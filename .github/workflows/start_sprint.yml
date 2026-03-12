@@ -1,0 +1,35 @@
+name: Start New Sprint
+
+on:
+  workflow_dispatch:
+    inputs:
+      sprint_name:
+        description: 'Sprint 里程碑名称 (如 Sprint-1 或 v0.1-alpha)'
+        required: true
+        default: 'Sprint-1'
+      sprint_desc:
+        description: 'Sprint 描述与迭代目标'
+        required: false
+
+jobs:
+  start_sprint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+
+      - name: Ensure Milestone Exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 检查 milestone 是否已存在
+          EXISTING_MS=$(gh api repos/${{ github.repository }}/milestones | jq -r ".[] | select(.title==\"${{ github.event.inputs.sprint_name }}\") | .title")
+          
+          if [ -z "$EXISTING_MS" ]; then
+            echo "正在为您创建新的 Sprint 里程碑: ${{ github.event.inputs.sprint_name }}"
+            gh api repos/${{ github.repository }}/milestones \
+              -f title="${{ github.event.inputs.sprint_name }}" \
+              -f description="${{ github.event.inputs.sprint_desc }}"
+          else
+            echo "里程碑 ${{ github.event.inputs.sprint_name }} 已存在。"
+          fi
