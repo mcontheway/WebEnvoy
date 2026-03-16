@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       sprint_name:
-        description: 'Sprint 里程碑名称 (必须符合 sprint-YYYY-WXX 格式，如 sprint-2026-W12)'
+        description: 'Sprint 战役名称 (建议符合 sprint-[语义目标] 格式，如 sprint-core-engine-init)'
         required: true
-        default: 'sprint-2026-W12'
+        default: 'sprint-core-engine-init'
       sprint_desc:
         description: 'Sprint 描述与迭代目标'
         required: false

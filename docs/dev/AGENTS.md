@@ -13,7 +13,7 @@ docs/dev/
  ├── vision.md               # [北极星] 产品愿景与不可逾越的底线要求（永远精简）
  ├── backlog.md              # [混沌期] 需求蓄水池与灵感草稿（拒绝同步 Github）
  ├── architecture/           # [架构蓝图] 系统底层运转与抽象模型设计（按组件拆分）
- ├── sprints/                # [战役指挥所] 迭代目标。文件以 `sprint-YYYY-WXX.md` 命名。Sprint 结束即封档，绝对禁止再修改
+ ├── sprints/                # [战役指挥所] 迭代战役目标。文件以 `sprint-[语义化战役名称].md` 命名（如 sprint-core-engine-init.md）。Sprint 结束即封档，绝对禁止再修改
  └── specs/                  # [法定契约] 正式特性的完整规约套件（按 FR 编号建子目录）
       └── FR-0012-xhs-login/ # 每个 Feature 一个独立子目录
            ├── spec.md        # [必须] 功能规格：用无技术偏见的独立语言描述"做什么"与验收标准 (AC)
