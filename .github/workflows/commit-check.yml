@@ -1,0 +1,49 @@
+name: Commit Check
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  check-commit:
+    name: Validate Commit Messages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Check Commit Messages
+        run: |
+          # 获取 PR 的所有提交记录
+          COMMITS=$(git log --format=%s origin/${{ github.base_ref }}..origin/${{ github.head_ref }})
+          
+          echo "Checking commits:"
+          echo "$COMMITS"
+          
+          # 遍历每个提交信息
+          while IFS= read -r msg; do
+            if [ -z "$msg" ]; then continue; fi
+            
+            echo "Validating: $msg"
+            
+            # 1. 校验 Conventional Commits 规范
+            # 格式: type(scope): description 或 type: description
+            if [[ ! "$msg" =~ ^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?: .+$ ]]; then
+              echo "错误: 提交信息必须符合 Conventional Commits 规范 (例如: feat: 增加某项功能)"
+              exit 1
+            fi
+            
+            # 2. 校验是否包含中文 (要求主体部分使用中文)
+            if [[ ! "$msg" =~ [[:cntrl:]]*[[:alnum:]]*[\u4e00-\u9fa5]+ ]]; then
+              # 注意: 这里的正则可能在某些 shell 环境下表现不一，使用 perl 作为备份方案
+              if ! echo "$msg" | perl -Mutf8 -ne 'exit 0 if /[\x{4e00}-\x{9fa5}]/; exit 1'; then
+                echo "错误: 提交信息必须包含中文。"
+                exit 1
+              fi
+            fi
+            
+          done <<< "$COMMITS"
+          
+          echo "所有提交信息校验通过！"

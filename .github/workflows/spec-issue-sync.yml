@@ -1,0 +1,54 @@
+name: Spec Issue Sync
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/dev/specs/**/spec.md'
+
+jobs:
+  sync-issue:
+    name: Sync Spec to Issue
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+
+      - name: Detect Changed Specs
+        id: changed-specs
+        run: |
+          # 获取最近一次提交中改变的 spec.md 文件
+          CHANGED_FILES=$(git diff-tree --no-commit-id --name-only -r ${{ github.sha }} | grep 'docs/dev/specs/.*/spec.md' || true)
+          echo "files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+
+      - name: Process Each Spec
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for file in ${{ steps.changed-specs.outputs.files }}; do
+            if [ ! -f "$file" ]; then continue; fi
+            
+            # 获取目录名作为 Feature ID
+            DIR_NAME=$(dirname "$file" | xargs basename)
+            TITLE=$(head -n 1 "$file" | sed 's/^# //')
+            
+            # 检查是否已存在同名 Issue
+            EXISTING_ISSUE=$(gh issue list --search "$DIR_NAME" --json number,title --jq ".[0].number")
+            
+            if [ -z "$EXISTING_ISSUE" ]; then
+              echo "创建新的 Issue: $TITLE ($DIR_NAME)"
+              gh issue create \
+                --title "[$DIR_NAME] $TITLE" \
+                --body "此 Issue 由 CI 自动生成，详细规范请参考源码路径: \`$file\`" \
+                --label "type:feature"
+            else
+              echo "Issue #$EXISTING_ISSUE 已存在，更新同步状态。"
+              # 这里可以添加更新 Issue 内容的逻辑，目前仅做识别
+            fi
+          done
