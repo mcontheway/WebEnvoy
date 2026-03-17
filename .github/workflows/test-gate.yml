@@ -54,7 +54,9 @@ jobs:
           has_e2e_script="$(node -e "const pkg=require('./package.json'); process.stdout.write(pkg.scripts && pkg.scripts['test:e2e'] ? 'yes' : 'no')")"
 
           has_unit_dir="no"
-          if find . -type d -name __tests__ -print -quit | grep -q .; then
+          if find . \
+            \( -path './node_modules' -o -path './.git' \) -prune -o \
+            -type d -name __tests__ -print -quit | grep -q .; then
             has_unit_dir="yes"
           fi
 
