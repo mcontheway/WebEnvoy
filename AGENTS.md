@@ -13,6 +13,18 @@
 2. **持续整洁的提交线**：提交信息（Commit Message）**必须使用中文且符合 Conventional Commits 规范**。向主分支合入 PR 时，必须采用 **Squash（压缩）合并**，以保持主干历史日志的绝对清晰与干净。
 3. **测试代码物理位置**：单元测试 (Unit Tests) 遵循同目录分离放置原则（归拢于被测源文件同级的 `__tests__/` 子目录下，如 `__tests__/[name].test.ts`）；验收 Spec AC 的核心端到端/集成测试 (E2E/Integration) 必须统一收拢于项目根目录的 `tests/` 下，以便 CI 后续执行门禁拦截。
 
+### PR Review Policy
+
+所有 AI Agent 在审查或决定是否合并 PR 时，必须遵循以下规则：
+
+1. **先审查，后合并**：任何合并动作前都必须先执行完整 review，不允许跳过审查直接 merge。
+2. **阻断项优先**：Review 的首要目标是发现会阻止合并的问题，包括行为回归、缺失关键测试、违反规格契约、违反架构边界、提交或 PR 元数据不合规。
+3. **证据不足即不放行**：如果无法确认改动“安全可合并”，默认结论必须是 `REQUEST_CHANGES`，而不是乐观放行。
+4. **合并门禁必须同时满足**：只有当 AI Review 结论为 `APPROVE`、判定 `safe_to_merge = true`、PR 非 Draft、GitHub Required Checks 全绿、且目标分支允许合入时，才可执行合并。
+5. **统一合并策略**：PR 合入必须使用 **Squash Merge**，不得擅自改用 merge commit 或 rebase merge。
+6. **评论风格要求**：Review 输出应尽量贴近 GitHub Code Review 习惯，先给结论，再列出阻断问题、影响文件和合并前动作，避免泛泛而谈。
+7. **本机按需审查入口**：本仓库默认使用 `scripts/pr-guardian.sh` 作为本机按需 review / merge 入口；详细说明见 `docs/dev/local-pr-review.md`。
+
 ### AI-Native 项目管理机制 (全托管模式)
 
 本项目采用**人类决策 + AI 全托管执行**的极简工作流，AI 需利用 `git` 和 `gh` CLI 自动完成所有底层操作，人类仅用自然语言下达指令：
