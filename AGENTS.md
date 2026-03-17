@@ -85,7 +85,7 @@ WebEnvoy 的定位是“供上层 AI 调用的 Web 执行工具”，不是 Agen
 1. 先基于 `docs/dev/roadmap.md` 梳理当前阶段的需求池，并在 GitHub Issues / Projects 中维护 backlog。
 2. 只有在当前阶段候选项已经明确后，才进入 FR 规约漏斗；不要在范围未确认前，提前向 `docs/dev/specs/` 写入正式 FR 目录。
 3. 核心特性、高风险改动、跨模块设计项，必须先建立正式 FR 规约，再进入开发。
-4. FR 至少包含 `spec.md`；复杂特性还应补齐 `plan.md`、`TODO.md` 与必要的补充文档。
+4. 正式 FR 套件必须至少包含 `spec.md`、`plan.md`、`TODO.md`；其余补充文档按复杂度按需添加。
 5. spec review 的目标是确认需求、边界、架构一致性、验收标准和风险，不得把 spec 当作开发后的补文档。
 6. 只有在 spec review 通过后，相关事项才能被纳入 Sprint 实施承诺。
 7. 小修复、低风险微特性、纯文案调整，可以只建 GitHub Issue，不强制要求建立 FR。

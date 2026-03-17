@@ -26,7 +26,7 @@
 - **边界**：不执行业务逻辑，业务逻辑由 Extension Content Script 编排
 
 ### nut.js
-- **阶段**：Phase 1（预留接口，Phase 2 完整启用）
+- **阶段**：Phase 1（预留接口，Phase 6 完整启用）
 - **用途**：最高安全模式（`--mode safe`）的 OS 级键鼠输入，`isTrusted = true`
 - **安装**：`npm install @nut-tree/nut-js`
 - **加载策略**：延迟加载，仅在 `--mode safe` 时 `require()`，避免默认模式引入 Native 编译依赖
@@ -51,7 +51,7 @@
 - **输出接口**：生成带时间戳的 `Vector[]` 坐标序列，直接喂给 CDP `Input.dispatchMouseEvent`
 
 ### agent-browser
-- **阶段**：Phase 2（Spike D 产出）
+- **阶段**：Phase 5（Spike D 产出）
 - **用途**：L2 通用读取层的 AX Tree 压缩 + RefMap 短引用系统
 - **为什么不直接 npm install**：它是完整的 CLI 工具（Rust CLI + Node Daemon），不是可 import 的 library
 - **移植范围**（Spike D 的具体目标）：
@@ -104,19 +104,19 @@
 - **不集成原因**：Go 技术栈 + SSE 通信架构，与 WebEnvoy TS + Native Messaging 栈不兼容
 
 ### browser-use
-- **阶段**：Phase 2（Spike D 扩展范围）
+- **阶段**：Phase 5（Spike D 扩展范围）
 - **待吸收内容**：
   1. **Paint Order 遮挡剔除**：通过 `DOMSnapshot.captureSnapshot` 获取绘制层级，剔除被弹窗完全遮盖的「幽灵元素」→ 产出 `src/l2/paint-order.ts`
   2. **JS 隐式事件捕获**：注入脚本调用 `getEventListeners()` 发现无标准 ARIA 角色的非标交互元素
 - **不集成原因**：Python + LangChain 生态，5 维数据融合管线过重
 
 ### Steel Browser
-- **阶段**：Phase 2（Spike E 目标）
+- **阶段**：Phase 5（Spike E 目标）
 - **待吸收内容**：`handlePageRequest` 中的广告/图片/字体屏蔽规则 → 转化为 Chrome `declarativeNetRequest` 静态规则集
 - **不集成原因**：云端 SaaS 服务（Docker + Fastify），不是可本地集成的库
 
 ### scrapling
-- **阶段**：Phase 2
+- **阶段**：Phase 5
 - **待吸收内容**：8 维自适应选择器 Schema；`__calculate_similarity_score` 多维加权模糊匹配算法；StealthyFetcher 8 项反检测补丁清单
 - **不集成原因**：Python 库；自适应定位在 AX Tree 架构下需重新设计，不能照搬
 
@@ -126,7 +126,7 @@
 - **不集成原因**：Go 技术栈；核心机制已通过 agent-browser 和自研设计覆盖
 
 ### UI-TARS
-- **阶段**：Phase 2 后期 / Phase 3
+- **阶段**：Phase 6
 - **待吸收内容**：「截图 → VLM → 坐标 → nut.js 物理点击」的 L1 执行链路；5 帧滑动窗口防单帧误判；Hybrid 模式坐标反向映射
 - **不集成原因**：Electron 桌面应用，与 WebEnvoy 架构不兼容
 
@@ -139,7 +139,7 @@
 - **不集成原因**：Node.js 爬虫框架（含浏览器管理 + 调度），与 WebEnvoy「CLI 轻 core + Chrome Extension 重前端」架构不兼容
 
 ### Selenoid
-- **阶段**：Phase 2（云端/容器化部署参考）
+- **阶段**：Phase 7（云端/容器化部署参考）
 - **待吸收内容**：Docker 容器级代理隔离模型（每容器独立 `HTTP_PROXY` 环境变量，天然无泄漏）→ WebEnvoy 多实例部署时的容器化方案参考
 - **不集成原因**：Selenium/WebDriver 协议 Hub，与 WebEnvoy 的 Chrome Extension + Native Messaging 架构不兼容；Phase 1 本地单机场景无需容器隔离
 
@@ -199,9 +199,9 @@
 |---|---|---|---|
 | `src/input/mouse.ts` | B | ghost-cursor 算法移植 | Phase 1 |
 | `src/install/native-host.ts` | D | KeePassXC 注册机制参考 | Phase 1 |
-| `src/l2/ax-tree.ts` | B | agent-browser 算法移植 | Phase 2 |
-| `src/l2/ref-map.ts` | B | agent-browser 算法移植 | Phase 2 |
-| `src/l2/paint-order.ts` | D | browser-use 思路实现 | Phase 2 |
+| `src/l2/ax-tree.ts` | B | agent-browser 算法移植 | Phase 5 |
+| `src/l2/ref-map.ts` | B | agent-browser 算法移植 | Phase 5 |
+| `src/l2/paint-order.ts` | D | browser-use 思路实现 | Phase 5 |
 
 ### 外部运行时（可选，用户自行安装）
 
