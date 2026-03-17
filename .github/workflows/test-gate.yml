@@ -82,7 +82,7 @@ jobs:
               integration_cmd="npm run test:integration"
             elif [ "$has_e2e_script" = "yes" ]; then
               integration_cmd="npm run test:e2e"
-            elif [ "$has_unit_dir" = "no" ] && [ "$has_test_script" = "yes" ]; then
+            elif [ "$has_test_script" = "yes" ]; then
               integration_cmd="npm test"
             else
               echo "tests/ 目录已存在，但 package.json 中没有可执行的集成测试脚本（期望 test:integration、test:e2e，或由 test 统一承载）。" >&2
