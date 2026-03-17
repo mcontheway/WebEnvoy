@@ -74,6 +74,28 @@ WebEnvoy 的定位是“供上层 AI 调用的 Web 执行工具”，不是 Agen
 4. 单元测试放在被测文件同级 `__tests__/`；端到端/集成测试统一放在仓库根目录 `tests/`。
 5. 本地代码库中不保留 backlog、sprint 等进度追踪文件；GitHub Issues / Projects 是唯一进度真理。
 
+## 需求到交付的标准机制
+
+本项目的默认推进顺序固定如下：
+
+`Roadmap / 阶段目标 -> GitHub backlog -> 选定当前阶段候选项 -> 为核心项建立 FR spec -> spec review -> 进入 Sprint 实施 -> PR review -> merge`
+
+执行要求：
+
+1. 先基于 `docs/dev/roadmap.md` 梳理当前阶段的需求池，并在 GitHub Issues / Projects 中维护 backlog。
+2. 只有在当前阶段候选项已经明确后，才进入 FR 规约漏斗；不要在范围未确认前，提前向 `docs/dev/specs/` 写入正式 FR 目录。
+3. 核心特性、高风险改动、跨模块设计项，必须先建立正式 FR 规约，再进入开发。
+4. 正式 FR 套件必须至少包含 `spec.md`、`plan.md`、`TODO.md`；其余补充文档按复杂度按需添加。
+5. spec review 的目标是确认需求、边界、架构一致性、验收标准和风险，不得把 spec 当作开发后的补文档。
+6. 只有在 spec review 通过后，相关事项才能被纳入 Sprint 实施承诺。
+7. 小修复、低风险微特性、纯文案调整，可以只建 GitHub Issue，不强制要求建立 FR。
+
+额外约束：
+
+- `docs/dev/specs/` 是正式契约区，不是 backlog 草稿区，也不是需求讨论草稿区。
+- backlog、Sprint 范围、状态流转一律以 GitHub 为准，本地 Markdown 不承担项目管理真相源职责。
+- 如果当前仍处于需求池讨论阶段，允许先修改 `roadmap.md`、架构文档或研究文档，但不应提前创建正式 FR 目录。
+
 推荐分支命名：
 
 - 设计 / 规约：`docs/FR-XXXX-*`
@@ -85,6 +107,8 @@ WebEnvoy 的定位是“供上层 AI 调用的 Web 执行工具”，不是 Agen
 ## Review 与合并底线
 
 任何合并前必须先 review，不能因为测试通过就跳过判断。
+
+本项目默认使用**本地 Codex 环境下的按需 PR review**，而不是依赖云端 LLM workflow 或定时 GitHub Actions review。PR 创建后，应由本机已登录的 Codex 账号在需要时执行 review；云端 workflow 可以做提醒或补充检查，但不应作为主审查机制。
 
 Review 至少覆盖以下方面：
 
@@ -113,6 +137,13 @@ Review 至少覆盖以下方面：
 - `safe_to_merge = true`
 - GitHub Required Checks 全绿
 - 目标分支允许按仓库策略合入
+
+FR 分支的推荐做法：
+
+- FR / 规约分支默认先开 Draft PR
+- 先在 Draft PR 中完成 spec review
+- spec review 通过后，再进入实现或解除 Draft
+- 不要把“等待定时 review”作为进入下一步的前提
 
 本机按需 review / merge 入口：
 

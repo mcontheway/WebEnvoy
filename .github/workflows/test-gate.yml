@@ -9,41 +9,112 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        if: ${{ hashFiles('package.json') != '' }}
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
 
       - name: Install Dependencies
+        if: ${{ hashFiles('package.json') != '' }}
         run: |
-          if [ -f package.json ]; then
+          set -euo pipefail
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f package.json ]; then
             npm install
           else
             echo "No package.json found. Skipping npm install."
           fi
 
-      - name: Run Unit Tests
+      - name: Detect Test Plan
+        id: detect-tests
         run: |
-          if [ -d src ]; then
-            # 运行业务代码同级的 __tests__ 目录下的单元测试
-            echo "Running unit tests..."
-            # 这里应替换为实际的测试命令，如 npm test
-            npm test -- --testPathPattern=__tests__ || echo "No tests found or test command failed."
-          else
-            echo "No src directory found. Skipping unit tests."
+          set -euo pipefail
+
+          if [ ! -f package.json ]; then
+            echo "has_package=no" >> "$GITHUB_OUTPUT"
+            echo "unit_dir=no" >> "$GITHUB_OUTPUT"
+            echo "integration_dir=no" >> "$GITHUB_OUTPUT"
+            echo "unit_cmd=" >> "$GITHUB_OUTPUT"
+            echo "integration_cmd=" >> "$GITHUB_OUTPUT"
+            echo "No package.json found. Skipping test planning."
+            exit 0
           fi
 
-      - name: Run E2E/Integration Tests
-        run: |
-          if [ -d tests ]; then
-            # 运行根目录 tests 目录下的验收测试
-            echo "Running E2E tests..."
-            # 这里应替换为实际的测试命令
-            npm run test:e2e || echo "No E2E tests found or test command failed."
-          else
-            echo "No tests directory found. Skipping E2E tests."
+          has_test_script="$(node -e "const pkg=require('./package.json'); process.stdout.write(pkg.scripts && pkg.scripts.test ? 'yes' : 'no')")"
+          has_unit_script="$(node -e "const pkg=require('./package.json'); process.stdout.write(pkg.scripts && pkg.scripts['test:unit'] ? 'yes' : 'no')")"
+          has_integration_script="$(node -e "const pkg=require('./package.json'); process.stdout.write(pkg.scripts && pkg.scripts['test:integration'] ? 'yes' : 'no')")"
+          has_e2e_script="$(node -e "const pkg=require('./package.json'); process.stdout.write(pkg.scripts && pkg.scripts['test:e2e'] ? 'yes' : 'no')")"
+
+          has_unit_dir="no"
+          if find . \
+            \( -path './node_modules' -o -path './.git' \) -prune -o \
+            -type d -name __tests__ -print -quit | grep -q .; then
+            has_unit_dir="yes"
           fi
+
+          has_integration_dir="no"
+          if [ -d tests ]; then
+            has_integration_dir="yes"
+          fi
+
+          unit_cmd=""
+          integration_cmd=""
+
+          if [ "$has_unit_dir" = "yes" ]; then
+            if [ "$has_unit_script" = "yes" ]; then
+              unit_cmd="npm run test:unit"
+            elif [ "$has_test_script" = "yes" ]; then
+              unit_cmd="npm test"
+            else
+              echo "__tests__ 目录已存在，但 package.json 中没有可执行的测试脚本（期望 test:unit 或 test）。" >&2
+              exit 1
+            fi
+          fi
+
+          if [ "$has_integration_dir" = "yes" ]; then
+            if [ "$has_integration_script" = "yes" ]; then
+              integration_cmd="npm run test:integration"
+            elif [ "$has_e2e_script" = "yes" ]; then
+              integration_cmd="npm run test:e2e"
+            elif [ "$has_test_script" = "yes" ]; then
+              integration_cmd="npm test"
+            else
+              echo "tests/ 目录已存在，但 package.json 中没有可执行的集成测试脚本（期望 test:integration、test:e2e，或由 test 统一承载）。" >&2
+              exit 1
+            fi
+          fi
+
+          {
+            echo "has_package=yes"
+            echo "unit_dir=$has_unit_dir"
+            echo "integration_dir=$has_integration_dir"
+            echo "unit_cmd=$unit_cmd"
+            echo "integration_cmd=$integration_cmd"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Unit Tests
+        if: ${{ steps.detect-tests.outputs.unit_cmd != '' }}
+        run: |
+          set -euo pipefail
+          echo "Running unit tests with: ${{ steps.detect-tests.outputs.unit_cmd }}"
+          ${{ steps.detect-tests.outputs.unit_cmd }}
+
+      - name: Run E2E/Integration Tests
+        if: ${{ steps.detect-tests.outputs.integration_cmd != '' && steps.detect-tests.outputs.integration_cmd != steps.detect-tests.outputs.unit_cmd }}
+        run: |
+          set -euo pipefail
+          echo "Running integration tests with: ${{ steps.detect-tests.outputs.integration_cmd }}"
+          ${{ steps.detect-tests.outputs.integration_cmd }}
+
+      - name: No Tests Declared
+        if: ${{ steps.detect-tests.outputs.has_package == 'no' || (steps.detect-tests.outputs.unit_dir == 'no' && steps.detect-tests.outputs.integration_dir == 'no') }}
+        run: |
+          echo "No package-managed tests detected for this repository state."

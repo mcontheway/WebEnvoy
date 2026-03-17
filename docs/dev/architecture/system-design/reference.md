@@ -55,13 +55,13 @@
 - [ ] 是否需要分片传输或 `chrome.storage` 中转
 - [ ] webRequest / declarativeNetRequest 读取响应体的可行方案
 
-### Spike D：agent-browser AX Tree 压缩算法研究（Phase 2 前置）
+### Spike D：agent-browser AX Tree 压缩算法研究（Phase 5 前置）
 
 - [ ] `processAriaTree` + `compactTree` 算法的代码级实现细节
 - [ ] RefMap 短引用系统的数据结构与序列化格式
 - [ ] 压缩后 AX Tree 的 Token 消耗对比测试
 
-### Spike E：Steel Browser 请求拦截在 Extension 架构中的可行性（Phase 2 前置）
+### Spike E：Steel Browser 请求拦截在 Extension 架构中的可行性（Phase 5 前置）
 
 - [ ] 在 Extension `declarativeNetRequest` 中实现图片/广告屏蔽的规则集
 - [ ] 拦截规则对页面功能的影响边界（是否会误拦截 API 请求）
@@ -69,11 +69,11 @@
 
 ---
 
-## 十五、Phase 2 L2 通用读取层（待设计）
+## 十五、Phase 5 L2 通用读取层（待设计）
 
 > **状态**：占位章节，设计工作在 Phase 1 交付后启动。
 
-本节描述 Phase 2 计划构建的 L2 通用读取层。该层的目标是使 WebEnvoy 能够对任意未知网站（无预建适配器）提供可靠的内容提取与交互能力，与 Phase 1 的 L3 专用平台适配器互补。
+本节描述 Phase 5 计划构建的 L2 通用读取层。该层的目标是使 WebEnvoy 能够对任意未知网站（无预建适配器）提供可靠的内容提取与交互能力，与前序阶段建设的 L3 专用平台适配器互补。
 
 ### 核心组成（待设计）
 

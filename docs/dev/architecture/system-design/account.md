@@ -48,7 +48,7 @@ profiles/
 
 **代理配置来源**（按优先级）：
 1. `webenvoy login --proxy <url>` 命令行参数
-2. 代理池配置文件自动分配（Phase 2 后期）
+2. 代理池配置文件自动分配（Phase 6 增强项）
 3. `null`（无代理，直连）
 
 > 参考来源：Crawlee SessionPool 的 `ProxyConfiguration.newProxyInfo(sessionId)` 黏性映射机制；Selenoid 的每容器独立 `HTTP_PROXY` 环境变量隔离模型（概念类比）。

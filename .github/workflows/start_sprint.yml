@@ -14,20 +14,26 @@ on:
 jobs:
   start_sprint:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v3
-
       - name: Ensure Milestone Exists
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 检查 milestone 是否已存在
-          EXISTING_MS=$(gh api repos/${{ github.repository }}/milestones | jq -r ".[] | select(.title==\"${{ github.event.inputs.sprint_name }}\") | .title")
-          
+          set -euo pipefail
+
+          EXISTING_MS="$(
+            gh api "repos/${{ github.repository }}/milestones?state=all&per_page=100" \
+              --jq '.[] | select(.title == "${{ github.event.inputs.sprint_name }}") | .title' \
+              | head -n 1
+          )"
+
           if [ -z "$EXISTING_MS" ]; then
             echo "正在为您创建新的 Sprint 里程碑: ${{ github.event.inputs.sprint_name }}"
-            gh api repos/${{ github.repository }}/milestones \
+            gh api "repos/${{ github.repository }}/milestones" \
+              --method POST \
               -f title="${{ github.event.inputs.sprint_name }}" \
               -f description="${{ github.event.inputs.sprint_desc }}"
           else
