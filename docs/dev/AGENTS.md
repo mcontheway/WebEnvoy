@@ -10,15 +10,13 @@
 
 ```text
 docs/dev/
- ├── backlog.md              # [混沌期] 需求蓄水池与灵感草稿（拒绝同步 Github）
  ├── roadmap.md              # [路线图] Phase 阶段划分与 FR 交付列表（按 Phase → Category 平铺）
  ├── architecture/           # [架构蓝图] 系统底层运转与抽象模型设计（按组件拆分）
- ├── sprints/                # [战役指挥所] 迭代战役目标。文件以 `sprint-[语义化战役名称].md` 命名（如 sprint-core-engine-init.md）。Sprint 结束即封档，绝对禁止再修改
  └── specs/                  # [法定契约] 正式特性的完整规约套件（按 FR 编号建子目录）
-      └── FR-0012-xhs-login/ # 每个 Feature 一个独立子目录
+      └── FR-001-native-messaging/ # 每个 Feature 一个独立子目录
            ├── spec.md        # [必须] 功能规格：用无技术偏见的独立语言描述"做什么"与验收标准 (AC)
            ├── plan.md        # [必须] 技术实现计划：技术选型与方案组装，连接需求到代码的桥梁
-           ├── TODO.md        # [必须] 任务拆解列表：按依赖顺序或并行粒度的可执行施工待办
+           ├── TODO.md        # [必须] 任务拆解与进度：跨会话管理该 FR 的细粒度实现进度
            ├── research.md    # [可选] 技术调研：针对拿不准的工具库或兼容性问题的调研结论
            ├── data-model.md  # [可选] 数据模型：实体关系图与数据库宽表设计，避免撑爆 plan
            └── contracts/     # [可选] 接口契约：前后端在写第一行代码前敲定的 API/JSON 规范
@@ -28,30 +26,27 @@ docs/dev/
 
 ## ⚙️ 二、需求流转的"单向漏斗"机制 (The Funnel)
 
-项目**绝不采用**本地 Markdown 与 GitHub Issues 的"双向同步"策略。WebEnvoy 严格遵循以下"单向宣发"生命周期：
+项目**绝不采用**本地 Markdown 与 GitHub Issues 的"双向同步"策略。WebEnvoy 严格遵循以下"三层单向数据流"生命周期：
 
-### 阶段 1：混沌蓄水 (Idea)
-*   **动作**：任何突发奇想、待解决的小痛点，请随意写入 **`docs/dev/backlog.md`**。
-*   **铁律**：这个阶段的文档没有任何格式负担。`backlog.md` 是纯粹的本地备忘录，**绝对不要**通过脚本将其同步至云端。原因：`backlog` 是未经审核的草稿，不应进入 Issue 系统；且一旦同步，与 Spec 自动化 Action 的触发逻辑将产生不可预期的冲突。
+### 阶段 1：需求池与冲刺规划 (GitHub Issues / Projects)
+*   **动作**：所有的灵感、Bug、待办事项（Backlog）以及冲刺规划（Sprint）全部在远端 GitHub 上进行。
+*   **自动化管理**：AI Agent 拥有调用 `gh` CLI 工具的权限。人类只需用自然语言下达指令（如："帮我把 FR-001 和 FR-002 建为 Issue，并放入 Sprint 1 的 Milestone 中"），AI 将自动执行 GitHub 的建卡与状态流转。
+*   **铁律**：本地代码库中**绝不保留** `backlog.md` 或 `sprints/` 目录。绝不在本地文件中打勾、划线追踪进度。GitHub 是唯一的进度与状态真理。
 
-### 阶段 2：立项与契约敲定 (Shape / Spec)
-*   **动作**：当决定在一个 Sprint 中真正实现某个特性时，将其从 `backlog` 划去。在 **`docs/dev/specs/`** 下以 `FR-XXXX-语义名称` 为名建立子目录，并在其中逐步创建规约套件（至少包含 `spec.md`、`plan.md`、`TODO.md` 三件套）。
-*   **`spec.md` 的必要组成**：
-    *   **用户故事 (User Story)**：`作为 [用户]，我想 [做什么]，以便 [达成什么目标]`
-    *   **验收标准 (AC)**：每条 AC 必须可独立测试，覆盖正常路径、边界情况与错误场景
-    *   **设计资源 (Design Assets)**：UI/UX 资产链接（如 Figma），若无 UI 需求需明确标注 `无特定 UI 需求`
+### 阶段 2：立项与契约敲定 (Local Specs)
+*   **动作**：当决定在一个 Sprint 中真正实现某个**核心/复杂特性**时，在 **`docs/dev/specs/`** 下以 `FR-XXXX-语义名称` 为名建立子目录，并在其中逐步创建规约套件（至少包含 `spec.md`、`plan.md`、`TODO.md`）。
 *   **唯一事实来源 (SSOT)**：所有关于"要做什么/做成什么样"的具体定义，永远只能以本目录下的特性规约文件为唯一准入基准。
-*   **铁律**：`spec.md` 一旦合并进入主干，即成为法律文件，后续开发必须针对其 AC 编写测试。如需修订，必须通过独立 PR 并在 Commit Message 中说明修订原因，不得静默覆盖。
+*   **铁律**：`spec.md` 一旦合并进入主干，即成为法律文件。如需修订，必须通过独立 PR 并在 Commit Message 中说明修订原因，不得静默覆盖。*(注：日常的 Bugfix 或微小特性不需要写 Spec，直接在 Issue 中描述即可)*。
 
 ### 阶段 3：自动化派发 (Sync)
 *   **单向推送**：我们通过 GitHub Action 监听 `docs/dev/specs/` 目录的新增或变更。一旦被推入保护干道，Action 脚本会自动在 GitHub 上生成同名或同编号 Issue，添加关联标签以建立池子。
 *   **铁律**：本地 `docs` 负责提供最高准则说明书 (What & How)，云端 Issue 页面仅承担分发指派与进度更新 (To Whom & When)。
 
-### 阶段 4：开发执行与进度流转 (Action)
-*   **永远不在本地改状态**：开发过程中的状态跟进（如：Todo -> In Progress -> Review -> Done）纯粹在**远端 GitHub** 进行。
-*   **严禁污染本地纯净度**：严禁为了更新进度修改本地的 `specs/` 文档或 `backlog.md`，加上类似【待开发】【已完成】字眼。本地文档必须像汽车使用说明书一样纯洁静态。
-*   **变更熔断 (Circuit Breaker)**：若在 `In Progress` 时发现 `plan.md` 有致命缺陷或 `spec.md` 需求冲突，**必须立即停止编码**。需拉取 `revise/FR-XXXX-docs` 专有分支仅修改规约文档，PR 重新评审合并后方可解除熔断。
-*   **代码合入语法**：功能的 Commit / Pull Request 必须带有连结语法词，如 `feat: add api (Fixes #FR-0012)` 以触动远端 GitHub 流水线的自动清账。
+### 阶段 4：全托管开发与 Git 流转 (Auto-Pilot)
+*   **人类角色（审批者）**：人类只需用自然语言下达宏观指令（如"开始做 FR-001"、"设计没问题，合并 PR"），**无需手动执行任何 Git 或 GitHub 命令**。
+*   **Agent 角色（执行者）**：AI Agent 负责全权接管底层工程操作。包括：自动拉取分支、提交符合规范的中文 Commit、推送远端、使用 `gh` CLI 创建 PR、并在获得人类授权后使用 `gh pr merge` 自动合并。
+*   **跨会话状态管理**：对于需要跨越多个会话才能完成的大型 FR，AI 自动更新该 FR 目录下的 `TODO.md` 来记录细粒度的实现进度，防止上下文丢失。
+*   **代码合入语法**：AI 在提交 PR 时，自动带上连结语法词（如 `Fixes #1`），利用 GitHub 机制自动清账。
 
 ---
 
@@ -63,6 +58,9 @@ docs/dev/
 
 1. **`vision.md`**（根目录）— 产品底线与不可逾越的约束，优先级最高
 2. **`docs/dev/roadmap.md`** — 全局阶段划分，明确当前所处 Phase 与优先级排序
-3. **当前 Sprint 文档**（`docs/dev/sprints/` 下最新文件）— 明确本期交付边界
-4. **对应 Feature 的 Spec 套件**（`docs/dev/specs/FR-XXXX-*/`）— 任务契约，执行基准
-5. **禁止加载 `backlog.md`** — 该文件是未经审核的草稿噪音区，不得作为任何决策依据
+3. **架构文档**（`docs/dev/architecture/`）— 明确系统底层运转与抽象模型设计
+4. **对应 Feature 的 Spec 套件**（`docs/dev/specs/FR-XXXX-*/`）— 任务契约，执行基准（如果有）
+5. **当前分支对应的 `TODO.md`** — 恢复跨会话的细粒度实现记忆（如果有）
+6. **用户当前提供的 GitHub Issue/任务描述** — 明确当前会话的具体执行目标
+
+> **关于需求池与状态**：本地代码库中**不包含** `backlog.md` 或 `sprints/` 目录。所有的需求池（Backlog）、冲刺规划（Sprint）和进度状态（Todo/Done）都在远端 GitHub (Issues/Projects) 中管理。AI 仅需关注当前会话中用户分配的具体任务。
