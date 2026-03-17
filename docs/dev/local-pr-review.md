@@ -53,6 +53,12 @@ scripts/pr-guardian.sh merge-if-safe 123
 scripts/pr-guardian.sh merge-if-safe 123 --post-review --delete-branch
 ```
 
+按需轮询自动 review，且只检查目标分支为 `main` 的 PR：
+
+```bash
+bash scripts/pr-review-poller.sh --base-branch main
+```
+
 ## 5. 合并门禁
 
 `merge-if-safe` 只有在以下条件全部满足时才会执行合并：
@@ -118,3 +124,4 @@ scripts/pr-guardian.sh merge-if-safe 123 --post-review --delete-branch
 - 这是一套“本机执行”的工作流，因此机器需要在线。
 - 它依赖本机 `codex` 和 `gh` 的登录态，不具备 GitHub Actions 的云端持续可用性。
 - “是否允许合并”的最终裁决虽然由脚本执行，但底层仍建议配合 GitHub Branch Protection 一起使用，避免人为绕过。
+- 如果正式合入目标是 `main`，但远端暂时还没有创建 `main`，轮询脚本会直接跳过，不会回退去审查 `dev` 或其他分支。
