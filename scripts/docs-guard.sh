@@ -53,7 +53,6 @@ ensure_in_repo() {
 require_cmd bash
 require_cmd jq
 require_cmd perl
-require_cmd rg
 
 echo "[docs-guard] 校验 shell 语法"
 while IFS= read -r file; do
