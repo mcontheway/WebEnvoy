@@ -28,7 +28,6 @@
 - 反检测与高隐匿：`camoufox_analysis.md`、`ghost-cursor_analysis.md`
 - 通用抓取与适配器：`scrapling_analysis.md`、`page-agent_analysis.md`
 - 写操作与富文本：`MultiPost-Extension_analysis.md`
-- 多账号与会话：`crawlee_analysis.md`、`profile_seeding_analysis.md`
 - 云端浏览器与部署：`steel-browser_analysis.md`、`selenoid_analysis.md`
 - 视觉兜底：`ui-tars_analysis.md`
 

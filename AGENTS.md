@@ -6,7 +6,10 @@
 - 当前仓库以文档、架构、脚本、CI 为主，业务代码骨架尚未完整建立
 - WebEnvoy 是 Web 执行工具，不是 Agent 大脑
 - 技术主线：TypeScript/Node CLI + Chrome Extension + Native Messaging + Playwright + SQLite
-- 优先级：L3 专用适配器 > L2 通用层 > L1 视觉/物理兜底
+- 当前主线优先级：执行内核与快速适配器化 > 能力交付与分享 > CLI-first 的可集成执行契约
+- 执行层优先级：L3 专用适配器 > L2 通用层 > L1 视觉/物理兜底
+- 未知网站不是只做一次性漫游；L2 成功路径应尽快沉淀为可复用适配器
+- 当前集成策略：默认以 CLI 作为第一集成面；暂不把 SDK / API 作为当前主线交付
 - 架构红线：浏览器内执行是唯一 HTTP 出口；不缝合外部异构爬虫为核心运行时
 - 禁止直推主分支；提交必须用中文 Conventional Commits；主干只用 Squash Merge
 - fresh clone 或新 worktree 首次进入仓库后，先执行 `bash scripts/setup-git-hooks.sh` 启用本地提交钩子
@@ -21,12 +24,13 @@
 
 所有 AI Agent 在操作此仓库前，按以下顺序恢复上下文：
 
-1. `docs/dev/roadmap.md`
-2. `docs/dev/architecture/system-design.md`
-3. 与当前任务直接相关的架构子文档
-4. 对应 `docs/dev/specs/FR-XXXX-*/`
-5. 当前分支的 `TODO.md`（如果有）
-6. 用户当前提供的 Issue / PR / 任务描述
+1. `vision.md`
+2. `docs/dev/roadmap.md`
+3. `docs/dev/architecture/system-design.md`
+4. 与当前任务直接相关的架构子文档
+5. 对应 `docs/dev/specs/FR-XXXX-*/`
+6. 当前分支的 `TODO.md`（如果有）
+7. 用户当前提供的 Issue / PR / 任务描述
 
 不要默认每次都需要完整读取 `docs/dev/architecture/` 全目录。应先看总览，再按任务进入相关子文档，例如：
 
@@ -55,6 +59,10 @@ WebEnvoy 的定位是“供上层 AI 调用的 Web 执行工具”，不是 Agen
 
 - 只负责执行、侦察、调度与结构化回传
 - 不负责长链路任务规划、聊天 UI 或内容生成
+- 当前阶段先证明“Agent 好用的 Web 执行内核”和“快速适配器化”成立
+- 当前仓库不承担独立上层运行系统职责，应优先把网页执行、能力沉淀与能力分享做好
+- CLI 必须按可集成契约设计：语义稳定、输入输出机器可读、错误结构化、运行标识清晰
+- 只保留执行所必需的最小身份 / 会话能力：身份指定、登录恢复、执行隔离、并发保护、状态回传
 - 对高价值平台优先采用 L3 专用适配器
 - L2 通用层用于未知站点
 - L1 视觉 / 物理输入仅作兜底
