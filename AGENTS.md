@@ -97,6 +97,34 @@ WebEnvoy 的定位是“供上层 AI 调用的 Web 执行工具”，不是 Agen
 - backlog、Sprint 范围、状态流转一律以 GitHub 为准，本地 Markdown 不承担项目管理真相源职责。
 - 如果当前仍处于需求池讨论阶段，允许先修改 `roadmap.md`、架构文档或研究文档，但不应提前创建正式 FR 目录。
 
+## 轻量改动通道
+
+以下改动可以走“轻量改动通道”，但**仍必须走分支 + PR + review + squash merge**：
+
+- 纯文案修正、错别字修复、失效链接修复、格式整理
+- 不改变正式契约、架构边界和流程语义的说明性文档补充
+- 不引入行为变化的注释、示例或非契约性说明更新
+
+以下改动**不得**按轻量改动处理，一律回到普通或高风险路径：
+
+- `vision.md`
+- `AGENTS.md`
+- `code_review.md`
+- `docs/dev/architecture/**`
+- `docs/dev/specs/**`
+- `.github/workflows/**`
+- `scripts/**`
+- `.githooks/**`
+- 任何会改变执行行为、合并门禁、正式契约、架构边界或审查标准的修改
+
+轻量改动的执行要求：
+
+- 不强制建立 FR 套件
+- PR 描述可以使用精简模板，但至少要写清摘要、关联 Issue（如有）、验证方式、回滚方式
+- 创建 PR 时优先使用 `bash scripts/open-pr.sh`
+- 验证证据以链接检查、渲染检查、`bash scripts/docs-guard.sh` 或等价静态校验为主
+- 一旦变更范围扩张或混入行为改动，立即切回普通路径，不继续按轻量改动申报
+
 推荐分支命名：
 
 - 设计 / 规约：`docs/FR-XXXX-*`
