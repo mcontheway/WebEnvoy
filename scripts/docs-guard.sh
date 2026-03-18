@@ -74,9 +74,4 @@ done; then
   die "存在失效文档引用"
 fi
 
-echo "[docs-guard] 校验并行开发文档未引用本地 backlog / sprint 文件"
-if rg -n '(^|[^A-Za-z0-9_])(backlog\.md|sprint\.md|sprints/|backlog/)' "${REPO_ROOT}/docs/dev/parallel-development.md" >/dev/null; then
-  die "parallel-development.md 不应引用本地 backlog / sprint 文件"
-fi
-
 echo "[docs-guard] 完成"

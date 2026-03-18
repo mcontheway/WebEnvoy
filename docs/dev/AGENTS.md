@@ -65,9 +65,3 @@ docs/dev/specs/FR-XXXX-feature-name/
 - `docs/dev/` 是研发执行区和正式规约区
 - `docs/research/ref/` 只提供参考研究，不直接构成实现契约
 - 如果研究结论与架构文档或 spec 冲突，以架构文档和 spec 为准
-
-## 并行开发
-
-- 本地并行推进多个 FR / PR / worktree 时，按 [`parallel-development.md`](./parallel-development.md) 执行
-- `main` 留在仓库主目录，其他活跃分支默认一分支一 worktree
-- detached worktree 默认只作为临时审查现场，不作为常规开发分支的长期承载位
