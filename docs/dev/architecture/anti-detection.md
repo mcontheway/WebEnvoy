@@ -310,6 +310,8 @@ interface BehaviorPersona {
 
 ### 4.4 操作后余韵（Post-operation Cooldown）
 
+> 本节描述的是后续扩展能力，不作为当前 Phase 1-3 的实现承诺。
+
 操作完成后不立即退出，而是进行短暂的「余韵浏览」：
 
 ```
@@ -567,7 +569,7 @@ CanvasRenderingContext2D.prototype.getImageData = function(...args) {
 | **操作前预热（Warmup）** | 🔜 后层扩展 | 后层 | 上层运行系统 / BehaviorEngine |
 | **行为人格（BehaviorPersona）** | 🔜 后层扩展 | 后层 | 上层运行系统 + Profile 元数据 |
 | **操作序列多样化** | ⏳ 待实现 | P1 | 平台适配器层 |
-| **操作后余韵** | ⏳ 待实现 | P2 | CLI 层，BehaviorEngine |
+| **操作后余韵** | 🔜 后续扩展 | 后层 | CLI 层 / 后续行为引擎 |
 | **Profile 播种流程** | 🔜 后层扩展 | 后层 | 上层运行系统 |
 | **账号健康状态追踪** | 🔜 后层扩展 | 后层 | 上层运行系统 |
 | **操作节奏自动调整** | 🔜 后层扩展 | 后层 | 上层运行系统，基于健康评分 |
