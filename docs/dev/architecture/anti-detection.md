@@ -555,13 +555,13 @@ CanvasRenderingContext2D.prototype.getImageData = function(...args) {
 | 悬停确认 + 轻微错过模拟 | ⏳ 待实现 | P1 | CLI 层 |
 | **键盘输入节奏（TypingPersona）**| ⏳ 待实现 | P1 | CLI 层 |
 | **滚动行为模拟（变速 + 停顿）** | ⏳ 待实现 | P1 | CLI 层 |
-| **操作前预热（Warmup）** | ⏳ 待实现 | P1 | CLI 层，BehaviorEngine |
-| **行为人格（BehaviorPersona）** | ⏳ 待实现 | P1 | Profile 元数据 + BehaviorEngine |
+| **操作前预热（Warmup）** | 🔜 后层扩展 | P3 | 上层运行系统 / BehaviorEngine |
+| **行为人格（BehaviorPersona）** | 🔜 后层扩展 | P3 | 上层运行系统 + Profile 元数据 |
 | **操作序列多样化** | ⏳ 待实现 | P1 | 平台适配器层 |
 | **操作后余韵** | ⏳ 待实现 | P2 | CLI 层，BehaviorEngine |
-| **Profile 播种流程** | ⏳ 待实现 | P1 | CLI `webenvoy seed` 命令 |
-| **账号健康状态追踪** | ⏳ 待实现 | P1 | Extension Background + SQLite |
-| **操作节奏自动调整** | ⏳ 待实现 | P1 | CLI 层，基于健康评分 |
+| **Profile 播种流程** | 🔜 后层扩展 | P3 | 上层运行系统 |
+| **账号健康状态追踪** | 🔜 后层扩展 | P4 | 上层运行系统 |
+| **操作节奏自动调整** | 🔜 后层扩展 | P4 | 上层运行系统，基于健康评分 |
 | Camoufox 一次性侦察集成 | ⏳ 待实现 | P2 | 独立侦察命令 |
 | OS 级输入引擎（最高安全模式）| ⏳ 待实现 | P2 | CLI 层，nut.js |
 
