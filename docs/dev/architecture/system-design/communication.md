@@ -54,14 +54,16 @@
 
 | 操作类型 | 返回给 AI | 存储位置 |
 |---|---|---|
-| 搜索 / 列表采集 | `{ total: N, batch_id: "..." }` | SQLite `note_list` 表 |
-| 详情获取 | `{ note_id: "...", title: "前20字..." }` | SQLite `note_detail` 表 |
-| 发布操作 | `{ note_id: "...", url: "...", status: "pending_review" }` | SQLite `publish_log` 表 |
-| 互动操作 | `{ target_id: "...", action: "like", status: "ok" }` | SQLite `interact_log` 表 |
-| 下载结果 | `{ file_id: "...", filename: "...", saved_to: "..." }` | SQLite `download_log` 表 |
+| 搜索 / 列表采集 | `{ total: N, batch_id: "..." }` | SQLite `raw_items` 表（按 `batch_id` / `data_type` 归档） |
+| 详情获取 | `{ note_id: "...", title: "前20字..." }` | SQLite `raw_items` 表（按 `biz_id` / `data_type` 覆盖写入） |
+| 发布操作 | `{ note_id: "...", url: "...", status: "pending_review" }` | SQLite `audit_log` 表 |
+| 互动操作 | `{ target_id: "...", action: "like", status: "ok" }` | SQLite `audit_log` 表 |
+| 下载结果 | `{ file_id: "...", filename: "...", saved_to: "..." }` | SQLite `audit_log` 表（记录文件元数据与落盘结果） |
 | 错误 | `{ code: "captcha_required", message: "..." }` | 不入库 |
 
-**设计意图**：避免将全量业务数据（可能数十 KB）直接塞入 AI 的上下文窗口，消耗 Token 预算。AI 通过 `batch_id` 在后续步骤按需查询，而非一次性接收全部数据。
+这里的“搜索结果”“详情”“发布结果”等是对 AI 暴露的逻辑能力名，不额外对应独立物理表；实际落库统一复用 [`database.md`](./database.md) 中定义的 `raw_items`、`batch_checkpoints`、`audit_log` 三类核心表。
+
+**设计意图**：避免将全量业务数据（可能数十 KB）直接塞入 AI 的上下文窗口，消耗 Token 预算。AI 通过 `batch_id` 或结构化业务 ID 在后续步骤按需查询，而非一次性接收全部数据。
 
 ---
 

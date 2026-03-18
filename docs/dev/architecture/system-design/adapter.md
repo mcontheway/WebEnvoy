@@ -77,11 +77,10 @@ execution:
 export class XhsAdapter implements PlatformAdapter {
   // L3 读：主动发包
   async search(query: string, page: number): Promise<NoteList> { ... }
-  async getNoteDetail(noteId: string): Promise<Note> { ... }
+  async detail(noteId: string): Promise<Note> { ... }
 
   // 写：真实页面交互
-  async publishNote(content: NoteContent): Promise<PublishResult> { ... }
-  async sendDM(userId: string, text: string): Promise<void> { ... }
+  async publish(content: NoteContent): Promise<PublishResult> { ... }
   async interact(action: InteractAction): Promise<InteractResult> { ... }
   async download(task: DownloadTask): Promise<DownloadResult> { ... }
 
@@ -91,7 +90,7 @@ export class XhsAdapter implements PlatformAdapter {
 }
 ```
 
-`PlatformAdapter` 接口定义了七类标准命令，详见 [`ARCHITECTURE_PRINCIPLES.md`](../ARCHITECTURE_PRINCIPLES.md) §2。
+`PlatformAdapter` 接口定义了七类标准命令，详见 [`ARCHITECTURE_PRINCIPLES.md`](../ARCHITECTURE_PRINCIPLES.md) §2。私信、点赞、评论、关注等具体动作统一归入 `interact`，不再为单一互动类型单独扩展第八类命令。
 
 ---
 
