@@ -132,6 +132,31 @@ normalize_review_path() {
   printf '%s\n' "${raw_path}"
 }
 
+line_range_reviewable() {
+  local path="$1"
+  local line_start="$2"
+  local line_end="$3"
+  local diff_line
+  local hunk_start
+  local hunk_count
+  local hunk_end
+
+  while IFS= read -r diff_line; do
+    [[ "${diff_line}" =~ ^@@\ -[0-9]+(,[0-9]+)?\ \+([0-9]+)(,([0-9]+))?\ @@ ]] || continue
+
+    hunk_start="${BASH_REMATCH[2]}"
+    hunk_count="${BASH_REMATCH[4]:-1}"
+    [[ "${hunk_count}" != "0" ]] || continue
+
+    hunk_end=$((hunk_start + hunk_count - 1))
+    if (( !(line_end < hunk_start || hunk_end < line_start) )); then
+      return 0
+    fi
+  done < <(git -C "${WORKTREE_DIR}" diff --unified=0 "origin/${BASE_REF}" -- "${path}")
+
+  return 1
+}
+
 run_codex_review() {
   local pr_number="$1"
 
@@ -188,6 +213,7 @@ post_review() {
 post_inline_comments() {
   local pr_number="$1"
   local payload_file="${TMP_DIR}/inline-comments.jsonl"
+  local inline_error_file="${TMP_DIR}/inline-comment.err"
   local count
 
   jq -c '
@@ -228,8 +254,13 @@ post_inline_comments() {
       continue
     fi
 
+    if ! line_range_reviewable "${path}" "${line_start}" "${line_end}"; then
+      echo "警告: 跳过无法锚定到 PR diff 的行级评论: ${path} (L${line_start}-L${line_end})" >&2
+      continue
+    fi
+
     if [[ "${line_start}" == "${line_end}" ]]; then
-      gh api \
+      if ! gh api \
         --method POST \
         -H "Accept: application/vnd.github+json" \
         "repos/:owner/:repo/pulls/${pr_number}/comments" \
@@ -237,9 +268,13 @@ post_inline_comments() {
         -f commit_id="${HEAD_SHA}" \
         -f path="${path}" \
         -F line="${line_end}" \
-        -f side="RIGHT" >/dev/null
+        -f side="RIGHT" >/dev/null 2>"${inline_error_file}"; then
+        echo "警告: 行级评论发布失败，已跳过: ${path} (L${line_start}-L${line_end})" >&2
+        sed 's/^/  /' "${inline_error_file}" >&2
+        continue
+      fi
     else
-      gh api \
+      if ! gh api \
         --method POST \
         -H "Accept: application/vnd.github+json" \
         "repos/:owner/:repo/pulls/${pr_number}/comments" \
@@ -249,7 +284,11 @@ post_inline_comments() {
         -F line="${line_end}" \
         -f side="RIGHT" \
         -F start_line="${line_start}" \
-        -f start_side="RIGHT" >/dev/null
+        -f start_side="RIGHT" >/dev/null 2>"${inline_error_file}"; then
+        echo "警告: 行级评论发布失败，已跳过: ${path} (L${line_start}-L${line_end})" >&2
+        sed 's/^/  /' "${inline_error_file}" >&2
+        continue
+      fi
     fi
   done < "${payload_file}"
 }

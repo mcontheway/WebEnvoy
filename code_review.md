@@ -194,14 +194,14 @@ Findings 的写法要求：
 - `findings` 只列出真正影响是否合并的事项，按严重性排序
 - `required_actions` 仅列出合并前必须完成的动作
 - `findings` 必须使用 `code_location` 结构
-- 如果能够可靠定位，`findings` 应补充 `code_location.line_range`
-- 如有把握，可补充 `confidence_score` 与 `priority`
+- `findings` 必须提供 `code_location.line_range.start` 与 `code_location.line_range.end`
+- `findings` 必须提供 `confidence_score` 与 `priority`
 
 Findings 要求：
 
 - 标题短、直接、可执行
 - 必须提供 `code_location.absolute_file_path`
-- 如果能够可靠定位，应提供精确行号或行范围
+- 必须提供精确行号或行范围；单行问题可令 `start = end`
 - 说明必须聚焦为什么这是合并阻断项
 - 不要输出泛泛建议或风格偏好
 

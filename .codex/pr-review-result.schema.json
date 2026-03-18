@@ -26,7 +26,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["severity", "title", "details", "code_location"],
+        "required": ["severity", "title", "details", "code_location", "confidence_score", "priority"],
         "properties": {
           "severity": {
             "type": "string",
@@ -44,7 +44,7 @@
           "code_location": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["absolute_file_path"],
+            "required": ["absolute_file_path", "line_range"],
             "properties": {
               "absolute_file_path": {
                 "type": "string",
