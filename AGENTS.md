@@ -73,6 +73,7 @@ WebEnvoy 的定位是“供上层 AI 调用的 Web 执行工具”，不是 Agen
 3. 合入主干必须使用 Squash Merge。
 4. 单元测试放在被测文件同级 `__tests__/`；端到端/集成测试统一放在仓库根目录 `tests/`。
 5. 本地代码库中不保留 backlog、sprint 等进度追踪文件；GitHub Issues / Projects 是唯一进度真理。
+
 ## 需求到交付的标准机制
 
 本项目的默认推进顺序固定如下：
@@ -106,6 +107,7 @@ WebEnvoy 的定位是“供上层 AI 调用的 Web 执行工具”，不是 Agen
 ## Review 与合并底线
 
 任何合并前必须先 review，不能因为测试通过就跳过判断。
+在进行代码审查时，请始终遵循 [code_review.md](./code_review.md) 中的标准。
 
 Review 至少覆盖以下方面：
 
@@ -145,7 +147,7 @@ FR 分支的推荐做法：
 本机按需 review / merge 入口：
 
 - `scripts/pr-guardian.sh`
-- 详细说明见 `docs/dev/local-pr-review.md`
+- 详细说明见 [code_review.md](./code_review.md)
 
 ## AI 执行职责
 
