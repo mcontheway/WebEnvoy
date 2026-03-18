@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DEFAULT_TEMPLATE="${REPO_ROOT}/.github/PULL_REQUEST_TEMPLATE.md"
+
+usage() {
+  cat <<'EOF'
+用法:
+  scripts/open-pr.sh [--issue <number>] [--title <title>] [--base <branch>] [--draft]
+
+说明:
+  基于当前分支自动生成 PR 标题和描述，并调用 gh pr create。
+  默认 base 分支为 main，默认标题取最近一次提交信息。
+EOF
+}
+
+die() {
+  echo "错误: $*" >&2
+  exit 1
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "缺少依赖命令: $1"
+}
+
+current_branch() {
+  git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD
+}
+
+ensure_not_main_branch() {
+  local branch="$1"
+  [[ "${branch}" != "main" ]] || die "当前分支是 main，请切到独立分支后再创建 PR。"
+}
+
+latest_commit_subject() {
+  git -C "${REPO_ROOT}" log -1 --pretty=%s
+}
+
+list_changed_files() {
+  local base_branch="$1"
+  git -C "${REPO_ROOT}" fetch origin "${base_branch}" >/dev/null 2>&1 || true
+  git -C "${REPO_ROOT}" diff --name-only "origin/${base_branch}...HEAD"
+}
+
+detect_risk_level() {
+  local base_branch="$1"
+  local files
+
+  files="$(list_changed_files "${base_branch}")"
+
+  if [[ -z "${files}" ]]; then
+    echo "normal|未检测到相对 ${base_branch} 的变更文件，按普通改动处理。"
+    return
+  fi
+
+  if grep -Eq '^(vision\.md|AGENTS\.md|code_review\.md|docs/dev/architecture/|docs/dev/specs/|\.github/workflows/|scripts/|\.githooks/)' <<< "${files}"; then
+    echo "high|变更涉及正式契约、架构/流程基线或高风险目录。"
+    return
+  fi
+
+  if grep -Evq '(^docs/archive/|\.md$)' <<< "${files}"; then
+    echo "normal|变更包含非 Markdown 文件，按普通改动处理。"
+    return
+  fi
+
+  echo "lightweight|仅检测到非契约性 Markdown 变更，可按轻量改动通道准备材料。"
+}
+
+build_changed_files_block() {
+  local base_branch="$1"
+  local files
+
+  files="$(list_changed_files "${base_branch}")"
+  if [[ -z "${files}" ]]; then
+    printf '%s\n' '- 无'
+    return
+  fi
+
+  while IFS= read -r file; do
+    [[ -n "${file}" ]] || continue
+    printf -- '- `%s`\n' "${file}"
+  done <<< "${files}"
+}
+
+build_verification_block() {
+  local risk_level="$1"
+
+  if [[ "${risk_level}" == "lightweight" ]]; then
+    cat <<'EOF'
+- 已执行：`bash scripts/docs-guard.sh`
+- 未执行：自动化行为测试（本次未涉及运行时行为变更）
+EOF
+    return
+  fi
+
+  cat <<'EOF'
+- 已执行：
+- 未执行：
+EOF
+}
+
+build_body() {
+  local template_file="$1"
+  local issue_number="$2"
+  local base_branch="$3"
+  local risk_level="$4"
+  local risk_reason="$5"
+  local tmp_file="$6"
+  local issue_line="无"
+  local fixes_line="无"
+
+  if [[ -n "${issue_number}" ]]; then
+    issue_line="#${issue_number}"
+    fixes_line="Fixes #${issue_number}"
+  fi
+
+  cp "${template_file}" "${tmp_file}"
+
+  PR_ISSUE="${issue_line}" \
+  PR_FIXES="${fixes_line}" \
+  PR_RISK_LEVEL="${risk_level}" \
+  PR_RISK_REASON="${risk_reason}" \
+  PR_ROLLBACK="如需撤回，执行对应的 revert PR 或回退本 PR 引入的提交。" \
+    perl -0pi -e '
+      s/\{\{ISSUE\}\}/$ENV{"PR_ISSUE"}/g;
+      s/\{\{FIXES\}\}/$ENV{"PR_FIXES"}/g;
+      s/\{\{RISK_LEVEL\}\}/$ENV{"PR_RISK_LEVEL"}/g;
+      s/\{\{RISK_REASON\}\}/$ENV{"PR_RISK_REASON"}/g;
+      s/\{\{ROLLBACK\}\}/$ENV{"PR_ROLLBACK"}/g;
+    ' "${tmp_file}"
+
+  {
+    printf '\n## 变更文件\n\n'
+    build_changed_files_block "${base_branch}"
+    printf '\n## 自动生成的验证建议\n\n'
+    build_verification_block "${risk_level}"
+  } >> "${tmp_file}"
+}
+
+main() {
+  local issue_number=""
+  local title=""
+  local base_branch="main"
+  local draft=0
+  local branch
+  local risk_info
+  local risk_level
+  local risk_reason
+  local tmp_body
+  local create_args=()
+
+  require_cmd git
+  require_cmd gh
+  require_cmd perl
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --issue)
+        shift
+        [[ $# -gt 0 ]] || die "--issue 需要一个编号"
+        issue_number="$1"
+        ;;
+      --title)
+        shift
+        [[ $# -gt 0 ]] || die "--title 需要一个标题"
+        title="$1"
+        ;;
+      --base)
+        shift
+        [[ $# -gt 0 ]] || die "--base 需要一个分支名"
+        base_branch="$1"
+        ;;
+      --draft)
+        draft=1
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "未知参数: $1"
+        ;;
+    esac
+    shift
+  done
+
+  [[ -f "${DEFAULT_TEMPLATE}" ]] || die "缺少 PR 模板: ${DEFAULT_TEMPLATE}"
+  gh auth status >/dev/null 2>&1 || die "GitHub CLI 未登录或凭证失效，请先执行 gh auth login"
+
+  branch="$(current_branch)"
+  ensure_not_main_branch "${branch}"
+
+  if [[ -z "${title}" ]]; then
+    title="$(latest_commit_subject)"
+  fi
+
+  risk_info="$(detect_risk_level "${base_branch}")"
+  risk_level="${risk_info%%|*}"
+  risk_reason="${risk_info#*|}"
+
+  tmp_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-pr-body.XXXXXX")"
+  trap 'rm -f "${tmp_body}"' EXIT
+
+  build_body "${DEFAULT_TEMPLATE}" "${issue_number}" "${base_branch}" "${risk_level}" "${risk_reason}" "${tmp_body}"
+
+  create_args+=(--base "${base_branch}" --title "${title}" --body-file "${tmp_body}")
+  if [[ "${draft}" == "1" ]]; then
+    create_args+=(--draft)
+  fi
+
+  gh pr create "${create_args[@]}"
+}
+
+main "$@"
