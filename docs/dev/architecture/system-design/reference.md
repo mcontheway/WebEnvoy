@@ -34,17 +34,20 @@
 
 ## 十四、待确认的知识盲区（Spike 任务）
 
-以下问题在 Phase 1 开发前必须通过真实观察确认：
+以下问题需要在各自对应阶段启动前，通过真实观察确认：
 
-### Spike A：小红书平台 API 端点确认（前置必做）
+### Spike A：小红书核心读链路确认（Phase 1 前置）
 
 - [ ] 搜索、详情、用户主页等核心 API 的 URL 端点与请求体结构
 - [ ] `a1` / `webId` / `gid` 等追踪字段的生命周期（Content Script 内如何稳定获取）
 - [ ] `window._webmsxyw` 的调用签名（参数格式、返回格式）
+
+### Spike A-Write：小红书最小写链路与上传路径确认（Phase 1 后段验证 / Phase 2 前置）
+
 - [ ] 富文本发布编辑器的 DOM 结构与 Composition 事件响应机制
 - [ ] 图片上传流程（DataTransfer 还是独立上传接口）
 
-### Spike B：抖音平台 API 端点确认
+### Spike B：抖音平台 API 端点确认（Phase 3 第二平台验证前置）
 
 - [ ] 视频流、用户信息、搜索等核心 API 端点
 - [ ] `window.bdms.init._v[2].p[42]` 签名函数的准确调用方式
