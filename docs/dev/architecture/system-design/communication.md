@@ -57,6 +57,8 @@
 | 搜索 / 列表采集 | `{ total: N, batch_id: "..." }` | SQLite `note_list` 表 |
 | 详情获取 | `{ note_id: "...", title: "前20字..." }` | SQLite `note_detail` 表 |
 | 发布操作 | `{ note_id: "...", url: "...", status: "pending_review" }` | SQLite `publish_log` 表 |
+| 互动操作 | `{ target_id: "...", action: "like", status: "ok" }` | SQLite `interact_log` 表 |
+| 下载结果 | `{ file_id: "...", filename: "...", saved_to: "..." }` | SQLite `download_log` 表 |
 | 错误 | `{ code: "captcha_required", message: "..." }` | 不入库 |
 
 **设计意图**：避免将全量业务数据（可能数十 KB）直接塞入 AI 的上下文窗口，消耗 Token 预算。AI 通过 `batch_id` 在后续步骤按需查询，而非一次性接收全部数据。

@@ -82,13 +82,16 @@ export class XhsAdapter implements PlatformAdapter {
   // 写：真实页面交互
   async publishNote(content: NoteContent): Promise<PublishResult> { ... }
   async sendDM(userId: string, text: string): Promise<void> { ... }
+  async interact(action: InteractAction): Promise<InteractResult> { ... }
+  async download(task: DownloadTask): Promise<DownloadResult> { ... }
 
-  // 侦察命令（ARCHITECTURE_PRINCIPLES.md §2 recon）
+  // 侦察与介入命令（ARCHITECTURE_PRINCIPLES.md §2 recon / dispatch）
   async recon(): Promise<ReconResult> { ... }
+  async dispatch(next: DispatchDecision): Promise<DispatchResult> { ... }
 }
 ```
 
-`PlatformAdapter` 接口定义了六类标准命令，详见 [`ARCHITECTURE_PRINCIPLES.md`](../ARCHITECTURE_PRINCIPLES.md) §2。
+`PlatformAdapter` 接口定义了七类标准命令，详见 [`ARCHITECTURE_PRINCIPLES.md`](../ARCHITECTURE_PRINCIPLES.md) §2。
 
 ---
 
