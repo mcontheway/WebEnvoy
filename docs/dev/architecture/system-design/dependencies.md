@@ -133,8 +133,8 @@
 ### Crawlee
 - **阶段**：已吸收
 - **已吸收内容**：
-  1. **Session 健康度三退场机制**：`errorScore` 线性累加（+1/markBad，+满/retire，-0.5/markGood）+ `maxUsageCount` 使用次数上限 + `maxAgeSecs` 年龄上限三条件任一触发退场 → `anti-detection.md §5.3` 冷却指数退避策略
-  2. **代理黏性绑定**：`sessionId → proxyUrl` 一对一映射，Session 退场时解绑 → `account.md §7.1` Proxy 黏性绑定
+  1. **错误信号累计思路**：保留“把失败信号结构化记录起来”的思想，但不把 Session 健康度退场机制直接带入当前主线 → 由 `error-handling.md` 的结构化错误与后续扩展承接
+  2. **代理黏性绑定**：`sessionId → proxyUrl` 一对一映射，只保留执行必需的最小黏性绑定，不扩展为账号池调度逻辑 → `account.md §7.1` Proxy 黏性绑定
   3. **操作间隔分布选型**：均匀分布可被统计检测，推荐长尾分布 → `anti-detection.md §4.1` 操作间隔分布模型
 - **不集成原因**：Node.js 爬虫框架（含浏览器管理 + 调度），与 WebEnvoy「CLI 轻 core + Chrome Extension 重前端」架构不兼容
 
