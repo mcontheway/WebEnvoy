@@ -27,7 +27,8 @@ describe("native messaging contract", () => {
     expect(body.summary).toMatchObject({
       message: "pong",
       transport: {
-        protocol: "webenvoy.native-bridge.v1"
+        protocol: "webenvoy.native-bridge.v1",
+        relay_path: "host>background>content-script>background>host"
       }
     });
   });

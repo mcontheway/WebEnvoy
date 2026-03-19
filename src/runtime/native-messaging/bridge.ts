@@ -10,11 +10,13 @@ import {
   type BridgeRequestEnvelope,
   type BridgeResponseEnvelope
 } from "./protocol.js";
+import { createLoopbackNativeBridgeTransport } from "./loopback.js";
 import {
   NativeMessagingSession,
   classifyTransportFailure,
   type TransportFailureCode
 } from "./session.js";
+import type { NativeBridgeTransport } from "./transport.js";
 
 export class NativeMessagingTransportError extends Error {
   code: TransportFailureCode;
@@ -26,12 +28,6 @@ export class NativeMessagingTransportError extends Error {
     this.code = code;
     this.retryable = options?.retryable ?? true;
   }
-}
-
-export interface NativeBridgeTransport {
-  open(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope>;
-  forward(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope>;
-  heartbeat(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope>;
 }
 
 interface FakeTransportOptions {
@@ -170,6 +166,7 @@ export interface RuntimePingResult {
     state: string;
     session_id: string;
     heartbeat_ok: boolean;
+    relay_path: string;
   };
 }
 
@@ -185,7 +182,7 @@ export class NativeMessagingBridge {
   #idSeq = 0;
 
   constructor(options?: BridgeOptions) {
-    this.#transport = options?.transport ?? createFakeNativeBridgeTransport();
+    this.#transport = options?.transport ?? createLoopbackNativeBridgeTransport();
     this.#now = options?.now ?? (() => Date.now());
   }
 
@@ -232,6 +229,7 @@ export class NativeMessagingBridge {
       const message = typeof payload.message === "string" ? payload.message : "pong";
       this.#session.completeForward();
       const snapshot = this.#session.snapshot();
+      const relayPath = String(success.summary.relay_path ?? "host>unknown");
 
       return {
         message,
@@ -239,7 +237,8 @@ export class NativeMessagingBridge {
           protocol: BRIDGE_PROTOCOL,
           state: snapshot.state,
           session_id: this.#session.sessionIdOrThrow(),
-          heartbeat_ok: true
+          heartbeat_ok: true,
+          relay_path: relayPath
         }
       };
     } catch (error) {

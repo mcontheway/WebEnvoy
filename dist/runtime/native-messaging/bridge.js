@@ -1,4 +1,5 @@
 import { BRIDGE_PROTOCOL, DEFAULT_TRANSPORT_TIMEOUT_MS, createBridgeForwardRequest, createBridgeOpenRequest, createHeartbeatRequest, ensureBridgeRequestEnvelope, ensureBridgeSuccess } from "./protocol.js";
+import { createLoopbackNativeBridgeTransport } from "./loopback.js";
 import { NativeMessagingSession, classifyTransportFailure } from "./session.js";
 export class NativeMessagingTransportError extends Error {
     code;
@@ -100,7 +101,7 @@ export class NativeMessagingBridge {
     #now;
     #idSeq = 0;
     constructor(options) {
-        this.#transport = options?.transport ?? createFakeNativeBridgeTransport();
+        this.#transport = options?.transport ?? createLoopbackNativeBridgeTransport();
         this.#now = options?.now ?? (() => Date.now());
     }
     async runtimePing(input) {
@@ -135,13 +136,15 @@ export class NativeMessagingBridge {
             const message = typeof payload.message === "string" ? payload.message : "pong";
             this.#session.completeForward();
             const snapshot = this.#session.snapshot();
+            const relayPath = String(success.summary.relay_path ?? "host>unknown");
             return {
                 message,
                 transport: {
                     protocol: BRIDGE_PROTOCOL,
                     state: snapshot.state,
                     session_id: this.#session.sessionIdOrThrow(),
-                    heartbeat_ok: true
+                    heartbeat_ok: true,
+                    relay_path: relayPath
                 }
             };
         }
