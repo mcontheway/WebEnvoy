@@ -301,7 +301,7 @@ describe("webenvoy cli contract", () => {
     });
   });
 
-  itWithSqlite("keeps command result and reports warning when runtime store schema mismatches", async () => {
+  itWithSqlite("returns structured runtime unavailable when runtime store schema mismatches", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const bootstrap = runCli(
       ["runtime.ping", "--run-id", "run-contract-005a"],
@@ -325,15 +325,15 @@ describe("webenvoy cli contract", () => {
         WEBENVOY_NATIVE_TRANSPORT: "loopback"
       }
     );
-    expect(result.status).toBe(0);
+    expect(result.status).toBe(5);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
       run_id: "run-contract-005b",
       command: "runtime.ping",
-      status: "success"
+      status: "error",
+      error: { code: "ERR_RUNTIME_UNAVAILABLE", retryable: false }
     });
-    expect(result.stderr).toContain("\"type\":\"runtime_store_warning\"");
-    expect(result.stderr).toContain("\"code\":\"ERR_RUNTIME_STORE_SCHEMA_MISMATCH\"");
+    expect(result.stderr).not.toContain("\"type\":\"runtime_store_warning\"");
   });
 
   it("returns execution failed error with code 6", () => {
