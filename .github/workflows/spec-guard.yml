@@ -9,11 +9,15 @@ on:
       - 'docs/dev/architecture/**'
       - 'docs/dev/AGENTS.md'
       - 'docs/AGENTS.md'
+      - 'docs/research/ref/AGENTS.md'
       - 'AGENTS.md'
       - 'vision.md'
+      - 'code_review.md'
       - 'spec_review.md'
       - 'scripts/spec-guard.sh'
       - '.github/workflows/spec-guard.yml'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - '.githooks/**'
 
 jobs:
   spec-guard:

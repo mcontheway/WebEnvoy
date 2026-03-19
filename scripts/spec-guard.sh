@@ -18,7 +18,8 @@ warn() {
   echo "[spec-guard] 提示: $*" >&2
 }
 
-ALLOWED_WITH_SPEC_REGEX='^(docs/dev/specs/|docs/dev/architecture/|docs/dev/AGENTS\.md|docs/AGENTS\.md|docs/research/ref/|AGENTS\.md|vision\.md|code_review\.md|spec_review\.md|scripts/|\.github/workflows/|\.githooks/|\.github/PULL_REQUEST_TEMPLATE\.md)'
+SPEC_SUITE_FILE_REGEX='^docs/dev/specs/FR-[0-9][0-9][0-9][0-9]-[^/]+/'
+GOVERNANCE_FILE_REGEX='^(docs/dev/architecture/|docs/dev/AGENTS\.md|docs/AGENTS\.md|docs/research/ref/AGENTS\.md|AGENTS\.md|vision\.md|code_review\.md|spec_review\.md|scripts/spec-guard\.sh|\.github/workflows/spec-guard\.yml|\.github/PULL_REQUEST_TEMPLATE\.md|\.githooks/)'
 
 resolve_base_ref() {
   if [[ -n "${SPEC_GUARD_BASE_REF:-}" ]]; then
@@ -53,27 +54,32 @@ changed_files() {
   git -C "${REPO_ROOT}" diff --name-only "${base_ref}...HEAD"
 }
 
-validate_fr_suite() {
-  local fr_dir="$1"
-  local plan_file="${fr_dir}/plan.md"
+require_section() {
+  local file="$1"
+  local pattern="$2"
+  local label="$3"
 
-  [[ -f "${fr_dir}/spec.md" ]] || die "${fr_dir} 缺少 spec.md"
-  [[ -f "${plan_file}" ]] || die "${fr_dir} 缺少 plan.md"
-  [[ -f "${fr_dir}/TODO.md" ]] || die "${fr_dir} 缺少 TODO.md"
-  [[ -s "${fr_dir}/spec.md" ]] || die "${fr_dir}/spec.md 为空"
-  [[ -s "${plan_file}" ]] || die "${fr_dir}/plan.md 为空"
-  [[ -s "${fr_dir}/TODO.md" ]] || die "${fr_dir}/TODO.md 为空"
-
-  grep -Eq '^##[[:space:]]+实施目标([[:space:]]|$)' "${plan_file}" || die "${fr_dir}/plan.md 缺少 `## 实施目标`"
-  grep -Eq '^##[[:space:]]+分阶段拆分([[:space:]]|$)' "${plan_file}" || die "${fr_dir}/plan.md 缺少 `## 分阶段拆分`"
-  grep -Eq '^##[[:space:]]+实现约束([[:space:]]|$)' "${plan_file}" || die "${fr_dir}/plan.md 缺少 `## 实现约束`"
-  grep -Eq '^##[[:space:]]+测试与验证策略([[:space:]]|$)' "${plan_file}" || die "${fr_dir}/plan.md 缺少 `## 测试与验证策略`"
-  grep -Eq '^##[[:space:]]+TDD[[:space:]]+范围([[:space:]]|$)' "${plan_file}" || die "${fr_dir}/plan.md 缺少 `## TDD 范围`"
-  grep -Eq '^##[[:space:]]+并行[[:space:]]*/[[:space:]]*串行关系([[:space:]]|$)' "${plan_file}" || die "${fr_dir}/plan.md 缺少 `## 并行 / 串行关系`"
-  grep -Eq '^##[[:space:]]+进入实现前条件([[:space:]]|$)' "${plan_file}" || die "${fr_dir}/plan.md 缺少 `## 进入实现前条件`"
+  grep -Eq "${pattern}" "${file}" || die "${file} 缺少 ${label}"
 }
 
-print_suite_hints() {
+require_nonempty_file() {
+  local file="$1"
+  [[ -f "${file}" ]] || die "缺少文件: ${file}"
+  [[ -s "${file}" ]] || die "${file} 为空"
+}
+
+validate_spec_file() {
+  local spec_file="$1"
+
+  require_section "${spec_file}" '^##[[:space:]]+GWT[[:space:]]+验收场景([[:space:]]|$)' '`## GWT 验收场景`'
+  require_section "${spec_file}" '^##[[:space:]]+异常与边界场景([[:space:]]|$)' '`## 异常与边界场景`'
+  require_section "${spec_file}" '^##[[:space:]]+验收标准([[:space:]]|$)' '`## 验收标准`'
+  grep -Eq '(^|[[:space:]])Given[[:space:]]' "${spec_file}" || die "${spec_file} 未看到 Given 场景"
+  grep -Eq '(^|[[:space:]])When[[:space:]]' "${spec_file}" || die "${spec_file} 未看到 When 场景"
+  grep -Eq '(^|[[:space:]])Then[[:space:]]' "${spec_file}" || die "${spec_file} 未看到 Then 场景"
+}
+
+validate_fr_suite() {
   local fr_dir="$1"
   local spec_file="${fr_dir}/spec.md"
   local plan_file="${fr_dir}/plan.md"
@@ -83,61 +89,98 @@ print_suite_hints() {
   local risks_file="${fr_dir}/risks.md"
   local suite_text
 
-  if ! grep -qi 'given' "${spec_file}" && ! grep -q 'GWT' "${spec_file}"; then
-    warn "${spec_file} 未看到明显的 GWT 验收场景标识。"
-  fi
+  require_nonempty_file "${spec_file}"
+  require_nonempty_file "${plan_file}"
+  require_nonempty_file "${fr_dir}/TODO.md"
+  validate_spec_file "${spec_file}"
 
-  if ! grep -Eqi '(spec review|评审通过|审查通过)' "${plan_file}"; then
-    warn "${plan_file} 未看到明显的 spec review 通过后动作说明。"
-  fi
+  require_section "${plan_file}" '^##[[:space:]]+实施目标([[:space:]]|$)' '`## 实施目标`'
+  require_section "${plan_file}" '^##[[:space:]]+分阶段拆分([[:space:]]|$)' '`## 分阶段拆分`'
+  require_section "${plan_file}" '^##[[:space:]]+实现约束([[:space:]]|$)' '`## 实现约束`'
+  require_section "${plan_file}" '^##[[:space:]]+测试与验证策略([[:space:]]|$)' '`## 测试与验证策略`'
+  require_section "${plan_file}" '^##[[:space:]]+TDD[[:space:]]+范围([[:space:]]|$)' '`## TDD 范围`'
+  require_section "${plan_file}" '^##[[:space:]]+并行[[:space:]]*/[[:space:]]*串行关系([[:space:]]|$)' '`## 并行 / 串行关系`'
+  require_section "${plan_file}" '^##[[:space:]]+进入实现前条件([[:space:]]|$)' '`## 进入实现前条件`'
+
+  grep -Eqi '(spec review|评审通过|审查通过)' "${plan_file}" || die "${plan_file} 未看到 spec review 通过后动作说明"
+  grep -Eq '(并行|串行|阻塞|依赖|#?[0-9]{2,})' "${plan_file}" || die "${plan_file} 未看到并行 / 串行或阻塞关系描述"
+
+  suite_text="$(cat "${spec_file}" "${plan_file}")"
 
   if [[ -d "${contracts_dir}" ]]; then
-    if ! find "${contracts_dir}" -type f | grep -q .; then
-      warn "${contracts_dir} 存在但没有任何契约文档；不要创建空壳目录。"
-    fi
+    find "${contracts_dir}" -type f | grep -q . || die "${contracts_dir} 存在但没有任何契约文档"
+    while IFS= read -r contract_file; do
+      [[ -n "${contract_file}" ]] || continue
+      [[ -s "${contract_file}" ]] || die "${contract_file} 为空"
+    done < <(find "${contracts_dir}" -type f)
   fi
 
-  if [[ -f "${data_model_file}" ]] && [[ ! -s "${data_model_file}" ]]; then
-    warn "${data_model_file} 存在但为空；按需文档不应作为占位符提交。"
+  if grep -Eqi '(CLI|contract|contracts|protocol|Native Messaging|extension|payload|stdout|stderr|exit code|适配器接口|结构化返回|协议|契约|退出码|通信)' <<< "${suite_text}"; then
+    [[ -d "${contracts_dir}" ]] || die "${fr_dir} 涉及稳定接口或协议，缺少 `contracts/`"
+  fi
+
+  if grep -Eqi '(SQLite|schema|table|migration|索引|表结构|迁移)' <<< "${suite_text}"; then
+    require_nonempty_file "${data_model_file}"
+  fi
+
+  if [[ -f "${data_model_file}" ]]; then
+    [[ -s "${data_model_file}" ]] || die "${data_model_file} 存在但为空"
   fi
 
   if [[ -f "${research_file}" ]] && [[ ! -s "${research_file}" ]]; then
     warn "${research_file} 存在但为空；按需文档不应作为占位符提交。"
   fi
 
-  if [[ -f "${risks_file}" ]] && [[ ! -s "${risks_file}" ]]; then
-    warn "${risks_file} 存在但为空；按需文档不应作为占位符提交。"
-  fi
-
-  suite_text="$(cat "${spec_file}" "${plan_file}")"
-
-  if [[ ! -d "${contracts_dir}" ]] && grep -Eqi '(CLI|contract|contracts|protocol|Native Messaging|extension|payload|stdout|stderr|exit code|适配器接口|结构化返回|协议|契约|退出码|通信)' <<< "${suite_text}"; then
-    warn "${fr_dir} 似乎涉及稳定接口或协议，检查是否需要补 `contracts/`。"
-  fi
-
-  if [[ ! -f "${data_model_file}" ]] && grep -Eqi '(SQLite|schema|table|migration|profile|session|run record|config|cache|entity|持久化|数据模型|表结构|迁移|身份|会话|运行记录|配置|缓存)' <<< "${suite_text}"; then
-    warn "${fr_dir} 似乎涉及共享或持久化数据，检查是否需要补 `data-model.md`。"
-  fi
-
   if [[ ! -f "${research_file}" ]] && grep -Eqi '(research|unknown|unknowns|third-party|signature|anti-detection|experiment|spike|验证|研究|未知|第三方|签名|反检测|实验|取舍)' <<< "${suite_text}"; then
     warn "${fr_dir} 似乎存在关键未知项或外部验证，检查是否需要补 `research.md`。"
   fi
 
-  if [[ ! -f "${risks_file}" ]] && grep -Eqi '(risk|rollback|security|account|write path|delete|migration|concurr|风控|风险|回滚|安全|账号|写入|删除|迁移|并发|不可逆)' <<< "${suite_text}"; then
-    warn "${fr_dir} 似乎涉及高风险链路，检查是否需要补 `risks.md`。"
+  if grep -Eqi '(risk|rollback|security|account|write path|delete|migration|concurr|风控|风险|回滚|安全|账号|写入|删除|迁移|并发|不可逆)' <<< "${suite_text}"; then
+    require_nonempty_file "${risks_file}"
   fi
 
-  if ! grep -Eq '(并行|串行|阻塞|依赖|#?[0-9]{2,})' "${plan_file}"; then
-    warn "${plan_file} 未看到明显的并行 / 串行或阻塞关系描述。"
+  if [[ -f "${risks_file}" ]]; then
+    [[ -s "${risks_file}" ]] || die "${risks_file} 存在但为空"
   fi
+}
+
+validate_governance_changes() {
+  local changed="$1"
+  local disallowed
+
+  disallowed="$(grep -Ev "${GOVERNANCE_FILE_REGEX}" <<< "${changed}" || true)"
+  if [[ -n "${disallowed}" ]]; then
+    echo "[spec-guard] 以下变更将治理/架构规则文件与实现/非治理文件混在同一 PR 中：" >&2
+    echo "${disallowed}" >&2
+    die "治理/架构规则变更必须与实现代码分离。"
+  fi
+
+  while IFS= read -r file; do
+    [[ -n "${file}" ]] || continue
+    local abs_path="${REPO_ROOT}/${file}"
+
+    [[ -e "${abs_path}" ]] || die "治理/架构基线文件不应在该模式下被删除: ${file}"
+    [[ -s "${abs_path}" ]] || die "${file} 为空"
+
+    case "${file}" in
+      scripts/*.sh|.githooks/*)
+        bash -n "${abs_path}" >/dev/null 2>&1 || die "${file} shell 语法校验失败"
+        ;;
+      .github/workflows/spec-guard.yml)
+        grep -q 'bash scripts/spec-guard.sh' "${abs_path}" || die "${file} 未调用 scripts/spec-guard.sh"
+        grep -q "docs/dev/architecture/" "${abs_path}" || die "${file} 未覆盖 docs/dev/architecture/** 触发路径"
+        grep -q "spec_review.md" "${abs_path}" || die "${file} 未覆盖 spec_review.md 触发路径"
+        ;;
+    esac
+  done <<< "${changed}"
 }
 
 main() {
   local base_ref
   local changed
   local spec_files
+  local governance_files
   local fr_dirs
-  local disallowed
 
   require_cmd git
   require_cmd grep
@@ -154,32 +197,46 @@ main() {
     exit 0
   fi
 
-  spec_files="$(grep '^docs/dev/specs/FR-[0-9][0-9][0-9][0-9]-[^/]\+/' <<< "${changed}" || true)"
-  if [[ -z "${spec_files}" ]]; then
-    echo "[spec-guard] 未检测到正式 FR 规约变更，跳过。"
+  spec_files="$(grep -E "${SPEC_SUITE_FILE_REGEX}" <<< "${changed}" || true)"
+  governance_files="$(grep -E "${GOVERNANCE_FILE_REGEX}" <<< "${changed}" || true)"
+
+  if [[ -n "${spec_files}" ]] && [[ -n "${governance_files}" ]]; then
+    die "正式 FR 套件与治理/架构规则文件不得混在同一 PR 中。"
+  fi
+
+  if [[ -n "${spec_files}" ]]; then
+    local disallowed
+
+    echo "[spec-guard] 检测到正式 FR 规约变更"
+
+    fr_dirs="$(
+      sed -n 's#^\(docs/dev/specs/FR-[^/]\+\)/.*#\1#p' <<< "${spec_files}" | sort -u
+    )"
+
+    while IFS= read -r dir; do
+      [[ -n "${dir}" ]] || continue
+      validate_fr_suite "${REPO_ROOT}/${dir}"
+    done <<< "${fr_dirs}"
+
+    disallowed="$(grep -Ev "${SPEC_SUITE_FILE_REGEX}" <<< "${changed}" || true)"
+    if [[ -n "${disallowed}" ]]; then
+      echo "[spec-guard] 以下变更将正式 spec 与实现/非规约文件混在同一 PR 中：" >&2
+      echo "${disallowed}" >&2
+      die "正式 spec 变更必须先完成 spec review，再通过独立 PR 进入实现。"
+    fi
+
+    echo "[spec-guard] 通过"
     exit 0
   fi
 
-  echo "[spec-guard] 检测到正式 FR 规约变更"
-
-  fr_dirs="$(
-    sed -n 's#^\(docs/dev/specs/FR-[^/]\+\)/.*#\1#p' <<< "${spec_files}" | sort -u
-  )"
-
-  while IFS= read -r dir; do
-    [[ -n "${dir}" ]] || continue
-    validate_fr_suite "${REPO_ROOT}/${dir}"
-    print_suite_hints "${REPO_ROOT}/${dir}"
-  done <<< "${fr_dirs}"
-
-  disallowed="$(grep -Ev "${ALLOWED_WITH_SPEC_REGEX}" <<< "${changed}" || true)"
-  if [[ -n "${disallowed}" ]]; then
-    echo "[spec-guard] 以下变更将正式 spec 与实现/非规约文件混在同一 PR 中：" >&2
-    echo "${disallowed}" >&2
-    die "正式 spec 变更必须先完成 spec review，再通过独立 PR 进入实现。"
+  if [[ -n "${governance_files}" ]]; then
+    echo "[spec-guard] 检测到治理/架构规则变更"
+    validate_governance_changes "${changed}"
+    echo "[spec-guard] 通过"
+    exit 0
   fi
 
-  echo "[spec-guard] 通过"
+  echo "[spec-guard] 未检测到正式 FR 或治理/架构规则变更，跳过。"
 }
 
 main "$@"
