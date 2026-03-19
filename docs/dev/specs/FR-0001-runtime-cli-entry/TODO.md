@@ -8,8 +8,8 @@
 - [x] 补齐最小 CLI 契约文档 `contracts/cli-entry.md`
 - [x] 补齐共享契约基座风险文档 `risks.md`
 - [x] 本地运行文档相关最小校验
-- [ ] 在 GitHub Issue `#141` 中绑定 `FR-0001`
-- [ ] 创建仅包含规约文档的 Draft PR
+- [x] 在 GitHub Issue `#141` 中绑定 `FR-0001`
+- [x] 创建仅包含规约文档的 Draft PR
 - [ ] 完成 spec review，并收敛所有 findings / blockers
 
 ## 进入实现前条件
