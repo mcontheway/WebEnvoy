@@ -2,13 +2,49 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ProfileRuntimeService } from "../profile-runtime.js";
+import { BROWSER_STATE_FILENAME } from "../browser-launcher.js";
 import type { ProfileLock } from "../profile-lock.js";
 import { ProfileStore, type ProfileMeta } from "../profile-store.js";
 
 const tempDirs: string[] = [];
+
+const createMockBrowserLauncher = () => ({
+  launch: async () => ({
+    browserPath: "/mock/chrome",
+    browserPid: 999999,
+    controllerPid: 999998,
+    launchArgs: ["about:blank"],
+    launchedAt: new Date().toISOString()
+  }),
+  shutdown: async () => undefined
+});
+
+const createTestService = (
+  options?: ConstructorParameters<typeof ProfileRuntimeService>[0]
+): ProfileRuntimeService =>
+  new ProfileRuntimeService({
+    ...options,
+    isProcessAlive:
+      options?.isProcessAlive ??
+      ((pid: number) => {
+        if (pid === 999999 || pid === 999998) {
+          return true;
+        }
+        if (!Number.isInteger(pid) || pid <= 0) {
+          return false;
+        }
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      }),
+    browserLauncher: options?.browserLauncher ?? createMockBrowserLauncher()
+  });
 
 afterEach(async () => {
   while (tempDirs.length > 0) {
@@ -150,7 +186,7 @@ describe("profile-runtime start rollback", () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-"));
     tempDirs.push(baseDir);
     const profileRootDir = join(baseDir, ".webenvoy", "profiles");
-    const service = new ProfileRuntimeService({
+    const service = createTestService({
       storeFactory: () => new FailingWriteProfileStore(profileRootDir)
     });
 
@@ -177,7 +213,7 @@ describe("profile-runtime stop rollback", () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-stop-"));
     tempDirs.push(baseDir);
     const profileRootDir = join(baseDir, ".webenvoy", "profiles");
-    const service = new ProfileRuntimeService({
+    const service = createTestService({
       storeFactory: () => new StopMetaWriteFailProfileStore(profileRootDir)
     });
 
@@ -217,7 +253,7 @@ describe("profile-runtime stop rollback", () => {
   it("rolls back stopped meta when lock delete fails", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-stop-delete-"));
     tempDirs.push(baseDir);
-    const service = new ProfileRuntimeService({
+    const service = createTestService({
       lockFileAdapter: failingDeleteLockAdapter
     });
 
@@ -259,7 +295,7 @@ describe("profile-runtime stop rollback", () => {
   it("retries lock delete and succeeds without rollback on transient failure", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-stop-retry-"));
     tempDirs.push(baseDir);
-    const service = new ProfileRuntimeService({
+    const service = createTestService({
       lockFileAdapter: createFlakyDeleteLockAdapter(1)
     });
 
@@ -294,13 +330,67 @@ describe("profile-runtime stop rollback", () => {
     expect(meta.profileState).toBe("stopped");
     expect(meta.lastStoppedAt).toBeTruthy();
   });
+
+  it("stops runtime through browser controller shutdown instead of direct process kill", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-stop-no-kill-"));
+    tempDirs.push(baseDir);
+    const shutdownCalls: Array<{ profileDir: string; controllerPid: number; runId: string }> = [];
+    const service = createTestService({
+      isProcessAlive: (pid: number) => pid === 999998,
+      browserLauncher: {
+        launch: async () => ({
+          browserPath: "/mock/chrome",
+          browserPid: 999999,
+          controllerPid: 999998,
+          launchArgs: ["about:blank"],
+          launchedAt: new Date().toISOString()
+        }),
+        shutdown: async (input) => {
+          shutdownCalls.push(input);
+        }
+      }
+    });
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(
+      (() => true) as typeof process.kill
+    );
+
+    try {
+      await service.start({
+        cwd: baseDir,
+        profile: "stop_no_kill_profile",
+        runId: "run-runtime-test-131",
+        params: {}
+      });
+
+      const stopped = await service.stop({
+        cwd: baseDir,
+        profile: "stop_no_kill_profile",
+        runId: "run-runtime-test-131",
+        params: {}
+      });
+      expect(stopped).toMatchObject({
+        profile: "stop_no_kill_profile",
+        profileState: "stopped",
+        lockHeld: false
+      });
+      expect(shutdownCalls).toHaveLength(1);
+      expect(shutdownCalls[0]).toMatchObject({
+        controllerPid: 999998,
+        runId: "run-runtime-test-131"
+      });
+      expect(killSpy).not.toHaveBeenCalledWith(999998, "SIGTERM");
+      expect(killSpy).not.toHaveBeenCalledWith(999998, "SIGKILL");
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
 });
 
 describe("profile-runtime stale lock reclaim", () => {
   it("auto-recovers stale lock for runtime.start after crash residue", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-reclaim-start-"));
     tempDirs.push(baseDir);
-    const service = new ProfileRuntimeService({
+    const service = createTestService({
       isProcessAlive: () => false
     });
 
@@ -356,8 +446,9 @@ describe("profile-runtime stale lock reclaim", () => {
   it("auto-recovers stale lock for runtime.login after crash residue", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-reclaim-login-"));
     tempDirs.push(baseDir);
-    const service = new ProfileRuntimeService({
-      isProcessAlive: () => false
+    let alive = false;
+    const service = createTestService({
+      isProcessAlive: () => alive
     });
 
     await service.start({
@@ -385,17 +476,18 @@ describe("profile-runtime stale lock reclaim", () => {
       cwd: baseDir,
       profile: "reclaim_login_profile",
       runId: "run-runtime-test-402",
-      params: { confirm: true }
+      params: {}
     });
     expect(recovered).toMatchObject({
       profile: "reclaim_login_profile",
-      profileState: "ready",
+      profileState: "logging_in",
       lockHeld: true
     });
 
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as ProfileLock;
     expect(lock.ownerRunId).toBe("run-runtime-test-402");
+    expect(lock.ownerPid).toBe(999998);
 
     const metaPath = join(
       baseDir,
@@ -407,12 +499,26 @@ describe("profile-runtime stale lock reclaim", () => {
     const metaRaw = await readFile(metaPath, "utf8");
     const meta = JSON.parse(metaRaw) as ProfileMeta;
     expect(meta.lastDisconnectedAt).toBeTruthy();
+    expect(meta.profileState).toBe("logging_in");
+
+    alive = true;
+    const confirmed = await service.login({
+      cwd: baseDir,
+      profile: "reclaim_login_profile",
+      runId: "run-runtime-test-402",
+      params: { confirm: true }
+    });
+    expect(confirmed).toMatchObject({
+      profile: "reclaim_login_profile",
+      profileState: "ready",
+      lockHeld: true
+    });
   });
 
   it("does not reclaim stale-looking lock when owner process is still alive", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-reclaim-alive-"));
     tempDirs.push(baseDir);
-    const service = new ProfileRuntimeService({
+    const service = createTestService({
       isProcessAlive: () => true
     });
 
@@ -448,13 +554,193 @@ describe("profile-runtime stale lock reclaim", () => {
       code: "ERR_PROFILE_LOCKED"
     });
   });
+
+  it("marks disconnected while still blocking reuse when controller is dead but browser pid in state file is still alive", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-reclaim-controller-dead-"));
+    tempDirs.push(baseDir);
+    const alivePids = new Set<number>([999998, 999999]);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid)
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "reclaim_controller_dead_profile",
+      runId: "run-runtime-test-601",
+      params: {}
+    });
+
+    const profileDir = join(
+      baseDir,
+      ".webenvoy",
+      "profiles",
+      "reclaim_controller_dead_profile"
+    );
+    const lockPath = join(profileDir, "__webenvoy_lock.json");
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as ProfileLock;
+    lock.ownerPid = 12345;
+    lock.ownerRunId = "run-runtime-test-legacy-controller";
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+    const browserPid = 223344;
+    const browserStatePath = join(profileDir, BROWSER_STATE_FILENAME);
+    await writeFile(
+      browserStatePath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          launchToken: "state-token-601",
+          profileDir,
+          runId: "run-runtime-test-legacy-controller",
+          browserPath: "/mock/chrome",
+          controllerPid: 12345,
+          browserPid,
+          launchedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    alivePids.delete(999998);
+    alivePids.delete(999999);
+    alivePids.add(browserPid);
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "reclaim_controller_dead_profile",
+      runId: "run-runtime-test-602",
+      params: {}
+    });
+    expect(status).toMatchObject({
+      profile: "reclaim_controller_dead_profile",
+      profileState: "disconnected",
+      browserState: "disconnected",
+      lockHeld: true
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "reclaim_controller_dead_profile",
+        runId: "run-runtime-test-603",
+        params: {}
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_LOCKED"
+    });
+
+    await expect(
+      service.login({
+        cwd: baseDir,
+        profile: "reclaim_controller_dead_profile",
+        runId: "run-runtime-test-604",
+        params: {}
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_LOCKED"
+    });
+  });
+
+  it("marks disconnected and allows stop recovery when controller is dead but browser pid is still alive", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-stop-controller-dead-"));
+    tempDirs.push(baseDir);
+    const alivePids = new Set<number>([999998, 999999]);
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
+      if (signal === 0) {
+        return alivePids.has(pid);
+      }
+      alivePids.delete(pid);
+      return true;
+    }) as typeof process.kill);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid)
+    });
+
+    try {
+      await service.start({
+        cwd: baseDir,
+        profile: "stop_controller_dead_profile",
+        runId: "run-runtime-test-701",
+        params: {}
+      });
+
+      const profileDir = join(
+        baseDir,
+        ".webenvoy",
+        "profiles",
+        "stop_controller_dead_profile"
+      );
+      const lockPath = join(profileDir, "__webenvoy_lock.json");
+      const lockRaw = await readFile(lockPath, "utf8");
+      const lock = JSON.parse(lockRaw) as ProfileLock;
+      lock.ownerPid = 12345;
+      await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+      const browserPid = 223355;
+      const browserStatePath = join(profileDir, BROWSER_STATE_FILENAME);
+      await writeFile(
+        browserStatePath,
+        `${JSON.stringify(
+          {
+            schemaVersion: 1,
+            launchToken: "state-token-701",
+            profileDir,
+            runId: "run-runtime-test-701",
+            browserPath: "/mock/chrome",
+            controllerPid: 12345,
+            browserPid,
+            launchedAt: new Date().toISOString()
+          },
+          null,
+          2
+        )}\n`,
+        "utf8"
+      );
+      alivePids.delete(999998);
+      alivePids.delete(999999);
+      alivePids.add(browserPid);
+
+      const status = await service.status({
+        cwd: baseDir,
+        profile: "stop_controller_dead_profile",
+        runId: "run-runtime-test-702",
+        params: {}
+      });
+      expect(status).toMatchObject({
+        profileState: "disconnected",
+        browserState: "disconnected",
+        lockHeld: true
+      });
+
+      const stopped = await service.stop({
+        cwd: baseDir,
+        profile: "stop_controller_dead_profile",
+        runId: "run-runtime-test-701",
+        params: {}
+      });
+      expect(stopped).toMatchObject({
+        profileState: "stopped",
+        lockHeld: false
+      });
+      expect(alivePids.has(browserPid)).toBe(false);
+      await expect(readFile(lockPath, "utf8")).rejects.toMatchObject({
+        code: "ENOENT"
+      });
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
 });
 
 describe("profile-runtime login", () => {
   it("keeps logging_in before confirmation and writes lastLoginAt after confirmation", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-login-"));
     tempDirs.push(baseDir);
-    const service = new ProfileRuntimeService();
+    const service = createTestService({
+      isProcessAlive: () => true
+    });
 
     const beforeConfirm = await service.login({
       cwd: baseDir,
@@ -486,14 +772,25 @@ describe("profile-runtime login", () => {
       cwd: baseDir,
       profile: "first_login_profile",
       runId: "run-runtime-test-201",
-      params: { confirm: true }
+      params: {
+        confirm: true,
+        localStorageSnapshot: {
+          origin: "https://example.com",
+          entries: [{ key: "session", value: "token-1" }]
+        }
+      }
     });
 
     expect(result).toMatchObject({
       profile: "first_login_profile",
       profileState: "ready",
       browserState: "ready",
-      lockHeld: true
+      lockHeld: true,
+      recoverableSession: {
+        hasLocalStorageSnapshot: true,
+        snapshotCount: 1,
+        origins: ["https://example.com"]
+      }
     });
     expect(typeof result.lastLoginAt).toBe("string");
 
@@ -501,5 +798,55 @@ describe("profile-runtime login", () => {
     const confirmedMeta = JSON.parse(confirmedMetaRaw) as ProfileMeta;
     expect(confirmedMeta.profileState).toBe("ready");
     expect(confirmedMeta.lastLoginAt).toBe(result.lastLoginAt);
+    expect(confirmedMeta.localStorageSnapshots).toEqual([
+      {
+        origin: "https://example.com",
+        entries: [{ key: "session", value: "token-1" }]
+      }
+    ]);
+  });
+
+  it("marks disconnected when confirm arrives after login browser already closed", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-login-disconnect-"));
+    tempDirs.push(baseDir);
+    let alive = true;
+    const service = createTestService({
+      isProcessAlive: () => alive
+    });
+
+    const beforeConfirm = await service.login({
+      cwd: baseDir,
+      profile: "disconnect_login_profile",
+      runId: "run-runtime-test-301",
+      params: {}
+    });
+    expect(beforeConfirm).toMatchObject({
+      profileState: "logging_in",
+      lockHeld: true
+    });
+
+    alive = false;
+
+    await expect(
+      service.login({
+        cwd: baseDir,
+        profile: "disconnect_login_profile",
+        runId: "run-runtime-test-301",
+        params: { confirm: true }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_STATE_CONFLICT"
+    });
+
+    const metaPath = join(baseDir, ".webenvoy", "profiles", "disconnect_login_profile", "__webenvoy_meta.json");
+    const rawMeta = await readFile(metaPath, "utf8");
+    const meta = JSON.parse(rawMeta) as ProfileMeta;
+    expect(meta.profileState).toBe("disconnected");
+    expect(typeof meta.lastDisconnectedAt).toBe("string");
+
+    const lockPath = join(baseDir, ".webenvoy", "profiles", "disconnect_login_profile", "__webenvoy_lock.json");
+    await expect(readFile(lockPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
   });
 });
