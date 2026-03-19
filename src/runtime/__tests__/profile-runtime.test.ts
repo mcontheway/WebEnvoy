@@ -168,25 +168,21 @@ describe("profile-runtime stop rollback", () => {
 });
 
 describe("profile-runtime login", () => {
-  it("initializes profile and writes lastLoginAt on first runtime.login", async () => {
+  it("keeps logging_in before confirmation and writes lastLoginAt after confirmation", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-login-"));
     tempDirs.push(baseDir);
     const service = new ProfileRuntimeService();
 
-    const result = await service.login({
-      cwd: baseDir,
-      profile: "first_login_profile",
-      runId: "run-runtime-test-201",
-      params: {}
+    await expect(
+      service.login({
+        cwd: baseDir,
+        profile: "first_login_profile",
+        runId: "run-runtime-test-201",
+        params: {}
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_STATE_CONFLICT"
     });
-
-    expect(result).toMatchObject({
-      profile: "first_login_profile",
-      profileState: "ready",
-      browserState: "ready",
-      lockHeld: true
-    });
-    expect(typeof result.lastLoginAt).toBe("string");
 
     const metaPath = join(
       baseDir,
@@ -197,7 +193,27 @@ describe("profile-runtime login", () => {
     );
     const metaRaw = await readFile(metaPath, "utf8");
     const meta = JSON.parse(metaRaw) as ProfileMeta;
-    expect(meta.profileState).toBe("ready");
-    expect(meta.lastLoginAt).toBe(result.lastLoginAt);
+    expect(meta.profileState).toBe("logging_in");
+    expect(meta.lastLoginAt).toBeNull();
+
+    const result = await service.login({
+      cwd: baseDir,
+      profile: "first_login_profile",
+      runId: "run-runtime-test-201",
+      params: { confirm: true }
+    });
+
+    expect(result).toMatchObject({
+      profile: "first_login_profile",
+      profileState: "ready",
+      browserState: "ready",
+      lockHeld: true
+    });
+    expect(typeof result.lastLoginAt).toBe("string");
+
+    const confirmedMetaRaw = await readFile(metaPath, "utf8");
+    const confirmedMeta = JSON.parse(confirmedMetaRaw) as ProfileMeta;
+    expect(confirmedMeta.profileState).toBe("ready");
+    expect(confirmedMeta.lastLoginAt).toBe(result.lastLoginAt);
   });
 });

@@ -216,15 +216,49 @@ describe("webenvoy cli contract", () => {
     });
   });
 
-  it("supports runtime.login from uninitialized profile and persists lastLoginAt", async () => {
+  it("keeps logging_in before confirmation and persists lastLoginAt after confirmation", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const login = runCli(
       ["runtime.login", "--profile", "login_profile", "--run-id", "run-contract-151"],
       runtimeCwd
     );
-    expect(login.status).toBe(0);
+    expect(login.status).toBe(5);
     const loginBody = parseSingleJsonLine(login.stdout);
     expect(loginBody).toMatchObject({
+      command: "runtime.login",
+      status: "error",
+      error: { code: "ERR_PROFILE_STATE_CONFLICT" }
+    });
+
+    const statusBeforeConfirm = runCli(["runtime.status", "--profile", "login_profile"], runtimeCwd);
+    expect(statusBeforeConfirm.status).toBe(0);
+    const statusBeforeConfirmBody = parseSingleJsonLine(statusBeforeConfirm.stdout);
+    expect(statusBeforeConfirmBody).toMatchObject({
+      command: "runtime.status",
+      status: "success",
+      summary: {
+        profile: "login_profile",
+        profileState: "logging_in",
+        browserState: "logging_in",
+        lockHeld: true
+      }
+    });
+
+    const loginConfirm = runCli(
+      [
+        "runtime.login",
+        "--profile",
+        "login_profile",
+        "--run-id",
+        "run-contract-151",
+        "--params",
+        "{\"confirm\":true}"
+      ],
+      runtimeCwd
+    );
+    expect(loginConfirm.status).toBe(0);
+    const loginConfirmBody = parseSingleJsonLine(loginConfirm.stdout);
+    expect(loginConfirmBody).toMatchObject({
       command: "runtime.login",
       status: "success",
       summary: {
@@ -234,8 +268,7 @@ describe("webenvoy cli contract", () => {
         lockHeld: true
       }
     });
-
-    const loginSummary = loginBody.summary as Record<string, unknown>;
+    const loginSummary = loginConfirmBody.summary as Record<string, unknown>;
     expect(typeof loginSummary.lastLoginAt).toBe("string");
 
     const profileDir = String(loginSummary.profileDir);
