@@ -521,6 +521,9 @@ describe("webenvoy cli contract", () => {
     const meta = JSON.parse(rawMeta) as Record<string, unknown>;
     expect(meta.profileState).toBe("disconnected");
     expect(typeof meta.lastDisconnectedAt).toBe("string");
+    await expect(readFile(lockPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
   });
 
   it("rejects runtime.login when profile lock is held by another run", async () => {

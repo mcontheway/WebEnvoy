@@ -292,6 +292,7 @@ export class ProfileRuntimeService {
             if (confirmLogin &&
                 (lockAcquireResult.acquisition !== "same-owner" ||
                     lockAcquireResult.lock.ownerRunId !== input.runId ||
+                    lockAcquireResult.lock.ownerPid === process.pid ||
                     !this.#isProcessAlive(lockAcquireResult.lock.ownerPid))) {
                 if (isRuntimeActiveProfileState(recoveredMeta.profileState) ||
                     recoveredMeta.profileState === "disconnected") {

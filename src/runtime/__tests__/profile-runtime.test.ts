@@ -608,5 +608,10 @@ describe("profile-runtime login", () => {
     const meta = JSON.parse(rawMeta) as ProfileMeta;
     expect(meta.profileState).toBe("disconnected");
     expect(typeof meta.lastDisconnectedAt).toBe("string");
+
+    const lockPath = join(baseDir, ".webenvoy", "profiles", "disconnect_login_profile", "__webenvoy_lock.json");
+    await expect(readFile(lockPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
   });
 });

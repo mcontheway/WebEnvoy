@@ -406,6 +406,7 @@ export class ProfileRuntimeService {
         confirmLogin &&
         (lockAcquireResult.acquisition !== "same-owner" ||
           lockAcquireResult.lock.ownerRunId !== input.runId ||
+          lockAcquireResult.lock.ownerPid === process.pid ||
           !this.#isProcessAlive(lockAcquireResult.lock.ownerPid))
       ) {
         if (
