@@ -1,14 +1,25 @@
 export class ContentScriptHandler {
     #listeners = new Set();
+    #reachable = true;
     onResult(listener) {
         this.#listeners.add(listener);
         return () => this.#listeners.delete(listener);
     }
+    setReachable(reachable) {
+        this.#reachable = reachable;
+    }
     onBackgroundMessage(message) {
+        if (!this.#reachable) {
+            return false;
+        }
+        if (message.commandParams.simulate_no_response === true) {
+            return true;
+        }
         const result = this.#handleForward(message);
         for (const listener of this.#listeners) {
             listener(result);
         }
+        return true;
     }
     #handleForward(message) {
         if (message.command !== "runtime.ping") {

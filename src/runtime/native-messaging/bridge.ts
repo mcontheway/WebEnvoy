@@ -51,6 +51,23 @@ const asError = (error: unknown): Error => (error instanceof Error ? error : new
 
 const asBoolean = (value: unknown): value is true => value === true;
 
+const transportCodeOf = (
+  error: unknown
+): "ERR_TRANSPORT_TIMEOUT" | "ERR_TRANSPORT_DISCONNECTED" | "ERR_TRANSPORT_FORWARD_FAILED" | null => {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+  const code = (error as { transportCode?: unknown }).transportCode;
+  if (
+    code === "ERR_TRANSPORT_TIMEOUT" ||
+    code === "ERR_TRANSPORT_DISCONNECTED" ||
+    code === "ERR_TRANSPORT_FORWARD_FAILED"
+  ) {
+    return code;
+  }
+  return null;
+};
+
 const readTimeoutMs = (value: unknown): number | null => {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return null;
@@ -282,9 +299,21 @@ export class NativeMessagingBridge {
       return error;
     }
 
+    const coded = transportCodeOf(error);
+    if (coded === "ERR_TRANSPORT_DISCONNECTED") {
+      this.#session.observeDisconnect("forward_disconnect", this.#now());
+      return new NativeMessagingTransportError(coded, asError(error).message);
+    }
+    if (coded === "ERR_TRANSPORT_TIMEOUT") {
+      return new NativeMessagingTransportError(coded, asError(error).message);
+    }
+    if (coded === "ERR_TRANSPORT_FORWARD_FAILED") {
+      return new NativeMessagingTransportError(coded, asError(error).message);
+    }
+
     const raw = asError(error);
     const disconnectedObserved = this.#session.snapshot().state === "disconnected";
-    const timeoutElapsed = raw.message.includes("transport timeout");
+    const timeoutElapsed = /timeout/i.test(raw.message);
     const code = classifyTransportFailure({
       disconnectedObserved,
       timeoutElapsed

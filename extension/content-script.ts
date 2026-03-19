@@ -17,17 +17,31 @@ export type ContentMessageListener = (message: ContentToBackgroundMessage) => vo
 
 export class ContentScriptHandler {
   #listeners = new Set<ContentMessageListener>();
+  #reachable = true;
 
   onResult(listener: ContentMessageListener): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
   }
 
-  onBackgroundMessage(message: BackgroundToContentMessage): void {
+  setReachable(reachable: boolean): void {
+    this.#reachable = reachable;
+  }
+
+  onBackgroundMessage(message: BackgroundToContentMessage): boolean {
+    if (!this.#reachable) {
+      return false;
+    }
+
+    if (message.commandParams.simulate_no_response === true) {
+      return true;
+    }
+
     const result = this.#handleForward(message);
     for (const listener of this.#listeners) {
       listener(result);
     }
+    return true;
   }
 
   #handleForward(message: BackgroundToContentMessage): ContentToBackgroundMessage {

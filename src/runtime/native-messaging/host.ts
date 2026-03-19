@@ -8,6 +8,15 @@ import {
 } from "./protocol.js";
 import type { NativeBridgeTransport } from "./transport.js";
 
+type TransportCodedError = Error & {
+  transportCode?: "ERR_TRANSPORT_TIMEOUT" | "ERR_TRANSPORT_DISCONNECTED" | "ERR_TRANSPORT_FORWARD_FAILED";
+};
+
+const withTransportCode = (
+  error: Error,
+  code: TransportCodedError["transportCode"]
+): TransportCodedError => Object.assign(error, { transportCode: code });
+
 const readSocketPath = (): string | null => {
   const value = process.env.WEBENVOY_NATIVE_BRIDGE_SOCKET;
   if (!value || value.trim().length === 0) {
@@ -42,11 +51,13 @@ const sendEnvelope = (
     };
 
     socket.setTimeout(timeoutMs, () => {
-      done(() => reject(new Error("native bridge socket timeout")));
+      done(() =>
+        reject(withTransportCode(new Error("native bridge socket timeout"), "ERR_TRANSPORT_TIMEOUT"))
+      );
     });
 
     socket.on("error", (error) => {
-      done(() => reject(error));
+      done(() => reject(withTransportCode(error, "ERR_TRANSPORT_FORWARD_FAILED")));
     });
 
     socket.on("connect", () => {
@@ -67,7 +78,11 @@ const sendEnvelope = (
               return;
             }
           } catch (error) {
-            done(() => reject(error as Error));
+            done(() =>
+              reject(
+                withTransportCode(error as Error, "ERR_TRANSPORT_FORWARD_FAILED")
+              )
+            );
             return;
           }
         }
@@ -76,7 +91,14 @@ const sendEnvelope = (
     });
 
     socket.on("end", () => {
-      done(() => reject(new Error("native bridge socket closed before response")));
+      done(() =>
+        reject(
+          withTransportCode(
+            new Error("native bridge socket closed before response"),
+            "ERR_TRANSPORT_DISCONNECTED"
+          )
+        )
+      );
     });
   });
 

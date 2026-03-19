@@ -49,6 +49,53 @@ describe("native messaging bridge", () => {
     });
   });
 
+  it("maps socket transport timeout marker to ERR_TRANSPORT_TIMEOUT", async () => {
+    const bridge = new NativeMessagingBridge({
+      transport: {
+        async open(request) {
+          return {
+            id: request.id,
+            status: "success",
+            summary: {
+              protocol: "webenvoy.native-bridge.v1",
+              session_id: "nm-session-001",
+              state: "ready"
+            },
+            error: null
+          };
+        },
+        async heartbeat(request) {
+          return {
+            id: request.id,
+            status: "success",
+            summary: {
+              session_id: "nm-session-001"
+            },
+            error: null
+          };
+        },
+        async forward() {
+          throw Object.assign(new Error("native bridge socket timeout"), {
+            transportCode: "ERR_TRANSPORT_TIMEOUT"
+          });
+        }
+      }
+    });
+
+    await expect(
+      bridge.runtimePing({
+        runId: "run-socket-timeout",
+        profile: "profile-a",
+        cwd: "/tmp",
+        params: {
+          timeout_ms: 10
+        }
+      })
+    ).rejects.toMatchObject<Partial<NativeMessagingTransportError>>({
+      code: "ERR_TRANSPORT_TIMEOUT"
+    });
+  });
+
   it("prioritizes disconnected over timeout", async () => {
     const bridge = new NativeMessagingBridge({
       transport: createFakeNativeBridgeTransport({

@@ -1,5 +1,6 @@
 import net from "node:net";
 import { DEFAULT_TRANSPORT_TIMEOUT_MS, ensureBridgeRequestEnvelope } from "./protocol.js";
+const withTransportCode = (error, code) => Object.assign(error, { transportCode: code });
 const readSocketPath = () => {
     const value = process.env.WEBENVOY_NATIVE_BRIDGE_SOCKET;
     if (!value || value.trim().length === 0) {
@@ -26,10 +27,10 @@ const sendEnvelope = (socketPath, request) => new Promise((resolve, reject) => {
         fn();
     };
     socket.setTimeout(timeoutMs, () => {
-        done(() => reject(new Error("native bridge socket timeout")));
+        done(() => reject(withTransportCode(new Error("native bridge socket timeout"), "ERR_TRANSPORT_TIMEOUT")));
     });
     socket.on("error", (error) => {
-        done(() => reject(error));
+        done(() => reject(withTransportCode(error, "ERR_TRANSPORT_FORWARD_FAILED")));
     });
     socket.on("connect", () => {
         socket.write(`${JSON.stringify(request)}\n`);
@@ -49,7 +50,7 @@ const sendEnvelope = (socketPath, request) => new Promise((resolve, reject) => {
                     }
                 }
                 catch (error) {
-                    done(() => reject(error));
+                    done(() => reject(withTransportCode(error, "ERR_TRANSPORT_FORWARD_FAILED")));
                     return;
                 }
             }
@@ -57,7 +58,7 @@ const sendEnvelope = (socketPath, request) => new Promise((resolve, reject) => {
         }
     });
     socket.on("end", () => {
-        done(() => reject(new Error("native bridge socket closed before response")));
+        done(() => reject(withTransportCode(new Error("native bridge socket closed before response"), "ERR_TRANSPORT_DISCONNECTED")));
     });
 });
 export class SocketNativeBridgeTransport {

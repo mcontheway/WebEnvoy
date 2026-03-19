@@ -1,10 +1,13 @@
+const defaultForwardTimeoutMs = 3_000;
 export class BackgroundRelay {
     contentScript;
     #listeners = new Set();
     #pending = new Map();
     #sessionId = "nm-session-001";
-    constructor(contentScript) {
+    #forwardTimeoutMs;
+    constructor(contentScript, options) {
         this.contentScript = contentScript;
+        this.#forwardTimeoutMs = options?.forwardTimeoutMs ?? defaultForwardTimeoutMs;
         this.contentScript.onResult((message) => {
             this.#onContentResult(message);
         });
@@ -50,7 +53,13 @@ export class BackgroundRelay {
             });
             return;
         }
-        this.#pending.set(request.id, request);
+        const timeout = setTimeout(() => {
+            this.#failPending(request.id, {
+                code: "ERR_TRANSPORT_TIMEOUT",
+                message: "content script forward timed out"
+            });
+        }, this.#forwardTimeoutMs);
+        this.#pending.set(request.id, { request, timeout });
         const forward = {
             kind: "forward",
             id: request.id,
@@ -59,17 +68,33 @@ export class BackgroundRelay {
                 ? request.params.command_params
                 : {}
         };
-        this.contentScript.onBackgroundMessage(forward);
+        try {
+            const accepted = this.contentScript.onBackgroundMessage(forward);
+            if (!accepted) {
+                this.#failPending(request.id, {
+                    code: "ERR_TRANSPORT_FORWARD_FAILED",
+                    message: "content script unreachable"
+                });
+            }
+        }
+        catch {
+            this.#failPending(request.id, {
+                code: "ERR_TRANSPORT_FORWARD_FAILED",
+                message: "content script dispatch failed"
+            });
+        }
     }
     #onContentResult(message) {
         const pending = this.#pending.get(message.id);
         if (!pending) {
             return;
         }
+        clearTimeout(pending.timeout);
         this.#pending.delete(message.id);
+        const request = pending.request;
         if (!message.ok) {
             this.#emit({
-                id: pending.id,
+                id: request.id,
                 status: "error",
                 summary: {
                     relay_path: "host>background>content-script>background>host"
@@ -82,16 +107,32 @@ export class BackgroundRelay {
             return;
         }
         this.#emit({
-            id: pending.id,
+            id: request.id,
             status: "success",
             summary: {
-                session_id: String(pending.params.session_id ?? this.#sessionId),
-                run_id: String(pending.params.run_id ?? pending.id),
-                command: String(pending.params.command ?? "runtime.ping"),
+                session_id: String(request.params.session_id ?? this.#sessionId),
+                run_id: String(request.params.run_id ?? request.id),
+                command: String(request.params.command ?? "runtime.ping"),
                 relay_path: "host>background>content-script>background>host"
             },
             payload: message.payload ?? {},
             error: null
+        });
+    }
+    #failPending(id, error) {
+        const pending = this.#pending.get(id);
+        if (!pending) {
+            return;
+        }
+        clearTimeout(pending.timeout);
+        this.#pending.delete(id);
+        this.#emit({
+            id: pending.request.id,
+            status: "error",
+            summary: {
+                relay_path: "host>background>content-script>background>host"
+            },
+            error
         });
     }
     #emit(message) {
