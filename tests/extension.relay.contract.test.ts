@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { BackgroundRelay } from "../extension/background.js";
-import { ContentScriptHandler } from "../extension/content-script.js";
+import { ContentScriptHandler } from "../extension/content-script-handler.js";
 
 type BridgeResponse = {
   id: string;

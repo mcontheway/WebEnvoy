@@ -2,7 +2,7 @@ import {
   ContentScriptHandler,
   type BackgroundToContentMessage,
   type ContentToBackgroundMessage
-} from "./content-script.js";
+} from "./content-script-handler.js";
 
 type BridgeRequest = {
   id: string;
@@ -29,6 +29,7 @@ interface PendingForward {
 
 const defaultForwardTimeoutMs = 3_000;
 const defaultNativeHostName = "com.webenvoy.host";
+const maxRecoveryQueuedForwards = 5;
 const readTimeoutMs = (value: unknown): number | null => {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return null;
@@ -258,6 +259,7 @@ export class BackgroundRelay {
 class ChromeBackgroundBridge {
   #port: ExtensionPort | null = null;
   #pending = new Map<string, PendingForward>();
+  #recoveryQueue: BridgeRequest[] = [];
   #heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   #heartbeatTimeout: ReturnType<typeof setTimeout> | null = null;
   #recoveryTimer: ReturnType<typeof setInterval> | null = null;
@@ -431,12 +433,14 @@ class ChromeBackgroundBridge {
     }
 
     const tick = (): void => {
-      if (this.#state !== "recovering") {
+      if (this.#state !== "recovering" && this.#state !== "connecting") {
         return;
       }
       const deadline = this.#recoveryDeadlineMs;
       if (deadline !== null && Date.now() >= deadline) {
         this.#state = "disconnected";
+        this.#recoveryDeadlineMs = null;
+        this.#failRecoveryQueue("recovery window exhausted");
         this.#stopRecoveryLoop();
         return;
       }
@@ -461,22 +465,6 @@ class ChromeBackgroundBridge {
   }
 
   async #onNativeRequest(request: BridgeRequest): Promise<void> {
-    if (request.method === "bridge.forward" && this.#state !== "ready") {
-      const code = this.#state === "disconnected" ? "ERR_TRANSPORT_DISCONNECTED" : "ERR_TRANSPORT_NOT_READY";
-      this.#emit({
-        id: request.id,
-        status: "error",
-        summary: {
-          relay_path: "host>background>content-script>background>host"
-        },
-        error: {
-          code,
-          message: code === "ERR_TRANSPORT_DISCONNECTED" ? "native messaging disconnected" : "native bridge is not ready"
-        }
-      });
-      return;
-    }
-
     if (request.method === "bridge.open") {
       this.#state = "ready";
       this.#recoveryDeadlineMs = null;
@@ -491,6 +479,7 @@ class ChromeBackgroundBridge {
         },
         error: null
       });
+      this.#replayRecoveryQueue();
       return;
     }
 
@@ -519,6 +508,89 @@ class ChromeBackgroundBridge {
       return;
     }
 
+    if (this.#state !== "ready") {
+      if (this.#isRecoveryWindowOpen()) {
+        this.#enqueueRecoveryForward(request);
+        return;
+      }
+      const code = this.#state === "disconnected" ? "ERR_TRANSPORT_DISCONNECTED" : "ERR_TRANSPORT_NOT_READY";
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background>content-script>background>host"
+        },
+        error: {
+          code,
+          message:
+            code === "ERR_TRANSPORT_DISCONNECTED"
+              ? "native messaging disconnected"
+              : "native bridge is not ready"
+        }
+      });
+      return;
+    }
+
+    await this.#dispatchForward(request);
+  }
+
+  #isRecoveryWindowOpen(): boolean {
+    const deadline = this.#recoveryDeadlineMs;
+    return deadline !== null && Date.now() < deadline;
+  }
+
+  #enqueueRecoveryForward(request: BridgeRequest): void {
+    if (this.#recoveryQueue.length >= maxRecoveryQueuedForwards) {
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background>content-script>background>host"
+        },
+        error: {
+          code: "ERR_TRANSPORT_DISCONNECTED",
+          message: `recovery queue exhausted (${maxRecoveryQueuedForwards})`
+        }
+      });
+      return;
+    }
+    this.#recoveryQueue.push(request);
+  }
+
+  async #replayRecoveryQueue(): Promise<void> {
+    if (this.#recoveryQueue.length === 0) {
+      return;
+    }
+    const queued = [...this.#recoveryQueue];
+    this.#recoveryQueue.length = 0;
+    for (const request of queued) {
+      if (this.#state !== "ready") {
+        this.#enqueueRecoveryForward(request);
+        continue;
+      }
+      await this.#dispatchForward(request);
+    }
+  }
+
+  #failRecoveryQueue(message: string): void {
+    const queued = [...this.#recoveryQueue];
+    this.#recoveryQueue.length = 0;
+    for (const request of queued) {
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background>content-script>background>host"
+        },
+        error: {
+          code: "ERR_TRANSPORT_DISCONNECTED",
+          message
+        }
+      });
+    }
+  }
+
+  async #dispatchForward(request: BridgeRequest): Promise<void> {
     const tabId = await this.#resolveTargetTabId(request);
     if (!tabId) {
       this.#emit({

@@ -1,5 +1,6 @@
 const defaultForwardTimeoutMs = 3_000;
 const defaultNativeHostName = "com.webenvoy.host";
+const maxRecoveryQueuedForwards = 5;
 const readTimeoutMs = (value) => {
     if (typeof value !== "number" || !Number.isFinite(value)) {
         return null;
@@ -166,6 +167,7 @@ class ChromeBackgroundBridge {
     options;
     #port = null;
     #pending = new Map();
+    #recoveryQueue = [];
     #heartbeatTimer = null;
     #heartbeatTimeout = null;
     #recoveryTimer = null;
@@ -315,12 +317,14 @@ class ChromeBackgroundBridge {
             return;
         }
         const tick = () => {
-            if (this.#state !== "recovering") {
+            if (this.#state !== "recovering" && this.#state !== "connecting") {
                 return;
             }
             const deadline = this.#recoveryDeadlineMs;
             if (deadline !== null && Date.now() >= deadline) {
                 this.#state = "disconnected";
+                this.#recoveryDeadlineMs = null;
+                this.#failRecoveryQueue("recovery window exhausted");
                 this.#stopRecoveryLoop();
                 return;
             }
@@ -341,21 +345,6 @@ class ChromeBackgroundBridge {
         return `bg-hb-${this.#heartbeatSeq.toString().padStart(4, "0")}`;
     }
     async #onNativeRequest(request) {
-        if (request.method === "bridge.forward" && this.#state !== "ready") {
-            const code = this.#state === "disconnected" ? "ERR_TRANSPORT_DISCONNECTED" : "ERR_TRANSPORT_NOT_READY";
-            this.#emit({
-                id: request.id,
-                status: "error",
-                summary: {
-                    relay_path: "host>background>content-script>background>host"
-                },
-                error: {
-                    code,
-                    message: code === "ERR_TRANSPORT_DISCONNECTED" ? "native messaging disconnected" : "native bridge is not ready"
-                }
-            });
-            return;
-        }
         if (request.method === "bridge.open") {
             this.#state = "ready";
             this.#recoveryDeadlineMs = null;
@@ -370,6 +359,7 @@ class ChromeBackgroundBridge {
                 },
                 error: null
             });
+            this.#replayRecoveryQueue();
             return;
         }
         if (request.method === "__ping__") {
@@ -395,6 +385,82 @@ class ChromeBackgroundBridge {
             });
             return;
         }
+        if (this.#state !== "ready") {
+            if (this.#isRecoveryWindowOpen()) {
+                this.#enqueueRecoveryForward(request);
+                return;
+            }
+            const code = this.#state === "disconnected" ? "ERR_TRANSPORT_DISCONNECTED" : "ERR_TRANSPORT_NOT_READY";
+            this.#emit({
+                id: request.id,
+                status: "error",
+                summary: {
+                    relay_path: "host>background>content-script>background>host"
+                },
+                error: {
+                    code,
+                    message: code === "ERR_TRANSPORT_DISCONNECTED"
+                        ? "native messaging disconnected"
+                        : "native bridge is not ready"
+                }
+            });
+            return;
+        }
+        await this.#dispatchForward(request);
+    }
+    #isRecoveryWindowOpen() {
+        const deadline = this.#recoveryDeadlineMs;
+        return deadline !== null && Date.now() < deadline;
+    }
+    #enqueueRecoveryForward(request) {
+        if (this.#recoveryQueue.length >= maxRecoveryQueuedForwards) {
+            this.#emit({
+                id: request.id,
+                status: "error",
+                summary: {
+                    relay_path: "host>background>content-script>background>host"
+                },
+                error: {
+                    code: "ERR_TRANSPORT_DISCONNECTED",
+                    message: `recovery queue exhausted (${maxRecoveryQueuedForwards})`
+                }
+            });
+            return;
+        }
+        this.#recoveryQueue.push(request);
+    }
+    async #replayRecoveryQueue() {
+        if (this.#recoveryQueue.length === 0) {
+            return;
+        }
+        const queued = [...this.#recoveryQueue];
+        this.#recoveryQueue.length = 0;
+        for (const request of queued) {
+            if (this.#state !== "ready") {
+                this.#enqueueRecoveryForward(request);
+                continue;
+            }
+            await this.#dispatchForward(request);
+        }
+    }
+    #failRecoveryQueue(message) {
+        const queued = [...this.#recoveryQueue];
+        this.#recoveryQueue.length = 0;
+        for (const request of queued) {
+            this.#emit({
+                id: request.id,
+                status: "error",
+                summary: {
+                    relay_path: "host>background>content-script>background>host"
+                },
+                error: {
+                    code: "ERR_TRANSPORT_DISCONNECTED",
+                    message
+                }
+            });
+        }
+    }
+    async #dispatchForward(request) {
         const tabId = await this.#resolveTargetTabId(request);
         if (!tabId) {
             this.#emit({

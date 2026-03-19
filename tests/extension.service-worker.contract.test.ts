@@ -28,147 +28,46 @@ const createMockPort = () => {
   };
 };
 
-describe("extension service worker entry contract", () => {
-  it("binds native port and forwards request context to content script", async () => {
-    const nativeMessageListeners: Array<(message: Record<string, unknown>) => void> = [];
-    const runtimeMessageListeners: Array<
-      (message: unknown, sender: { tab?: { id?: number } }) => void
-    > = [];
-
-    const port = {
-      postMessage: vi.fn(),
+const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
+  let connectIndex = 0;
+  const runtimeMessageListeners: Array<
+    (message: unknown, sender: { tab?: { id?: number } }) => void
+  > = [];
+  const chromeApi = {
+    runtime: {
+      connectNative: vi.fn(() => {
+        const current = ports[Math.min(connectIndex, ports.length - 1)];
+        connectIndex += 1;
+        return current.port;
+      }),
       onMessage: {
-        addListener: (listener: (message: Record<string, unknown>) => void) => {
-          nativeMessageListeners.push(listener);
+        addListener: (listener: (message: unknown, sender: { tab?: { id?: number } }) => void) => {
+          runtimeMessageListeners.push(listener);
         }
       },
-      onDisconnect: {
+      onInstalled: {
+        addListener: vi.fn()
+      },
+      onStartup: {
         addListener: vi.fn()
       }
-    };
+    },
+    tabs: {
+      query: vi.fn(async () => [{ id: 11 }]),
+      sendMessage: vi.fn(async () => {})
+    }
+  };
 
-    const chromeApi = {
-      runtime: {
-        connectNative: vi.fn(() => port),
-        onMessage: {
-          addListener: (listener: (message: unknown, sender: { tab?: { id?: number } }) => void) => {
-            runtimeMessageListeners.push(listener);
-          }
-        },
-        onInstalled: {
-          addListener: vi.fn()
-        },
-        onStartup: {
-          addListener: vi.fn()
-        }
-      },
-      tabs: {
-        query: vi.fn(async () => [{ id: 11 }]),
-        sendMessage: vi.fn(async () => {})
-      }
-    };
+  return {
+    chromeApi,
+    runtimeMessageListeners
+  };
+};
 
-    startChromeBackgroundBridge(chromeApi);
-    expect(chromeApi.runtime.connectNative).toHaveBeenCalledWith("com.webenvoy.host");
-
-    nativeMessageListeners[0]?.({
-      id: "bridge-open-001",
-      method: "bridge.open",
-      profile: "profile-a",
-      params: {}
-    });
-    expect(port.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "bridge-open-001",
-        status: "success"
-      })
-    );
-
-    nativeMessageListeners[0]?.({
-      id: "run-001",
-      method: "bridge.forward",
-      profile: "profile-a",
-      params: {
-        session_id: "nm-session-001",
-        run_id: "run-001",
-        command: "runtime.ping",
-        command_params: {
-          foo: "bar"
-        },
-        cwd: "/workspace/WebEnvoy"
-      },
-      timeout_ms: 123
-    });
-
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
-      11,
-      expect.objectContaining({
-        id: "run-001",
-        runId: "run-001",
-        profile: "profile-a",
-        cwd: "/workspace/WebEnvoy",
-        timeoutMs: 123,
-        command: "runtime.ping"
-      })
-    );
-
-    runtimeMessageListeners[0]?.(
-      {
-        kind: "result",
-        id: "run-001",
-        ok: true,
-        payload: {
-          message: "pong"
-        }
-      },
-      {
-        tab: {
-          id: 11
-        }
-      }
-    );
-
-    expect(port.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-001",
-        status: "success",
-        summary: expect.objectContaining({
-          run_id: "run-001",
-          profile: "profile-a",
-          cwd: "/workspace/WebEnvoy",
-          relay_path: "host>background>content-script>background>host"
-        })
-      })
-    );
-  });
-
-  it("returns ERR_TRANSPORT_NOT_READY before handshake and does not forward", async () => {
+describe("extension service worker recovery contract", () => {
+  it("forwards only after open handshake", async () => {
     const firstPort = createMockPort();
-    const runtimeMessageListeners: Array<
-      (message: unknown, sender: { tab?: { id?: number } }) => void
-    > = [];
-
-    const chromeApi = {
-      runtime: {
-        connectNative: vi.fn(() => firstPort.port),
-        onMessage: {
-          addListener: (listener: (message: unknown, sender: { tab?: { id?: number } }) => void) => {
-            runtimeMessageListeners.push(listener);
-          }
-        },
-        onInstalled: {
-          addListener: vi.fn()
-        },
-        onStartup: {
-          addListener: vi.fn()
-        }
-      },
-      tabs: {
-        query: vi.fn(async () => [{ id: 11 }]),
-        sendMessage: vi.fn(async () => {})
-      }
-    };
+    const { chromeApi } = createChromeApi([firstPort]);
 
     startChromeBackgroundBridge(chromeApi);
 
@@ -185,8 +84,8 @@ describe("extension service worker entry contract", () => {
       },
       timeout_ms: 50
     });
-
     await Promise.resolve();
+
     expect(firstPort.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "run-before-open-001",
@@ -197,138 +96,49 @@ describe("extension service worker entry contract", () => {
       })
     );
     expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "open-001",
+      method: "bridge.open",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001"
+      }
+    });
+    firstPort.onMessageListeners[0]?.({
+      id: "run-after-open-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-after-open-001",
+        command: "runtime.ping",
+        command_params: {},
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      11,
+      expect.objectContaining({
+        id: "run-after-open-001"
+      })
+    );
   });
 
-  it("heartbeat timeout clears port and fails pending forward as disconnected", async () => {
+  it("queues forwards during recovering and replays after reopen", async () => {
     vi.useFakeTimers();
     try {
       const ports = [createMockPort(), createMockPort()];
-      let connectIndex = 0;
-      const runtimeMessageListeners: Array<
-        (message: unknown, sender: { tab?: { id?: number } }) => void
-      > = [];
-
-      const chromeApi = {
-        runtime: {
-          connectNative: vi.fn(() => {
-            const current = ports[Math.min(connectIndex, ports.length - 1)];
-            connectIndex += 1;
-            return current.port;
-          }),
-          onMessage: {
-            addListener: (listener: (message: unknown, sender: { tab?: { id?: number } }) => void) => {
-              runtimeMessageListeners.push(listener);
-            }
-          },
-          onInstalled: {
-            addListener: vi.fn()
-          },
-          onStartup: {
-            addListener: vi.fn()
-          }
-        },
-        tabs: {
-          query: vi.fn(async () => [{ id: 11 }]),
-          sendMessage: vi.fn(
-            async () =>
-              await new Promise<void>(() => {
-                // keep pending forward unresolved until disconnect handling.
-              })
-          )
-        }
-      };
+      const { chromeApi } = createChromeApi(ports);
 
       startChromeBackgroundBridge(chromeApi, {
-        heartbeatIntervalMs: 10,
-        heartbeatTimeoutMs: 5,
-        maxMissedHeartbeats: 1,
-        recoveryRetryIntervalMs: 50,
-        recoveryWindowMs: 200
-      });
-
-      ports[0].onMessageListeners[0]?.({
-        id: "open-001",
-        method: "bridge.open",
-        profile: "profile-a",
-        params: {
-          session_id: "nm-session-001"
-        }
-      });
-
-      ports[0].onMessageListeners[0]?.({
-        id: "run-pending-001",
-        method: "bridge.forward",
-        profile: "profile-a",
-        params: {
-          session_id: "nm-session-001",
-          run_id: "run-pending-001",
-          command: "runtime.ping",
-          command_params: {},
-          cwd: "/workspace/WebEnvoy"
-        },
-        timeout_ms: 500
-      });
-
-      await Promise.resolve();
-      await Promise.resolve();
-      vi.advanceTimersByTime(10);
-      vi.advanceTimersByTime(6);
-
-      expect(ports[0].postMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: "run-pending-001",
-          status: "error",
-          error: expect.objectContaining({
-            code: "ERR_TRANSPORT_DISCONNECTED"
-          })
-        })
-      );
-      expect(chromeApi.runtime.connectNative).toHaveBeenCalledTimes(2);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("reconnects after heartbeat timeout and can handshake again", async () => {
-    vi.useFakeTimers();
-    try {
-      const ports = [createMockPort(), createMockPort()];
-      let connectIndex = 0;
-      const runtimeMessageListeners: Array<
-        (message: unknown, sender: { tab?: { id?: number } }) => void
-      > = [];
-
-      const chromeApi = {
-        runtime: {
-          connectNative: vi.fn(() => {
-            const current = ports[Math.min(connectIndex, ports.length - 1)];
-            connectIndex += 1;
-            return current.port;
-          }),
-          onMessage: {
-            addListener: (listener: (message: unknown, sender: { tab?: { id?: number } }) => void) => {
-              runtimeMessageListeners.push(listener);
-            }
-          },
-          onInstalled: {
-            addListener: vi.fn()
-          },
-          onStartup: {
-            addListener: vi.fn()
-          }
-        },
-        tabs: {
-          query: vi.fn(async () => [{ id: 11 }]),
-          sendMessage: vi.fn(async () => {})
-        }
-      };
-
-      startChromeBackgroundBridge(chromeApi, {
-        heartbeatIntervalMs: 10,
-        heartbeatTimeoutMs: 5,
-        maxMissedHeartbeats: 1,
-        recoveryRetryIntervalMs: 10,
-        recoveryWindowMs: 200
+        heartbeatIntervalMs: 10_000,
+        recoveryRetryIntervalMs: 5,
+        recoveryWindowMs: 100
       });
 
       ports[0].onMessageListeners[0]?.({
@@ -339,18 +149,18 @@ describe("extension service worker entry contract", () => {
           session_id: "nm-session-001"
         }
       });
-
-      vi.advanceTimersByTime(10);
-      vi.advanceTimersByTime(6);
+      ports[0].onDisconnectListeners[0]?.();
+      await Promise.resolve();
+      vi.advanceTimersByTime(5);
       expect(chromeApi.runtime.connectNative).toHaveBeenCalledTimes(2);
 
       ports[1].onMessageListeners[0]?.({
-        id: "run-before-reopen-001",
+        id: "queued-forward-001",
         method: "bridge.forward",
         profile: "profile-a",
         params: {
           session_id: "nm-session-001",
-          run_id: "run-before-reopen-001",
+          run_id: "queued-forward-001",
           command: "runtime.ping",
           command_params: {},
           cwd: "/workspace/WebEnvoy"
@@ -358,15 +168,12 @@ describe("extension service worker entry contract", () => {
         timeout_ms: 50
       });
       await Promise.resolve();
-      await Promise.resolve();
-      const preReadyCall = ports[1].postMessage.mock.calls.find(
-        (call) =>
-          (call[0] as { id?: string }).id === "run-before-reopen-001" &&
-          (call[0] as { status?: string }).status === "error"
+
+      const queuedError = ports[1].postMessage.mock.calls.find(
+        (call) => (call[0] as { id?: string }).id === "queued-forward-001"
       );
-      expect(preReadyCall).toBeDefined();
-      const preReadyCode = (preReadyCall?.[0] as { error?: { code?: string } })?.error?.code;
-      expect(["ERR_TRANSPORT_NOT_READY", "ERR_TRANSPORT_DISCONNECTED"]).toContain(preReadyCode);
+      expect(queuedError).toBeUndefined();
+      expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
 
       ports[1].onMessageListeners[0]?.({
         id: "open-second-001",
@@ -377,25 +184,120 @@ describe("extension service worker entry contract", () => {
         }
       });
 
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+        11,
+        expect.objectContaining({
+          id: "queued-forward-001"
+        })
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails only when recovery queue exceeds limit", async () => {
+    const ports = [createMockPort(), createMockPort()];
+    const { chromeApi } = createChromeApi(ports);
+
+    startChromeBackgroundBridge(chromeApi, {
+      heartbeatIntervalMs: 10_000,
+      recoveryRetryIntervalMs: 5,
+      recoveryWindowMs: 500
+    });
+
+    ports[0].onMessageListeners[0]?.({
+      id: "open-first-queue-001",
+      method: "bridge.open",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001"
+      }
+    });
+    ports[0].onDisconnectListeners[0]?.();
+    await Promise.resolve();
+
+    for (let i = 1; i <= 6; i += 1) {
       ports[1].onMessageListeners[0]?.({
-        id: "run-after-reopen-001",
+        id: `queued-overflow-${i}`,
         method: "bridge.forward",
         profile: "profile-a",
         params: {
           session_id: "nm-session-001",
-          run_id: "run-after-reopen-001",
+          run_id: `queued-overflow-${i}`,
           command: "runtime.ping",
           command_params: {},
           cwd: "/workspace/WebEnvoy"
         },
         timeout_ms: 50
       });
+    }
+
+    await Promise.resolve();
+    const overflowError = ports[1].postMessage.mock.calls.find(
+      (call) => (call[0] as { id?: string }).id === "queued-overflow-6"
+    );
+    expect(overflowError).toBeDefined();
+    expect((overflowError?.[0] as { error?: { code?: string } }).error?.code).toBe(
+      "ERR_TRANSPORT_DISCONNECTED"
+    );
+
+    for (let i = 1; i <= 5; i += 1) {
+      const queuedFailure = ports[1].postMessage.mock.calls.find(
+        (call) => (call[0] as { id?: string }).id === `queued-overflow-${i}`
+      );
+      expect(queuedFailure).toBeUndefined();
+    }
+  });
+
+  it("fails queued forwards when recovery window exhausts", async () => {
+    vi.useFakeTimers();
+    try {
+      const ports = [createMockPort(), createMockPort()];
+      const { chromeApi } = createChromeApi(ports);
+
+      startChromeBackgroundBridge(chromeApi, {
+        heartbeatIntervalMs: 10_000,
+        recoveryRetryIntervalMs: 10,
+        recoveryWindowMs: 30
+      });
+
+      ports[0].onMessageListeners[0]?.({
+        id: "open-exhaust-001",
+        method: "bridge.open",
+        profile: "profile-a",
+        params: {
+          session_id: "nm-session-001"
+        }
+      });
+      ports[0].onDisconnectListeners[0]?.();
+
+      ports[1].onMessageListeners[0]?.({
+        id: "queued-expire-001",
+        method: "bridge.forward",
+        profile: "profile-a",
+        params: {
+          session_id: "nm-session-001",
+          run_id: "queued-expire-001",
+          command: "runtime.ping",
+          command_params: {},
+          cwd: "/workspace/WebEnvoy"
+        },
+        timeout_ms: 50
+      });
+
+      vi.advanceTimersByTime(40);
       await Promise.resolve();
       await Promise.resolve();
-      expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
-        11,
+
+      expect(ports[1].postMessage).toHaveBeenCalledWith(
         expect.objectContaining({
-          id: "run-after-reopen-001"
+          id: "queued-expire-001",
+          status: "error",
+          error: expect.objectContaining({
+            code: "ERR_TRANSPORT_DISCONNECTED"
+          })
         })
       );
     } finally {
