@@ -44,7 +44,7 @@ describe("executeCommand", () => {
     ).rejects.toMatchObject({ code: "ERR_CLI_UNKNOWN_COMMAND" });
   });
 
-  it("returns not implemented error for registered placeholder command", async () => {
+  it("returns invalid args error when xhs.search lacks ability envelope", async () => {
     await expect(
       executeCommand(
         {
@@ -53,7 +53,45 @@ describe("executeCommand", () => {
         },
         createCommandRegistry()
       )
-    ).rejects.toMatchObject({ code: "ERR_CLI_NOT_IMPLEMENTED" });
+    ).rejects.toMatchObject({
+      code: "ERR_CLI_INVALID_ARGS",
+      details: {
+        stage: "input_validation",
+        reason: "ABILITY_MISSING"
+      }
+    });
+  });
+
+  it("returns capability summary for xhs.search fixture success", async () => {
+    const summary = await executeCommand(
+      {
+        ...baseContext,
+        command: "xhs.search",
+        params: {
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            fixture_success: true
+          }
+        }
+      },
+      createCommandRegistry()
+    );
+
+    expect(summary).toMatchObject({
+      capability_result: {
+        ability_id: "xhs.note.search.v1",
+        layer: "L3",
+        action: "read",
+        outcome: "partial"
+      }
+    });
   });
 
   it("returns runtime unavailable error without collapsing into execution failed", async () => {

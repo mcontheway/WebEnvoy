@@ -1,3 +1,5 @@
+import type { CapabilityErrorDetails } from "./types.js";
+
 export type ErrorCode =
   | "ERR_CLI_INVALID_ARGS"
   | "ERR_CLI_UNKNOWN_COMMAND"
@@ -32,16 +34,18 @@ const EXIT_CODE_BY_ERROR: Record<ErrorCode, number> = {
 export class CliError extends Error {
   code: ErrorCode;
   retryable: boolean;
+  details?: CapabilityErrorDetails;
 
   constructor(
     code: ErrorCode,
     message: string,
-    options?: { retryable?: boolean; cause?: unknown }
+    options?: { retryable?: boolean; cause?: unknown; details?: CapabilityErrorDetails }
   ) {
     super(message, options);
     this.name = "CliError";
     this.code = code;
     this.retryable = options?.retryable ?? false;
+    this.details = options?.details;
   }
 }
 

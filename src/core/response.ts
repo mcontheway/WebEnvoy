@@ -53,7 +53,8 @@ export const buildErrorResponse = (
       error: {
         code: error.code,
         message: error.message,
-        retryable: error.retryable
+        retryable: error.retryable,
+        ...(error.details ? { details: error.details } : {})
       },
       timestamp: isoNow()
     },

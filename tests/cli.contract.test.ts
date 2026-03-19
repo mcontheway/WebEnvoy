@@ -233,13 +233,117 @@ describe("webenvoy cli contract", () => {
     });
   });
 
-  it("returns not implemented error with code 4", () => {
+  it("returns structured input validation error for xhs.search without ability envelope", () => {
     const result = runCli(["xhs.search"]);
-    expect(result.status).toBe(4);
+    expect(result.status).toBe(2);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
       status: "error",
-      error: { code: "ERR_CLI_NOT_IMPLEMENTED" }
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          ability_id: null,
+          stage: "input_validation",
+          reason: "ABILITY_MISSING"
+        }
+      }
+    });
+  });
+
+  it("returns capability_result for xhs.search fixture success path", () => {
+    const result = runCli([
+      "xhs.search",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          fixture_success: true
+        }
+      })
+    ]);
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "success",
+      summary: {
+        capability_result: {
+          ability_id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read",
+          outcome: "partial"
+        }
+      }
+    });
+  });
+
+  it("returns structured execution details for xhs.search pending path", () => {
+    const result = runCli([
+      "xhs.search",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        }
+      })
+    ]);
+    expect(result.status).toBe(4);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "error",
+      error: {
+        code: "ERR_CLI_NOT_IMPLEMENTED",
+        details: {
+          ability_id: "xhs.note.search.v1",
+          stage: "execution",
+          reason: "XHS_SEARCH_SPIKE_PENDING"
+        }
+      }
+    });
+  });
+
+  it("returns structured output mapping details for xhs.search bad output path", () => {
+    const result = runCli([
+      "xhs.search",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备",
+          force_bad_output: true
+        }
+      })
+    ]);
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          ability_id: "xhs.note.search.v1",
+          stage: "output_mapping",
+          reason: "CAPABILITY_RESULT_MISSING"
+        }
+      }
     });
   });
 
