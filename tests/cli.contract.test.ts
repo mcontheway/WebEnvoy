@@ -116,21 +116,27 @@ describe("webenvoy cli contract", () => {
     expect(typeof body.timestamp).toBe("string");
   });
 
-  it("keeps command success when runtime store is unavailable and reports warning on stderr", () => {
+  it("returns structured runtime unavailable when runtime store is unavailable", () => {
     const result = runCli(["runtime.ping", "--run-id", "run-contract-store-warning-001"], {
       WEBENVOY_NATIVE_TRANSPORT: "loopback",
       WEBENVOY_RUNTIME_STORE_FORCE_UNAVAILABLE: "1"
     });
 
-    expect(result.status).toBe(0);
+    expect(result.status).toBe(5);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
       run_id: "run-contract-store-warning-001",
       command: "runtime.ping",
-      status: "success"
+      status: "error",
+      error: {
+        code: "ERR_RUNTIME_UNAVAILABLE",
+        retryable: true
+      }
     });
-    expect(result.stderr).toContain("\"type\":\"runtime_store_warning\"");
-    expect(result.stderr).toContain("\"code\":\"ERR_RUNTIME_STORE_UNAVAILABLE\"");
+    expect(String((body.error as Record<string, unknown>).message)).toContain(
+      "ERR_RUNTIME_STORE_UNAVAILABLE"
+    );
+    expect(result.stderr).toBe("");
   });
 
   it("returns unknown command error with code 3", () => {

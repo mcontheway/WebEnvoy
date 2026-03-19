@@ -80,7 +80,7 @@ describe("native messaging contract", () => {
     );
   });
 
-  it("does not override transport error when runtime store is unavailable", () => {
+  it("returns runtime store error when persistence is unavailable during native messaging failure", () => {
     const result = runCli(
       [
         "runtime.ping",
@@ -104,13 +104,12 @@ describe("native messaging contract", () => {
       }
     });
     expect(String((body.error as Record<string, unknown>).message)).toContain(
-      "ERR_TRANSPORT_TIMEOUT"
-    );
-    expect(String((body.error as Record<string, unknown>).message)).not.toContain(
       "ERR_RUNTIME_STORE_UNAVAILABLE"
     );
-    expect(result.stderr).toContain("\"type\":\"runtime_store_warning\"");
-    expect(result.stderr).toContain("\"code\":\"ERR_RUNTIME_STORE_UNAVAILABLE\"");
+    expect(String((body.error as Record<string, unknown>).message)).not.toContain(
+      "ERR_TRANSPORT_TIMEOUT"
+    );
+    expect(result.stderr).toBe("");
   });
 
   it("maps transport disconnect to runtime unavailable exit code without loopback", () => {
