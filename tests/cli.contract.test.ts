@@ -64,6 +64,13 @@ const parseSingleJsonLine = (stdout: string) => {
   return JSON.parse(lines[0]) as Record<string, unknown>;
 };
 
+const assertLockMissing = async (profileDir: string): Promise<void> => {
+  const lockPath = path.join(profileDir, "__webenvoy_lock.json");
+  await expect(readFile(lockPath, "utf8")).rejects.toMatchObject({
+    code: "ENOENT"
+  });
+};
+
 describe("webenvoy cli contract", () => {
   it("returns success json for runtime.ping", () => {
     const result = runCli(["runtime.ping", "--run-id", "run-contract-001"]);
@@ -105,6 +112,31 @@ describe("webenvoy cli contract", () => {
       status: "error",
       error: { code: "ERR_CLI_INVALID_ARGS" }
     });
+  });
+
+  it("cleans lock when runtime.start fails by invalid proxyUrl", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const profileName = "invalid_proxy_profile";
+    const result = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        profileName,
+        "--run-id",
+        "run-contract-006",
+        "--params",
+        '{"proxyUrl":"not-a-url"}'
+      ],
+      runtimeCwd
+    );
+    expect(result.status).toBe(5);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.start",
+      status: "error",
+      error: { code: "ERR_PROFILE_INVALID" }
+    });
+    await assertLockMissing(path.join(runtimeCwd, ".webenvoy", "profiles", profileName));
   });
 
   it("returns runtime unavailable error with code 5", () => {
@@ -361,5 +393,42 @@ describe("webenvoy cli contract", () => {
         code: "ERR_PROFILE_LOCKED"
       }
     });
+  });
+
+  it("cleans lock when runtime.start fails by profile state conflict", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const start = runCli(
+      ["runtime.start", "--profile", "state_conflict_profile", "--run-id", "run-contract-701"],
+      runtimeCwd
+    );
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    const summary = startBody.summary as Record<string, unknown>;
+    const profileDir = String(summary.profileDir);
+
+    const stop = runCli(
+      ["runtime.stop", "--profile", "state_conflict_profile", "--run-id", "run-contract-701"],
+      runtimeCwd
+    );
+    expect(stop.status).toBe(0);
+
+    const metaPath = path.join(profileDir, "__webenvoy_meta.json");
+    const rawMeta = await readFile(metaPath, "utf8");
+    const meta = JSON.parse(rawMeta) as Record<string, unknown>;
+    meta.profileState = "ready";
+    await writeFile(metaPath, `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+
+    const conflictStart = runCli(
+      ["runtime.start", "--profile", "state_conflict_profile", "--run-id", "run-contract-702"],
+      runtimeCwd
+    );
+    expect(conflictStart.status).toBe(5);
+    const conflictBody = parseSingleJsonLine(conflictStart.stdout);
+    expect(conflictBody).toMatchObject({
+      command: "runtime.start",
+      status: "error",
+      error: { code: "ERR_PROFILE_STATE_CONFLICT" }
+    });
+    await assertLockMissing(profileDir);
   });
 });

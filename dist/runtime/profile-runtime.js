@@ -63,6 +63,14 @@ const mapRuntimeError = (error) => {
     return new CliError("ERR_RUNTIME_UNAVAILABLE", "最小会话运行时不可用", { retryable: true });
 };
 export class ProfileRuntimeService {
+    #storeFactory;
+    constructor(options) {
+        this.#storeFactory =
+            options?.storeFactory ??
+                ((cwd) => {
+                    return new ProfileStore(join(cwd, ...PROFILE_ROOT_SEGMENTS));
+                });
+    }
     async start(input) {
         const nowIso = isoNow();
         const store = this.#createStore(input.cwd);
@@ -75,13 +83,14 @@ export class ProfileRuntimeService {
             runId: input.runId,
             nowIso
         });
-        let existingMeta = await this.#readOrInitializeMeta(store, input.profile, nowIso);
-        const profileState = existingMeta.profileState;
-        if (!isStartableProfileState(profileState)) {
-            throw new CliError("ERR_PROFILE_STATE_CONFLICT", `profile 当前状态 ${profileState} 不能直接 start`);
-        }
-        let session = buildRuntimeSession(input.profile, existingMeta);
+        let startSucceeded = false;
         try {
+            let existingMeta = await this.#readOrInitializeMeta(store, input.profile, nowIso);
+            const profileState = existingMeta.profileState;
+            if (!isStartableProfileState(profileState)) {
+                throw new CliError("ERR_PROFILE_STATE_CONFLICT", `profile 当前状态 ${profileState} 不能直接 start`);
+            }
+            let session = buildRuntimeSession(input.profile, existingMeta);
             session = applyProfileProxyBinding(session, {
                 requested: parseProxyUrl(input.params),
                 nowIso,
@@ -92,28 +101,34 @@ export class ProfileRuntimeService {
                 nowIso
             });
             session = markSessionReady(session);
+            await store.writeMeta(input.profile, this.#patchMeta(existingMeta, {
+                profileName: input.profile,
+                profileDir,
+                profileState: session.profileState,
+                proxyBinding: session.proxyBinding,
+                updatedAt: nowIso,
+                lastStartedAt: nowIso
+            }));
+            await this.#writeLock(lockPath, lockAcquireResult.lock);
+            startSucceeded = true;
+            return {
+                profile: input.profile,
+                profileState: session.profileState,
+                browserState: browserStateFromProfileState(session.profileState, true),
+                profileDir,
+                proxyUrl: session.proxyBinding?.url ?? null,
+                lockHeld: true,
+                startedAt: nowIso
+            };
         }
         catch (error) {
             throw mapRuntimeError(error);
         }
-        await store.writeMeta(input.profile, this.#patchMeta(existingMeta, {
-            profileName: input.profile,
-            profileDir,
-            profileState: session.profileState,
-            proxyBinding: session.proxyBinding,
-            updatedAt: nowIso,
-            lastStartedAt: nowIso
-        }));
-        await this.#writeLock(lockPath, lockAcquireResult.lock);
-        return {
-            profile: input.profile,
-            profileState: session.profileState,
-            browserState: browserStateFromProfileState(session.profileState, true),
-            profileDir,
-            proxyUrl: session.proxyBinding?.url ?? null,
-            lockHeld: true,
-            startedAt: nowIso
-        };
+        finally {
+            if (!startSucceeded) {
+                await this.#rollbackLockOnStartFailure(lockPath, input.runId);
+            }
+        }
     }
     async status(input) {
         const store = this.#createStore(input.cwd);
@@ -181,7 +196,7 @@ export class ProfileRuntimeService {
         };
     }
     #createStore(cwd) {
-        return new ProfileStore(join(cwd, ...PROFILE_ROOT_SEGMENTS));
+        return this.#storeFactory(cwd);
     }
     #resolveProfileDir(store, profile) {
         try {
@@ -224,6 +239,16 @@ export class ProfileRuntimeService {
     }
     async #writeLock(lockPath, lock) {
         await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+    }
+    async #rollbackLockOnStartFailure(lockPath, runId) {
+        const lock = await this.#readLock(lockPath);
+        if (!lock) {
+            return;
+        }
+        if (lock.ownerRunId !== runId) {
+            return;
+        }
+        await this.#deleteLock(lockPath);
     }
     async #acquireProfileLockAtomically(input) {
         for (let attempt = 0; attempt < LOCK_ACQUIRE_MAX_RETRIES; attempt += 1) {

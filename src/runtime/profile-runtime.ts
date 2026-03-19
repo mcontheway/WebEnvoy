@@ -28,6 +28,14 @@ interface RuntimeActionInput {
   params: JsonObject;
 }
 
+interface ProfileStoreLike {
+  ensureProfileDir(profileName: string): Promise<string>;
+  getProfileDir(profileName: string): string;
+  readMeta(profileName: string): Promise<ProfileMeta | null>;
+  initializeMeta(profileName: string, nowIso: string): Promise<ProfileMeta>;
+  writeMeta(profileName: string, meta: ProfileMeta): Promise<void>;
+}
+
 const isoNow = (): string => new Date().toISOString();
 
 const browserStateFromProfileState = (profileState: ProfileState, lockHeld: boolean): BrowserState => {
@@ -91,6 +99,16 @@ const mapRuntimeError = (error: unknown): CliError => {
 };
 
 export class ProfileRuntimeService {
+  readonly #storeFactory: (cwd: string) => ProfileStoreLike;
+
+  constructor(options?: { storeFactory?: (cwd: string) => ProfileStoreLike }) {
+    this.#storeFactory =
+      options?.storeFactory ??
+      ((cwd: string) => {
+        return new ProfileStore(join(cwd, ...PROFILE_ROOT_SEGMENTS));
+      });
+  }
+
   async start(input: RuntimeActionInput): Promise<JsonObject> {
     const nowIso = isoNow();
     const store = this.#createStore(input.cwd);
@@ -103,17 +121,19 @@ export class ProfileRuntimeService {
       runId: input.runId,
       nowIso
     });
-    let existingMeta = await this.#readOrInitializeMeta(store, input.profile, nowIso);
-    const profileState = existingMeta.profileState;
-    if (!isStartableProfileState(profileState)) {
-      throw new CliError(
-        "ERR_PROFILE_STATE_CONFLICT",
-        `profile 当前状态 ${profileState} 不能直接 start`
-      );
-    }
+    let startSucceeded = false;
 
-    let session = buildRuntimeSession(input.profile, existingMeta);
     try {
+      let existingMeta = await this.#readOrInitializeMeta(store, input.profile, nowIso);
+      const profileState = existingMeta.profileState;
+      if (!isStartableProfileState(profileState)) {
+        throw new CliError(
+          "ERR_PROFILE_STATE_CONFLICT",
+          `profile 当前状态 ${profileState} 不能直接 start`
+        );
+      }
+
+      let session = buildRuntimeSession(input.profile, existingMeta);
       session = applyProfileProxyBinding(session, {
         requested: parseProxyUrl(input.params),
         nowIso,
@@ -124,32 +144,37 @@ export class ProfileRuntimeService {
         nowIso
       });
       session = markSessionReady(session);
+
+      await store.writeMeta(
+        input.profile,
+        this.#patchMeta(existingMeta, {
+          profileName: input.profile,
+          profileDir,
+          profileState: session.profileState,
+          proxyBinding: session.proxyBinding,
+          updatedAt: nowIso,
+          lastStartedAt: nowIso
+        })
+      );
+      await this.#writeLock(lockPath, lockAcquireResult.lock);
+
+      startSucceeded = true;
+      return {
+        profile: input.profile,
+        profileState: session.profileState,
+        browserState: browserStateFromProfileState(session.profileState, true),
+        profileDir,
+        proxyUrl: session.proxyBinding?.url ?? null,
+        lockHeld: true,
+        startedAt: nowIso
+      };
     } catch (error) {
       throw mapRuntimeError(error);
+    } finally {
+      if (!startSucceeded) {
+        await this.#rollbackLockOnStartFailure(lockPath, input.runId);
+      }
     }
-
-    await store.writeMeta(
-      input.profile,
-      this.#patchMeta(existingMeta, {
-        profileName: input.profile,
-        profileDir,
-        profileState: session.profileState,
-        proxyBinding: session.proxyBinding,
-        updatedAt: nowIso,
-        lastStartedAt: nowIso
-      })
-    );
-    await this.#writeLock(lockPath, lockAcquireResult.lock);
-
-    return {
-      profile: input.profile,
-      profileState: session.profileState,
-      browserState: browserStateFromProfileState(session.profileState, true),
-      profileDir,
-      proxyUrl: session.proxyBinding?.url ?? null,
-      lockHeld: true,
-      startedAt: nowIso
-    };
   }
 
   async status(input: RuntimeActionInput): Promise<JsonObject> {
@@ -232,11 +257,11 @@ export class ProfileRuntimeService {
     };
   }
 
-  #createStore(cwd: string): ProfileStore {
-    return new ProfileStore(join(cwd, ...PROFILE_ROOT_SEGMENTS));
+  #createStore(cwd: string): ProfileStoreLike {
+    return this.#storeFactory(cwd);
   }
 
-  #resolveProfileDir(store: ProfileStore, profile: string): string {
+  #resolveProfileDir(store: ProfileStoreLike, profile: string): string {
     try {
       return store.getProfileDir(profile);
     } catch (error) {
@@ -248,7 +273,7 @@ export class ProfileRuntimeService {
     return join(profileDir, PROFILE_LOCK_FILENAME);
   }
 
-  async #readMeta(store: ProfileStore, profile: string): Promise<ProfileMeta | null> {
+  async #readMeta(store: ProfileStoreLike, profile: string): Promise<ProfileMeta | null> {
     try {
       return await store.readMeta(profile);
     } catch {
@@ -257,7 +282,7 @@ export class ProfileRuntimeService {
   }
 
   async #readOrInitializeMeta(
-    store: ProfileStore,
+    store: ProfileStoreLike,
     profile: string,
     nowIso: string
   ): Promise<ProfileMeta> {
@@ -283,6 +308,17 @@ export class ProfileRuntimeService {
 
   async #writeLock(lockPath: string, lock: ProfileLock): Promise<void> {
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+  }
+
+  async #rollbackLockOnStartFailure(lockPath: string, runId: string): Promise<void> {
+    const lock = await this.#readLock(lockPath);
+    if (!lock) {
+      return;
+    }
+    if (lock.ownerRunId !== runId) {
+      return;
+    }
+    await this.#deleteLock(lockPath);
   }
 
   async #acquireProfileLockAtomically(input: {
