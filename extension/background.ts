@@ -29,10 +29,11 @@ interface PendingForward {
 
 interface QueuedForwardRequest {
   request: BridgeRequest;
-  expiresAtMs: number;
+  deadlineMs: number;
 }
 
 const defaultForwardTimeoutMs = 3_000;
+const defaultHandshakeTimeoutMs = 30_000;
 const defaultNativeHostName = "com.webenvoy.host";
 const bridgeProtocol = "webenvoy.native-bridge.v1";
 const maxRecoveryQueuedForwards = 5;
@@ -268,10 +269,14 @@ class ChromeBackgroundBridge {
   #recoveryQueue: QueuedForwardRequest[] = [];
   #heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   #heartbeatTimeout: ReturnType<typeof setTimeout> | null = null;
+  #handshakeTimeout: ReturnType<typeof setTimeout> | null = null;
   #recoveryTimer: ReturnType<typeof setInterval> | null = null;
   #recoveryDeadlineMs: number | null = null;
   #pendingHeartbeatId: string | null = null;
+  #pendingHandshakeId: string | null = null;
+  #sessionId = "nm-session-001";
   #heartbeatSeq = 0;
+  #handshakeSeq = 0;
   #missedHeartbeatCount = 0;
   #state: NativeBridgeState = "connecting";
 
@@ -305,6 +310,8 @@ class ChromeBackgroundBridge {
     this.#missedHeartbeatCount = 0;
     this.#pendingHeartbeatId = null;
     this.#clearHeartbeatTimeout();
+    this.#clearHandshakeTimeout();
+    this.#pendingHandshakeId = null;
 
     port.onMessage.addListener((message) => {
       if (this.#port !== port) {
@@ -319,7 +326,32 @@ class ChromeBackgroundBridge {
       this.#handleDisconnect("native messaging disconnected");
     });
 
+    this.#sendHandshakeOpen(port);
     this.#startHeartbeatLoop();
+  }
+
+  #sendHandshakeOpen(port: ExtensionPort): void {
+    const timeoutMs = this.options?.handshakeTimeoutMs ?? defaultHandshakeTimeoutMs;
+    const request: BridgeRequest = {
+      id: this.#nextHandshakeId(),
+      method: "bridge.open",
+      profile: null,
+      params: {
+        protocol: bridgeProtocol,
+        capabilities: ["relay", "heartbeat"]
+      },
+      timeout_ms: timeoutMs
+    };
+    this.#pendingHandshakeId = request.id;
+    port.postMessage(request);
+    this.#clearHandshakeTimeout();
+    this.#handshakeTimeout = setTimeout(() => {
+      if (this.#port !== port || this.#pendingHandshakeId !== request.id) {
+        return;
+      }
+      this.#pendingHandshakeId = null;
+      this.#handleDisconnect("handshake timeout");
+    }, timeoutMs);
   }
 
   #startHeartbeatLoop(): void {
@@ -348,7 +380,7 @@ class ChromeBackgroundBridge {
       method: "__ping__",
       profile: null,
       params: {
-        session_id: "nm-session-001",
+        session_id: this.#sessionId,
         timestamp: new Date().toISOString()
       },
       timeout_ms: timeoutMs
@@ -372,6 +404,8 @@ class ChromeBackgroundBridge {
 
   #handleDisconnect(message: string): void {
     this.#clearHeartbeatTimeout();
+    this.#clearHandshakeTimeout();
+    this.#pendingHandshakeId = null;
     this.#pendingHeartbeatId = null;
     this.#missedHeartbeatCount = 0;
     this.#failAllPending({
@@ -383,6 +417,17 @@ class ChromeBackgroundBridge {
   }
 
   async #onNativeMessage(message: unknown): Promise<void> {
+    const handshakeResponse = message as Partial<BridgeResponse> | null;
+    if (
+      handshakeResponse &&
+      typeof handshakeResponse.id === "string" &&
+      handshakeResponse.id === this.#pendingHandshakeId &&
+      (handshakeResponse.status === "success" || handshakeResponse.status === "error")
+    ) {
+      this.#onHandshakeResponse(handshakeResponse as BridgeResponse);
+      return;
+    }
+
     const heartbeatAck = message as
       | (Partial<NativeHeartbeatMessage> & { status?: "success" | "error" })
       | null;
@@ -404,12 +449,48 @@ class ChromeBackgroundBridge {
     await this.#onNativeRequest(request);
   }
 
+  #onHandshakeResponse(response: BridgeResponse): void {
+    this.#clearHandshakeTimeout();
+    this.#pendingHandshakeId = null;
+
+    if (response.status !== "success") {
+      const message = response.error?.message ?? "handshake failed";
+      this.#handleDisconnect(`handshake failed: ${message}`);
+      return;
+    }
+
+    const protocol =
+      typeof response.summary.protocol === "string" ? response.summary.protocol : null;
+    if (protocol !== bridgeProtocol) {
+      this.#handleDisconnect(`incompatible protocol: ${protocol ?? "unknown"}`);
+      return;
+    }
+
+    const sessionId =
+      typeof response.summary.session_id === "string" && response.summary.session_id.length > 0
+        ? response.summary.session_id
+        : this.#sessionId;
+    this.#sessionId = sessionId;
+    this.#state = "ready";
+    this.#recoveryDeadlineMs = null;
+    this.#stopRecoveryLoop();
+    void this.#replayRecoveryQueue();
+  }
+
   #clearHeartbeatTimeout(): void {
     if (!this.#heartbeatTimeout) {
       return;
     }
     clearTimeout(this.#heartbeatTimeout);
     this.#heartbeatTimeout = null;
+  }
+
+  #clearHandshakeTimeout(): void {
+    if (!this.#handshakeTimeout) {
+      return;
+    }
+    clearTimeout(this.#handshakeTimeout);
+    this.#handshakeTimeout = null;
   }
 
   #disposeCurrentPort(): void {
@@ -471,35 +552,22 @@ class ChromeBackgroundBridge {
     return `bg-hb-${this.#heartbeatSeq.toString().padStart(4, "0")}`;
   }
 
+  #nextHandshakeId(): string {
+    this.#handshakeSeq += 1;
+    return `bg-open-${this.#handshakeSeq.toString().padStart(4, "0")}`;
+  }
+
   async #onNativeRequest(request: BridgeRequest): Promise<void> {
     if (request.method === "bridge.open") {
-      const protocol = typeof request.params.protocol === "string" ? request.params.protocol : null;
-      if (protocol !== bridgeProtocol) {
-        this.#emit({
-          id: request.id,
-          status: "error",
-          summary: {},
-          error: {
-            code: "ERR_TRANSPORT_HANDSHAKE_FAILED",
-            message: `incompatible protocol: ${protocol ?? "unknown"}`
-          }
-        });
-        return;
-      }
-      this.#state = "ready";
-      this.#recoveryDeadlineMs = null;
-      this.#stopRecoveryLoop();
       this.#emit({
         id: request.id,
-        status: "success",
-        summary: {
-          protocol: bridgeProtocol,
-          state: "ready",
-          session_id: String(request.params.session_id ?? "nm-session-001")
-        },
-        error: null
+        status: "error",
+        summary: {},
+        error: {
+          code: "ERR_TRANSPORT_HANDSHAKE_FAILED",
+          message: "bridge.open must be initiated by extension/background"
+        }
       });
-      this.#replayRecoveryQueue();
       return;
     }
 
@@ -560,9 +628,9 @@ class ChromeBackgroundBridge {
   }
 
   #enqueueRecoveryForward(request: BridgeRequest): void {
-    const timeoutMs = readTimeoutMs(request.timeout_ms) ?? defaultForwardTimeoutMs;
-    const expiresAtMs = Date.now() + timeoutMs;
-    if (Date.now() >= expiresAtMs) {
+    const timeoutMs = this.#resolveForwardTimeoutMs(request);
+    const deadlineMs = Date.now() + timeoutMs;
+    if (Date.now() >= deadlineMs) {
       this.#emit({
         id: request.id,
         status: "error",
@@ -592,7 +660,7 @@ class ChromeBackgroundBridge {
     }
     this.#recoveryQueue.push({
       request,
-      expiresAtMs
+      deadlineMs
     });
   }
 
@@ -605,7 +673,7 @@ class ChromeBackgroundBridge {
     this.#recoveryQueue.length = 0;
     for (const queuedForward of queued) {
       const request = queuedForward.request;
-      if (Date.now() >= queuedForward.expiresAtMs) {
+      if (Date.now() >= queuedForward.deadlineMs) {
         this.#emit({
           id: request.id,
           status: "error",
@@ -623,7 +691,7 @@ class ChromeBackgroundBridge {
         this.#recoveryQueue.push(queuedForward);
         continue;
       }
-      await this.#dispatchForward(request);
+      await this.#dispatchForward(request, queuedForward.deadlineMs);
     }
   }
 
@@ -652,7 +720,7 @@ class ChromeBackgroundBridge {
     }
     const keep: QueuedForwardRequest[] = [];
     for (const queuedForward of this.#recoveryQueue) {
-      if (nowMs < queuedForward.expiresAtMs) {
+      if (nowMs < queuedForward.deadlineMs) {
         keep.push(queuedForward);
         continue;
       }
@@ -671,7 +739,8 @@ class ChromeBackgroundBridge {
     this.#recoveryQueue = keep;
   }
 
-  async #dispatchForward(request: BridgeRequest): Promise<void> {
+  async #dispatchForward(request: BridgeRequest, deadlineMs?: number): Promise<void> {
+    const requestDeadlineMs = deadlineMs ?? Date.now() + this.#resolveForwardTimeoutMs(request);
     const tabId = await this.#resolveTargetTabId(request);
     if (!tabId) {
       this.#emit({
@@ -688,13 +757,28 @@ class ChromeBackgroundBridge {
       return;
     }
 
-    const timeoutMs = readTimeoutMs(request.timeout_ms) ?? this.options?.forwardTimeoutMs ?? defaultForwardTimeoutMs;
+    const timeoutMs = requestDeadlineMs - Date.now();
+    if (timeoutMs <= 0) {
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background>content-script>background>host"
+        },
+        error: {
+          code: "ERR_TRANSPORT_TIMEOUT",
+          message: "forward request timed out during recovery"
+        }
+      });
+      return;
+    }
+    const forwardTimeoutMs = Math.max(1, Math.floor(timeoutMs));
     const timeout = setTimeout(() => {
       this.#failPending(request.id, {
         code: "ERR_TRANSPORT_TIMEOUT",
         message: "content script forward timed out"
       });
-    }, timeoutMs);
+    }, forwardTimeoutMs);
     this.#pending.set(request.id, { request, timeout });
 
     const forward: BackgroundToContentMessage = {
@@ -703,7 +787,7 @@ class ChromeBackgroundBridge {
       runId: String(request.params.run_id ?? request.id),
       profile: typeof request.profile === "string" ? request.profile : null,
       cwd: String(request.params.cwd ?? ""),
-      timeoutMs,
+      timeoutMs: forwardTimeoutMs,
       command: String(request.params.command ?? ""),
       params:
         typeof request.params === "object" && request.params !== null
@@ -723,6 +807,14 @@ class ChromeBackgroundBridge {
         message: "content script dispatch failed"
       });
     }
+  }
+
+  #resolveForwardTimeoutMs(request: BridgeRequest): number {
+    return (
+      readTimeoutMs(request.timeout_ms) ??
+      this.options?.forwardTimeoutMs ??
+      defaultForwardTimeoutMs
+    );
   }
 
   #onContentScriptResult(message: unknown, sender: RuntimeMessageSender): void {
@@ -820,6 +912,7 @@ class ChromeBackgroundBridge {
 export interface ChromeBackgroundBridgeOptions {
   nativeHostName?: string;
   forwardTimeoutMs?: number;
+  handshakeTimeoutMs?: number;
   heartbeatIntervalMs?: number;
   heartbeatTimeoutMs?: number;
   maxMissedHeartbeats?: number;

@@ -224,6 +224,25 @@ interface BridgeOptions {
 const defaultRecoveryPollIntervalMs = 100;
 const defaultHeartbeatTimeoutMs = 3_000;
 
+interface TimeoutBudget {
+  deadlineMs: number;
+  remainingMs(): number;
+}
+
+const createTimeoutBudget = (timeoutMs: number, now: () => number): TimeoutBudget => {
+  const deadlineMs = now() + timeoutMs;
+  return {
+    deadlineMs,
+    remainingMs(): number {
+      const remaining = deadlineMs - now();
+      if (remaining <= 0) {
+        throw new NativeMessagingTransportError("ERR_TRANSPORT_TIMEOUT", "transport timeout");
+      }
+      return Math.max(1, Math.floor(remaining));
+    }
+  };
+};
+
 export class NativeMessagingBridge {
   readonly #session = new NativeMessagingSession();
   readonly #transport: NativeBridgeTransport;
@@ -242,6 +261,7 @@ export class NativeMessagingBridge {
 
   async runtimePing(input: RuntimePingInput): Promise<RuntimePingResult> {
     const timeoutMs = readTimeoutMs(input.params.timeout_ms) ?? DEFAULT_TRANSPORT_TIMEOUT_MS;
+    const budget = createTimeoutBudget(timeoutMs, this.#now);
 
     if (asBoolean(input.params.simulate_transport_handshake_fail)) {
       throw new NativeMessagingTransportError(
@@ -250,9 +270,9 @@ export class NativeMessagingBridge {
       );
     }
 
-    await this.#recoverIfDisconnected(input.profile, timeoutMs);
-    await this.#ensureReady(input.profile);
-    await this.#pulseHeartbeat();
+    await this.#recoverIfDisconnected(input.profile, budget);
+    await this.#ensureReady(input.profile, budget);
+    await this.#pulseHeartbeat(budget);
 
     if (asBoolean(input.params.simulate_transport_disconnect)) {
       this.#session.observeDisconnect("simulated_disconnect", this.#now());
@@ -266,6 +286,7 @@ export class NativeMessagingBridge {
       throw new NativeMessagingTransportError("ERR_TRANSPORT_TIMEOUT", "simulated transport timeout");
     }
 
+    const forwardTimeoutMs = budget.remainingMs();
     const request = createBridgeForwardRequest({
       id: this.#nextId("run"),
       profile: input.profile,
@@ -274,12 +295,12 @@ export class NativeMessagingBridge {
       command: "runtime.ping",
       commandParams: input.params,
       cwd: input.cwd,
-      timeoutMs
+      timeoutMs: forwardTimeoutMs
     });
 
     try {
       this.#session.beginForward();
-      const response = await runWithTimeout(this.#transport.forward(request), timeoutMs);
+      const response = await runWithTimeout(this.#transport.forward(request), forwardTimeoutMs);
       const success = ensureBridgeSuccess(response, "forward failed");
       const payload = success.payload ?? {};
       const message = typeof payload.message === "string" ? payload.message : "pong";
@@ -342,22 +363,21 @@ export class NativeMessagingBridge {
     return new NativeMessagingTransportError(code, raw.message);
   }
 
-  async #ensureReady(profile: string | null): Promise<void> {
+  async #ensureReady(profile: string | null, budget: TimeoutBudget): Promise<void> {
     if (this.#session.snapshot().state === "ready") {
       return;
     }
 
+    const openTimeoutMs = budget.remainingMs();
     this.#session.beginHandshake();
     const request = createBridgeOpenRequest({
       id: this.#nextId("bridge-open"),
-      profile
+      profile,
+      timeoutMs: openTimeoutMs
     });
 
     try {
-      const response = await runWithTimeout(
-        this.#transport.open(request),
-        request.timeout_ms ?? DEFAULT_TRANSPORT_TIMEOUT_MS
-      );
+      const response = await runWithTimeout(this.#transport.open(request), openTimeoutMs);
       const success = ensureBridgeSuccess(response, "handshake failed");
       const sessionId = String(success.summary.session_id ?? "");
       const protocol = String(success.summary.protocol ?? "");
@@ -392,17 +412,18 @@ export class NativeMessagingBridge {
     }
   }
 
-  async #pulseHeartbeat(): Promise<void> {
-    const request = createHeartbeatRequest({
+  async #pulseHeartbeat(budget: TimeoutBudget): Promise<void> {
+    const heartbeatTimeoutMs = Math.min(this.#heartbeatTimeoutMs, budget.remainingMs());
+    const request = {
+      ...createHeartbeatRequest({
       id: this.#nextId("hb"),
       sessionId: this.#session.sessionIdOrThrow()
-    });
+      }),
+      timeout_ms: heartbeatTimeoutMs
+    };
 
     try {
-      const response = await runWithTimeout(
-        this.#transport.heartbeat(request),
-        this.#heartbeatTimeoutMs
-      );
+      const response = await runWithTimeout(this.#transport.heartbeat(request), heartbeatTimeoutMs);
       ensureBridgeSuccess(response, "heartbeat failed");
     } catch (error) {
       this.#session.observeDisconnect("heartbeat_timeout", this.#now());
@@ -415,7 +436,7 @@ export class NativeMessagingBridge {
     }
   }
 
-  async #recoverIfDisconnected(profile: string | null, timeoutMs: number): Promise<void> {
+  async #recoverIfDisconnected(profile: string | null, budget: TimeoutBudget): Promise<void> {
     const now = this.#now();
     const snapshot = this.#session.snapshot();
     if (snapshot.state !== "disconnected") {
@@ -432,12 +453,11 @@ export class NativeMessagingBridge {
 
     try {
       const recoveryDeadline = this.#session.recoveryDeadlineMs() ?? now + RECOVERY_WINDOW_MS;
-      const requestDeadline = now + timeoutMs;
-      const stopAt = Math.min(recoveryDeadline, requestDeadline);
+      const stopAt = Math.min(recoveryDeadline, budget.deadlineMs);
 
       while (this.#now() < stopAt) {
         try {
-          await this.#ensureReady(profile);
+          await this.#ensureReady(profile, budget);
           return;
         } catch (error) {
           if (error instanceof NativeMessagingTransportError) {
@@ -448,11 +468,19 @@ export class NativeMessagingBridge {
             if (!recoverable) {
               throw error;
             }
-            await delay(this.#recoveryPollIntervalMs);
+            const remaining = stopAt - this.#now();
+            if (remaining <= 0) {
+              break;
+            }
+            await delay(Math.min(this.#recoveryPollIntervalMs, remaining));
             continue;
           }
 
-          await delay(this.#recoveryPollIntervalMs);
+          const remaining = stopAt - this.#now();
+          if (remaining <= 0) {
+            break;
+          }
+          await delay(Math.min(this.#recoveryPollIntervalMs, remaining));
           continue;
         }
       }

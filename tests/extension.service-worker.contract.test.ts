@@ -64,6 +64,29 @@ const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
   };
 };
 
+const respondHandshake = (
+  mockPort: ReturnType<typeof createMockPort>,
+  options?: { protocol?: string; sessionId?: string }
+) => {
+  const protocol = options?.protocol ?? "webenvoy.native-bridge.v1";
+  const sessionId = options?.sessionId ?? "nm-session-001";
+  const handshakeCall = mockPort.postMessage.mock.calls.find(
+    (call) => (call[0] as { method?: string }).method === "bridge.open"
+  );
+  expect(handshakeCall).toBeDefined();
+  const handshakeId = String((handshakeCall?.[0] as { id: string }).id);
+  mockPort.onMessageListeners[0]?.({
+    id: handshakeId,
+    status: "success",
+    summary: {
+      protocol,
+      session_id: sessionId,
+      state: "ready"
+    },
+    error: null
+  });
+};
+
 describe("extension service worker recovery contract", () => {
   it("rejects mismatched protocol on bridge.open and does not enter ready", async () => {
     const firstPort = createMockPort();
@@ -151,15 +174,9 @@ describe("extension service worker recovery contract", () => {
     );
     expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
 
-    firstPort.onMessageListeners[0]?.({
-      id: "open-001",
-      method: "bridge.open",
-      profile: "profile-a",
-      params: {
-        session_id: "nm-session-001",
-        protocol: "webenvoy.native-bridge.v1"
-      }
-    });
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
     firstPort.onMessageListeners[0]?.({
       id: "run-after-open-001",
       method: "bridge.forward",
@@ -196,15 +213,7 @@ describe("extension service worker recovery contract", () => {
         recoveryWindowMs: 100
       });
 
-      ports[0].onMessageListeners[0]?.({
-        id: "open-first-001",
-        method: "bridge.open",
-        profile: "profile-a",
-        params: {
-          session_id: "nm-session-001",
-          protocol: "webenvoy.native-bridge.v1"
-        }
-      });
+      respondHandshake(ports[0]);
       ports[0].onDisconnectListeners[0]?.();
       await Promise.resolve();
       vi.advanceTimersByTime(5);
@@ -231,15 +240,7 @@ describe("extension service worker recovery contract", () => {
       expect(queuedError).toBeUndefined();
       expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
 
-      ports[1].onMessageListeners[0]?.({
-        id: "open-second-001",
-        method: "bridge.open",
-        profile: "profile-a",
-        params: {
-          session_id: "nm-session-001",
-          protocol: "webenvoy.native-bridge.v1"
-        }
-      });
+      respondHandshake(ports[1]);
 
       await Promise.resolve();
       await Promise.resolve();
