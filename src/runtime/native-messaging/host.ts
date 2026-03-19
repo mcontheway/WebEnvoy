@@ -29,6 +29,77 @@ const readNativeHostCommand = (): string | null => {
   return value.trim();
 };
 
+const splitNativeHostCommand = (command: string): string[] | null => {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  let escaping = false;
+
+  const pushCurrent = (): void => {
+    if (current.length > 0) {
+      tokens.push(current);
+      current = "";
+    }
+  };
+
+  for (const char of command) {
+    if (escaping) {
+      current += char;
+      escaping = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaping = true;
+      continue;
+    }
+
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      pushCurrent();
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (escaping || quote) {
+    return null;
+  }
+  pushCurrent();
+  return tokens.length > 0 ? tokens : null;
+};
+
+export const parseNativeHostCommand = (
+  command: string | null
+): { file: string; args: string[] } | null => {
+  if (!command) {
+    return null;
+  }
+  const tokens = splitNativeHostCommand(command);
+  if (!tokens) {
+    return null;
+  }
+  const [file, ...args] = tokens;
+  return {
+    file,
+    args
+  };
+};
+
 const encodeNativeMessage = (payload: string): Buffer => {
   const body = Buffer.from(payload, "utf8");
   const header = Buffer.alloc(4);
@@ -55,12 +126,14 @@ interface PendingMessage {
 
 export class NativeHostBridgeTransport implements NativeBridgeTransport {
   readonly #hostCommand: string | null;
+  readonly #hostSpec: { file: string; args: string[] } | null;
   #child: ChildProcessWithoutNullStreams | null = null;
   #stdoutBuffer = Buffer.alloc(0);
   #pending = new Map<string, PendingMessage>();
 
   constructor(hostCommand: string | null = readNativeHostCommand()) {
     this.#hostCommand = hostCommand;
+    this.#hostSpec = parseNativeHostCommand(hostCommand);
   }
 
   open(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
@@ -78,10 +151,12 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
   #send(phase: TransportPhase, request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
     ensureBridgeRequestEnvelope(request);
 
-    if (!this.#hostCommand) {
+    if (!this.#hostCommand || !this.#hostSpec) {
       const code =
         phase === "open" ? "ERR_TRANSPORT_HANDSHAKE_FAILED" : "ERR_TRANSPORT_DISCONNECTED";
-      return Promise.reject(withTransportCode(new Error("native host command is not configured"), code));
+      return Promise.reject(
+        withTransportCode(new Error("native host command is not configured or invalid"), code)
+      );
     }
 
     this.#ensureChild();
@@ -130,12 +205,12 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
       return;
     }
 
-    if (!this.#hostCommand) {
+    if (!this.#hostSpec) {
       return;
     }
 
-    const child = spawn(this.#hostCommand, {
-      shell: true,
+    const child = spawn(this.#hostSpec.file, this.#hostSpec.args, {
+      shell: false,
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env
     });

@@ -46,9 +46,9 @@ type RuntimeMessageSender = {
 };
 
 interface ExtensionPort {
-  postMessage(message: BridgeResponse): void;
+  postMessage(message: unknown): void;
   onMessage: {
-    addListener(listener: (message: BridgeRequest) => void): void;
+    addListener(listener: (message: unknown) => void): void;
   };
   onDisconnect: {
     addListener(listener: () => void): void;
@@ -72,6 +72,17 @@ interface ExtensionChromeApi {
     query(filter: { active: boolean; currentWindow: boolean }): Promise<Array<{ id?: number }>>;
     sendMessage(tabId: number, message: BackgroundToContentMessage): Promise<void>;
   };
+}
+
+interface NativeHeartbeatMessage {
+  id: string;
+  method: "__ping__";
+  profile: null;
+  params: {
+    session_id: string;
+    timestamp: string;
+  };
+  timeout_ms: number;
 }
 
 export class BackgroundRelay {
@@ -244,10 +255,16 @@ export class BackgroundRelay {
 class ChromeBackgroundBridge {
   #port: ExtensionPort | null = null;
   #pending = new Map<string, PendingForward>();
+  #heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  #heartbeatTimeout: ReturnType<typeof setTimeout> | null = null;
+  #pendingHeartbeatId: string | null = null;
+  #heartbeatSeq = 0;
+  #missedHeartbeatCount = 0;
+  #disconnected = false;
 
   constructor(
     private readonly chromeApi: ExtensionChromeApi,
-    private readonly options?: { nativeHostName?: string; forwardTimeoutMs?: number }
+    private readonly options?: ChromeBackgroundBridgeOptions
   ) {}
 
   start(): void {
@@ -267,21 +284,128 @@ class ChromeBackgroundBridge {
     const hostName = this.options?.nativeHostName ?? defaultNativeHostName;
     const port = this.chromeApi.runtime.connectNative(hostName);
     this.#port = port;
+    this.#disconnected = false;
+    this.#missedHeartbeatCount = 0;
 
-    port.onMessage.addListener((request) => {
-      void this.#onNativeRequest(request);
+    port.onMessage.addListener((message) => {
+      void this.#onNativeMessage(message);
     });
     port.onDisconnect.addListener(() => {
+      this.#clearHeartbeatTimeout();
+      this.#pendingHeartbeatId = null;
+      this.#missedHeartbeatCount = 0;
       this.#port = null;
-      this.#failAllPending({
-        code: "ERR_TRANSPORT_DISCONNECTED",
-        message: "native messaging disconnected"
-      });
+      this.#markDisconnected("native messaging disconnected");
+    });
+
+    this.#startHeartbeatLoop();
+  }
+
+  #startHeartbeatLoop(): void {
+    if (this.#heartbeatTimer) {
+      return;
+    }
+
+    const intervalMs = this.options?.heartbeatIntervalMs ?? 20_000;
+    this.#heartbeatTimer = setInterval(() => {
+      this.#sendHeartbeat();
+    }, intervalMs);
+  }
+
+  #sendHeartbeat(): void {
+    if (!this.#port || this.#disconnected) {
+      return;
+    }
+
+    if (this.#pendingHeartbeatId) {
+      return;
+    }
+
+    const timeoutMs = this.options?.heartbeatTimeoutMs ?? 5_000;
+    const heartbeat: NativeHeartbeatMessage = {
+      id: this.#nextHeartbeatId(),
+      method: "__ping__",
+      profile: null,
+      params: {
+        session_id: "nm-session-001",
+        timestamp: new Date().toISOString()
+      },
+      timeout_ms: timeoutMs
+    };
+    this.#pendingHeartbeatId = heartbeat.id;
+    this.#port.postMessage(heartbeat);
+
+    this.#clearHeartbeatTimeout();
+    this.#heartbeatTimeout = setTimeout(() => {
+      if (!this.#pendingHeartbeatId) {
+        return;
+      }
+      this.#pendingHeartbeatId = null;
+      this.#missedHeartbeatCount += 1;
+      const maxMissed = this.options?.maxMissedHeartbeats ?? 2;
+      if (this.#missedHeartbeatCount >= maxMissed) {
+        this.#markDisconnected("heartbeat timeout");
+      }
+    }, timeoutMs);
+  }
+
+  async #onNativeMessage(message: unknown): Promise<void> {
+    const heartbeatAck = message as Partial<NativeHeartbeatMessage> | null;
+    if (
+      heartbeatAck &&
+      typeof heartbeatAck.id === "string" &&
+      heartbeatAck.id === this.#pendingHeartbeatId &&
+      (heartbeatAck.method === "__ping__" || (heartbeatAck as { method?: string }).method === "__pong__")
+    ) {
+      this.#pendingHeartbeatId = null;
+      this.#missedHeartbeatCount = 0;
+      this.#clearHeartbeatTimeout();
+      return;
+    }
+
+    const request = message as BridgeRequest;
+    await this.#onNativeRequest(request);
+  }
+
+  #clearHeartbeatTimeout(): void {
+    if (!this.#heartbeatTimeout) {
+      return;
+    }
+    clearTimeout(this.#heartbeatTimeout);
+    this.#heartbeatTimeout = null;
+  }
+
+  #markDisconnected(message: string): void {
+    this.#disconnected = true;
+    this.#failAllPending({
+      code: "ERR_TRANSPORT_DISCONNECTED",
+      message
     });
   }
 
+  #nextHeartbeatId(): string {
+    this.#heartbeatSeq += 1;
+    return `bg-hb-${this.#heartbeatSeq.toString().padStart(4, "0")}`;
+  }
+
   async #onNativeRequest(request: BridgeRequest): Promise<void> {
+    if (this.#disconnected && request.method === "bridge.forward") {
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background>content-script>background>host"
+        },
+        error: {
+          code: "ERR_TRANSPORT_DISCONNECTED",
+          message: "native messaging disconnected"
+        }
+      });
+      return;
+    }
+
     if (request.method === "bridge.open") {
+      this.#disconnected = false;
       this.#emit({
         id: request.id,
         status: "success",
@@ -465,8 +589,19 @@ class ChromeBackgroundBridge {
   }
 }
 
-export const startChromeBackgroundBridge = (chromeApi: ExtensionChromeApi): void => {
-  const bridge = new ChromeBackgroundBridge(chromeApi);
+export interface ChromeBackgroundBridgeOptions {
+  nativeHostName?: string;
+  forwardTimeoutMs?: number;
+  heartbeatIntervalMs?: number;
+  heartbeatTimeoutMs?: number;
+  maxMissedHeartbeats?: number;
+}
+
+export const startChromeBackgroundBridge = (
+  chromeApi: ExtensionChromeApi,
+  options?: ChromeBackgroundBridgeOptions
+): void => {
+  const bridge = new ChromeBackgroundBridge(chromeApi, options);
   bridge.start();
 };
 

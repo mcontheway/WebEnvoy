@@ -166,6 +166,12 @@ class ChromeBackgroundBridge {
     options;
     #port = null;
     #pending = new Map();
+    #heartbeatTimer = null;
+    #heartbeatTimeout = null;
+    #pendingHeartbeatId = null;
+    #heartbeatSeq = 0;
+    #missedHeartbeatCount = 0;
+    #disconnected = false;
     constructor(chromeApi, options) {
         this.chromeApi = chromeApi;
         this.options = options;
@@ -185,19 +191,111 @@ class ChromeBackgroundBridge {
         const hostName = this.options?.nativeHostName ?? defaultNativeHostName;
         const port = this.chromeApi.runtime.connectNative(hostName);
         this.#port = port;
-        port.onMessage.addListener((request) => {
-            void this.#onNativeRequest(request);
+        this.#disconnected = false;
+        this.#missedHeartbeatCount = 0;
+        port.onMessage.addListener((message) => {
+            void this.#onNativeMessage(message);
         });
         port.onDisconnect.addListener(() => {
+            this.#clearHeartbeatTimeout();
+            this.#pendingHeartbeatId = null;
+            this.#missedHeartbeatCount = 0;
             this.#port = null;
-            this.#failAllPending({
-                code: "ERR_TRANSPORT_DISCONNECTED",
-                message: "native messaging disconnected"
-            });
+            this.#markDisconnected("native messaging disconnected");
+        });
+        this.#startHeartbeatLoop();
+    }
+    #startHeartbeatLoop() {
+        if (this.#heartbeatTimer) {
+            return;
+        }
+        const intervalMs = this.options?.heartbeatIntervalMs ?? 20_000;
+        this.#heartbeatTimer = setInterval(() => {
+            this.#sendHeartbeat();
+        }, intervalMs);
+    }
+    #sendHeartbeat() {
+        if (!this.#port || this.#disconnected) {
+            return;
+        }
+        if (this.#pendingHeartbeatId) {
+            return;
+        }
+        const timeoutMs = this.options?.heartbeatTimeoutMs ?? 5_000;
+        const heartbeat = {
+            id: this.#nextHeartbeatId(),
+            method: "__ping__",
+            profile: null,
+            params: {
+                session_id: "nm-session-001",
+                timestamp: new Date().toISOString()
+            },
+            timeout_ms: timeoutMs
+        };
+        this.#pendingHeartbeatId = heartbeat.id;
+        this.#port.postMessage(heartbeat);
+        this.#clearHeartbeatTimeout();
+        this.#heartbeatTimeout = setTimeout(() => {
+            if (!this.#pendingHeartbeatId) {
+                return;
+            }
+            this.#pendingHeartbeatId = null;
+            this.#missedHeartbeatCount += 1;
+            const maxMissed = this.options?.maxMissedHeartbeats ?? 2;
+            if (this.#missedHeartbeatCount >= maxMissed) {
+                this.#markDisconnected("heartbeat timeout");
+            }
+        }, timeoutMs);
+    }
+    async #onNativeMessage(message) {
+        const heartbeatAck = message;
+        if (heartbeatAck &&
+            typeof heartbeatAck.id === "string" &&
+            heartbeatAck.id === this.#pendingHeartbeatId &&
+            (heartbeatAck.method === "__ping__" || heartbeatAck.method === "__pong__")) {
+            this.#pendingHeartbeatId = null;
+            this.#missedHeartbeatCount = 0;
+            this.#clearHeartbeatTimeout();
+            return;
+        }
+        const request = message;
+        await this.#onNativeRequest(request);
+    }
+    #clearHeartbeatTimeout() {
+        if (!this.#heartbeatTimeout) {
+            return;
+        }
+        clearTimeout(this.#heartbeatTimeout);
+        this.#heartbeatTimeout = null;
+    }
+    #markDisconnected(message) {
+        this.#disconnected = true;
+        this.#failAllPending({
+            code: "ERR_TRANSPORT_DISCONNECTED",
+            message
         });
     }
+    #nextHeartbeatId() {
+        this.#heartbeatSeq += 1;
+        return `bg-hb-${this.#heartbeatSeq.toString().padStart(4, "0")}`;
+    }
     async #onNativeRequest(request) {
+        if (this.#disconnected && request.method === "bridge.forward") {
+            this.#emit({
+                id: request.id,
+                status: "error",
+                summary: {
+                    relay_path: "host>background>content-script>background>host"
+                },
+                error: {
+                    code: "ERR_TRANSPORT_DISCONNECTED",
+                    message: "native messaging disconnected"
+                }
+            });
+            return;
+        }
         if (request.method === "bridge.open") {
+            this.#disconnected = false;
             this.#emit({
                 id: request.id,
                 status: "success",
@@ -361,8 +459,8 @@ class ChromeBackgroundBridge {
         this.#port?.postMessage(message);
     }
 }
-export const startChromeBackgroundBridge = (chromeApi) => {
-    const bridge = new ChromeBackgroundBridge(chromeApi);
+export const startChromeBackgroundBridge = (chromeApi, options) => {
+    const bridge = new ChromeBackgroundBridge(chromeApi, options);
     bridge.start();
 };
 const chromeApi = globalThis.chrome;

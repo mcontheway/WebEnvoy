@@ -8,6 +8,66 @@ const readNativeHostCommand = () => {
     }
     return value.trim();
 };
+const splitNativeHostCommand = (command) => {
+    const tokens = [];
+    let current = "";
+    let quote = null;
+    let escaping = false;
+    const pushCurrent = () => {
+        if (current.length > 0) {
+            tokens.push(current);
+            current = "";
+        }
+    };
+    for (const char of command) {
+        if (escaping) {
+            current += char;
+            escaping = false;
+            continue;
+        }
+        if (char === "\\") {
+            escaping = true;
+            continue;
+        }
+        if (quote) {
+            if (char === quote) {
+                quote = null;
+            }
+            else {
+                current += char;
+            }
+            continue;
+        }
+        if (char === "'" || char === '"') {
+            quote = char;
+            continue;
+        }
+        if (/\s/.test(char)) {
+            pushCurrent();
+            continue;
+        }
+        current += char;
+    }
+    if (escaping || quote) {
+        return null;
+    }
+    pushCurrent();
+    return tokens.length > 0 ? tokens : null;
+};
+export const parseNativeHostCommand = (command) => {
+    if (!command) {
+        return null;
+    }
+    const tokens = splitNativeHostCommand(command);
+    if (!tokens) {
+        return null;
+    }
+    const [file, ...args] = tokens;
+    return {
+        file,
+        args
+    };
+};
 const encodeNativeMessage = (payload) => {
     const body = Buffer.from(payload, "utf8");
     const header = Buffer.alloc(4);
@@ -20,11 +80,13 @@ const asTransportError = (error, fallback) => {
 };
 export class NativeHostBridgeTransport {
     #hostCommand;
+    #hostSpec;
     #child = null;
     #stdoutBuffer = Buffer.alloc(0);
     #pending = new Map();
     constructor(hostCommand = readNativeHostCommand()) {
         this.#hostCommand = hostCommand;
+        this.#hostSpec = parseNativeHostCommand(hostCommand);
     }
     open(request) {
         return this.#send("open", request);
@@ -37,9 +99,9 @@ export class NativeHostBridgeTransport {
     }
     #send(phase, request) {
         ensureBridgeRequestEnvelope(request);
-        if (!this.#hostCommand) {
+        if (!this.#hostCommand || !this.#hostSpec) {
             const code = phase === "open" ? "ERR_TRANSPORT_HANDSHAKE_FAILED" : "ERR_TRANSPORT_DISCONNECTED";
-            return Promise.reject(withTransportCode(new Error("native host command is not configured"), code));
+            return Promise.reject(withTransportCode(new Error("native host command is not configured or invalid"), code));
         }
         this.#ensureChild();
         const child = this.#child;
@@ -80,11 +142,11 @@ export class NativeHostBridgeTransport {
         if (this.#child && !this.#child.killed) {
             return;
         }
-        if (!this.#hostCommand) {
+        if (!this.#hostSpec) {
             return;
         }
-        const child = spawn(this.#hostCommand, {
-            shell: true,
+        const child = spawn(this.#hostSpec.file, this.#hostSpec.args, {
+            shell: false,
             stdio: ["pipe", "pipe", "pipe"],
             env: process.env
         });

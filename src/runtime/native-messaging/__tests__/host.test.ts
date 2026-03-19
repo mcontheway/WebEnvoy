@@ -6,9 +6,23 @@ import {
   createBridgeForwardRequest,
   createBridgeOpenRequest
 } from "../protocol.js";
-import { NativeHostBridgeTransport } from "../host.js";
+import { NativeHostBridgeTransport, parseNativeHostCommand } from "../host.js";
 
 describe("native host bridge transport classification", () => {
+  it("parses quoted native host command with spaces", () => {
+    const parsed = parseNativeHostCommand(
+      `"${process.execPath}" "/tmp/mock folder/native-host.mjs" --mode smoke`
+    );
+    expect(parsed).toEqual({
+      file: process.execPath,
+      args: ["/tmp/mock folder/native-host.mjs", "--mode", "smoke"]
+    });
+  });
+
+  it("rejects empty native host command", () => {
+    expect(parseNativeHostCommand("   ")).toBeNull();
+  });
+
   it("classifies open without configured native host command as handshake failed", async () => {
     const transport = new NativeHostBridgeTransport(null);
     await expect(
