@@ -3,6 +3,14 @@ const DEFAULT_MAX_TITLE_LENGTH = 120;
 const DEFAULT_MAX_FAILURE_SUMMARY_LENGTH = 160;
 const DEFAULT_MAX_REQUEST_REASON_LENGTH = 120;
 
+export type ObservabilityCoverage = "complete" | "partial" | "unavailable";
+export type RequestEvidenceState = "available" | "none";
+export type TruncationField =
+  | "page_state.title"
+  | "key_requests"
+  | "key_requests[].failure_reason"
+  | "failure_site.summary";
+
 export interface PageStateInput {
   page_kind?: string | null;
   url?: string | null;
@@ -39,6 +47,8 @@ export interface PageState {
   url: string;
   title: string;
   ready_state: string;
+  partial_observable?: boolean;
+  title_truncated?: boolean;
 }
 
 export interface KeyRequest {
@@ -49,6 +59,7 @@ export interface KeyRequest {
   outcome: string;
   status_code?: number;
   failure_reason?: string;
+  failure_reason_truncated?: boolean;
   request_class?: string;
 }
 
@@ -57,10 +68,17 @@ export interface FailureSite {
   component: string;
   target: string;
   summary: string;
+  summary_truncated?: boolean;
 }
 
 export interface ObservabilityPayload {
-  page_state: PageState;
+  coverage: ObservabilityCoverage;
+  request_evidence: RequestEvidenceState;
+  truncation: {
+    truncated: boolean;
+    fields: TruncationField[];
+  };
+  page_state: PageState | null;
   key_requests: KeyRequest[];
   failure_site: FailureSite | null;
 }
@@ -77,14 +95,29 @@ const nonEmpty = (value: string | null | undefined, fallback: string): string =>
   return normalized.length > 0 ? normalized : fallback;
 };
 
-const truncate = (value: string, maxLength: number): string => {
+const truncate = (
+  value: string,
+  maxLength: number
+): {
+  value: string;
+  truncated: boolean;
+} => {
   if (maxLength <= 0) {
-    return "";
+    return {
+      value: "",
+      truncated: value.length > 0
+    };
   }
   if (value.length <= maxLength) {
-    return value;
+    return {
+      value,
+      truncated: false
+    };
   }
-  return value.slice(0, maxLength);
+  return {
+    value: value.slice(0, maxLength),
+    truncated: true
+  };
 };
 
 const stripQueryAndFragment = (value: string): string => {
@@ -111,17 +144,46 @@ export const sanitizeUrl = (url: string | null | undefined): string => {
   }
 };
 
+const pushUniqueField = (fields: TruncationField[], field: TruncationField): void => {
+  if (!fields.includes(field)) {
+    fields.push(field);
+  }
+};
+
 export const normalizePageState = (
   input: PageStateInput | null | undefined,
   options?: ObservabilityOptions
-): PageState => {
+): PageState | null => {
+  if (input === null || input === undefined) {
+    return null;
+  }
+
   const maxTitleLength = options?.maxTitleLength ?? DEFAULT_MAX_TITLE_LENGTH;
-  return {
-    page_kind: nonEmpty(input?.page_kind, "unknown"),
-    url: sanitizeUrl(input?.url) || "about:blank",
-    title: truncate(nonEmpty(input?.title, "unknown"), maxTitleLength),
-    ready_state: nonEmpty(input?.ready_state, "unknown")
+  const pageKindRaw = typeof input.page_kind === "string" ? input.page_kind.trim() : "";
+  const urlRaw = sanitizeUrl(input.url);
+  const titleRaw = typeof input.title === "string" ? input.title.trim() : "";
+  const readyStateRaw = typeof input.ready_state === "string" ? input.ready_state.trim() : "";
+
+  const titleNormalized = nonEmpty(titleRaw, "unknown");
+  const title = truncate(titleNormalized, maxTitleLength);
+
+  const pageState: PageState = {
+    page_kind: pageKindRaw.length > 0 ? pageKindRaw : "unknown",
+    url: urlRaw.length > 0 ? urlRaw : "about:blank",
+    title: title.value,
+    ready_state: readyStateRaw.length > 0 ? readyStateRaw : "unknown"
   };
+
+  const partialObservable =
+    pageKindRaw.length === 0 || urlRaw.length === 0 || titleRaw.length === 0 || readyStateRaw.length === 0;
+  if (partialObservable) {
+    pageState.partial_observable = true;
+  }
+  if (title.truncated) {
+    pageState.title_truncated = true;
+  }
+
+  return pageState;
 };
 
 const normalizeKeyRequest = (
@@ -143,7 +205,11 @@ const normalizeKeyRequest = (
 
   const failureReason = nonEmpty(input.failure_reason, "");
   if (failureReason.length > 0) {
-    output.failure_reason = truncate(failureReason, maxReasonLength);
+    const truncated = truncate(failureReason, maxReasonLength);
+    output.failure_reason = truncated.value;
+    if (truncated.truncated) {
+      output.failure_reason_truncated = true;
+    }
   }
 
   const requestClass = nonEmpty(input.request_class, "");
@@ -172,19 +238,54 @@ export const normalizeFailureSite = (
   }
 
   const maxSummaryLength = options?.maxFailureSummaryLength ?? DEFAULT_MAX_FAILURE_SUMMARY_LENGTH;
+  const summary = truncate(nonEmpty(input.summary, "unknown"), maxSummaryLength);
   return {
     stage: nonEmpty(input.stage, "unknown"),
     component: nonEmpty(input.component, "unknown"),
     target: nonEmpty(input.target, "unknown"),
-    summary: truncate(nonEmpty(input.summary, "unknown"), maxSummaryLength)
+    summary: summary.value,
+    ...(summary.truncated ? { summary_truncated: true } : {})
   };
 };
 
 export const buildObservabilityPayload = (
   input: ObservabilityInput,
   options?: ObservabilityOptions
-): ObservabilityPayload => ({
-  page_state: normalizePageState(input.page_state, options),
-  key_requests: normalizeKeyRequests(input.key_requests, options),
-  failure_site: normalizeFailureSite(input.failure_site, options)
-});
+): ObservabilityPayload => {
+  const truncationFields: TruncationField[] = [];
+  const maxRequests = options?.maxRequests ?? DEFAULT_MAX_REQUESTS;
+  const originalRequests = Array.isArray(input.key_requests) ? input.key_requests : [];
+  const keyRequests = normalizeKeyRequests(input.key_requests, options);
+  if (originalRequests.length > Math.max(0, maxRequests)) {
+    pushUniqueField(truncationFields, "key_requests");
+  }
+  if (keyRequests.some((item) => item.failure_reason_truncated === true)) {
+    pushUniqueField(truncationFields, "key_requests[].failure_reason");
+  }
+
+  const pageState = normalizePageState(input.page_state, options);
+  if (pageState?.title_truncated) {
+    pushUniqueField(truncationFields, "page_state.title");
+  }
+
+  const failureSite = normalizeFailureSite(input.failure_site, options);
+  if (failureSite?.summary_truncated) {
+    pushUniqueField(truncationFields, "failure_site.summary");
+  }
+
+  const coverage: ObservabilityCoverage =
+    pageState === null ? "unavailable" : pageState.partial_observable ? "partial" : "complete";
+  const requestEvidence: RequestEvidenceState = keyRequests.length > 0 ? "available" : "none";
+
+  return {
+    coverage,
+    request_evidence: requestEvidence,
+    truncation: {
+      truncated: truncationFields.length > 0,
+      fields: truncationFields
+    },
+    page_state: pageState,
+    key_requests: keyRequests,
+    failure_site: failureSite
+  };
+};

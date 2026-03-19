@@ -71,6 +71,14 @@ describe("observability", () => {
             stage: "request",
             method: "GET",
             url: "https://example.com/api/feed?token=abc",
+            outcome: "failed",
+            failure_reason: "request timeout because upstream overloaded"
+          },
+          {
+            request_id: "req-2",
+            stage: "request",
+            method: "POST",
+            url: "https://example.com/api/feed?token=abc",
             outcome: "completed"
           }
         ],
@@ -82,14 +90,66 @@ describe("observability", () => {
         }
       },
       {
+        maxRequests: 1,
         maxTitleLength: 32,
-        maxFailureSummaryLength: 64
+        maxFailureSummaryLength: 64,
+        maxRequestReasonLength: 12
       }
     );
 
-    expect(payload.page_state.title).toHaveLength(32);
-    expect(payload.page_state.url).toBe("https://example.com/post/1");
+    expect(payload.coverage).toBe("complete");
+    expect(payload.request_evidence).toBe("available");
+    expect(payload.page_state).not.toBeNull();
+    expect(payload.page_state?.title).toHaveLength(32);
+    expect(payload.page_state?.title_truncated).toBe(true);
+    expect(payload.page_state?.url).toBe("https://example.com/post/1");
+    expect(payload.key_requests).toHaveLength(1);
     expect(payload.key_requests[0].url).toBe("https://example.com/api/feed");
+    expect(payload.key_requests[0].failure_reason).toHaveLength(12);
+    expect(payload.key_requests[0].failure_reason_truncated).toBe(true);
     expect(payload.failure_site?.summary).toHaveLength(64);
+    expect(payload.failure_site?.summary_truncated).toBe(true);
+    expect(payload.truncation).toEqual({
+      truncated: true,
+      fields: [
+        "key_requests",
+        "key_requests[].failure_reason",
+        "page_state.title",
+        "failure_site.summary"
+      ]
+    });
+  });
+
+  it("does not fabricate page state when no observability source exists", () => {
+    const payload = buildObservabilityPayload({
+      page_state: null,
+      key_requests: null,
+      failure_site: null
+    });
+
+    expect(payload.coverage).toBe("unavailable");
+    expect(payload.request_evidence).toBe("none");
+    expect(payload.page_state).toBeNull();
+    expect(payload.key_requests).toEqual([]);
+    expect(payload.truncation).toEqual({
+      truncated: false,
+      fields: []
+    });
+  });
+
+  it("marks page state as partial when required page signals are missing", () => {
+    const payload = buildObservabilityPayload({
+      page_state: {
+        page_kind: "feed",
+        url: "https://example.com/feed",
+        title: "Feed"
+      },
+      key_requests: [],
+      failure_site: null
+    });
+
+    expect(payload.coverage).toBe("partial");
+    expect(payload.page_state?.partial_observable).toBe(true);
+    expect(payload.request_evidence).toBe("none");
   });
 });

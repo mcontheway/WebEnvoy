@@ -25,7 +25,9 @@ describe("response-shaping", () => {
 
     expect(shaped).not.toBe(base);
     expect(base).not.toHaveProperty("observability");
-    expect(shaped.observability.page_state.url).toBe("https://example.com/feed");
+    expect(shaped.observability.coverage).toBe("complete");
+    expect(shaped.observability.request_evidence).toBe("none");
+    expect(shaped.observability.page_state?.url).toBe("https://example.com/feed");
   });
 
   it("adds diagnosis to error payload and preserves core fields", () => {
@@ -69,6 +71,41 @@ describe("response-shaping", () => {
     expect(shaped.error.code).toBe("ERR_EXECUTION_FAILED");
     expect(shaped.error.retryable).toBe(false);
     expect(shaped.error.diagnosis.category).toBe("request_failed");
-    expect(shaped.observability.page_state.url).toBe("https://example.com/path");
+    expect(shaped.observability.page_state?.url).toBe("https://example.com/path");
+  });
+
+  it("keeps runtime unavailable response observable without fabricating page state", () => {
+    const base = {
+      run_id: "run-3",
+      command: "runtime.ping",
+      status: "error" as const,
+      error: {
+        code: "ERR_RUNTIME_UNAVAILABLE",
+        message: "运行时不可用",
+        retryable: true
+      },
+      timestamp: "2026-03-19T12:00:00.000Z"
+    };
+
+    const shaped = shapeErrorResponse(
+      base,
+      {
+        page_state: null,
+        key_requests: null,
+        failure_site: null
+      },
+      {
+        signals: {
+          runtime_unavailable: true
+        },
+        evidence: ["runtime bridge not ready"]
+      }
+    );
+
+    expect(shaped.error.diagnosis.category).toBe("runtime_unavailable");
+    expect(shaped.observability.coverage).toBe("unavailable");
+    expect(shaped.observability.request_evidence).toBe("none");
+    expect(shaped.observability.page_state).toBeNull();
+    expect(shaped.observability.key_requests).toEqual([]);
   });
 });
