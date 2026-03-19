@@ -456,15 +456,18 @@ describe("profile-runtime login", () => {
     tempDirs.push(baseDir);
     const service = new ProfileRuntimeService();
 
-    await expect(
-      service.login({
-        cwd: baseDir,
-        profile: "first_login_profile",
-        runId: "run-runtime-test-201",
-        params: {}
-      })
-    ).rejects.toMatchObject({
-      code: "ERR_PROFILE_STATE_CONFLICT"
+    const beforeConfirm = await service.login({
+      cwd: baseDir,
+      profile: "first_login_profile",
+      runId: "run-runtime-test-201",
+      params: {}
+    });
+    expect(beforeConfirm).toMatchObject({
+      profile: "first_login_profile",
+      profileState: "logging_in",
+      browserState: "logging_in",
+      lockHeld: true,
+      confirmationRequired: true
     });
 
     const metaPath = join(

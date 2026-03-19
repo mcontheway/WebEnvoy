@@ -118,6 +118,21 @@ const isRuntimeActiveProfileState = (state: ProfileState): boolean =>
 const shouldRecoverAsDisconnected = (acquisition: LockAcquisition, state: ProfileState): boolean =>
   acquisition !== "same-owner" && isRuntimeActiveProfileState(state);
 const shouldConfirmLogin = (params: JsonObject): boolean => params.confirm === true;
+const parseIsoTimestamp = (value: string): number | null => {
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) {
+    return null;
+  }
+  return timestamp;
+};
+const isLockStale = (lock: ProfileLock, nowIso: string): boolean => {
+  const now = parseIsoTimestamp(nowIso);
+  const heartbeat = parseIsoTimestamp(lock.lastHeartbeatAt);
+  if (now === null || heartbeat === null) {
+    return true;
+  }
+  return now - heartbeat > DEFAULT_LOCK_STALE_MS;
+};
 
 const mapRuntimeError = (error: unknown): CliError => {
   if (error instanceof CliError) {
@@ -314,11 +329,18 @@ export class ProfileRuntimeService {
       );
 
       if (!confirmLogin) {
+        loginSucceeded = true;
         keepLockOnFailure = true;
-        throw new CliError(
-          "ERR_PROFILE_STATE_CONFLICT",
-          "登录确认未完成，profile 当前仍处于 logging_in"
-        );
+        return {
+          profile: input.profile,
+          profileState: session.profileState,
+          browserState: browserStateFromProfileState(session.profileState, true),
+          profileDir,
+          proxyUrl: session.proxyBinding?.url ?? null,
+          lockHeld: true,
+          confirmationRequired: true,
+          confirmPath: "runtime.login --params '{\"confirm\":true}'"
+        };
       }
 
       session = markSessionReady(session);
@@ -354,6 +376,7 @@ export class ProfileRuntimeService {
   }
 
   async status(input: RuntimeActionInput): Promise<JsonObject> {
+    const nowIso = isoNow();
     const store = this.#createStore(input.cwd);
     const profileDir = this.#resolveProfileDir(store, input.profile);
     const lockPath = this.#getLockPath(profileDir);
@@ -362,7 +385,9 @@ export class ProfileRuntimeService {
 
     const storedProfileState: ProfileState = meta?.profileState ?? "uninitialized";
     const activeState = isRuntimeActiveProfileState(storedProfileState);
-    const healthyLock = lock !== null;
+    const healthyLock =
+      lock !== null &&
+      (this.#isProcessAlive(lock.ownerPid) || !isLockStale(lock, nowIso));
     const profileState: ProfileState =
       activeState && !healthyLock ? "disconnected" : storedProfileState;
     const lockHeld = activeState && healthyLock;

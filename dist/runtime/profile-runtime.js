@@ -63,6 +63,21 @@ const isLoginableProfileState = (state) => state === "uninitialized" ||
 const isRuntimeActiveProfileState = (state) => state === "starting" || state === "ready" || state === "logging_in" || state === "stopping";
 const shouldRecoverAsDisconnected = (acquisition, state) => acquisition !== "same-owner" && isRuntimeActiveProfileState(state);
 const shouldConfirmLogin = (params) => params.confirm === true;
+const parseIsoTimestamp = (value) => {
+    const timestamp = Date.parse(value);
+    if (Number.isNaN(timestamp)) {
+        return null;
+    }
+    return timestamp;
+};
+const isLockStale = (lock, nowIso) => {
+    const now = parseIsoTimestamp(nowIso);
+    const heartbeat = parseIsoTimestamp(lock.lastHeartbeatAt);
+    if (now === null || heartbeat === null) {
+        return true;
+    }
+    return now - heartbeat > DEFAULT_LOCK_STALE_MS;
+};
 const mapRuntimeError = (error) => {
     if (error instanceof CliError) {
         return error;
@@ -228,8 +243,18 @@ export class ProfileRuntimeService {
                 updatedAt: nowIso
             }));
             if (!confirmLogin) {
+                loginSucceeded = true;
                 keepLockOnFailure = true;
-                throw new CliError("ERR_PROFILE_STATE_CONFLICT", "登录确认未完成，profile 当前仍处于 logging_in");
+                return {
+                    profile: input.profile,
+                    profileState: session.profileState,
+                    browserState: browserStateFromProfileState(session.profileState, true),
+                    profileDir,
+                    proxyUrl: session.proxyBinding?.url ?? null,
+                    lockHeld: true,
+                    confirmationRequired: true,
+                    confirmPath: "runtime.login --params '{\"confirm\":true}'"
+                };
             }
             session = markSessionReady(session);
             await store.writeMeta(input.profile, this.#patchMeta(recoveredMeta, {
@@ -261,6 +286,7 @@ export class ProfileRuntimeService {
         }
     }
     async status(input) {
+        const nowIso = isoNow();
         const store = this.#createStore(input.cwd);
         const profileDir = this.#resolveProfileDir(store, input.profile);
         const lockPath = this.#getLockPath(profileDir);
@@ -268,7 +294,8 @@ export class ProfileRuntimeService {
         const lock = await this.#readLock(lockPath);
         const storedProfileState = meta?.profileState ?? "uninitialized";
         const activeState = isRuntimeActiveProfileState(storedProfileState);
-        const healthyLock = lock !== null;
+        const healthyLock = lock !== null &&
+            (this.#isProcessAlive(lock.ownerPid) || !isLockStale(lock, nowIso));
         const profileState = activeState && !healthyLock ? "disconnected" : storedProfileState;
         const lockHeld = activeState && healthyLock;
         return {
