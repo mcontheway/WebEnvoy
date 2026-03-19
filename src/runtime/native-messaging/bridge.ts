@@ -10,7 +10,7 @@ import {
   type BridgeRequestEnvelope,
   type BridgeResponseEnvelope
 } from "./protocol.js";
-import { SocketNativeBridgeTransport } from "./host.js";
+import { NativeHostBridgeTransport } from "./host.js";
 import {
   MAX_PENDING_DURING_RECOVERY,
   NativeMessagingSession,
@@ -233,7 +233,7 @@ export class NativeMessagingBridge {
   #idSeq = 0;
 
   constructor(options?: BridgeOptions) {
-    this.#transport = options?.transport ?? new SocketNativeBridgeTransport();
+    this.#transport = options?.transport ?? new NativeHostBridgeTransport();
     this.#now = options?.now ?? (() => Date.now());
     this.#recoveryPollIntervalMs =
       options?.recoveryPollIntervalMs ?? defaultRecoveryPollIntervalMs;

@@ -25,6 +25,34 @@ const waitForResponse = (relay: BackgroundRelay, timeoutMs = 500): Promise<Bridg
   });
 
 describe("extension background relay contract", () => {
+  it("keeps run/profile/cwd context on successful forward", async () => {
+    const contentScript = new ContentScriptHandler();
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 20 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-context-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-context-001",
+        command: "runtime.ping",
+        command_params: {},
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a"
+    });
+
+    const response = await responsePromise;
+    expect(response.status).toBe("success");
+    expect(response.summary).toMatchObject({
+      run_id: "run-context-001",
+      profile: "profile-a",
+      cwd: "/workspace/WebEnvoy",
+      relay_path: "host>background>content-script>background>host"
+    });
+  });
+
   it("returns ERR_TRANSPORT_FORWARD_FAILED when content script is unreachable", async () => {
     const contentScript = new ContentScriptHandler();
     contentScript.setReachable(false);
@@ -39,7 +67,8 @@ describe("extension background relay contract", () => {
         run_id: "run-001",
         command: "runtime.ping",
         command_params: {}
-      }
+      },
+      profile: "profile-a"
     });
 
     const response = await responsePromise;
@@ -61,8 +90,10 @@ describe("extension background relay contract", () => {
         command: "runtime.ping",
         command_params: {
           simulate_no_response: true
-        }
-      }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a"
     });
 
     const response = await responsePromise;

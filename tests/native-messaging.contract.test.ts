@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
 const binPath = path.join(repoRoot, "bin", "webenvoy");
+const mockNativeHostPath = path.join(repoRoot, "tests", "fixtures", "native-host-mock.mjs");
 
 const runCli = (args: string[], env?: Record<string, string>) =>
   spawnSync(process.execPath, [binPath, ...args], {
@@ -17,6 +18,10 @@ const runCli = (args: string[], env?: Record<string, string>) =>
   });
 
 const parseJson = (stdout: string) => JSON.parse(stdout.trim()) as Record<string, unknown>;
+const withNativeHost = (mode: string): Record<string, string> => ({
+  WEBENVOY_NATIVE_HOST_CMD: `"${process.execPath}" "${mockNativeHostPath}"`,
+  WEBENVOY_NATIVE_HOST_MODE: mode
+});
 
 describe("native messaging contract", () => {
   it("returns handshake failure on default transport when bridge is not connected", () => {
@@ -35,10 +40,8 @@ describe("native messaging contract", () => {
     );
   });
 
-  it("returns transport metadata on runtime.ping success with loopback injection", () => {
-    const result = runCli(["runtime.ping", "--run-id", "run-nm-001"], {
-      WEBENVOY_NATIVE_TRANSPORT: "loopback"
-    });
+  it("returns transport metadata on runtime.ping success via native host stdio bridge", () => {
+    const result = runCli(["runtime.ping", "--run-id", "run-nm-001"], withNativeHost("success"));
     expect(result.status).toBe(0);
 
     const body = parseJson(result.stdout);
@@ -55,16 +58,14 @@ describe("native messaging contract", () => {
     });
   });
 
-  it("maps transport timeout to runtime unavailable exit code", () => {
+  it("maps transport timeout to runtime unavailable exit code without loopback", () => {
     const result = runCli([
       "runtime.ping",
       "--run-id",
       "run-nm-002",
       "--params",
-      '{"simulate_transport_timeout":true}'
-    ], {
-      WEBENVOY_NATIVE_TRANSPORT: "loopback"
-    });
+      '{"timeout_ms":100}'
+    ], withNativeHost("drop-forward"));
     expect(result.status).toBe(5);
 
     const body = parseJson(result.stdout);
@@ -79,16 +80,8 @@ describe("native messaging contract", () => {
     );
   });
 
-  it("maps transport disconnect to runtime unavailable exit code", () => {
-    const result = runCli([
-      "runtime.ping",
-      "--run-id",
-      "run-nm-003",
-      "--params",
-      '{"simulate_transport_disconnect":true}'
-    ], {
-      WEBENVOY_NATIVE_TRANSPORT: "loopback"
-    });
+  it("maps transport disconnect to runtime unavailable exit code without loopback", () => {
+    const result = runCli(["runtime.ping", "--run-id", "run-nm-003"], withNativeHost("disconnect-on-forward"));
     expect(result.status).toBe(5);
 
     const body = parseJson(result.stdout);

@@ -1,5 +1,5 @@
 import { BRIDGE_PROTOCOL, DEFAULT_TRANSPORT_TIMEOUT_MS, createBridgeForwardRequest, createBridgeOpenRequest, createHeartbeatRequest, ensureBridgeRequestEnvelope, ensureBridgeSuccess } from "./protocol.js";
-import { SocketNativeBridgeTransport } from "./host.js";
+import { NativeHostBridgeTransport } from "./host.js";
 import { MAX_PENDING_DURING_RECOVERY, NativeMessagingSession, RECOVERY_WINDOW_MS, classifyTransportFailure } from "./session.js";
 export class NativeMessagingTransportError extends Error {
     code;
@@ -130,7 +130,7 @@ export class NativeMessagingBridge {
     #heartbeatTimeoutMs;
     #idSeq = 0;
     constructor(options) {
-        this.#transport = options?.transport ?? new SocketNativeBridgeTransport();
+        this.#transport = options?.transport ?? new NativeHostBridgeTransport();
         this.#now = options?.now ?? (() => Date.now());
         this.#recoveryPollIntervalMs =
             options?.recoveryPollIntervalMs ?? defaultRecoveryPollIntervalMs;

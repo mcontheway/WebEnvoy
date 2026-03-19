@@ -4,7 +4,7 @@ import {
   NativeMessagingBridge,
   NativeMessagingTransportError
 } from "../runtime/native-messaging/bridge.js";
-import { SocketNativeBridgeTransport } from "../runtime/native-messaging/host.js";
+import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
 
 const asBoolean = (value: unknown): boolean => value === true;
@@ -16,7 +16,7 @@ const resolveRuntimeBridge = (): NativeMessagingBridge => {
   }
 
   return new NativeMessagingBridge({
-    transport: new SocketNativeBridgeTransport()
+    transport: new NativeHostBridgeTransport()
   });
 };
 

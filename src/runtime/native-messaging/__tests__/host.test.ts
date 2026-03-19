@@ -4,14 +4,11 @@ import {
   createBridgeForwardRequest,
   createBridgeOpenRequest
 } from "../protocol.js";
-import { SocketNativeBridgeTransport } from "../host.js";
+import { NativeHostBridgeTransport } from "../host.js";
 
-const invalidSocketPath = `/tmp/webenvoy-invalid-${process.pid}.sock`;
-
-describe("socket native bridge transport classification", () => {
-  it("classifies open/connect failure as handshake failed", async () => {
-    const transport = new SocketNativeBridgeTransport(invalidSocketPath);
-
+describe("native host bridge transport classification", () => {
+  it("classifies open without configured native host command as handshake failed", async () => {
+    const transport = new NativeHostBridgeTransport(null);
     await expect(
       transport.open(
         createBridgeOpenRequest({
@@ -25,8 +22,8 @@ describe("socket native bridge transport classification", () => {
     });
   });
 
-  it("classifies forward connect failure as disconnected", async () => {
-    const transport = new SocketNativeBridgeTransport(invalidSocketPath);
+  it("classifies forward without configured native host command as disconnected", async () => {
+    const transport = new NativeHostBridgeTransport(null);
 
     await expect(
       transport.forward(
