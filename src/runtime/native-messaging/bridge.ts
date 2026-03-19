@@ -38,6 +38,7 @@ interface FakeTransportOptions {
   incompatibleProtocol?: boolean;
   disconnectOnForward?: boolean;
   heartbeatDisconnect?: boolean;
+  heartbeatDelayMs?: number;
   forwardDelayMs?: number;
 }
 
@@ -141,6 +142,10 @@ export const createFakeNativeBridgeTransport = (
   async heartbeat(request: BridgeRequestEnvelope) {
     ensureBridgeRequestEnvelope(request);
 
+    if (options?.heartbeatDelayMs && options.heartbeatDelayMs > 0) {
+      await delay(options.heartbeatDelayMs);
+    }
+
     if (options?.heartbeatDisconnect) {
       throw new NativeMessagingTransportError(
         "ERR_TRANSPORT_DISCONNECTED",
@@ -183,15 +188,18 @@ interface BridgeOptions {
   transport?: NativeBridgeTransport;
   now?: () => number;
   recoveryPollIntervalMs?: number;
+  heartbeatTimeoutMs?: number;
 }
 
 const defaultRecoveryPollIntervalMs = 100;
+const defaultHeartbeatTimeoutMs = 3_000;
 
 export class NativeMessagingBridge {
   readonly #session = new NativeMessagingSession();
   readonly #transport: NativeBridgeTransport;
   readonly #now: () => number;
   readonly #recoveryPollIntervalMs: number;
+  readonly #heartbeatTimeoutMs: number;
   #idSeq = 0;
 
   constructor(options?: BridgeOptions) {
@@ -199,6 +207,7 @@ export class NativeMessagingBridge {
     this.#now = options?.now ?? (() => Date.now());
     this.#recoveryPollIntervalMs =
       options?.recoveryPollIntervalMs ?? defaultRecoveryPollIntervalMs;
+    this.#heartbeatTimeoutMs = options?.heartbeatTimeoutMs ?? defaultHeartbeatTimeoutMs;
   }
 
   async runtimePing(input: RuntimePingInput): Promise<RuntimePingResult> {
@@ -341,16 +350,18 @@ export class NativeMessagingBridge {
     });
 
     try {
-      const response = await runWithTimeout(this.#transport.heartbeat(request), 3_000);
+      const response = await runWithTimeout(
+        this.#transport.heartbeat(request),
+        this.#heartbeatTimeoutMs
+      );
       ensureBridgeSuccess(response, "heartbeat failed");
     } catch (error) {
       this.#session.observeDisconnect("heartbeat_timeout", this.#now());
-      if (error instanceof NativeMessagingTransportError) {
-        throw error;
-      }
+      const reason =
+        error instanceof NativeMessagingTransportError ? error.message : asError(error).message;
       throw new NativeMessagingTransportError(
         "ERR_TRANSPORT_DISCONNECTED",
-        `heartbeat failed: ${asError(error).message}`
+        `heartbeat failed: ${reason}`
       );
     }
   }

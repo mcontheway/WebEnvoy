@@ -60,3 +60,5 @@ tmp_issue_body.md
 # FR-0001 CLI contract requires clean-checkout executable entry.
 !/dist/
 !/dist/**
+!/extension/build/
+!/extension/build/**

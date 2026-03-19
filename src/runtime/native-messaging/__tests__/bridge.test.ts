@@ -144,4 +144,43 @@ describe("native messaging bridge", () => {
       code: "ERR_TRANSPORT_DISCONNECTED"
     });
   });
+
+  it("maps heartbeat disconnect to ERR_TRANSPORT_DISCONNECTED", async () => {
+    const bridge = new NativeMessagingBridge({
+      transport: createFakeNativeBridgeTransport({
+        heartbeatDisconnect: true
+      })
+    });
+
+    await expect(
+      bridge.runtimePing({
+        runId: "run-heartbeat-disconnect",
+        profile: "profile-a",
+        cwd: "/tmp",
+        params: {}
+      })
+    ).rejects.toMatchObject<Partial<NativeMessagingTransportError>>({
+      code: "ERR_TRANSPORT_DISCONNECTED"
+    });
+  });
+
+  it("maps heartbeat timeout to ERR_TRANSPORT_DISCONNECTED", async () => {
+    const bridge = new NativeMessagingBridge({
+      transport: createFakeNativeBridgeTransport({
+        heartbeatDelayMs: 20
+      }),
+      heartbeatTimeoutMs: 5
+    });
+
+    await expect(
+      bridge.runtimePing({
+        runId: "run-heartbeat-timeout",
+        profile: "profile-a",
+        cwd: "/tmp",
+        params: {}
+      })
+    ).rejects.toMatchObject<Partial<NativeMessagingTransportError>>({
+      code: "ERR_TRANSPORT_DISCONNECTED"
+    });
+  });
 });
