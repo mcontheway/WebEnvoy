@@ -1,5 +1,5 @@
-import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 export class RuntimeStoreError extends Error {
     code;
@@ -11,6 +11,7 @@ export class RuntimeStoreError extends Error {
 }
 const SCHEMA_VERSION = 1;
 const SUMMARY_MAX_CHARS = 512;
+let databaseSyncCtorCache;
 const sanitizeSummary = (summary) => {
     if (summary === null) {
         return null;
@@ -26,15 +27,35 @@ const sanitizeSummary = (summary) => {
 };
 const isIsoLike = (value) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value);
 export const resolveRuntimeStorePath = (cwd) => path.join(cwd, ".webenvoy", "runtime", "store.sqlite");
+const resolveDatabaseSyncConstructor = () => {
+    if (databaseSyncCtorCache === null) {
+        throw new Error("node:sqlite unavailable");
+    }
+    if (databaseSyncCtorCache) {
+        return databaseSyncCtorCache;
+    }
+    const require = createRequire(import.meta.url);
+    const sqliteModule = require("node:sqlite");
+    if (typeof sqliteModule.DatabaseSync !== "function") {
+        databaseSyncCtorCache = null;
+        throw new Error("node:sqlite DatabaseSync unavailable");
+    }
+    databaseSyncCtorCache = sqliteModule.DatabaseSync;
+    return databaseSyncCtorCache;
+};
 export class SQLiteRuntimeStore {
     #db;
     constructor(dbPath) {
         try {
             mkdirSync(path.dirname(dbPath), { recursive: true });
-            this.#db = new DatabaseSync(dbPath);
+            const DatabaseSyncCtor = resolveDatabaseSyncConstructor();
+            this.#db = new DatabaseSyncCtor(dbPath);
             this.#initialize();
         }
         catch (error) {
+            if (error instanceof RuntimeStoreError) {
+                throw error;
+            }
             throw new RuntimeStoreError("ERR_RUNTIME_STORE_UNAVAILABLE", "runtime store unavailable", {
                 cause: error
             });

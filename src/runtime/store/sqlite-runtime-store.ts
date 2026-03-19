@@ -1,6 +1,7 @@
-import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 
 export type RuntimeRunStatus = "running" | "succeeded" | "failed";
 
@@ -89,6 +90,8 @@ export class RuntimeStoreError extends Error {
 
 const SCHEMA_VERSION = 1;
 const SUMMARY_MAX_CHARS = 512;
+type DatabaseSyncConstructor = new (path: string) => DatabaseSync;
+let databaseSyncCtorCache: DatabaseSyncConstructor | null | undefined;
 
 const sanitizeSummary = (summary: string | null): string | null => {
   if (summary === null) {
@@ -113,15 +116,37 @@ const isIsoLike = (value: string): boolean =>
 export const resolveRuntimeStorePath = (cwd: string): string =>
   path.join(cwd, ".webenvoy", "runtime", "store.sqlite");
 
+const resolveDatabaseSyncConstructor = (): DatabaseSyncConstructor => {
+  if (databaseSyncCtorCache === null) {
+    throw new Error("node:sqlite unavailable");
+  }
+  if (databaseSyncCtorCache) {
+    return databaseSyncCtorCache;
+  }
+
+  const require = createRequire(import.meta.url);
+  const sqliteModule = require("node:sqlite") as { DatabaseSync?: DatabaseSyncConstructor };
+  if (typeof sqliteModule.DatabaseSync !== "function") {
+    databaseSyncCtorCache = null;
+    throw new Error("node:sqlite DatabaseSync unavailable");
+  }
+  databaseSyncCtorCache = sqliteModule.DatabaseSync;
+  return databaseSyncCtorCache;
+};
+
 export class SQLiteRuntimeStore {
   #db: DatabaseSync;
 
   constructor(dbPath: string) {
     try {
       mkdirSync(path.dirname(dbPath), { recursive: true });
-      this.#db = new DatabaseSync(dbPath);
+      const DatabaseSyncCtor = resolveDatabaseSyncConstructor();
+      this.#db = new DatabaseSyncCtor(dbPath);
       this.#initialize();
     } catch (error) {
+      if (error instanceof RuntimeStoreError) {
+        throw error;
+      }
       throw new RuntimeStoreError("ERR_RUNTIME_STORE_UNAVAILABLE", "runtime store unavailable", {
         cause: error
       });

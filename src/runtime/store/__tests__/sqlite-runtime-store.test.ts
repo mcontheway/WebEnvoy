@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -12,6 +12,23 @@ import {
 } from "../sqlite-runtime-store.js";
 
 const tempDirs: string[] = [];
+type DatabaseSyncCtor = new (path: string) => {
+  prepare: (sql: string) => { run: (...args: unknown[]) => unknown };
+  close: () => void;
+};
+
+const resolveDatabaseSync = (): DatabaseSyncCtor | null => {
+  try {
+    const require = createRequire(import.meta.url);
+    const sqliteModule = require("node:sqlite") as { DatabaseSync?: DatabaseSyncCtor };
+    return typeof sqliteModule.DatabaseSync === "function" ? sqliteModule.DatabaseSync : null;
+  } catch {
+    return null;
+  }
+};
+
+const DatabaseSync = resolveDatabaseSync();
+const describeWithSqlite = DatabaseSync ? describe : describe.skip;
 
 afterEach(async () => {
   while (tempDirs.length > 0) {
@@ -28,7 +45,7 @@ const createTempCwd = async (): Promise<string> => {
   return cwd;
 };
 
-describe("sqlite-runtime-store", () => {
+describeWithSqlite("sqlite-runtime-store", () => {
   it("initializes schema with WAL and schema version", async () => {
     const cwd = await createTempCwd();
     const dbPath = resolveRuntimeStorePath(cwd);
@@ -192,7 +209,8 @@ describe("sqlite-runtime-store", () => {
     const store = new SQLiteRuntimeStore(dbPath);
     store.close();
 
-    const db = new DatabaseSync(dbPath);
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    const db = new DatabaseSyncCtor(dbPath);
     db.prepare("UPDATE runtime_store_meta SET value = '999' WHERE key = 'schema_version'").run();
     db.close();
 
