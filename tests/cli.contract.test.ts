@@ -234,7 +234,7 @@ describe("webenvoy cli contract", () => {
   });
 
   it("returns structured input validation error for xhs.search without ability envelope", () => {
-    const result = runCli(["xhs.search"]);
+    const result = runCli(["xhs.search", "--profile", "xhs_account_001"]);
     expect(result.status).toBe(2);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
@@ -253,6 +253,8 @@ describe("webenvoy cli contract", () => {
   it("returns capability_result for xhs.search fixture success path", () => {
     const result = runCli([
       "xhs.search",
+      "--profile",
+      "xhs_account_001",
       "--params",
       JSON.stringify({
         ability: {
@@ -287,6 +289,8 @@ describe("webenvoy cli contract", () => {
   it("returns structured execution details for xhs.search pending path", () => {
     const result = runCli([
       "xhs.search",
+      "--profile",
+      "xhs_account_001",
       "--params",
       JSON.stringify({
         ability: {
@@ -318,6 +322,8 @@ describe("webenvoy cli contract", () => {
   it("returns structured output mapping details for xhs.search bad output path", () => {
     const result = runCli([
       "xhs.search",
+      "--profile",
+      "xhs_account_001",
       "--params",
       JSON.stringify({
         ability: {
@@ -343,6 +349,32 @@ describe("webenvoy cli contract", () => {
           stage: "output_mapping",
           reason: "CAPABILITY_RESULT_MISSING"
         }
+      }
+    });
+  });
+
+  it("requires profile for xhs.search", () => {
+    const result = runCli([
+      "xhs.search",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        }
+      })
+    ]);
+    expect(result.status).toBe(2);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS"
       }
     });
   });

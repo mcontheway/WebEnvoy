@@ -127,6 +127,7 @@ export const xhsCommands = (): CommandDefinition[] => [
   {
     name: "xhs.search",
     status: "implemented",
+    requiresProfile: true,
     handler: xhsSearch
   }
 ];

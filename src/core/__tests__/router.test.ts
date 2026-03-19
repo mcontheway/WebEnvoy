@@ -49,7 +49,8 @@ describe("executeCommand", () => {
       executeCommand(
         {
           ...baseContext,
-          command: "xhs.search"
+          command: "xhs.search",
+          profile: "xhs_account_001"
         },
         createCommandRegistry()
       )
@@ -67,6 +68,7 @@ describe("executeCommand", () => {
       {
         ...baseContext,
         command: "xhs.search",
+        profile: "xhs_account_001",
         params: {
           ability: {
             id: "xhs.note.search.v1",

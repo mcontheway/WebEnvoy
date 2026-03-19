@@ -89,6 +89,7 @@ export const xhsCommands = () => [
     {
         name: "xhs.search",
         status: "implemented",
+        requiresProfile: true,
         handler: xhsSearch
     }
 ];
