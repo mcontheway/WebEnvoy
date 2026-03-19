@@ -3,6 +3,7 @@ import type { JsonObject, RuntimeContext } from "../../core/types.js";
 import {
   SQLiteRuntimeStore,
   type AppendRunEventInput,
+  type UpsertRunInput,
   resolveRuntimeStorePath
 } from "./sqlite-runtime-store.js";
 
@@ -39,42 +40,55 @@ const buildEvent = (
   ...input
 });
 
-export class RuntimeStoreRecorder {
-  #store: SQLiteRuntimeStore;
+interface RuntimeStoreWriter {
+  upsertRun(input: UpsertRunInput): Promise<unknown>;
+  appendRunEvent(input: AppendRunEventInput): Promise<unknown>;
+  close(): void;
+}
 
-  constructor(cwd: string) {
-    this.#store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+export class RuntimeStoreRecorder {
+  #store: RuntimeStoreWriter;
+  #startedAtByRunId = new Map<string, string>();
+
+  constructor(cwd: string, store?: RuntimeStoreWriter) {
+    this.#store = store ?? new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
   }
 
   close(): void {
     this.#store.close();
   }
 
-  async recordStart(context: RuntimeContext): Promise<void> {
-    try {
-      await this.#store.upsertRun({
-        runId: context.run_id,
-        sessionId: null,
-        profileName: context.profile ?? "anonymous",
-        command: context.command,
-        status: "running",
-        startedAt: new Date().toISOString(),
-        endedAt: null,
-        errorCode: null
-      });
-      await this.#store.appendRunEvent(
-        buildEvent(context, {
-          stage: "boot",
-          component: "cli",
-          eventType: "started",
-          diagnosisCategory: null,
-          failurePoint: null,
-          summary: "command started"
-        })
-      );
-    } catch {
-      // Best effort in first implementation slice; should not affect CLI response contract.
+  #ensureStartedAt(runId: string): string {
+    const existing = this.#startedAtByRunId.get(runId);
+    if (existing) {
+      return existing;
     }
+    const startedAt = new Date().toISOString();
+    this.#startedAtByRunId.set(runId, startedAt);
+    return startedAt;
+  }
+
+  async recordStart(context: RuntimeContext): Promise<void> {
+    await this.#store.upsertRun({
+      runId: context.run_id,
+      sessionId: null,
+      profileName: context.profile ?? "anonymous",
+      command: context.command,
+      status: "running",
+      startedAt: this.#ensureStartedAt(context.run_id),
+      endedAt: null,
+      errorCode: null
+    });
+    await this.#store.appendRunEvent(
+      buildEvent(context, {
+        stage: "boot",
+        component: "cli",
+        eventType: "started",
+        diagnosisCategory: null,
+        failurePoint: null,
+        summary: "command started"
+      })
+    );
   }
 
   async recordSuccess(context: RuntimeContext, summary: JsonObject): Promise<void> {
@@ -85,7 +99,7 @@ export class RuntimeStoreRecorder {
         profileName: context.profile ?? "anonymous",
         command: context.command,
         status: "succeeded",
-        startedAt: new Date().toISOString(),
+        startedAt: this.#ensureStartedAt(context.run_id),
         endedAt: new Date().toISOString(),
         errorCode: null
       });
@@ -99,8 +113,8 @@ export class RuntimeStoreRecorder {
           summary: toSummaryText(summary)
         })
       );
-    } catch {
-      // Best effort in first implementation slice; should not affect CLI response contract.
+    } finally {
+      this.#startedAtByRunId.delete(context.run_id);
     }
   }
 
@@ -112,7 +126,7 @@ export class RuntimeStoreRecorder {
         profileName: context.profile ?? "anonymous",
         command: context.command,
         status: "failed",
-        startedAt: new Date().toISOString(),
+        startedAt: this.#ensureStartedAt(context.run_id),
         endedAt: new Date().toISOString(),
         errorCode: error.code
       });
@@ -126,16 +140,11 @@ export class RuntimeStoreRecorder {
           summary: `${error.code}: ${error.message}`
         })
       );
-    } catch {
-      // Best effort in first implementation slice; should not affect CLI response contract.
+    } finally {
+      this.#startedAtByRunId.delete(context.run_id);
     }
   }
 }
 
-export const createRuntimeStoreRecorder = (cwd: string): RuntimeStoreRecorder | null => {
-  try {
-    return new RuntimeStoreRecorder(cwd);
-  } catch {
-    return null;
-  }
-};
+export const createRuntimeStoreRecorder = (cwd: string): RuntimeStoreRecorder =>
+  new RuntimeStoreRecorder(cwd);

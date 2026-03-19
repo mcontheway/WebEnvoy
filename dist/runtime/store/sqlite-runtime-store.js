@@ -11,6 +11,8 @@ export class RuntimeStoreError extends Error {
 }
 const SCHEMA_VERSION = 1;
 const SUMMARY_MAX_CHARS = 512;
+const SQLITE_BUSY_MESSAGE = /SQLITE_BUSY|database is locked/i;
+const SQLITE_OPEN_RETRY_LIMIT = 3;
 let databaseSyncCtorCache;
 const sanitizeSummary = (summary) => {
     if (summary === null) {
@@ -27,6 +29,11 @@ const sanitizeSummary = (summary) => {
 };
 const isIsoLike = (value) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value);
 export const resolveRuntimeStorePath = (cwd) => path.join(cwd, ".webenvoy", "runtime", "store.sqlite");
+const sleepSync = (milliseconds) => {
+    const buffer = new SharedArrayBuffer(4);
+    const view = new Int32Array(buffer);
+    Atomics.wait(view, 0, 0, milliseconds);
+};
 const resolveDatabaseSyncConstructor = () => {
     if (databaseSyncCtorCache === null) {
         throw new Error("node:sqlite unavailable");
@@ -46,23 +53,50 @@ const resolveDatabaseSyncConstructor = () => {
 export class SQLiteRuntimeStore {
     #db;
     constructor(dbPath) {
+        let lastError;
         try {
             mkdirSync(path.dirname(dbPath), { recursive: true });
             const DatabaseSyncCtor = resolveDatabaseSyncConstructor();
-            this.#db = new DatabaseSyncCtor(dbPath);
-            this.#initialize();
+            for (let attempt = 0; attempt <= SQLITE_OPEN_RETRY_LIMIT; attempt += 1) {
+                try {
+                    this.#db = new DatabaseSyncCtor(dbPath);
+                    this.#initialize();
+                    return;
+                }
+                catch (error) {
+                    try {
+                        this.#db?.close();
+                    }
+                    catch {
+                        // Ignore cleanup failure in retry loop.
+                    }
+                    if (error instanceof RuntimeStoreError &&
+                        error.code === "ERR_RUNTIME_STORE_SCHEMA_MISMATCH") {
+                        throw error;
+                    }
+                    if (error instanceof Error && SQLITE_BUSY_MESSAGE.test(error.message) && attempt < SQLITE_OPEN_RETRY_LIMIT) {
+                        sleepSync(25 * (attempt + 1));
+                        lastError = error;
+                        continue;
+                    }
+                    lastError = error;
+                    break;
+                }
+            }
         }
         catch (error) {
-            if (error instanceof RuntimeStoreError) {
-                throw error;
-            }
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_UNAVAILABLE", "runtime store unavailable", {
-                cause: error
-            });
+            lastError = error;
         }
+        if (lastError instanceof RuntimeStoreError) {
+            throw lastError;
+        }
+        throw new RuntimeStoreError("ERR_RUNTIME_STORE_UNAVAILABLE", "runtime store unavailable", {
+            cause: lastError
+        });
     }
     #initialize() {
         this.#db.exec("PRAGMA journal_mode=WAL;");
+        this.#db.exec("PRAGMA busy_timeout=2000;");
         this.#db.exec(`
       CREATE TABLE IF NOT EXISTS runtime_store_meta (
         key TEXT PRIMARY KEY,
@@ -112,58 +146,81 @@ export class SQLiteRuntimeStore {
     close() {
         this.#db.close();
     }
+    #toStoreDbError(error) {
+        if (error instanceof RuntimeStoreError) {
+            return error;
+        }
+        if (error instanceof Error && SQLITE_BUSY_MESSAGE.test(error.message)) {
+            return new RuntimeStoreError("ERR_RUNTIME_STORE_CONFLICT", "runtime store write conflict", {
+                cause: error
+            });
+        }
+        return new RuntimeStoreError("ERR_RUNTIME_STORE_UNAVAILABLE", "runtime store unavailable", {
+            cause: error
+        });
+    }
     async upsertRun(input) {
         this.#assertUpsertRunInput(input);
-        const nowIso = new Date().toISOString();
-        const existing = this.#db
-            .prepare("SELECT run_id FROM runtime_runs WHERE run_id = ?")
-            .get(input.runId);
-        const created = !existing;
-        this.#db
-            .prepare(`
-        INSERT INTO runtime_runs(
-          run_id, session_id, profile_name, command, status, started_at, ended_at, error_code, created_at, updated_at
-        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(run_id) DO UPDATE SET
-          session_id = excluded.session_id,
-          profile_name = excluded.profile_name,
-          command = excluded.command,
-          status = excluded.status,
-          started_at = excluded.started_at,
-          ended_at = excluded.ended_at,
-          error_code = excluded.error_code,
-          updated_at = excluded.updated_at
-      `)
-            .run(input.runId, input.sessionId, input.profileName, input.command, input.status, input.startedAt, input.endedAt, input.errorCode, nowIso, nowIso);
-        return {
-            run_id: input.runId,
-            status: input.status,
-            created,
-            updated_at: nowIso
-        };
+        try {
+            const nowIso = new Date().toISOString();
+            const existing = this.#db
+                .prepare("SELECT run_id FROM runtime_runs WHERE run_id = ?")
+                .get(input.runId);
+            const created = !existing;
+            this.#db
+                .prepare(`
+          INSERT INTO runtime_runs(
+            run_id, session_id, profile_name, command, status, started_at, ended_at, error_code, created_at, updated_at
+          ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(run_id) DO UPDATE SET
+            session_id = excluded.session_id,
+            profile_name = excluded.profile_name,
+            command = excluded.command,
+            status = excluded.status,
+            started_at = excluded.started_at,
+            ended_at = excluded.ended_at,
+            error_code = excluded.error_code,
+            updated_at = excluded.updated_at
+        `)
+                .run(input.runId, input.sessionId, input.profileName, input.command, input.status, input.startedAt, input.endedAt, input.errorCode, nowIso, nowIso);
+            return {
+                run_id: input.runId,
+                status: input.status,
+                created,
+                updated_at: nowIso
+            };
+        }
+        catch (error) {
+            throw this.#toStoreDbError(error);
+        }
     }
     async appendRunEvent(input) {
         this.#assertAppendEventInput(input);
-        const runExists = this.#db
-            .prepare("SELECT run_id FROM runtime_runs WHERE run_id = ?")
-            .get(input.runId);
-        if (!runExists) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_RUN_NOT_FOUND", "run not found");
+        try {
+            const runExists = this.#db
+                .prepare("SELECT run_id FROM runtime_runs WHERE run_id = ?")
+                .get(input.runId);
+            if (!runExists) {
+                throw new RuntimeStoreError("ERR_RUNTIME_STORE_RUN_NOT_FOUND", "run not found");
+            }
+            const eventSummary = sanitizeSummary(input.summary);
+            const createdAt = new Date().toISOString();
+            const result = this.#db
+                .prepare(`
+        INSERT INTO runtime_events(
+          run_id, event_time, stage, component, event_type, diagnosis_category, failure_point, summary, created_at
+        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+                .run(input.runId, input.eventTime, input.stage, input.component, input.eventType, input.diagnosisCategory, input.failurePoint, eventSummary, createdAt);
+            return {
+                run_id: input.runId,
+                event_id: Number(result.lastInsertRowid),
+                event_time: input.eventTime
+            };
         }
-        const eventSummary = sanitizeSummary(input.summary);
-        const createdAt = new Date().toISOString();
-        const result = this.#db
-            .prepare(`
-      INSERT INTO runtime_events(
-        run_id, event_time, stage, component, event_type, diagnosis_category, failure_point, summary, created_at
-      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `)
-            .run(input.runId, input.eventTime, input.stage, input.component, input.eventType, input.diagnosisCategory, input.failurePoint, eventSummary, createdAt);
-        return {
-            run_id: input.runId,
-            event_id: Number(result.lastInsertRowid),
-            event_time: input.eventTime
-        };
+        catch (error) {
+            throw this.#toStoreDbError(error);
+        }
     }
     async getRunTrace(runId) {
         if (!runId.trim()) {

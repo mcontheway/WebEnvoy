@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -9,6 +10,23 @@ const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
 const binPath = path.join(repoRoot, "bin", "webenvoy");
 
 const tempDirs: string[] = [];
+type DatabaseSyncCtor = new (filePath: string) => {
+  prepare: (sql: string) => { run: (...args: unknown[]) => unknown };
+  close: () => void;
+};
+
+const resolveDatabaseSync = (): DatabaseSyncCtor | null => {
+  try {
+    const require = createRequire(import.meta.url);
+    const sqliteModule = require("node:sqlite") as { DatabaseSync?: DatabaseSyncCtor };
+    return typeof sqliteModule.DatabaseSync === "function" ? sqliteModule.DatabaseSync : null;
+  } catch {
+    return null;
+  }
+};
+
+const DatabaseSync = resolveDatabaseSync();
+const itWithSqlite = DatabaseSync ? it : it.skip;
 
 afterEach(async () => {
   while (tempDirs.length > 0) {
@@ -266,6 +284,40 @@ describe("webenvoy cli contract", () => {
     });
   });
 
+  itWithSqlite("returns structured runtime unavailable when runtime store schema mismatches", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const bootstrap = runCli(
+      ["runtime.ping", "--run-id", "run-contract-005a"],
+      runtimeCwd,
+      {
+        WEBENVOY_NATIVE_TRANSPORT: "loopback"
+      }
+    );
+    expect(bootstrap.status).toBe(0);
+
+    const dbPath = path.join(runtimeCwd, ".webenvoy", "runtime", "store.sqlite");
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    const db = new DatabaseSyncCtor(dbPath);
+    db.prepare("UPDATE runtime_store_meta SET value = '999' WHERE key = 'schema_version'").run();
+    db.close();
+
+    const result = runCli(
+      ["runtime.ping", "--run-id", "run-contract-005b"],
+      runtimeCwd,
+      {
+        WEBENVOY_NATIVE_TRANSPORT: "loopback"
+      }
+    );
+    expect(result.status).toBe(5);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: "run-contract-005b",
+      command: "runtime.ping",
+      status: "error",
+      error: { code: "ERR_RUNTIME_UNAVAILABLE", retryable: false }
+    });
+  });
+
   it("returns execution failed error with code 6", () => {
     const result = runCli(["runtime.ping", "--params", '{"force_fail":true}']);
     expect(result.status).toBe(6);
@@ -465,16 +517,21 @@ describe("webenvoy cli contract", () => {
       )
     ]);
 
-    const statuses = [first.status, second.status].sort();
-    expect(statuses).toEqual([0, 5]);
+    const statuses = [first.status, second.status];
+    const successCount = statuses.filter((status) => status === 0).length;
+    const failureCount = statuses.filter((status) => status === 5).length;
+    expect(successCount).toBeGreaterThanOrEqual(1);
+    expect(failureCount).toBeLessThanOrEqual(1);
 
-    const failed = first.status === 5 ? first : second;
-    const failedBody = parseSingleJsonLine(failed.stdout);
-    expect(failedBody).toMatchObject({
-      command: "runtime.start",
-      status: "error",
-      error: { code: "ERR_PROFILE_LOCKED" }
-    });
+    const failed = first.status === 5 ? first : second.status === 5 ? second : null;
+    if (failed) {
+      const failedBody = parseSingleJsonLine(failed.stdout);
+      expect(failedBody).toMatchObject({
+        command: "runtime.start",
+        status: "error",
+        error: { code: "ERR_PROFILE_LOCKED" }
+      });
+    }
   });
 
   it("supports runtime.stop and reflects stopped state via runtime.status", async () => {

@@ -13,9 +13,26 @@ import { buildErrorResponse, buildSuccessResponse, writeJsonLine } from "./core/
 import { executeCommand } from "./core/router.js";
 import type { RuntimeContext } from "./core/types.js";
 import { createRuntimeStoreRecorder } from "./runtime/store/runtime-store-recorder.js";
+import { RuntimeStoreError } from "./runtime/store/sqlite-runtime-store.js";
 
-const normalizeCliError = (error: unknown): CliError =>
-  error instanceof CliError ? error : normalizeExecutionError(error);
+const isRuntimeStoreError = (error: unknown): error is RuntimeStoreError =>
+  error instanceof RuntimeStoreError;
+
+const toRuntimeStoreCliError = (error: RuntimeStoreError): CliError =>
+  new CliError("ERR_RUNTIME_UNAVAILABLE", `运行记录存储失败: ${error.code}`, {
+    retryable: error.code !== "ERR_RUNTIME_STORE_SCHEMA_MISMATCH",
+    cause: error
+  });
+
+const normalizeCliError = (error: unknown): CliError => {
+  if (error instanceof CliError) {
+    return error;
+  }
+  if (isRuntimeStoreError(error)) {
+    return toRuntimeStoreCliError(error);
+  }
+  return normalizeExecutionError(error);
+};
 
 export const runCli = async (
   argv: string[],
@@ -31,27 +48,33 @@ export const runCli = async (
   const commandHint = getCommandHint(argv);
   const runIdHint = getRunIdHint(argv);
   let runtimeContext: RuntimeContext | null = null;
-  let recorder = createRuntimeStoreRecorder(cwd);
+  let recorder: ReturnType<typeof createRuntimeStoreRecorder> | null = null;
 
   try {
     const parsed = parseArgv(argv);
     const context = buildRuntimeContext(parsed, cwd);
     runtimeContext = context;
-    await recorder?.recordStart(context);
+    recorder = createRuntimeStoreRecorder(cwd);
+    await recorder.recordStart(context);
     const summary = await executeCommand(context, createCommandRegistry());
-    await recorder?.recordSuccess(context, summary);
+    await recorder.recordSuccess(context, summary);
 
     writeJsonLine(stdout, buildSuccessResponse(context, summary));
     if (context.command === "runtime.help") {
       stderr.write("Use --params to pass structured JSON object parameters.\n");
     }
-    recorder?.close();
     return successExitCode();
   } catch (error) {
-    const cliError = normalizeCliError(error);
-    if (runtimeContext) {
-      await recorder?.recordFailure(runtimeContext, cliError);
+    let finalError: unknown = error;
+    if (runtimeContext && recorder && !isRuntimeStoreError(error)) {
+      const commandError = normalizeCliError(error);
+      try {
+        await recorder.recordFailure(runtimeContext, commandError);
+      } catch (recordError) {
+        finalError = recordError;
+      }
     }
+    const cliError = normalizeCliError(finalError);
     const runId =
       runtimeContext?.run_id ??
       (runIdHint && isValidRunId(runIdHint) ? runIdHint : generateRunId());
@@ -61,8 +84,9 @@ export const runCli = async (
     if (cliError.code === "ERR_CLI_INVALID_ARGS") {
       stderr.write(`${cliError.message}\n`);
     }
-    recorder?.close();
     return exitCodeForError(cliError.code);
+  } finally {
+    recorder?.close();
   }
 };
 
