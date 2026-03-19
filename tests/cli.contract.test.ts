@@ -139,6 +139,50 @@ describe("webenvoy cli contract", () => {
     await assertLockMissing(path.join(runtimeCwd, ".webenvoy", "profiles", profileName));
   });
 
+  it("rejects empty proxyUrl for runtime.start and runtime.login", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "empty_proxy_profile",
+        "--run-id",
+        "run-contract-007",
+        "--params",
+        "{\"proxyUrl\":\"\"}"
+      ],
+      runtimeCwd
+    );
+    expect(start.status).toBe(5);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      command: "runtime.start",
+      status: "error",
+      error: { code: "ERR_PROFILE_INVALID" }
+    });
+
+    const login = runCli(
+      [
+        "runtime.login",
+        "--profile",
+        "empty_proxy_profile",
+        "--run-id",
+        "run-contract-008",
+        "--params",
+        "{\"proxyUrl\":\"   \"}"
+      ],
+      runtimeCwd
+    );
+    expect(login.status).toBe(5);
+    const loginBody = parseSingleJsonLine(login.stdout);
+    expect(loginBody).toMatchObject({
+      command: "runtime.login",
+      status: "error",
+      error: { code: "ERR_PROFILE_INVALID" }
+    });
+  });
+
   it("returns runtime unavailable error with code 5", () => {
     const result = runCli([
       "runtime.ping",
@@ -408,7 +452,7 @@ describe("webenvoy cli contract", () => {
     });
   });
 
-  it("marks disconnected in runtime.status when lock heartbeat is stale", async () => {
+  it("keeps runtime.status as pure read even when lock heartbeat is stale", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const start = runCli(
       ["runtime.start", "--profile", "stale_profile", "--run-id", "run-contract-501"],
@@ -435,9 +479,9 @@ describe("webenvoy cli contract", () => {
       status: "success",
       summary: {
         profile: "stale_profile",
-        profileState: "disconnected",
-        browserState: "disconnected",
-        lockHeld: false
+        profileState: "ready",
+        browserState: "ready",
+        lockHeld: true
       }
     });
 
@@ -447,7 +491,7 @@ describe("webenvoy cli contract", () => {
     expect(afterStatusLock).toBe(beforeStatusLock);
   });
 
-  it("auto-reclaims stale lock on runtime.start", async () => {
+  it("does not reclaim stale-looking lock without lease renewal mechanism", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const firstStart = runCli(
       ["runtime.start", "--profile", "reclaim_profile", "--run-id", "run-contract-601"],
@@ -468,22 +512,13 @@ describe("webenvoy cli contract", () => {
       ["runtime.start", "--profile", "reclaim_profile", "--run-id", "run-contract-602"],
       runtimeCwd
     );
-    expect(secondStart.status).toBe(0);
+    expect(secondStart.status).toBe(5);
     const secondBody = parseSingleJsonLine(secondStart.stdout);
     expect(secondBody).toMatchObject({
       command: "runtime.start",
-      status: "success",
-      summary: {
-        profile: "reclaim_profile",
-        profileState: "ready",
-        browserState: "ready",
-        lockHeld: true
-      }
+      status: "error",
+      error: { code: "ERR_PROFILE_LOCKED" }
     });
-
-    const updatedLockRaw = await readFile(lockPath, "utf8");
-    const updatedLock = JSON.parse(updatedLockRaw) as Record<string, unknown>;
-    expect(updatedLock.ownerRunId).toBe("run-contract-602");
   });
 
   it("marks disconnected in runtime.status when runtime meta is active but lock is missing", async () => {

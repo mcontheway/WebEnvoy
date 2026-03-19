@@ -1,7 +1,7 @@
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CliError } from "../core/errors.js";
-import { acquireProfileLock, createProfileLock, DEFAULT_LOCK_STALE_MS } from "./profile-lock.js";
+import { createProfileLock } from "./profile-lock.js";
 import { ProfileStore } from "./profile-store.js";
 import { applyProfileProxyBinding, beginLoginSession, beginStartSession, beginStopSession, buildRuntimeSession, markSessionReady, markSessionStopped } from "./runtime-session.js";
 const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
@@ -37,6 +37,9 @@ const parseProxyUrl = (params) => {
     if (typeof value !== "string") {
         throw new CliError("ERR_PROFILE_INVALID", "params.proxyUrl 必须是字符串或 null");
     }
+    if (value.trim().length === 0) {
+        throw new CliError("ERR_PROFILE_INVALID", "params.proxyUrl 不能为空字符串");
+    }
     return value;
 };
 const isStartableProfileState = (state) => state === "uninitialized" || state === "stopped" || state === "disconnected";
@@ -46,14 +49,6 @@ const isLoginableProfileState = (state) => state === "uninitialized" ||
     state === "ready" ||
     state === "logging_in";
 const isRuntimeActiveProfileState = (state) => state === "starting" || state === "ready" || state === "logging_in" || state === "stopping";
-const isLockHeartbeatStale = (lock, nowIso) => {
-    const now = Date.parse(nowIso);
-    const lastHeartbeat = Date.parse(lock.lastHeartbeatAt);
-    if (Number.isNaN(now) || Number.isNaN(lastHeartbeat)) {
-        return true;
-    }
-    return now - lastHeartbeat > DEFAULT_LOCK_STALE_MS;
-};
 const shouldRecoverAsDisconnected = (acquisition, state) => acquisition !== "same-owner" && isRuntimeActiveProfileState(state);
 const shouldConfirmLogin = (params) => params.confirm === true;
 const mapRuntimeError = (error) => {
@@ -237,7 +232,6 @@ export class ProfileRuntimeService {
         }
     }
     async status(input) {
-        const nowIso = isoNow();
         const store = this.#createStore(input.cwd);
         const profileDir = this.#resolveProfileDir(store, input.profile);
         const lockPath = this.#getLockPath(profileDir);
@@ -245,7 +239,7 @@ export class ProfileRuntimeService {
         const lock = await this.#readLock(lockPath);
         const storedProfileState = meta?.profileState ?? "uninitialized";
         const activeState = isRuntimeActiveProfileState(storedProfileState);
-        const healthyLock = lock !== null && !isLockHeartbeatStale(lock, nowIso);
+        const healthyLock = lock !== null;
         const profileState = activeState && !healthyLock ? "disconnected" : storedProfileState;
         const lockHeld = activeState && healthyLock;
         return {
@@ -401,38 +395,9 @@ export class ProfileRuntimeService {
                 await this.#writeLock(input.lockPath, updatedLock);
                 return { lock: updatedLock, acquisition: "same-owner" };
             }
-            let acquireResult;
-            try {
-                acquireResult = acquireProfileLock(existingLock, nextRequest, {
-                    staleAfterMs: DEFAULT_LOCK_STALE_MS
-                });
-            }
-            catch {
-                throw new CliError("ERR_PROFILE_META_CORRUPT", "profile 锁文件损坏");
-            }
-            if (acquireResult.status === "conflict") {
-                throw new CliError("ERR_PROFILE_LOCKED", "profile 当前被其他运行占用", {
-                    retryable: true
-                });
-            }
-            if (acquireResult.status === "acquired") {
-                await this.#writeLock(input.lockPath, acquireResult.lock);
-                return { lock: acquireResult.lock, acquisition: "same-owner" };
-            }
-            await this.#deleteLock(input.lockPath);
-            try {
-                await writeFile(input.lockPath, `${JSON.stringify(acquireResult.lock, null, 2)}\n`, {
-                    encoding: "utf8",
-                    flag: "wx"
-                });
-                return { lock: acquireResult.lock, acquisition: "reclaimed" };
-            }
-            catch (error) {
-                const nodeError = error;
-                if (nodeError.code !== "EEXIST") {
-                    throw error;
-                }
-            }
+            throw new CliError("ERR_PROFILE_LOCKED", "profile 当前被其他运行占用", {
+                retryable: true
+            });
         }
         throw new CliError("ERR_RUNTIME_UNAVAILABLE", "profile 锁获取失败，请重试", {
             retryable: true
