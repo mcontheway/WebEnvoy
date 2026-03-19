@@ -56,3 +56,7 @@ coverage/
 
 # Project specific
 tmp_issue_body.md
+
+# FR-0001 CLI contract requires clean-checkout executable entry.
+!/dist/
+!/dist/**
