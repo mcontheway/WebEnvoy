@@ -1,7 +1,12 @@
 import { CliError } from "../core/errors.js";
 import type { CommandDefinition, RuntimeContext } from "../core/types.js";
+import {
+  NativeMessagingBridge,
+  NativeMessagingTransportError
+} from "../runtime/native-messaging/bridge.js";
 
 const asBoolean = (value: unknown): boolean => value === true;
+const bridge = new NativeMessagingBridge();
 
 const runtimePing = async (context: RuntimeContext) => {
   if (asBoolean(context.params.simulate_runtime_unavailable)) {
@@ -12,9 +17,22 @@ const runtimePing = async (context: RuntimeContext) => {
     throw new Error("forced execution failure");
   }
 
-  return {
-    message: "ok"
-  };
+  try {
+    return await bridge.runtimePing({
+      runId: context.run_id,
+      profile: context.profile,
+      cwd: context.cwd,
+      params: context.params
+    });
+  } catch (error) {
+    if (error instanceof NativeMessagingTransportError) {
+      throw new CliError("ERR_RUNTIME_UNAVAILABLE", `通信链路不可用: ${error.code}`, {
+        retryable: error.retryable,
+        cause: error
+      });
+    }
+    throw error;
+  }
 };
 
 const runtimeHelp = async () => ({
