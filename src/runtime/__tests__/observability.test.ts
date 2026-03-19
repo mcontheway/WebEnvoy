@@ -152,4 +152,30 @@ describe("observability", () => {
     expect(payload.page_state?.partial_observable).toBe(true);
     expect(payload.request_evidence).toBe("none");
   });
+
+  it("sanitizes and bounds failure site target", () => {
+    const payload = buildObservabilityPayload(
+      {
+        page_state: null,
+        key_requests: [],
+        failure_site: {
+          stage: "request",
+          component: "network",
+          target: "https://example.com/api/feed?token=raw-token&signature=deadbeef#frag",
+          summary: "request failed"
+        }
+      },
+      {
+        maxFailureTargetLength: 24
+      }
+    );
+
+    expect(payload.failure_site).not.toBeNull();
+    expect(payload.failure_site?.target).toBe("https://example.com/api/");
+    expect(payload.failure_site?.target).not.toContain("?");
+    expect(payload.failure_site?.target).not.toContain("signature");
+    expect(payload.failure_site?.target_truncated).toBe(true);
+    expect(payload.truncation.truncated).toBe(true);
+    expect(payload.truncation.fields).toContain("failure_site.target");
+  });
 });

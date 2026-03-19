@@ -6,6 +6,7 @@ import {
 
 const DEFAULT_MAX_EVIDENCE_ITEMS = 4;
 const DEFAULT_MAX_EVIDENCE_LENGTH = 160;
+const REDACTED = "[REDACTED]";
 
 export type DiagnosisCategory =
   | "page_changed"
@@ -58,6 +59,23 @@ const truncate = (value: string, maxLength: number): string => {
   return value.slice(0, maxLength);
 };
 
+const sanitizeEvidence = (value: string): string =>
+  value
+    .replace(/\bauthorization\s*:\s*[^\n\r]+/gi, `authorization: ${REDACTED}`)
+    .replace(/\bcookie\s*:\s*[^\n\r]+/gi, `cookie: ${REDACTED}`)
+    .replace(
+      /([?&])(token|access_token|id_token|refresh_token|signature|sig|auth|code)=([^&#\s]+)/gi,
+      (_match, prefix: string, key: string) => `${prefix}${key}=${REDACTED}`
+    )
+    .replace(
+      /\b(token|access_token|id_token|refresh_token|signature|sig|auth|code)\s*=\s*([^&\s,;]+)/gi,
+      (_match, key: string) => `${key}=${REDACTED}`
+    )
+    .replace(
+      /\b(token|access_token|id_token|refresh_token|signature|sig|auth|code)\s*:\s*([^\s,;]+)/gi,
+      (_match, key: string) => `${key}: ${REDACTED}`
+    );
+
 const inferCategory = (signals?: DiagnosisSignals): DiagnosisCategory => {
   if (signals?.runtime_unavailable) {
     return "runtime_unavailable";
@@ -85,7 +103,7 @@ const normalizeEvidence = (
     .map((item) => (typeof item === "string" ? item.trim() : ""))
     .filter((item) => item.length > 0)
     .slice(0, Math.max(0, maxItems))
-    .map((item) => truncate(item, maxLength));
+    .map((item) => truncate(sanitizeEvidence(item), maxLength));
 };
 
 const fallbackFailureSite = (

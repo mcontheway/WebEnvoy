@@ -53,6 +53,36 @@ describe("diagnostics", () => {
     expect(diagnosis.evidence[1]).toHaveLength(40);
   });
 
+  it("redacts sensitive evidence fragments before returning payload", () => {
+    const diagnosis = buildDiagnosis(
+      {
+        category: "request_failed",
+        failure_site: {
+          stage: "request",
+          component: "network",
+          target: "/api/feed",
+          summary: "request failed"
+        },
+        evidence: [
+          "Authorization: Bearer top-secret-token",
+          "Cookie: sid=abc123; token=raw-token",
+          "GET /api/feed?token=raw&signature=abc123",
+          "signature=deadbeef auth: raw-auth-value"
+        ]
+      },
+      {
+        maxEvidenceItems: 4,
+        maxEvidenceLength: 200
+      }
+    );
+
+    expect(diagnosis.evidence[0]).toBe("authorization: [REDACTED]");
+    expect(diagnosis.evidence[1]).toContain("cookie: [REDACTED]");
+    expect(diagnosis.evidence[2]).toContain("?token=[REDACTED]&signature=[REDACTED]");
+    expect(diagnosis.evidence[3]).toContain("signature=[REDACTED]");
+    expect(diagnosis.evidence[3]).toContain("auth: [REDACTED]");
+  });
+
   it("creates minimal unknown diagnosis when no signal is available", () => {
     const diagnosis = createMinimalDiagnosis();
 

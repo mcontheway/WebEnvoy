@@ -2,6 +2,7 @@ const DEFAULT_MAX_REQUESTS = 10;
 const DEFAULT_MAX_TITLE_LENGTH = 120;
 const DEFAULT_MAX_FAILURE_SUMMARY_LENGTH = 160;
 const DEFAULT_MAX_REQUEST_REASON_LENGTH = 120;
+const DEFAULT_MAX_FAILURE_TARGET_LENGTH = 160;
 
 export type ObservabilityCoverage = "complete" | "partial" | "unavailable";
 export type RequestEvidenceState = "available" | "none";
@@ -9,6 +10,7 @@ export type TruncationField =
   | "page_state.title"
   | "key_requests"
   | "key_requests[].failure_reason"
+  | "failure_site.target"
   | "failure_site.summary";
 
 export interface PageStateInput {
@@ -67,6 +69,7 @@ export interface FailureSite {
   stage: string;
   component: string;
   target: string;
+  target_truncated?: boolean;
   summary: string;
   summary_truncated?: boolean;
 }
@@ -88,6 +91,7 @@ export interface ObservabilityOptions {
   maxTitleLength?: number;
   maxFailureSummaryLength?: number;
   maxRequestReasonLength?: number;
+  maxFailureTargetLength?: number;
 }
 
 const nonEmpty = (value: string | null | undefined, fallback: string): string => {
@@ -148,6 +152,21 @@ const pushUniqueField = (fields: TruncationField[], field: TruncationField): voi
   if (!fields.includes(field)) {
     fields.push(field);
   }
+};
+
+const sanitizeFailureTarget = (value: string): string => {
+  const normalized = value.trim();
+  const isAbsolute = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(normalized);
+  const isPathLike =
+    normalized.startsWith("/") || normalized.startsWith("./") || normalized.startsWith("../");
+
+  if (isAbsolute || isPathLike) {
+    return sanitizeUrl(normalized);
+  }
+  if (normalized.includes("?")) {
+    return normalized.split("?", 1)[0] ?? normalized;
+  }
+  return normalized;
 };
 
 export const normalizePageState = (
@@ -237,12 +256,18 @@ export const normalizeFailureSite = (
     return null;
   }
 
+  const maxTargetLength = options?.maxFailureTargetLength ?? DEFAULT_MAX_FAILURE_TARGET_LENGTH;
   const maxSummaryLength = options?.maxFailureSummaryLength ?? DEFAULT_MAX_FAILURE_SUMMARY_LENGTH;
+  const target = truncate(
+    nonEmpty(sanitizeFailureTarget(nonEmpty(input.target, "unknown")), "unknown"),
+    maxTargetLength
+  );
   const summary = truncate(nonEmpty(input.summary, "unknown"), maxSummaryLength);
   return {
     stage: nonEmpty(input.stage, "unknown"),
     component: nonEmpty(input.component, "unknown"),
-    target: nonEmpty(input.target, "unknown"),
+    target: target.value,
+    ...(target.truncated ? { target_truncated: true } : {}),
     summary: summary.value,
     ...(summary.truncated ? { summary_truncated: true } : {})
   };
@@ -269,6 +294,9 @@ export const buildObservabilityPayload = (
   }
 
   const failureSite = normalizeFailureSite(input.failure_site, options);
+  if (failureSite?.target_truncated) {
+    pushUniqueField(truncationFields, "failure_site.target");
+  }
   if (failureSite?.summary_truncated) {
     pushUniqueField(truncationFields, "failure_site.summary");
   }
