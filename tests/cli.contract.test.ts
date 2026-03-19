@@ -143,6 +143,21 @@ const runHeadlessDomProbe = (
   );
 
 const realBrowserContractsEnabled = process.env.WEBENVOY_RUN_REAL_BROWSER === "1";
+const BROWSER_STATE_FILENAME = "__webenvoy_browser_instance.json";
+const BROWSER_CONTROL_FILENAME = "__webenvoy_browser_control.json";
+
+const isPidAlive = (pid: number): boolean => {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    return nodeError.code === "EPERM";
+  }
+};
 
 describe("webenvoy cli contract", () => {
   it("returns success json for runtime.ping", () => {
@@ -615,6 +630,13 @@ describe("webenvoy cli contract", () => {
       runtimeCwd
     );
     expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    const startSummary = startBody.summary as Record<string, unknown>;
+    const profileDir = String(startSummary.profileDir);
+    const browserPid = Number(startSummary.browserPid);
+    const controllerPid = Number(startSummary.controllerPid);
+    expect(browserPid).toBeGreaterThan(0);
+    expect(controllerPid).toBeGreaterThan(0);
 
     const stop = runCli(
       ["runtime.stop", "--profile", "stop_profile", "--run-id", "run-contract-301"],
@@ -631,6 +653,14 @@ describe("webenvoy cli contract", () => {
         browserState: "absent",
         lockHeld: false
       }
+    });
+    expect(isPidAlive(browserPid)).toBe(false);
+    expect(isPidAlive(controllerPid)).toBe(false);
+    await expect(readFile(path.join(profileDir, BROWSER_STATE_FILENAME), "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(readFile(path.join(profileDir, BROWSER_CONTROL_FILENAME), "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
     });
 
     const status = runCli(["runtime.status", "--profile", "stop_profile"], runtimeCwd);

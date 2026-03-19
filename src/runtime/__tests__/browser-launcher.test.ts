@@ -4,7 +4,13 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { BrowserLaunchError, launchBrowser } from "../browser-launcher.js";
+import {
+  BROWSER_CONTROL_FILENAME,
+  BROWSER_STATE_FILENAME,
+  BrowserLaunchError,
+  launchBrowser,
+  shutdownBrowserSession
+} from "../browser-launcher.js";
 
 const tempDirs: string[] = [];
 
@@ -102,15 +108,29 @@ describe("browser-launcher", () => {
       command: "runtime.start",
       profileDir,
       proxyUrl: "http://127.0.0.1:8080",
+      runId: "run-launcher-test-001",
       params: {}
     });
     expect(launched.browserPath).toBe(scriptPath);
     expect(launched.browserPid).toBeGreaterThan(0);
+    expect(launched.controllerPid).toBeGreaterThan(0);
 
     const launchLog = await waitForLaunchLog(logPath);
     expect(launchLog).toContain(`--user-data-dir=${profileDir}`);
     expect(launchLog).toContain("--proxy-server=http://127.0.0.1:8080");
     expect(launchLog).toContain("about:blank");
+
+    await shutdownBrowserSession({
+      profileDir,
+      controllerPid: launched.controllerPid,
+      runId: "run-launcher-test-001"
+    });
+    await expect(readFile(join(profileDir, BROWSER_STATE_FILENAME), "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(readFile(join(profileDir, BROWSER_CONTROL_FILENAME), "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
   });
 
   it("rejects invalid startUrl", async () => {
@@ -122,6 +142,7 @@ describe("browser-launcher", () => {
         command: "runtime.start",
         profileDir: join(tmpdir(), "webenvoy-browser-launcher-profile-invalid"),
         proxyUrl: null,
+        runId: "run-launcher-test-002",
         params: {
           startUrl: "javascript:alert(1)"
         }
@@ -134,13 +155,15 @@ describe("browser-launcher", () => {
 
   it("keeps runtime.login visible by default", async () => {
     const { scriptPath, logPath } = await createMockBrowserExecutable();
+    const profileDir = join(tmpdir(), "webenvoy-browser-launcher-login-visible");
     process.env.WEBENVOY_BROWSER_PATH = scriptPath;
     process.env.WEBENVOY_BROWSER_MOCK_LOG = logPath;
 
-    await launchBrowser({
+    const launched = await launchBrowser({
       command: "runtime.login",
-      profileDir: join(tmpdir(), "webenvoy-browser-launcher-login-visible"),
+      profileDir,
       proxyUrl: null,
+      runId: "run-launcher-test-003",
       params: {
         headless: true
       }
@@ -148,6 +171,11 @@ describe("browser-launcher", () => {
 
     const launchLog = await waitForLaunchLog(logPath);
     expect(launchLog).not.toContain("--headless=new");
+    await shutdownBrowserSession({
+      profileDir,
+      controllerPid: launched.controllerPid,
+      runId: "run-launcher-test-003"
+    });
   });
 
   it("rejects request-scoped browserPath override", async () => {
@@ -159,6 +187,7 @@ describe("browser-launcher", () => {
         command: "runtime.start",
         profileDir: join(tmpdir(), "webenvoy-browser-launcher-reject-override"),
         proxyUrl: null,
+        runId: "run-launcher-test-004",
         params: {
           browserPath: scriptPath
         }
@@ -183,6 +212,7 @@ describe("browser-launcher", () => {
         command: "runtime.start",
         profileDir,
         proxyUrl: null,
+        runId: "run-launcher-test-005",
         params: {}
       })
     ).rejects.toMatchObject({

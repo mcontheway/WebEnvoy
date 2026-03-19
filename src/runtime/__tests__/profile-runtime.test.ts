@@ -14,9 +14,11 @@ const createMockBrowserLauncher = () => ({
   launch: async () => ({
     browserPath: "/mock/chrome",
     browserPid: 999999,
+    controllerPid: 999998,
     launchArgs: ["about:blank"],
     launchedAt: new Date().toISOString()
-  })
+  }),
+  shutdown: async () => undefined
 });
 
 const createTestService = (
@@ -27,7 +29,7 @@ const createTestService = (
     isProcessAlive:
       options?.isProcessAlive ??
       ((pid: number) => {
-        if (pid === 999999) {
+        if (pid === 999999 || pid === 999998) {
           return true;
         }
         if (!Number.isInteger(pid) || pid <= 0) {
@@ -328,11 +330,24 @@ describe("profile-runtime stop rollback", () => {
     expect(meta.lastStoppedAt).toBeTruthy();
   });
 
-  it("does not kill lock owner pid during runtime.stop", async () => {
+  it("stops runtime through browser controller shutdown instead of direct process kill", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-stop-no-kill-"));
     tempDirs.push(baseDir);
+    const shutdownCalls: Array<{ profileDir: string; controllerPid: number; runId: string }> = [];
     const service = createTestService({
-      isProcessAlive: (pid: number) => pid === 999999
+      isProcessAlive: (pid: number) => pid === 999998,
+      browserLauncher: {
+        launch: async () => ({
+          browserPath: "/mock/chrome",
+          browserPid: 999999,
+          controllerPid: 999998,
+          launchArgs: ["about:blank"],
+          launchedAt: new Date().toISOString()
+        }),
+        shutdown: async (input) => {
+          shutdownCalls.push(input);
+        }
+      }
     });
     const killSpy = vi.spyOn(process, "kill").mockImplementation(
       (() => true) as typeof process.kill
@@ -357,8 +372,13 @@ describe("profile-runtime stop rollback", () => {
         profileState: "stopped",
         lockHeld: false
       });
-      expect(killSpy).not.toHaveBeenCalledWith(999999, "SIGTERM");
-      expect(killSpy).not.toHaveBeenCalledWith(999999, "SIGKILL");
+      expect(shutdownCalls).toHaveLength(1);
+      expect(shutdownCalls[0]).toMatchObject({
+        controllerPid: 999998,
+        runId: "run-runtime-test-131"
+      });
+      expect(killSpy).not.toHaveBeenCalledWith(999998, "SIGTERM");
+      expect(killSpy).not.toHaveBeenCalledWith(999998, "SIGKILL");
     } finally {
       killSpy.mockRestore();
     }
@@ -466,7 +486,7 @@ describe("profile-runtime stale lock reclaim", () => {
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as ProfileLock;
     expect(lock.ownerRunId).toBe("run-runtime-test-402");
-    expect(lock.ownerPid).toBe(999999);
+    expect(lock.ownerPid).toBe(999998);
 
     const metaPath = join(
       baseDir,

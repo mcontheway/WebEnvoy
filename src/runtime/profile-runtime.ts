@@ -6,6 +6,7 @@ import type { JsonObject } from "../core/types.js";
 import {
   BrowserLaunchError,
   launchBrowser,
+  shutdownBrowserSession,
   type BrowserLaunchResult
 } from "./browser-launcher.js";
 import {
@@ -65,8 +66,14 @@ interface BrowserLauncherLike {
     command: "runtime.start" | "runtime.login";
     profileDir: string;
     proxyUrl: string | null;
+    runId: string;
     params: JsonObject;
   }): Promise<BrowserLaunchResult>;
+  shutdown(input: {
+    profileDir: string;
+    controllerPid: number;
+    runId: string;
+  }): Promise<void>;
 }
 
 const isoNow = (): string => new Date().toISOString();
@@ -264,7 +271,8 @@ export class ProfileRuntimeService {
         }
       });
     this.#browserLauncher = options?.browserLauncher ?? {
-      launch: launchBrowser
+      launch: launchBrowser,
+      shutdown: shutdownBrowserSession
     };
   }
 
@@ -284,7 +292,7 @@ export class ProfileRuntimeService {
       lockAcquireResult.acquisition === "same-owner" &&
       lockAcquireResult.lock.ownerPid !== process.pid;
     let startSucceeded = false;
-    let launchedBrowserPid: number | null = null;
+    let launchedControllerPid: number | null = null;
 
     try {
       let existingMeta = await this.#readOrInitializeMeta(store, input.profile, nowIso);
@@ -321,10 +329,11 @@ export class ProfileRuntimeService {
         command: "runtime.start",
         profileDir,
         proxyUrl: session.proxyBinding?.url ?? null,
+        runId: input.runId,
         params: input.params
       });
-      launchedBrowserPid = browserLaunch.browserPid;
-      await this.#updateLockOwnerPid(lockPath, input.runId, browserLaunch.browserPid, nowIso);
+      launchedControllerPid = browserLaunch.controllerPid;
+      await this.#updateLockOwnerPid(lockPath, input.runId, browserLaunch.controllerPid, nowIso);
       session = markSessionReady(session);
 
       const nextMeta = this.#patchMeta(recoveredMeta, {
@@ -350,6 +359,7 @@ export class ProfileRuntimeService {
         lockHeld: true,
         browserPath: browserLaunch.browserPath,
         browserPid: browserLaunch.browserPid,
+        controllerPid: browserLaunch.controllerPid,
         recoverableSession: buildRecoverableSessionSummary(nextMeta),
         startedAt: nowIso
       };
@@ -357,7 +367,7 @@ export class ProfileRuntimeService {
       throw mapRuntimeError(error);
     } finally {
       if (!startSucceeded) {
-        await this.#terminateProcess(launchedBrowserPid);
+        await this.#terminateProcess(launchedControllerPid);
         if (!keepExistingLockOnFailure) {
           await this.#rollbackLockOnStartFailure(lockPath, input.runId);
         }
@@ -381,7 +391,7 @@ export class ProfileRuntimeService {
     });
     let loginSucceeded = false;
     let keepLockOnFailure = false;
-    let launchedBrowserPid: number | null = null;
+    let launchedControllerPid: number | null = null;
 
     try {
       let existingMeta = await this.#readOrInitializeMeta(store, input.profile, nowIso);
@@ -454,10 +464,11 @@ export class ProfileRuntimeService {
           command: "runtime.login",
           profileDir,
           proxyUrl: session.proxyBinding?.url ?? null,
+          runId: input.runId,
           params: input.params
         });
-        launchedBrowserPid = browserLaunch.browserPid;
-        await this.#updateLockOwnerPid(lockPath, input.runId, browserLaunch.browserPid, nowIso);
+        launchedControllerPid = browserLaunch.controllerPid;
+        await this.#updateLockOwnerPid(lockPath, input.runId, browserLaunch.controllerPid, nowIso);
       }
 
       await store.writeMeta(
@@ -521,7 +532,7 @@ export class ProfileRuntimeService {
       throw mapRuntimeError(error);
     } finally {
       if (!loginSucceeded && !keepLockOnFailure) {
-        await this.#terminateProcess(launchedBrowserPid);
+        await this.#terminateProcess(launchedControllerPid);
         await this.#rollbackLockOnStartFailure(lockPath, input.runId);
       }
     }
@@ -592,6 +603,11 @@ export class ProfileRuntimeService {
 
     const previousMeta = existingMeta;
     try {
+      await this.#browserLauncher.shutdown({
+        profileDir,
+        controllerPid: lock.ownerPid,
+        runId: input.runId
+      });
       await store.writeMeta(
         input.profile,
         this.#patchMeta(existingMeta, {

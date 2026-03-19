@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { access, stat } from "node:fs/promises";
-import { delimiter, isAbsolute, join } from "node:path";
+import { access, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { delimiter, dirname, isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 const KNOWN_BROWSER_CANDIDATES = {
     darwin: [
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -42,6 +44,15 @@ export class BrowserLaunchError extends Error {
         this.code = code;
     }
 }
+export const BROWSER_STATE_FILENAME = "__webenvoy_browser_instance.json";
+export const BROWSER_CONTROL_FILENAME = "__webenvoy_browser_control.json";
+const READY_WAIT_MAX_ATTEMPTS = 20;
+const READY_WAIT_INTERVAL_MS = 150;
+const READY_MIN_UPTIME_MS = 600;
+const READY_CONFIRM_DELAY_MS = 120;
+const SUPERVISOR_STATE_WAIT_ATTEMPTS = 40;
+const SUPERVISOR_STATE_WAIT_INTERVAL_MS = 80;
+const SUPERVISOR_SHUTDOWN_TIMEOUT_MS = 4_000;
 const parseOptionalString = (value) => {
     if (value === undefined || value === null) {
         return null;
@@ -101,6 +112,61 @@ const isFreshReadyMarker = async (path, launchedAtMs) => {
         return false;
     }
 };
+const sleep = async (ms) => new Promise((resolve) => {
+    setTimeout(resolve, ms);
+});
+const isProcessAlive = (pid) => {
+    if (!Number.isInteger(pid) || pid <= 0) {
+        return false;
+    }
+    try {
+        process.kill(pid, 0);
+        return true;
+    }
+    catch {
+        return false;
+    }
+};
+const deleteFileQuietly = async (path) => {
+    try {
+        await unlink(path);
+    }
+    catch (error) {
+        const nodeError = error;
+        if (nodeError.code !== "ENOENT") {
+            throw error;
+        }
+    }
+};
+const getStateFilePath = (profileDir) => join(profileDir, BROWSER_STATE_FILENAME);
+const getControlFilePath = (profileDir) => join(profileDir, BROWSER_CONTROL_FILENAME);
+const parseInstanceState = (raw) => {
+    const parsed = JSON.parse(raw);
+    if (parsed.schemaVersion !== 1 ||
+        typeof parsed.launchToken !== "string" ||
+        typeof parsed.profileDir !== "string" ||
+        typeof parsed.runId !== "string" ||
+        typeof parsed.browserPath !== "string" ||
+        !Number.isInteger(parsed.controllerPid) ||
+        !Number.isInteger(parsed.browserPid) ||
+        typeof parsed.launchedAt !== "string") {
+        return null;
+    }
+    return parsed;
+};
+const readInstanceState = async (path) => {
+    try {
+        const raw = await readFile(path, "utf8");
+        return parseInstanceState(raw);
+    }
+    catch (error) {
+        const nodeError = error;
+        if (nodeError.code === "ENOENT") {
+            return null;
+        }
+        return null;
+    }
+};
 const resolveCommandFromPath = async (command) => {
     const pathEnv = process.env.PATH ?? "";
     if (pathEnv.trim().length === 0) {
@@ -150,11 +216,20 @@ const resolveExecutablePath = async (params) => {
     }
     throw new BrowserLaunchError("BROWSER_NOT_FOUND", "未找到系统 Chrome/Chromium，可通过受信环境变量 WEBENVOY_BROWSER_PATH 显式指定");
 };
+const resolveSupervisorScriptPath = async () => {
+    const moduleDir = dirname(fileURLToPath(import.meta.url));
+    const candidates = [
+        join(moduleDir, "browser-supervisor.js"),
+        join(process.cwd(), "dist", "runtime", "browser-supervisor.js")
+    ];
+    for (const candidate of candidates) {
+        if (await pathExists(candidate)) {
+            return candidate;
+        }
+    }
+    throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "缺少浏览器控制进程脚本 browser-supervisor.js");
+};
 const shouldLaunchHeadless = (params) => params.headless !== false;
-const READY_WAIT_MAX_ATTEMPTS = 20;
-const READY_WAIT_INTERVAL_MS = 150;
-const READY_MIN_UPTIME_MS = 600;
-const READY_CONFIRM_DELAY_MS = 120;
 const assertProcessAlive = (pid) => {
     try {
         process.kill(pid, 0);
@@ -179,20 +254,46 @@ const waitForBrowserReady = async (profileDir, pid, launchedAtMs) => {
             }
         }
         if (markerReady && Date.now() - launchedAtMs >= READY_MIN_UPTIME_MS) {
-            await new Promise((resolve) => {
-                setTimeout(resolve, READY_CONFIRM_DELAY_MS);
-            });
+            await sleep(READY_CONFIRM_DELAY_MS);
             assertProcessAlive(pid);
             return;
         }
-        await new Promise((resolve) => {
-            setTimeout(resolve, READY_WAIT_INTERVAL_MS);
-        });
+        await sleep(READY_WAIT_INTERVAL_MS);
     }
     throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器启动超时，未完成最小 profile 初始化");
 };
-const launchProcess = async (executablePath, args) => {
-    const child = spawn(executablePath, args, {
+const waitForSupervisorState = async (input) => {
+    for (let attempt = 0; attempt < SUPERVISOR_STATE_WAIT_ATTEMPTS; attempt += 1) {
+        const state = await readInstanceState(input.stateFilePath);
+        if (state &&
+            state.launchToken === input.expectedToken &&
+            state.controllerPid === input.expectedControllerPid &&
+            state.browserPid > 0) {
+            return state;
+        }
+        await sleep(SUPERVISOR_STATE_WAIT_INTERVAL_MS);
+    }
+    throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器控制进程未写入可用状态");
+};
+const launchProcess = async (supervisorScriptPath, executablePath, args, input) => {
+    const launchArgsBase64 = Buffer.from(JSON.stringify(args), "utf8").toString("base64");
+    const child = spawn(process.execPath, [
+        supervisorScriptPath,
+        "--browser-path",
+        executablePath,
+        "--launch-args-b64",
+        launchArgsBase64,
+        "--state-file",
+        input.stateFilePath,
+        "--control-file",
+        input.controlFilePath,
+        "--launch-token",
+        input.launchToken,
+        "--profile-dir",
+        input.profileDir,
+        "--run-id",
+        input.runId
+    ], {
         detached: true,
         stdio: "ignore"
     });
@@ -234,6 +335,7 @@ const launchProcess = async (executablePath, args) => {
 };
 export const launchBrowser = async (input) => {
     const executablePath = await resolveExecutablePath(input.params);
+    const supervisorScriptPath = await resolveSupervisorScriptPath();
     const launchArgs = [
         `--user-data-dir=${input.profileDir}`,
         "--profile-directory=Default",
@@ -249,17 +351,44 @@ export const launchBrowser = async (input) => {
         launchArgs.push("--headless=new");
     }
     launchArgs.push(parseStartUrl(input.params));
+    const launchToken = randomUUID();
+    const stateFilePath = getStateFilePath(input.profileDir);
+    const controlFilePath = getControlFilePath(input.profileDir);
+    let controllerPid = null;
     try {
-        const launched = await launchProcess(executablePath, launchArgs);
-        await waitForBrowserReady(input.profileDir, launched.pid, launched.launchedAtMs);
+        await deleteFileQuietly(stateFilePath);
+        await deleteFileQuietly(controlFilePath);
+        const launched = await launchProcess(supervisorScriptPath, executablePath, launchArgs, {
+            stateFilePath,
+            controlFilePath,
+            launchToken,
+            profileDir: input.profileDir,
+            runId: input.runId
+        });
+        controllerPid = launched.pid;
+        const state = await waitForSupervisorState({
+            stateFilePath,
+            expectedToken: launchToken,
+            expectedControllerPid: launched.pid
+        });
+        await waitForBrowserReady(input.profileDir, state.browserPid, launched.launchedAtMs);
         return {
             browserPath: executablePath,
-            browserPid: launched.pid,
+            browserPid: state.browserPid,
+            controllerPid: state.controllerPid,
             launchArgs: [...launchArgs],
             launchedAt: launched.launchedAt
         };
     }
     catch (error) {
+        if (controllerPid !== null && isProcessAlive(controllerPid)) {
+            try {
+                process.kill(controllerPid, "SIGTERM");
+            }
+            catch {
+                // ignore cleanup failure
+            }
+        }
         if (error instanceof BrowserLaunchError) {
             throw error;
         }
@@ -267,4 +396,55 @@ export const launchBrowser = async (input) => {
             cause: error
         });
     }
+};
+export const shutdownBrowserSession = async (input) => {
+    const timeoutMs = input.timeoutMs ?? SUPERVISOR_SHUTDOWN_TIMEOUT_MS;
+    const stateFilePath = getStateFilePath(input.profileDir);
+    const controlFilePath = getControlFilePath(input.profileDir);
+    const state = await readInstanceState(stateFilePath);
+    if (!state) {
+        throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器实例状态缺失，无法安全停止");
+    }
+    if (state.controllerPid !== input.controllerPid) {
+        throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器控制进程与锁所有者不一致");
+    }
+    if (state.runId !== input.runId) {
+        throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器实例 run_id 与 stop 请求不一致");
+    }
+    if (!isProcessAlive(input.controllerPid)) {
+        throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器控制进程已断开，无法安全停止");
+    }
+    const command = {
+        action: "shutdown",
+        launchToken: state.launchToken,
+        requestedAt: new Date().toISOString()
+    };
+    await writeFile(controlFilePath, `${JSON.stringify(command, null, 2)}\n`, "utf8");
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const controllerAlive = isProcessAlive(input.controllerPid);
+        const nextState = await readInstanceState(stateFilePath);
+        if (!controllerAlive && nextState === null) {
+            return;
+        }
+        await sleep(100);
+    }
+    if (isProcessAlive(input.controllerPid)) {
+        try {
+            process.kill(input.controllerPid, "SIGTERM");
+        }
+        catch {
+            // ignore signal failure
+        }
+    }
+    const gracefulDeadline = Date.now() + 1_000;
+    while (Date.now() < gracefulDeadline) {
+        const controllerAlive = isProcessAlive(input.controllerPid);
+        const nextState = await readInstanceState(stateFilePath);
+        if (!controllerAlive && nextState === null) {
+            return;
+        }
+        await sleep(100);
+    }
+    throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器控制进程关闭超时");
 };
