@@ -34,10 +34,11 @@ FR-0001 已冻结 WebEnvoy 的 CLI 外层契约。`#142` 要解决的是这套 C
 
 ### 1. Native Messaging 最小握手
 
-- Extension Background 必须能通过 Native Messaging 主动连接 CLI 的 native host。
+- Extension Background 必须主动建立 Native Messaging 连接到 CLI 的 native host。
 - CLI 侧必须能接受该连接并完成稳定握手。
 - 握手必须包含最小协议版本信息，且版本必须可协商或显式拒绝。
 - 握手成功后，Background 才能把当前会话标记为可转发。
+- 握手只建立连接级会话，不绑定单次命令上下文；`run_id` 仅属于后续单次转发调用上下文，不属于握手字段。
 - 握手失败必须可区分为：
   - host 不可用
   - manifest / 路径不可解析
@@ -53,6 +54,7 @@ FR-0001 已冻结 WebEnvoy 的 CLI 外层契约。`#142` 要解决的是这套 C
   - `profile`
   - `params`
   - `cwd`
+- `bridge.forward` 必须携带 `timeout_ms`，或等价地从当前单次调用上下文继承剩余超时预算；该超时只约束这次转发往返，不改变连接级会话状态。
 - Background 只负责路由和会话管理，不解释页面业务 payload。
 - Content Script 只负责页面侧执行 / 回传，不重新定义 CLI 外层参数模型。
 - 本 FR 的最小往返命令以 `runtime.ping` 作为 smoke path；它必须能被页面侧看到并返回结果。
@@ -62,8 +64,10 @@ FR-0001 已冻结 WebEnvoy 的 CLI 外层契约。`#142` 要解决的是这套 C
 - Background 必须定期向 CLI 发送心跳。
 - CLI 必须立即响应心跳。
 - 心跳丢失必须触发断连判定，而不是静默挂死。
-- 断连后，当前会话必须进入不可用状态，直到重新握手成功。
-- 连接恢复后，新的消息才能再次进入转发链路。
+- 断连后，当前会话必须进入不可用状态，并进入自动重连窗口；在窗口内 Background 可以继续尝试恢复连接。
+- 自动重连窗口默认对齐 `ERR-07` 的 30s 恢复期，期间最多允许排队 5 条待转发请求。
+- 连接恢复后，新的消息和排队中的消息才能再次进入转发链路；若恢复窗口超时，排队请求必须失败并回传 `ERR_TRANSPORT_DISCONNECTED`。
+- 断连判定必须以 Background 本地可观测状态变化为准，例如 `onDisconnect` 回调、连续心跳超时等，不要求通过已断开的同一通道补发关闭消息。
 
 ### 4. 基础错误分类
 
@@ -81,8 +85,8 @@ FR-0001 已冻结 WebEnvoy 的 CLI 外层契约。`#142` 要解决的是这套 C
 
 - 握手不成功，属于 `ERR_TRANSPORT_HANDSHAKE_FAILED`
 - Background 无法把消息送到页面侧，属于 `ERR_TRANSPORT_FORWARD_FAILED`
-- 指定时限内没有收到响应，属于 `ERR_TRANSPORT_TIMEOUT`
-- 心跳丢失或连接中断，属于 `ERR_TRANSPORT_DISCONNECTED`
+- 指定 `timeout_ms` 内没有收到当前转发响应，且 Native Messaging 连接仍被观测为可用，属于 `ERR_TRANSPORT_TIMEOUT`
+- 只要 Background 已经观测到 `onDisconnect`、心跳超时或其他断连信号，正在等待的请求在恢复窗口结束前应进入排队或重试流程；若恢复窗口耗尽仍未恢复，则归入 `ERR_TRANSPORT_DISCONNECTED`
 - 页面业务自己返回失败，但链路仍然通，不能被误判为 transport failure
 
 ### 5. 会话状态
@@ -109,6 +113,7 @@ FR-0001 已冻结 WebEnvoy 的 CLI 外层契约。`#142` 要解决的是这套 C
 
 Given CLI 通过 FR-0001 的标准化命令上下文发起一次 `runtime.ping` 调用  
 And Native Messaging Host 可用  
+And Extension Background 主动建立连接  
 When CLI 与 Extension Background 完成最小握手  
 Then 会话进入 `ready`  
 And Background 可以把最小消息转发到 Content Script  
@@ -137,8 +142,10 @@ Given 会话已经处于 `ready`
 And 后续连续心跳没有收到响应  
 When 超过断连阈值  
 Then 会话必须进入 `disconnected`  
-And 正在等待的转发请求必须失败返回  
-And 该失败必须区分为 `ERR_TRANSPORT_DISCONNECTED` 或 `ERR_TRANSPORT_TIMEOUT`  
+And 系统必须进入自动重连窗口  
+And 期间最多允许排队 5 条待转发请求  
+And 若恢复窗口结束仍未恢复，则排队请求必须失败返回  
+And 该失败必须优先区分为 `ERR_TRANSPORT_DISCONNECTED`；只有在连接仍可观测为可用且单次 `timeout_ms` 到期时，才归为 `ERR_TRANSPORT_TIMEOUT`  
 
 ### 场景 5：页面侧不可达不会伪装成业务失败
 
@@ -165,7 +172,8 @@ And 不得把该错误伪装成页面业务执行失败
 ### 3. 心跳边界
 
 - 心跳失败的判定必须先于普通业务超时判定，避免把链路断开误判为业务失败。
-- 断连后再次发送的消息必须进入新的握手流程，不能复用旧会话。
+- 断连后消息不能直接走旧会话；它们要么进入自动重连窗口排队，要么在窗口耗尽后失败返回。
+- 自动重连恢复成功后，才允许新的消息继续进入转发链路。
 
 ### 4. 错误边界
 
