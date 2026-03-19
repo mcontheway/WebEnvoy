@@ -10,9 +10,11 @@ import {
   type BridgeRequestEnvelope,
   type BridgeResponseEnvelope
 } from "./protocol.js";
-import { createLoopbackNativeBridgeTransport } from "./loopback.js";
+import { SocketNativeBridgeTransport } from "./host.js";
 import {
+  MAX_PENDING_DURING_RECOVERY,
   NativeMessagingSession,
+  RECOVERY_WINDOW_MS,
   classifyTransportFailure,
   type TransportFailureCode
 } from "./session.js";
@@ -32,6 +34,8 @@ export class NativeMessagingTransportError extends Error {
 
 interface FakeTransportOptions {
   failHandshake?: boolean;
+  failHandshakeAfterFirstOpen?: boolean;
+  incompatibleProtocol?: boolean;
   disconnectOnForward?: boolean;
   heartbeatDisconnect?: boolean;
   forwardDelayMs?: number;
@@ -78,11 +82,15 @@ const runWithTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promis
 
 export const createFakeNativeBridgeTransport = (
   options?: FakeTransportOptions
-): NativeBridgeTransport => ({
+): NativeBridgeTransport => {
+  let openCount = 0;
+
+  return {
   async open(request: BridgeRequestEnvelope) {
     ensureBridgeRequestEnvelope(request);
+    openCount += 1;
 
-    if (options?.failHandshake) {
+    if (options?.failHandshake || (options?.failHandshakeAfterFirstOpen && openCount > 1)) {
       throw new NativeMessagingTransportError(
         "ERR_TRANSPORT_HANDSHAKE_FAILED",
         "native host unavailable"
@@ -93,7 +101,7 @@ export const createFakeNativeBridgeTransport = (
       id: request.id,
       status: "success",
       summary: {
-        protocol: BRIDGE_PROTOCOL,
+        protocol: options?.incompatibleProtocol ? "webenvoy.native-bridge.v0" : BRIDGE_PROTOCOL,
         session_id: "nm-session-001",
         state: "ready"
       },
@@ -149,7 +157,8 @@ export const createFakeNativeBridgeTransport = (
       error: null
     };
   }
-});
+};
+};
 
 export interface RuntimePingInput {
   runId: string;
@@ -173,20 +182,28 @@ export interface RuntimePingResult {
 interface BridgeOptions {
   transport?: NativeBridgeTransport;
   now?: () => number;
+  recoveryPollIntervalMs?: number;
 }
+
+const defaultRecoveryPollIntervalMs = 100;
 
 export class NativeMessagingBridge {
   readonly #session = new NativeMessagingSession();
   readonly #transport: NativeBridgeTransport;
   readonly #now: () => number;
+  readonly #recoveryPollIntervalMs: number;
   #idSeq = 0;
 
   constructor(options?: BridgeOptions) {
-    this.#transport = options?.transport ?? createLoopbackNativeBridgeTransport();
+    this.#transport = options?.transport ?? new SocketNativeBridgeTransport();
     this.#now = options?.now ?? (() => Date.now());
+    this.#recoveryPollIntervalMs =
+      options?.recoveryPollIntervalMs ?? defaultRecoveryPollIntervalMs;
   }
 
   async runtimePing(input: RuntimePingInput): Promise<RuntimePingResult> {
+    const timeoutMs = readTimeoutMs(input.params.timeout_ms) ?? DEFAULT_TRANSPORT_TIMEOUT_MS;
+
     if (asBoolean(input.params.simulate_transport_handshake_fail)) {
       throw new NativeMessagingTransportError(
         "ERR_TRANSPORT_HANDSHAKE_FAILED",
@@ -194,6 +211,7 @@ export class NativeMessagingBridge {
       );
     }
 
+    await this.#recoverIfDisconnected(input.profile, timeoutMs);
     await this.#ensureReady(input.profile);
     await this.#pulseHeartbeat();
 
@@ -205,7 +223,6 @@ export class NativeMessagingBridge {
       );
     }
 
-    const timeoutMs = readTimeoutMs(input.params.timeout_ms) ?? DEFAULT_TRANSPORT_TIMEOUT_MS;
     if (asBoolean(input.params.simulate_transport_timeout)) {
       throw new NativeMessagingTransportError("ERR_TRANSPORT_TIMEOUT", "simulated transport timeout");
     }
@@ -289,11 +306,18 @@ export class NativeMessagingBridge {
       );
       const success = ensureBridgeSuccess(response, "handshake failed");
       const sessionId = String(success.summary.session_id ?? "");
+      const protocol = String(success.summary.protocol ?? "");
 
       if (sessionId.length === 0) {
         throw new NativeMessagingTransportError(
           "ERR_TRANSPORT_HANDSHAKE_FAILED",
           "missing session id"
+        );
+      }
+      if (protocol !== BRIDGE_PROTOCOL) {
+        throw new NativeMessagingTransportError(
+          "ERR_TRANSPORT_HANDSHAKE_FAILED",
+          `incompatible protocol: ${protocol || "unknown"}`
         );
       }
 
@@ -328,6 +352,51 @@ export class NativeMessagingBridge {
         "ERR_TRANSPORT_DISCONNECTED",
         `heartbeat failed: ${asError(error).message}`
       );
+    }
+  }
+
+  async #recoverIfDisconnected(profile: string | null, timeoutMs: number): Promise<void> {
+    const now = this.#now();
+    const snapshot = this.#session.snapshot();
+    if (snapshot.state !== "disconnected") {
+      return;
+    }
+
+    if (!this.#session.tryQueuePending(now)) {
+      throw new NativeMessagingTransportError(
+        "ERR_TRANSPORT_DISCONNECTED",
+        `recovery queue exhausted (${MAX_PENDING_DURING_RECOVERY}) or window elapsed`,
+        { retryable: true }
+      );
+    }
+
+    try {
+      const recoveryDeadline = this.#session.recoveryDeadlineMs() ?? now + RECOVERY_WINDOW_MS;
+      const requestDeadline = now + timeoutMs;
+      const stopAt = Math.min(recoveryDeadline, requestDeadline);
+
+      while (this.#now() < stopAt) {
+        try {
+          await this.#ensureReady(profile);
+          return;
+        } catch (error) {
+          if (error instanceof NativeMessagingTransportError) {
+            if (error.code !== "ERR_TRANSPORT_HANDSHAKE_FAILED") {
+              throw error;
+            }
+          }
+        }
+
+        await delay(this.#recoveryPollIntervalMs);
+      }
+
+      throw new NativeMessagingTransportError(
+        "ERR_TRANSPORT_DISCONNECTED",
+        "recovery window exhausted before reconnect",
+        { retryable: true }
+      );
+    } finally {
+      this.#session.releasePending();
     }
   }
 

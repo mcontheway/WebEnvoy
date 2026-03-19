@@ -6,10 +6,14 @@ import { describe, expect, it } from "vitest";
 const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
 const binPath = path.join(repoRoot, "bin", "webenvoy");
 
-const runCli = (args: string[]) =>
+const runCli = (args: string[], env?: Record<string, string>) =>
   spawnSync(process.execPath, [binPath, ...args], {
     cwd: repoRoot,
-    encoding: "utf8"
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      ...env
+    }
   });
 
 const parseSingleJsonLine = (stdout: string) => {
@@ -24,7 +28,9 @@ const parseSingleJsonLine = (stdout: string) => {
 
 describe("webenvoy cli contract", () => {
   it("returns success json for runtime.ping", () => {
-    const result = runCli(["runtime.ping", "--run-id", "run-contract-001"]);
+    const result = runCli(["runtime.ping", "--run-id", "run-contract-001"], {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
     expect(result.status).toBe(0);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({

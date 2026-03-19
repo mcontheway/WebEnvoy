@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createCommandRegistry } from "../../commands/index.js";
 import { executeCommand } from "../router.js";
-import type { RuntimeContext } from "../types.js";
+import type { JsonObject, RuntimeContext } from "../types.js";
 
 const baseContext: RuntimeContext = {
   run_id: "run-test-001",
@@ -14,7 +14,14 @@ const baseContext: RuntimeContext = {
 
 describe("executeCommand", () => {
   it("returns summary when command is implemented", async () => {
-    const summary = await executeCommand(baseContext, createCommandRegistry());
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    process.env.WEBENVOY_NATIVE_TRANSPORT = "loopback";
+    let summary: JsonObject;
+    try {
+      summary = await executeCommand(baseContext, createCommandRegistry());
+    } finally {
+      process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
+    }
 
     expect(summary).toMatchObject({
       message: "pong",

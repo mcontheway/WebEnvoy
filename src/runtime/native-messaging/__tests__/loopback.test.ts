@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { NativeMessagingBridge } from "../bridge.js";
+import { createLoopbackNativeBridgeTransport } from "../loopback.js";
 
 describe("native messaging default loopback chain", () => {
   it("uses host -> background -> content-script -> background -> host path by default", async () => {
-    const bridge = new NativeMessagingBridge();
+    const bridge = new NativeMessagingBridge({
+      transport: createLoopbackNativeBridgeTransport()
+    });
     const result = await bridge.runtimePing({
       runId: "run-loopback-001",
       profile: "profile-a",

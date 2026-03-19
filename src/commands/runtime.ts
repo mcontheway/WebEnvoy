@@ -4,9 +4,21 @@ import {
   NativeMessagingBridge,
   NativeMessagingTransportError
 } from "../runtime/native-messaging/bridge.js";
+import { SocketNativeBridgeTransport } from "../runtime/native-messaging/host.js";
+import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
 
 const asBoolean = (value: unknown): boolean => value === true;
-const bridge = new NativeMessagingBridge();
+const resolveRuntimeBridge = (): NativeMessagingBridge => {
+  if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
+    return new NativeMessagingBridge({
+      transport: createLoopbackNativeBridgeTransport()
+    });
+  }
+
+  return new NativeMessagingBridge({
+    transport: new SocketNativeBridgeTransport()
+  });
+};
 
 const runtimePing = async (context: RuntimeContext) => {
   if (asBoolean(context.params.simulate_runtime_unavailable)) {
@@ -18,6 +30,7 @@ const runtimePing = async (context: RuntimeContext) => {
   }
 
   try {
+    const bridge = resolveRuntimeBridge();
     return await bridge.runtimePing({
       runId: context.run_id,
       profile: context.profile,

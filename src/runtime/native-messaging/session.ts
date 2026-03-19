@@ -93,12 +93,26 @@ export class NativeMessagingSession {
     return true;
   }
 
+  releasePending(): void {
+    if (this.#pendingCount > 0) {
+      this.#pendingCount -= 1;
+    }
+  }
+
   canRecover(nowMs: number): boolean {
     if (this.#state !== "disconnected" || this.#disconnectedAt === null) {
       return false;
     }
 
     return nowMs - this.#disconnectedAt <= RECOVERY_WINDOW_MS;
+  }
+
+  recoveryDeadlineMs(): number | null {
+    if (this.#disconnectedAt === null) {
+      return null;
+    }
+
+    return this.#disconnectedAt + RECOVERY_WINDOW_MS;
   }
 
   sessionIdOrThrow(): string {

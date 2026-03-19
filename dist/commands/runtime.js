@@ -1,7 +1,18 @@
 import { CliError } from "../core/errors.js";
 import { NativeMessagingBridge, NativeMessagingTransportError } from "../runtime/native-messaging/bridge.js";
+import { SocketNativeBridgeTransport } from "../runtime/native-messaging/host.js";
+import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
 const asBoolean = (value) => value === true;
-const bridge = new NativeMessagingBridge();
+const resolveRuntimeBridge = () => {
+    if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
+        return new NativeMessagingBridge({
+            transport: createLoopbackNativeBridgeTransport()
+        });
+    }
+    return new NativeMessagingBridge({
+        transport: new SocketNativeBridgeTransport()
+    });
+};
 const runtimePing = async (context) => {
     if (asBoolean(context.params.simulate_runtime_unavailable)) {
         throw new CliError("ERR_RUNTIME_UNAVAILABLE", "运行时不可用", { retryable: true });
@@ -10,6 +21,7 @@ const runtimePing = async (context) => {
         throw new Error("forced execution failure");
     }
     try {
+        const bridge = resolveRuntimeBridge();
         return await bridge.runtimePing({
             runId: context.run_id,
             profile: context.profile,
