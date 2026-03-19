@@ -108,4 +108,42 @@ describe("response-shaping", () => {
     expect(shaped.observability.page_state).toBeNull();
     expect(shaped.observability.key_requests).toEqual([]);
   });
+
+  it("keeps execution_interrupted distinct from runtime_unavailable in shaped errors", () => {
+    const base = {
+      run_id: "run-4",
+      command: "runtime.ping",
+      status: "error" as const,
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        message: "执行链路中断",
+        retryable: false
+      },
+      timestamp: "2026-03-19T12:00:00.000Z"
+    };
+
+    const shaped = shapeErrorResponse(
+      base,
+      {
+        page_state: null,
+        key_requests: [],
+        failure_site: {
+          stage: "transport",
+          component: "bridge",
+          target: "native-messaging",
+          summary: "bridge disconnected"
+        }
+      },
+      {
+        signals: {
+          runtime_unavailable: true,
+          execution_interrupted: true
+        }
+      }
+    );
+
+    expect(shaped.error.diagnosis.category).toBe("execution_interrupted");
+    expect(shaped.error.diagnosis.failure_site.stage).toBe("transport");
+    expect(shaped.error.diagnosis.failure_site.component).toBe("bridge");
+  });
 });

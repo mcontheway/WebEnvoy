@@ -1,4 +1,6 @@
 import type { ErrorCode } from "./errors.js";
+import type { Diagnosis } from "../runtime/diagnostics.js";
+import type { ObservabilityPayload } from "../runtime/observability.js";
 
 export type JsonObject = Record<string, unknown>;
 
@@ -22,6 +24,7 @@ export interface SuccessResponse {
   command: string;
   status: "success";
   summary: JsonObject;
+  observability: ObservabilityPayload;
   timestamp: string;
 }
 
@@ -33,7 +36,9 @@ export interface ErrorResponse {
     code: ErrorCode;
     message: string;
     retryable: boolean;
+    diagnosis: Diagnosis;
   };
+  observability: ObservabilityPayload;
   timestamp: string;
 }
 

@@ -7,6 +7,8 @@ import {
 const DEFAULT_MAX_EVIDENCE_ITEMS = 4;
 const DEFAULT_MAX_EVIDENCE_LENGTH = 160;
 const REDACTED = "[REDACTED]";
+const EXECUTION_INTERRUPTED_HINT =
+  /(interrupt(?:ed|ion)?|abort(?:ed)?|disconnect(?:ed)?|closed?|terminate(?:d)?|timeout|timed out|cancel(?:ed|led)?|econnreset|eof|broken pipe|中断|断开|超时)/iu;
 
 export type DiagnosisCategory =
   | "page_changed"
@@ -83,6 +85,8 @@ const inferCategoryFromFailureSite = (
 ): DiagnosisCategory | null => {
   const normalizedStage = stage.toLowerCase();
   const normalizedComponent = component.toLowerCase();
+  const summary = failureSite?.summary.toLowerCase() ?? "";
+  const target = failureSite?.target.toLowerCase() ?? "";
 
   if (
     normalizedStage === "request" ||
@@ -100,10 +104,16 @@ const inferCategoryFromFailureSite = (
     return "page_changed";
   }
   if (
-    normalizedStage === "runtime" ||
     normalizedStage === "transport" ||
-    normalizedComponent === "runtime" ||
     normalizedComponent === "bridge" ||
+    EXECUTION_INTERRUPTED_HINT.test(summary) ||
+    EXECUTION_INTERRUPTED_HINT.test(target)
+  ) {
+    return "execution_interrupted";
+  }
+  if (
+    normalizedStage === "runtime" ||
+    normalizedComponent === "runtime" ||
     normalizedComponent === "cli"
   ) {
     return "runtime_unavailable";
@@ -121,11 +131,11 @@ const inferCategory = (
   if (fromFailureSite !== null && fromFailureSite !== "unknown") {
     return fromFailureSite;
   }
-  if (signals?.runtime_unavailable) {
-    return "runtime_unavailable";
-  }
   if (signals?.execution_interrupted) {
     return "execution_interrupted";
+  }
+  if (signals?.runtime_unavailable) {
+    return "runtime_unavailable";
   }
   if (signals?.request_failed) {
     return "request_failed";

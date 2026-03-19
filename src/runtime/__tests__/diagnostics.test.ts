@@ -23,6 +23,25 @@ describe("diagnostics", () => {
     expect(diagnosis.component).toBe("cli");
   });
 
+  it("classifies transport/bridge failures as execution interrupted", () => {
+    const diagnosis = buildDiagnosis({
+      signals: {
+        runtime_unavailable: true,
+        execution_interrupted: true
+      },
+      failure_site: {
+        stage: "transport",
+        component: "bridge",
+        target: "native-messaging",
+        summary: "bridge disconnected during run"
+      }
+    });
+
+    expect(diagnosis.category).toBe("execution_interrupted");
+    expect(diagnosis.stage).toBe("transport");
+    expect(diagnosis.component).toBe("bridge");
+  });
+
   it("uses explicit category and bounds evidence payload", () => {
     const diagnosis = buildDiagnosis(
       {
@@ -99,6 +118,17 @@ describe("diagnostics", () => {
 
     expect(diagnosis.category).toBe("request_failed");
     expect(diagnosis.failure_site.component).toBe("network");
+  });
+
+  it("prefers execution_interrupted signal over runtime_unavailable when no failure site is available", () => {
+    const diagnosis = buildDiagnosis({
+      signals: {
+        runtime_unavailable: true,
+        execution_interrupted: true
+      }
+    });
+
+    expect(diagnosis.category).toBe("execution_interrupted");
   });
 
   it("creates minimal unknown diagnosis when no signal is available", () => {
