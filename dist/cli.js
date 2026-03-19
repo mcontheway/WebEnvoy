@@ -4,6 +4,7 @@ import { buildRuntimeContext, generateRunId } from "./core/context.js";
 import { CliError, exitCodeForError, normalizeExecutionError, successExitCode } from "./core/errors.js";
 import { buildErrorResponse, buildSuccessResponse, writeJsonLine } from "./core/response.js";
 import { executeCommand } from "./core/router.js";
+import { createRuntimeStoreRecorder } from "./runtime/store/runtime-store-recorder.js";
 const normalizeCliError = (error) => error instanceof CliError ? error : normalizeExecutionError(error);
 export const runCli = async (argv, options) => {
     const cwd = options?.cwd ?? process.cwd();
@@ -12,19 +13,26 @@ export const runCli = async (argv, options) => {
     const commandHint = getCommandHint(argv);
     const runIdHint = getRunIdHint(argv);
     let runtimeContext = null;
+    let recorder = createRuntimeStoreRecorder(cwd);
     try {
         const parsed = parseArgv(argv);
         const context = buildRuntimeContext(parsed, cwd);
-        runtimeContext = { run_id: context.run_id, command: context.command };
+        runtimeContext = context;
+        await recorder?.recordStart(context);
         const summary = await executeCommand(context, createCommandRegistry());
+        await recorder?.recordSuccess(context, summary);
         writeJsonLine(stdout, buildSuccessResponse(context, summary));
         if (context.command === "runtime.help") {
             stderr.write("Use --params to pass structured JSON object parameters.\n");
         }
+        recorder?.close();
         return successExitCode();
     }
     catch (error) {
         const cliError = normalizeCliError(error);
+        if (runtimeContext) {
+            await recorder?.recordFailure(runtimeContext, cliError);
+        }
         const runId = runtimeContext?.run_id ??
             (runIdHint && isValidRunId(runIdHint) ? runIdHint : generateRunId());
         const command = runtimeContext?.command ?? commandHint;
@@ -32,6 +40,7 @@ export const runCli = async (argv, options) => {
         if (cliError.code === "ERR_CLI_INVALID_ARGS") {
             stderr.write(`${cliError.message}\n`);
         }
+        recorder?.close();
         return exitCodeForError(cliError.code);
     }
 };
