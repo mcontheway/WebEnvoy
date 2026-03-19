@@ -7,6 +7,7 @@
 - [x] 补齐 GWT 验收场景与异常 / 边界场景
 - [x] 补齐 `plan.md` 的 7 个必答章节
 - [x] 补齐 `contracts/`、`data-model.md`、`risks.md`
+- [x] 明确 `localStorageSnapshots` 在 FR-0003 中仅作为最小会话摘要 / 恢复输入，不要求自动回写浏览器会话
 - [ ] 完成 spec review，并收敛所有 findings / blockers
 - [ ] 确认 `#143` 与 `#141`、`#142`、`#144` 的边界分工
 
@@ -27,5 +28,6 @@
 - [ ] 建立 `runtime.start` / `runtime.login` / `runtime.status` / `runtime.stop` 的承载
 - [ ] 建立代理粘性绑定与冲突拒绝
 - [ ] 建立状态机转移与断连回读
+- [ ] 建立 `localStorageSnapshots` 最小写入与摘要回读（不实现自动回写浏览器会话）
 - [ ] 补齐生命周期测试、锁测试、元数据测试与代理绑定测试
 - [ ] 补齐最小启动 smoke test

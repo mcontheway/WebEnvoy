@@ -121,7 +121,8 @@ disconnected -> starting
 - 将 Profile 置入 `logging_in`
 - 若 Profile 尚未初始化，则先创建最小目录与最小元数据
 - 等待用户手动完成登录
-- 确认后回写最小持久化内容并回到 `ready`
+- 确认后回写最小持久化摘要到 `__webenvoy_meta.json` 并回到 `ready`
+- 本 FR 不要求把 `localStorageSnapshots` 自动回写到后续浏览器会话
 
 成功结果至少包含：
 
@@ -220,10 +221,11 @@ disconnected -> starting
 - `audioNoiseSeed`
 - `canvasNoiseSeed`
 
-其中 `localStorageSnapshots` 用于保存最小的 SPA 鉴权快照，不要求导出全部浏览器会话细节，但必须能支持后续恢复所需的关键键值。
+其中 `localStorageSnapshots` 用于保存最小的 SPA 鉴权快照，不要求导出全部浏览器会话细节；在 FR-0003 中它只作为最小会话摘要 / 恢复输入，不要求自动回写到后续浏览器会话。
 
 ## 兼容策略
 
 - 本契约冻结后，后续 FR 可以增加可选字段，但不能重定义状态语义
 - 后续 FR 可以增加新的运行时命令，但不能改写 Profile 独占锁和代理粘性绑定的核心规则
 - 本 FR 不要求把 Profile 生命周期持久化到 SQLite
+- 后续 FR 可以在不破坏现有状态机与错误语义的前提下补 `localStorageSnapshots` 的自动回写链路

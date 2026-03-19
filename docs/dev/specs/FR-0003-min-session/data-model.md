@@ -75,8 +75,14 @@ ProfileDirectory 是浏览器 UserDataDir 对应的物理目录。
 - `profileState` 必须来自 FR-0003 冻结的状态枚举。
 - `proxyBinding.url` 为空表示直连，不代表缺失或待定。
 - `updatedAt` 必须在每次状态变更或绑定变更后刷新。
-- `fingerprintSeeds` 与 `localStorageSnapshots` 仅承载最小会话恢复所需信息，不得膨胀为账号资产总表。
+- `fingerprintSeeds` 与 `localStorageSnapshots` 仅承载最小会话摘要 / 恢复输入，不得膨胀为账号资产总表。
 - 不允许把账号健康、矩阵调度、风控分数写入该文件。
+
+### `localStorageSnapshots` 语义约束
+
+- FR-0003 只要求在 `runtime.login` 确认后把快照写入 `__webenvoy_meta.json`，并在状态回读中提供摘要可见性。
+- FR-0003 不要求把该快照自动回写到后续浏览器会话。
+- 自动回写链路属于后续 FR，可在不改变本 FR 状态机与锁语义的前提下增量引入。
 
 ### 状态流转
 

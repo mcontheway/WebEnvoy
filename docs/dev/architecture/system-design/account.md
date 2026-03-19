@@ -25,7 +25,7 @@ profiles/
 `__webenvoy_meta.json` 在当前阶段只存储执行所必需的最小元数据：
 - 平台标识与 Profile 名称
 - 指纹噪声种子（`audioNoiseSeed`、`canvasNoiseSeed` 等，详见 [`anti-detection.md`](../anti-detection.md) §2.3）
-- LocalStorage 快照（用于 SPA 前端鉴权恢复）
+- LocalStorage 快照（用于最小会话摘要 / 恢复输入，自动回写链路见后续 FR）
 - 可选的 **Proxy 绑定**（`proxyUrl` 字段，见下文）
 
 以下信息不属于当前主线基线：
@@ -97,7 +97,7 @@ profiles/
 ### 7.3 关键实现约束
 
 - **禁止使用 Camoufox** 管理需要保活的账号（不支持持久化 Profile）
-- **LocalStorage 快照**：对于依赖 LocalStorage 做前端鉴权的 SPA，需在配置空间元数据中额外保存 localStorage 快照，防止重启后鉴权失效
+- **LocalStorage 快照**：对于依赖 LocalStorage 做前端鉴权的 SPA，当前主线先在配置空间元数据中保存最小快照摘要作为恢复输入；自动回写浏览器会话由后续 FR 承接
 - **配置空间独占锁**：通过锁文件实现互斥，同一配置空间同时只能被一个 CLI 进程使用
 - **不引入账号健康运营逻辑**：当前仓库不在 Profile 元数据中内建健康评分、养号节律或矩阵调度信息
 

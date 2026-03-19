@@ -55,14 +55,15 @@
 
 - 阶段 B 完成
 
-### 阶段 D：最小持久化边界与恢复语义
+### 阶段 D：最小持久化边界与恢复输入语义
 
 产出：
 
-- `__webenvoy_meta.json` 的写入、读取与恢复语义
+- `__webenvoy_meta.json` 的写入、读取与恢复输入语义
 - 首次登录从 `uninitialized` 直接进入 `runtime.login` 的最小语义
 - 断连后 Profile 状态回读
-- 手动登录结果持久化回 Profile
+- 手动登录结果持久化回 Profile 元数据
+- `localStorageSnapshots` 的最小摘要回读语义（不含自动回写浏览器会话）
 
 依赖：
 
@@ -90,6 +91,7 @@
 
 - 必须保持最小身份 / 会话边界，不得扩张到账号矩阵、养号或长期运营。
 - 不新增独立会话数据库；持久化只允许落在浏览器 UserDataDir 与 `__webenvoy_meta.json`。
+- 不在本 FR 中扩张 `localStorageSnapshots` 自动回写浏览器会话链路。
 - 不引入代理池、代理轮转或后台调度器。
 - 不把 Profile 状态机和后续平台任务状态机混成一套。
 - 不修改 FR-0001 已冻结的 CLI 外层契约。
@@ -111,6 +113,7 @@
 - `runtime.status` 能读回状态与代理绑定
 - `runtime.login` 首次登录流程可以从未初始化 Profile 直接创建并回写最小元数据
 - `runtime.login` 的手动登录确认流程
+- `localStorageSnapshots` 写入元数据与摘要回读
 - 并发启动同一 Profile 的冲突断言
 - 浏览器崩溃后状态回落到 `disconnected`
 

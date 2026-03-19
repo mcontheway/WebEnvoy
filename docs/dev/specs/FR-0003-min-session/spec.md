@@ -20,7 +20,7 @@ Issue #143 要求的不是完整账号系统，也不是长期运营基座，而
 4. 建立 Profile 级代理粘性绑定，确保同一 Profile 后续会话默认复用同一代理出口。
 5. 建立 Profile 独占锁，避免同一 Profile 被多个 CLI 进程同时占用。
 6. 冻结最小持久化边界：Profile 目录 + `__webenvoy_meta.json`，不引入新的账号数据库或运营型状态仓库。
-7. 冻结首次登录路径，让未初始化 Profile 能直接进入 `runtime.login` 并形成最小可恢复会话边界。
+7. 冻结首次登录路径，让未初始化 Profile 能直接进入 `runtime.login` 并形成最小会话摘要 / 恢复输入边界。
 
 ## 非目标
 
@@ -30,6 +30,7 @@ Issue #143 要求的不是完整账号系统，也不是长期运营基座，而
 - 不做 SDK / API / daemon 服务化。
 - 不把浏览器运行时扩张成长期驻留进程管理平台。
 - 不在本 FR 中定义平台级读写命令的业务语义。
+- 不在本 FR 中实现 `localStorageSnapshots` 自动回写到后续浏览器会话。
 
 ## 功能需求
 
@@ -101,6 +102,8 @@ Issue #143 要求的不是完整账号系统，也不是长期运营基座，而
 - 不新增独立 SQLite 表来承载账号生命周期。
 - 不把任务状态、平台数据、运行日志混入 Profile 元数据。
 - `__webenvoy_meta.json` 只保留运行所需的最小字段，不承载账号矩阵或长期运营信息。
+- `localStorageSnapshots` 在本 FR 中只作为最小会话摘要 / 恢复输入写入元数据与状态回读。
+- 本 FR 不要求把 `localStorageSnapshots` 自动回写到后续浏览器会话。
 
 ## GWT 验收场景
 
@@ -127,14 +130,21 @@ When 调用 `runtime.login --profile <name>` 并完成手动登录确认
 Then 系统会创建对应的 Profile 目录与最小元数据文件  
 And 浏览器会绑定到该 Named Profile 启动  
 And Profile 状态会从 `uninitialized` 进入 `logging_in` 再回到 `ready`  
-And 登录态相关的最小持久化内容会被保存到该 Profile
+And 登录态相关的最小持久化摘要会被保存到该 Profile 元数据
 
 ### 场景 4：手动登录后的状态可以回写到 Profile
 
 Given 一个处于 `ready` 状态但尚未完成目标站点登录的 Profile  
 When 调用 `runtime.login --profile <name>` 并完成手动登录确认  
 Then Profile 状态会从 `ready` 进入 `logging_in` 再回到 `ready`  
-And 登录态相关的最小持久化内容会被保存到该 Profile
+And 登录态相关的最小持久化摘要会被保存到该 Profile 元数据
+
+### 场景 8：`localStorageSnapshots` 在 FR-0003 中不要求自动回写浏览器会话
+
+Given 一个 Profile 的 `__webenvoy_meta.json` 已保存 `localStorageSnapshots`  
+When 后续再次执行 `runtime.start --profile <name>`  
+Then 命令返回与状态回读可以暴露最小会话摘要 / 恢复输入  
+And 本 FR 不要求自动把该快照回写到浏览器会话
 
 ### 场景 5：同一 Profile 的并发启动会被拒绝
 
@@ -198,6 +208,7 @@ And 后续重新 `runtime.start` 可以重新进入 `starting`
 5. `runtime.status` 能稳定返回浏览器态、Profile 态和代理绑定信息。
 6. 本 FR 未引入账号矩阵、长期运营、代理池或独立会话数据库。
 7. 浏览器启动与最小身份 / 会话模型能为后续 `#145`、`#146`、`#148` 提供稳定承载面。
+8. `localStorageSnapshots` 在本 FR 中仅作为最小会话摘要 / 恢复输入，不作为自动回写浏览器会话的完成标准。
 
 ## 依赖与前置条件
 
