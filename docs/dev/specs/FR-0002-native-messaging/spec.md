@@ -24,7 +24,7 @@ FR-0001 已冻结 WebEnvoy 的 CLI 外层契约。`#142` 要解决的是这套 C
 ## 非目标
 
 - 不重新定义 FR-0001 的 CLI 外层命令壳、argv 语法、stdout / stderr 边界或退出码。
-- 不在本 FR 内实现 `webenvoy install` / `uninstall` 之类系统注册命令。
+- 不在本 FR 内实现 `webenvoy install` / `uninstall` 之类系统注册命令，但本 FR 的握手和 smoke path 验证必须以 Native Messaging host 已按 `docs/dev/architecture/system-design/communication.md` 注册完成为前提。
 - 不在本 FR 内实现浏览器启动、Profile 恢复、SQLite 落库或完整账号生命周期。
 - 不在本 FR 内实现完整消息总线、广播、订阅、排队调度或多 tab fan-out。
 - 不在本 FR 内定义平台业务命令本身，只承接运输与回传。
@@ -201,6 +201,9 @@ And 不得把该错误伪装成页面业务执行失败
   - `docs/dev/architecture/system-design/account.md`
   - `docs/dev/specs/FR-0001-runtime-cli-entry/spec.md`
   - `docs/dev/specs/FR-0001-runtime-cli-entry/contracts/cli-entry.md`
+- 运行前提：
+  - Native Messaging host 已完成注册安装，且 `com.webenvoy.host` 可被 Chrome 侧发现
+  - `runtime.ping` 的 smoke path 可以在本地已注册环境中被实际连接
 - 硬依赖：
   - `#141` / FR-0001
 - 直接对应 issue：
