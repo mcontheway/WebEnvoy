@@ -14,6 +14,8 @@ docs/
 ## 查阅规则
 
 - 要做实现、设计、评审或任何工程决策：读 [`docs/dev/AGENTS.md`](./dev/AGENTS.md)
+- 要做 FR / 架构规约审查：同时读 [`spec_review.md`](../spec_review.md)
+- 要起草正式 FR 套件：把“spec”理解为整套 `spec.md + plan.md + TODO.md`，不要只补单个文件
 - 要补背景调研或比较竞品：按需进入 `docs/research/ref/`
 - 要看历史资料：进入 `docs/archive/`
 

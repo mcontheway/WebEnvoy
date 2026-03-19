@@ -1,0 +1,45 @@
+name: Spec Guard
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'docs/dev/specs/**'
+      - 'docs/dev/architecture/**'
+      - 'docs/dev/AGENTS.md'
+      - 'docs/AGENTS.md'
+      - 'docs/research/ref/AGENTS.md'
+      - 'AGENTS.md'
+      - 'vision.md'
+      - 'code_review.md'
+      - 'spec_review.md'
+      - 'scripts/spec-guard.sh'
+      - '.github/workflows/spec-guard.yml'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - '.githooks/**'
+
+jobs:
+  spec-guard:
+    name: Validate Spec Review Boundaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch PR base branch
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --prune origin \
+            "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+
+      - name: Run spec guard
+        env:
+          SPEC_GUARD_BASE_REF: "origin/${{ github.base_ref }}"
+        run: |
+          set -euo pipefail
+          bash scripts/spec-guard.sh
