@@ -18,7 +18,7 @@
     "typecheck:extension": "tsc -p tsconfig.extension.json --noEmit"
   },
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=23.9.0"
   },
   "devDependencies": {
     "@types/node": "^24.5.2",
