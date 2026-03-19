@@ -196,6 +196,30 @@ describe("observability", () => {
     });
   });
 
+  it("marks coverage as partial when request or failure evidence exists without page state", () => {
+    const payload = buildObservabilityPayload({
+      page_state: null,
+      key_requests: [
+        {
+          request_id: "req-1",
+          stage: "request",
+          method: "GET",
+          url: "/api/feed?token=abc",
+          outcome: "failed"
+        }
+      ],
+      failure_site: {
+        stage: "request",
+        component: "network",
+        target: "/api/feed",
+        summary: "request failed"
+      }
+    });
+
+    expect(payload.coverage).toBe("partial");
+    expect(payload.request_evidence).toBe("available");
+  });
+
   it("marks page state as partial when required page signals are missing", () => {
     const payload = buildObservabilityPayload({
       page_state: {

@@ -322,8 +322,15 @@ export const buildObservabilityPayload = (
     pushUniqueField(truncationFields, "failure_site.summary");
   }
 
+  const hasSupplementalEvidence = keyRequests.length > 0 || failureSite !== null;
   const coverage: ObservabilityCoverage =
-    pageState === null ? "unavailable" : pageState.partial_observable ? "partial" : "complete";
+    pageState === null
+      ? hasSupplementalEvidence
+        ? "partial"
+        : "unavailable"
+      : pageState.partial_observable
+        ? "partial"
+        : "complete";
   const requestEvidence: RequestEvidenceState = keyRequests.length > 0 ? "available" : "none";
 
   return {

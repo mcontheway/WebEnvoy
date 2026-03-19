@@ -76,7 +76,51 @@ const sanitizeEvidence = (value: string): string =>
       (_match, key: string) => `${key}: ${REDACTED}`
     );
 
-const inferCategory = (signals?: DiagnosisSignals): DiagnosisCategory => {
+const inferCategoryFromFailureSite = (
+  failureSite: FailureSite | null,
+  stage: string,
+  component: string
+): DiagnosisCategory | null => {
+  const normalizedStage = stage.toLowerCase();
+  const normalizedComponent = component.toLowerCase();
+
+  if (
+    normalizedStage === "request" ||
+    normalizedComponent === "network" ||
+    normalizedComponent === "request"
+  ) {
+    return "request_failed";
+  }
+  if (
+    normalizedComponent === "page" ||
+    normalizedComponent === "dom" ||
+    normalizedStage === "page" ||
+    normalizedStage === "action"
+  ) {
+    return "page_changed";
+  }
+  if (
+    normalizedStage === "runtime" ||
+    normalizedStage === "transport" ||
+    normalizedComponent === "runtime" ||
+    normalizedComponent === "bridge" ||
+    normalizedComponent === "cli"
+  ) {
+    return "runtime_unavailable";
+  }
+  return failureSite === null ? null : "unknown";
+};
+
+const inferCategory = (
+  signals: DiagnosisSignals | undefined,
+  failureSite: FailureSite | null,
+  stage: string,
+  component: string
+): DiagnosisCategory => {
+  const fromFailureSite = inferCategoryFromFailureSite(failureSite, stage, component);
+  if (fromFailureSite !== null && fromFailureSite !== "unknown") {
+    return fromFailureSite;
+  }
   if (signals?.runtime_unavailable) {
     return "runtime_unavailable";
   }
@@ -129,7 +173,7 @@ export const buildDiagnosis = (
   const failureSite = normalizeFailureSite(input.failure_site);
   const stage = nonEmpty(input.stage, failureSite?.stage ?? "unknown");
   const component = nonEmpty(input.component, failureSite?.component ?? "unknown");
-  const category = input.category ?? inferCategory(input.signals);
+  const category = input.category ?? inferCategory(input.signals, failureSite, stage, component);
   const evidence = normalizeEvidence(input.evidence, options);
 
   return {

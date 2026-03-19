@@ -83,6 +83,24 @@ describe("diagnostics", () => {
     expect(diagnosis.evidence[3]).toContain("auth: [REDACTED]");
   });
 
+  it("prefers failure site over generic signal priority when determining root category", () => {
+    const diagnosis = buildDiagnosis({
+      signals: {
+        runtime_unavailable: true,
+        request_failed: true
+      },
+      failure_site: {
+        stage: "request",
+        component: "network",
+        target: "/api/feed",
+        summary: "upstream timeout"
+      }
+    });
+
+    expect(diagnosis.category).toBe("request_failed");
+    expect(diagnosis.failure_site.component).toBe("network");
+  });
+
   it("creates minimal unknown diagnosis when no signal is available", () => {
     const diagnosis = createMinimalDiagnosis();
 
