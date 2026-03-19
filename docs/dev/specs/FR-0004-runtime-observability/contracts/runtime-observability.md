@@ -35,9 +35,17 @@
 
 这些输入必须在进入最终响应前被裁剪、归一化和脱敏。
 
+URL 类字段必须默认做净化处理：
+
+- 保留用于定位问题所需的稳定主干信息，例如 `scheme://host/path`
+- 默认移除 `query` 与 `fragment`
+- 若业务场景必须保留部分查询参数，仅允许白名单字段，并且必须对 `token`、`code`、`signature`、`sig`、`auth` 这类敏感参数做替换或删除
+
 ## 输出
 
 ### 成功响应中的观测对象
+
+示例中的 `url` 已按净化规则处理，仅保留用于定位问题的稳定地址主干；真实实现返回时不得包含 query 或 fragment。
 
 ```json
 {
@@ -122,7 +130,7 @@
 最小字段：
 
 - `page_kind`：当前页面的最小语义分类，例如 `feed`、`detail`、`compose`、`login`、`unknown`
-- `url`：当前页面的规范化 URL
+- `url`：当前页面的规范化 URL，必须默认仅保留 `scheme://host/path`；query、fragment 和携带凭据的片段必须删除或替换为脱敏值
 - `title`：页面标题
 - `ready_state`：文档加载状态
 
@@ -140,7 +148,7 @@
 - `request_id`
 - `stage`
 - `method`
-- `url`
+- `url`：关键请求的规范化 URL 或路径，必须默认仅保留定位问题所需的主干信息；query、fragment 和可能携带 token / signature 的参数必须删除或替换
 - `outcome`
 
 可选字段：
