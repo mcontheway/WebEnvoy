@@ -1,14 +1,33 @@
 import { spawnSync } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
 const binPath = path.join(repoRoot, "bin", "webenvoy");
 
-const runCli = (args: string[]) =>
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  while (tempDirs.length > 0) {
+    const dir = tempDirs.pop();
+    if (dir) {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+const createRuntimeCwd = async (): Promise<string> => {
+  const dir = await mkdtemp(path.join(tmpdir(), "webenvoy-cli-contract-"));
+  tempDirs.push(dir);
+  return dir;
+};
+
+const runCli = (args: string[], cwd: string = repoRoot) =>
   spawnSync(process.execPath, [binPath, ...args], {
-    cwd: repoRoot,
+    cwd,
     encoding: "utf8"
   });
 
@@ -96,5 +115,110 @@ describe("webenvoy cli contract", () => {
     const result = runCli(["runtime.help"]);
     expect(result.status).toBe(0);
     parseSingleJsonLine(result.stdout);
+  });
+
+  it("supports runtime.start and runtime.status with profile lock and meta state", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "default",
+        "--run-id",
+        "run-contract-100",
+        "--params",
+        '{"proxyUrl":"http://127.0.0.1:8080"}'
+      ],
+      runtimeCwd
+    );
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      command: "runtime.start",
+      status: "success",
+      summary: {
+        profile: "default",
+        profileState: "ready",
+        browserState: "ready",
+        proxyUrl: "http://127.0.0.1:8080/",
+        lockHeld: true
+      }
+    });
+
+    const status = runCli(["runtime.status", "--profile", "default"], runtimeCwd);
+    expect(status.status).toBe(0);
+    const statusBody = parseSingleJsonLine(status.stdout);
+    expect(statusBody).toMatchObject({
+      command: "runtime.status",
+      status: "success",
+      summary: {
+        profile: "default",
+        profileState: "ready",
+        browserState: "ready",
+        proxyUrl: "http://127.0.0.1:8080/",
+        lockHeld: true
+      }
+    });
+  });
+
+  it("rejects runtime.start when profile lock is held by another run", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const firstStart = runCli(
+      ["runtime.start", "--profile", "locked_profile", "--run-id", "run-contract-201"],
+      runtimeCwd
+    );
+    expect(firstStart.status).toBe(0);
+
+    const secondStart = runCli(
+      ["runtime.start", "--profile", "locked_profile", "--run-id", "run-contract-202"],
+      runtimeCwd
+    );
+    expect(secondStart.status).toBe(5);
+    const body = parseSingleJsonLine(secondStart.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.start",
+      status: "error",
+      error: { code: "ERR_PROFILE_LOCKED" }
+    });
+  });
+
+  it("supports runtime.stop and reflects stopped state via runtime.status", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const start = runCli(
+      ["runtime.start", "--profile", "stop_profile", "--run-id", "run-contract-301"],
+      runtimeCwd
+    );
+    expect(start.status).toBe(0);
+
+    const stop = runCli(
+      ["runtime.stop", "--profile", "stop_profile", "--run-id", "run-contract-302"],
+      runtimeCwd
+    );
+    expect(stop.status).toBe(0);
+    const stopBody = parseSingleJsonLine(stop.stdout);
+    expect(stopBody).toMatchObject({
+      command: "runtime.stop",
+      status: "success",
+      summary: {
+        profile: "stop_profile",
+        profileState: "stopped",
+        browserState: "absent",
+        lockHeld: false
+      }
+    });
+
+    const status = runCli(["runtime.status", "--profile", "stop_profile"], runtimeCwd);
+    expect(status.status).toBe(0);
+    const statusBody = parseSingleJsonLine(status.stdout);
+    expect(statusBody).toMatchObject({
+      command: "runtime.status",
+      status: "success",
+      summary: {
+        profile: "stop_profile",
+        profileState: "stopped",
+        browserState: "absent",
+        lockHeld: false
+      }
+    });
   });
 });

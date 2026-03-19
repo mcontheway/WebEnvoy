@@ -1,5 +1,7 @@
 import { CliError } from "../core/errors.js";
+import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 const asBoolean = (value) => value === true;
+const profileRuntime = new ProfileRuntimeService();
 const runtimePing = async (context) => {
     if (asBoolean(context.params.simulate_runtime_unavailable)) {
         throw new CliError("ERR_RUNTIME_UNAVAILABLE", "运行时不可用", { retryable: true });
@@ -11,9 +13,35 @@ const runtimePing = async (context) => {
         message: "ok"
     };
 };
+const runtimeStart = async (context) => profileRuntime.start({
+    cwd: context.cwd,
+    profile: context.profile ?? "",
+    runId: context.run_id,
+    params: context.params
+});
+const runtimeStatus = async (context) => profileRuntime.status({
+    cwd: context.cwd,
+    profile: context.profile ?? "",
+    runId: context.run_id,
+    params: context.params
+});
+const runtimeStop = async (context) => profileRuntime.stop({
+    cwd: context.cwd,
+    profile: context.profile ?? "",
+    runId: context.run_id,
+    params: context.params
+});
 const runtimeHelp = async () => ({
     usage: "webenvoy <command> [--params '<json>'] [--profile <profile>] [--run-id <run_id>]",
-    commands: ["runtime.help", "runtime.ping", "xhs.search"],
+    commands: [
+        "runtime.help",
+        "runtime.ping",
+        "runtime.start",
+        "runtime.login",
+        "runtime.status",
+        "runtime.stop",
+        "xhs.search"
+    ],
     notes: ["--params 必须是 JSON 对象字符串", "stdout 只输出单个 JSON 对象"]
 });
 export const runtimeCommands = () => [
@@ -26,5 +54,28 @@ export const runtimeCommands = () => [
         name: "runtime.ping",
         status: "implemented",
         handler: runtimePing
+    },
+    {
+        name: "runtime.start",
+        status: "implemented",
+        requiresProfile: true,
+        handler: runtimeStart
+    },
+    {
+        name: "runtime.login",
+        status: "not_implemented",
+        requiresProfile: true
+    },
+    {
+        name: "runtime.status",
+        status: "implemented",
+        requiresProfile: true,
+        handler: runtimeStatus
+    },
+    {
+        name: "runtime.stop",
+        status: "implemented",
+        requiresProfile: true,
+        handler: runtimeStop
     }
 ];
