@@ -1,6 +1,7 @@
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CliError } from "../core/errors.js";
+import { BrowserLaunchError, launchBrowser } from "./browser-launcher.js";
 import { createProfileLock } from "./profile-lock.js";
 import { ProfileStore } from "./profile-store.js";
 import { applyProfileProxyBinding, beginLoginSession, beginStartSession, beginStopSession, buildRuntimeSession, markSessionReady, markSessionStopped } from "./runtime-session.js";
@@ -54,6 +55,55 @@ const parseProxyUrl = (params) => {
     }
     return value;
 };
+const asObjectRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+const parseLocalStorageSnapshot = (params) => {
+    const rawSnapshot = params.localStorageSnapshot;
+    if (rawSnapshot === undefined || rawSnapshot === null) {
+        return null;
+    }
+    if (!asObjectRecord(rawSnapshot)) {
+        throw new CliError("ERR_PROFILE_INVALID", "params.localStorageSnapshot 必须是对象");
+    }
+    if (typeof rawSnapshot.origin !== "string" || rawSnapshot.origin.trim().length === 0) {
+        throw new CliError("ERR_PROFILE_INVALID", "params.localStorageSnapshot.origin 必须是非空字符串");
+    }
+    const origin = rawSnapshot.origin;
+    if (!Array.isArray(rawSnapshot.entries)) {
+        throw new CliError("ERR_PROFILE_INVALID", "params.localStorageSnapshot.entries 必须是数组");
+    }
+    const entries = rawSnapshot.entries.map((entry, index) => {
+        if (!asObjectRecord(entry)) {
+            throw new CliError("ERR_PROFILE_INVALID", `params.localStorageSnapshot.entries[${index}] 必须是对象`);
+        }
+        if (typeof entry.key !== "string" || typeof entry.value !== "string") {
+            throw new CliError("ERR_PROFILE_INVALID", `params.localStorageSnapshot.entries[${index}] 的 key/value 必须是字符串`);
+        }
+        return {
+            key: entry.key,
+            value: entry.value
+        };
+    });
+    return {
+        origin,
+        entries
+    };
+};
+const upsertLocalStorageSnapshot = (snapshots, nextSnapshot) => {
+    if (!nextSnapshot) {
+        return snapshots;
+    }
+    const preserved = snapshots.filter((snapshot) => snapshot.origin !== nextSnapshot.origin);
+    return [...preserved, nextSnapshot];
+};
+const buildRecoverableSessionSummary = (meta) => {
+    const snapshots = meta?.localStorageSnapshots ?? [];
+    return {
+        hasLocalStorageSnapshot: snapshots.length > 0,
+        snapshotCount: snapshots.length,
+        origins: snapshots.map((snapshot) => snapshot.origin),
+        lastLoginAt: meta?.lastLoginAt ?? null
+    };
+};
 const isStartableProfileState = (state) => state === "uninitialized" || state === "stopped" || state === "disconnected";
 const isLoginableProfileState = (state) => state === "uninitialized" ||
     state === "stopped" ||
@@ -66,6 +116,15 @@ const shouldConfirmLogin = (params) => params.confirm === true;
 const mapRuntimeError = (error) => {
     if (error instanceof CliError) {
         return error;
+    }
+    if (error instanceof BrowserLaunchError) {
+        if (error.code === "BROWSER_INVALID_ARGUMENT") {
+            return new CliError("ERR_PROFILE_INVALID", error.message);
+        }
+        return new CliError("ERR_BROWSER_LAUNCH_FAILED", error.message, {
+            retryable: error.code !== "BROWSER_NOT_FOUND",
+            cause: error
+        });
     }
     if (error instanceof Error) {
         if (/Invalid profile name/i.test(error.message)) {
@@ -89,6 +148,7 @@ export class ProfileRuntimeService {
     #storeFactory;
     #lockFileAdapter;
     #isProcessAlive;
+    #browserLauncher;
     constructor(options) {
         this.#storeFactory =
             options?.storeFactory ??
@@ -110,6 +170,9 @@ export class ProfileRuntimeService {
                         return false;
                     }
                 });
+        this.#browserLauncher = options?.browserLauncher ?? {
+            launch: launchBrowser
+        };
     }
     async start(input) {
         const nowIso = isoNow();
@@ -124,6 +187,7 @@ export class ProfileRuntimeService {
             nowIso
         });
         let startSucceeded = false;
+        let launchedBrowserPid = null;
         try {
             let existingMeta = await this.#readOrInitializeMeta(store, input.profile, nowIso);
             const recoveredMeta = shouldRecoverAsDisconnected(lockAcquireResult.acquisition, existingMeta.profileState)
@@ -150,15 +214,23 @@ export class ProfileRuntimeService {
                 runId: input.runId,
                 nowIso
             });
+            const browserLaunch = await this.#browserLauncher.launch({
+                profileDir,
+                proxyUrl: session.proxyBinding?.url ?? null,
+                params: input.params
+            });
+            launchedBrowserPid = browserLaunch.browserPid;
+            await this.#updateLockOwnerPid(lockPath, input.runId, browserLaunch.browserPid, nowIso);
             session = markSessionReady(session);
-            await store.writeMeta(input.profile, this.#patchMeta(recoveredMeta, {
+            const nextMeta = this.#patchMeta(recoveredMeta, {
                 profileName: input.profile,
                 profileDir,
                 profileState: session.profileState,
                 proxyBinding: session.proxyBinding,
                 updatedAt: nowIso,
                 lastStartedAt: nowIso
-            }));
+            });
+            await store.writeMeta(input.profile, nextMeta);
             startSucceeded = true;
             return {
                 profile: input.profile,
@@ -167,6 +239,9 @@ export class ProfileRuntimeService {
                 profileDir,
                 proxyUrl: session.proxyBinding?.url ?? null,
                 lockHeld: true,
+                browserPath: browserLaunch.browserPath,
+                browserPid: browserLaunch.browserPid,
+                recoverableSession: buildRecoverableSessionSummary(nextMeta),
                 startedAt: nowIso
             };
         }
@@ -175,6 +250,7 @@ export class ProfileRuntimeService {
         }
         finally {
             if (!startSucceeded) {
+                await this.#terminateProcess(launchedBrowserPid);
                 await this.#rollbackLockOnStartFailure(lockPath, input.runId);
             }
         }
@@ -194,6 +270,7 @@ export class ProfileRuntimeService {
         const confirmLogin = shouldConfirmLogin(input.params);
         let loginSucceeded = false;
         let keepLockOnFailure = false;
+        let launchedBrowserPid = null;
         try {
             let existingMeta = await this.#readOrInitializeMeta(store, input.profile, nowIso);
             const recoveredMeta = shouldRecoverAsDisconnected(lockAcquireResult.acquisition, existingMeta.profileState)
@@ -220,6 +297,15 @@ export class ProfileRuntimeService {
                 runId: input.runId,
                 nowIso
             });
+            if (!confirmLogin) {
+                const browserLaunch = await this.#browserLauncher.launch({
+                    profileDir,
+                    proxyUrl: session.proxyBinding?.url ?? null,
+                    params: input.params
+                });
+                launchedBrowserPid = browserLaunch.browserPid;
+                await this.#updateLockOwnerPid(lockPath, input.runId, browserLaunch.browserPid, nowIso);
+            }
             await store.writeMeta(input.profile, this.#patchMeta(recoveredMeta, {
                 profileName: input.profile,
                 profileDir,
@@ -237,19 +323,23 @@ export class ProfileRuntimeService {
                     profileDir,
                     proxyUrl: session.proxyBinding?.url ?? null,
                     lockHeld: true,
+                    recoverableSession: buildRecoverableSessionSummary(recoveredMeta),
                     confirmationRequired: true,
                     confirmPath: "runtime.login --params '{\"confirm\":true}'"
                 };
             }
+            const localStorageSnapshot = parseLocalStorageSnapshot(input.params);
             session = markSessionReady(session);
-            await store.writeMeta(input.profile, this.#patchMeta(recoveredMeta, {
+            const nextMeta = this.#patchMeta(recoveredMeta, {
                 profileName: input.profile,
                 profileDir,
                 profileState: session.profileState,
                 proxyBinding: session.proxyBinding,
                 updatedAt: nowIso,
-                lastLoginAt: nowIso
-            }));
+                lastLoginAt: nowIso,
+                localStorageSnapshots: upsertLocalStorageSnapshot(recoveredMeta.localStorageSnapshots, localStorageSnapshot)
+            });
+            await store.writeMeta(input.profile, nextMeta);
             loginSucceeded = true;
             return {
                 profile: input.profile,
@@ -258,6 +348,7 @@ export class ProfileRuntimeService {
                 profileDir,
                 proxyUrl: session.proxyBinding?.url ?? null,
                 lockHeld: true,
+                recoverableSession: buildRecoverableSessionSummary(nextMeta),
                 lastLoginAt: nowIso
             };
         }
@@ -266,6 +357,7 @@ export class ProfileRuntimeService {
         }
         finally {
             if (!loginSucceeded && !keepLockOnFailure) {
+                await this.#terminateProcess(launchedBrowserPid);
                 await this.#rollbackLockOnStartFailure(lockPath, input.runId);
             }
         }
@@ -288,6 +380,8 @@ export class ProfileRuntimeService {
             profileDir,
             proxyUrl: meta?.proxyBinding?.url ?? null,
             lockHeld,
+            lockOwnerPid: lock?.ownerPid ?? null,
+            recoverableSession: buildRecoverableSessionSummary(meta),
             updatedAt: meta?.updatedAt ?? null
         };
     }
@@ -321,6 +415,7 @@ export class ProfileRuntimeService {
         }
         const previousMeta = existingMeta;
         try {
+            await this.#terminateProcess(lock.ownerPid);
             await store.writeMeta(input.profile, this.#patchMeta(existingMeta, {
                 profileName: input.profile,
                 profileDir,
@@ -350,6 +445,7 @@ export class ProfileRuntimeService {
             profileDir,
             proxyUrl: session.proxyBinding?.url ?? null,
             lockHeld: false,
+            recoverableSession: buildRecoverableSessionSummary(existingMeta),
             stoppedAt: nowIso
         };
     }
@@ -398,6 +494,25 @@ export class ProfileRuntimeService {
     async #writeLock(lockPath, lock) {
         await this.#lockFileAdapter.writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
     }
+    async #updateLockOwnerPid(lockPath, runId, ownerPid, nowIso) {
+        const existing = await this.#readLock(lockPath);
+        if (!existing) {
+            throw new CliError("ERR_RUNTIME_UNAVAILABLE", "profile 锁丢失，浏览器启动状态不可恢复", {
+                retryable: true
+            });
+        }
+        if (existing.ownerRunId !== runId) {
+            throw new CliError("ERR_PROFILE_LOCKED", "profile 当前被其他运行占用", {
+                retryable: true
+            });
+        }
+        const updated = {
+            ...existing,
+            ownerPid,
+            lastHeartbeatAt: nowIso
+        };
+        await this.#writeLock(lockPath, updated);
+    }
     async #rollbackLockOnStartFailure(lockPath, runId) {
         const lock = await this.#readLock(lockPath);
         if (!lock) {
@@ -407,6 +522,41 @@ export class ProfileRuntimeService {
             return;
         }
         await this.#deleteLock(lockPath);
+    }
+    async #terminateProcess(pid) {
+        if (!Number.isInteger(pid) || pid === null || pid <= 0) {
+            return;
+        }
+        try {
+            process.kill(pid, "SIGTERM");
+        }
+        catch (error) {
+            const nodeError = error;
+            if (nodeError.code === "ESRCH") {
+                return;
+            }
+            throw error;
+        }
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            if (!this.#isProcessAlive(pid)) {
+                return;
+            }
+            await new Promise((resolve) => {
+                setTimeout(resolve, 80);
+            });
+        }
+        if (!this.#isProcessAlive(pid)) {
+            return;
+        }
+        try {
+            process.kill(pid, "SIGKILL");
+        }
+        catch (error) {
+            const nodeError = error;
+            if (nodeError.code !== "ESRCH") {
+                throw error;
+            }
+        }
     }
     async #acquireProfileLockAtomically(input) {
         for (let attempt = 0; attempt < LOCK_ACQUIRE_MAX_RETRIES; attempt += 1) {
@@ -436,9 +586,12 @@ export class ProfileRuntimeService {
                 continue;
             }
             if (existingLock.ownerRunId === input.runId) {
+                const ownerPid = this.#isProcessAlive(existingLock.ownerPid)
+                    ? existingLock.ownerPid
+                    : process.pid;
                 const updatedLock = {
                     ...existingLock,
-                    ownerPid: process.pid,
+                    ownerPid,
                     lastHeartbeatAt: input.nowIso
                 };
                 await this.#writeLock(input.lockPath, updatedLock);
@@ -499,6 +652,7 @@ export class ProfileRuntimeService {
             profileDir: patch.profileDir,
             profileState: patch.profileState,
             proxyBinding: patch.proxyBinding,
+            localStorageSnapshots: patch.localStorageSnapshots ?? current.localStorageSnapshots,
             updatedAt: patch.updatedAt,
             lastStartedAt: patch.lastStartedAt ?? current.lastStartedAt,
             lastLoginAt: patch.lastLoginAt ?? current.lastLoginAt,

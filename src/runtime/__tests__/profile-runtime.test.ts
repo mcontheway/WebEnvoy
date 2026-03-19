@@ -10,6 +10,23 @@ import { ProfileStore, type ProfileMeta } from "../profile-store.js";
 
 const tempDirs: string[] = [];
 
+const createMockBrowserLauncher = () => ({
+  launch: async () => ({
+    browserPath: "/mock/chrome",
+    browserPid: 999999,
+    launchArgs: ["about:blank"],
+    launchedAt: new Date().toISOString()
+  })
+});
+
+const createTestService = (
+  options?: ConstructorParameters<typeof ProfileRuntimeService>[0]
+): ProfileRuntimeService =>
+  new ProfileRuntimeService({
+    ...options,
+    browserLauncher: options?.browserLauncher ?? createMockBrowserLauncher()
+  });
+
 afterEach(async () => {
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
@@ -150,7 +167,7 @@ describe("profile-runtime start rollback", () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-"));
     tempDirs.push(baseDir);
     const profileRootDir = join(baseDir, ".webenvoy", "profiles");
-    const service = new ProfileRuntimeService({
+    const service = createTestService({
       storeFactory: () => new FailingWriteProfileStore(profileRootDir)
     });
 
@@ -177,7 +194,7 @@ describe("profile-runtime stop rollback", () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-stop-"));
     tempDirs.push(baseDir);
     const profileRootDir = join(baseDir, ".webenvoy", "profiles");
-    const service = new ProfileRuntimeService({
+    const service = createTestService({
       storeFactory: () => new StopMetaWriteFailProfileStore(profileRootDir)
     });
 
@@ -217,7 +234,7 @@ describe("profile-runtime stop rollback", () => {
   it("rolls back stopped meta when lock delete fails", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-stop-delete-"));
     tempDirs.push(baseDir);
-    const service = new ProfileRuntimeService({
+    const service = createTestService({
       lockFileAdapter: failingDeleteLockAdapter
     });
 
@@ -259,7 +276,7 @@ describe("profile-runtime stop rollback", () => {
   it("retries lock delete and succeeds without rollback on transient failure", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-stop-retry-"));
     tempDirs.push(baseDir);
-    const service = new ProfileRuntimeService({
+    const service = createTestService({
       lockFileAdapter: createFlakyDeleteLockAdapter(1)
     });
 
@@ -300,7 +317,7 @@ describe("profile-runtime stale lock reclaim", () => {
   it("auto-recovers stale lock for runtime.start after crash residue", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-reclaim-start-"));
     tempDirs.push(baseDir);
-    const service = new ProfileRuntimeService({
+    const service = createTestService({
       isProcessAlive: () => false
     });
 
@@ -356,7 +373,7 @@ describe("profile-runtime stale lock reclaim", () => {
   it("auto-recovers stale lock for runtime.login after crash residue", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-reclaim-login-"));
     tempDirs.push(baseDir);
-    const service = new ProfileRuntimeService({
+    const service = createTestService({
       isProcessAlive: () => false
     });
 
@@ -412,7 +429,7 @@ describe("profile-runtime stale lock reclaim", () => {
   it("does not reclaim stale-looking lock when owner process is still alive", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-reclaim-alive-"));
     tempDirs.push(baseDir);
-    const service = new ProfileRuntimeService({
+    const service = createTestService({
       isProcessAlive: () => true
     });
 
@@ -454,7 +471,7 @@ describe("profile-runtime login", () => {
   it("keeps logging_in before confirmation and writes lastLoginAt after confirmation", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-login-"));
     tempDirs.push(baseDir);
-    const service = new ProfileRuntimeService();
+    const service = createTestService();
 
     const beforeConfirm = await service.login({
       cwd: baseDir,
@@ -486,14 +503,25 @@ describe("profile-runtime login", () => {
       cwd: baseDir,
       profile: "first_login_profile",
       runId: "run-runtime-test-201",
-      params: { confirm: true }
+      params: {
+        confirm: true,
+        localStorageSnapshot: {
+          origin: "https://example.com",
+          entries: [{ key: "session", value: "token-1" }]
+        }
+      }
     });
 
     expect(result).toMatchObject({
       profile: "first_login_profile",
       profileState: "ready",
       browserState: "ready",
-      lockHeld: true
+      lockHeld: true,
+      recoverableSession: {
+        hasLocalStorageSnapshot: true,
+        snapshotCount: 1,
+        origins: ["https://example.com"]
+      }
     });
     expect(typeof result.lastLoginAt).toBe("string");
 
@@ -501,5 +529,11 @@ describe("profile-runtime login", () => {
     const confirmedMeta = JSON.parse(confirmedMetaRaw) as ProfileMeta;
     expect(confirmedMeta.profileState).toBe("ready");
     expect(confirmedMeta.lastLoginAt).toBe(result.lastLoginAt);
+    expect(confirmedMeta.localStorageSnapshots).toEqual([
+      {
+        origin: "https://example.com",
+        entries: [{ key: "session", value: "token-1" }]
+      }
+    ]);
   });
 });
