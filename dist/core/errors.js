@@ -16,11 +16,13 @@ const EXIT_CODE_BY_ERROR = {
 export class CliError extends Error {
     code;
     retryable;
+    details;
     constructor(code, message, options) {
         super(message, options);
         this.name = "CliError";
         this.code = code;
         this.retryable = options?.retryable ?? false;
+        this.details = options?.details;
     }
 }
 export const successExitCode = () => EXIT_CODE_SUCCESS;

@@ -1,6 +1,7 @@
 import { CommandRegistry } from "../core/registry.js";
 
 import { runtimeCommands } from "./runtime.js";
+import { xhsCommands } from "./xhs.js";
 
 export const createCommandRegistry = (): CommandRegistry => {
   const registry = new CommandRegistry();
@@ -9,11 +10,9 @@ export const createCommandRegistry = (): CommandRegistry => {
     registry.register(command);
   }
 
-  registry.register({
-    name: "xhs.search",
-    status: "not_implemented",
-    requiresProfile: false
-  });
+  for (const command of xhsCommands()) {
+    registry.register(command);
+  }
 
   return registry;
 };

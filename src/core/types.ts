@@ -4,6 +4,12 @@ import type { ObservabilityPayload } from "../runtime/observability.js";
 
 export type JsonObject = Record<string, unknown>;
 
+export interface CapabilityErrorDetails extends JsonObject {
+  ability_id: string;
+  stage: "input_validation" | "execution" | "output_mapping";
+  reason: string;
+}
+
 export interface ParsedCliInput {
   command: string;
   params: JsonObject;
@@ -37,6 +43,7 @@ export interface ErrorResponse {
     message: string;
     retryable: boolean;
     diagnosis: Diagnosis;
+    details?: CapabilityErrorDetails;
   };
   observability: ObservabilityPayload;
   timestamp: string;
