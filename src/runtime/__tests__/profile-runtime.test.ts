@@ -47,6 +47,11 @@ class FailingWriteProfileStore {
       profileDir,
       profileState: "uninitialized",
       proxyBinding: null,
+      fingerprintSeeds: {
+        audioNoiseSeed: `${profileName}-audio-seed`,
+        canvasNoiseSeed: `${profileName}-canvas-seed`
+      },
+      localStorageSnapshots: [],
       createdAt: nowIso,
       updatedAt: nowIso,
       lastStartedAt: null,

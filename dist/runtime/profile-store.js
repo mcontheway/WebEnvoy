@@ -1,5 +1,5 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 export const PROFILE_META_FILENAME = "__webenvoy_meta.json";
 const DEFAULT_FILE_SYSTEM = {
     mkdir,
@@ -8,8 +8,16 @@ const DEFAULT_FILE_SYSTEM = {
     rename
 };
 const PROFILE_NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
-const validateProfileName = (profileName) => {
+const validateProfileName = (profileName, rootDir) => {
     if (!PROFILE_NAME_PATTERN.test(profileName)) {
+        throw new Error(`Invalid profile name: ${profileName}`);
+    }
+    if (profileName === "." || profileName === "..") {
+        throw new Error(`Invalid profile name: ${profileName}`);
+    }
+    const resolvedProfileDir = resolve(rootDir, profileName);
+    const rootWithSeparator = rootDir.endsWith(sep) ? rootDir : `${rootDir}${sep}`;
+    if (!resolvedProfileDir.startsWith(rootWithSeparator)) {
         throw new Error(`Invalid profile name: ${profileName}`);
     }
 };
@@ -22,7 +30,7 @@ export class ProfileStore {
         this.fs = fsAdapter;
     }
     getProfileDir(profileName) {
-        validateProfileName(profileName);
+        validateProfileName(profileName, this.rootDir);
         return join(this.rootDir, profileName);
     }
     getMetaPath(profileName) {
@@ -69,6 +77,11 @@ export class ProfileStore {
             profileDir,
             profileState: "uninitialized",
             proxyBinding: null,
+            fingerprintSeeds: {
+                audioNoiseSeed: `${profileName}-audio-seed`,
+                canvasNoiseSeed: `${profileName}-canvas-seed`
+            },
+            localStorageSnapshots: [],
             createdAt: nowIso,
             updatedAt: nowIso,
             lastStartedAt: null,

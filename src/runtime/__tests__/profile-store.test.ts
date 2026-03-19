@@ -31,6 +31,11 @@ describe("profile-store", () => {
     expect(meta.profileName).toBe("default");
     expect(meta.profileState).toBe("uninitialized");
     expect(meta.proxyBinding).toBeNull();
+    expect(meta.fingerprintSeeds).toMatchObject({
+      audioNoiseSeed: "default-audio-seed",
+      canvasNoiseSeed: "default-canvas-seed"
+    });
+    expect(meta.localStorageSnapshots).toEqual([]);
 
     const profileDir = store.getProfileDir("default");
     const metaPath = store.getMetaPath("default");
@@ -51,6 +56,16 @@ describe("profile-store", () => {
         boundAt: "2026-03-19T10:01:00.000Z",
         source: "runtime.start"
       },
+      fingerprintSeeds: {
+        audioNoiseSeed: "seed-a-001",
+        canvasNoiseSeed: "seed-c-001"
+      },
+      localStorageSnapshots: [
+        {
+          origin: "https://example.com",
+          entries: [{ key: "session", value: "token" }]
+        }
+      ],
       createdAt: "2026-03-19T10:00:00.000Z",
       updatedAt: "2026-03-19T10:01:00.000Z",
       lastStartedAt: "2026-03-19T10:01:00.000Z",
@@ -62,6 +77,8 @@ describe("profile-store", () => {
     const meta = await store.readMeta("default");
     expect(meta?.profileState).toBe("ready");
     expect(meta?.proxyBinding?.url).toBe("http://127.0.0.1:8080/");
+    expect(meta?.fingerprintSeeds.audioNoiseSeed).toBe("seed-a-001");
+    expect(meta?.localStorageSnapshots).toHaveLength(1);
   });
 
   it("returns null when meta does not exist", async () => {
@@ -73,6 +90,12 @@ describe("profile-store", () => {
   it("rejects invalid profile name", async () => {
     const store = await createStore();
     await expect(store.initializeMeta("../escape", "2026-03-19T10:00:00.000Z")).rejects.toThrow(
+      /invalid profile name/i
+    );
+    await expect(store.initializeMeta(".", "2026-03-19T10:00:00.000Z")).rejects.toThrow(
+      /invalid profile name/i
+    );
+    await expect(store.initializeMeta("..", "2026-03-19T10:00:00.000Z")).rejects.toThrow(
       /invalid profile name/i
     );
   });

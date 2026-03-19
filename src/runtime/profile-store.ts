@@ -1,10 +1,25 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 
 import type { ProfileState } from "./profile-state.js";
 import type { ProxyBinding } from "./proxy-binding.js";
 
 export const PROFILE_META_FILENAME = "__webenvoy_meta.json";
+
+export interface FingerprintSeeds {
+  audioNoiseSeed: string;
+  canvasNoiseSeed: string;
+}
+
+export interface LocalStorageSnapshotEntry {
+  key: string;
+  value: string;
+}
+
+export interface LocalStorageSnapshot {
+  origin: string;
+  entries: LocalStorageSnapshotEntry[];
+}
 
 export interface ProfileMeta {
   schemaVersion: number;
@@ -12,6 +27,8 @@ export interface ProfileMeta {
   profileDir: string;
   profileState: ProfileState;
   proxyBinding: ProxyBinding | null;
+  fingerprintSeeds: FingerprintSeeds;
+  localStorageSnapshots: LocalStorageSnapshot[];
   createdAt: string;
   updatedAt: string;
   lastStartedAt: string | null;
@@ -36,8 +53,17 @@ const DEFAULT_FILE_SYSTEM: FileSystemAdapter = {
 
 const PROFILE_NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
 
-const validateProfileName = (profileName: string): void => {
+const validateProfileName = (profileName: string, rootDir: string): void => {
   if (!PROFILE_NAME_PATTERN.test(profileName)) {
+    throw new Error(`Invalid profile name: ${profileName}`);
+  }
+  if (profileName === "." || profileName === "..") {
+    throw new Error(`Invalid profile name: ${profileName}`);
+  }
+
+  const resolvedProfileDir = resolve(rootDir, profileName);
+  const rootWithSeparator = rootDir.endsWith(sep) ? rootDir : `${rootDir}${sep}`;
+  if (!resolvedProfileDir.startsWith(rootWithSeparator)) {
     throw new Error(`Invalid profile name: ${profileName}`);
   }
 };
@@ -55,7 +81,7 @@ export class ProfileStore {
   }
 
   getProfileDir(profileName: string): string {
-    validateProfileName(profileName);
+    validateProfileName(profileName, this.rootDir);
     return join(this.rootDir, profileName);
   }
 
@@ -109,6 +135,11 @@ export class ProfileStore {
       profileDir,
       profileState: "uninitialized",
       proxyBinding: null,
+      fingerprintSeeds: {
+        audioNoiseSeed: `${profileName}-audio-seed`,
+        canvasNoiseSeed: `${profileName}-canvas-seed`
+      },
+      localStorageSnapshots: [],
       createdAt: nowIso,
       updatedAt: nowIso,
       lastStartedAt: null,
