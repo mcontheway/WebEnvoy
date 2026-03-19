@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
-import { access } from "node:fs/promises";
+import { access, stat } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
 const KNOWN_BROWSER_CANDIDATES = {
     darwin: [
@@ -92,6 +92,15 @@ const pathExists = async (path) => {
         return false;
     }
 };
+const isFreshReadyMarker = async (path, launchedAtMs) => {
+    try {
+        const markerStat = await stat(path);
+        return markerStat.mtimeMs >= launchedAtMs;
+    }
+    catch {
+        return false;
+    }
+};
 const resolveCommandFromPath = async (command) => {
     const pathEnv = process.env.PATH ?? "";
     if (pathEnv.trim().length === 0) {
@@ -119,9 +128,11 @@ const resolveCommandFromPath = async (command) => {
 };
 const resolveExecutablePath = async (params) => {
     const explicitFromParams = parseOptionalString(params.browserPath);
+    if (explicitFromParams !== null) {
+        throw new BrowserLaunchError("BROWSER_INVALID_ARGUMENT", "params.browserPath 不受支持，请使用受信环境变量 WEBENVOY_BROWSER_PATH");
+    }
     const explicitFromEnv = parseOptionalString(process.env.WEBENVOY_BROWSER_PATH);
     const candidates = [
-        explicitFromParams,
         explicitFromEnv,
         ...(KNOWN_BROWSER_CANDIDATES[process.platform] ?? [])
     ].filter((item) => item !== null);
@@ -137,29 +148,45 @@ const resolveExecutablePath = async (params) => {
             return resolved;
         }
     }
-    throw new BrowserLaunchError("BROWSER_NOT_FOUND", "未找到系统 Chrome/Chromium，可通过 WEBENVOY_BROWSER_PATH 或 params.browserPath 显式指定");
+    throw new BrowserLaunchError("BROWSER_NOT_FOUND", "未找到系统 Chrome/Chromium，可通过受信环境变量 WEBENVOY_BROWSER_PATH 显式指定");
 };
 const shouldLaunchHeadless = (params) => params.headless !== false;
-const waitForBrowserReady = async (profileDir, pid) => {
+const READY_WAIT_MAX_ATTEMPTS = 20;
+const READY_WAIT_INTERVAL_MS = 150;
+const READY_MIN_UPTIME_MS = 600;
+const READY_CONFIRM_DELAY_MS = 120;
+const assertProcessAlive = (pid) => {
+    try {
+        process.kill(pid, 0);
+    }
+    catch (error) {
+        const nodeError = error;
+        if (nodeError.code === "ESRCH") {
+            throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器启动后立即退出");
+        }
+        throw error;
+    }
+};
+const waitForBrowserReady = async (profileDir, pid, launchedAtMs) => {
     const readyMarkers = [join(profileDir, "Local State"), join(profileDir, "Default", "Preferences")];
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-        try {
-            process.kill(pid, 0);
-        }
-        catch (error) {
-            const nodeError = error;
-            if (nodeError.code === "ESRCH") {
-                throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器启动后立即退出");
-            }
-            throw error;
-        }
+    for (let attempt = 0; attempt < READY_WAIT_MAX_ATTEMPTS; attempt += 1) {
+        assertProcessAlive(pid);
+        let markerReady = false;
         for (const marker of readyMarkers) {
-            if (await pathExists(marker)) {
-                return;
+            if (await isFreshReadyMarker(marker, launchedAtMs)) {
+                markerReady = true;
+                break;
             }
+        }
+        if (markerReady && Date.now() - launchedAtMs >= READY_MIN_UPTIME_MS) {
+            await new Promise((resolve) => {
+                setTimeout(resolve, READY_CONFIRM_DELAY_MS);
+            });
+            assertProcessAlive(pid);
+            return;
         }
         await new Promise((resolve) => {
-            setTimeout(resolve, 150);
+            setTimeout(resolve, READY_WAIT_INTERVAL_MS);
         });
     }
     throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器启动超时，未完成最小 profile 初始化");
@@ -169,7 +196,8 @@ const launchProcess = async (executablePath, args) => {
         detached: true,
         stdio: "ignore"
     });
-    const launchedAt = new Date().toISOString();
+    const launchedAtMs = Date.now();
+    const launchedAt = new Date(launchedAtMs).toISOString();
     child.unref();
     const launched = await new Promise((resolve, reject) => {
         let settled = false;
@@ -200,7 +228,8 @@ const launchProcess = async (executablePath, args) => {
     }
     return {
         pid: child.pid,
-        launchedAt
+        launchedAt,
+        launchedAtMs
     };
 };
 export const launchBrowser = async (input) => {
@@ -222,7 +251,7 @@ export const launchBrowser = async (input) => {
     launchArgs.push(parseStartUrl(input.params));
     try {
         const launched = await launchProcess(executablePath, launchArgs);
-        await waitForBrowserReady(input.profileDir, launched.pid);
+        await waitForBrowserReady(input.profileDir, launched.pid, launched.launchedAtMs);
         return {
             browserPath: executablePath,
             browserPid: launched.pid,

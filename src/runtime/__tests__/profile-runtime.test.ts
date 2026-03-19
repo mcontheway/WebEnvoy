@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ProfileRuntimeService } from "../profile-runtime.js";
 import type { ProfileLock } from "../profile-lock.js";
@@ -326,6 +326,42 @@ describe("profile-runtime stop rollback", () => {
     const meta = JSON.parse(metaRaw) as ProfileMeta;
     expect(meta.profileState).toBe("stopped");
     expect(meta.lastStoppedAt).toBeTruthy();
+  });
+
+  it("does not kill lock owner pid during runtime.stop", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-stop-no-kill-"));
+    tempDirs.push(baseDir);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => pid === 999999
+    });
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(
+      (() => true) as typeof process.kill
+    );
+
+    try {
+      await service.start({
+        cwd: baseDir,
+        profile: "stop_no_kill_profile",
+        runId: "run-runtime-test-131",
+        params: {}
+      });
+
+      const stopped = await service.stop({
+        cwd: baseDir,
+        profile: "stop_no_kill_profile",
+        runId: "run-runtime-test-131",
+        params: {}
+      });
+      expect(stopped).toMatchObject({
+        profile: "stop_no_kill_profile",
+        profileState: "stopped",
+        lockHeld: false
+      });
+      expect(killSpy).not.toHaveBeenCalledWith(999999, "SIGTERM");
+      expect(killSpy).not.toHaveBeenCalledWith(999999, "SIGKILL");
+    } finally {
+      killSpy.mockRestore();
+    }
   });
 });
 

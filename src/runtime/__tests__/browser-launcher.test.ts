@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -43,9 +43,24 @@ setInterval(() => {}, 1000);
   return { scriptPath, logPath };
 };
 
+const createCrashBrowserExecutable = async (): Promise<string> => {
+  const dir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-crash-"));
+  tempDirs.push(dir);
+  const scriptPath = join(dir, "crash-browser.mjs");
+  await writeFile(
+    scriptPath,
+    `#!/usr/bin/env node
+setTimeout(() => process.exit(0), 50);
+`,
+    "utf8"
+  );
+  await chmod(scriptPath, 0o755);
+  return scriptPath;
+};
+
 const waitForLaunchLog = async (logPath: string): Promise<string> => {
   let lastError: unknown = null;
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
     try {
       const content = await readFile(logPath, "utf8");
       if (content.trim().length > 0) {
@@ -133,5 +148,46 @@ describe("browser-launcher", () => {
 
     const launchLog = await waitForLaunchLog(logPath);
     expect(launchLog).not.toContain("--headless=new");
+  });
+
+  it("rejects request-scoped browserPath override", async () => {
+    const { scriptPath } = await createMockBrowserExecutable();
+    process.env.WEBENVOY_BROWSER_PATH = scriptPath;
+
+    await expect(
+      launchBrowser({
+        command: "runtime.start",
+        profileDir: join(tmpdir(), "webenvoy-browser-launcher-reject-override"),
+        proxyUrl: null,
+        params: {
+          browserPath: scriptPath
+        }
+      })
+    ).rejects.toMatchObject({
+      name: "BrowserLaunchError",
+      code: "BROWSER_INVALID_ARGUMENT"
+    } satisfies Partial<BrowserLaunchError>);
+  });
+
+  it("rejects launch when existing profile markers are stale and browser exits quickly", async () => {
+    const scriptPath = await createCrashBrowserExecutable();
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-stale-profile-"));
+    tempDirs.push(profileDir);
+    await mkdir(join(profileDir, "Default"), { recursive: true });
+    await writeFile(join(profileDir, "Local State"), "{}", "utf8");
+    await writeFile(join(profileDir, "Default", "Preferences"), "{}", "utf8");
+    process.env.WEBENVOY_BROWSER_PATH = scriptPath;
+
+    await expect(
+      launchBrowser({
+        command: "runtime.start",
+        profileDir,
+        proxyUrl: null,
+        params: {}
+      })
+    ).rejects.toMatchObject({
+      name: "BrowserLaunchError",
+      code: "BROWSER_LAUNCH_FAILED"
+    } satisfies Partial<BrowserLaunchError>);
   });
 });

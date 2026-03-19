@@ -741,6 +741,49 @@ describe("webenvoy cli contract", () => {
     });
   });
 
+  it("keeps lock when same run_id retries runtime.start and hits state conflict", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const first = runCli(
+      ["runtime.start", "--profile", "same_run_retry_profile", "--run-id", "run-contract-521"],
+      runtimeCwd
+    );
+    expect(first.status).toBe(0);
+    const firstBody = parseSingleJsonLine(first.stdout);
+    const firstSummary = firstBody.summary as Record<string, unknown>;
+    const profileDir = String(firstSummary.profileDir);
+    const lockPath = path.join(profileDir, "__webenvoy_lock.json");
+
+    const second = runCli(
+      ["runtime.start", "--profile", "same_run_retry_profile", "--run-id", "run-contract-521"],
+      runtimeCwd
+    );
+    expect(second.status).toBe(5);
+    const secondBody = parseSingleJsonLine(second.stdout);
+    expect(secondBody).toMatchObject({
+      command: "runtime.start",
+      status: "error",
+      error: { code: "ERR_PROFILE_STATE_CONFLICT" }
+    });
+
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as Record<string, unknown>;
+    expect(lock.ownerRunId).toBe("run-contract-521");
+
+    const status = runCli(["runtime.status", "--profile", "same_run_retry_profile"], runtimeCwd);
+    expect(status.status).toBe(0);
+    const statusBody = parseSingleJsonLine(status.stdout);
+    expect(statusBody).toMatchObject({
+      command: "runtime.status",
+      status: "success",
+      summary: {
+        profile: "same_run_retry_profile",
+        profileState: "ready",
+        browserState: "ready",
+        lockHeld: true
+      }
+    });
+  });
+
   it("allows runtime.start immediate recovery when owner is dead even with fresh heartbeat", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const firstStart = runCli(
@@ -959,7 +1002,6 @@ document.body.textContent = JSON.stringify(state);
           "run-contract-971",
           "--params",
           JSON.stringify({
-            browserPath: realBrowserPath,
             startUrl: `${baseUrl}/seed`,
             headless: true
           })
@@ -990,7 +1032,6 @@ document.body.textContent = JSON.stringify(state);
           "run-contract-972",
           "--params",
           JSON.stringify({
-            browserPath: realBrowserPath,
             headless: true
           })
         ],

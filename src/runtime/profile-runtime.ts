@@ -280,6 +280,9 @@ export class ProfileRuntimeService {
       runId: input.runId,
       nowIso
     });
+    const keepExistingLockOnFailure =
+      lockAcquireResult.acquisition === "same-owner" &&
+      lockAcquireResult.lock.ownerPid !== process.pid;
     let startSucceeded = false;
     let launchedBrowserPid: number | null = null;
 
@@ -355,7 +358,9 @@ export class ProfileRuntimeService {
     } finally {
       if (!startSucceeded) {
         await this.#terminateProcess(launchedBrowserPid);
-        await this.#rollbackLockOnStartFailure(lockPath, input.runId);
+        if (!keepExistingLockOnFailure) {
+          await this.#rollbackLockOnStartFailure(lockPath, input.runId);
+        }
       }
     }
   }
@@ -587,7 +592,6 @@ export class ProfileRuntimeService {
 
     const previousMeta = existingMeta;
     try {
-      await this.#terminateProcess(lock.ownerPid);
       await store.writeMeta(
         input.profile,
         this.#patchMeta(existingMeta, {
