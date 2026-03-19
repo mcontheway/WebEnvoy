@@ -27,8 +27,14 @@ interface PendingForward {
   timeout: ReturnType<typeof setTimeout>;
 }
 
+interface QueuedForwardRequest {
+  request: BridgeRequest;
+  expiresAtMs: number;
+}
+
 const defaultForwardTimeoutMs = 3_000;
 const defaultNativeHostName = "com.webenvoy.host";
+const bridgeProtocol = "webenvoy.native-bridge.v1";
 const maxRecoveryQueuedForwards = 5;
 const readTimeoutMs = (value: unknown): number | null => {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -259,7 +265,7 @@ export class BackgroundRelay {
 class ChromeBackgroundBridge {
   #port: ExtensionPort | null = null;
   #pending = new Map<string, PendingForward>();
-  #recoveryQueue: BridgeRequest[] = [];
+  #recoveryQueue: QueuedForwardRequest[] = [];
   #heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   #heartbeatTimeout: ReturnType<typeof setTimeout> | null = null;
   #recoveryTimer: ReturnType<typeof setInterval> | null = null;
@@ -436,6 +442,7 @@ class ChromeBackgroundBridge {
       if (this.#state !== "recovering" && this.#state !== "connecting") {
         return;
       }
+      this.#expireQueuedForwards(Date.now());
       const deadline = this.#recoveryDeadlineMs;
       if (deadline !== null && Date.now() >= deadline) {
         this.#state = "disconnected";
@@ -466,6 +473,19 @@ class ChromeBackgroundBridge {
 
   async #onNativeRequest(request: BridgeRequest): Promise<void> {
     if (request.method === "bridge.open") {
+      const protocol = typeof request.params.protocol === "string" ? request.params.protocol : null;
+      if (protocol !== bridgeProtocol) {
+        this.#emit({
+          id: request.id,
+          status: "error",
+          summary: {},
+          error: {
+            code: "ERR_TRANSPORT_HANDSHAKE_FAILED",
+            message: `incompatible protocol: ${protocol ?? "unknown"}`
+          }
+        });
+        return;
+      }
       this.#state = "ready";
       this.#recoveryDeadlineMs = null;
       this.#stopRecoveryLoop();
@@ -473,7 +493,7 @@ class ChromeBackgroundBridge {
         id: request.id,
         status: "success",
         summary: {
-          protocol: "webenvoy.native-bridge.v1",
+          protocol: bridgeProtocol,
           state: "ready",
           session_id: String(request.params.session_id ?? "nm-session-001")
         },
@@ -540,6 +560,22 @@ class ChromeBackgroundBridge {
   }
 
   #enqueueRecoveryForward(request: BridgeRequest): void {
+    const timeoutMs = readTimeoutMs(request.timeout_ms) ?? defaultForwardTimeoutMs;
+    const expiresAtMs = Date.now() + timeoutMs;
+    if (Date.now() >= expiresAtMs) {
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background>content-script>background>host"
+        },
+        error: {
+          code: "ERR_TRANSPORT_TIMEOUT",
+          message: "forward request timed out during recovery"
+        }
+      });
+      return;
+    }
     if (this.#recoveryQueue.length >= maxRecoveryQueuedForwards) {
       this.#emit({
         id: request.id,
@@ -554,18 +590,37 @@ class ChromeBackgroundBridge {
       });
       return;
     }
-    this.#recoveryQueue.push(request);
+    this.#recoveryQueue.push({
+      request,
+      expiresAtMs
+    });
   }
 
   async #replayRecoveryQueue(): Promise<void> {
     if (this.#recoveryQueue.length === 0) {
       return;
     }
+    this.#expireQueuedForwards(Date.now());
     const queued = [...this.#recoveryQueue];
     this.#recoveryQueue.length = 0;
-    for (const request of queued) {
+    for (const queuedForward of queued) {
+      const request = queuedForward.request;
+      if (Date.now() >= queuedForward.expiresAtMs) {
+        this.#emit({
+          id: request.id,
+          status: "error",
+          summary: {
+            relay_path: "host>background>content-script>background>host"
+          },
+          error: {
+            code: "ERR_TRANSPORT_TIMEOUT",
+            message: "forward request timed out during recovery"
+          }
+        });
+        continue;
+      }
       if (this.#state !== "ready") {
-        this.#enqueueRecoveryForward(request);
+        this.#recoveryQueue.push(queuedForward);
         continue;
       }
       await this.#dispatchForward(request);
@@ -575,7 +630,8 @@ class ChromeBackgroundBridge {
   #failRecoveryQueue(message: string): void {
     const queued = [...this.#recoveryQueue];
     this.#recoveryQueue.length = 0;
-    for (const request of queued) {
+    for (const queuedForward of queued) {
+      const request = queuedForward.request;
       this.#emit({
         id: request.id,
         status: "error",
@@ -588,6 +644,31 @@ class ChromeBackgroundBridge {
         }
       });
     }
+  }
+
+  #expireQueuedForwards(nowMs: number): void {
+    if (this.#recoveryQueue.length === 0) {
+      return;
+    }
+    const keep: QueuedForwardRequest[] = [];
+    for (const queuedForward of this.#recoveryQueue) {
+      if (nowMs < queuedForward.expiresAtMs) {
+        keep.push(queuedForward);
+        continue;
+      }
+      this.#emit({
+        id: queuedForward.request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background>content-script>background>host"
+        },
+        error: {
+          code: "ERR_TRANSPORT_TIMEOUT",
+          message: "forward request timed out during recovery"
+        }
+      });
+    }
+    this.#recoveryQueue = keep;
   }
 
   async #dispatchForward(request: BridgeRequest): Promise<void> {

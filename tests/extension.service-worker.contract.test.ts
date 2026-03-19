@@ -65,6 +65,60 @@ const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
 };
 
 describe("extension service worker recovery contract", () => {
+  it("rejects mismatched protocol on bridge.open and does not enter ready", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+
+    startChromeBackgroundBridge(chromeApi);
+
+    firstPort.onMessageListeners[0]?.({
+      id: "open-bad-protocol-001",
+      method: "bridge.open",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        protocol: "webenvoy.native-bridge.v0"
+      }
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "open-bad-protocol-001",
+        status: "error",
+        error: expect.objectContaining({
+          code: "ERR_TRANSPORT_HANDSHAKE_FAILED"
+        })
+      })
+    );
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-after-bad-open-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-after-bad-open-001",
+        command: "runtime.ping",
+        command_params: {},
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-after-bad-open-001",
+        status: "error",
+        error: expect.objectContaining({
+          code: "ERR_TRANSPORT_NOT_READY"
+        })
+      })
+    );
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
   it("forwards only after open handshake", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
@@ -102,7 +156,8 @@ describe("extension service worker recovery contract", () => {
       method: "bridge.open",
       profile: "profile-a",
       params: {
-        session_id: "nm-session-001"
+        session_id: "nm-session-001",
+        protocol: "webenvoy.native-bridge.v1"
       }
     });
     firstPort.onMessageListeners[0]?.({
@@ -146,7 +201,8 @@ describe("extension service worker recovery contract", () => {
         method: "bridge.open",
         profile: "profile-a",
         params: {
-          session_id: "nm-session-001"
+          session_id: "nm-session-001",
+          protocol: "webenvoy.native-bridge.v1"
         }
       });
       ports[0].onDisconnectListeners[0]?.();
@@ -180,7 +236,8 @@ describe("extension service worker recovery contract", () => {
         method: "bridge.open",
         profile: "profile-a",
         params: {
-          session_id: "nm-session-001"
+          session_id: "nm-session-001",
+          protocol: "webenvoy.native-bridge.v1"
         }
       });
 
@@ -212,7 +269,8 @@ describe("extension service worker recovery contract", () => {
       method: "bridge.open",
       profile: "profile-a",
       params: {
-        session_id: "nm-session-001"
+        session_id: "nm-session-001",
+        protocol: "webenvoy.native-bridge.v1"
       }
     });
     ports[0].onDisconnectListeners[0]?.();
@@ -268,7 +326,8 @@ describe("extension service worker recovery contract", () => {
         method: "bridge.open",
         profile: "profile-a",
         params: {
-          session_id: "nm-session-001"
+          session_id: "nm-session-001",
+          protocol: "webenvoy.native-bridge.v1"
         }
       });
       ports[0].onDisconnectListeners[0]?.();
@@ -297,6 +356,60 @@ describe("extension service worker recovery contract", () => {
           status: "error",
           error: expect.objectContaining({
             code: "ERR_TRANSPORT_DISCONNECTED"
+          })
+        })
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("expires short-timeout queued forward before recovery window ends", async () => {
+    vi.useFakeTimers();
+    try {
+      const ports = [createMockPort(), createMockPort()];
+      const { chromeApi } = createChromeApi(ports);
+
+      startChromeBackgroundBridge(chromeApi, {
+        heartbeatIntervalMs: 10_000,
+        recoveryRetryIntervalMs: 5,
+        recoveryWindowMs: 200
+      });
+
+      ports[0].onMessageListeners[0]?.({
+        id: "open-short-timeout-001",
+        method: "bridge.open",
+        profile: "profile-a",
+        params: {
+          session_id: "nm-session-001",
+          protocol: "webenvoy.native-bridge.v1"
+        }
+      });
+      ports[0].onDisconnectListeners[0]?.();
+
+      ports[1].onMessageListeners[0]?.({
+        id: "queued-short-timeout-001",
+        method: "bridge.forward",
+        profile: "profile-a",
+        params: {
+          session_id: "nm-session-001",
+          run_id: "queued-short-timeout-001",
+          command: "runtime.ping",
+          command_params: {},
+          cwd: "/workspace/WebEnvoy"
+        },
+        timeout_ms: 20
+      });
+
+      vi.advanceTimersByTime(30);
+      await Promise.resolve();
+
+      expect(ports[1].postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "queued-short-timeout-001",
+          status: "error",
+          error: expect.objectContaining({
+            code: "ERR_TRANSPORT_TIMEOUT"
           })
         })
       );
