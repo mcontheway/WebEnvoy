@@ -50,6 +50,76 @@ describe("native messaging bridge", () => {
     });
   });
 
+  it("uses one shared timeout budget across open heartbeat and forward", async () => {
+    let nowMs = 0;
+    const now = (): number => {
+      const current = nowMs;
+      nowMs += 5;
+      return current;
+    };
+
+    const transport = {
+      async open(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            protocol: "webenvoy.native-bridge.v1",
+            session_id: "nm-session-001",
+            state: "ready"
+          },
+          error: null
+        };
+      },
+      async heartbeat(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            session_id: "nm-session-001"
+          },
+          error: null
+        };
+      },
+      async forward(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        if ((request.timeout_ms ?? 0) < 5) {
+          throw new NativeMessagingTransportError("ERR_TRANSPORT_TIMEOUT", "transport timeout");
+        }
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            session_id: "nm-session-001",
+            run_id: String(request.params.run_id ?? request.id),
+            command: "runtime.ping"
+          },
+          payload: {
+            message: "pong"
+          },
+          error: null
+        };
+      }
+    };
+
+    const bridge = new NativeMessagingBridge({
+      transport,
+      now
+    });
+
+    await expect(
+      bridge.runtimePing({
+        runId: "run-budget-chain",
+        profile: "profile-a",
+        cwd: "/tmp",
+        params: {
+          timeout_ms: 15
+        }
+      })
+    ).rejects.toMatchObject<Partial<NativeMessagingTransportError>>({
+      code: "ERR_TRANSPORT_TIMEOUT"
+    });
+  });
+
   it("maps socket transport timeout marker to ERR_TRANSPORT_TIMEOUT", async () => {
     const bridge = new NativeMessagingBridge({
       transport: {
@@ -157,7 +227,7 @@ describe("native messaging bridge", () => {
     });
   });
 
-  it("returns disconnected after recovery window/timeout is exhausted", async () => {
+  it("returns timeout when request budget exhausts before recovery window", async () => {
     const bridge = new NativeMessagingBridge({
       transport: createFakeNativeBridgeTransport({
         disconnectOnForward: true,
@@ -189,7 +259,7 @@ describe("native messaging bridge", () => {
         }
       })
     ).rejects.toMatchObject<Partial<NativeMessagingTransportError>>({
-      code: "ERR_TRANSPORT_DISCONNECTED"
+      code: "ERR_TRANSPORT_TIMEOUT"
     });
   });
 

@@ -94,26 +94,10 @@ describe("extension service worker recovery contract", () => {
 
     startChromeBackgroundBridge(chromeApi);
 
-    firstPort.onMessageListeners[0]?.({
-      id: "open-bad-protocol-001",
-      method: "bridge.open",
-      profile: "profile-a",
-      params: {
-        session_id: "nm-session-001",
-        protocol: "webenvoy.native-bridge.v0"
-      }
+    respondHandshake(firstPort, {
+      protocol: "webenvoy.native-bridge.v0"
     });
     await Promise.resolve();
-
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "open-bad-protocol-001",
-        status: "error",
-        error: expect.objectContaining({
-          code: "ERR_TRANSPORT_HANDSHAKE_FAILED"
-        })
-      })
-    );
 
     firstPort.onMessageListeners[0]?.({
       id: "run-after-bad-open-001",
@@ -130,15 +114,10 @@ describe("extension service worker recovery contract", () => {
     });
     await Promise.resolve();
 
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-after-bad-open-001",
-        status: "error",
-        error: expect.objectContaining({
-          code: "ERR_TRANSPORT_NOT_READY"
-        })
-      })
+    const retryHandshakeCall = firstPort.postMessage.mock.calls.findLast(
+      (call) => (call[0] as { method?: string }).method === "bridge.open"
     );
+    expect(retryHandshakeCall).toBeDefined();
     expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
   });
 
@@ -265,15 +244,7 @@ describe("extension service worker recovery contract", () => {
       recoveryWindowMs: 500
     });
 
-    ports[0].onMessageListeners[0]?.({
-      id: "open-first-queue-001",
-      method: "bridge.open",
-      profile: "profile-a",
-      params: {
-        session_id: "nm-session-001",
-        protocol: "webenvoy.native-bridge.v1"
-      }
-    });
+    respondHandshake(ports[0]);
     ports[0].onDisconnectListeners[0]?.();
     await Promise.resolve();
 
@@ -322,15 +293,7 @@ describe("extension service worker recovery contract", () => {
         recoveryWindowMs: 30
       });
 
-      ports[0].onMessageListeners[0]?.({
-        id: "open-exhaust-001",
-        method: "bridge.open",
-        profile: "profile-a",
-        params: {
-          session_id: "nm-session-001",
-          protocol: "webenvoy.native-bridge.v1"
-        }
-      });
+      respondHandshake(ports[0]);
       ports[0].onDisconnectListeners[0]?.();
 
       ports[1].onMessageListeners[0]?.({
@@ -377,15 +340,7 @@ describe("extension service worker recovery contract", () => {
         recoveryWindowMs: 200
       });
 
-      ports[0].onMessageListeners[0]?.({
-        id: "open-short-timeout-001",
-        method: "bridge.open",
-        profile: "profile-a",
-        params: {
-          session_id: "nm-session-001",
-          protocol: "webenvoy.native-bridge.v1"
-        }
-      });
+      respondHandshake(ports[0]);
       ports[0].onDisconnectListeners[0]?.();
 
       ports[1].onMessageListeners[0]?.({
