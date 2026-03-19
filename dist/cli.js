@@ -6,6 +6,12 @@ import { buildErrorResponse, buildSuccessResponse, writeJsonLine } from "./core/
 import { executeCommand } from "./core/router.js";
 import { createRuntimeStoreRecorder } from "./runtime/store/runtime-store-recorder.js";
 import { RuntimeStoreError } from "./runtime/store/sqlite-runtime-store.js";
+const DEFAULT_OBSERVABILITY = {
+    page_state: null,
+    key_requests: null,
+    failure_site: null
+};
+const EXECUTION_INTERRUPTED_HINT = /(interrupt(?:ed|ion)?|abort(?:ed)?|disconnect(?:ed)?|closed?|terminate(?:d)?|timeout|timed out|cancel(?:ed|led)?|econnreset|eof|broken pipe|中断|断开|超时)/iu;
 const isRuntimeStoreError = (error) => error instanceof RuntimeStoreError;
 const toRuntimeStoreCliError = (error) => new CliError("ERR_RUNTIME_UNAVAILABLE", `运行记录存储失败: ${error.code}`, {
     retryable: error.code !== "ERR_RUNTIME_STORE_SCHEMA_MISMATCH",
@@ -19,6 +25,84 @@ const normalizeCliError = (error) => {
         return toRuntimeStoreCliError(error);
     }
     return normalizeExecutionError(error);
+};
+const collectErrorEvidence = (error) => {
+    const evidence = [error.message.trim()];
+    const cause = error.cause;
+    if (cause instanceof Error) {
+        if (cause.message.trim().length > 0) {
+            evidence.push(cause.message.trim());
+        }
+    }
+    else if (typeof cause === "string" && cause.trim().length > 0) {
+        evidence.push(cause.trim());
+    }
+    return evidence.filter((item, index, list) => item.length > 0 && list.indexOf(item) === index);
+};
+const looksExecutionInterrupted = (error) => {
+    if (error.code !== "ERR_EXECUTION_FAILED") {
+        return false;
+    }
+    const candidates = [error.message];
+    const cause = error.cause;
+    if (cause instanceof Error) {
+        candidates.push(cause.name, cause.message);
+    }
+    else if (typeof cause === "string") {
+        candidates.push(cause);
+    }
+    return candidates.some((item) => EXECUTION_INTERRUPTED_HINT.test(item));
+};
+const diagnosisFromCliError = (error) => {
+    const evidence = collectErrorEvidence(error);
+    if (error.code === "ERR_RUNTIME_UNAVAILABLE") {
+        return {
+            category: "runtime_unavailable",
+            stage: "runtime",
+            component: "cli",
+            signals: {
+                runtime_unavailable: true
+            },
+            failure_site: {
+                stage: "runtime",
+                component: "cli",
+                target: "native-messaging",
+                summary: error.message
+            },
+            evidence
+        };
+    }
+    if (looksExecutionInterrupted(error)) {
+        return {
+            category: "execution_interrupted",
+            stage: "transport",
+            component: "bridge",
+            signals: {
+                execution_interrupted: true
+            },
+            failure_site: {
+                stage: "transport",
+                component: "bridge",
+                target: "runtime-channel",
+                summary: error.message
+            },
+            evidence
+        };
+    }
+    if (error.code === "ERR_EXECUTION_FAILED") {
+        return {
+            category: "unknown",
+            stage: "execution",
+            component: "runtime",
+            evidence
+        };
+    }
+    return {
+        category: "unknown",
+        stage: "cli",
+        component: "cli",
+        evidence
+    };
 };
 export const runCli = async (argv, options) => {
     const cwd = options?.cwd ?? process.cwd();
@@ -36,7 +120,9 @@ export const runCli = async (argv, options) => {
         await recorder.recordStart(context);
         const summary = await executeCommand(context, createCommandRegistry());
         await recorder.recordSuccess(context, summary);
-        writeJsonLine(stdout, buildSuccessResponse(context, summary));
+        writeJsonLine(stdout, buildSuccessResponse(context, summary, {
+            observability: DEFAULT_OBSERVABILITY
+        }));
         if (context.command === "runtime.help") {
             stderr.write("Use --params to pass structured JSON object parameters.\n");
         }
@@ -56,7 +142,10 @@ export const runCli = async (argv, options) => {
         const runId = runtimeContext?.run_id ??
             (runIdHint && isValidRunId(runIdHint) ? runIdHint : generateRunId());
         const command = runtimeContext?.command ?? commandHint;
-        writeJsonLine(stdout, buildErrorResponse({ runId, command }, cliError));
+        writeJsonLine(stdout, buildErrorResponse({ runId, command }, cliError, {
+            observability: DEFAULT_OBSERVABILITY,
+            diagnosis: diagnosisFromCliError(cliError)
+        }));
         if (cliError.code === "ERR_CLI_INVALID_ARGS") {
             stderr.write(`${cliError.message}\n`);
         }

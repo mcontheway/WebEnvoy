@@ -111,7 +111,14 @@ describe("webenvoy cli contract", () => {
     expect(body).toMatchObject({
       run_id: "run-contract-001",
       command: "runtime.ping",
-      status: "success"
+      status: "success",
+      observability: {
+        coverage: "unavailable",
+        request_evidence: "none",
+        page_state: null,
+        key_requests: [],
+        failure_site: null
+      }
     });
     expect(typeof body.timestamp).toBe("string");
   });
@@ -303,7 +310,22 @@ describe("webenvoy cli contract", () => {
     expect(body).toMatchObject({
       run_id: "run-contract-005",
       status: "error",
-      error: { code: "ERR_RUNTIME_UNAVAILABLE", retryable: true }
+      error: {
+        code: "ERR_RUNTIME_UNAVAILABLE",
+        retryable: true,
+        diagnosis: {
+          category: "runtime_unavailable",
+          stage: "runtime",
+          component: "cli"
+        }
+      },
+      observability: {
+        coverage: "unavailable",
+        request_evidence: "none",
+        page_state: null,
+        key_requests: [],
+        failure_site: null
+      }
     });
   });
 
@@ -390,7 +412,20 @@ describe("webenvoy cli contract", () => {
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
       status: "error",
-      error: { code: "ERR_EXECUTION_FAILED" }
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        diagnosis: {
+          category: "unknown",
+          stage: "execution",
+          component: "runtime"
+        }
+      },
+      observability: {
+        coverage: "unavailable",
+        page_state: null,
+        key_requests: [],
+        failure_site: null
+      }
     });
   });
 
