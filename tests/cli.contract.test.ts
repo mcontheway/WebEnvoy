@@ -183,6 +183,58 @@ describe("webenvoy cli contract", () => {
     });
   });
 
+  it("rejects explicit proxyUrl:null when profile is already bound to a proxy", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const startWithProxy = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "proxy_null_conflict_profile",
+        "--run-id",
+        "run-contract-009",
+        "--params",
+        "{\"proxyUrl\":\"http://127.0.0.1:8080\"}"
+      ],
+      runtimeCwd
+    );
+    expect(startWithProxy.status).toBe(0);
+    const startBody = parseSingleJsonLine(startWithProxy.stdout);
+    const startSummary = startBody.summary as Record<string, unknown>;
+    const profileDir = String(startSummary.profileDir);
+
+    const stop = runCli(
+      ["runtime.stop", "--profile", "proxy_null_conflict_profile", "--run-id", "run-contract-009"],
+      runtimeCwd
+    );
+    expect(stop.status).toBe(0);
+
+    const restartWithNull = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "proxy_null_conflict_profile",
+        "--run-id",
+        "run-contract-010",
+        "--params",
+        "{\"proxyUrl\":null}"
+      ],
+      runtimeCwd
+    );
+    expect(restartWithNull.status).toBe(5);
+    const restartBody = parseSingleJsonLine(restartWithNull.stdout);
+    expect(restartBody).toMatchObject({
+      command: "runtime.start",
+      status: "error",
+      error: { code: "ERR_PROFILE_PROXY_CONFLICT" }
+    });
+
+    const metaPath = path.join(profileDir, "__webenvoy_meta.json");
+    const metaRaw = await readFile(metaPath, "utf8");
+    const meta = JSON.parse(metaRaw) as Record<string, unknown>;
+    const proxyBinding = meta.proxyBinding as Record<string, unknown>;
+    expect(proxyBinding.url).toBe("http://127.0.0.1:8080/");
+  });
+
   it("returns runtime unavailable error with code 5", () => {
     const result = runCli([
       "runtime.ping",
@@ -690,6 +742,64 @@ describe("webenvoy cli contract", () => {
         browserState: "ready",
         lockHeld: true
       }
+    });
+  });
+
+  it("rejects malformed profile meta for runtime.status/runtime.start/runtime.login", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const start = runCli(
+      ["runtime.start", "--profile", "corrupt_meta_profile", "--run-id", "run-contract-901"],
+      runtimeCwd
+    );
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    const startSummary = startBody.summary as Record<string, unknown>;
+    const profileDir = String(startSummary.profileDir);
+
+    const stop = runCli(
+      ["runtime.stop", "--profile", "corrupt_meta_profile", "--run-id", "run-contract-901"],
+      runtimeCwd
+    );
+    expect(stop.status).toBe(0);
+
+    const metaPath = path.join(profileDir, "__webenvoy_meta.json");
+    await writeFile(
+      metaPath,
+      `${JSON.stringify({ profileName: "corrupt_meta_profile", profileState: "ready" }, null, 2)}\n`,
+      "utf8"
+    );
+
+    const status = runCli(["runtime.status", "--profile", "corrupt_meta_profile"], runtimeCwd);
+    expect(status.status).toBe(5);
+    const statusBody = parseSingleJsonLine(status.stdout);
+    expect(statusBody).toMatchObject({
+      command: "runtime.status",
+      status: "error",
+      error: { code: "ERR_PROFILE_META_CORRUPT" }
+    });
+
+    const restart = runCli(
+      ["runtime.start", "--profile", "corrupt_meta_profile", "--run-id", "run-contract-902"],
+      runtimeCwd
+    );
+    expect(restart.status).toBe(5);
+    const restartBody = parseSingleJsonLine(restart.stdout);
+    expect(restartBody).toMatchObject({
+      command: "runtime.start",
+      status: "error",
+      error: { code: "ERR_PROFILE_META_CORRUPT" }
+    });
+
+    const login = runCli(
+      ["runtime.login", "--profile", "corrupt_meta_profile", "--run-id", "run-contract-903"],
+      runtimeCwd
+    );
+    expect(login.status).toBe(5);
+    const loginBody = parseSingleJsonLine(login.stdout);
+    expect(loginBody).toMatchObject({
+      command: "runtime.login",
+      status: "error",
+      error: { code: "ERR_PROFILE_META_CORRUPT" }
     });
   });
 });

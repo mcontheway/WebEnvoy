@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -85,6 +85,19 @@ describe("profile-store", () => {
     const store = await createStore();
     const meta = await store.readMeta("missing-profile");
     expect(meta).toBeNull();
+  });
+
+  it("rejects malformed meta structure", async () => {
+    const store = await createStore();
+    await store.ensureProfileDir("broken");
+    const metaPath = store.getMetaPath("broken");
+    await writeFile(
+      metaPath,
+      `${JSON.stringify({ profileName: "broken", profileState: "ready" }, null, 2)}\n`,
+      "utf8"
+    );
+
+    await expect(store.readMeta("broken")).rejects.toThrow(/invalid profile meta structure/i);
   });
 
   it("rejects invalid profile name", async () => {

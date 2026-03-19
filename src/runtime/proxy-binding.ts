@@ -80,6 +80,14 @@ export const resolveProxyBinding = (
     };
   }
 
+  if (normalized === null && input.current.url !== null) {
+    return {
+      binding: input.current,
+      changed: false,
+      conflict: true
+    };
+  }
+
   if (input.current.url === normalized) {
     return {
       binding: input.current,

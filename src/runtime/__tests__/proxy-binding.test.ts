@@ -50,6 +50,23 @@ describe("proxy-binding", () => {
     expect(result.binding?.url).toBe("http://127.0.0.1:8080/");
   });
 
+  it("reports conflict for explicit null when profile is bound to a proxy", () => {
+    const result = resolveProxyBinding({
+      current: {
+        url: "http://127.0.0.1:8080/",
+        boundAt: "2026-03-19T10:00:00.000Z",
+        source: "runtime.start"
+      },
+      requested: null,
+      nowIso: "2026-03-19T10:01:00.000Z",
+      source: "runtime.login"
+    });
+
+    expect(result.conflict).toBe(true);
+    expect(result.changed).toBe(false);
+    expect(result.binding?.url).toBe("http://127.0.0.1:8080/");
+  });
+
   it("accepts direct mode with null binding", () => {
     const result = resolveProxyBinding({
       current: null,
