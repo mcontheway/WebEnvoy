@@ -10,9 +10,12 @@ import {
   successExitCode
 } from "./core/errors.js";
 import { buildErrorResponse, buildSuccessResponse, writeJsonLine } from "./core/response.js";
+import type { RuntimeContext } from "./core/types.js";
 import { executeCommand } from "./core/router.js";
 import type { DiagnosisInput } from "./runtime/diagnostics.js";
 import type { ObservabilityInput } from "./runtime/observability.js";
+import { createRuntimeStoreRecorder } from "./runtime/store/runtime-store-recorder.js";
+import { RuntimeStoreError } from "./runtime/store/sqlite-runtime-store.js";
 
 const DEFAULT_OBSERVABILITY: ObservabilityInput = {
   page_state: null,
@@ -22,6 +25,25 @@ const DEFAULT_OBSERVABILITY: ObservabilityInput = {
 
 const EXECUTION_INTERRUPTED_HINT =
   /(interrupt(?:ed|ion)?|abort(?:ed)?|disconnect(?:ed)?|closed?|terminate(?:d)?|timeout|timed out|cancel(?:ed|led)?|econnreset|eof|broken pipe|中断|断开|超时)/iu;
+
+const isRuntimeStoreError = (error: unknown): error is RuntimeStoreError =>
+  error instanceof RuntimeStoreError;
+
+const toRuntimeStoreCliError = (error: RuntimeStoreError): CliError =>
+  new CliError("ERR_RUNTIME_UNAVAILABLE", `运行记录存储失败: ${error.code}`, {
+    retryable: error.code !== "ERR_RUNTIME_STORE_SCHEMA_MISMATCH",
+    cause: error
+  });
+
+const normalizeCliError = (error: unknown): CliError => {
+  if (error instanceof CliError) {
+    return error;
+  }
+  if (isRuntimeStoreError(error)) {
+    return toRuntimeStoreCliError(error);
+  }
+  return normalizeExecutionError(error);
+};
 
 const collectErrorEvidence = (error: CliError): string[] => {
   const evidence = [error.message.trim()];
@@ -108,9 +130,6 @@ const diagnosisFromCliError = (error: CliError): DiagnosisInput => {
   };
 };
 
-const normalizeCliError = (error: unknown): CliError =>
-  error instanceof CliError ? error : normalizeExecutionError(error);
-
 export const runCli = async (
   argv: string[],
   options?: {
@@ -124,13 +143,17 @@ export const runCli = async (
   const stderr = options?.stderr ?? process.stderr;
   const commandHint = getCommandHint(argv);
   const runIdHint = getRunIdHint(argv);
-  let runtimeContext: { run_id: string; command: string } | null = null;
+  let runtimeContext: RuntimeContext | null = null;
+  let recorder: ReturnType<typeof createRuntimeStoreRecorder> | null = null;
 
   try {
     const parsed = parseArgv(argv);
     const context = buildRuntimeContext(parsed, cwd);
-    runtimeContext = { run_id: context.run_id, command: context.command };
+    runtimeContext = context;
+    recorder = createRuntimeStoreRecorder(cwd);
+    await recorder.recordStart(context);
     const summary = await executeCommand(context, createCommandRegistry());
+    await recorder.recordSuccess(context, summary);
 
     writeJsonLine(
       stdout,
@@ -143,7 +166,15 @@ export const runCli = async (
     }
     return successExitCode();
   } catch (error) {
-    const cliError = normalizeCliError(error);
+    let finalError: unknown = error;
+    if (runtimeContext && recorder && !isRuntimeStoreError(error)) {
+      try {
+        await recorder.recordFailure(runtimeContext, normalizeCliError(error));
+      } catch (recordError) {
+        finalError = recordError;
+      }
+    }
+    const cliError = normalizeCliError(finalError);
     const runId =
       runtimeContext?.run_id ??
       (runIdHint && isValidRunId(runIdHint) ? runIdHint : generateRunId());
@@ -164,6 +195,12 @@ export const runCli = async (
       stderr.write(`${cliError.message}\n`);
     }
     return exitCodeForError(cliError.code);
+  } finally {
+    try {
+      recorder?.close();
+    } catch {
+      // Close errors are non-blocking for CLI contract.
+    }
   }
 };
 

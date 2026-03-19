@@ -19,7 +19,7 @@ jobs:
         if: ${{ hashFiles('package.json') != '' }}
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '23.9.0'
 
       - name: Install Dependencies
         if: ${{ hashFiles('package.json') != '' }}
