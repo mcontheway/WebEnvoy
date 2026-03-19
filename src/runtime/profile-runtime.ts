@@ -13,6 +13,7 @@ import { ProfileStore, type ProfileMeta } from "./profile-store.js";
 import type { ProfileState } from "./profile-state.js";
 import {
   applyProfileProxyBinding,
+  beginLoginSession,
   beginStartSession,
   beginStopSession,
   buildRuntimeSession,
@@ -80,6 +81,8 @@ const parseProxyUrl = (params: JsonObject): string | null | undefined => {
 
 const isStartableProfileState = (state: ProfileState): boolean =>
   state === "uninitialized" || state === "stopped" || state === "disconnected";
+const isLoginableProfileState = (state: ProfileState): boolean =>
+  state === "uninitialized" || state === "stopped" || state === "disconnected" || state === "ready";
 const isRuntimeActiveProfileState = (state: ProfileState): boolean =>
   state === "starting" || state === "ready" || state === "logging_in" || state === "stopping";
 
@@ -91,6 +94,9 @@ const isLockHeartbeatStale = (lock: ProfileLock, nowIso: string): boolean => {
   }
   return now - lastHeartbeat > DEFAULT_LOCK_STALE_MS;
 };
+
+const shouldRecoverAsDisconnected = (acquisition: LockAcquisition, state: ProfileState): boolean =>
+  acquisition !== "same-owner" && isRuntimeActiveProfileState(state);
 
 const mapRuntimeError = (error: unknown): CliError => {
   if (error instanceof CliError) {
@@ -143,11 +149,7 @@ export class ProfileRuntimeService {
     try {
       let existingMeta = await this.#readOrInitializeMeta(store, input.profile, nowIso);
       const recoveredMeta =
-        lockAcquireResult.acquisition !== "same-owner" &&
-        (existingMeta.profileState === "ready" ||
-          existingMeta.profileState === "logging_in" ||
-          existingMeta.profileState === "starting" ||
-          existingMeta.profileState === "stopping")
+        shouldRecoverAsDisconnected(lockAcquireResult.acquisition, existingMeta.profileState)
           ? this.#patchMeta(existingMeta, {
               profileName: input.profile,
               profileDir,
@@ -203,6 +205,87 @@ export class ProfileRuntimeService {
       throw mapRuntimeError(error);
     } finally {
       if (!startSucceeded) {
+        await this.#rollbackLockOnStartFailure(lockPath, input.runId);
+      }
+    }
+  }
+
+  async login(input: RuntimeActionInput): Promise<JsonObject> {
+    const nowIso = isoNow();
+    const store = this.#createStore(input.cwd);
+    const profileDir = this.#resolveProfileDir(store, input.profile);
+    await store.ensureProfileDir(input.profile);
+    const lockPath = this.#getLockPath(profileDir);
+    const lockAcquireResult = await this.#acquireProfileLockAtomically({
+      profileName: input.profile,
+      lockPath,
+      runId: input.runId,
+      nowIso
+    });
+    let loginSucceeded = false;
+
+    try {
+      let existingMeta = await this.#readOrInitializeMeta(store, input.profile, nowIso);
+      const recoveredMeta = shouldRecoverAsDisconnected(
+        lockAcquireResult.acquisition,
+        existingMeta.profileState
+      )
+        ? this.#patchMeta(existingMeta, {
+            profileName: input.profile,
+            profileDir,
+            profileState: "disconnected",
+            proxyBinding: existingMeta.proxyBinding,
+            updatedAt: nowIso,
+            lastDisconnectedAt: nowIso
+          })
+        : existingMeta;
+
+      const profileState = recoveredMeta.profileState;
+      if (!isLoginableProfileState(profileState)) {
+        throw new CliError(
+          "ERR_PROFILE_STATE_CONFLICT",
+          `profile 当前状态 ${profileState} 不能直接 login`
+        );
+      }
+
+      let session = buildRuntimeSession(input.profile, recoveredMeta);
+      session = applyProfileProxyBinding(session, {
+        requested: parseProxyUrl(input.params),
+        nowIso,
+        source: "runtime.login"
+      });
+      session = beginLoginSession(session, {
+        runId: input.runId,
+        nowIso
+      });
+      session = markSessionReady(session);
+
+      await store.writeMeta(
+        input.profile,
+        this.#patchMeta(recoveredMeta, {
+          profileName: input.profile,
+          profileDir,
+          profileState: session.profileState,
+          proxyBinding: session.proxyBinding,
+          updatedAt: nowIso,
+          lastLoginAt: nowIso
+        })
+      );
+
+      loginSucceeded = true;
+      return {
+        profile: input.profile,
+        profileState: session.profileState,
+        browserState: browserStateFromProfileState(session.profileState, true),
+        profileDir,
+        proxyUrl: session.proxyBinding?.url ?? null,
+        lockHeld: true,
+        lastLoginAt: nowIso
+      };
+    } catch (error) {
+      throw mapRuntimeError(error);
+    } finally {
+      if (!loginSucceeded) {
         await this.#rollbackLockOnStartFailure(lockPath, input.runId);
       }
     }
@@ -474,6 +557,7 @@ export class ProfileRuntimeService {
       proxyBinding: ProfileMeta["proxyBinding"];
       updatedAt: string;
       lastStartedAt?: string;
+      lastLoginAt?: string;
       lastStoppedAt?: string;
       lastDisconnectedAt?: string;
     }
@@ -486,6 +570,7 @@ export class ProfileRuntimeService {
       proxyBinding: patch.proxyBinding,
       updatedAt: patch.updatedAt,
       lastStartedAt: patch.lastStartedAt ?? current.lastStartedAt,
+      lastLoginAt: patch.lastLoginAt ?? current.lastLoginAt,
       lastStoppedAt: patch.lastStoppedAt ?? current.lastStoppedAt,
       lastDisconnectedAt: patch.lastDisconnectedAt ?? current.lastDisconnectedAt
     };

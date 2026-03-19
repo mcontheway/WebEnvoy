@@ -216,6 +216,57 @@ describe("webenvoy cli contract", () => {
     });
   });
 
+  it("supports runtime.login from uninitialized profile and persists lastLoginAt", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const login = runCli(
+      ["runtime.login", "--profile", "login_profile", "--run-id", "run-contract-151"],
+      runtimeCwd
+    );
+    expect(login.status).toBe(0);
+    const loginBody = parseSingleJsonLine(login.stdout);
+    expect(loginBody).toMatchObject({
+      command: "runtime.login",
+      status: "success",
+      summary: {
+        profile: "login_profile",
+        profileState: "ready",
+        browserState: "ready",
+        lockHeld: true
+      }
+    });
+
+    const loginSummary = loginBody.summary as Record<string, unknown>;
+    expect(typeof loginSummary.lastLoginAt).toBe("string");
+
+    const profileDir = String(loginSummary.profileDir);
+    const metaPath = path.join(profileDir, "__webenvoy_meta.json");
+    const rawMeta = await readFile(metaPath, "utf8");
+    const meta = JSON.parse(rawMeta) as Record<string, unknown>;
+    expect(meta.profileState).toBe("ready");
+    expect(meta.lastLoginAt).toBe(loginSummary.lastLoginAt);
+  });
+
+  it("rejects runtime.login when profile lock is held by another run", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const start = runCli(
+      ["runtime.start", "--profile", "login_locked_profile", "--run-id", "run-contract-161"],
+      runtimeCwd
+    );
+    expect(start.status).toBe(0);
+
+    const login = runCli(
+      ["runtime.login", "--profile", "login_locked_profile", "--run-id", "run-contract-162"],
+      runtimeCwd
+    );
+    expect(login.status).toBe(5);
+    const loginBody = parseSingleJsonLine(login.stdout);
+    expect(loginBody).toMatchObject({
+      command: "runtime.login",
+      status: "error",
+      error: { code: "ERR_PROFILE_LOCKED" }
+    });
+  });
+
   it("rejects runtime.start when profile lock is held by another run", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const firstStart = runCli(

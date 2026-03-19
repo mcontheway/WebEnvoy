@@ -19,6 +19,12 @@ const runtimeStart = async (context) => profileRuntime.start({
     runId: context.run_id,
     params: context.params
 });
+const runtimeLogin = async (context) => profileRuntime.login({
+    cwd: context.cwd,
+    profile: context.profile ?? "",
+    runId: context.run_id,
+    params: context.params
+});
 const runtimeStatus = async (context) => profileRuntime.status({
     cwd: context.cwd,
     profile: context.profile ?? "",
@@ -63,8 +69,9 @@ export const runtimeCommands = () => [
     },
     {
         name: "runtime.login",
-        status: "not_implemented",
-        requiresProfile: true
+        status: "implemented",
+        requiresProfile: true,
+        handler: runtimeLogin
     },
     {
         name: "runtime.status",

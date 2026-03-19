@@ -161,3 +161,38 @@ describe("profile-runtime stop rollback", () => {
     expect(meta.profileState).toBe("ready");
   });
 });
+
+describe("profile-runtime login", () => {
+  it("initializes profile and writes lastLoginAt on first runtime.login", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-login-"));
+    tempDirs.push(baseDir);
+    const service = new ProfileRuntimeService();
+
+    const result = await service.login({
+      cwd: baseDir,
+      profile: "first_login_profile",
+      runId: "run-runtime-test-201",
+      params: {}
+    });
+
+    expect(result).toMatchObject({
+      profile: "first_login_profile",
+      profileState: "ready",
+      browserState: "ready",
+      lockHeld: true
+    });
+    expect(typeof result.lastLoginAt).toBe("string");
+
+    const metaPath = join(
+      baseDir,
+      ".webenvoy",
+      "profiles",
+      "first_login_profile",
+      "__webenvoy_meta.json"
+    );
+    const metaRaw = await readFile(metaPath, "utf8");
+    const meta = JSON.parse(metaRaw) as ProfileMeta;
+    expect(meta.profileState).toBe("ready");
+    expect(meta.lastLoginAt).toBe(result.lastLoginAt);
+  });
+});
