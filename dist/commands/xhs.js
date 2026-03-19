@@ -4,7 +4,7 @@ const ABILITY_ACTIONS = new Set(["read", "write", "download"]);
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
-const invalidAbilityInput = (reason, abilityId = null) => new CliError("ERR_CLI_INVALID_ARGS", "能力输入不合法", {
+const invalidAbilityInput = (reason, abilityId = "unknown") => new CliError("ERR_CLI_INVALID_ARGS", "能力输入不合法", {
     details: {
         ability_id: abilityId,
         stage: "input_validation",
@@ -59,6 +59,17 @@ const buildCapabilityResult = (ability, summary) => ({
 });
 const xhsSearch = async (context) => {
     const envelope = parseAbilityEnvelope(context.params);
+    if (process.env.NODE_ENV === "test" &&
+        process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS === "1" &&
+        envelope.options.fixture_success === true) {
+        const query = typeof envelope.input.query === "string" ? envelope.input.query : null;
+        return buildCapabilityResult(envelope.ability, {
+            data_ref: query ? { query } : {},
+            metrics: {
+                count: 0
+            }
+        });
+    }
     if (envelope.input.force_bad_output === true) {
         throw new CliError("ERR_EXECUTION_FAILED", "能力输出映射失败", {
             details: {
@@ -68,16 +79,7 @@ const xhsSearch = async (context) => {
             }
         });
     }
-    if (envelope.options.fixture_success === true) {
-        const query = typeof envelope.input.query === "string" ? envelope.input.query : null;
-        return buildCapabilityResult(envelope.ability, {
-            data_ref: query ? { query } : {},
-            metrics: {
-                count: 0
-            }
-        });
-    }
-    throw new CliError("ERR_CLI_NOT_IMPLEMENTED", "能力壳已接入，但小红书读链路尚未实现", {
+    throw new CliError("ERR_EXECUTION_FAILED", "能力壳已接入，但小红书读链路尚未实现", {
         details: {
             ability_id: envelope.ability.id,
             stage: "execution",

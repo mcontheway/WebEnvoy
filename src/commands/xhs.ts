@@ -26,7 +26,7 @@ const asObject = (value: unknown): JsonObject | null =>
 
 const invalidAbilityInput = (
   reason: string,
-  abilityId: string | null = null
+  abilityId = "unknown"
 ): CliError =>
   new CliError("ERR_CLI_INVALID_ARGS", "能力输入不合法", {
     details: {
@@ -94,6 +94,20 @@ const buildCapabilityResult = (ability: AbilityRef, summary?: JsonObject): JsonO
 const xhsSearch = async (context: RuntimeContext): Promise<JsonObject> => {
   const envelope = parseAbilityEnvelope(context.params);
 
+  if (
+    process.env.NODE_ENV === "test" &&
+    process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS === "1" &&
+    envelope.options.fixture_success === true
+  ) {
+    const query = typeof envelope.input.query === "string" ? envelope.input.query : null;
+    return buildCapabilityResult(envelope.ability, {
+      data_ref: query ? { query } : {},
+      metrics: {
+        count: 0
+      }
+    });
+  }
+
   if (envelope.input.force_bad_output === true) {
     throw new CliError("ERR_EXECUTION_FAILED", "能力输出映射失败", {
       details: {
@@ -104,17 +118,7 @@ const xhsSearch = async (context: RuntimeContext): Promise<JsonObject> => {
     });
   }
 
-  if (envelope.options.fixture_success === true) {
-    const query = typeof envelope.input.query === "string" ? envelope.input.query : null;
-    return buildCapabilityResult(envelope.ability, {
-      data_ref: query ? { query } : {},
-      metrics: {
-        count: 0
-      }
-    });
-  }
-
-  throw new CliError("ERR_CLI_NOT_IMPLEMENTED", "能力壳已接入，但小红书读链路尚未实现", {
+  throw new CliError("ERR_EXECUTION_FAILED", "能力壳已接入，但小红书读链路尚未实现", {
     details: {
       ability_id: envelope.ability.id,
       stage: "execution",

@@ -47,6 +47,7 @@ const createRuntimeCwd = async (): Promise<string> => {
 };
 
 const defaultRuntimeEnv = (cwd: string): Record<string, string> => ({
+  NODE_ENV: "test",
   WEBENVOY_BROWSER_PATH: mockBrowserPath,
   WEBENVOY_BROWSER_MOCK_LOG: path.join(cwd, ".browser-launch.log"),
   WEBENVOY_BROWSER_MOCK_TTL: "2"
@@ -242,7 +243,7 @@ describe("webenvoy cli contract", () => {
       error: {
         code: "ERR_CLI_INVALID_ARGS",
         details: {
-          ability_id: null,
+          ability_id: "unknown",
           stage: "input_validation",
           reason: "ABILITY_MISSING"
         }
@@ -269,7 +270,9 @@ describe("webenvoy cli contract", () => {
           fixture_success: true
         }
       })
-    ]);
+    ], repoRoot, {
+      WEBENVOY_ALLOW_FIXTURE_SUCCESS: "1"
+    });
     expect(result.status).toBe(0);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
@@ -303,13 +306,13 @@ describe("webenvoy cli contract", () => {
         }
       })
     ]);
-    expect(result.status).toBe(4);
+    expect(result.status).toBe(6);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
       command: "xhs.search",
       status: "error",
       error: {
-        code: "ERR_CLI_NOT_IMPLEMENTED",
+        code: "ERR_EXECUTION_FAILED",
         details: {
           ability_id: "xhs.note.search.v1",
           stage: "execution",

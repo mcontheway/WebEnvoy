@@ -5,7 +5,7 @@ import type { ObservabilityPayload } from "../runtime/observability.js";
 export type JsonObject = Record<string, unknown>;
 
 export interface CapabilityErrorDetails extends JsonObject {
-  ability_id: string | null;
+  ability_id: string;
   stage: "input_validation" | "execution" | "output_mapping";
   reason: string;
 }
