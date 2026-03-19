@@ -87,7 +87,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
       profileName: "default",
       command: "runtime.ping",
       status: "succeeded",
-      startedAt: "2026-03-19T10:00:00.000Z",
+      startedAt: "2026-03-19T10:05:00.000Z",
       endedAt: "2026-03-19T10:00:02.000Z",
       errorCode: null
     });
@@ -98,6 +98,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
     expect(first.created).toBe(true);
     expect(second.created).toBe(false);
     expect(trace.run?.status).toBe("succeeded");
+    expect(trace.run?.started_at).toBe("2026-03-19T10:00:00.000Z");
     expect(trace.run?.ended_at).toBe("2026-03-19T10:00:02.000Z");
   });
 

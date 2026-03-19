@@ -281,7 +281,7 @@ export class SQLiteRuntimeStore {
             profile_name = excluded.profile_name,
             command = excluded.command,
             status = excluded.status,
-            started_at = excluded.started_at,
+            started_at = runtime_runs.started_at,
             ended_at = excluded.ended_at,
             error_code = excluded.error_code,
             updated_at = excluded.updated_at
