@@ -207,7 +207,7 @@
 | `X-S-Common` | `page_state` | 第一手已观测（请求头） | `session_scoped` 或 `page_refresh_scoped` 候选 | `required_optional` | 仅确认出现在请求头，稳定性未实锤 |
 | `x-b3-traceid` | `runtime_generated/page_state` | 第一手已观测（请求头） | `request_scoped` 候选 | `required_optional` | 来源/生成机制未复核 |
 | `x-xray-traceid` | `runtime_generated/page_state` | 第一手已观测（请求头） | `request_scoped` 候选 | `required_optional` | 来源/生成机制未复核 |
-| `a1` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 候选 | `hard` | 仅确认可读到，未做跨刷新对比 |
+| `a1` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 候选 | `required_optional` | 仅确认可读到，未做跨刷新对比，尚未证明是最小必要条件 |
 | `webId` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 或 `page_refresh_scoped` 候选 | `required_optional` | 且已有证据表明不在 local/session storage |
 | `gid` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 或 `page_refresh_scoped` 候选 | `required_optional` | 且已有证据表明不在 local/session storage |
 | `xsecappid` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 候选 | `required_optional` | 仅确认可读 |

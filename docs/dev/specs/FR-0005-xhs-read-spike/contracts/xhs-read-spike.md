@@ -54,6 +54,8 @@ Spike 输出必须包含以下三个对象：
 ```json
 {
   "entry": "window.<fn>|module.<fn>",
+  "entry_status": "stable|variant|candidate",
+  "entry_scope": ["explore", "detail_page", "profile_page", "search_result_variant"],
   "input_shape": {
     "path": "string",
     "payload": "object|string",
