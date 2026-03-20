@@ -73,8 +73,8 @@ Spike 输出必须包含以下三个对象：
 
 补充约束：
 
-1. `route_role=primary` 表示当前场景优先交付给后续实现 FR 的主读取路径；`route_role=fallback` 表示只在主路径被风控、环境或样本不足阻断时作为正式备用读路径消费。
-2. `path_kind=page` 只能在 `route_role=fallback` 或明确修订 FR 范围后出现；不得默认与 API 主路径等价。
+1. `route_role=primary` 表示当前场景优先交付给后续实现 FR 的主读取路径；`route_role=fallback` 仅用于 `page-state fallback`，表示在 API primary 受阻时保留的页面级备用读路径。
+2. `path_kind=page` 只能在 `route_role=fallback` 或明确修订 FR 范围后出现；`path_kind=api` 不得使用 `route_role=fallback` 兜底表达未定性的辅助候选。
 3. `evidence_maturity` 用于表达证据成熟度：
    - `observed_once`：单次样本或单轮观测，不能直接支撑实现准入
    - `reproduced_multi_round`：已满足多轮复现，但仍可能缺少实现前置（如 headers/cookie 实验矩阵）

@@ -136,12 +136,12 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `search-primary-01` | `primary` | `api` | `success` | `observed_once` | `POST` | `/api/sns/web/v1/search/notes` | 真实搜索交互中观测到 `HTTP 200` 成功样本 | 主路径强证据，但仍缺最小必要 headers/cookie/origin 矩阵 |
 | `search-primary-02` | `primary` | `api` | `failed` | `observed_once` | `POST` | `/api/sns/web/v1/search/notes` | 手动仅补 `X-s/X-t` 得到 `HTTP 500` + `create invoker failed` | 阻断“仅双字段签名可复现”的假设 |
-| `search-fallback-01` | `fallback` | `api` | `candidate` | `observed_once` | `GET/POST` | `/api/sns/web/v1/search/recommend` / `/api/sns/web/v1/search/filter` / `/api/sns/web/v1/search/onebox` | 同批次可见成功请求，但未证明可替代主读链路 | `fallback-only`（不构成实现准入） |
+| `search-supporting-01` | `primary` | `api` | `candidate` | `observed_once` | `GET/POST` | `/api/sns/web/v1/search/recommend` / `/api/sns/web/v1/search/filter` / `/api/sns/web/v1/search/onebox` | 同批次可见成功请求，但未证明可替代主读链路 | 辅助 API 证据，不替代 `primary` |
 
 当前结论：
 
 - `search/notes` 仍是 `primary` 候选主路径，但当前只达到 `observed_once`，未达“实现准入”。
-- `search` 场景当前无可冻结的 `page` fallback 成功证据；现有 `fallback` 证据均按 `fallback-only` 处理，不构成实现准入。
+- `search` 场景当前无可冻结的 `page` fallback 成功证据；其余辅助 API 证据仅保留为候选，不构成实现准入。
 - 当前已观测头族：`Accept`、`Content-Type`（POST）、`x-b3-traceid`、`x-xray-traceid`、`X-s`、`X-t`、`X-S-Common`；Cookie/Origin/Referer/UA-CH 仍为候选必要项。
 
 ### 2.2 detail
