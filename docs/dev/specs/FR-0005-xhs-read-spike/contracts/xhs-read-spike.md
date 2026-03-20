@@ -29,6 +29,7 @@ Spike 输出必须包含以下三个对象：
 ```json
 {
   "scenario": "search|detail|user_home",
+  "route_role": "primary|fallback",
   "path_kind": "api|page",
   "method": "GET|POST",
   "path": "/api/...|/explore/<noteId>?xsec_token=...|/user/profile/<userId>?xsec_token=...",
@@ -39,9 +40,14 @@ Spike 输出必须包含以下三个对象：
   "required_headers_candidate": ["Cookie", "Origin"],
   "required_params": ["keyword", "note_id"],
   "success_signal": "HTTP 200 + business code success | 页面命中 + __INITIAL_STATE__ 可读 + 关键 store 存在",
-  "failure_signals": ["captcha", "session_expired", "invalid_sign"]
+  "failure_signals": ["browser_env_abnormal", "account_abnormal", "gateway_invoker_failed", "signature_entry_missing", "captcha", "session_expired", "invalid_sign"]
 }
 ```
+
+补充约束：
+
+1. `route_role=primary` 表示当前场景优先交付给后续实现 FR 的主读取路径；`route_role=fallback` 表示只在主路径被风控、环境或样本不足阻断时作为正式备用读路径消费。
+2. `path_kind=page` 只能在 `route_role=fallback` 或明确修订 FR 范围后出现；不得默认与 API 主路径等价。
 
 ## signature_path
 
@@ -67,7 +73,7 @@ Spike 输出必须包含以下三个对象：
   },
   "request_headers_observed": ["X-S-Common"],
   "preconditions": ["logged_in", "page_context_ready"],
-  "failure_signals": ["entry_missing", "runtime_throw", "invalid_output"]
+  "failure_signals": ["signature_entry_missing", "runtime_throw", "invalid_output"]
 }
 ```
 
@@ -84,6 +90,7 @@ Spike 输出必须包含以下三个对象：
   "field": "x-s|x-t|trace_id",
   "source": "page_state|runtime_generated|static",
   "lifecycle": "request_scoped|session_scoped|page_refresh_scoped",
+  "verification_status": "confirmed|candidate",
   "required_level": "hard|required_optional",
   "notes": "简述约束与已知变化条件"
 }
@@ -95,3 +102,4 @@ Spike 输出必须包含以下三个对象：
 2. `required_level=hard` 的字段定义变化必须触发后续实现 FR 的显式评审。
 3. 任何未识别失败信号必须追加到 `failure_signals`，不得静默忽略。
 4. 在没有成功样本前，不允许把 `required_headers_candidate` 直接升级为“已确认必要条件”。
+5. `verification_status=candidate` 的字段不得被后续实现 FR 直接当作冻结事实消费；进入实现前需先在对应 FR 中完成复核或显式承接为待决项。
