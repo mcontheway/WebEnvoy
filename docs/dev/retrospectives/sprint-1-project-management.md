@@ -183,7 +183,7 @@ Sprint 结束前，除业务与文档收口外，增加环境治理清单：
 | D 双门禁 + 一语义 | `code_review.md` 与 PR 模板（如有） | 把 `Fixes/refs` 使用场景写成检查项，并纳入合并前清单 |
 | E 状态型 runtime 健康矩阵 | `spec_review.md` + 对应 FR `plan.md` / `risks.md` | 把健康矩阵、恢复路径、最低回归矩阵纳入进入实现前条件 |
 | F Handoff 强制工件 | `.codex/memories/` 使用约定 + `docs/dev/AGENTS.md` | 为长链路事项定义 handoff 触发条件与最小字段 |
-| G 环境清理 DoD | [docs/dev/retrospectives/sprint-close-checklist.md](/Users/mc/Desktop/同步空间/coding/WebEnvoy/docs/dev/retrospectives/sprint-close-checklist.md) | 固化“交付完成”与“环境收口”双清单，避免历史噪音累积 |
+| G 环境清理 DoD | `docs/dev/retrospectives/sprint-close-checklist.md` | 固化“交付完成”与“环境收口”双清单，避免历史噪音累积 |
 
 ## 6. 后续 Sprint 操作指引（简版）
 
@@ -202,4 +202,4 @@ Sprint 结束前，除业务与文档收口外，增加环境治理清单：
 - `docs/dev/roadmap.md`：Phase 约束、阶段门与“状态以 GitHub 为准”
 - `docs/dev/AGENTS.md`：研发漏斗、规约/实现分离、spec 套件要求
 - `spec_review.md`：正式准入标准、必查维度、阻断条件
-- `.codex/memories/webenvoy-sprint1-handoff-2026-03-19.md`：Sprint 1 实际执行轨迹、阻断收口、合并判定与收尾状态
+- Sprint 1 本地 handoff 记录：用于恢复执行停点、阻断收口、合并判定与收尾状态；该类记录属于本地恢复介质，不是仓库正式真相源

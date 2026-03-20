@@ -9,11 +9,12 @@ DEFAULT_TEMPLATE="${REPO_ROOT}/.github/PULL_REQUEST_TEMPLATE.md"
 usage() {
   cat <<'EOF'
 用法:
-  scripts/open-pr.sh [--issue <number>] [--title <title>] [--base <branch>] [--draft]
+  scripts/open-pr.sh [--issue <number>] [--title <title>] [--base <branch>] [--draft] [--closing <fixes|refs|none>]
 
 说明:
   基于当前分支自动生成 PR 标题和描述，并调用 gh pr create。
   默认 base 分支为 main，默认标题取最近一次提交信息。
+  默认关闭语义为 `fixes`；如当前 PR 不应关闭 issue，请显式传 `--closing refs` 或 `--closing none`。
 EOF
 }
 
@@ -108,25 +109,36 @@ build_body() {
   local base_branch="$3"
   local risk_level="$4"
   local risk_reason="$5"
-  local tmp_file="$6"
+  local closing_mode="$6"
+  local tmp_file="$7"
   local issue_line="无"
-  local fixes_line="无"
+  local closing_line="无"
 
   if [[ -n "${issue_number}" ]]; then
     issue_line="#${issue_number}"
-    fixes_line="Fixes #${issue_number}"
+    case "${closing_mode}" in
+      fixes)
+        closing_line="Fixes #${issue_number}"
+        ;;
+      refs)
+        closing_line="Refs #${issue_number}"
+        ;;
+      none)
+        closing_line="无"
+        ;;
+    esac
   fi
 
   cp "${template_file}" "${tmp_file}"
 
   PR_ISSUE="${issue_line}" \
-  PR_FIXES="${fixes_line}" \
+  PR_CLOSING="${closing_line}" \
   PR_RISK_LEVEL="${risk_level}" \
   PR_RISK_REASON="${risk_reason}" \
   PR_ROLLBACK="如需撤回，执行对应的 revert PR 或回退本 PR 引入的提交。" \
     perl -0pi -e '
       s/\{\{ISSUE\}\}/$ENV{"PR_ISSUE"}/g;
-      s/\{\{FIXES\}\}/$ENV{"PR_FIXES"}/g;
+      s/\{\{CLOSING\}\}/$ENV{"PR_CLOSING"}/g;
       s/\{\{RISK_LEVEL\}\}/$ENV{"PR_RISK_LEVEL"}/g;
       s/\{\{RISK_REASON\}\}/$ENV{"PR_RISK_REASON"}/g;
       s/\{\{ROLLBACK\}\}/$ENV{"PR_ROLLBACK"}/g;
@@ -145,6 +157,7 @@ main() {
   local title=""
   local base_branch="main"
   local draft=0
+  local closing_mode="fixes"
   local branch
   local risk_info
   local risk_level
@@ -176,6 +189,18 @@ main() {
       --draft)
         draft=1
         ;;
+      --closing)
+        shift
+        [[ $# -gt 0 ]] || die "--closing 需要一个取值"
+        closing_mode="$1"
+        case "${closing_mode}" in
+          fixes|refs|none)
+            ;;
+          *)
+            die "--closing 仅支持 fixes|refs|none"
+            ;;
+        esac
+        ;;
       -h|--help)
         usage
         exit 0
@@ -205,7 +230,7 @@ main() {
   # Capture the resolved temp path now; EXIT runs after local variables go out of scope.
   trap "rm -f '${tmp_body}'" EXIT
 
-  build_body "${DEFAULT_TEMPLATE}" "${issue_number}" "${base_branch}" "${risk_level}" "${risk_reason}" "${tmp_body}"
+  build_body "${DEFAULT_TEMPLATE}" "${issue_number}" "${base_branch}" "${risk_level}" "${risk_reason}" "${closing_mode}" "${tmp_body}"
 
   create_args+=(--base "${base_branch}" --title "${title}" --body-file "${tmp_body}")
   if [[ "${draft}" == "1" ]]; then

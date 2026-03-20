@@ -165,7 +165,10 @@ spec review 的执行约束：
 - 功能开发：`feat/FR-XXXX-*`
 - 缺陷修复：`fix/<scope>-*`
 
-提交 PR 时，若对应 GitHub Issue 已存在，应显式带上 `Fixes #<issue-number>`。
+提交 PR 时，若对应 GitHub Issue 已存在，应显式写明关闭语义：
+
+- 实现闭环并在本 PR 合入后应关闭 issue：使用 `Fixes #<issue-number>`
+- Spike、规约、研究或仅部分完成闭环：使用 `Refs #<issue-number>`，不要提前关闭
 
 ## Review 与合并底线
 
@@ -181,7 +184,9 @@ spec review 的执行约束：
 - 将以下目录或主题视为高风险：`.github/workflows/`、`scripts/`、执行引擎、账号体系、适配器协议、数据读写、schema、迁移、安全与风控链路。
 - 对高风险改动，重点检查副作用、回滚路径、验证证据与滥用面扩张风险。
 - 如果关键测试、验证证据或合并元数据不足，默认给出阻断性结论。
-- 如果对应 GitHub Issue 已存在，PR 描述应显式包含 `Fixes #<issue-number>`。
+- 如果对应 GitHub Issue 已存在，PR 描述应显式包含正确的关闭语义：
+  - 完整实现闭环使用 `Fixes #<issue-number>`
+  - Spike、规约、研究或部分完成场景使用 `Refs #<issue-number>`
 - `docs/dev/specs/` 是正式契约区，不应把 backlog 草稿、未确认需求或本地进度真相源写入其中。
 
 ## AI 执行职责
