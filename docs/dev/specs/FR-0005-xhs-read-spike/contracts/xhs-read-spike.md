@@ -39,6 +39,32 @@ Spike 输出必须包含以下三个对象：
   "required_headers_observed": ["Accept", "X-s", "X-t"],
   "required_headers_candidate": ["Cookie", "Origin"],
   "required_params": ["keyword", "note_id"],
+  "page_state_fallback": {
+    "freeze_scope": "minimal_only",
+    "path_template": "GET /explore/<noteId>?xsec_token=...&xsec_source=... | GET /user/profile/<userId>?xsec_token=...",
+    "url_params_observed": [
+      { "name": "noteId", "source": "path_segment", "required": true, "status": "success|candidate" },
+      { "name": "userId", "source": "path_segment", "required": true, "status": "success|candidate" },
+      { "name": "xsec_token", "source": "query", "required": true, "status": "success|candidate" },
+      { "name": "xsec_source", "source": "query", "required": false, "status": "candidate" }
+    ],
+    "state_probe": {
+      "root_path": "window.__INITIAL_STATE__",
+      "root_expect": "object",
+      "root_status": "success|failed|candidate",
+      "key_paths_observed": [
+        { "path": "note.noteDetailMap", "status": "success|candidate" },
+        { "path": "user", "status": "success|candidate" },
+        { "path": "board", "status": "success|candidate" },
+        { "path": "note", "status": "success|candidate" }
+      ]
+    },
+    "replay_actions": [
+      { "step": "open_url", "target": "/explore/<noteId>?xsec_token=...&xsec_source=...", "expect": "page_loaded", "result_status": "success|failed|candidate" },
+      { "step": "eval_js", "target": "typeof window.__INITIAL_STATE__", "expect": "object", "result_status": "success|failed|candidate" },
+      { "step": "eval_js", "target": "window.__INITIAL_STATE__.note.noteDetailMap", "expect": "contains current noteId", "result_status": "success|failed|candidate" }
+    ]
+  },
   "success_signal": "HTTP 200 + business code success | 页面命中 + __INITIAL_STATE__ 可读 + 关键 store 存在",
   "failure_signals": ["browser_env_abnormal", "account_abnormal", "gateway_invoker_failed", "signature_entry_missing", "captcha", "session_expired", "invalid_sign"]
 }
@@ -48,6 +74,15 @@ Spike 输出必须包含以下三个对象：
 
 1. `route_role=primary` 表示当前场景优先交付给后续实现 FR 的主读取路径；`route_role=fallback` 表示只在主路径被风控、环境或样本不足阻断时作为正式备用读路径消费。
 2. `path_kind=page` 只能在 `route_role=fallback` 或明确修订 FR 范围后出现；不得默认与 API 主路径等价。
+3. `path_kind=page` 时，`page_state_fallback` 必填，且必须至少包含：
+   - `freeze_scope=minimal_only`
+   - 1 个路径模板（`path_template`，仅允许路径模板与方法）
+   - 1 个 URL 关键参数（`url_params_observed`）
+   - 1 个页面状态根探针（`state_probe.root_path`）
+   - 1 个已观测键路径（`state_probe.key_paths_observed`）
+   - 2 个以上可执行复现动作（`replay_actions`，每步必须含 `step/target/expect`）
+   - `url_params_observed`、`state_probe.root_status`、`state_probe.key_paths_observed[*].status`、`replay_actions[*].result_status` 仅允许 `success|failed|candidate`
+4. `path_kind=api` 时，`page_state_fallback` 必须为 `null`，不得混入页面探针字段。
 
 ## signature_path
 
