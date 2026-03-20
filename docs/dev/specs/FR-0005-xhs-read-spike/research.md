@@ -6,178 +6,217 @@
 2. 页面签名函数最小调用路径是否可稳定复现。
 3. 关键追踪字段在请求级/会话级/刷新级的变化规律是什么。
 
-## 当前证据基线
+## 证据分层与结论口径
 
-本轮 Spike 先基于仓库内已落盘、可在干净 clone 中复核的材料收敛正式输入，不把零散调研留在口头层：
+本文件把证据分为两层，避免把历史调研与本轮浏览器内实测混写：
 
-1. 仓库内调研：
-   - `docs/research/ref/MediaCrawlerPro_analysis.md`
-   - `docs/archive/tech-selection-preresearch.md`
-   - `docs/dev/architecture/system-design/reference.md`
-2. 归档说明：
-   - 上述仓库内调研已经吸收了外部参考项目的观察结果。
-   - 未被仓库内文档直接承接的外部源码观察，不在本文件中当作正式证据基线引用。
+1. 仓库内既有调研证据（历史基线）
+  - `docs/research/ref/MediaCrawlerPro_analysis.md`
+  - `docs/archive/tech-selection-preresearch.md`
+  - `docs/dev/architecture/system-design/reference.md`
+2. 浏览器内第一手复核证据（本轮新增）
+  - 在真实浏览器页面内观察函数、Cookie、XHR、DOM、手动 fetch 回包
 
-> 结论口径：
-> - 本文件可作为后续浏览器内复核与下一 FR 起草的候选输入。
-> - 但其中“字段生命周期”“用户主页读链路端点”“风控映射”仍存在待浏览器内复核项，不得单独当作后续实现基线。
+口径约束：
 
-## 1. 端点结论
+- 第一手证据优先用于描述“本轮已发生事实”。
+- 历史基线仅作为候选参考，不能覆盖第一手失败证据。
+- 本轮已触发风控/账号异常，浏览器内 live 复核已暂停；本文件不是“实现就绪”结论。
 
-### 1.1 搜索列表
+## 1. 浏览器内第一手复核证据（新增）
 
-- 场景：`search`
-- 方法：`POST`
-- 路径：`/api/sns/web/v1/search/notes`
-- 最小请求字段：
-  - `keyword`
-  - `page`
-  - `page_size`
-  - `search_id`
-  - `sort`
-  - `note_type`
-- 最小成功信号：
+### 1.1 环境与会话前提
+
+- 登录态来源：`Claw profile` 的隔离 clone。
+- 浏览器启动方式：手动启动 Chrome，并开启 remote debugging `9222`。
+- 本轮状态：出现账号/风控异常后，停止继续 live 交互，避免扩大账号风险。
+
+### 1.2 签名入口页面分流实测
+
+- 页面：`https://www.xiaohongshu.com/explore`
+  - `window._webmsxyw` 为 `function`。
+  - `toString()` 预览为混淆函数。
+  - 调用样例：`window._webmsxyw('/api/sns/web/v1/search/notes', payload)` 返回对象，键至少包含 `X-s`、`X-t`。
+- 页面：`/explore/<noteId>?xsec_token=...`
+  - `window._webmsxyw` 为 `function`。
+  - `window.__INITIAL_STATE__` 为 `object`，且 `note.noteDetailMap` 中可直接拿到当前 `noteId`。
+- 页面：`/user/profile/<userId>?xsec_token=...&xsec_source=pc_search`
+  - 曾在一次访问中出现 `window._webmsxyw is not a function`。
+  - 但后续直接打开同类 profile URL 时，`window._webmsxyw` 又为 `function`，且 `window.__INITIAL_STATE__` 为 `object`，顶层包含 `user`、`board`、`note` 等 store。
+- 页面：`search_result` 的一个页面变体
+  - 曾出现 `window._webmsxyw` 为 `undefined`。
+
+结论（受限于本轮样本）：签名入口至少存在页面、加载时机或版本分流，不能写成全局稳定入口。
+
+### 1.3 Cookie 与存储观测
+
+- 在 `/explore` 页面，`document.cookie` 可直接读到：`a1`、`webId`、`gid`、`xsecappid`。
+- 结合此前已落盘证据：`webId` / `gid` 不在 `localStorage` / `sessionStorage`。
+
+### 1.4 单次搜索交互的成功 XHR 样本（HTTP 200）
+
+以下请求在单次搜索交互中实际观察为成功 `200`：
+
+- `GET //edith.xiaohongshu.com/api/sns/web/v1/search/recommend?keyword=AI`
+- `GET //edith.xiaohongshu.com/api/sns/web/v1/search/filter?keyword=AI&search_id=...`
+- `POST //edith.xiaohongshu.com/api/sns/web/v1/search/onebox`
+- `POST //edith.xiaohongshu.com/api/sns/web/v1/search/notes`
+- `GET //edith.xiaohongshu.com/api/sns/web/v1/board/user?user_id=...&num=15&page=1`
+
+同批次可见的请求头族（观测值，不等于最小必要集）：
+
+- 通用：`Accept`
+- POST 额外：`Content-Type: application/json;charset=utf-8`
+- 追踪/签名相关：`x-b3-traceid`、`x-xray-traceid`、`X-s`、`X-t`、`X-S-Common`
+
+### 1.5 DOM 抽样证据
+
+- 在 `/explore` 页 DOM 可直接抽到：
+  - 笔记 URL 形态：`/explore/<noteId>?xsec_token=...&xsec_source=...`
+  - 用户 URL 形态：`/user/profile/<userId>?xsec_token=...&xsec_source=pc_search`
+- 在直接打开的 detail / profile 页面：
+  - `window.__INITIAL_STATE__` 均为 `object`
+  - detail 页可从 `note.noteDetailMap` 直接取到当前 `noteId`
+  - profile 页顶层可见 `user`、`board`、`note` 等 store
+
+### 1.6 手动 fetch 失败/风控样本
+
+- `fetch('/api/sns/web/v1/search/notes')` 仅补 `X-s/X-t`：
+  - `HTTP 500`
+  - body 含 `create invoker failed / jarvis-gateway-default`
+- `fetch('https://edith.xiaohongshu.com/api/sns/web/v1/user/otherinfo?...')` 仅补 `X-s/X-t`：
   - `HTTP 200`
-  - 业务码成功
-  - 返回列表字段与分页信息
-- 已知失败信号：
-  - `471/461`：验证码
-  - `300013`：访问频次异常
-  - `300015`：签名失败
-  - `-100`：登录过期
-- 证据来源：
-  - `docs/research/ref/MediaCrawlerPro_analysis.md` §4.1 / §4.3
-  - `docs/archive/tech-selection-preresearch.md` §三 / 路径 A
+  - 业务 `code=300015`，`msg=Browser environment abnormal ...`
+- 手动 `POST https://edith.xiaohongshu.com/api/sns/web/v1/feed`，补 `Accept/Content-Type/x-b3-traceid/x-xray-traceid/X-s/X-t/X-S-Common`：
+  - `HTTP 461`
+  - body `code=300011`，`msg=Account abnormal. Switch account and retry.`
 
-### 1.2 笔记详情
+## 2. 场景化端点结论（按证据强度拆分）
 
-- 场景：`detail`
-- 方法：`POST`
-- 路径：`/api/sns/web/v1/feed`
-- 最小请求字段：
-  - `source_note_id`
-- 备用路径：
-  - 访问笔记 HTML 后读取 `window.__INITIAL_STATE__`
-- 最小成功信号：
-  - `HTTP 200`
-  - 响应中存在 note 详情结构
-- 已知失败信号：
-  - `300015`：签名失败
-  - `-100`：登录过期
-  - 页面结构漂移导致 `__INITIAL_STATE__` 解析失败
-- 证据来源：
-  - `docs/research/ref/MediaCrawlerPro_analysis.md` §4.1 / §4.4
-  - `docs/archive/tech-selection-preresearch.md` §三 / 路径 A
+### 2.1 search
 
-### 1.3 用户主页
+第一手成功证据：
 
-- 场景：`user_home`
-- 当前仓库内可复核的最小候选端点：`GET /api/sns/web/v1/user/otherinfo`
-- 关联会话探针：`GET /api/sns/web/v1/user/selfinfo`
-- 最小请求字段：
-  - `target_user_id`
-- 最小成功信号：
-  - `HTTP 200`
-  - 返回用户信息结构
-- 已知失败信号：
-  - `-100`：登录过期
-  - `300015`：签名失败
-  - 目标用户不存在或无可见信息时返回空结构/异常
-- 说明：
-  - 作品列表类“主页聚合端点”在本轮仓库内证据里仍未达到可冻结程度。
-  - 若后续浏览器内复核确认 `user_posted` 或其他聚合端点稳定存在，应在下一 FR 中单独补冻结，不在本 Spike 内越权确认。
-- 证据来源：
-  - `docs/research/ref/MediaCrawlerPro_analysis.md` §4.1 / §4.4
+- 在真实搜索交互中，`search/recommend`、`search/filter`、`search/onebox`、`search/notes` 出现成功 `HTTP 200`。
 
-## 2. 签名结论
+候选或失败证据：
 
-### 2.1 最小调用入口
+- 手动直调 `search/notes` 且仅补 `X-s/X-t`，得到 `HTTP 500`（`create invoker failed`），说明“仅两字段签名”不足以稳定复现。
 
-- 当前最小入口：`window._webmsxyw(uri, data)`
-- 调用位置：
-  - 平台页面已加载后的浏览器内 JS 上下文
-  - 对 WebEnvoy 来说，应由 `Content Script -> MAIN World` 触达，而不是浏览器外签名服务
-- 前置条件：
-  - 页面处于已登录且目标脚本已加载状态
-  - 请求 URI 与请求体已确定
+`required_headers` 已观测（基于成功/失败样本抓到的头族）：
 
-### 2.2 最小输入
+- `Accept`
+- `Content-Type: application/json;charset=utf-8`（POST）
+- `x-b3-traceid`
+- `x-xray-traceid`
+- `X-s`
+- `X-t`
+- `X-S-Common`
 
-- `uri`: 请求路径字符串
-- `data`: 请求体对象或序列化字符串
-- 关联上下文：
-  - 当前登录 Cookie
-  - 页面环境中已有的会话/设备相关状态
+`required_headers` 候选（本轮未实锤“最小必要”）：
 
-### 2.3 最小输出
+- 浏览器自动附加上下文头与会话上下文（如 Cookie、Origin、Referer、UA Client Hints）。
 
-- 主签名字段：
+### 2.2 detail
+
+第一手成功证据：
+
+- 直接打开笔记页 `https://www.xiaohongshu.com/explore/<noteId>?xsec_token=...&xsec_source=...` 可稳定进入详情页。
+- 当前 detail 页 `window.__INITIAL_STATE__` 为 `object`，且 `note.noteDetailMap` 中可直接提取当前 `noteId`。
+- 因此“详情页 HTML / `__INITIAL_STATE__` 读取”这条备用读路径已得到第一手页面级证据。
+
+候选或失败证据：
+
+- `POST /api/sns/web/v1/feed` 手动构造请求后得到 `HTTP 461` + `code=300011`（账号异常）。
+- 现阶段仍没有 `feed` 端点的成功 `HTTP 200 + 业务成功` 样本，不能把 API 详情读路径冻结为已确认。
+
+`required_headers` 已观测：
+
+- 在失败样本中显式使用了：
+  - `Accept`
+  - `Content-Type: application/json;charset=utf-8`
+  - `x-b3-traceid`
+  - `x-xray-traceid`
   - `X-s`
   - `X-t`
-  - `x-s-common`
-  - `X-B3-Traceid`
-- 对 WebEnvoy 的实施意义：
-  - 后续 L3 读适配至少要承载这 4 个字段的观测和错误分类
-  - 不应先承诺复刻 SignSrv 或浏览器外离线签名链路
+  - `X-S-Common`
 
-### 2.4 已知失效信号
+`required_headers` 候选（未被成功样本验证）：
 
-- `window._webmsxyw` 缺失
-- 调用抛异常
-- 签名存在但请求返回 `300015`
-- 页面脚本版本漂移导致输出字段缺失或形态改变
+- Cookie/页面上下文相关头可能仍为必要条件。
 
-## 3. 字段生命周期结论
+### 2.3 user_home
 
-### 3.1 已确认：请求级变化
+第一手成功证据：
 
-| 字段 | 来源 | 生命周期 | 依赖等级 | 说明 |
-|---|---|---|---|---|
-| `search_id` | `runtime_generated` | `request_scoped` | `required_optional` | 由客户端生成的搜索请求标识 |
-| `X-s` | `page_state` | `request_scoped` | `hard` | 由签名函数针对本次请求生成 |
-| `X-t` | `page_state` | `request_scoped` | `hard` | 与本次签名调用绑定 |
-| `X-B3-Traceid` | `runtime_generated/page_state` | `request_scoped` | `required_optional` | 链路追踪字段，后续需在浏览器内复核来源 |
+- 在搜索交互同批次里观察到 `GET /api/sns/web/v1/board/user?...` 成功 `HTTP 200`。
+- 直接打开 `user/profile/<userId>?xsec_token=...&xsec_source=pc_search` 可稳定进入用户主页。
+- 该 profile 页 `window.__INITIAL_STATE__` 为 `object`，顶层包含 `user`、`board`、`note` 等 store。
+- 该证据当前仅能标记为“用户域相关成功请求”，尚不能直接冻结为 `user_home` 主端点契约。
 
-### 3.2 已确认：会话级稳定
+候选或失败证据：
 
-| 字段 | 来源 | 生命周期 | 依赖等级 | 说明 |
-|---|---|---|---|---|
-| Cookie | `page_state` | `session_scoped` | `hard` | 真实登录态强依赖 |
+- `GET /api/sns/web/v1/user/otherinfo?...` 手动请求（仅 `X-s/X-t`）返回 `HTTP 200 + code=300015`（浏览器环境异常）。
+- 因账号异常，未完成“可稳定读取用户主页核心字段”的闭环复核。
 
-### 3.3 待浏览器内复核：页面刷新级或会话级
+`required_headers` 已观测：
 
-| 字段 | 当前候选 | 生命周期候选 | 依赖等级 | 说明 |
-|---|---|---|---|---|
-| `x-s-common` | `page_state` | `session_scoped` 或 `page_refresh_scoped` | `required_optional` | 含设备/环境相关信息，当前仅能确认参与签名链路，具体稳定性待浏览器内复核 |
-| `a1` | `page_state` | `session_scoped` | `hard` | 参考架构文档与调研，需在 WebEnvoy 链路内确认 |
-| `webId` | `page_state` | `page_refresh_scoped` 或 `session_scoped` | `required_optional` | 需通过浏览器内多次对比确认 |
-| `gid` | `page_state/runtime_generated` | `page_refresh_scoped` 候选 | `required_optional` | 当前仅有调研结论，未在 WebEnvoy 内实锤 |
-| `xsec_token` | `page_state` | `page_refresh_scoped` | `required_optional` | 详情页 URL 相关字段 |
-| `xsec_source` | `static/page_state` | `page_refresh_scoped` | `required_optional` | 详情页 URL 相关字段 |
+- `board/user` 成功样本可见头族：`Accept`、`x-b3-traceid`、`x-xray-traceid`、`X-s`、`X-t`、`X-S-Common`。
 
-## 4. 错误分类结论
+`required_headers` 候选（未实锤）：
 
-本 Spike 可直接冻结给后续实现的最小错误分类：
+- `user/otherinfo` 可能需要完整浏览器上下文头、Cookie 和页面上下文一致性；本轮无成功样本，不做更强断言。
 
-| 错误码 / 现象 | 语义 | 后续建议分类 |
-|---|---|---|
-| `471` / `461` | 验证码 / 滑块 | `captcha` |
-| `300012` | IP 被封锁 | `ip_blocked` |
-| `300013` | 访问频次异常 | `access_frequency` |
-| `300015` | 签名失败 | `invalid_sign` |
-| `-100` | 登录过期 | `session_expired` |
-| `window._webmsxyw` 缺失 | 页面脚本漂移 | `signature_entry_missing` |
-| `chrome.runtime` / content-script 不可达 | 运行时链路失败 | `runtime_chain_unavailable` |
+## 3. 签名链路与字段生命周期（本轮可保守冻结）
 
-## 5. 当前可直接进入后续 FR 起草 / 复核的结论
+### 3.1 签名链路
 
-1. 搜索与详情场景的最小候选端点已经足够明确，可直接进入下一轮浏览器内复核设计。
-2. 签名链路可继续以“浏览器内调用平台自有函数”作为侦察方向，不需要转向外置 SignSrv。
-3. 最小错误分类已经足够指导后续适配器实现与 `#154` 诊断壳对齐。
-4. 字段生命周期矩阵已经能支撑下一轮 TDD/复核拆分：哪些字段继续保留为候选，哪些需要优先实锤。
+- 当前可确认入口仍是浏览器内 `window._webmsxyw(uri, data)`。
+- 但入口存在页面/加载时机/版本分流（`/explore`、detail 页可用；`search_result` 某变体与 profile 页的早期样本出现过不可用）。
+- 因此只能冻结为“候选主入口 + 分流风险”，不能冻结为“全局稳定唯一入口”。
 
-## 未决项
+### 3.2 生命周期矩阵（已确认 vs 候选）
 
-- [ ] 需要在 WebEnvoy 浏览器内链路中复核 `a1 / webId / gid` 的精确生命周期
-- [ ] 需要在浏览器内确认 `window._webmsxyw` 的输入 / 输出对象形态是否有版本分流
-- [ ] 需要通过真实会话样本补齐“未登录 / 会话过期 / 风控拦截”在 WebEnvoy 诊断壳中的最终映射
+
+| 字段               | 本轮状态            | 生命周期判断                                      | 依赖等级                | 说明                              |
+| ---------------- | --------------- | ------------------------------------------- | ------------------- | ------------------------------- |
+| `X-s`            | 第一手已观测          | `request_scoped` 候选                         | `hard`              | 签名调用返回键                         |
+| `X-t`            | 第一手已观测          | `request_scoped` 候选                         | `hard`              | 签名调用返回键                         |
+| `X-S-Common`     | 第一手已观测（请求头）     | `session_scoped` 或 `page_refresh_scoped` 候选 | `required_optional` | 仅确认出现在请求头，稳定性未实锤                |
+| `x-b3-traceid`   | 第一手已观测（请求头）     | `request_scoped` 候选                         | `required_optional` | 来源/生成机制未复核                      |
+| `x-xray-traceid` | 第一手已观测（请求头）     | `request_scoped` 候选                         | `required_optional` | 来源/生成机制未复核                      |
+| `a1`             | 第一手已观测（Cookie）  | `session_scoped` 候选                         | `hard`              | 仅确认可读到，未做跨刷新对比                  |
+| `webId`          | 第一手已观测（Cookie）  | `session_scoped` 或 `page_refresh_scoped` 候选 | `required_optional` | 且已有证据表明不在 local/session storage |
+| `gid`            | 第一手已观测（Cookie）  | `session_scoped` 或 `page_refresh_scoped` 候选 | `required_optional` | 且已有证据表明不在 local/session storage |
+| `xsecappid`      | 第一手已观测（Cookie）  | `session_scoped` 候选                         | `required_optional` | 仅确认可读                           |
+| `xsec_token`     | 第一手已观测（DOM URL） | `page_refresh_scoped` 候选                    | `required_optional` | 由 URL 抽样获得                      |
+| `xsec_source`    | 第一手已观测（DOM URL） | `page_refresh_scoped` 候选                    | `required_optional` | 由 URL 抽样获得                      |
+
+
+## 4. 错误分类更新（含本轮新增）
+
+
+| 错误码 / 现象                                | 语义             | 建议分类                      |
+| --------------------------------------- | -------------- | ------------------------- |
+| `300015` + Browser environment abnormal | 浏览器环境校验失败      | `browser_env_abnormal`    |
+| `300011` + Account abnormal             | 账号异常/风控阻断      | `account_abnormal`        |
+| `HTTP 500` + create invoker failed      | 网关侧调用失败（上下文不足） | `gateway_invoker_failed`  |
+| `window._webmsxyw` 缺失                   | 页面脚本分流/漂移      | `signature_entry_missing` |
+
+
+## 5. 当前状态与暂停说明
+
+本轮浏览器内复核为“部分完成”：
+
+- 已有：`search` 相关成功样本、detail/profile 页面级 `__INITIAL_STATE__` 证据、签名入口分流证据、Cookie/DOM 一手样本、多类失败样本。
+- 未有：`detail` 与 `user_home` 的稳定成功闭环证据，及每个端点“最小必要 headers”严格证明。
+
+由于已出现 `account abnormal`，本轮 live 复核到此为止。后续需要在账号/环境恢复后继续，当前结论不得直接转写为“实现已就绪”。
+
+## 未决项（进入下一轮复核前保留）
+
+- 在新会话样本中复核 `detail` 的成功路径与最小必要请求上下文
+- 在新会话样本中复核 `user_home` 主端点（含 `otherinfo` 与候选聚合端点）的成功路径
+- 对 `search/detail/user_home` 分别完成“required_headers 最小必要集”实验矩阵
+- 复核 `a1 / webId / gid` 的跨刷新与跨会话生命周期
+- 复核 `window._webmsxyw` 的页面/版本分流条件，并补统一降级策略

@@ -22,7 +22,7 @@ Spike 输出必须包含以下三个对象：
 
 ### 语义
 
-记录核心读场景可复现端点信息。
+记录核心读场景端点证据，并区分“已观测事实”与“候选推断”。
 
 ### 最小结构
 
@@ -31,7 +31,11 @@ Spike 输出必须包含以下三个对象：
   "scenario": "search|detail|user_home",
   "method": "GET|POST",
   "path": "/api/...",
-  "required_headers": ["x-s", "x-t"],
+  "evidence_tier": "browser_first_hand|repo_baseline",
+  "evidence_status": "success|failed|candidate",
+  "evidence_notes": "可复现动作与关键回包",
+  "required_headers_observed": ["Accept", "X-s", "X-t"],
+  "required_headers_candidate": ["Cookie", "Origin"],
   "required_params": ["keyword", "note_id"],
   "success_signal": "HTTP 200 + business code success",
   "failure_signals": ["captcha", "session_expired", "invalid_sign"]
@@ -86,3 +90,4 @@ Spike 输出必须包含以下三个对象：
 1. 新增场景或字段时允许追加，不允许破坏既有字段语义。
 2. `required_level=hard` 的字段定义变化必须触发后续实现 FR 的显式评审。
 3. 任何未识别失败信号必须追加到 `failure_signals`，不得静默忽略。
+4. 在没有成功样本前，不允许把 `required_headers_candidate` 直接升级为“已确认必要条件”。
