@@ -29,15 +29,16 @@ Spike 输出必须包含以下三个对象：
 ```json
 {
   "scenario": "search|detail|user_home",
+  "path_kind": "api|page",
   "method": "GET|POST",
-  "path": "/api/...",
+  "path": "/api/...|/explore/<noteId>?xsec_token=...|/user/profile/<userId>?xsec_token=...",
   "evidence_tier": "browser_first_hand|repo_baseline",
   "evidence_status": "success|failed|candidate",
   "evidence_notes": "可复现动作与关键回包",
   "required_headers_observed": ["Accept", "X-s", "X-t"],
   "required_headers_candidate": ["Cookie", "Origin"],
   "required_params": ["keyword", "note_id"],
-  "success_signal": "HTTP 200 + business code success",
+  "success_signal": "HTTP 200 + business code success | 页面命中 + __INITIAL_STATE__ 可读 + 关键 store 存在",
   "failure_signals": ["captcha", "session_expired", "invalid_sign"]
 }
 ```
@@ -60,9 +61,9 @@ Spike 输出必须包含以下三个对象：
   },
   "output_shape": {
     "X-s": "string",
-    "X-t": "string|number",
-    "X-S-Common": "string|null"
+    "X-t": "string|number"
   },
+  "request_headers_observed": ["X-S-Common"],
   "preconditions": ["logged_in", "page_context_ready"],
   "failure_signals": ["entry_missing", "runtime_throw", "invalid_output"]
 }
