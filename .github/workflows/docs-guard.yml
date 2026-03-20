@@ -6,7 +6,7 @@ on:
       - main
     paths:
       - '**/*.md'
-      - '.codex/pr-review-result.schema.json'
+      - 'scripts/pr-review-result.schema.json'
       - 'scripts/**'
       - '.github/workflows/**'
       - '!docs/archive/**'

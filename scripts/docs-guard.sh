@@ -72,7 +72,7 @@ while IFS= read -r file; do
 done < <(find "${REPO_ROOT}/scripts" -maxdepth 1 -type f -name '*.sh' | sort)
 
 echo "[docs-guard] 校验审查输出 Schema"
-jq empty "${REPO_ROOT}/.codex/pr-review-result.schema.json" >/dev/null
+jq empty "${REPO_ROOT}/scripts/pr-review-result.schema.json" >/dev/null
 
 echo "[docs-guard] 校验文档链接和路径引用"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/webenvoy-docs-guard.XXXXXX")"

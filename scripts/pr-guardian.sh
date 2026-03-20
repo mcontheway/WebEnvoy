@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PROMPT_FILE="${REPO_ROOT}/code_review.md"
-SCHEMA_FILE="${REPO_ROOT}/.codex/pr-review-result.schema.json"
+SCHEMA_FILE="${REPO_ROOT}/scripts/pr-review-result.schema.json"
 
 usage() {
   cat <<'EOF'
