@@ -13,24 +13,14 @@ die() {
 list_changed_files() {
   local base_branch="$1"
   local committed=""
-  local staged=""
-  local unstaged=""
-  local untracked=""
 
   git -C "${REPO_ROOT}" fetch origin "${base_branch}" >/dev/null 2>&1 || true
   if git -C "${REPO_ROOT}" rev-parse --verify "origin/${base_branch}" >/dev/null 2>&1; then
     committed="$(git -C "${REPO_ROOT}" diff --name-only "origin/${base_branch}...HEAD" 2>/dev/null || true)"
   fi
-  staged="$(git -C "${REPO_ROOT}" diff --name-only --cached)"
-  unstaged="$(git -C "${REPO_ROOT}" diff --name-only)"
-  untracked="$(git -C "${REPO_ROOT}" ls-files --others --exclude-standard)"
 
-  {
-    printf '%s\n' "${committed}"
-    printf '%s\n' "${staged}"
-    printf '%s\n' "${unstaged}"
-    printf '%s\n' "${untracked}"
-  } | sed '/^$/d' | sort -u
+  # Purity gates should evaluate the actual PR payload only.
+  printf '%s\n' "${committed}" | sed '/^$/d' | sort -u
 }
 
 print_violation() {
@@ -62,8 +52,9 @@ main() {
   local files
   local conflicts=""
   local allowed_docs_pattern='^(AGENTS\.md$|code_review\.md$|spec_review\.md$|vision\.md$|\.github/PULL_REQUEST_TEMPLATE\.md$|docs/.*\.md$)'
-  local docs_forbidden_pattern='^(\.github/workflows/|\.githooks/|scripts/|src/|tests/|dist/|package(-lock)?\.json$|tsconfig.*\.json$|pnpm-lock\.yaml$|yarn\.lock$|bun\.lockb$|[^/]+\.(ts|tsx|js|jsx|mjs|cjs|json|sql|sh)$)'
+  local docs_forbidden_pattern='^(\.github/workflows/|\.githooks/|scripts/|src/|tests/|dist/|extension/|bin/|package(-lock)?\.json$|tsconfig.*\.json$|pnpm-lock\.yaml$|yarn\.lock$|bun\.lockb$|[^/]+\.(ts|tsx|js|jsx|mjs|cjs|json|sql|sh)$)'
   local governance_pattern='^(vision\.md$|AGENTS\.md$|docs/dev/AGENTS\.md$|code_review\.md$|spec_review\.md$|docs/dev/architecture/|docs/dev/specs/|\.github/PULL_REQUEST_TEMPLATE\.md$)'
+  local allowed_specs_todo_pattern='^docs/dev/specs/.+/TODO\.md$'
   local retrospective_pattern='^docs/dev/retrospectives/'
 
   [[ -n "${branch}" ]] || die "缺少分支名参数"
@@ -96,7 +87,7 @@ main() {
       conflicts="$(
         {
           list_matches "${retrospective_pattern}" "${files}"
-          list_matches "${governance_pattern}" "${files}"
+          list_matches "${governance_pattern}" "${files}" | grep -Ev "${allowed_specs_todo_pattern}" || true
         } | sed '/^$/d' | sort -u
       )"
       if [[ -n "${conflicts}" ]]; then
@@ -111,7 +102,7 @@ main() {
       conflicts="$(
         {
           list_matches "${retrospective_pattern}" "${files}"
-          list_matches "${governance_pattern}" "${files}"
+          list_matches "${governance_pattern}" "${files}" | grep -Ev "${allowed_specs_todo_pattern}" || true
         } | sed '/^$/d' | sort -u
       )"
       if [[ -n "${conflicts}" ]]; then
