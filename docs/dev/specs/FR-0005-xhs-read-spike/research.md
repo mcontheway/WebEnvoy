@@ -136,7 +136,6 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `search-primary-01` | `primary` | `api` | `success` | `observed_once` | `browser_first_hand` | `POST` | `/api/sns/web/v1/search/notes` | 真实搜索交互中观测到 `HTTP 200` 成功样本 | 主路径强证据，但仍缺最小必要 headers/cookie/origin 矩阵 |
 | `search-primary-02` | `primary` | `api` | `failed` | `observed_once` | `browser_first_hand` | `POST` | `/api/sns/web/v1/search/notes` | 手动仅补 `X-s/X-t` 得到 `HTTP 500` + `create invoker failed` | 阻断“仅双字段签名可复现”的假设 |
-| `search-supporting-01` | `primary` | `api` | `candidate` | `observed_once` | `browser_first_hand` | `GET/POST` | `/api/sns/web/v1/search/recommend` / `/api/sns/web/v1/search/filter` / `/api/sns/web/v1/search/onebox` | 同批次可见成功请求，但未证明可替代主读链路 | 辅助 API 证据，不替代 `primary` |
 
 `search` 端点补充字段：
 
@@ -154,19 +153,22 @@
   - `success_signal`: `n/a`
   - `failure_signals`: `gateway_invoker_failed`
   - `page_state_fallback`: `null`
-- `search-supporting-01`
-  - `required_headers_observed`: `Accept`, `X-s`, `X-t`, `X-S-Common`
-  - `required_headers_candidate`: `Cookie`, `Origin`, `Referer`
-  - `required_params`: `keyword`, `search_id`
-  - `success_signal`: `请求可见但未证明可替代主读链路`
-  - `failure_signals`: `candidate_only`
-  - `page_state_fallback`: `null`
-
 当前结论：
 
 - `search/notes` 仍是 `primary` 候选主路径，但当前只达到 `observed_once`，未达“实现准入”。
 - `search` 场景当前无可冻结的 `page` fallback 成功证据；其余辅助 API 证据仅保留为候选，不构成实现准入。
 - 当前已观测头族：`Accept`、`Content-Type`（POST）、`x-b3-traceid`、`x-xray-traceid`、`X-s`、`X-t`、`X-S-Common`；Cookie/Origin/Referer/UA-CH 仍为候选必要项。
+
+`search` 辅助 API 证据（不进入正式 `endpoint_catalog`）：
+
+- `search-supporting-01`
+  - 观测路径：`/api/sns/web/v1/search/recommend` / `/api/sns/web/v1/search/filter` / `/api/sns/web/v1/search/onebox`
+  - `required_headers_observed`: `Accept`, `X-s`, `X-t`, `X-S-Common`
+  - `required_headers_candidate`: `Cookie`, `Origin`, `Referer`
+  - `required_params`: `keyword`, `search_id`
+  - `success_signal`: `请求可见但未证明可替代主读链路`
+  - `failure_signals`: `candidate_only`
+  - 作用：仅保留为 supporting/candidate 线索，不冻结 `route_role`
 
 ### 2.2 detail
 
@@ -179,7 +181,7 @@
 `detail` 端点补充字段：
 
 - `detail-primary-01`
-  - `required_headers_observed`: `none`
+  - `required_headers_observed`: `[]`
   - `required_headers_candidate`: `Accept`, `Content-Type`, `Cookie`, `Origin`, `Referer`, `X-s`, `X-t`, `X-S-Common`
   - `required_params`: `source_note_id`
   - `success_signal`: `HTTP 200 + 详情内容正常返回`
@@ -231,19 +233,11 @@
 | evidence_id | route_role | path_kind | evidence_status | evidence_maturity | evidence_tier | method | path | 证据摘要 | 准入作用 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `user-home-fallback-01` | `fallback` | `page` | `success` | `observed_once` | `browser_first_hand` | `GET` | `/user/profile/<userId>?xsec_token=...&xsec_source=pc_search` | 页面命中后 `window.__INITIAL_STATE__` 为 `object`，顶层可见 `user`/`board`/`note` | `fallback-only`（不构成实现准入） |
-| `user-home-supporting-01` | `primary` | `api` | `candidate` | `observed_once` | `browser_first_hand` | `GET` | `/api/sns/web/v1/board/user?user_id=...&num=15&page=1` | 搜索交互同批次观测到 `HTTP 200`，但仍是单点样本且未完成端点选择 | 辅助 API 证据，不冻结 `primary` |
 | `user-home-primary-02` | `primary` | `api` | `failed` | `observed_once` | `browser_first_hand` | `GET` | `/api/sns/web/v1/user/otherinfo?...` | 手动仅补 `X-s/X-t` 返回 `HTTP 200 + code=300015`（环境异常） | 阻断“低上下文请求可复现”假设 |
 | `user-home-primary-03` | `primary` | `api` | `candidate` | `observed_once` | `repo_baseline` | `GET` | `/api/sns/web/v1/user/otherinfo?...` | 端点语义相关，但本轮无成功闭环 | 候选，不准入 |
 
 `user_home` 端点补充字段：
 
-- `user-home-supporting-01`
-  - `required_headers_observed`: `Accept`, `x-b3-traceid`, `x-xray-traceid`, `X-s`, `X-t`, `X-S-Common`
-  - `required_headers_candidate`: `Cookie`, `Origin`, `Referer`
-  - `required_params`: `user_id`, `num`, `page`
-  - `success_signal`: `HTTP 200`
-  - `failure_signals`: `candidate_only`
-  - `page_state_fallback`: `null`
 - `user-home-primary-02`
   - `required_headers_observed`: `X-s`, `X-t`
   - `required_headers_candidate`: `Cookie`, `Origin`, `Referer`, `X-S-Common`
@@ -252,7 +246,7 @@
   - `failure_signals`: `browser_env_abnormal`
   - `page_state_fallback`: `null`
 - `user-home-primary-03`
-  - `required_headers_observed`: `none`
+  - `required_headers_observed`: `[]`
   - `required_headers_candidate`: `Accept`, `Cookie`, `Origin`, `Referer`, `X-s`, `X-t`, `X-S-Common`
   - `required_params`: `user_id`
   - `success_signal`: `HTTP 200 + 用户主页核心字段稳定返回`
@@ -294,6 +288,17 @@
 - `/api/sns/web/v1/board/user` 当前只保留为辅助 API 证据，不冻结为 `primary`。
 - user_home 的 `primary api` 仍缺“可稳定读取核心字段 + 最小必要请求上下文”的闭环证据，不构成实现准入。
 
+`user_home` 辅助 API 证据（不进入正式 `endpoint_catalog`）：
+
+- `user-home-supporting-01`
+  - 观测路径：`/api/sns/web/v1/board/user?user_id=...&num=15&page=1`
+  - `required_headers_observed`: `Accept`, `x-b3-traceid`, `x-xray-traceid`, `X-s`, `X-t`, `X-S-Common`
+  - `required_headers_candidate`: `Cookie`, `Origin`, `Referer`
+  - `required_params`: `user_id`, `num`, `page`
+  - `success_signal`: `HTTP 200`
+  - `failure_signals`: `candidate_only`
+  - 作用：仅保留为 supporting/candidate 线索，不冻结 `route_role`
+
 ## 3. 签名链路与字段生命周期（本轮可保守冻结）
 
 ### 3.1 签名链路
@@ -301,6 +306,47 @@
 - 当前可确认入口仍是浏览器内 `window._webmsxyw(uri, data)`。
 - 但入口存在页面/加载时机/版本分流（`/explore`、detail 页可用；`search_result` 某变体与 profile 页的早期样本出现过不可用）。
 - 因此只能冻结为“候选主入口 + 分流风险”，不能冻结为“全局稳定唯一入口”。
+
+`signature_path` 正式输出（对齐 `contracts/xhs-read-spike.md` 最小结构，按当前证据保守填写）：
+
+```json
+[
+  {
+    "entry": "window._webmsxyw(uri, data)",
+    "entry_status": "candidate",
+    "entry_scope": ["explore", "detail_page"],
+    "input_shape": {
+      "path": "string (uri, observed_once)",
+      "payload": "object|string (data, observed_once)",
+      "timestamp": "number|string (not_observed_in_this_round)"
+    },
+    "output_shape": {
+      "X-s": "string (observed_once)",
+      "X-t": "string|number (observed_once)"
+    },
+    "request_headers_observed": ["X-S-Common"],
+    "preconditions": ["logged_in", "page_context_ready", "signature_entry_present"],
+    "failure_signals": ["signature_entry_missing", "gateway_invoker_failed", "browser_env_abnormal", "account_abnormal", "invalid_sign"]
+  },
+  {
+    "entry": "window._webmsxyw(uri, data)",
+    "entry_status": "variant",
+    "entry_scope": ["search_result_variant", "profile_page"],
+    "input_shape": {
+      "path": "string (candidate)",
+      "payload": "object|string (candidate)",
+      "timestamp": "number|string (not_observed_in_this_round)"
+    },
+    "output_shape": {
+      "X-s": "string (candidate)",
+      "X-t": "string|number (candidate)"
+    },
+    "request_headers_observed": ["X-S-Common"],
+    "preconditions": ["logged_in", "page_context_ready"],
+    "failure_signals": ["signature_entry_missing"]
+  }
+]
+```
 
 ### 3.2 生命周期矩阵（已确认 vs 候选）
 
