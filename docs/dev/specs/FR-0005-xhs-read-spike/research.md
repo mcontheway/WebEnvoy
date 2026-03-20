@@ -46,9 +46,8 @@
   - `300015`：签名失败
   - `-100`：登录过期
 - 证据来源：
-  - `MediaCrawlerPro_analysis.md` §4.1 / §4.3
-  - `media_platform/xhs/client.py`
-  - `media_platform/xhs/handlers/search_handler.py`
+  - `docs/research/ref/MediaCrawlerPro_analysis.md` §4.1 / §4.3
+  - `docs/archive/tech-selection-preresearch.md` §三 / 路径 A
 
 ### 1.2 笔记详情
 
@@ -67,9 +66,8 @@
   - `-100`：登录过期
   - 页面结构漂移导致 `__INITIAL_STATE__` 解析失败
 - 证据来源：
-  - `MediaCrawlerPro_analysis.md` §4.1 / §4.4
-  - `media_platform/xhs/client.py`
-  - `media_platform/xhs/extractor.py`
+  - `docs/research/ref/MediaCrawlerPro_analysis.md` §4.1 / §4.4
+  - `docs/archive/tech-selection-preresearch.md` §三 / 路径 A
 
 ### 1.3 用户主页
 
