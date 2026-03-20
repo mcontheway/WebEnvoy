@@ -126,31 +126,31 @@
 
 标注口径（对齐 `contracts/xhs-read-spike.md`）：
 
-- 每条证据显式包含 `route_role`、`path_kind`、`evidence_status`。
+- 每条证据显式包含 `route_role`、`path_kind`、`evidence_status`、`evidence_maturity`。
 - `route_role=fallback` 且 `path_kind=page` 的证据统一标记为 `fallback-only`，只作为降级路径证据，不构成实现准入。
 - 仅 `route_role=primary` + `evidence_status=success` 且补齐最小必要请求上下文实验矩阵，才可进入实现准入；当前轮次尚未满足。
 
 ### 2.1 search
 
-| evidence_id | route_role | path_kind | evidence_status | method | path | 证据摘要 | 准入作用 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `search-primary-01` | `primary` | `api` | `success` | `POST` | `/api/sns/web/v1/search/notes` | 真实搜索交互中观测到 `HTTP 200` 成功样本 | 主路径强证据，但仍缺最小必要 headers/cookie/origin 矩阵 |
-| `search-primary-02` | `primary` | `api` | `failed` | `POST` | `/api/sns/web/v1/search/notes` | 手动仅补 `X-s/X-t` 得到 `HTTP 500` + `create invoker failed` | 阻断“仅双字段签名可复现”的假设 |
-| `search-fallback-01` | `fallback` | `api` | `candidate` | `GET/POST` | `/api/sns/web/v1/search/recommend` / `/api/sns/web/v1/search/filter` / `/api/sns/web/v1/search/onebox` | 同批次可见成功请求，但未证明可替代主读链路 | `fallback-only`（不构成实现准入） |
+| evidence_id | route_role | path_kind | evidence_status | evidence_maturity | method | path | 证据摘要 | 准入作用 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `search-primary-01` | `primary` | `api` | `success` | `observed_once` | `POST` | `/api/sns/web/v1/search/notes` | 真实搜索交互中观测到 `HTTP 200` 成功样本 | 主路径强证据，但仍缺最小必要 headers/cookie/origin 矩阵 |
+| `search-primary-02` | `primary` | `api` | `failed` | `observed_once` | `POST` | `/api/sns/web/v1/search/notes` | 手动仅补 `X-s/X-t` 得到 `HTTP 500` + `create invoker failed` | 阻断“仅双字段签名可复现”的假设 |
+| `search-fallback-01` | `fallback` | `api` | `candidate` | `observed_once` | `GET/POST` | `/api/sns/web/v1/search/recommend` / `/api/sns/web/v1/search/filter` / `/api/sns/web/v1/search/onebox` | 同批次可见成功请求，但未证明可替代主读链路 | `fallback-only`（不构成实现准入） |
 
 当前结论：
 
-- `search/notes` 仍是 `primary` 候选主路径，但未达“实现准入”。
+- `search/notes` 仍是 `primary` 候选主路径，但当前只达到 `observed_once`，未达“实现准入”。
 - `search` 场景当前无可冻结的 `page` fallback 成功证据；现有 `fallback` 证据均按 `fallback-only` 处理，不构成实现准入。
 - 当前已观测头族：`Accept`、`Content-Type`（POST）、`x-b3-traceid`、`x-xray-traceid`、`X-s`、`X-t`、`X-S-Common`；Cookie/Origin/Referer/UA-CH 仍为候选必要项。
 
 ### 2.2 detail
 
-| evidence_id | route_role | path_kind | evidence_status | method | path | 证据摘要 | 准入作用 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `detail-fallback-01` | `fallback` | `page` | `success` | `GET` | `/explore/<noteId>?xsec_token=...&xsec_source=...` | 页面命中后 `window.__INITIAL_STATE__` 为 `object`，`note.noteDetailMap` 可读到当前 `noteId` | `fallback-only`（不构成实现准入） |
-| `detail-primary-01` | `primary` | `api` | `candidate` | `POST` | `/api/sns/web/v1/feed` | 存在端点与参数形态（`source_note_id`）证据，但无成功闭环 | 主路径候选，未准入 |
-| `detail-primary-02` | `primary` | `api` | `failed` | `POST` | `/api/sns/web/v1/feed` | 手动请求返回 `HTTP 461` + `code=300011`（账号异常） | 风控阻断证据 |
+| evidence_id | route_role | path_kind | evidence_status | evidence_maturity | method | path | 证据摘要 | 准入作用 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `detail-fallback-01` | `fallback` | `page` | `success` | `observed_once` | `GET` | `/explore/<noteId>?xsec_token=...&xsec_source=...` | 页面命中后 `window.__INITIAL_STATE__` 为 `object`，`note.noteDetailMap` 可读到当前 `noteId` | `fallback-only`（不构成实现准入） |
+| `detail-primary-01` | `primary` | `api` | `candidate` | `observed_once` | `POST` | `/api/sns/web/v1/feed` | 存在端点与参数形态（`source_note_id`）证据，但无成功闭环 | 主路径候选，未准入 |
+| `detail-primary-02` | `primary` | `api` | `failed` | `observed_once` | `POST` | `/api/sns/web/v1/feed` | 手动请求返回 `HTTP 461` + `code=300011`（账号异常） | 风控阻断证据 |
 
 `detail-fallback-01` 对应 `page_state_fallback` 冻结快照：
 
@@ -185,12 +185,12 @@
 
 ### 2.3 user_home
 
-| evidence_id | route_role | path_kind | evidence_status | method | path | 证据摘要 | 准入作用 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `user-home-fallback-01` | `fallback` | `page` | `success` | `GET` | `/user/profile/<userId>?xsec_token=...&xsec_source=pc_search` | 页面命中后 `window.__INITIAL_STATE__` 为 `object`，顶层可见 `user`/`board`/`note` | `fallback-only`（不构成实现准入） |
-| `user-home-primary-01` | `primary` | `api` | `success` | `GET` | `/api/sns/web/v1/board/user?user_id=...&num=15&page=1` | 搜索交互同批次观测到 `HTTP 200` | 单点成功证据，尚不足以形成主路径准入 |
-| `user-home-primary-02` | `primary` | `api` | `failed` | `GET` | `/api/sns/web/v1/user/otherinfo?...` | 手动仅补 `X-s/X-t` 返回 `HTTP 200 + code=300015`（环境异常） | 阻断“低上下文请求可复现”假设 |
-| `user-home-primary-03` | `primary` | `api` | `candidate` | `GET` | `/api/sns/web/v1/user/otherinfo?...` | 端点语义相关，但本轮无成功闭环 | 候选，不准入 |
+| evidence_id | route_role | path_kind | evidence_status | evidence_maturity | method | path | 证据摘要 | 准入作用 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `user-home-fallback-01` | `fallback` | `page` | `success` | `observed_once` | `GET` | `/user/profile/<userId>?xsec_token=...&xsec_source=pc_search` | 页面命中后 `window.__INITIAL_STATE__` 为 `object`，顶层可见 `user`/`board`/`note` | `fallback-only`（不构成实现准入） |
+| `user-home-supporting-01` | `fallback` | `api` | `candidate` | `observed_once` | `GET` | `/api/sns/web/v1/board/user?user_id=...&num=15&page=1` | 搜索交互同批次观测到 `HTTP 200`，但仍是单点样本且未完成端点选择 | 辅助 API 证据，不冻结 `primary` |
+| `user-home-primary-02` | `primary` | `api` | `failed` | `observed_once` | `GET` | `/api/sns/web/v1/user/otherinfo?...` | 手动仅补 `X-s/X-t` 返回 `HTTP 200 + code=300015`（环境异常） | 阻断“低上下文请求可复现”假设 |
+| `user-home-primary-03` | `primary` | `api` | `candidate` | `observed_once` | `GET` | `/api/sns/web/v1/user/otherinfo?...` | 端点语义相关，但本轮无成功闭环 | 候选，不准入 |
 
 `user-home-fallback-01` 对应 `page_state_fallback` 冻结快照：
 
@@ -222,6 +222,7 @@
 当前结论：
 
 - user_home 的 `page` 路径仅为 `fallback-only`。
+- `/api/sns/web/v1/board/user` 当前只保留为辅助 API 证据，不冻结为 `primary`。
 - user_home 的 `primary api` 仍缺“可稳定读取核心字段 + 最小必要请求上下文”的闭环证据，不构成实现准入。
 
 ## 3. 签名链路与字段生命周期（本轮可保守冻结）
