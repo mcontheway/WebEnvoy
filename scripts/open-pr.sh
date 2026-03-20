@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DEFAULT_TEMPLATE="${REPO_ROOT}/.github/PULL_REQUEST_TEMPLATE.md"
+PURITY_GUARD="${REPO_ROOT}/scripts/check-pr-purity.sh"
 
 usage() {
   cat <<'EOF'
@@ -15,6 +16,7 @@ usage() {
   基于当前分支自动生成 PR 标题和描述，并调用 gh pr create。
   默认 base 分支为 main，默认标题取最近一次提交信息。
   默认关闭语义为 `fixes`；如当前 PR 不应关闭 issue，请显式传 `--closing refs` 或 `--closing none`。
+  创建 PR 前会执行分支纯度门禁（分支前缀与变更文件类别一致性）。
 EOF
 }
 
@@ -213,10 +215,12 @@ main() {
   done
 
   [[ -f "${DEFAULT_TEMPLATE}" ]] || die "缺少 PR 模板: ${DEFAULT_TEMPLATE}"
+  [[ -x "${PURITY_GUARD}" ]] || die "缺少可执行门禁脚本: ${PURITY_GUARD}"
   gh auth status >/dev/null 2>&1 || die "GitHub CLI 未登录或凭证失效，请先执行 gh auth login"
 
   branch="$(current_branch)"
   ensure_not_main_branch "${branch}"
+  "${PURITY_GUARD}" "${branch}" "${base_branch}"
 
   if [[ -z "${title}" ]]; then
     title="$(latest_commit_subject)"
