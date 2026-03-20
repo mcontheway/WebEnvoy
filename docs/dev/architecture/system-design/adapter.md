@@ -23,7 +23,7 @@ adapters/
 
 ## 规则文件结构（`rules.yaml`）
 
-规则文件描述平台的 API 端点、签名方式、限流策略和执行层选择，是**唯一需要随平台改版维护的文件**（通过热更新无需重启 CLI）。
+规则文件描述平台的 API 端点、签名方式、读路径策略、限流策略和执行层选择，是**唯一需要随平台改版维护的文件**（通过热更新无需重启 CLI）。
 
 ```yaml
 platform: xiaohongshu
@@ -62,6 +62,13 @@ intercept_patterns:
   - url_pattern: "*/api/sns/web/v1/search*"
     data_type: note_list
 
+# L3 读路径策略
+read_strategy:
+  primary: api
+  fallback:
+    - page_state
+  admission_gate: api_primary_verified
+
 # 执行层策略
 execution:
   default: L3           # L3 / L2 / L1
@@ -75,7 +82,7 @@ execution:
 ```typescript
 // adapters/xiaohongshu/adapter.ts
 export class XhsAdapter implements PlatformAdapter {
-  // L3 读：主动发包
+  // L3 读：API 主路径，必要时页面状态 fallback
   async search(query: string, page: number): Promise<NoteList> { ... }
   async detail(noteId: string): Promise<Note> { ... }
 
@@ -91,6 +98,17 @@ export class XhsAdapter implements PlatformAdapter {
 ```
 
 `PlatformAdapter` 接口定义了七类标准命令，详见 [`ARCHITECTURE_PRINCIPLES.md`](../ARCHITECTURE_PRINCIPLES.md) §2。私信、点赞、评论、关注等具体动作统一归入 `interact`，不再为单一互动类型单独扩展第八类命令。
+
+---
+
+## L3 读路径与实现准入
+
+为对齐 FR-0005 Spike 输出，平台适配器默认遵循以下规则：
+
+1. **主路径**：核心读场景必须以 API 调用为 primary。
+2. **fallback**：允许页面状态读取（例如 `window.__INITIAL_STATE__`）作为连续性或侦察补证路径。
+3. **准入门槛**：`fallback` 不等于实现准入。若核心场景只有 fallback、缺少可复现 API 主路径，不得宣告该平台 L3 读能力已完成。
+4. **规则可审计**：`rules.yaml` 中必须显式声明 `read_strategy`，并将 `admission_gate` 固定为 `api_primary_verified`。
 
 ---
 

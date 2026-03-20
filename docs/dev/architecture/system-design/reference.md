@@ -13,7 +13,7 @@
 | 通信层通道切换 | Native Messaging（默认）/ WebSocket（调试用）→ 见 [communication.md](./communication.md) |
 | CLI 与插件双向通信 | Native Messaging Protocol，Extension 主动发起连接 → 见 [communication.md](./communication.md) |
 | 获取无障碍树 | CDP `Accessibility.getFullAXTree` + 过滤 + RefCache → 见 [read-write.md §4.3](./read-write.md) |
-| 拦截网络响应数据 | webRequest 被动拦截 + Content Script fetch 主动发包（双路）→ 见 [read-write.md §4](./read-write.md) |
+| 拦截网络响应数据 | Content Script API 主动发包（primary）+ 页面状态读取 fallback + webRequest 被动拦截（观测）→ 见 [read-write.md §4](./read-write.md) |
 | 填写文字（富文本编辑器）| 合成事件链，自动识别 input/contenteditable → 见 [read-write.md §5.1](./read-write.md) |
 | 上传本地文件 | DataTransfer 注入，降级为 L3 直调上传 API → 见 [read-write.md §5.2](./read-write.md) |
 | 拟人化鼠标轨迹 | ghost-cursor 贝塞尔模型 + CDP Input.dispatchMouseEvent → 见 [read-write.md §5.3](./read-write.md) |
@@ -38,7 +38,9 @@
 
 ### Spike A：小红书核心读链路确认（Phase 1 前置）
 
+- [ ] 读路径口径冻结：API 为主路径，页面状态读取仅作 fallback 连续性路径
 - [ ] 搜索、详情、用户主页等核心 API 的 URL 端点与请求体结构
+- [ ] 页面状态 fallback 的可读取字段、触发条件与失效信号
 - [ ] `a1` / `webId` / `gid` 等追踪字段的生命周期（Content Script 内如何稳定获取）
 - [ ] `window._webmsxyw` 的调用签名（参数格式、返回格式）
 
@@ -123,7 +125,8 @@ L2 通用读取层**复用** Phase 1 建立的以下基础设施：
 | 默认执行档 | Playwright 启动 + Extension Content Script 操控 + Stealth 补丁 | 兼顾开发效率与防风控，适合主流平台（小红书、抖音）；Playwright 负责进程管理与 CDP Input 物理输入通道，业务逻辑编排由 Extension 执行 | 纯 CDP 直驱（时序特征明显，高防可检测）|
 | 最高安全执行档 | 直接 spawn Chrome（无 CDP 端口）+ OS 级输入（nut.js / CGEvent） | 消除 `--remote-debugging-port` 痕迹，鼠标/键盘事件 `isTrusted=true` | Playwright 启动（有 CDP 端口侧信道风险）|
 | 高防一次性侦察 | Camoufox（Python 胶水调用）| C++ 内核级 Canvas/WebGL 伪装不可替代 | 不作为主运行时 |
-| 读取机制 | Content Script 主动发包（L3）+ webRequest 被动拦截（辅）| 天然利用浏览器的 Cookie 和签名能力，无需独立 SignSrv | Python httpx 外部发包（违反浏览器内执行原则）|
+| 读取机制 | Content Script API 主动发包（L3 primary）+ 页面状态读取（fallback）+ webRequest 被动拦截（辅）| API 路径保障主链路效率；页面状态路径用于 API 波动时的连续性与补证；均不依赖独立 SignSrv | Python httpx 外部发包（违反浏览器内执行原则）|
+| L3 实现准入门槛 | 核心读场景必须具备可复现 API 主路径；fallback 仅作补充证据 | 避免把临时 fallback 误判为能力完成，确保后续适配器实现稳定收敛 | 仅凭页面状态 fallback 放行实现 |
 | 账号管理 | Named Profile（UserDataDir 隔离）| 一次登录永久复活，Profile 可备份/迁移 | Cookie 文件手动同步（脆弱）、Camoufox（不支持持久化）|
 | 签名获取 | Content Script → MAIN World → 平台自有函数 | 平台已提供，无需逆向算法 | 独立 SignSrv 微服务（引入跨服务依赖，违反单一进程原则）|
 | 写操作 | 真实页面交互（合成事件链）| 最拟真，与页面框架状态同步 | 直接调 API（对高防平台风险高，且写操作逻辑较复杂）|
