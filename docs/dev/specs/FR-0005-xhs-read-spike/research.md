@@ -156,6 +156,8 @@
 
 ```json
 {
+  "freeze_scope": "minimal_only",
+  "path_template": "GET /explore/<noteId>?xsec_token=...&xsec_source=...",
   "url_params_observed": [
     { "name": "noteId", "source": "path_segment", "required": true, "status": "success" },
     { "name": "xsec_token", "source": "query", "required": true, "status": "success" },
@@ -196,6 +198,8 @@
 
 ```json
 {
+  "freeze_scope": "minimal_only",
+  "path_template": "GET /user/profile/<userId>?xsec_token=...&xsec_source=pc_search",
   "url_params_observed": [
     { "name": "userId", "source": "path_segment", "required": true, "status": "success" },
     { "name": "xsec_token", "source": "query", "required": true, "status": "success" },
@@ -236,19 +240,19 @@
 ### 3.2 生命周期矩阵（已确认 vs 候选）
 
 
-| 字段 | 来源 | 本轮状态 | 生命周期判断 | 依赖等级 | 说明 |
-| --- | --- | --- | --- | --- | --- |
-| `X-s` | `runtime_generated` | 第一手已观测 | `request_scoped` 候选 | `hard` | 由浏览器内签名调用 `window._webmsxyw(uri, data)` 返回 |
-| `X-t` | `runtime_generated` | 第一手已观测 | `request_scoped` 候选 | `hard` | 由浏览器内签名调用 `window._webmsxyw(uri, data)` 返回 |
-| `X-S-Common` | `page_state` | 第一手已观测（请求头） | `session_scoped` 候选 | `required_optional` | 仅确认出现在请求头，仍需复核是否会退化为 `page_refresh_scoped` |
-| `x-b3-traceid` | `runtime_generated` | 第一手已观测（请求头） | `request_scoped` 候选 | `required_optional` | 生成机制未复核，当前先按运行时生成处理 |
-| `x-xray-traceid` | `runtime_generated` | 第一手已观测（请求头） | `request_scoped` 候选 | `required_optional` | 生成机制未复核，当前先按运行时生成处理 |
-| `a1` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 候选 | `required_optional` | 仅确认可读到，未做跨刷新对比，尚未证明是最小必要条件 |
-| `webId` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 候选 | `required_optional` | 且已有证据表明不在 local/session storage，仍需复核是否会退化为 `page_refresh_scoped` |
-| `gid` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 候选 | `required_optional` | 且已有证据表明不在 local/session storage，仍需复核是否会退化为 `page_refresh_scoped` |
-| `xsecappid` | `page_state` | 第一手已观测（Cookie） | `session_scoped` 候选 | `required_optional` | 仅确认可读 |
-| `xsec_token` | `page_state` | 第一手已观测（DOM URL） | `page_refresh_scoped` 候选 | `required_optional` | 由 URL 抽样获得 |
-| `xsec_source` | `static` | 第一手已观测（DOM URL） | `page_refresh_scoped` 候选 | `required_optional` | 由 URL 抽样获得，仍需复核是否受页面状态改写 |
+| 字段 | 来源 | verification_status | 本轮状态 | 生命周期判断 | 依赖等级 | 说明 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `X-s` | `runtime_generated` | `candidate` | 第一手已观测 | `request_scoped` 候选 | `hard` | 由浏览器内签名调用 `window._webmsxyw(uri, data)` 返回 |
+| `X-t` | `runtime_generated` | `candidate` | 第一手已观测 | `request_scoped` 候选 | `hard` | 由浏览器内签名调用 `window._webmsxyw(uri, data)` 返回 |
+| `X-S-Common` | `page_state` | `candidate` | 第一手已观测（请求头） | `session_scoped` 候选 | `required_optional` | 仅确认出现在请求头，仍需复核是否会退化为 `page_refresh_scoped` |
+| `x-b3-traceid` | `runtime_generated` | `candidate` | 第一手已观测（请求头） | `request_scoped` 候选 | `required_optional` | 生成机制未复核，当前先按运行时生成处理 |
+| `x-xray-traceid` | `runtime_generated` | `candidate` | 第一手已观测（请求头） | `request_scoped` 候选 | `required_optional` | 生成机制未复核，当前先按运行时生成处理 |
+| `a1` | `page_state` | `candidate` | 第一手已观测（Cookie） | `session_scoped` 候选 | `required_optional` | 仅确认可读到，未做跨刷新对比，尚未证明是最小必要条件 |
+| `webId` | `page_state` | `candidate` | 第一手已观测（Cookie） | `session_scoped` 候选 | `required_optional` | 且已有证据表明不在 local/session storage，仍需复核是否会退化为 `page_refresh_scoped` |
+| `gid` | `page_state` | `candidate` | 第一手已观测（Cookie） | `session_scoped` 候选 | `required_optional` | 且已有证据表明不在 local/session storage，仍需复核是否会退化为 `page_refresh_scoped` |
+| `xsecappid` | `page_state` | `candidate` | 第一手已观测（Cookie） | `session_scoped` 候选 | `required_optional` | 仅确认可读 |
+| `xsec_token` | `page_state` | `candidate` | 第一手已观测（DOM URL） | `page_refresh_scoped` 候选 | `required_optional` | 由 URL 抽样获得 |
+| `xsec_source` | `static` | `candidate` | 第一手已观测（DOM URL） | `page_refresh_scoped` 候选 | `required_optional` | 由 URL 抽样获得，仍需复核是否受页面状态改写 |
 
 
 ## 4. 错误分类更新（含本轮新增）
