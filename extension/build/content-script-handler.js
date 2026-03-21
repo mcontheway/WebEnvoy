@@ -16,6 +16,17 @@ const extractFetchBody = async (response) => {
         };
     }
 };
+const encodeUtf8Base64 = (value) => {
+    if (typeof btoa === "function") {
+        return btoa(unescape(encodeURIComponent(value)));
+    }
+    const bufferCtor = globalThis.Buffer;
+    if (bufferCtor) {
+        return bufferCtor.from(value, "utf8").toString("base64");
+    }
+    throw new Error("base64 encoder is unavailable");
+};
+export const encodeMainWorldPayload = (value) => encodeUtf8Base64(JSON.stringify(value));
 const mainWorldCall = async (request) => {
     const eventName = "__webenvoy_main_world_result__";
     const requestId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -37,10 +48,15 @@ const mainWorldCall = async (request) => {
                 : "main world call failed"));
         };
         window.addEventListener(eventName, listener);
+        const encodedRequest = encodeMainWorldPayload({
+            id: requestId,
+            ...request
+        });
         const script = document.createElement("script");
         script.textContent = `
       (() => {
-        const request = ${JSON.stringify({ id: requestId, ...request })};
+        const decodeRequest = (encoded) => JSON.parse(decodeURIComponent(escape(atob(encoded))));
+        const request = decodeRequest(${JSON.stringify(encodedRequest)});
         const emit = (detail) => {
           window.dispatchEvent(new CustomEvent(${JSON.stringify(eventName)}, { detail }));
         };

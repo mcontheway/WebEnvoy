@@ -323,6 +323,26 @@ const inferFailure = (status: number, body: unknown): { reason: string; message:
   };
 };
 
+const inferRequestException = (error: unknown): { reason: string; message: string; detail: string } => {
+  const errorName =
+    typeof error === "object" && error !== null && "name" in error
+      ? String((error as { name?: unknown }).name)
+      : "";
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  if (errorName === "AbortError") {
+    return {
+      reason: "REQUEST_TIMEOUT",
+      message: "请求超时，无法完成 xhs.search",
+      detail: errorMessage
+    };
+  }
+  return {
+    reason: "REQUEST_DISPATCH_FAILED",
+    message: "搜索请求发送失败，无法完成 xhs.search",
+    detail: errorMessage
+  };
+};
+
 const resolveXsCommon = (value: unknown): string => {
   if (typeof value === "string" && value.trim().length > 0) {
     return value.trim();
@@ -454,13 +474,40 @@ export const executeXhsSearch = async (
     "x-xray-traceid": env.randomId().replace(/-/g, "")
   };
 
-  const response = await env.fetchJson({
-    url: SEARCH_ENDPOINT,
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-    timeoutMs
-  });
+  let response: FetchResult;
+  try {
+    response = await env.fetchJson({
+      url: SEARCH_ENDPOINT,
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      timeoutMs
+    });
+  } catch (error) {
+    const failure = inferRequestException(error);
+    return createFailure(
+      "ERR_EXECUTION_FAILED",
+      failure.message,
+      {
+        ability_id: input.abilityId,
+        stage: "execution",
+        reason: failure.reason
+      },
+      createObservability({
+        href,
+        title,
+        readyState,
+        requestId,
+        outcome: "failed",
+        failureReason: failure.detail
+      }),
+      createDiagnosis({
+        category: "request_failed",
+        reason: failure.reason,
+        summary: failure.message
+      })
+    );
+  }
 
   const responseRecord = asRecord(response.body);
   const businessCode = responseRecord?.code;

@@ -42,6 +42,20 @@ const extractFetchBody = async (response: Response): Promise<unknown> => {
   }
 };
 
+const encodeUtf8Base64 = (value: string): string => {
+  if (typeof btoa === "function") {
+    return btoa(unescape(encodeURIComponent(value)));
+  }
+  const bufferCtor = (globalThis as { Buffer?: { from(input: string, encoding: string): { toString(encoding: string): string } } }).Buffer;
+  if (bufferCtor) {
+    return bufferCtor.from(value, "utf8").toString("base64");
+  }
+  throw new Error("base64 encoder is unavailable");
+};
+
+export const encodeMainWorldPayload = (value: Record<string, unknown>): string =>
+  encodeUtf8Base64(JSON.stringify(value));
+
 const mainWorldCall = async <T>(request: {
   type: "xhs-sign";
   payload: Record<string, unknown>;
@@ -76,10 +90,15 @@ const mainWorldCall = async <T>(request: {
     };
 
     window.addEventListener(eventName, listener as EventListener);
+    const encodedRequest = encodeMainWorldPayload({
+      id: requestId,
+      ...request
+    });
     const script = document.createElement("script");
     script.textContent = `
       (() => {
-        const request = ${JSON.stringify({ id: requestId, ...request })};
+        const decodeRequest = (encoded) => JSON.parse(decodeURIComponent(escape(atob(encoded))));
+        const request = decodeRequest(${JSON.stringify(encodedRequest)});
         const emit = (detail) => {
           window.dispatchEvent(new CustomEvent(${JSON.stringify(eventName)}, { detail }));
         };

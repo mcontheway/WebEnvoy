@@ -53,6 +53,12 @@ type RuntimeMessageSender = {
   };
 };
 
+type ExtensionTab = {
+  id?: number;
+  url?: string;
+  active?: boolean;
+};
+
 interface ExtensionPort {
   postMessage(message: unknown): void;
   disconnect?(): void;
@@ -82,7 +88,7 @@ interface ExtensionChromeApi {
       active?: boolean;
       currentWindow?: boolean;
       url?: string | string[];
-    }): Promise<Array<{ id?: number }>>;
+    }): Promise<ExtensionTab[]>;
     sendMessage(tabId: number, message: BackgroundToContentMessage): Promise<void>;
   };
 }
@@ -99,6 +105,20 @@ interface NativeHeartbeatMessage {
 }
 
 type NativeBridgeState = "connecting" | "ready" | "recovering" | "disconnected";
+
+const scoreXhsTab = (tab: ExtensionTab): number => {
+  const url = typeof tab.url === "string" ? tab.url : "";
+  if (url.includes("/search_result")) {
+    return 0;
+  }
+  if (url.includes("/explore/")) {
+    return 1;
+  }
+  if (url.includes("/user/profile/")) {
+    return 2;
+  }
+  return 3;
+};
 
 export class BackgroundRelay {
   #listeners = new Set<NativeMessageListener>();
@@ -885,22 +905,24 @@ class ChromeBackgroundBridge {
     const command = String(request.params.command ?? "");
     if (command === "xhs.search") {
       const xhsUrlPatterns = ["*://www.xiaohongshu.com/*", "*://edith.xiaohongshu.com/*", "*://*.xiaohongshu.com/*"];
-      const activeXhsTabs = await this.chromeApi.tabs.query({
-        active: true,
-        currentWindow: true,
-        url: xhsUrlPatterns
-      });
-      const activeXhsTab = activeXhsTabs[0];
-      if (typeof activeXhsTab?.id === "number") {
-        return activeXhsTab.id;
-      }
-
       const xhsTabs = await this.chromeApi.tabs.query({
         currentWindow: true,
         url: xhsUrlPatterns
       });
-      const xhsTab = xhsTabs[0];
-      return typeof xhsTab?.id === "number" ? xhsTab.id : null;
+      const ranked = xhsTabs
+        .filter((tab) => typeof tab.id === "number")
+        .sort((left, right) => {
+          const scoreDiff = scoreXhsTab(left) - scoreXhsTab(right);
+          if (scoreDiff !== 0) {
+            return scoreDiff;
+          }
+          if (left.active === right.active) {
+            return 0;
+          }
+          return left.active ? -1 : 1;
+        });
+      const candidate = ranked[0];
+      return typeof candidate?.id === "number" ? candidate.id : null;
     }
 
     const tabs = await this.chromeApi.tabs.query({
