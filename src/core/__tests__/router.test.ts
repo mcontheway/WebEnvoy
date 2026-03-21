@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createCommandRegistry } from "../../commands/index.js";
 import { executeCommand } from "../router.js";
-import type { JsonObject, RuntimeContext } from "../types.js";
+import type { CommandExecutionResult, RuntimeContext } from "../types.js";
 
 const baseContext: RuntimeContext = {
   run_id: "run-test-001",
@@ -16,14 +16,14 @@ describe("executeCommand", () => {
   it("returns summary when command is implemented", async () => {
     const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
     process.env.WEBENVOY_NATIVE_TRANSPORT = "loopback";
-    let summary: JsonObject;
+    let execution: CommandExecutionResult;
     try {
-      summary = await executeCommand(baseContext, createCommandRegistry());
+      execution = await executeCommand(baseContext, createCommandRegistry());
     } finally {
       process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
     }
 
-    expect(summary).toMatchObject({
+    expect(execution.summary).toMatchObject({
       message: "pong",
       transport: {
         protocol: "webenvoy.native-bridge.v1",
@@ -70,7 +70,7 @@ describe("executeCommand", () => {
     process.env.NODE_ENV = "test";
     process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS = "1";
     try {
-      const summary = await executeCommand(
+      const execution = await executeCommand(
         {
           ...baseContext,
           command: "xhs.search",
@@ -92,7 +92,7 @@ describe("executeCommand", () => {
         createCommandRegistry()
       );
 
-      expect(summary).toMatchObject({
+      expect(execution.summary).toMatchObject({
         capability_result: {
           ability_id: "xhs.note.search.v1",
           layer: "L3",
@@ -103,6 +103,48 @@ describe("executeCommand", () => {
     } finally {
       process.env.NODE_ENV = previousNodeEnv;
       process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS = previousFixtureFlag;
+    }
+  });
+
+  it("returns capability summary and observability for xhs.search runtime success", async () => {
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    process.env.WEBENVOY_NATIVE_TRANSPORT = "loopback";
+    try {
+      const execution = await executeCommand(
+        {
+          ...baseContext,
+          command: "xhs.search",
+          profile: "xhs_account_001",
+          params: {
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              query: "露营装备"
+            },
+            options: {
+              simulate_result: "success"
+            }
+          }
+        },
+        createCommandRegistry()
+      );
+
+      expect(execution.summary).toMatchObject({
+        capability_result: {
+          ability_id: "xhs.note.search.v1",
+          outcome: "success"
+        }
+      });
+      expect(execution.observability).toMatchObject({
+        page_state: {
+          page_kind: "search"
+        }
+      });
+    } finally {
+      process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
     }
   });
 

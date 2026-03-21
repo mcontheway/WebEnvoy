@@ -289,7 +289,7 @@ describe("webenvoy cli contract", () => {
     });
   });
 
-  it("returns structured execution details for xhs.search pending path", () => {
+  it("returns structured capability success and observability for xhs.search runtime path", () => {
     const result = runCli([
       "xhs.search",
       "--profile",
@@ -303,9 +303,65 @@ describe("webenvoy cli contract", () => {
         },
         input: {
           query: "露营装备"
+        },
+        options: {
+          simulate_result: "success"
         }
       })
-    ]);
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "success",
+      summary: {
+        capability_result: {
+          ability_id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read",
+          outcome: "success"
+        }
+      },
+      observability: {
+        page_state: {
+          page_kind: "search"
+        },
+        key_requests: [
+          {
+            url: "/api/sns/web/v1/search/notes",
+            outcome: "completed",
+            status_code: 200
+          }
+        ],
+        failure_site: null
+      }
+    });
+  });
+
+  it("returns structured execution details for xhs.search login-required path", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          simulate_result: "login_required"
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
     expect(result.status).toBe(6);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
@@ -316,7 +372,18 @@ describe("webenvoy cli contract", () => {
         details: {
           ability_id: "xhs.note.search.v1",
           stage: "execution",
-          reason: "XHS_SEARCH_SPIKE_PENDING"
+          reason: "SESSION_EXPIRED"
+        },
+        diagnosis: {
+          category: "request_failed"
+        }
+      },
+      observability: {
+        page_state: {
+          page_kind: "login"
+        },
+        failure_site: {
+          target: "/api/sns/web/v1/search/notes"
         }
       }
     });

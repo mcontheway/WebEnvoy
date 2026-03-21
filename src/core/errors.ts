@@ -1,3 +1,5 @@
+import type { DiagnosisInput } from "../runtime/diagnostics.js";
+import type { ObservabilityInput } from "../runtime/observability.js";
 import type { CapabilityErrorDetails } from "./types.js";
 
 export type ErrorCode =
@@ -35,17 +37,27 @@ export class CliError extends Error {
   code: ErrorCode;
   retryable: boolean;
   details?: CapabilityErrorDetails;
+  diagnosis?: DiagnosisInput;
+  observability?: ObservabilityInput;
 
   constructor(
     code: ErrorCode,
     message: string,
-    options?: { retryable?: boolean; cause?: unknown; details?: CapabilityErrorDetails }
+    options?: {
+      retryable?: boolean;
+      cause?: unknown;
+      details?: CapabilityErrorDetails;
+      diagnosis?: DiagnosisInput;
+      observability?: ObservabilityInput;
+    }
   ) {
     super(message, options);
     this.name = "CliError";
     this.code = code;
     this.retryable = options?.retryable ?? false;
     this.details = options?.details;
+    this.diagnosis = options?.diagnosis;
+    this.observability = options?.observability;
   }
 }
 

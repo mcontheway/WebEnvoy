@@ -101,4 +101,138 @@ describe("extension background relay contract", () => {
     expect(response.status).toBe("error");
     expect(response.error?.code).toBe("ERR_TRANSPORT_TIMEOUT");
   });
+
+  it("passes xhs.search execution payload through relay on error", async () => {
+    let capturedHeaders: Record<string, string> | null = null;
+    const contentScript = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_000,
+        randomId: () => "relay-test-id",
+        getLocationHref: () => "https://www.xiaohongshu.com/search_result",
+        getDocumentTitle: () => "Search Result",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=valid;",
+        callSignature: async () => ({
+          "X-s": "signed",
+          "X-t": "1"
+        }),
+        fetchJson: async (request) => {
+          capturedHeaders = request.headers;
+          return {
+            status: 200,
+            body: {
+              code: 300011,
+              msg: "Account abnormal. Switch account and retry."
+            }
+          };
+        }
+      }
+    });
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-error-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-error-001",
+        command: "xhs.search",
+        command_params: {
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {}
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    const response = await responsePromise;
+    expect(response.status).toBe("error");
+    expect(response.error?.code).toBe("ERR_EXECUTION_FAILED");
+    expect(response.payload).toMatchObject({
+      details: {
+        reason: "ACCOUNT_ABNORMAL"
+      },
+      observability: {
+        failure_site: {
+          target: "/api/sns/web/v1/search/notes"
+        }
+      }
+    });
+    expect(capturedHeaders?.["X-S-Common"]).toBe("{}");
+  });
+
+  it("returns structured payload when xhs.search request times out", async () => {
+    const timeoutError = new Error("request timeout");
+    timeoutError.name = "AbortError";
+    const contentScript = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_000,
+        randomId: () => "relay-timeout-id",
+        getLocationHref: () => "https://www.xiaohongshu.com/search_result",
+        getDocumentTitle: () => "Search Result",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=valid;",
+        callSignature: async () => ({
+          "X-s": "signed",
+          "X-t": "1"
+        }),
+        fetchJson: async () => {
+          throw timeoutError;
+        }
+      }
+    });
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-timeout-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-timeout-001",
+        command: "xhs.search",
+        command_params: {
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {}
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    const response = await responsePromise;
+    expect(response.status).toBe("error");
+    expect(response.error?.code).toBe("ERR_EXECUTION_FAILED");
+    expect(response.payload).toMatchObject({
+      details: {
+        reason: "REQUEST_TIMEOUT"
+      },
+      diagnosis: {
+        category: "request_failed"
+      },
+      observability: {
+        failure_site: {
+          target: "/api/sns/web/v1/search/notes"
+        }
+      }
+    });
+  });
 });

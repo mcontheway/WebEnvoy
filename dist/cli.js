@@ -118,10 +118,10 @@ export const runCli = async (argv, options) => {
         runtimeContext = context;
         recorder = createRuntimeStoreRecorder(cwd);
         await recorder.recordStart(context);
-        const summary = await executeCommand(context, createCommandRegistry());
-        await recorder.recordSuccess(context, summary);
-        writeJsonLine(stdout, buildSuccessResponse(context, summary, {
-            observability: DEFAULT_OBSERVABILITY
+        const execution = await executeCommand(context, createCommandRegistry());
+        await recorder.recordSuccess(context, execution.summary);
+        writeJsonLine(stdout, buildSuccessResponse(context, execution.summary, {
+            observability: execution.observability ?? DEFAULT_OBSERVABILITY
         }));
         if (context.command === "runtime.help") {
             stderr.write("Use --params to pass structured JSON object parameters.\n");
@@ -143,8 +143,8 @@ export const runCli = async (argv, options) => {
             (runIdHint && isValidRunId(runIdHint) ? runIdHint : generateRunId());
         const command = runtimeContext?.command ?? commandHint;
         writeJsonLine(stdout, buildErrorResponse({ runId, command }, cliError, {
-            observability: DEFAULT_OBSERVABILITY,
-            diagnosis: diagnosisFromCliError(cliError)
+            observability: cliError.observability ?? DEFAULT_OBSERVABILITY,
+            diagnosis: cliError.diagnosis ?? diagnosisFromCliError(cliError)
         }));
         if (cliError.code === "ERR_CLI_INVALID_ARGS") {
             stderr.write(`${cliError.message}\n`);

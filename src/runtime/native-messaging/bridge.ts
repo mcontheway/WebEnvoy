@@ -214,6 +214,32 @@ export interface RuntimePingResult {
   };
 }
 
+export interface BridgeCommandInput {
+  runId: string;
+  profile: string | null;
+  cwd: string;
+  command: string;
+  params: JsonObject;
+}
+
+export interface BridgeCommandSuccess {
+  ok: true;
+  payload: Record<string, unknown>;
+  relay_path: string;
+}
+
+export interface BridgeCommandFailure {
+  ok: false;
+  error: {
+    code: string;
+    message: string;
+  };
+  payload: Record<string, unknown>;
+  relay_path: string;
+}
+
+export type BridgeCommandResult = BridgeCommandSuccess | BridgeCommandFailure;
+
 interface BridgeOptions {
   transport?: NativeBridgeTransport;
   now?: () => number;
@@ -325,6 +351,26 @@ export class NativeMessagingBridge {
     }
   }
 
+  async runCommand(input: BridgeCommandInput): Promise<BridgeCommandResult> {
+    const response = await this.#forwardCommand(input);
+    const relayPath = String(response.summary.relay_path ?? "host>unknown");
+
+    if (response.status === "error") {
+      return {
+        ok: false,
+        error: response.error,
+        payload: response.payload ?? {},
+        relay_path: relayPath
+      };
+    }
+
+    return {
+      ok: true,
+      payload: response.payload ?? {},
+      relay_path: relayPath
+    };
+  }
+
   #normalizeForwardFailure(error: unknown): NativeMessagingTransportError {
     if (error instanceof NativeMessagingTransportError) {
       if (error.code === "ERR_TRANSPORT_DISCONNECTED") {
@@ -361,6 +407,38 @@ export class NativeMessagingBridge {
     }
 
     return new NativeMessagingTransportError(code, raw.message);
+  }
+
+  async #forwardCommand(input: BridgeCommandInput): Promise<BridgeResponseEnvelope> {
+    const timeoutMs = readTimeoutMs(input.params.timeout_ms) ?? DEFAULT_TRANSPORT_TIMEOUT_MS;
+    const budget = createTimeoutBudget(timeoutMs, this.#now);
+
+    await this.#recoverIfDisconnected(input.profile, budget);
+    await this.#ensureReady(input.profile, budget);
+    await this.#pulseHeartbeat(budget);
+
+    const forwardTimeoutMs = budget.remainingMs();
+    const request = createBridgeForwardRequest({
+      id: this.#nextId("run"),
+      profile: input.profile,
+      sessionId: this.#session.sessionIdOrThrow(),
+      runId: input.runId,
+      command: input.command,
+      commandParams: input.params,
+      cwd: input.cwd,
+      timeoutMs: forwardTimeoutMs
+    });
+
+    try {
+      this.#session.beginForward();
+      const response = await runWithTimeout(this.#transport.forward(request), forwardTimeoutMs);
+      this.#session.completeForward();
+      return response;
+    } catch (error) {
+      throw this.#normalizeForwardFailure(error);
+    } finally {
+      this.#session.completeForward();
+    }
   }
 
   async #ensureReady(profile: string | null, budget: TimeoutBudget): Promise<void> {

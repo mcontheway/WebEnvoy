@@ -41,14 +41,151 @@ class InMemoryContentScriptRuntime {
         });
     }
     handleForward(message) {
-        if (message.command !== "runtime.ping") {
+        if (message.command === "runtime.ping") {
+            return {
+                kind: "result",
+                id: message.id,
+                ok: true,
+                payload: {
+                    message: "pong"
+                }
+            };
+        }
+        if (message.command === "xhs.search") {
+            const simulated = typeof message.commandParams.options === "object" &&
+                message.commandParams.options !== null &&
+                typeof message.commandParams.options.simulate_result === "string"
+                ? String(message.commandParams.options.simulate_result)
+                : "success";
+            const ability = typeof message.commandParams.ability === "object" && message.commandParams.ability !== null
+                ? message.commandParams.ability
+                : {};
+            const input = typeof message.commandParams.input === "object" && message.commandParams.input !== null
+                ? message.commandParams.input
+                : {};
+            if (simulated === "success") {
+                return {
+                    kind: "result",
+                    id: message.id,
+                    ok: true,
+                    payload: {
+                        summary: {
+                            capability_result: {
+                                ability_id: String(ability.id ?? "xhs.note.search.v1"),
+                                layer: String(ability.layer ?? "L3"),
+                                action: String(ability.action ?? "read"),
+                                outcome: "success",
+                                data_ref: {
+                                    query: String(input.query ?? ""),
+                                    search_id: "loopback-search-id"
+                                },
+                                metrics: {
+                                    count: 2,
+                                    duration_ms: 12
+                                }
+                            }
+                        },
+                        observability: {
+                            page_state: {
+                                page_kind: "search",
+                                url: "https://www.xiaohongshu.com/search_result",
+                                title: "Search Result",
+                                ready_state: "complete"
+                            },
+                            key_requests: [
+                                {
+                                    request_id: "req-loopback-001",
+                                    stage: "request",
+                                    method: "POST",
+                                    url: "/api/sns/web/v1/search/notes",
+                                    outcome: "completed",
+                                    status_code: 200
+                                }
+                            ],
+                            failure_site: null
+                        }
+                    }
+                };
+            }
             return {
                 kind: "result",
                 id: message.id,
                 ok: false,
                 error: {
-                    code: "ERR_TRANSPORT_FORWARD_FAILED",
-                    message: `unsupported command: ${message.command}`
+                    code: "ERR_EXECUTION_FAILED",
+                    message: simulated === "login_required"
+                        ? "登录态缺失，无法执行 xhs.search"
+                        : simulated === "account_abnormal"
+                            ? "账号异常，平台拒绝当前请求"
+                            : simulated === "browser_env_abnormal"
+                                ? "浏览器环境异常，平台拒绝当前请求"
+                                : simulated === "signature_entry_missing"
+                                    ? "页面签名入口不可用"
+                                    : "网关调用失败，当前上下文不足以完成搜索请求"
+                },
+                payload: {
+                    details: {
+                        ability_id: String(ability.id ?? "xhs.note.search.v1"),
+                        stage: "execution",
+                        reason: simulated === "login_required"
+                            ? "SESSION_EXPIRED"
+                            : simulated === "account_abnormal"
+                                ? "ACCOUNT_ABNORMAL"
+                                : simulated === "browser_env_abnormal"
+                                    ? "BROWSER_ENV_ABNORMAL"
+                                    : simulated === "signature_entry_missing"
+                                        ? "SIGNATURE_ENTRY_MISSING"
+                                        : "GATEWAY_INVOKER_FAILED"
+                    },
+                    observability: {
+                        page_state: {
+                            page_kind: simulated === "login_required" ? "login" : "search",
+                            url: simulated === "login_required"
+                                ? "https://www.xiaohongshu.com/login"
+                                : "https://www.xiaohongshu.com/search_result",
+                            title: "Search Result",
+                            ready_state: "complete"
+                        },
+                        key_requests: [
+                            {
+                                request_id: "req-loopback-001",
+                                stage: "request",
+                                method: "POST",
+                                url: "/api/sns/web/v1/search/notes",
+                                outcome: "failed",
+                                status_code: simulated === "account_abnormal"
+                                    ? 461
+                                    : simulated === "browser_env_abnormal"
+                                        ? 200
+                                        : simulated === "gateway_invoker_failed"
+                                            ? 500
+                                            : undefined,
+                                failure_reason: simulated
+                            }
+                        ],
+                        failure_site: {
+                            stage: simulated === "signature_entry_missing" ? "execution" : "request",
+                            component: simulated === "signature_entry_missing" ? "page" : "network",
+                            target: simulated === "signature_entry_missing"
+                                ? "window._webmsxyw"
+                                : "/api/sns/web/v1/search/notes",
+                            summary: simulated
+                        }
+                    },
+                    diagnosis: {
+                        category: simulated === "signature_entry_missing" ? "page_changed" : "request_failed",
+                        stage: simulated === "signature_entry_missing" ? "execution" : "request",
+                        component: simulated === "signature_entry_missing" ? "page" : "network",
+                        failure_site: {
+                            stage: simulated === "signature_entry_missing" ? "execution" : "request",
+                            component: simulated === "signature_entry_missing" ? "page" : "network",
+                            target: simulated === "signature_entry_missing"
+                                ? "window._webmsxyw"
+                                : "/api/sns/web/v1/search/notes",
+                            summary: simulated
+                        },
+                        evidence: [simulated]
+                    }
                 }
             };
         }
@@ -164,6 +301,7 @@ class InMemoryBackgroundRelay {
                     summary: {
                         relay_path: RELAY_PATH
                     },
+                    payload: result.payload ?? {},
                     error: result.error ?? {
                         code: "ERR_TRANSPORT_FORWARD_FAILED",
                         message: "content script failed"

@@ -17,12 +17,16 @@ export class CliError extends Error {
     code;
     retryable;
     details;
+    diagnosis;
+    observability;
     constructor(code, message, options) {
         super(message, options);
         this.name = "CliError";
         this.code = code;
         this.retryable = options?.retryable ?? false;
         this.details = options?.details;
+        this.diagnosis = options?.diagnosis;
+        this.observability = options?.observability;
     }
 }
 export const successExitCode = () => EXIT_CODE_SUCCESS;

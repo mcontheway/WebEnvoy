@@ -1,11 +1,14 @@
 import { CliError, normalizeExecutionError } from "./errors.js";
 import { CommandRegistry } from "./registry.js";
-import type { JsonObject, RuntimeContext } from "./types.js";
+import type { CommandExecutionResult, JsonObject, RuntimeContext } from "./types.js";
+
+const isCommandExecutionResult = (value: JsonObject | CommandExecutionResult): value is CommandExecutionResult =>
+  "summary" in value && typeof value.summary === "object" && value.summary !== null;
 
 export const executeCommand = async (
   context: RuntimeContext,
   registry: CommandRegistry
-): Promise<JsonObject> => {
+): Promise<CommandExecutionResult> => {
   const command = registry.get(context.command);
 
   if (!command) {
@@ -21,7 +24,14 @@ export const executeCommand = async (
   }
 
   try {
-    return await command.handler(context);
+    const result = await command.handler(context);
+    if (isCommandExecutionResult(result)) {
+      return result;
+    }
+
+    return {
+      summary: result
+    };
   } catch (error) {
     throw normalizeExecutionError(error);
   }

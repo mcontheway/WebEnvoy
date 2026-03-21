@@ -53,6 +53,12 @@ type RuntimeMessageSender = {
   };
 };
 
+type ExtensionTab = {
+  id?: number;
+  url?: string;
+  active?: boolean;
+};
+
 interface ExtensionPort {
   postMessage(message: unknown): void;
   disconnect?(): void;
@@ -78,7 +84,11 @@ interface ExtensionChromeApi {
     };
   };
   tabs: {
-    query(filter: { active: boolean; currentWindow: boolean }): Promise<Array<{ id?: number }>>;
+    query(filter: {
+      active?: boolean;
+      currentWindow?: boolean;
+      url?: string | string[];
+    }): Promise<ExtensionTab[]>;
     sendMessage(tabId: number, message: BackgroundToContentMessage): Promise<void>;
   };
 }
@@ -95,6 +105,20 @@ interface NativeHeartbeatMessage {
 }
 
 type NativeBridgeState = "connecting" | "ready" | "recovering" | "disconnected";
+
+const scoreXhsTab = (tab: ExtensionTab): number => {
+  const url = typeof tab.url === "string" ? tab.url : "";
+  if (url.includes("/search_result")) {
+    return 0;
+  }
+  if (url.includes("/explore/")) {
+    return 1;
+  }
+  if (url.includes("/user/profile/")) {
+    return 2;
+  }
+  return 3;
+};
 
 export class BackgroundRelay {
   #listeners = new Set<NativeMessageListener>();
@@ -214,6 +238,7 @@ export class BackgroundRelay {
         summary: {
           relay_path: "host>background>content-script>background>host"
         },
+        payload: message.payload ?? {},
         error:
           message.error ?? {
             code: "ERR_TRANSPORT_FORWARD_FAILED",
@@ -839,6 +864,10 @@ class ChromeBackgroundBridge {
         summary: {
           relay_path: "host>background>content-script>background>host"
         },
+        payload:
+          typeof result.payload === "object" && result.payload !== null
+            ? (result.payload as Record<string, unknown>)
+            : {},
         error:
           result.error ?? {
             code: "ERR_TRANSPORT_FORWARD_FAILED",
@@ -871,6 +900,29 @@ class ChromeBackgroundBridge {
   async #resolveTargetTabId(request: BridgeRequest): Promise<number | null> {
     if (typeof request.params.tab_id === "number" && Number.isInteger(request.params.tab_id)) {
       return request.params.tab_id;
+    }
+
+    const command = String(request.params.command ?? "");
+    if (command === "xhs.search") {
+      const xhsUrlPatterns = ["*://www.xiaohongshu.com/*", "*://edith.xiaohongshu.com/*", "*://*.xiaohongshu.com/*"];
+      const xhsTabs = await this.chromeApi.tabs.query({
+        currentWindow: true,
+        url: xhsUrlPatterns
+      });
+      const ranked = xhsTabs
+        .filter((tab) => typeof tab.id === "number")
+        .sort((left, right) => {
+          const scoreDiff = scoreXhsTab(left) - scoreXhsTab(right);
+          if (scoreDiff !== 0) {
+            return scoreDiff;
+          }
+          if (left.active === right.active) {
+            return 0;
+          }
+          return left.active ? -1 : 1;
+        });
+      const candidate = ranked[0];
+      return typeof candidate?.id === "number" ? candidate.id : null;
     }
 
     const tabs = await this.chromeApi.tabs.query({

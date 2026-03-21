@@ -1,5 +1,7 @@
 import type { ErrorCode } from "./errors.js";
 import type { Diagnosis } from "../runtime/diagnostics.js";
+import type { DiagnosisInput } from "../runtime/diagnostics.js";
+import type { ObservabilityInput } from "../runtime/observability.js";
 import type { ObservabilityPayload } from "../runtime/observability.js";
 
 export type JsonObject = Record<string, unknown>;
@@ -23,6 +25,16 @@ export interface RuntimeContext {
   profile: string | null;
   params: JsonObject;
   cwd: string;
+}
+
+export interface CommandExecutionResult {
+  summary: JsonObject;
+  observability?: ObservabilityInput;
+}
+
+export interface CommandExecutionFailure {
+  diagnosis?: DiagnosisInput;
+  observability?: ObservabilityInput;
 }
 
 export interface SuccessResponse {
@@ -53,5 +65,5 @@ export interface CommandDefinition {
   name: string;
   status: "implemented" | "not_implemented";
   requiresProfile?: boolean;
-  handler?: (context: RuntimeContext) => Promise<JsonObject>;
+  handler?: (context: RuntimeContext) => Promise<JsonObject | CommandExecutionResult>;
 }

@@ -152,13 +152,13 @@ export const runCli = async (
     runtimeContext = context;
     recorder = createRuntimeStoreRecorder(cwd);
     await recorder.recordStart(context);
-    const summary = await executeCommand(context, createCommandRegistry());
-    await recorder.recordSuccess(context, summary);
+    const execution = await executeCommand(context, createCommandRegistry());
+    await recorder.recordSuccess(context, execution.summary);
 
     writeJsonLine(
       stdout,
-      buildSuccessResponse(context, summary, {
-        observability: DEFAULT_OBSERVABILITY
+      buildSuccessResponse(context, execution.summary, {
+        observability: execution.observability ?? DEFAULT_OBSERVABILITY
       })
     );
     if (context.command === "runtime.help") {
@@ -185,8 +185,8 @@ export const runCli = async (
         { runId, command },
         cliError,
         {
-          observability: DEFAULT_OBSERVABILITY,
-          diagnosis: diagnosisFromCliError(cliError)
+          observability: cliError.observability ?? DEFAULT_OBSERVABILITY,
+          diagnosis: cliError.diagnosis ?? diagnosisFromCliError(cliError)
         }
       )
     );
