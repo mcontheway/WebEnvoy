@@ -210,6 +210,12 @@ const inferFailure = (status, body) => {
         message: "搜索接口返回了未识别的失败响应"
     };
 };
+const resolveXsCommon = (value) => {
+    if (typeof value === "string" && value.trim().length > 0) {
+        return value.trim();
+    }
+    return "{}";
+};
 export const executeXhsSearch = async (input, env) => {
     const simulated = resolveSimulatedResult(input.options.simulate_result, input.params, input.options, env);
     if (simulated) {
@@ -302,12 +308,10 @@ export const executeXhsSearch = async (input, env) => {
         "Content-Type": "application/json;charset=utf-8",
         "X-s": String(signature["X-s"]),
         "X-t": String(signature["X-t"]),
+        "X-S-Common": resolveXsCommon(input.options.x_s_common),
         "x-b3-traceid": env.randomId().replace(/-/g, ""),
         "x-xray-traceid": env.randomId().replace(/-/g, "")
     };
-    if (typeof input.options.x_s_common === "string" && input.options.x_s_common.trim().length > 0) {
-        headers["X-S-Common"] = input.options.x_s_common.trim();
-    }
     const response = await env.fetchJson({
         url: SEARCH_ENDPOINT,
         method: "POST",

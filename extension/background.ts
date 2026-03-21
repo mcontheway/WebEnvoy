@@ -78,7 +78,11 @@ interface ExtensionChromeApi {
     };
   };
   tabs: {
-    query(filter: { active: boolean; currentWindow: boolean }): Promise<Array<{ id?: number }>>;
+    query(filter: {
+      active?: boolean;
+      currentWindow?: boolean;
+      url?: string | string[];
+    }): Promise<Array<{ id?: number }>>;
     sendMessage(tabId: number, message: BackgroundToContentMessage): Promise<void>;
   };
 }
@@ -840,6 +844,10 @@ class ChromeBackgroundBridge {
         summary: {
           relay_path: "host>background>content-script>background>host"
         },
+        payload:
+          typeof result.payload === "object" && result.payload !== null
+            ? (result.payload as Record<string, unknown>)
+            : {},
         error:
           result.error ?? {
             code: "ERR_TRANSPORT_FORWARD_FAILED",
@@ -872,6 +880,27 @@ class ChromeBackgroundBridge {
   async #resolveTargetTabId(request: BridgeRequest): Promise<number | null> {
     if (typeof request.params.tab_id === "number" && Number.isInteger(request.params.tab_id)) {
       return request.params.tab_id;
+    }
+
+    const command = String(request.params.command ?? "");
+    if (command === "xhs.search") {
+      const xhsUrlPatterns = ["*://www.xiaohongshu.com/*", "*://edith.xiaohongshu.com/*", "*://*.xiaohongshu.com/*"];
+      const activeXhsTabs = await this.chromeApi.tabs.query({
+        active: true,
+        currentWindow: true,
+        url: xhsUrlPatterns
+      });
+      const activeXhsTab = activeXhsTabs[0];
+      if (typeof activeXhsTab?.id === "number") {
+        return activeXhsTab.id;
+      }
+
+      const xhsTabs = await this.chromeApi.tabs.query({
+        currentWindow: true,
+        url: xhsUrlPatterns
+      });
+      const xhsTab = xhsTabs[0];
+      return typeof xhsTab?.id === "number" ? xhsTab.id : null;
     }
 
     const tabs = await this.chromeApi.tabs.query({

@@ -180,6 +180,131 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
+  it("forwards content-script error payload through background bridge", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-error-payload-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-error-payload-001",
+        command: "xhs.search",
+        command_params: {},
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-xhs-error-payload-001",
+        ok: false,
+        error: {
+          code: "ERR_EXECUTION_FAILED",
+          message: "登录态缺失，无法执行 xhs.search"
+        },
+        payload: {
+          details: {
+            reason: "SESSION_EXPIRED"
+          },
+          diagnosis: {
+            category: "request_failed"
+          }
+        }
+      },
+      {
+        tab: {
+          id: 11
+        }
+      }
+    );
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-xhs-error-payload-001",
+        status: "error",
+        payload: {
+          details: {
+            reason: "SESSION_EXPIRED"
+          },
+          diagnosis: {
+            category: "request_failed"
+          }
+        }
+      })
+    );
+  });
+
+  it("pins xhs.search to xiaohongshu tab instead of generic active tab", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async (filter: { active?: boolean; url?: string | string[] }) => {
+      if (filter.url) {
+        return filter.active ? [] : [{ id: 32 }];
+      }
+      return [{ id: 11 }];
+    });
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-tab-pin-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-tab-pin-001",
+        command: "xhs.search",
+        command_params: {},
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "run-xhs-tab-pin-001",
+        command: "xhs.search"
+      })
+    );
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-xhs-tab-pin-001",
+        ok: true,
+        payload: {
+          summary: {
+            capability_result: {
+              outcome: "success"
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+  });
+
   it("queues forwards during recovering and replays after reopen", async () => {
     vi.useFakeTimers();
     try {

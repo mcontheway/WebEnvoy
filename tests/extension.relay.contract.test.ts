@@ -103,6 +103,7 @@ describe("extension background relay contract", () => {
   });
 
   it("passes xhs.search execution payload through relay on error", async () => {
+    let capturedHeaders: Record<string, string> | null = null;
     const contentScript = new ContentScriptHandler({
       xhsEnv: {
         now: () => 1_000,
@@ -115,13 +116,16 @@ describe("extension background relay contract", () => {
           "X-s": "signed",
           "X-t": "1"
         }),
-        fetchJson: async () => ({
-          status: 200,
-          body: {
-            code: 300011,
-            msg: "Account abnormal. Switch account and retry."
-          }
-        })
+        fetchJson: async (request) => {
+          capturedHeaders = request.headers;
+          return {
+            status: 200,
+            body: {
+              code: 300011,
+              msg: "Account abnormal. Switch account and retry."
+            }
+          };
+        }
       }
     });
     const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
@@ -164,5 +168,6 @@ describe("extension background relay contract", () => {
         }
       }
     });
+    expect(capturedHeaders?.["X-S-Common"]).toBe("{}");
   });
 });

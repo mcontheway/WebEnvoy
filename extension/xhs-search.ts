@@ -323,6 +323,13 @@ const inferFailure = (status: number, body: unknown): { reason: string; message:
   };
 };
 
+const resolveXsCommon = (value: unknown): string => {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim();
+  }
+  return "{}";
+};
+
 export const executeXhsSearch = async (
   input: {
     abilityId: string;
@@ -442,13 +449,10 @@ export const executeXhsSearch = async (
     "Content-Type": "application/json;charset=utf-8",
     "X-s": String(signature["X-s"]),
     "X-t": String(signature["X-t"]),
+    "X-S-Common": resolveXsCommon(input.options.x_s_common),
     "x-b3-traceid": env.randomId().replace(/-/g, ""),
     "x-xray-traceid": env.randomId().replace(/-/g, "")
   };
-
-  if (typeof input.options.x_s_common === "string" && input.options.x_s_common.trim().length > 0) {
-    headers["X-S-Common"] = input.options.x_s_common.trim();
-  }
 
   const response = await env.fetchJson({
     url: SEARCH_ENDPOINT,
