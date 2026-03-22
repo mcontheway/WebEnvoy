@@ -44,7 +44,7 @@
 - [ ] `a1` / `webId` / `gid` 等追踪字段的生命周期（Content Script 内如何稳定获取）
 - [ ] `window._webmsxyw` 的调用签名（参数格式、返回格式）
 
-### Spike A-Write：小红书最小写链路与上传路径确认（Phase 1 后段验证 / Sprint 2-3 前置）
+### Spike A-Write：小红书最小写链路与上传路径确认（Phase 1 后段验证 / Phase 2 前置）
 
 - [ ] 富文本发布编辑器的 DOM 结构与 Composition 事件响应机制
 - [ ] 图片上传流程（DataTransfer 还是独立上传接口）
@@ -75,9 +75,9 @@
 
 ---
 
-## 十五、Phase 2（Sprint 4 起）L2 首次可用能力（待设计）
+## 十五、Phase 2 L2 首次可用能力（待设计）
 
-> **状态**：占位章节。按当前治理排布，设计工作在 Sprint 2（风险门禁与执行硬化）和 Sprint 3（最小反风控执行能力）完成后启动。
+> **状态**：占位章节，设计工作在 Phase 1 交付后启动。
 
 本节描述 Phase 2 计划构建的 L2 通用读取层。该层的目标是使 WebEnvoy 能够对任意未知网站（无预建适配器）提供首次可用的内容提取与基础交互能力，并与前序阶段建设的 L3 专用平台适配器互补。
 
@@ -112,9 +112,8 @@ L2 通用读取层**复用** Phase 1 建立的以下基础设施：
 ### 设计依赖的前置条件
 
 1. Phase 1 核心运行时稳定运行（CLI 入口、Native Messaging 通道、Extension 架构）
-2. Sprint 2 / Sprint 3 的风险门禁与最小反风控执行前置已完成
-3. 完成 Spike D（agent-browser AX Tree 压缩算法代码级研究）
-4. 完成 Spike E（Steel Browser 请求拦截在 Extension 架构中的可行性验证）
+2. 完成 Spike D（agent-browser AX Tree 压缩算法代码级研究）
+3. 完成 Spike E（Steel Browser 请求拦截在 Extension 架构中的可行性验证）
 
 ---
 
