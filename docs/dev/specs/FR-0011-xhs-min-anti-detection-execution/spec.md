@@ -1,4 +1,4 @@
-# FR-0010 Sprint 3 最小反风控执行能力
+# FR-0011 Sprint 3 最小反风控执行能力
 
 ## 背景
 
@@ -66,7 +66,7 @@
 ### 场景 1：插件层成为门禁主落点
 
 Given 读写命令通过 CLI 进入 extension 执行链
-When 评审者检查 FR-0010 套件
+When 评审者检查 FR-0011 套件
 Then 能明确看到门禁判定由插件层主导
 And CLI 侧不承担门禁核心判定逻辑
 
@@ -100,10 +100,10 @@ And `#208/#209` 能直接引用状态输出作为前置
 
 ## 验收标准
 
-1. FR-0010 套件完整（`spec.md`、`plan.md`、`TODO.md`、`contracts/`、`research.md`、`risks.md`、`data-model.md`）。
+1. FR-0011 套件完整（`spec.md`、`plan.md`、`TODO.md`、`contracts/`、`research.md`、`risks.md`、`data-model.md`）。
 2. 插件层门禁主落点、读路径收敛、写路径分级三项均有可实现契约边界。
 3. 最小 session 节律/冷却/恢复规则和三态状态机均有结构化输出定义。
-4. `#208/#209` 可直接引用 FR-0010 输出作为进入 live 的前置。
+4. `#208/#209` 可直接引用 FR-0011 输出作为进入 live 的前置。
 5. 本 FR 不混入实现代码，保持在规约审查路径。
 
 ## 依赖与前置条件

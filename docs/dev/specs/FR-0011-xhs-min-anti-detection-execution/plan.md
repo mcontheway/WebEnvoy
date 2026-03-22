@@ -1,4 +1,4 @@
-# FR-0010 实施计划
+# FR-0011 实施计划
 
 ## 实施目标
 
@@ -57,16 +57,16 @@
 
 - 串行前置：
   - `FR-0009` 已合并（完成）
-  - `FR-0010` spec review 通过（本 FR 目标）
+  - `FR-0011` spec review 通过（本 FR 目标）
 - 可并行：
   - Sprint 治理重排（`#216`）中的 roadmap/milestone 调整可并行推进
 - 串行后置：
-  - `FR-0010` spec review 未通过前，不进入“最小反风控执行能力”实现 PR
+  - `FR-0011` spec review 未通过前，不进入“最小反风控执行能力”实现 PR
   - `#208` 恢复 live 正式验证前，必须先消费本 FR 输出
 
 ## 进入实现前条件
 
-1. FR-0010 规约 PR 完成 spec review 且无阻断项。
+1. FR-0011 规约 PR 完成 spec review 且无阻断项。
 2. `contracts/anti-detection-execution.md` 五对象语义稳定无歧义。
 3. `research.md` 中证据矩阵和差距项已明确标注成熟度。
 4. `risks.md` 中 stop-ship 与回滚路径可执行。
