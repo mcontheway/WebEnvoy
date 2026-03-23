@@ -71,10 +71,16 @@ interface SearchExecutionFailure {
 export type SearchExecutionResult = SearchExecutionSuccess | SearchExecutionFailure;
 
 type ActionType = "read" | "write" | "irreversible_write";
-type RequestedExecutionMode = "dry_run" | "recon" | "live_read_high_risk" | "live_write";
+type RequestedExecutionMode =
+  | "dry_run"
+  | "recon"
+  | "live_read_limited"
+  | "live_read_high_risk"
+  | "live_write";
 type EffectiveExecutionMode =
   | "dry_run"
   | "recon"
+  | "live_read_limited"
   | "live_read_high_risk"
   | "live_write"
   | null;
@@ -120,6 +126,18 @@ interface ConsumerGateResult {
 
 interface XhsSearchGate {
   scope_context: ScopeContextRecord;
+  read_execution_policy: {
+    default_mode: "dry_run";
+    allowed_modes: RequestedExecutionMode[];
+    blocked_actions: string[];
+    live_entry_requirements: string[];
+  };
+  issue_action_matrix: {
+    issue_scope: "issue_209";
+    state: RiskState;
+    allowed_actions: string[];
+    blocked_actions: string[];
+  };
   gate_input: Omit<GateInputRecord, "run_id" | "session_id" | "profile">;
   gate_outcome: GateOutcomeRecord;
   consumer_gate_result: ConsumerGateResult;
@@ -164,10 +182,52 @@ const ACTION_TYPES = new Set<ActionType>(["read", "write", "irreversible_write"]
 const REQUESTED_EXECUTION_MODES = new Set<RequestedExecutionMode>([
   "dry_run",
   "recon",
+  "live_read_limited",
   "live_read_high_risk",
   "live_write"
 ]);
 const RISK_STATES = new Set<RiskState>(["paused", "limited", "allowed"]);
+const READ_EXECUTION_POLICY = {
+  default_mode: "dry_run" as const,
+  allowed_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"] as const,
+  blocked_actions: ["expand_new_live_surface_without_gate"] as const,
+  live_entry_requirements: [
+    "risk_state_not_paused",
+    "target_domain_confirmed",
+    "manual_confirmation_recorded"
+  ] as const
+};
+const ISSUE_209_ACTION_MATRIX = {
+  paused: {
+    issue_scope: "issue_209",
+    state: "paused",
+    allowed_actions: ["dry_run", "recon"],
+    blocked_actions: [
+      "live_read_limited",
+      "live_read_high_risk",
+      "live_write",
+      "irreversible_write",
+      "expand_new_live_surface_without_gate"
+    ]
+  },
+  limited: {
+    issue_scope: "issue_209",
+    state: "limited",
+    allowed_actions: ["dry_run", "recon", "live_read_limited"],
+    blocked_actions: [
+      "live_read_high_risk",
+      "live_write",
+      "irreversible_write",
+      "expand_new_live_surface_without_gate"
+    ]
+  },
+  allowed: {
+    issue_scope: "issue_209",
+    state: "allowed",
+    allowed_actions: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+    blocked_actions: ["live_write", "irreversible_write", "expand_new_live_surface_without_gate"]
+  }
+} as const;
 const REQUIRED_APPROVAL_CHECKS = [
   "target_domain_confirmed",
   "target_tab_confirmed",
@@ -206,10 +266,30 @@ const resolveRiskState = (value: unknown): RiskState =>
     ? (value as RiskState)
     : "paused";
 
+const resolveIssue209Matrix = (state: RiskState): XhsSearchGate["issue_action_matrix"] => {
+  const entry = ISSUE_209_ACTION_MATRIX[state];
+  return {
+    issue_scope: entry.issue_scope,
+    state: entry.state,
+    allowed_actions: [...entry.allowed_actions],
+    blocked_actions: [...entry.blocked_actions]
+  };
+};
+
+const resolveReadExecutionPolicy = (): XhsSearchGate["read_execution_policy"] => ({
+  default_mode: READ_EXECUTION_POLICY.default_mode,
+  allowed_modes: [...READ_EXECUTION_POLICY.allowed_modes],
+  blocked_actions: [...READ_EXECUTION_POLICY.blocked_actions],
+  live_entry_requirements: [...READ_EXECUTION_POLICY.live_entry_requirements]
+});
+
 const resolveFallbackMode = (
   requestedExecutionMode: RequestedExecutionMode,
   riskState: RiskState
 ): EffectiveExecutionMode => {
+  if (requestedExecutionMode === "live_read_high_risk" && riskState === "limited") {
+    return "live_read_limited";
+  }
   if (requestedExecutionMode === "live_write") {
     return "dry_run";
   }
@@ -237,6 +317,9 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
   const actionType = resolveActionType(options.action_type);
   const requestedExecutionMode = resolveRequestedExecutionMode(options.requested_execution_mode);
   const riskState = resolveRiskState(options.risk_state);
+  const readExecutionPolicy = resolveReadExecutionPolicy();
+  const issueActionMatrix = resolveIssue209Matrix(riskState);
+  const issueAllowedModes = new Set(issueActionMatrix.allowed_actions);
   const fallbackMode = resolveFallbackMode(requestedExecutionMode ?? "dry_run", riskState);
   const targetDomain = asNonEmptyString(options.target_domain);
   const targetTabId = asInteger(options.target_tab_id);
@@ -299,7 +382,11 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
 
   if (gateReasons.length > 0) {
     gateDecision = "blocked";
-    if (requestedExecutionMode === "live_read_high_risk" || requestedExecutionMode === "live_write") {
+    if (
+      requestedExecutionMode === "live_read_limited" ||
+      requestedExecutionMode === "live_read_high_risk" ||
+      requestedExecutionMode === "live_write"
+    ) {
       effectiveExecutionMode = fallbackMode;
     }
   } else if (requestedExecutionMode === "dry_run" || requestedExecutionMode === "recon") {
@@ -313,25 +400,42 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
     if (requestedExecutionMode === "live_read_high_risk" && actionType !== "read") {
       gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
     }
+    if (requestedExecutionMode === "live_read_limited" && actionType !== "read") {
+      gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
+    }
     if (requestedExecutionMode === "live_write" && actionType === "read") {
       gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
     }
-    if (riskState !== "allowed") {
+    if (
+      requestedExecutionMode &&
+      !issueAllowedModes.has(requestedExecutionMode) &&
+      (requestedExecutionMode === "live_read_limited" ||
+        requestedExecutionMode === "live_read_high_risk")
+    ) {
       gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
+      gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
     }
 
-    const missingChecks = REQUIRED_APPROVAL_CHECKS.filter((key) => !approvalRecord.checks[key]);
-    if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
-      gateReasons.push("MANUAL_CONFIRMATION_MISSING");
-    }
-    if (missingChecks.length > 0) {
-      gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
-    }
+    const liveModeCanEnter =
+      requestedExecutionMode !== null &&
+      issueAllowedModes.has(requestedExecutionMode) &&
+      (requestedExecutionMode === "live_read_limited" ||
+        requestedExecutionMode === "live_read_high_risk");
 
-    if (gateReasons.length === 0) {
-      gateDecision = "allowed";
-      effectiveExecutionMode = requestedExecutionMode ?? "dry_run";
-      gateReasons.push("LIVE_MODE_APPROVED");
+    if (liveModeCanEnter) {
+      const missingChecks = REQUIRED_APPROVAL_CHECKS.filter((key) => !approvalRecord.checks[key]);
+      if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
+        gateReasons.push("MANUAL_CONFIRMATION_MISSING");
+      }
+      if (missingChecks.length > 0) {
+        gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
+      }
+
+      if (gateReasons.length === 0) {
+        gateDecision = "allowed";
+        effectiveExecutionMode = requestedExecutionMode;
+        gateReasons.push("LIVE_MODE_APPROVED");
+      }
     }
   }
 
@@ -342,6 +446,8 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
       write_domain: XHS_WRITE_DOMAIN,
       domain_mixing_forbidden: true
     },
+    read_execution_policy: readExecutionPolicy,
+    issue_action_matrix: issueActionMatrix,
     gate_input: {
       target_domain: targetDomain,
       target_tab_id: targetTabId,
@@ -355,7 +461,9 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
       gate_decision: gateDecision,
       gate_reasons: gateReasons,
       requires_manual_confirmation:
-        requestedExecutionMode === "live_read_high_risk" || requestedExecutionMode === "live_write"
+        requestedExecutionMode === "live_read_limited" ||
+        requestedExecutionMode === "live_read_high_risk" ||
+        requestedExecutionMode === "live_write"
     },
     consumer_gate_result: {
       risk_state: riskState,
@@ -406,6 +514,8 @@ const createGateOnlySuccess = (
         ...gate.gate_input
       },
       gate_outcome: gate.gate_outcome,
+      read_execution_policy: gate.read_execution_policy,
+      issue_action_matrix: gate.issue_action_matrix,
       consumer_gate_result: gate.consumer_gate_result,
       approval_record: gate.approval_record,
       audit_record: auditRecord
@@ -524,6 +634,8 @@ const createFailure = (
             ...gate.gate_input
           },
           gate_outcome: gate.gate_outcome,
+          read_execution_policy: gate.read_execution_policy,
+          issue_action_matrix: gate.issue_action_matrix,
           consumer_gate_result: gate.consumer_gate_result,
           approval_record: gate.approval_record,
           ...(auditRecord ? { audit_record: auditRecord } : {})
@@ -829,6 +941,8 @@ export const executeXhsSearch = async (
               ...gate.gate_input
             },
             gate_outcome: gate.gate_outcome,
+            read_execution_policy: gate.read_execution_policy,
+            issue_action_matrix: gate.issue_action_matrix,
             consumer_gate_result: gate.consumer_gate_result,
             approval_record: gate.approval_record,
             audit_record: auditRecord
@@ -845,6 +959,8 @@ export const executeXhsSearch = async (
           ability_id: input.abilityId,
           ...(asRecord(simulated.payload.details) ?? {})
         },
+        read_execution_policy: gate.read_execution_policy,
+        issue_action_matrix: gate.issue_action_matrix,
         consumer_gate_result: gate.consumer_gate_result,
         approval_record: gate.approval_record,
         audit_record: auditRecord
@@ -1034,6 +1150,8 @@ export const executeXhsSearch = async (
           ...gate.gate_input
         },
         gate_outcome: gate.gate_outcome,
+        read_execution_policy: gate.read_execution_policy,
+        issue_action_matrix: gate.issue_action_matrix,
         consumer_gate_result: gate.consumer_gate_result,
         approval_record: gate.approval_record,
         audit_record: auditRecord

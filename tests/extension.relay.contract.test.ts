@@ -45,6 +45,15 @@ describe("extension background relay contract", () => {
       }
     }
   };
+  const approvedLimitedLiveOptions = {
+    ...approvedLiveOptions,
+    requested_execution_mode: "live_read_limited",
+    risk_state: "limited"
+  };
+  const approvedHighRiskLimitedOptions = {
+    ...approvedLiveOptions,
+    risk_state: "limited"
+  };
 
   it("keeps run/profile/cwd context on successful forward", async () => {
     const contentScript = new ContentScriptHandler();
@@ -370,6 +379,233 @@ describe("extension background relay contract", () => {
         gate_reasons: ["MANUAL_CONFIRMATION_MISSING", "APPROVAL_CHECKS_INCOMPLETE"]
       }
     });
+  });
+
+  it("blocks live_read_limited when risk_state is paused", async () => {
+    let fetchCalled = false;
+    const contentScript = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_000,
+        randomId: () => "relay-live-limited-paused-id",
+        getLocationHref: () => "https://www.xiaohongshu.com/search_result",
+        getDocumentTitle: () => "Search Result",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=valid;",
+        callSignature: async () => ({
+          "X-s": "signed",
+          "X-t": "1"
+        }),
+        fetchJson: async () => {
+          fetchCalled = true;
+          return { status: 200, body: { code: 0, data: { items: [] } } };
+        }
+      }
+    });
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-live-limited-paused-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-limited-paused-001",
+        command: "xhs.search",
+        command_params: {
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            ...approvedLimitedLiveOptions,
+            risk_state: "paused"
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    const response = await responsePromise;
+    expect(response.status).toBe("error");
+    expect(response.error?.code).toBe("ERR_EXECUTION_FAILED");
+    expect(response.payload).toMatchObject({
+      details: {
+        reason: "EXECUTION_MODE_GATE_BLOCKED"
+      },
+      gate_input: {
+        requested_execution_mode: "live_read_limited",
+        risk_state: "paused"
+      },
+      gate_outcome: {
+        effective_execution_mode: "dry_run",
+        gate_decision: "blocked"
+      },
+      consumer_gate_result: {
+        requested_execution_mode: "live_read_limited",
+        effective_execution_mode: "dry_run",
+        gate_decision: "blocked"
+      }
+    });
+    expect(
+      (((response.payload as Record<string, unknown>).consumer_gate_result as Record<string, unknown>)
+        .gate_reasons as string[])
+    ).toEqual(expect.arrayContaining(["RISK_STATE_PAUSED", "ISSUE_ACTION_MATRIX_BLOCKED"]));
+    expect(fetchCalled).toBe(false);
+  });
+
+  it("allows live_read_limited with approval in limited risk state", async () => {
+    const contentScript = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_000,
+        randomId: () => "relay-live-limited-allowed-id",
+        getLocationHref: () => "https://www.xiaohongshu.com/search_result",
+        getDocumentTitle: () => "Search Result",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=valid;",
+        callSignature: async () => ({
+          "X-s": "signed",
+          "X-t": "1"
+        }),
+        fetchJson: async () => ({
+          status: 200,
+          body: {
+            code: 0,
+            data: {
+              items: []
+            }
+          }
+        })
+      }
+    });
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-live-limited-allowed-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-limited-allowed-001",
+        command: "xhs.search",
+        command_params: {
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: approvedLimitedLiveOptions
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    const response = await responsePromise;
+    expect(response.status).toBe("success");
+    expect(response.payload).toMatchObject({
+      summary: {
+        gate_input: {
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited"
+        },
+        gate_outcome: {
+          effective_execution_mode: "live_read_limited",
+          gate_decision: "allowed",
+          gate_reasons: ["LIVE_MODE_APPROVED"]
+        },
+        consumer_gate_result: {
+          requested_execution_mode: "live_read_limited",
+          effective_execution_mode: "live_read_limited",
+          gate_decision: "allowed",
+          gate_reasons: ["LIVE_MODE_APPROVED"]
+        }
+      }
+    });
+  });
+
+  it("blocks live_read_high_risk in limited risk state and converges to limited mode", async () => {
+    let fetchCalled = false;
+    const contentScript = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_000,
+        randomId: () => "relay-live-high-risk-limited-id",
+        getLocationHref: () => "https://www.xiaohongshu.com/search_result",
+        getDocumentTitle: () => "Search Result",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=valid;",
+        callSignature: async () => ({
+          "X-s": "signed",
+          "X-t": "1"
+        }),
+        fetchJson: async () => {
+          fetchCalled = true;
+          return { status: 200, body: { code: 0, data: { items: [] } } };
+        }
+      }
+    });
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-live-high-risk-limited-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-high-risk-limited-001",
+        command: "xhs.search",
+        command_params: {
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: approvedHighRiskLimitedOptions
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    const response = await responsePromise;
+    expect(response.status).toBe("error");
+    expect(response.error?.code).toBe("ERR_EXECUTION_FAILED");
+    expect(response.payload).toMatchObject({
+      details: {
+        reason: "EXECUTION_MODE_GATE_BLOCKED"
+      },
+      gate_input: {
+        requested_execution_mode: "live_read_high_risk",
+        risk_state: "limited"
+      },
+      gate_outcome: {
+        effective_execution_mode: "live_read_limited",
+        gate_decision: "blocked"
+      },
+      consumer_gate_result: {
+        requested_execution_mode: "live_read_high_risk",
+        effective_execution_mode: "live_read_limited",
+        gate_decision: "blocked"
+      }
+    });
+    expect(
+      (((response.payload as Record<string, unknown>).consumer_gate_result as Record<string, unknown>)
+        .gate_reasons as string[])
+    ).toEqual(expect.arrayContaining(["RISK_STATE_LIMITED", "ISSUE_ACTION_MATRIX_BLOCKED"]));
+    expect(fetchCalled).toBe(false);
   });
 
   it("blocks xhs.search when target scope is missing even in dry_run", async () => {
