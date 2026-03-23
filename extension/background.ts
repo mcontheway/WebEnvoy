@@ -26,6 +26,7 @@ interface PendingForward {
   request: BridgeRequest;
   timeout: ReturnType<typeof setTimeout>;
   consumerGateResult?: XhsTargetGateResult["consumerGateResult"];
+  gatePayload?: XhsTargetGateResult["gatePayload"];
 }
 
 interface QueuedForwardRequest {
@@ -108,12 +109,30 @@ interface NativeHeartbeatMessage {
 type NativeBridgeState = "connecting" | "ready" | "recovering" | "disconnected";
 type XhsActionType = "read" | "write" | "irreversible_write";
 type XhsExecutionMode = "dry_run" | "recon" | "live_read_high_risk" | "live_write";
+type XhsRiskState = "paused" | "limited" | "allowed";
+type XhsIssueScope = "issue_208" | "issue_209";
+
+interface XhsIssueActionMatrixEntry {
+  issue_scope: XhsIssueScope;
+  state: XhsRiskState;
+  allowed_actions: string[];
+  blocked_actions: string[];
+}
+
+interface XhsApprovalRecord {
+  approved: boolean;
+  approver: string | null;
+  approved_at: string | null;
+  checks: Record<string, boolean>;
+}
 
 interface XhsTargetGateResult {
   allowed: boolean;
   targetTabId: number | null;
   errorMessage: string;
   consumerGateResult: {
+    risk_state: XhsRiskState;
+    issue_scope: XhsIssueScope;
     target_domain: string | null;
     target_tab_id: number | null;
     target_page: string | null;
@@ -123,6 +142,7 @@ interface XhsTargetGateResult {
     gate_decision: "allowed" | "blocked";
     gate_reasons: string[];
   };
+  gatePayload: Record<string, unknown>;
 }
 
 const XHS_READ_DOMAIN = "www.xiaohongshu.com";
@@ -134,6 +154,113 @@ const XHS_EXECUTION_MODES = new Set<XhsExecutionMode>([
   "live_read_high_risk",
   "live_write"
 ]);
+const XHS_RISK_STATES = new Set<XhsRiskState>(["paused", "limited", "allowed"]);
+const XHS_ISSUE_SCOPES = new Set<XhsIssueScope>(["issue_208", "issue_209"]);
+const XHS_REQUIRED_APPROVAL_CHECKS = [
+  "target_domain_confirmed",
+  "target_tab_confirmed",
+  "target_page_confirmed",
+  "risk_state_checked",
+  "action_type_confirmed"
+] as const;
+const XHS_SCOPE_CONTEXT = {
+  platform: "xhs",
+  read_domain: XHS_READ_DOMAIN,
+  write_domain: XHS_WRITE_DOMAIN,
+  domain_mixing_forbidden: true
+} as const;
+const XHS_RISK_STATE_MACHINE = {
+  states: ["paused", "limited", "allowed"],
+  transitions: [
+    { from: "allowed", to: "limited", trigger: "risk_signal_detected" },
+    { from: "limited", to: "paused", trigger: "account_alert_or_repeat_risk" },
+    {
+      from: "paused",
+      to: "limited",
+      trigger: "cooldown_backoff_window_passed_and_manual_approve"
+    },
+    {
+      from: "limited",
+      to: "allowed",
+      trigger: "stability_window_passed_and_manual_approve"
+    }
+  ],
+  hard_block_when_paused: ["live_write", "live_read_high_risk"]
+} as const;
+const XHS_ISSUE_ACTION_MATRIX: XhsIssueActionMatrixEntry[] = [
+  {
+    issue_scope: "issue_208",
+    state: "paused",
+    allowed_actions: ["dry_run", "recon"],
+    blocked_actions: [
+      "live_read_limited",
+      "live_read_high_risk",
+      "reversible_interaction_with_approval",
+      "live_write",
+      "irreversible_write",
+      "expand_new_live_surface_without_gate"
+    ]
+  },
+  {
+    issue_scope: "issue_208",
+    state: "limited",
+    allowed_actions: ["dry_run", "recon", "reversible_interaction_with_approval"],
+    blocked_actions: [
+      "live_read_limited",
+      "live_read_high_risk",
+      "irreversible_write",
+      "live_write",
+      "expand_new_live_surface_without_gate"
+    ]
+  },
+  {
+    issue_scope: "issue_208",
+    state: "allowed",
+    allowed_actions: ["dry_run", "recon", "reversible_interaction_with_approval"],
+    blocked_actions: [
+      "live_read_limited",
+      "live_read_high_risk",
+      "irreversible_write",
+      "live_write",
+      "expand_new_live_surface_without_gate"
+    ]
+  },
+  {
+    issue_scope: "issue_209",
+    state: "paused",
+    allowed_actions: ["dry_run", "recon"],
+    blocked_actions: [
+      "live_read_limited",
+      "live_read_high_risk",
+      "live_write",
+      "irreversible_write",
+      "expand_new_live_surface_without_gate"
+    ]
+  },
+  {
+    issue_scope: "issue_209",
+    state: "limited",
+    allowed_actions: ["dry_run", "recon", "live_read_limited"],
+    blocked_actions: [
+      "live_read_high_risk",
+      "live_write",
+      "irreversible_write",
+      "expand_new_live_surface_without_gate"
+    ]
+  },
+  {
+    issue_scope: "issue_209",
+    state: "allowed",
+    allowed_actions: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+    blocked_actions: ["live_write", "irreversible_write", "expand_new_live_surface_without_gate"]
+  }
+];
+const XHS_PLUGIN_GATE_OWNERSHIP = {
+  background_gate: ["target_domain_check", "target_tab_check", "mode_gate", "risk_state_gate"],
+  content_script_gate: ["page_context_check", "action_tier_check"],
+  main_world_gate: ["signed_call_scope_check"],
+  cli_role: "request_and_result_shell_only"
+} as const;
 
 const scoreXhsTab = (tab: ExtensionTab): number => {
   const url = typeof tab.url === "string" ? tab.url : "";
@@ -153,6 +280,14 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+
+const asNonEmptyString = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+
+const asInteger = (value: unknown): number | null =>
+  typeof value === "number" && Number.isInteger(value) ? value : null;
+
+const asBoolean = (value: unknown): boolean => value === true;
 
 const parseUrl = (value: string): URL | null => {
   try {
@@ -196,11 +331,17 @@ const xhsGateReasonMessage = (reason: string): string => {
     REQUESTED_EXECUTION_MODE_NOT_EXPLICIT: "requested_execution_mode must be explicit",
     LIVE_EXECUTION_MODE_BLOCKED_BY_BACKGROUND_GATE:
       "live execution mode is blocked by background target gate",
+    ISSUE_ACTION_BLOCKED_BY_STATE_MATRIX: "requested action is blocked by issue/state matrix",
     TARGET_DOMAIN_NOT_EXPLICIT: "target domain must be explicit",
     TARGET_DOMAIN_OUT_OF_SCOPE: "target domain is out of xhs read/write scope",
     TARGET_TAB_NOT_EXPLICIT: "target tab is not explicit",
     TARGET_PAGE_NOT_EXPLICIT: "target page is not explicit",
     ACTION_DOMAIN_MISMATCH: "read action cannot target write domain",
+    EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND: "execution mode is unsupported for xhs.search",
+    RISK_STATE_PAUSED: "risk state paused blocks live read",
+    RISK_STATE_LIMITED: "risk state limited blocks high-risk live read",
+    MANUAL_CONFIRMATION_MISSING: "manual confirmation is required for live mode",
+    APPROVAL_CHECKS_INCOMPLETE: "approval checks are incomplete",
     TARGET_TAB_NOT_FOUND: "target tab is unavailable",
     TARGET_DOMAIN_MISMATCH: "target tab domain does not match target_domain",
     TARGET_PAGE_MISMATCH: "target tab page does not match target_page",
@@ -213,6 +354,62 @@ const parseRequestedExecutionMode = (value: unknown): XhsExecutionMode | null =>
   typeof value === "string" && XHS_EXECUTION_MODES.has(value as XhsExecutionMode)
     ? (value as XhsExecutionMode)
     : null;
+
+const resolveRiskState = (value: unknown): XhsRiskState =>
+  typeof value === "string" && XHS_RISK_STATES.has(value as XhsRiskState)
+    ? (value as XhsRiskState)
+    : "paused";
+
+const resolveIssueScope = (value: unknown): XhsIssueScope =>
+  typeof value === "string" && XHS_ISSUE_SCOPES.has(value as XhsIssueScope)
+    ? (value as XhsIssueScope)
+    : "issue_209";
+
+const normalizeApprovalRecord = (value: unknown): XhsApprovalRecord => {
+  const approval = asRecord(value);
+  const checks = asRecord(approval?.checks);
+  return {
+    approved: asBoolean(approval?.approved),
+    approver: asNonEmptyString(approval?.approver),
+    approved_at: asNonEmptyString(approval?.approved_at),
+    checks: Object.fromEntries(
+      XHS_REQUIRED_APPROVAL_CHECKS.map((key) => [key, asBoolean(checks?.[key])])
+    )
+  };
+};
+
+const resolveIssueActionMatrixEntry = (
+  issueScope: XhsIssueScope,
+  state: XhsRiskState
+): XhsIssueActionMatrixEntry => {
+  const matched = XHS_ISSUE_ACTION_MATRIX.find(
+    (entry) => entry.issue_scope === issueScope && entry.state === state
+  );
+  if (!matched) {
+    return {
+      issue_scope: issueScope,
+      state,
+      allowed_actions: ["dry_run", "recon"],
+      blocked_actions: ["expand_new_live_surface_without_gate"]
+    };
+  }
+  return {
+    issue_scope: matched.issue_scope,
+    state: matched.state,
+    allowed_actions: [...matched.allowed_actions],
+    blocked_actions: [...matched.blocked_actions]
+  };
+};
+
+const resolveBlockedFallbackMode = (
+  requestedExecutionMode: XhsExecutionMode | null,
+  riskState: XhsRiskState
+): XhsExecutionMode =>
+  requestedExecutionMode === "recon"
+    ? "recon"
+    : requestedExecutionMode === "live_read_high_risk" && riskState === "limited"
+      ? "recon"
+      : "dry_run";
 
 export class BackgroundRelay {
   #listeners = new Set<NativeMessageListener>();
@@ -378,6 +575,7 @@ export class BackgroundRelay {
       summary: {
         relay_path: "host>background>content-script>background>host"
       },
+      ...(pending.gatePayload ? { payload: { ...pending.gatePayload } } : {}),
       error
     });
   }
@@ -870,9 +1068,11 @@ class ChromeBackgroundBridge {
     const command = String(request.params.command ?? "");
     let tabId: number | null;
     let consumerGateResult: XhsTargetGateResult["consumerGateResult"] | undefined;
+    let gatePayload: XhsTargetGateResult["gatePayload"] | undefined;
     if (command === "xhs.search") {
       const gateResult = await this.#evaluateXhsTargetGate(request);
       consumerGateResult = gateResult.consumerGateResult;
+      gatePayload = gateResult.gatePayload;
       if (!gateResult.allowed || !gateResult.targetTabId) {
         this.#emit({
           id: request.id,
@@ -880,9 +1080,7 @@ class ChromeBackgroundBridge {
           summary: {
             relay_path: "host>background>content-script>background>host"
           },
-          payload: {
-            consumer_gate_result: gateResult.consumerGateResult
-          },
+          payload: gateResult.gatePayload,
           error: {
             code: "ERR_TRANSPORT_FORWARD_FAILED",
             message: gateResult.errorMessage
@@ -932,7 +1130,7 @@ class ChromeBackgroundBridge {
         message: "content script forward timed out"
       });
     }, forwardTimeoutMs);
-    this.#pending.set(request.id, { request, timeout, consumerGateResult });
+    this.#pending.set(request.id, { request, timeout, consumerGateResult, gatePayload });
 
     const forward: BackgroundToContentMessage = {
       kind: "forward",
@@ -976,41 +1174,66 @@ class ChromeBackgroundBridge {
     const rawTargetTabId = readGateParam("target_tab_id");
     const rawTargetPage = readGateParam("target_page");
     const rawRequestedExecutionMode = readGateParam("requested_execution_mode");
-    const targetDomain =
-      typeof rawTargetDomain === "string" && rawTargetDomain.trim().length > 0
-        ? rawTargetDomain.trim()
-        : null;
-    const targetTabId =
-      typeof rawTargetTabId === "number" && Number.isInteger(rawTargetTabId)
-        ? rawTargetTabId
-        : null;
-    const targetPage =
-      typeof rawTargetPage === "string" && rawTargetPage.trim().length > 0
-        ? rawTargetPage.trim()
-        : null;
+    const rawIssueScope = readGateParam("issue_scope");
+    const rawRiskState = readGateParam("risk_state");
+    const rawApprovalRecord = readGateParam("approval_record") ?? readGateParam("approval");
+    const targetDomain = asNonEmptyString(rawTargetDomain);
+    const targetTabId = asInteger(rawTargetTabId);
+    const targetPage = asNonEmptyString(rawTargetPage);
+    const issueScope = resolveIssueScope(rawIssueScope);
+    const riskState = resolveRiskState(rawRiskState);
     const actionType: XhsActionType = "read";
     const requestedExecutionMode = parseRequestedExecutionMode(rawRequestedExecutionMode);
-    const effectiveExecutionMode: XhsExecutionMode =
-      requestedExecutionMode === "recon" ? "recon" : "dry_run";
-
+    const approvalRecord = normalizeApprovalRecord(rawApprovalRecord);
+    const issueActionMatrixEntry = resolveIssueActionMatrixEntry(issueScope, riskState);
     const gateReasons: string[] = [];
+    const pushReason = (reason: string): void => {
+      if (!gateReasons.includes(reason)) {
+        gateReasons.push(reason);
+      }
+    };
+
     if (!requestedExecutionMode) {
-      gateReasons.push("REQUESTED_EXECUTION_MODE_NOT_EXPLICIT");
+      pushReason("REQUESTED_EXECUTION_MODE_NOT_EXPLICIT");
     }
     if (!targetDomain) {
-      gateReasons.push("TARGET_DOMAIN_NOT_EXPLICIT");
+      pushReason("TARGET_DOMAIN_NOT_EXPLICIT");
     } else if (!XHS_DOMAIN_ALLOWLIST.has(targetDomain)) {
-      gateReasons.push("TARGET_DOMAIN_OUT_OF_SCOPE");
+      pushReason("TARGET_DOMAIN_OUT_OF_SCOPE");
     }
 
     if (targetTabId === null) {
-      gateReasons.push("TARGET_TAB_NOT_EXPLICIT");
+      pushReason("TARGET_TAB_NOT_EXPLICIT");
     }
     if (!targetPage) {
-      gateReasons.push("TARGET_PAGE_NOT_EXPLICIT");
+      pushReason("TARGET_PAGE_NOT_EXPLICIT");
     }
     if (targetDomain === XHS_WRITE_DOMAIN && actionType === "read") {
-      gateReasons.push("ACTION_DOMAIN_MISMATCH");
+      pushReason("ACTION_DOMAIN_MISMATCH");
+    }
+
+    if (requestedExecutionMode === "live_write") {
+      pushReason("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
+    }
+    if (
+      requestedExecutionMode &&
+      issueActionMatrixEntry.blocked_actions.includes(requestedExecutionMode)
+    ) {
+      pushReason("ISSUE_ACTION_BLOCKED_BY_STATE_MATRIX");
+    }
+    if (requestedExecutionMode === "live_read_high_risk") {
+      if (riskState !== "allowed") {
+        pushReason(`RISK_STATE_${riskState.toUpperCase()}`);
+      }
+      if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
+        pushReason("MANUAL_CONFIRMATION_MISSING");
+      }
+      const missingChecks = XHS_REQUIRED_APPROVAL_CHECKS.filter(
+        (key) => !approvalRecord.checks[key]
+      );
+      if (missingChecks.length > 0) {
+        pushReason("APPROVAL_CHECKS_INCOMPLETE");
+      }
     }
 
     if (gateReasons.length === 0 && targetDomain && targetTabId !== null && targetPage) {
@@ -1019,19 +1242,19 @@ class ChromeBackgroundBridge {
       });
       const targetTab = domainTabs.find((tab) => tab.id === targetTabId);
       if (!targetTab) {
-        gateReasons.push("TARGET_TAB_NOT_FOUND");
+        pushReason("TARGET_TAB_NOT_FOUND");
       } else {
         const tabUrl = typeof targetTab.url === "string" ? targetTab.url : "";
         const parsed = parseUrl(tabUrl);
         if (!parsed) {
-          gateReasons.push("TARGET_TAB_URL_INVALID");
+          pushReason("TARGET_TAB_URL_INVALID");
         } else {
           if (parsed.hostname !== targetDomain) {
-            gateReasons.push("TARGET_DOMAIN_MISMATCH");
+            pushReason("TARGET_DOMAIN_MISMATCH");
           }
           const actualPage = classifyXhsPage(tabUrl, targetDomain);
           if (actualPage !== targetPage) {
-            gateReasons.push("TARGET_PAGE_MISMATCH");
+            pushReason("TARGET_PAGE_MISMATCH");
           }
         }
       }
@@ -1039,7 +1262,23 @@ class ChromeBackgroundBridge {
 
     const allowed = gateReasons.length === 0;
     const gateDecision: "allowed" | "blocked" = allowed ? "allowed" : "blocked";
+    const requiresManualConfirmation =
+      requestedExecutionMode === "live_read_high_risk" || requestedExecutionMode === "live_write";
+    const effectiveExecutionMode = allowed
+      ? requestedExecutionMode ?? "dry_run"
+      : resolveBlockedFallbackMode(requestedExecutionMode, riskState);
+    if (allowed && requestedExecutionMode === "dry_run") {
+      gateReasons.push("DEFAULT_MODE_DRY_RUN");
+    }
+    if (allowed && requestedExecutionMode === "recon") {
+      gateReasons.push("DEFAULT_MODE_RECON");
+    }
+    if (allowed && requestedExecutionMode === "live_read_high_risk") {
+      gateReasons.push("LIVE_MODE_APPROVED");
+    }
     const consumerGateResult = {
+      risk_state: riskState,
+      issue_scope: issueScope,
       target_domain: targetDomain,
       target_tab_id: targetTabId,
       target_page: targetPage,
@@ -1049,12 +1288,85 @@ class ChromeBackgroundBridge {
       gate_decision: gateDecision,
       gate_reasons: gateReasons
     };
+    const runId = String(request.params.run_id ?? request.id);
+    const sessionId = String(request.params.session_id ?? this.#sessionId);
+    const profile = typeof request.profile === "string" ? request.profile : null;
+    const auditRecord = {
+      event_id: `bg_gate_${request.id}`,
+      run_id: runId,
+      session_id: sessionId,
+      profile,
+      issue_scope: issueScope,
+      risk_state: riskState,
+      target_domain: targetDomain,
+      target_tab_id: targetTabId,
+      target_page: targetPage,
+      action_type: actionType,
+      requested_execution_mode: requestedExecutionMode,
+      effective_execution_mode: effectiveExecutionMode,
+      gate_decision: gateDecision,
+      gate_reasons: gateReasons,
+      approver: approvalRecord.approver,
+      approved_at: approvalRecord.approved_at,
+      recorded_at: new Date().toISOString()
+    };
+    const riskTransitionAudit = {
+      run_id: runId,
+      session_id: sessionId,
+      issue_scope: issueScope,
+      prev_state: riskState,
+      next_state: riskState,
+      trigger: "gate_evaluation",
+      decision: gateDecision,
+      reason: gateReasons[0] ?? "GATE_DECISION_RECORDED",
+      approver: approvalRecord.approver
+    };
+    const gatePayload = {
+      plugin_gate_ownership: XHS_PLUGIN_GATE_OWNERSHIP,
+      scope_context: XHS_SCOPE_CONTEXT,
+      gate_input: {
+        run_id: runId,
+        session_id: sessionId,
+        profile,
+        issue_scope: issueScope,
+        target_domain: targetDomain,
+        target_tab_id: targetTabId,
+        target_page: targetPage,
+        action_type: actionType,
+        requested_execution_mode: requestedExecutionMode,
+        risk_state: riskState
+      },
+      gate_outcome: {
+        effective_execution_mode: effectiveExecutionMode,
+        gate_decision: gateDecision,
+        gate_reasons: gateReasons,
+        requires_manual_confirmation: requiresManualConfirmation
+      },
+      consumer_gate_result: consumerGateResult,
+      approval_record: approvalRecord,
+      issue_action_matrix: issueActionMatrixEntry,
+      risk_state_output: {
+        current_state: riskState,
+        risk_state_machine: {
+          states: [...XHS_RISK_STATE_MACHINE.states],
+          transitions: XHS_RISK_STATE_MACHINE.transitions.map((transition) => ({ ...transition })),
+          hard_block_when_paused: [...XHS_RISK_STATE_MACHINE.hard_block_when_paused]
+        },
+        issue_action_matrix: [
+          resolveIssueActionMatrixEntry("issue_208", riskState),
+          resolveIssueActionMatrixEntry("issue_209", riskState)
+        ]
+      },
+      audit_record: auditRecord,
+      risk_transition_audit: riskTransitionAudit
+    } satisfies Record<string, unknown>;
 
     return {
       allowed,
       targetTabId: allowed ? targetTabId : null,
       errorMessage: allowed ? "" : xhsGateReasonMessage(gateReasons[0] ?? "TARGET_TAB_NOT_EXPLICIT"),
-      consumerGateResult
+      consumerGateResult,
+      gatePayload
     };
   }
 
@@ -1088,9 +1400,24 @@ class ChromeBackgroundBridge {
       typeof payload.summary === "object" && payload.summary !== null
         ? (payload.summary as Record<string, unknown>)
         : null;
-    const hasGateResult =
-      "consumer_gate_result" in payload || (summary !== null && "consumer_gate_result" in summary);
-    if (pending.consumerGateResult && !hasGateResult) {
+    if (pending.gatePayload) {
+      for (const [key, value] of Object.entries(pending.gatePayload)) {
+        const hasInPayload = Object.prototype.hasOwnProperty.call(payload, key);
+        const hasInSummary =
+          summary !== null && Object.prototype.hasOwnProperty.call(summary, key);
+        if (!hasInPayload && !hasInSummary) {
+          if (summary !== null) {
+            summary[key] = value;
+          } else {
+            payload[key] = value;
+          }
+        }
+      }
+    } else if (
+      pending.consumerGateResult &&
+      !Object.prototype.hasOwnProperty.call(payload, "consumer_gate_result") &&
+      !(summary !== null && Object.prototype.hasOwnProperty.call(summary, "consumer_gate_result"))
+    ) {
       payload.consumer_gate_result = pending.consumerGateResult;
     }
 

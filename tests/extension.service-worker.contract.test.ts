@@ -88,9 +88,12 @@ const respondHandshake = (
 };
 
 const createXhsCommandParams = (overrides?: Record<string, unknown>) => ({
+  issue_scope: "issue_209",
   target_domain: "www.xiaohongshu.com",
   target_tab_id: 32,
   target_page: "search_result_tab",
+  action_type: "read",
+  risk_state: "paused",
   requested_execution_mode: "dry_run",
   ...overrides
 });
@@ -240,27 +243,30 @@ describe("extension service worker recovery contract", () => {
     );
     await Promise.resolve();
 
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-xhs-error-payload-001",
-        status: "error",
-        payload: {
-          consumer_gate_result: expect.objectContaining({
-            target_domain: "www.xiaohongshu.com",
-            target_tab_id: 32,
-            target_page: "search_result_tab",
-            requested_execution_mode: "dry_run",
-            effective_execution_mode: "dry_run"
-          }),
-          details: {
-            reason: "SESSION_EXPIRED"
-          },
-          diagnosis: {
-            category: "request_failed"
-          }
+    const forwardedError = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-error-payload-001");
+    expect(forwardedError).toMatchObject({
+      id: "run-xhs-error-payload-001",
+      status: "error",
+      payload: {
+        consumer_gate_result: {
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
+          requested_execution_mode: "dry_run",
+          effective_execution_mode: "dry_run",
+          issue_scope: "issue_209",
+          risk_state: "paused"
+        },
+        details: {
+          reason: "SESSION_EXPIRED"
+        },
+        diagnosis: {
+          category: "request_failed"
         }
-      })
-    );
+      }
+    });
   });
 
   it("pins xhs.search to xiaohongshu tab instead of generic active tab", async () => {
@@ -327,22 +333,27 @@ describe("extension service worker recovery contract", () => {
     );
     await Promise.resolve();
 
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-xhs-tab-pin-001",
-        status: "success",
-        payload: expect.objectContaining({
-          consumer_gate_result: expect.objectContaining({
+    const forwarded = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: { summary?: Record<string, unknown> } })
+      .find((message) => message.id === "run-xhs-tab-pin-001");
+    expect(forwarded).toMatchObject({
+      id: "run-xhs-tab-pin-001",
+      status: "success",
+      payload: {
+        summary: {
+          consumer_gate_result: {
             target_domain: "www.xiaohongshu.com",
             target_tab_id: 32,
             target_page: "search_result_tab",
             requested_execution_mode: "dry_run",
             effective_execution_mode: "dry_run",
-            gate_decision: "allowed"
-          })
-        })
-      })
-    );
+            gate_decision: "allowed",
+            issue_scope: "issue_209",
+            risk_state: "paused"
+          }
+        }
+      }
+    });
   });
 
   it("accepts real xhs.search payload shape and reads target gate fields from options", async () => {
@@ -655,9 +666,9 @@ describe("extension service worker recovery contract", () => {
     expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("forwards live_read_high_risk to content script and returns blocked gate result when approval is missing", async () => {
+  it("blocks live_read_high_risk in background gate when approval is missing", async () => {
     const firstPort = createMockPort();
-    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const { chromeApi } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
       { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
     ]);
@@ -674,7 +685,8 @@ describe("extension service worker recovery contract", () => {
         run_id: "run-xhs-live-mode-blocked-001",
         command: "xhs.search",
         command_params: createXhsCommandParams({
-          requested_execution_mode: "live_read_high_risk"
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed"
         }),
         cwd: "/workspace/WebEnvoy"
       },
@@ -683,46 +695,7 @@ describe("extension service worker recovery contract", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
-      32,
-      expect.objectContaining({
-        id: "run-xhs-live-mode-blocked-001",
-        command: "xhs.search"
-      })
-    );
-
-    runtimeMessageListeners[0]?.(
-      {
-        kind: "result",
-        id: "run-xhs-live-mode-blocked-001",
-        ok: false,
-        error: {
-          code: "ERR_EXECUTION_FAILED",
-          message: "执行模式门禁阻断了当前 xhs.search 请求"
-        },
-        payload: {
-          details: {
-            reason: "EXECUTION_MODE_GATE_BLOCKED"
-          },
-          consumer_gate_result: {
-            target_domain: "www.xiaohongshu.com",
-            target_tab_id: 32,
-            target_page: "search_result_tab",
-            action_type: "read",
-            requested_execution_mode: "live_read_high_risk",
-            effective_execution_mode: "dry_run",
-            gate_decision: "blocked",
-            gate_reasons: ["MANUAL_CONFIRMATION_MISSING"]
-          }
-        }
-      },
-      {
-        tab: {
-          id: 32
-        }
-      }
-    );
-    await Promise.resolve();
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
 
     const blocked = firstPort.postMessage.mock.calls
       .map((call) => call[0] as {
@@ -733,6 +706,8 @@ describe("extension service worker recovery contract", () => {
             reason?: string;
           };
           consumer_gate_result?: {
+            risk_state?: string;
+            issue_scope?: string;
             target_domain?: string | null;
             target_tab_id?: number | null;
             target_page?: string | null;
@@ -749,10 +724,27 @@ describe("extension service worker recovery contract", () => {
       id: "run-xhs-live-mode-blocked-001",
       status: "error",
       payload: {
-        details: {
-          reason: "EXECUTION_MODE_GATE_BLOCKED"
+        plugin_gate_ownership: {
+          background_gate: [
+            "target_domain_check",
+            "target_tab_check",
+            "mode_gate",
+            "risk_state_gate"
+          ],
+          content_script_gate: ["page_context_check", "action_tier_check"],
+          main_world_gate: ["signed_call_scope_check"],
+          cli_role: "request_and_result_shell_only"
+        },
+        risk_transition_audit: {
+          issue_scope: "issue_209",
+          prev_state: "allowed",
+          next_state: "allowed",
+          trigger: "gate_evaluation",
+          decision: "blocked"
         },
         consumer_gate_result: {
+          issue_scope: "issue_209",
+          risk_state: "allowed",
           target_domain: "www.xiaohongshu.com",
           target_tab_id: 32,
           target_page: "search_result_tab",
@@ -760,7 +752,71 @@ describe("extension service worker recovery contract", () => {
           requested_execution_mode: "live_read_high_risk",
           effective_execution_mode: "dry_run",
           gate_decision: "blocked",
-          gate_reasons: ["MANUAL_CONFIRMATION_MISSING"]
+          gate_reasons: ["MANUAL_CONFIRMATION_MISSING", "APPROVAL_CHECKS_INCOMPLETE"]
+        }
+      }
+    });
+  });
+
+  it("blocks live_read_high_risk in paused state even with approval", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-mode-paused-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-mode-paused-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "paused",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as {
+        id?: string;
+        status?: string;
+        payload?: {
+          consumer_gate_result?: {
+            gate_reasons?: string[];
+          };
+        };
+      })
+      .find((message) => message.id === "run-xhs-live-mode-paused-001");
+    expect(blocked).toMatchObject({
+      id: "run-xhs-live-mode-paused-001",
+      status: "error",
+      payload: {
+        consumer_gate_result: {
+          gate_reasons: ["ISSUE_ACTION_BLOCKED_BY_STATE_MATRIX", "RISK_STATE_PAUSED"]
         }
       }
     });
@@ -785,7 +841,20 @@ describe("extension service worker recovery contract", () => {
         run_id: "run-xhs-live-mode-approved-001",
         command: "xhs.search",
         command_params: createXhsCommandParams({
-          requested_execution_mode: "live_read_high_risk"
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
         }),
         cwd: "/workspace/WebEnvoy"
       },
