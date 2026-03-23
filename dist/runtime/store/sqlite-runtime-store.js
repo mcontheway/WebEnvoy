@@ -642,7 +642,12 @@ export class SQLiteRuntimeStore {
         if (!isIsoLike(input.recordedAt)) {
             throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid recorded_at");
         }
-        if (input.gateDecision === "allowed" &&
+        const requiresApprovalEvidence = input.gateDecision === "allowed" &&
+            (input.requestedExecutionMode === "live_read_high_risk" ||
+                input.requestedExecutionMode === "live_write" ||
+                input.effectiveExecutionMode === "live_read_high_risk" ||
+                input.effectiveExecutionMode === "live_write");
+        if (requiresApprovalEvidence &&
             (!input.approver?.trim() || !input.approvedAt || !isIsoLike(input.approvedAt))) {
             throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "allowed record requires approver and approved_at");
         }
