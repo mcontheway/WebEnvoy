@@ -55,6 +55,7 @@
 - 门禁生效模式必须写入 `effective_execution_mode`。
 - 默认生效模式必须为 `dry_run` 或 `recon`。
 - `live_read_limited`、`live_read_high_risk` 与 `live_write` 进入 live 前都必须满足升级前置；若前置缺失则默认阻断。
+- `live_read_limited` 只允许用于读动作，不得被写动作或不可逆写动作请求或生效。
 - 升级 live 前置至少包含：
   - 风险状态检查通过
   - 人工确认通过

@@ -68,6 +68,7 @@
 
 1. `target_tab_id` 与 `target_page` 必须共同表达“目标 tab + 页面语义”；不允许只给页面类型字符串替代 tab 选择边界。
 2. `requested_execution_mode` 只表示请求方模式，不承载门禁降级后的实际执行结果。
+3. `requested_execution_mode=live_read_limited` 只允许与 `action_type=read` 搭配；写动作或不可逆写动作不得请求该模式。
 
 ## gate_outcome
 
@@ -93,6 +94,7 @@
 3. `gate_reasons` 不得为空，必须可用于审计复盘。
 4. `gate_decision` 在整个 FR-0010 套件中固定为标量枚举，不可作为对象层名称复用。
 5. `gate_decision=blocked` 时，`effective_execution_mode` 只允许表示真实未继续 live 的降级模式，不得返回未实际执行的 `live_*`。
+6. `effective_execution_mode=live_read_limited` 只允许表示读动作的真实继续执行路径，不得用于写动作或不可逆写动作。
 
 ## approval_record
 

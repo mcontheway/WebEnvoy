@@ -54,9 +54,12 @@
 
 - 合约层验证：
   - 门禁对象字段完整性、枚举值合法性、回退语义稳定。
+  - `live_read_limited` 仅允许绑定 `action_type=read`，不得扩展为写路径共享模式。
+  - `gate_decision=blocked` 时 `effective_execution_mode` 只能回落到真实未继续 live 的模式。
 - 行为层验证：
   - 未满足前置时默认 `dry_run/recon`；
   - 高风险 live 被阻断；
+  - `live_read_limited` 在非读动作下必须阻断；
   - 目标页未确认时阻断；
   - 审批记录缺失时阻断。
 - 事项联动验证：

@@ -21,6 +21,7 @@
 
 1. 所有门禁请求都必须提供 `target_tab_id` 与 `target_page`，不得在非 live 请求中留空。
 2. `target_domain` 必须属于 `scope_context` 定义的读域或写域之一。
+3. `requested_execution_mode=live_read_limited` 只允许与 `action_type=read` 搭配。
 
 ## 实体 2：GateDecision
 
@@ -37,6 +38,7 @@
 1. `gate_decision=blocked` 时，`gate_reasons` 必须至少包含 1 项。
 2. 默认情况下 `effective_execution_mode` 不得为 `live_*`。
 3. `gate_decision=blocked` 时，`effective_execution_mode` 只能表示真实未继续 live 的降级模式，不得返回未实际执行的 `live_*`。
+4. `effective_execution_mode=live_read_limited` 只允许与读动作绑定，不得作为写动作或不可逆写动作的生效模式。
 
 ## 实体 3：ApprovalRecord
 
