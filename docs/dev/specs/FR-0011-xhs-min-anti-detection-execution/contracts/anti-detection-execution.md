@@ -53,13 +53,12 @@
     "allowed_modes": ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
     "blocked_actions": ["expand_new_live_surface_without_gate"],
     "live_entry_requirements": [
-      "risk_state_not_paused_for_live_eligibility",
+      "gate_input_risk_state_limited_or_allowed",
       "risk_state_checked",
       "target_domain_confirmed",
       "target_tab_confirmed",
       "target_page_confirmed",
       "action_type_confirmed",
-      "manual_confirmation_recorded",
       "approval_record_approved_true",
       "approval_record_approver_present",
       "approval_record_approved_at_present",
@@ -76,9 +75,11 @@
 - `live_read_limited` 是正式公开的受控 live 读模式，可由外部请求方显式请求。
 - `live_read_limited` 与 `live_read_high_risk` 进入 live 前都必须满足 `live_entry_requirements`，且审批证据要求不可分叉。
 - `live_entry_requirements` 仅定义 live 读模式共享必备前置；其满足仅表示进入 live 判定所需必要条件，不表示在当前 `risk_state` 自动放行全部 live 读模式。
+- `gate_input_risk_state_limited_or_allowed` 表示 `FR-0010.gate_input.risk_state` 只能为 `limited` 或 `allowed`；若为 `paused`，不得进入 live 判定。
 - `approval_record_approved_true` 表示 `FR-0010.approval_record.approved=true`；`approval_record_approver_present` / `approval_record_approved_at_present` 表示 `approver` 与 `approved_at` 已填写。
 - `approval_record_checks_all_true` 表示 `FR-0010.approval_record.checks.target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`risk_state_checked`、`action_type_confirmed` 全为 `true`。
 - `audit_record_present` 表示存在可检索的 `FR-0010.audit_record`；`audit_record_approver_present_when_allowed` / `audit_record_approved_at_present_when_allowed` 表示 `gate_decision=allowed` 时，审计记录中的 `approver` 与 `approved_at` 已填写。
+- `manual_confirmation_recorded` 不再作为独立机器条件名存在；人工确认的正式机器承载统一落在 `approval_record.approved=true`、`approver`、`approved_at` 与完整 `checks` 上。
 - `live_entry_requirements` 必须与 `FR-0010.approval_record` / `FR-0010.audit_record` 的完整审批与审计证据保持同一口径，至少显式覆盖 `risk_state_checked` 与 `action_type_confirmed`，不允许保留更宽松的只读前置。
 - 具体 `(issue_scope, state, execution_mode)` 是否允许，必须再受 `issue_action_matrix` 的显式边界约束；若与 `live_entry_requirements` 出现冲突，以 `issue_action_matrix` 为准。
 - 若请求被门禁阻断，`effective_execution_mode` 不得表达未实际继续执行的 `live_*` 模式。
@@ -141,6 +142,7 @@
         "issue_scope": "issue_208",
         "state": "paused",
         "allowed_actions": ["dry_run", "recon"],
+        "conditional_actions": [],
         "blocked_actions": [
           "live_read_limited",
           "live_read_high_risk",
@@ -154,6 +156,7 @@
         "issue_scope": "issue_208",
         "state": "limited",
         "allowed_actions": ["dry_run", "recon", "reversible_interaction_with_approval"],
+        "conditional_actions": [],
         "blocked_actions": [
           "live_read_limited",
           "live_read_high_risk",
@@ -166,6 +169,7 @@
         "issue_scope": "issue_208",
         "state": "allowed",
         "allowed_actions": ["dry_run", "recon", "reversible_interaction_with_approval"],
+        "conditional_actions": [],
         "blocked_actions": [
           "live_read_limited",
           "live_read_high_risk",
@@ -178,6 +182,7 @@
         "issue_scope": "issue_209",
         "state": "paused",
         "allowed_actions": ["dry_run", "recon"],
+        "conditional_actions": [],
         "blocked_actions": [
           "live_read_limited",
           "live_read_high_risk",
@@ -260,6 +265,7 @@
 - `paused` 下两者都不得包含任何 live 写或高风险 live 读动作。
 - `limited` 下 `issue_208` 不得包含不可逆写动作。
 - 每个 `(issue_scope, state)` 都必须同时定义 `allowed_actions` 与 `blocked_actions`；若存在需附加审批/审计前置的动作，还必须定义 `conditional_actions`，不得把条件放行集合留给实现阶段猜测。
+- `conditional_actions` 在所有 entry 中都必须显式出现；无条件动作场景下使用空数组，不得靠字段缺失表达“无条件动作”。
 - `allowed_actions` 仅表示无需额外审批前置即可执行的动作；`conditional_actions` 表示命中当前 `(issue_scope, state)` 后仍需满足 `requires` 中附加审批/审计条件的动作。
 - live 读模式不得以裸字符串形式出现在 `allowed_actions` 中；若需审批证据，必须落入 `conditional_actions` 并显式列出 `requires`。
 - `issue_209` 在 `limited` 下仅可通过 `conditional_actions` 放行 `live_read_limited`，不得放行 `live_read_high_risk`。

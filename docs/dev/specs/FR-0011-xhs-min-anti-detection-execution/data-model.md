@@ -27,7 +27,7 @@
 - `default_mode` 在 FR-0011 生效阶段只能是 `dry_run` 或 `recon`，不得为任何 `live_*`。
 - `live_read_limited` 作为 `allowed_modes` 成员时，表示正式公开的受控 live 模式，不得仅作为内部 fallback 枚举存在。
 - `blocked_actions` 为空时视为无效对象。
-- `live_entry_requirements` 必须显式覆盖 `risk_state_checked`、`target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`action_type_confirmed`、人工确认、完整审批证据与审计证据，不得弱于 `FR-0010.ApprovalRecord` / `FR-0010.AuditRecord`。
+- `live_entry_requirements` 必须显式覆盖 `FR-0010.GateInput.risk_state` 的 live 准入边界、`target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`action_type_confirmed`、以及完整审批证据与审计证据，不得弱于 `FR-0010.ApprovalRecord` / `FR-0010.AuditRecord`。
 
 ## 实体 3：WriteInteractionTier
 
@@ -75,6 +75,7 @@
 - `paused` 的 `allowed_actions` 只能包含 `dry_run` 或 `recon` 类动作。
 - `conditional_actions` 的每个元素必须至少包含 `action` 与 `requires` 两个字段。
 - `conditional_actions.requires` 只允许引用已在 `ReadExecutionPolicy.live_entry_requirements` 中冻结的机器条件名。
+- 所有 `IssueActionMatrix` entry 都必须显式包含 `conditional_actions`；当不存在附加前置动作时，取空数组。
 - `paused` 的 `blocked_actions` 必须显式覆盖所有 live 动作，不得依赖实现推断补全。
 - `issue_208` 在 `limited` 下不得出现不可逆写动作。
 - `blocked_actions` 不得为空，必须与 `allowed_actions`、`conditional_actions` 一起定义完整边界。
