@@ -66,6 +66,7 @@
 - `issue_208` 与 `issue_209` 必须覆盖相同的 `state` 枚举集合。
 - `paused` 的 `allowed_actions` 只能包含 `dry_run` 或 `recon` 类动作。
 - `issue_208` 在 `limited` 下不得出现不可逆写动作。
+- `blocked_actions` 不得为空，必须与 `allowed_actions` 一起定义完整边界。
 
 ## 实体 7：RiskTransitionAuditRecord
 
@@ -82,6 +83,7 @@
 
 约束：
 - 缺失 `run_id/session_id/prev_state/next_state/decision/reason` 任一字段时，状态变更无效。
+- 缺失 `approver/approved_at` 时，不得把依赖人工确认的状态恢复判定为有效。
 - 状态变更无效时，执行层必须回退到 `paused` 并阻断 live。
 
 ## 生命周期

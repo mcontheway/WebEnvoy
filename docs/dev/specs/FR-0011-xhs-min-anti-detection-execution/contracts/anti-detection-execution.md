@@ -11,7 +11,7 @@
 
 ## 输出对象
 
-必须包含以下五个对象：
+必须包含以下七个对象：
 1. `plugin_gate_ownership`
 2. `read_execution_policy`
 3. `write_interaction_tier`
@@ -108,12 +108,14 @@
     "issue_208": {
       "paused": ["dry_run", "recon"],
       "limited": ["recon", "reversible_interaction_with_approval"],
-      "allowed": ["approved_scope_actions"]
+      "allowed": ["approved_scope_actions"],
+      "blocked_actions": ["live_write", "irreversible_write"]
     },
     "issue_209": {
       "paused": ["dry_run", "recon"],
       "limited": ["recon", "live_read_limited_with_approval"],
-      "allowed": ["approved_scope_actions"]
+      "allowed": ["approved_scope_actions"],
+      "blocked_actions": ["live_write", "expand_new_live_surface_without_gate"]
     }
   }
 }
@@ -123,6 +125,7 @@
 - `issue_208` 与 `issue_209` 必须共享同一状态集合（`paused/limited/allowed`）。
 - `paused` 下两者都不得包含任何 live 写或高风险 live 读动作。
 - `limited` 下 `issue_208` 不得包含不可逆写动作。
+- 每个 issue scope 都必须显式给出 `blocked_actions`，不得把阻断集合留给实现阶段猜测。
 
 ## risk_transition_audit
 
@@ -137,7 +140,9 @@
       "next_state",
       "trigger",
       "decision",
-      "reason"
+      "reason",
+      "approver",
+      "approved_at"
     ],
     "on_missing_record": "force_pause_and_block_live",
     "rollback_entrypoint": "risk_state_reset_to_paused"
