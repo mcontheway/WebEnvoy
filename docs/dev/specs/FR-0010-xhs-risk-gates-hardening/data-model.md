@@ -19,7 +19,7 @@
 
 约束：
 
-1. `requested_execution_mode` 为 `live_*` 时，`target_tab_id` 与 `target_page` 均不得为空。
+1. 所有门禁请求都必须提供 `target_tab_id` 与 `target_page`，不得在非 live 请求中留空。
 2. `target_domain` 必须属于 `scope_context` 定义的读域或写域之一。
 
 ## 实体 2：GateDecision
