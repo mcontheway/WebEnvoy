@@ -16,9 +16,10 @@
 
 1. `scope_context`
 2. `gate_input`
-3. `gate_decision`
+3. `gate_outcome`
 4. `approval_record`
 5. `audit_record`
+6. `consumer_gate_result`
 
 ## scope_context
 
@@ -47,9 +48,10 @@
     "session_id": "nm-session-001",
     "profile": "xhs_account_001",
     "target_domain": "www.xiaohongshu.com",
-    "target_tab_id": 32,
+    "target_tab_id": 924,
+    "target_page": "search_result_tab",
     "action_type": "read",
-    "requested_mode": "live_read_high_risk",
+    "requested_execution_mode": "live_read_high_risk",
     "risk_state": "paused"
   }
 }
@@ -58,17 +60,22 @@
 枚举：
 
 - `action_type`: `read | write | irreversible_write`
-- `requested_mode`: `dry_run | recon | live_read_high_risk | live_write`
+- `requested_execution_mode`: `dry_run | recon | live_read_high_risk | live_write`
 - `risk_state`: `paused | limited | allowed`
 
-## gate_decision
+约束：
+
+1. `target_tab_id` 与 `target_page` 必须共同表达“目标 tab + 页面语义”；不允许只给页面类型字符串替代 tab 选择边界。
+2. `requested_execution_mode` 只表示请求方模式，不承载门禁降级后的实际执行结果。
+
+## gate_outcome
 
 ```json
 {
-  "gate_decision": {
-    "effective_mode": "dry_run",
-    "decision": "blocked",
-    "reasons": [
+  "gate_outcome": {
+    "effective_execution_mode": "dry_run",
+    "gate_decision": "blocked",
+    "gate_reasons": [
       "TARGET_TAB_NOT_EXPLICIT",
       "RISK_STATE_PAUSED",
       "MANUAL_CONFIRMATION_MISSING"
@@ -80,9 +87,10 @@
 
 约束：
 
-1. 默认 `effective_mode` 必须是 `dry_run` 或 `recon`。
-2. `requested_mode` 为 `live_*` 时，如任一前置缺失必须 `decision=blocked`。
-3. `reasons` 不得为空，必须可用于审计复盘。
+1. 默认 `effective_execution_mode` 必须是 `dry_run` 或 `recon`。
+2. `requested_execution_mode` 为 `live_*` 时，如任一前置缺失必须 `gate_decision=blocked`。
+3. `gate_reasons` 不得为空，必须可用于审计复盘。
+4. `gate_decision` 在整个 FR-0010 套件中固定为标量枚举，不可作为对象层名称复用。
 
 ## approval_record
 
@@ -94,7 +102,8 @@
     "approved_at": null,
     "checks": {
       "target_domain_confirmed": true,
-      "target_page_confirmed": false,
+      "target_tab_confirmed": true,
+      "target_page_confirmed": true,
       "risk_state_checked": true,
       "action_type_confirmed": true
     }
@@ -115,11 +124,20 @@
     "event_id": "gate_evt_001",
     "run_id": "run_001",
     "session_id": "nm-session-001",
+    "profile": "xhs_account_001",
     "target_domain": "www.xiaohongshu.com",
+    "target_tab_id": 924,
+    "target_page": "search_result_tab",
     "action_type": "read",
-    "requested_mode": "live_read_high_risk",
-    "effective_mode": "dry_run",
-    "decision": "blocked",
+    "requested_execution_mode": "live_read_high_risk",
+    "effective_execution_mode": "dry_run",
+    "gate_decision": "blocked",
+    "gate_reasons": [
+      "RISK_STATE_PAUSED",
+      "MANUAL_CONFIRMATION_MISSING"
+    ],
+    "approver": null,
+    "approved_at": null,
     "recorded_at": "2026-03-22T08:00:00Z"
   }
 }
@@ -129,9 +147,46 @@
 
 1. 每次门禁判定都必须生成审计记录。
 2. 记录必须可被 `run_id/session_id` 检索。
+3. `gate_reasons` 不得为空，必须能独立解释本次放行或阻断原因。
+4. 若 `gate_decision=allowed`，`approver` 与 `approved_at` 必填；若为阻断，可为空。
+
+## consumer_gate_result
+
+`#208` 与 `#209` 必须消费同一个标准化对象，不允许定义私有判定字段绕过门禁：
+
+```json
+{
+  "consumer_gate_result": {
+    "target_domain": "www.xiaohongshu.com",
+    "target_tab_id": 924,
+    "target_page": "search_result_tab",
+    "action_type": "read",
+    "requested_execution_mode": "live_read_high_risk",
+    "effective_execution_mode": "dry_run",
+    "gate_decision": "blocked",
+    "gate_reasons": [
+      "RISK_STATE_PAUSED"
+    ]
+  }
+}
+```
+
+约束：
+
+1. `target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons` 为冻结字段。
+2. `#208` 与 `#209` 只允许追加附加字段，不允许重定义冻结字段语义。
+
+## #223 统一状态机锚点（规约层）
+
+`#223` 在 Sprint 2 仅允许扩展本契约，不允许新建并行门禁契约。可引用锚点如下：
+
+1. `gate_input.risk_state`：统一状态机的输入状态集合（当前 `paused|limited|allowed`）。
+2. `gate_outcome.gate_decision` + `gate_outcome.gate_reasons`：统一阻断策略的可审计输出边界。
+3. `audit_record`：统一状态机与阻断策略的追溯记录载体。
 
 ## 兼容性
 
 1. 新增字段可追加，不允许改变既有字段语义。
-2. `decision` 枚举值变更必须经过独立 spec review。
-3. `reasons` 的新增代码允许追加，不允许复用同义码造成歧义。
+2. FR-0009 作为治理基线保留；Sprint 2 实现统一消费本契约对象。
+3. `gate_decision` 枚举值变更必须经过独立 spec review。
+4. `gate_reasons` 的新增代码允许追加，不允许复用同义码造成歧义。

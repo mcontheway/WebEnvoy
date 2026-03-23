@@ -33,10 +33,22 @@
 - 回滚：
   - 视作审批无效，统一降级为 `dry_run/recon`。
 
+## 风险 4：#218/#219/#221 并行实施导致门禁字段漂移
+
+- 等级：high
+- 触发条件：三个 issue 各自定义门禁字段或枚举，未共享冻结对象。
+- 影响：`#208/#209` 需要按事项分支写兼容逻辑，出现绕过统一门禁的路径。
+- 缓解：
+  - 在 FR-0010 固定统一消费字段（`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`）。
+  - 将字段语义变更纳入独立 spec review，不在实现期临时改动。
+- 回滚：
+  - 发现字段漂移时立即回到 FR-0010 契约版本，阻断 live 升级。
+
 ## Stop-Ship 条件
 
 - 未通过 FR-0010 spec review 即恢复 `#208` live 正式验证。
 - 在无审批记录情况下放行 `live_read_high_risk` 或 `live_write`。
+- `#208/#209` 不消费统一门禁对象而采用私有判定字段。
 
 ## 回滚策略
 

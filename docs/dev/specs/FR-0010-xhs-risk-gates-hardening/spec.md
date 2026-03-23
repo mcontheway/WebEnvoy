@@ -2,9 +2,17 @@
 
 ## 背景
 
-`FR-0009` 已经冻结了“XHS 读写路径风险审查与保护门禁”的规约边界，但当前仓库仍缺少实现级门禁能力。`#209` 的读路径已经落地，`#208` 的最小页面交互验证仍待推进；若不先完成执行硬化，后续 live 验证和功能实现会持续放大账号与风控风险。
+`FR-0009` 已经冻结了“XHS 读写路径风险审查与保护门禁”的治理边界，但当前仓库仍缺少实现级门禁能力。`#209` 的读路径已经落地，`#208` 的最小页面交互验证仍待推进；若不先完成执行硬化，后续 live 验证和功能实现会持续放大账号与风控风险。
 
-本 FR 对应 `#220`，用于把 Sprint 2 的门禁前置落到可执行能力，作为 `#208` 与 `#209` 后续 live 扩展的统一准入。
+`FR-0010` 在 Sprint 2 作为 `FR-0009` 的执行契约替代层：`FR-0009` 保留治理基线，`FR-0010` 提供实现前可直接消费的单一机器契约。
+
+本 FR 对应 `#220`，并承载 Sprint 2 的三条实现项：
+
+- `#218`：读写域分离与目标域/目标页显式确认
+- `#219`：执行模式门禁（默认 `dry_run/recon`，live 升级显式放行）
+- `#221`：人工确认与审计记录链路
+
+目标是把 Sprint 2 的门禁前置落到可执行能力，作为 `#208` 与 `#209` 后续 live 扩展的统一准入。
 
 ## 目标
 
@@ -13,6 +21,7 @@
 3. 建立默认 `dry_run/recon` 执行模式，并定义升级到 live 的前置条件。
 4. 建立人工确认与审计记录最小闭环，支持事后追溯与回滚。
 5. 将 `#208` 与 `#209` 统一纳入同一门禁模型。
+6. 冻结统一门禁输出对象，确保 `#208/#209` 消费同一字段口径（`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`）。
 
 ## 非目标
 
@@ -23,7 +32,7 @@
 
 ## 功能需求
 
-### 1. 读域/写域分离门禁
+### 1. 读域/写域分离门禁（承载 #218）
 
 - 必须显式区分：
   - 读域：`www.xiaohongshu.com`
@@ -31,31 +40,34 @@
 - 任意执行请求必须在门禁阶段声明目标域与动作类型。
 - 禁止以读域可用性推导写域放行，反之亦然。
 
-### 2. 显式目标域/目标页确认
+### 2. 显式目标域/目标页确认（承载 #218）
 
 - 高风险动作不得走“后台自动选页即执行”的默认路径。
 - 执行前必须完成：
   - 目标域确认
-  - 目标页确认（tab/page）
+  - 目标页确认（必须同时给出 `target_tab_id` 与 `target_page`，防止退化为页面类型字符串）
   - 动作类型确认（读、写、不可逆写）
+- 所有门禁请求都必须显式携带 `target_tab_id` 与 `target_page`；不得只在 `live_*` 请求中临时补齐。
 
-### 3. 执行模式门禁
+### 3. 执行模式门禁（承载 #219）
 
-- 默认模式必须为 `dry_run` 或 `recon`。
+- 请求方模式必须写入 `requested_execution_mode`。
+- 门禁生效模式必须写入 `effective_execution_mode`。
+- 默认生效模式必须为 `dry_run` 或 `recon`。
 - `live_read_high_risk` 与 `live_write` 默认阻断，只有在升级前置满足时才允许进入。
 - 升级 live 前置至少包含：
   - 风险状态检查通过
   - 人工确认通过
   - 审批记录落盘
 
-### 4. 人工确认与审计
+### 4. 人工确认与审计（承载 #221）
 
 - 门禁实现必须记录最小审计信息：
   - run_id / session_id / profile
-  - target_domain / target_page
-  - action_type / execution_mode
+  - target_domain / target_tab_id / target_page
+  - action_type / requested_execution_mode / effective_execution_mode
   - approver / approved_at
-  - gate_decision / gate_reason
+  - gate_decision / gate_reasons
 - 任意 live 放行必须可追溯到审批记录。
 
 ### 5. 与 #208 / #209 的统一约束
@@ -63,6 +75,24 @@
 - `#208` 的 live 正式验证必须依赖本 FR 门禁实现。
 - `#209` 的后续 live 扩展也必须服从同一门禁，不得豁免。
 - 对外输出必须给出可消费的门禁结论对象，避免后续事项口头解释。
+
+### 6. 统一消费对象冻结
+
+- 门禁输出必须包含并冻结以下最小字段：
+  - `target_domain`
+  - `target_tab_id`
+  - `target_page`
+  - `action_type`
+  - `requested_execution_mode`
+  - `effective_execution_mode`
+  - `gate_decision`
+  - `gate_reasons`
+- `#208` 与 `#209` 不得定义私有门禁字段绕过上述对象。
+
+### 7. #223 统一状态机与阻断策略归属锚点（规约层）
+
+- `#223` 的 Sprint 2 统一风险状态机与阻断策略，归属在 FR-0010 套件内扩展，不再新增并行门禁契约。
+- `#223` 仅允许在 FR-0010 的 `risk_state`、`gate_decision` 与 `gate_reasons` 语义上做规约层收口；本 FR 不扩展到代码实现承诺。
 
 ## GWT 验收场景
 
@@ -114,13 +144,23 @@ And 不存在某一事项绕过门禁的路径
 1. FR-0010 套件完整并通过 spec review。
 2. 读域/写域分离规则已定义为执行前硬门禁。
 3. 默认模式为 `dry_run/recon`，高风险 live 默认阻断。
-4. 显式目标域/目标页确认、人工确认、审计记录要求均已冻结。
+4. 显式目标域/目标页确认（含 `target_tab_id`）、人工确认、审计记录要求均已冻结。
 5. `#208` 与 `#209` 的后续 live 扩展前置条件已统一。
 6. 输出对象可被实现层与后续事项稳定消费。
+7. `requested_execution_mode` 与 `effective_execution_mode` 语义已无歧义。
+8. `gate_decision`（标量）与 `gate_outcome`（对象层）命名冲突已消除。
+9. `gate_reasons` 为唯一正式原因字段。
+
+## 与 FR-0009 的替代与兼容关系
+
+- 关系声明：`FR-0009` 继续作为治理基线；Sprint 2 实现与测试统一消费 `FR-0010` 契约对象。
+- 替代范围：`FR-0009` 的 `execution_mode_gate` 与 `resume_requirements` 在实现入口侧由 FR-0010 的 `gate_input/gate_outcome/approval_record/audit_record/consumer_gate_result` 承接。
+- 兼容要求：若存在旧消费者仍依赖 FR-0009 字段，必须在实现 PR 提供显式映射，不得在 FR-0010 契约中并存双语义字段。
+- 迁移完成判定：`#218/#219/#221/#208/#209` 仅消费 FR-0010 冻结字段后，FR-0009 机器字段视为历史参考，不再作为实现准入输入。
 
 ## 依赖与前置条件
 
-- 输入事项：`#220`、`#213`、`#208`、`#209`、`#216`
+- 输入事项：`#220`、`#218`、`#219`、`#221`、`#223`、`#213`、`#208`、`#209`、`#216`
 - 规约基线：`FR-0009`
 - 架构约束：
   - `docs/dev/architecture/system-design/read-write.md`
