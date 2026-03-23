@@ -105,20 +105,96 @@ interface NativeHeartbeatMessage {
 }
 
 type NativeBridgeState = "connecting" | "ready" | "recovering" | "disconnected";
+type XhsActionType = "read" | "write" | "irreversible_write";
+type XhsExecutionMode = "dry_run" | "recon" | "live_read_high_risk" | "live_write";
 
-const scoreXhsTab = (tab: ExtensionTab): number => {
-  const url = typeof tab.url === "string" ? tab.url : "";
-  if (url.includes("/search_result")) {
-    return 0;
+interface XhsTargetGateResult {
+  allowed: boolean;
+  targetTabId: number | null;
+  errorMessage: string;
+  consumerGateResult: {
+    target_domain: string | null;
+    target_tab_id: number | null;
+    target_page: string | null;
+    action_type: XhsActionType;
+    requested_execution_mode: XhsExecutionMode;
+    effective_execution_mode: XhsExecutionMode;
+    gate_decision: "allowed" | "blocked";
+    gate_reasons: string[];
+  };
+}
+
+const XHS_READ_DOMAIN = "www.xiaohongshu.com";
+const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
+const XHS_DOMAIN_ALLOWLIST = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
+const XHS_EXECUTION_MODES = new Set<XhsExecutionMode>([
+  "dry_run",
+  "recon",
+  "live_read_high_risk",
+  "live_write"
+]);
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const parseUrl = (value: string): URL | null => {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
   }
-  if (url.includes("/explore/")) {
-    return 1;
-  }
-  if (url.includes("/user/profile/")) {
-    return 2;
-  }
-  return 3;
 };
+
+const classifyXhsPage = (url: string, domain: string): string => {
+  const parsed = parseUrl(url);
+  if (!parsed) {
+    return "unknown_tab";
+  }
+
+  const pathname = parsed.pathname;
+  if (domain === XHS_READ_DOMAIN) {
+    if (pathname.includes("/search_result")) {
+      return "search_result_tab";
+    }
+    if (pathname.includes("/explore/")) {
+      return "explore_detail_tab";
+    }
+    if (pathname.includes("/user/profile/")) {
+      return "profile_tab";
+    }
+    if (pathname.includes("/home")) {
+      return "home_tab";
+    }
+    return "read_unknown_tab";
+  }
+
+  if (pathname.includes("/publish")) {
+    return "creator_publish_tab";
+  }
+  return "creator_home_tab";
+};
+
+const xhsGateReasonMessage = (reason: string): string => {
+  const mapping: Record<string, string> = {
+    TARGET_DOMAIN_NOT_EXPLICIT: "target domain must be explicit",
+    TARGET_DOMAIN_OUT_OF_SCOPE: "target domain is out of xhs read/write scope",
+    TARGET_TAB_NOT_EXPLICIT: "target tab is not explicit",
+    TARGET_PAGE_NOT_EXPLICIT: "target page is not explicit",
+    ACTION_DOMAIN_MISMATCH: "read action cannot target write domain",
+    TARGET_TAB_NOT_FOUND: "target tab is unavailable",
+    TARGET_DOMAIN_MISMATCH: "target tab domain does not match target_domain",
+    TARGET_PAGE_MISMATCH: "target tab page does not match target_page",
+    TARGET_TAB_URL_INVALID: "target tab url is invalid"
+  };
+  return mapping[reason] ?? "xhs target gate blocked";
+};
+
+const resolveRequestedExecutionMode = (value: unknown): XhsExecutionMode =>
+  typeof value === "string" && XHS_EXECUTION_MODES.has(value as XhsExecutionMode)
+    ? (value as XhsExecutionMode)
+    : "dry_run";
 
 export class BackgroundRelay {
   #listeners = new Set<NativeMessageListener>();
@@ -766,7 +842,32 @@ class ChromeBackgroundBridge {
 
   async #dispatchForward(request: BridgeRequest, deadlineMs?: number): Promise<void> {
     const requestDeadlineMs = deadlineMs ?? Date.now() + this.#resolveForwardTimeoutMs(request);
-    const tabId = await this.#resolveTargetTabId(request);
+    const command = String(request.params.command ?? "");
+    let tabId: number | null;
+    if (command === "xhs.search") {
+      const gateResult = await this.#evaluateXhsTargetGate(request);
+      if (!gateResult.allowed || !gateResult.targetTabId) {
+        this.#emit({
+          id: request.id,
+          status: "error",
+          summary: {
+            relay_path: "host>background>content-script>background>host"
+          },
+          payload: {
+            consumer_gate_result: gateResult.consumerGateResult
+          },
+          error: {
+            code: "ERR_TRANSPORT_FORWARD_FAILED",
+            message: gateResult.errorMessage
+          }
+        });
+        return;
+      }
+      tabId = gateResult.targetTabId;
+    } else {
+      tabId = await this.#resolveTargetTabId(request);
+    }
+
     if (!tabId) {
       this.#emit({
         id: request.id,
@@ -832,6 +933,90 @@ class ChromeBackgroundBridge {
         message: "content script dispatch failed"
       });
     }
+  }
+
+  async #evaluateXhsTargetGate(request: BridgeRequest): Promise<XhsTargetGateResult> {
+    const commandParams = asRecord(request.params.command_params) ?? {};
+    const targetDomain =
+      typeof commandParams.target_domain === "string" && commandParams.target_domain.trim().length > 0
+        ? commandParams.target_domain.trim()
+        : null;
+    const targetTabId =
+      typeof commandParams.target_tab_id === "number" && Number.isInteger(commandParams.target_tab_id)
+        ? commandParams.target_tab_id
+        : null;
+    const targetPage =
+      typeof commandParams.target_page === "string" && commandParams.target_page.trim().length > 0
+        ? commandParams.target_page.trim()
+        : null;
+    const actionType: XhsActionType = "read";
+    const requestedExecutionMode = resolveRequestedExecutionMode(
+      commandParams.requested_execution_mode
+    );
+    // #218 only handles target gate; keep execution mode unchanged here.
+    const effectiveExecutionMode: XhsExecutionMode = requestedExecutionMode;
+
+    const gateReasons: string[] = [];
+    if (!targetDomain) {
+      gateReasons.push("TARGET_DOMAIN_NOT_EXPLICIT");
+    } else if (!XHS_DOMAIN_ALLOWLIST.has(targetDomain)) {
+      gateReasons.push("TARGET_DOMAIN_OUT_OF_SCOPE");
+    }
+
+    if (targetTabId === null) {
+      gateReasons.push("TARGET_TAB_NOT_EXPLICIT");
+    }
+    if (!targetPage) {
+      gateReasons.push("TARGET_PAGE_NOT_EXPLICIT");
+    }
+    if (targetDomain === XHS_WRITE_DOMAIN && actionType === "read") {
+      gateReasons.push("ACTION_DOMAIN_MISMATCH");
+    }
+
+    if (gateReasons.length === 0 && targetDomain && targetTabId !== null && targetPage) {
+      const domainTabs = await this.chromeApi.tabs.query({
+        currentWindow: true,
+        url: `*://${targetDomain}/*`
+      });
+      const targetTab = domainTabs.find((tab) => tab.id === targetTabId);
+      if (!targetTab) {
+        gateReasons.push("TARGET_TAB_NOT_FOUND");
+      } else {
+        const tabUrl = typeof targetTab.url === "string" ? targetTab.url : "";
+        const parsed = parseUrl(tabUrl);
+        if (!parsed) {
+          gateReasons.push("TARGET_TAB_URL_INVALID");
+        } else {
+          if (parsed.hostname !== targetDomain) {
+            gateReasons.push("TARGET_DOMAIN_MISMATCH");
+          }
+          const actualPage = classifyXhsPage(tabUrl, targetDomain);
+          if (actualPage !== targetPage) {
+            gateReasons.push("TARGET_PAGE_MISMATCH");
+          }
+        }
+      }
+    }
+
+    const allowed = gateReasons.length === 0;
+    const gateDecision: "allowed" | "blocked" = allowed ? "allowed" : "blocked";
+    const consumerGateResult = {
+      target_domain: targetDomain,
+      target_tab_id: targetTabId,
+      target_page: targetPage,
+      action_type: actionType,
+      requested_execution_mode: requestedExecutionMode,
+      effective_execution_mode: effectiveExecutionMode,
+      gate_decision: gateDecision,
+      gate_reasons: gateReasons
+    };
+
+    return {
+      allowed,
+      targetTabId: allowed ? targetTabId : null,
+      errorMessage: allowed ? "" : xhsGateReasonMessage(gateReasons[0] ?? "TARGET_TAB_NOT_EXPLICIT"),
+      consumerGateResult
+    };
   }
 
   #resolveForwardTimeoutMs(request: BridgeRequest): number {
@@ -900,29 +1085,6 @@ class ChromeBackgroundBridge {
   async #resolveTargetTabId(request: BridgeRequest): Promise<number | null> {
     if (typeof request.params.tab_id === "number" && Number.isInteger(request.params.tab_id)) {
       return request.params.tab_id;
-    }
-
-    const command = String(request.params.command ?? "");
-    if (command === "xhs.search") {
-      const xhsUrlPatterns = ["*://www.xiaohongshu.com/*", "*://edith.xiaohongshu.com/*", "*://*.xiaohongshu.com/*"];
-      const xhsTabs = await this.chromeApi.tabs.query({
-        currentWindow: true,
-        url: xhsUrlPatterns
-      });
-      const ranked = xhsTabs
-        .filter((tab) => typeof tab.id === "number")
-        .sort((left, right) => {
-          const scoreDiff = scoreXhsTab(left) - scoreXhsTab(right);
-          if (scoreDiff !== 0) {
-            return scoreDiff;
-          }
-          if (left.active === right.active) {
-            return 0;
-          }
-          return left.active ? -1 : 1;
-        });
-      const candidate = ranked[0];
-      return typeof candidate?.id === "number" ? candidate.id : null;
     }
 
     const tabs = await this.chromeApi.tabs.query({

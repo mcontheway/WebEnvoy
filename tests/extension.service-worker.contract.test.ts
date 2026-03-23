@@ -87,6 +87,13 @@ const respondHandshake = (
   });
 };
 
+const createXhsCommandParams = (overrides?: Record<string, unknown>) => ({
+  target_domain: "www.xiaohongshu.com",
+  target_tab_id: 32,
+  target_page: "search_result_tab",
+  ...overrides
+});
+
 describe("extension service worker recovery contract", () => {
   it("rejects mismatched protocol on bridge.open and does not enter ready", async () => {
     const firstPort = createMockPort();
@@ -183,6 +190,9 @@ describe("extension service worker recovery contract", () => {
   it("forwards content-script error payload through background bridge", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
     await Promise.resolve();
@@ -195,7 +205,7 @@ describe("extension service worker recovery contract", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-error-payload-001",
         command: "xhs.search",
-        command_params: {},
+        command_params: createXhsCommandParams(),
         cwd: "/workspace/WebEnvoy"
       },
       timeout_ms: 100
@@ -271,7 +281,7 @@ describe("extension service worker recovery contract", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-tab-pin-001",
         command: "xhs.search",
-        command_params: {},
+        command_params: createXhsCommandParams(),
         cwd: "/workspace/WebEnvoy"
       },
       timeout_ms: 100
@@ -331,7 +341,7 @@ describe("extension service worker recovery contract", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-no-tab-001",
         command: "xhs.search",
-        command_params: {},
+        command_params: createXhsCommandParams(),
         cwd: "/workspace/WebEnvoy"
       },
       timeout_ms: 100
@@ -350,6 +360,238 @@ describe("extension service worker recovery contract", () => {
         message: "target tab is unavailable"
       }
     });
+  });
+
+  it("blocks xhs.search when target_page is missing", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-missing-page-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-missing-page-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          target_page: undefined
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as {
+        id?: string;
+        status?: string;
+        payload?: {
+          consumer_gate_result?: {
+            target_domain?: string | null;
+            target_tab_id?: number | null;
+            target_page?: string | null;
+            action_type?: string;
+            requested_execution_mode?: string;
+            effective_execution_mode?: string;
+            gate_reasons?: string[];
+          };
+        };
+      })
+      .find((message) => message.id === "run-xhs-missing-page-001");
+    expect(blocked).toMatchObject({
+      id: "run-xhs-missing-page-001",
+      status: "error",
+      payload: {
+        consumer_gate_result: {
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: null,
+          action_type: "read",
+          requested_execution_mode: "dry_run",
+          effective_execution_mode: "dry_run",
+          gate_reasons: ["TARGET_PAGE_NOT_EXPLICIT"]
+        }
+      }
+    });
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("blocks xhs.search when target_tab_id is missing", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-missing-tab-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-missing-tab-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          target_tab_id: undefined
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as {
+        id?: string;
+        status?: string;
+        payload?: {
+          consumer_gate_result?: {
+            requested_execution_mode?: string;
+            effective_execution_mode?: string;
+            gate_reasons?: string[];
+          };
+        };
+      })
+      .find((message) => message.id === "run-xhs-missing-tab-001");
+    expect(blocked).toMatchObject({
+      id: "run-xhs-missing-tab-001",
+      status: "error",
+      payload: {
+        consumer_gate_result: {
+          requested_execution_mode: "dry_run",
+          effective_execution_mode: "dry_run",
+          gate_reasons: ["TARGET_TAB_NOT_EXPLICIT"]
+        }
+      }
+    });
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("blocks xhs.search when target_domain is outside xhs read/write scope", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-invalid-domain-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-invalid-domain-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          target_domain: "www.douyin.com"
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: { consumer_gate_result?: { gate_reasons?: string[] } } })
+      .find((message) => message.id === "run-xhs-invalid-domain-001");
+    expect(blocked).toMatchObject({
+      id: "run-xhs-invalid-domain-001",
+      status: "error",
+      payload: {
+        consumer_gate_result: {
+          gate_reasons: ["TARGET_DOMAIN_OUT_OF_SCOPE"]
+        }
+      }
+    });
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("blocks xhs.search when read action targets write domain", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true },
+      { id: 45, url: "https://creator.xiaohongshu.com/publish/publish", active: false }
+    ]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-read-write-domain-mismatch-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-read-write-domain-mismatch-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 45,
+          target_page: "creator_publish_tab"
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: { consumer_gate_result?: { gate_reasons?: string[] } } })
+      .find((message) => message.id === "run-xhs-read-write-domain-mismatch-001");
+    expect(blocked).toMatchObject({
+      id: "run-xhs-read-write-domain-mismatch-001",
+      status: "error",
+      payload: {
+        consumer_gate_result: {
+          gate_reasons: ["ACTION_DOMAIN_MISMATCH"]
+        }
+      }
+    });
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("forwards xhs.search only when explicit target tab/page/domain match", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: false },
+      { id: 44, url: "https://www.xiaohongshu.com/home", active: true }
+    ]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-explicit-target-allow-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-explicit-target-allow-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams(),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "run-xhs-explicit-target-allow-001",
+        command: "xhs.search"
+      })
+    );
   });
 
   it("queues forwards during recovering and replays after reopen", async () => {
