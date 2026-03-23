@@ -35,6 +35,7 @@
 - 必须定义读路径默认模式（`dry_run|recon`）与受控 live 触发条件。
 - 必须明确 `live_read_limited` 是 Sprint 3 范围内对外可请求的正式受控 live 模式，而不是仅供内部 fallback 使用的私有枚举。
 - 必须明确 `live_read_limited` 与 `live_read_high_risk` 在进入 live 前都要求人工确认、审批检查项与审计证据，不允许只对高风险模式单独要求审批。
+- 必须把上述审批与审计要求落入结构化 `live_entry_requirements`，不允许只在 prose 里更严格、对象契约里更宽松。
 - 必须定义读路径禁止动作清单（例如风险状态不满足时禁止扩新 live 面）。
 - 必须明确 `effective_execution_mode` 只表示“真实继续执行的模式”；若门禁结果为 `blocked`，则该字段只能回落到 `dry_run` 或 `recon` 一类未继续 live 的模式，不得对外宣称未实际执行的 `live_*` 降级模式。
 - 必须定义读路径执行的最小审计字段，确保后续可追踪。
