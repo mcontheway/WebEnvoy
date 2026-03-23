@@ -4,7 +4,7 @@
 - Task goal: 在 `FR-0010` / `FR-0011` 合入后，切换到 Sprint 2 实施阶段，优先推进 `#218` 与 `#219`，并把运行时 / 会话生命周期的硬约束提前固化到实施入口。
 - Current status: `#242` 与 `#243` 已合入 `origin/main`；本地 `main` 已 fast-forward 到 `63658ff`；旧 docs worktree 与本地 docs 分支已清理；`#218/#219/#221/#223` 仍为 `OPEN`。
 - Progress estimate: 95%
-- Active branch and worktree path: `main` / `/Users/mc/Desktop/同步空间/coding/WebEnvoy`
+- Active branch and worktree path: `main` / repo root
 - Target issue, PR, and FR suite:
   - Next implementation issues: `#218`, `#219`
   - Follow-up issues: `#221`, `#223`
@@ -28,11 +28,11 @@
 ## 3) Minimal State Snapshot
 - Current frontier (first action after resume): 基于最新 `main` 为 `#218` 和 `#219` 创建两个独立实现 worktree，先对齐 `FR-0010` 冻结字段和运行时会话边界。
 - Key artifacts (files/outputs/logs):
-  - [FR-0010 spec](/Users/mc/Desktop/同步空间/coding/WebEnvoy/docs/dev/specs/FR-0010-xhs-risk-gates-hardening/spec.md)
-  - [FR-0010 contract](/Users/mc/Desktop/同步空间/coding/WebEnvoy/docs/dev/specs/FR-0010-xhs-risk-gates-hardening/contracts/risk-gate-execution.md)
-  - [FR-0010 data model](/Users/mc/Desktop/同步空间/coding/WebEnvoy/docs/dev/specs/FR-0010-xhs-risk-gates-hardening/data-model.md)
-  - [FR-0011 spec](/Users/mc/Desktop/同步空间/coding/WebEnvoy/docs/dev/specs/FR-0011-xhs-min-anti-detection-execution/spec.md)
-  - [FR-0011 contract](/Users/mc/Desktop/同步空间/coding/WebEnvoy/docs/dev/specs/FR-0011-xhs-min-anti-detection-execution/contracts/anti-detection-execution.md)
+  - [FR-0010 spec](../specs/FR-0010-xhs-risk-gates-hardening/spec.md)
+  - [FR-0010 contract](../specs/FR-0010-xhs-risk-gates-hardening/contracts/risk-gate-execution.md)
+  - [FR-0010 data model](../specs/FR-0010-xhs-risk-gates-hardening/data-model.md)
+  - [FR-0011 spec](../specs/FR-0011-xhs-min-anti-detection-execution/spec.md)
+  - [FR-0011 contract](../specs/FR-0011-xhs-min-anti-detection-execution/contracts/anti-detection-execution.md)
   - runtime-session-hardening skill references used during this handoff: `references/webenvoy.md`, `references/hardening-checklist.md`, `references/test-matrix.md`
 - Decisions already made:
   - `#218` 与 `#219` 是 Sprint 2 第一实施组，可并行。
@@ -47,8 +47,8 @@
 - Required environment/preconditions:
   - `gh` 已登录
   - 本地 hooks 可用
-  - 从 [main](/Users/mc/Desktop/同步空间/coding/WebEnvoy) 新建实现分支
-  - 不混入用户当前工作区之外的临时 `/tmp` 产物
+  - 从 `main` 新建实现分支
+  - 不混入仓库外的临时 `/tmp` 产物
 - Local noise that must not be committed:
   - `/tmp/webenvoy-pr242-fix`
   - `/tmp/webenvoy-pr243-fix`
