@@ -39,7 +39,7 @@
 - 触发条件：三个 issue 各自定义门禁字段或枚举，未共享冻结对象。
 - 影响：`#208/#209` 需要按事项分支写兼容逻辑，出现绕过统一门禁的路径。
 - 缓解：
-  - 在 FR-0010 固定统一消费字段（`target_domain`、`target_page`、`action_type`、`execution_mode`、`gate_decision`）。
+  - 在 FR-0010 固定统一消费字段（`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`）。
   - 将字段语义变更纳入独立 spec review，不在实现期临时改动。
 - 回滚：
   - 发现字段漂移时立即回到 FR-0010 契约版本，阻断 live 升级。

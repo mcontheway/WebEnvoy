@@ -19,7 +19,7 @@
 - [ ] 明确 `#208` 恢复 live 正式验证的门禁前置。
 - [ ] 明确 `#209` 后续 live 扩展纳入同一门禁的执行约束。
 - [ ] 门禁默认模式（`dry_run/recon`）与 live 升级审批流程达成评审共识。
-- [ ] 统一消费对象字段冻结并达成评审共识：`target_domain`、`target_page`、`action_type`、`execution_mode`、`gate_decision`。
+- [ ] 统一消费对象字段冻结并达成评审共识：`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`。
 
 ## 实施清单（spec 通过后）
 

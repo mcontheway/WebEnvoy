@@ -91,7 +91,10 @@
 5. 已确认回滚策略：任一关键前置失效时立即回退到 `dry_run/recon`。
 6. `#218/#219/#221` 共用字段完成冻结并通过评审：
    - `target_domain`
+   - `target_tab_id`
    - `target_page`
    - `action_type`
-   - `execution_mode`
+   - `requested_execution_mode`
+   - `effective_execution_mode`
    - `gate_decision`
+   - `gate_reasons`
