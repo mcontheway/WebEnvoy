@@ -243,13 +243,11 @@ const resolveIssueActionMatrixEntry = (issueScope, state) => {
 };
 const resolveBlockedFallbackMode = (requestedExecutionMode, riskState) => requestedExecutionMode === "recon"
     ? "recon"
-    : requestedExecutionMode === "live_read_high_risk" && riskState === "limited"
-        ? "live_read_limited"
-        : requestedExecutionMode === "live_write"
-            ? "dry_run"
-            : riskState === "limited"
-                ? "recon"
-                : "dry_run";
+    : requestedExecutionMode === "live_write"
+        ? "dry_run"
+        : riskState === "limited"
+            ? "recon"
+            : "dry_run";
 const getRiskRecoveryRequirements = (state) => {
     switch (state) {
         case "paused":

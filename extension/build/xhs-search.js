@@ -91,9 +91,6 @@ const resolveReadExecutionPolicy = () => ({
     live_entry_requirements: [...READ_EXECUTION_POLICY.live_entry_requirements]
 });
 const resolveFallbackMode = (requestedExecutionMode, riskState) => {
-    if (requestedExecutionMode === "live_read_high_risk" && riskState === "limited") {
-        return "live_read_limited";
-    }
     if (requestedExecutionMode === "live_write") {
         return "dry_run";
     }

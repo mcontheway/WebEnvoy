@@ -534,7 +534,7 @@ describe("extension background relay contract", () => {
     });
   });
 
-  it("blocks live_read_high_risk in limited risk state and converges to limited mode", async () => {
+  it("blocks live_read_high_risk in limited risk state and falls back to recon", async () => {
     let fetchCalled = false;
     const contentScript = new ContentScriptHandler({
       xhsEnv: {
@@ -593,12 +593,12 @@ describe("extension background relay contract", () => {
         risk_state: "limited"
       },
       gate_outcome: {
-        effective_execution_mode: "live_read_limited",
+        effective_execution_mode: "recon",
         gate_decision: "blocked"
       },
       consumer_gate_result: {
         requested_execution_mode: "live_read_high_risk",
-        effective_execution_mode: "live_read_limited",
+        effective_execution_mode: "recon",
         gate_decision: "blocked"
       }
     });
