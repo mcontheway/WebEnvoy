@@ -106,6 +106,13 @@ const parseSingleJsonLine = (stdout: string) => {
   return JSON.parse(lines[0]) as Record<string, unknown>;
 };
 
+const scopedXhsGateOptions = {
+  target_domain: "www.xiaohongshu.com",
+  target_tab_id: 32,
+  target_page: "search_result_tab",
+  requested_execution_mode: "dry_run"
+};
+
 const assertLockMissing = async (profileDir: string): Promise<void> => {
   const lockPath = path.join(profileDir, "__webenvoy_lock.json");
   await expect(readFile(lockPath, "utf8")).rejects.toMatchObject({
@@ -267,6 +274,7 @@ describe("webenvoy cli contract", () => {
           query: "露营装备"
         },
         options: {
+          ...scopedXhsGateOptions,
           fixture_success: true
         }
       })
@@ -289,6 +297,40 @@ describe("webenvoy cli contract", () => {
     });
   });
 
+  it("returns invalid args when xhs.search gate options are missing", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          requested_execution_mode: "dry_run"
+        }
+      })
+    ]);
+    expect(result.status).toBe(2);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "TARGET_DOMAIN_INVALID"
+        }
+      }
+    });
+  });
+
   it("returns structured capability success and observability for xhs.search runtime path", () => {
     const result = runCli([
       "xhs.search",
@@ -305,6 +347,7 @@ describe("webenvoy cli contract", () => {
           query: "露营装备"
         },
         options: {
+          ...scopedXhsGateOptions,
           simulate_result: "success"
         }
       })
@@ -340,6 +383,44 @@ describe("webenvoy cli contract", () => {
     });
   });
 
+  it("returns invalid args when xhs.search requested_execution_mode is missing", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab"
+        }
+      })
+    ]);
+    expect(result.status).toBe(2);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          ability_id: "xhs.note.search.v1",
+          stage: "input_validation",
+          reason: "REQUESTED_EXECUTION_MODE_INVALID"
+        }
+      }
+    });
+  });
+
   it("returns structured execution details for xhs.search login-required path", () => {
     const result = runCli([
       "xhs.search",
@@ -356,6 +437,7 @@ describe("webenvoy cli contract", () => {
           query: "露营装备"
         },
         options: {
+          ...scopedXhsGateOptions,
           simulate_result: "login_required"
         }
       })
@@ -404,7 +486,8 @@ describe("webenvoy cli contract", () => {
         input: {
           query: "露营装备",
           force_bad_output: true
-        }
+        },
+        options: scopedXhsGateOptions
       })
     ]);
     expect(result.status).toBe(6);

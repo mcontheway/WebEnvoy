@@ -13,6 +13,13 @@ const baseContext: RuntimeContext = {
 };
 
 describe("executeCommand", () => {
+  const scopedXhsGateOptions = {
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: 32,
+    target_page: "search_result_tab",
+    requested_execution_mode: "dry_run"
+  } as const;
+
   it("returns summary when command is implemented", async () => {
     const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
     process.env.WEBENVOY_NATIVE_TRANSPORT = "loopback";
@@ -85,6 +92,7 @@ describe("executeCommand", () => {
               query: "露营装备"
             },
             options: {
+              ...scopedXhsGateOptions,
               fixture_success: true
             }
           }
@@ -125,6 +133,7 @@ describe("executeCommand", () => {
               query: "露营装备"
             },
             options: {
+              ...scopedXhsGateOptions,
               simulate_result: "success"
             }
           }
@@ -146,6 +155,70 @@ describe("executeCommand", () => {
     } finally {
       process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
     }
+  });
+
+  it("returns invalid args when xhs.search misses target gate fields", async () => {
+    await expect(
+      executeCommand(
+        {
+          ...baseContext,
+          command: "xhs.search",
+          profile: "xhs_account_001",
+          params: {
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              query: "露营装备"
+            },
+            options: {
+              requested_execution_mode: "dry_run"
+            }
+          }
+        },
+        createCommandRegistry()
+      )
+    ).rejects.toMatchObject({
+      code: "ERR_CLI_INVALID_ARGS",
+      details: {
+        reason: "TARGET_DOMAIN_INVALID"
+      }
+    });
+  });
+
+  it("returns invalid args when xhs.search requested_execution_mode is missing", async () => {
+    await expect(
+      executeCommand(
+        {
+          ...baseContext,
+          command: "xhs.search",
+          profile: "xhs_account_001",
+          params: {
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              query: "露营装备"
+            },
+            options: {
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab"
+            }
+          }
+        },
+        createCommandRegistry()
+      )
+    ).rejects.toMatchObject({
+      code: "ERR_CLI_INVALID_ARGS",
+      details: {
+        reason: "REQUESTED_EXECUTION_MODE_INVALID"
+      }
+    });
   });
 
   it("returns runtime unavailable error without collapsing into execution failed", async () => {

@@ -9,6 +9,7 @@ import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging
 
 type AbilityLayer = "L3" | "L2" | "L1";
 type AbilityAction = "read" | "write" | "download";
+type XhsExecutionMode = "dry_run" | "recon" | "live_read_high_risk" | "live_write";
 
 interface AbilityRef {
   id: string;
@@ -24,6 +25,12 @@ interface AbilityEnvelope {
 
 const ABILITY_LAYERS = new Set<AbilityLayer>(["L3", "L2", "L1"]);
 const ABILITY_ACTIONS = new Set<AbilityAction>(["read", "write", "download"]);
+const XHS_EXECUTION_MODES = new Set<XhsExecutionMode>([
+  "dry_run",
+  "recon",
+  "live_read_high_risk",
+  "live_write"
+]);
 
 const asObject = (value: unknown): JsonObject | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -132,6 +139,64 @@ const parseSearchInput = (input: JsonObject, abilityId: string): JsonObject => {
   return normalized;
 };
 
+const normalizeGateOptions = (
+  options: JsonObject,
+  abilityId: string
+): {
+  targetDomain: string;
+  targetTabId: number;
+  targetPage: string;
+  requestedExecutionMode: XhsExecutionMode;
+  options: JsonObject;
+} => {
+  const targetDomain =
+    typeof options.target_domain === "string" && options.target_domain.trim().length > 0
+      ? options.target_domain.trim()
+      : null;
+  if (!targetDomain) {
+    throw invalidAbilityInput("TARGET_DOMAIN_INVALID", abilityId);
+  }
+
+  const targetTabId =
+    typeof options.target_tab_id === "number" && Number.isInteger(options.target_tab_id)
+      ? options.target_tab_id
+      : null;
+  if (targetTabId === null) {
+    throw invalidAbilityInput("TARGET_TAB_ID_INVALID", abilityId);
+  }
+
+  const targetPage =
+    typeof options.target_page === "string" && options.target_page.trim().length > 0
+      ? options.target_page.trim()
+      : null;
+  if (!targetPage) {
+    throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
+  }
+
+  const requestedExecutionMode =
+    typeof options.requested_execution_mode === "string" &&
+    XHS_EXECUTION_MODES.has(options.requested_execution_mode as XhsExecutionMode)
+      ? (options.requested_execution_mode as XhsExecutionMode)
+      : null;
+  if (!requestedExecutionMode) {
+    throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_INVALID", abilityId);
+  }
+
+  return {
+    targetDomain,
+    targetTabId,
+    targetPage,
+    requestedExecutionMode,
+    options: {
+      ...options,
+      target_domain: targetDomain,
+      target_tab_id: targetTabId,
+      target_page: targetPage,
+      requested_execution_mode: requestedExecutionMode
+    }
+  };
+};
+
 const buildCapabilityResult = (ability: AbilityRef, summary?: JsonObject): JsonObject => ({
   capability_result: {
     ability_id: ability.id,
@@ -162,6 +227,7 @@ const toCliExecutionError = (
     typeof details?.reason === "string" && details.reason.trim().length > 0
       ? details.reason.trim()
       : "TARGET_API_RESPONSE_INVALID";
+  const consumerGateResult = asObject(payload.consumer_gate_result);
 
   return new CliError("ERR_EXECUTION_FAILED", fallbackMessage, {
     retryable: payload.retryable === true,
@@ -173,7 +239,8 @@ const toCliExecutionError = (
         details?.stage === "execution"
           ? details.stage
           : "execution",
-      reason
+      reason,
+      ...(consumerGateResult ?? {})
     },
     observability: asObservabilityInput(payload.observability),
     diagnosis: asDiagnosisInput(payload.diagnosis)
@@ -193,11 +260,12 @@ const toTransportCliError = (error: NativeMessagingTransportError, ability: Abil
 
 const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResult> => {
   const envelope = parseAbilityEnvelope(context.params);
+  const gate = normalizeGateOptions(envelope.options, envelope.ability.id);
 
   if (
     process.env.NODE_ENV === "test" &&
     process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS === "1" &&
-    envelope.options.fixture_success === true
+    gate.options.fixture_success === true
   ) {
     const query = typeof envelope.input.query === "string" ? envelope.input.query : null;
     return {
@@ -229,9 +297,13 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
       cwd: context.cwd,
       command: context.command,
       params: {
+        target_domain: gate.targetDomain,
+        target_tab_id: gate.targetTabId,
+        target_page: gate.targetPage,
+        requested_execution_mode: gate.requestedExecutionMode,
         ability: envelope.ability,
         input: parseSearchInput(envelope.input, envelope.ability.id),
-        options: envelope.options
+        options: gate.options
       }
     });
 
@@ -255,7 +327,12 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
     }
 
     return {
-      summary,
+      summary: {
+        ...summary,
+        ...(asObject(bridgeResult.payload.consumer_gate_result)
+          ? { consumer_gate_result: asObject(bridgeResult.payload.consumer_gate_result) }
+          : {})
+      },
       observability: asObservabilityInput(bridgeResult.payload.observability)
     };
   } catch (error) {

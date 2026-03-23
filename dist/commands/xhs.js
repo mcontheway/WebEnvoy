@@ -4,6 +4,12 @@ import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
 const ABILITY_LAYERS = new Set(["L3", "L2", "L1"]);
 const ABILITY_ACTIONS = new Set(["read", "write", "download"]);
+const XHS_EXECUTION_MODES = new Set([
+    "dry_run",
+    "recon",
+    "live_read_high_risk",
+    "live_write"
+]);
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
@@ -87,6 +93,46 @@ const parseSearchInput = (input, abilityId) => {
     }
     return normalized;
 };
+const normalizeGateOptions = (options, abilityId) => {
+    const targetDomain = typeof options.target_domain === "string" && options.target_domain.trim().length > 0
+        ? options.target_domain.trim()
+        : null;
+    if (!targetDomain) {
+        throw invalidAbilityInput("TARGET_DOMAIN_INVALID", abilityId);
+    }
+    const targetTabId = typeof options.target_tab_id === "number" && Number.isInteger(options.target_tab_id)
+        ? options.target_tab_id
+        : null;
+    if (targetTabId === null) {
+        throw invalidAbilityInput("TARGET_TAB_ID_INVALID", abilityId);
+    }
+    const targetPage = typeof options.target_page === "string" && options.target_page.trim().length > 0
+        ? options.target_page.trim()
+        : null;
+    if (!targetPage) {
+        throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
+    }
+    const requestedExecutionMode = typeof options.requested_execution_mode === "string" &&
+        XHS_EXECUTION_MODES.has(options.requested_execution_mode)
+        ? options.requested_execution_mode
+        : null;
+    if (!requestedExecutionMode) {
+        throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_INVALID", abilityId);
+    }
+    return {
+        targetDomain,
+        targetTabId,
+        targetPage,
+        requestedExecutionMode,
+        options: {
+            ...options,
+            target_domain: targetDomain,
+            target_tab_id: targetTabId,
+            target_page: targetPage,
+            requested_execution_mode: requestedExecutionMode
+        }
+    };
+};
 const buildCapabilityResult = (ability, summary) => ({
     capability_result: {
         ability_id: ability.id,
@@ -109,6 +155,7 @@ const toCliExecutionError = (ability, payload, fallbackMessage) => {
     const reason = typeof details?.reason === "string" && details.reason.trim().length > 0
         ? details.reason.trim()
         : "TARGET_API_RESPONSE_INVALID";
+    const consumerGateResult = asObject(payload.consumer_gate_result);
     return new CliError("ERR_EXECUTION_FAILED", fallbackMessage, {
         retryable: payload.retryable === true,
         details: {
@@ -118,7 +165,8 @@ const toCliExecutionError = (ability, payload, fallbackMessage) => {
                 details?.stage === "execution"
                 ? details.stage
                 : "execution",
-            reason
+            reason,
+            ...(consumerGateResult ?? {})
         },
         observability: asObservabilityInput(payload.observability),
         diagnosis: asDiagnosisInput(payload.diagnosis)
@@ -135,9 +183,10 @@ const toTransportCliError = (error, ability) => new CliError("ERR_RUNTIME_UNAVAI
 });
 const xhsSearch = async (context) => {
     const envelope = parseAbilityEnvelope(context.params);
+    const gate = normalizeGateOptions(envelope.options, envelope.ability.id);
     if (process.env.NODE_ENV === "test" &&
         process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS === "1" &&
-        envelope.options.fixture_success === true) {
+        gate.options.fixture_success === true) {
         const query = typeof envelope.input.query === "string" ? envelope.input.query : null;
         return {
             summary: buildCapabilityResult(envelope.ability, {
@@ -165,9 +214,13 @@ const xhsSearch = async (context) => {
             cwd: context.cwd,
             command: context.command,
             params: {
+                target_domain: gate.targetDomain,
+                target_tab_id: gate.targetTabId,
+                target_page: gate.targetPage,
+                requested_execution_mode: gate.requestedExecutionMode,
                 ability: envelope.ability,
                 input: parseSearchInput(envelope.input, envelope.ability.id),
-                options: envelope.options
+                options: gate.options
             }
         });
         if (!bridgeResult.ok) {
@@ -184,7 +237,12 @@ const xhsSearch = async (context) => {
             });
         }
         return {
-            summary,
+            summary: {
+                ...summary,
+                ...(asObject(bridgeResult.payload.consumer_gate_result)
+                    ? { consumer_gate_result: asObject(bridgeResult.payload.consumer_gate_result) }
+                    : {})
+            },
             observability: asObservabilityInput(bridgeResult.payload.observability)
         };
     }
