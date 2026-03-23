@@ -77,7 +77,9 @@
   "session_rhythm_policy": {
     "min_action_interval_ms": 3000,
     "min_experiment_interval_ms": 30000,
-    "cooldown_after_risk_minutes": 60,
+    "cooldown_strategy": "exponential_backoff",
+    "cooldown_base_minutes": 30,
+    "cooldown_cap_minutes": 720,
     "resume_probe_mode": "recon_only"
   }
 }
@@ -92,8 +94,8 @@
     "transitions": [
       { "from": "allowed", "to": "limited", "trigger": "risk_signal_detected" },
       { "from": "limited", "to": "paused", "trigger": "account_alert_or_repeat_risk" },
-      { "from": "paused", "to": "limited", "trigger": "cooldown_passed_and_manual_approve" },
-      { "from": "limited", "to": "allowed", "trigger": "stability_window_passed" }
+      { "from": "paused", "to": "limited", "trigger": "cooldown_backoff_window_passed_and_manual_approve" },
+      { "from": "limited", "to": "allowed", "trigger": "stability_window_passed_and_manual_approve" }
     ],
     "hard_block_when_paused": ["live_write", "high_risk_live_read"]
   }
@@ -111,49 +113,75 @@
         "state": "paused",
         "allowed_actions": ["dry_run", "recon"],
         "blocked_actions": [
-          "live_read_high_risk",
           "live_read_limited_with_approval",
+          "live_read_high_risk_with_approval",
           "reversible_interaction_with_approval",
-          "approved_scope_actions",
           "live_write",
-          "irreversible_write"
+          "irreversible_write",
+          "expand_new_live_surface_without_gate"
         ]
       },
       {
         "issue_scope": "issue_208",
         "state": "limited",
-        "allowed_actions": ["recon", "reversible_interaction_with_approval"],
-        "blocked_actions": ["irreversible_write", "live_write"]
+        "allowed_actions": ["dry_run", "recon", "reversible_interaction_with_approval"],
+        "blocked_actions": [
+          "live_read_limited_with_approval",
+          "live_read_high_risk_with_approval",
+          "irreversible_write",
+          "live_write",
+          "expand_new_live_surface_without_gate"
+        ]
       },
       {
         "issue_scope": "issue_208",
         "state": "allowed",
-        "allowed_actions": ["approved_scope_actions"],
-        "blocked_actions": ["actions_outside_approved_scope"]
-      },
-      {
-        "issue_scope": "issue_209",
-        "state": "paused",
-        "allowed_actions": ["dry_run", "recon"],
+        "allowed_actions": ["dry_run", "recon", "reversible_interaction_with_approval"],
         "blocked_actions": [
-          "live_read_high_risk",
           "live_read_limited_with_approval",
-          "approved_scope_actions",
+          "live_read_high_risk_with_approval",
+          "irreversible_write",
           "live_write",
           "expand_new_live_surface_without_gate"
         ]
       },
       {
         "issue_scope": "issue_209",
+        "state": "paused",
+        "allowed_actions": ["dry_run", "recon"],
+        "blocked_actions": [
+          "live_read_limited_with_approval",
+          "live_read_high_risk_with_approval",
+          "live_write",
+          "irreversible_write",
+          "expand_new_live_surface_without_gate"
+        ]
+      },
+      {
+        "issue_scope": "issue_209",
         "state": "limited",
-        "allowed_actions": ["recon", "live_read_limited_with_approval"],
-        "blocked_actions": ["live_write", "expand_new_live_surface_without_gate"]
+        "allowed_actions": ["dry_run", "recon", "live_read_limited_with_approval"],
+        "blocked_actions": [
+          "live_read_high_risk_with_approval",
+          "live_write",
+          "irreversible_write",
+          "expand_new_live_surface_without_gate"
+        ]
       },
       {
         "issue_scope": "issue_209",
         "state": "allowed",
-        "allowed_actions": ["approved_scope_actions"],
-        "blocked_actions": ["actions_outside_approved_scope"]
+        "allowed_actions": [
+          "dry_run",
+          "recon",
+          "live_read_limited_with_approval",
+          "live_read_high_risk_with_approval"
+        ],
+        "blocked_actions": [
+          "live_write",
+          "irreversible_write",
+          "expand_new_live_surface_without_gate"
+        ]
       }
     ]
   }
@@ -182,8 +210,9 @@
       "reason"
     ],
     "approval_fields_required_when": [
-      "cooldown_passed_and_manual_approve",
-      "approved_scope_actions"
+      "cooldown_backoff_window_passed_and_manual_approve",
+      "stability_window_passed_and_manual_approve",
+      "next_state_is_allowed"
     ],
     "on_missing_record": "force_pause_and_block_live",
     "rollback_entrypoint": "risk_state_reset_to_paused"

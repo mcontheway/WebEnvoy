@@ -39,11 +39,14 @@
 
 - `min_action_interval_ms` INTEGER NOT NULL
 - `min_experiment_interval_ms` INTEGER NOT NULL
-- `cooldown_after_risk_minutes` INTEGER NOT NULL
+- `cooldown_strategy` ENUM NOT NULL（`exponential_backoff`）
+- `cooldown_base_minutes` INTEGER NOT NULL
+- `cooldown_cap_minutes` INTEGER NOT NULL
 - `resume_probe_mode` ENUM NOT NULL（`recon_only` | `dry_run_only`）
 
 约束：
 - 所有间隔字段必须 > 0。
+- `cooldown_strategy` 当前只允许 `exponential_backoff`，不得回退为固定冷却。
 
 ## 实体 5：RiskStateMachine
 
@@ -84,7 +87,7 @@
 
 约束：
 - 缺失 `run_id/session_id/prev_state/next_state/decision/reason` 任一字段时，状态变更无效。
-- 当 `trigger` 依赖人工批准恢复时，缺失 `approver/approved_at` 不得判定为有效。
+- 当 `trigger` 依赖人工批准恢复，或 `next_state=allowed` 会扩大 live 放行范围时，缺失 `approver/approved_at` 不得判定为有效。
 - 状态变更无效时，执行层必须回退到 `paused` 并阻断 live。
 
 ## 生命周期
