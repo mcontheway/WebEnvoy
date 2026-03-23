@@ -17,7 +17,7 @@
 
 ## 实体 2：ReadExecutionPolicy
 
-- `default_mode` ENUM NOT NULL（`dry_run` | `recon` | `live_limited`）
+- `default_mode` ENUM NOT NULL（`dry_run` | `recon` | `live_read_limited` | `live_read_high_risk`）
 - `allowed_modes` ARRAY NOT NULL
 - `blocked_actions` ARRAY NOT NULL
 - `live_entry_requirements` ARRAY NOT NULL

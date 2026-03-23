@@ -43,7 +43,7 @@
 {
   "read_execution_policy": {
     "default_mode": "dry_run",
-    "allowed_modes": ["dry_run", "recon", "live_limited"],
+    "allowed_modes": ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
     "blocked_actions": ["expand_new_live_surface_without_gate"],
     "live_entry_requirements": [
       "risk_state_not_paused",
@@ -97,7 +97,7 @@
       { "from": "paused", "to": "limited", "trigger": "cooldown_backoff_window_passed_and_manual_approve" },
       { "from": "limited", "to": "allowed", "trigger": "stability_window_passed_and_manual_approve" }
     ],
-    "hard_block_when_paused": ["live_write", "high_risk_live_read"]
+    "hard_block_when_paused": ["live_write", "live_read_high_risk"]
   }
 }
 ```
@@ -113,8 +113,8 @@
         "state": "paused",
         "allowed_actions": ["dry_run", "recon"],
         "blocked_actions": [
-          "live_read_limited_with_approval",
-          "live_read_high_risk_with_approval",
+          "live_read_limited",
+          "live_read_high_risk",
           "reversible_interaction_with_approval",
           "live_write",
           "irreversible_write",
@@ -126,8 +126,8 @@
         "state": "limited",
         "allowed_actions": ["dry_run", "recon", "reversible_interaction_with_approval"],
         "blocked_actions": [
-          "live_read_limited_with_approval",
-          "live_read_high_risk_with_approval",
+          "live_read_limited",
+          "live_read_high_risk",
           "irreversible_write",
           "live_write",
           "expand_new_live_surface_without_gate"
@@ -138,8 +138,8 @@
         "state": "allowed",
         "allowed_actions": ["dry_run", "recon", "reversible_interaction_with_approval"],
         "blocked_actions": [
-          "live_read_limited_with_approval",
-          "live_read_high_risk_with_approval",
+          "live_read_limited",
+          "live_read_high_risk",
           "irreversible_write",
           "live_write",
           "expand_new_live_surface_without_gate"
@@ -150,8 +150,8 @@
         "state": "paused",
         "allowed_actions": ["dry_run", "recon"],
         "blocked_actions": [
-          "live_read_limited_with_approval",
-          "live_read_high_risk_with_approval",
+          "live_read_limited",
+          "live_read_high_risk",
           "live_write",
           "irreversible_write",
           "expand_new_live_surface_without_gate"
@@ -160,9 +160,9 @@
       {
         "issue_scope": "issue_209",
         "state": "limited",
-        "allowed_actions": ["dry_run", "recon", "live_read_limited_with_approval"],
+        "allowed_actions": ["dry_run", "recon", "live_read_limited"],
         "blocked_actions": [
-          "live_read_high_risk_with_approval",
+          "live_read_high_risk",
           "live_write",
           "irreversible_write",
           "expand_new_live_surface_without_gate"
@@ -174,8 +174,8 @@
         "allowed_actions": [
           "dry_run",
           "recon",
-          "live_read_limited_with_approval",
-          "live_read_high_risk_with_approval"
+          "live_read_limited",
+          "live_read_high_risk"
         ],
         "blocked_actions": [
           "live_write",
