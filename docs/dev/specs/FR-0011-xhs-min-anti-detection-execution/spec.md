@@ -132,13 +132,14 @@ And 不得在 `gate_decision=blocked` 时对外暴露未实际执行的 `live_re
 3. 最小 session 节律/冷却/恢复规则和三态状态机均有结构化输出定义。
 4. `#208/#209` 可直接引用 FR-0011 输出作为进入 live 的前置。
 5. `live_read_limited` 的公开模式语义、审批前置与审计要求已被正式冻结。
-6. `effective_execution_mode` 在 `blocked` 场景下的语义已冻结为“真实继续执行模式”，不会对外暴露未实际执行的 `live_*`。
+6. `effective_execution_mode` 在 `blocked` 场景下的语义已冻结为“真实未继续 live 的降级模式”，不会对外暴露未实际执行的 `live_*`。
 7. 本 FR 不混入实现代码，保持在规约审查路径。
 
 ## 依赖与前置条件
 
 - 治理前置：`#216`
 - 风险门禁基线：`#213` / `FR-0009`
+- 门禁结果与审批证据载体：`#223` / `FR-0010`
 - 关联事项：`#208`、`#209`
 - 架构依据：
   - `docs/dev/architecture/system-design/read-write.md`

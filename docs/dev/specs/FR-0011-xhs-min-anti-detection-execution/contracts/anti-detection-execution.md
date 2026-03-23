@@ -3,6 +3,7 @@
 ## 边界与适用范围
 
 本契约定义 Sprint 3 的最小反风控执行能力输出对象，供 `#208` 与 `#209` 在进入 live 扩展前统一消费。
+凡涉及 `requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`approval_record`、`audit_record` 的稳定机器边界，本 FR 显式继承 `FR-0010` 的 `gate_outcome` / `approval_record` / `audit_record` / `consumer_gate_result`，只补充 Sprint 3 对 `live_read_limited` 与状态机的新增约束，不并行重定义另一套门禁结果对象。
 
 本契约不定义：
 - 平台规避策略细节
@@ -11,7 +12,7 @@
 
 ## 输出对象
 
-必须包含以下七个对象：
+必须新增或冻结以下七个 Sprint 3 对象：
 1. `plugin_gate_ownership`
 2. `read_execution_policy`
 3. `write_interaction_tier`
@@ -19,6 +20,12 @@
 5. `risk_state_machine`
 6. `issue_action_matrix`
 7. `risk_transition_audit`
+
+同时必须继续复用 `FR-0010` 的以下门禁结果对象作为实现落点：
+1. `gate_outcome`
+2. `approval_record`
+3. `audit_record`
+4. `consumer_gate_result`
 
 ## plugin_gate_ownership
 
@@ -236,5 +243,6 @@
 ## 公开模式与阻断语义补充
 
 1. `live_read_limited` 作为 Sprint 3 的正式公开模式，只适用于受控读 live，不得外溢为写路径或不可逆动作的隐式降级口径。
-2. `gate_decision=allowed` 且 `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 或 `live_read_high_risk` 时，`approval_record.approved=true`、`approver`、`approved_at` 与完整 `checks` 均为必需。
+2. `gate_decision=allowed` 且 `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 或 `live_read_high_risk` 时，必须复用 `FR-0010.approval_record` 与 `FR-0010.audit_record` 作为审批证据载体；其中 `approval_record.approved=true`、`approver`、`approved_at` 与完整 `checks` 均为必需。
 3. `gate_decision=blocked` 时，`effective_execution_mode` 只允许表示真实未继续 live 的降级结果（当前为 `dry_run` 或 `recon`）；不得返回未实际执行的 `live_read_limited`。
+4. `consumer_gate_result` 在 Sprint 3 中继续沿用 `FR-0010` 冻结字段，并允许 `requested_execution_mode|effective_execution_mode` 扩展为 `live_read_limited`；`#208/#209/#255` 不得自行定义私有审批证据字段绕过 `approval_record` / `audit_record`。

@@ -3,6 +3,7 @@
 ## 范围说明
 
 本模型描述 FR-0011 规约阶段需要稳定交付的共享对象，不新增持久化 schema，仅定义实现阶段必须遵循的数据结构语义。
+凡涉及门禁结果、审批证据与审计留痕的机器字段，本模型显式继承 `FR-0010` 的 `GateDecision`、`ApprovalRecord` 与 `AuditRecord` 作为承载对象，FR-0011 只补充 Sprint 3 的新增枚举与约束。
 
 ## 实体 1：PluginGateOwnership
 
@@ -102,6 +103,7 @@
 - `gate_decision=allowed` 时，`effective_execution_mode` 才允许表达真实继续执行的 `live_*` 模式。
 - `gate_decision=blocked` 时，`effective_execution_mode` 只能表达真实未继续 live 的降级模式，当前只允许 `dry_run` 或 `recon`。
 - 若 `gate_decision=allowed` 且 `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 或 `live_read_high_risk`，则审批证据字段必须完整。
+- 上述审批证据必须落在 `FR-0010.ApprovalRecord` 与 `FR-0010.AuditRecord` 中，不允许由 `#208/#209/#255` 引入私有字段替代。
 
 ## 生命周期
 
