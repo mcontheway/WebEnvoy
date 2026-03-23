@@ -116,12 +116,19 @@
     "event_id": "gate_evt_001",
     "run_id": "run_001",
     "session_id": "nm-session-001",
+    "profile": "xhs_account_001",
     "target_domain": "www.xiaohongshu.com",
     "target_page": "search_result_tab",
     "action_type": "read",
     "execution_mode": "live_read_high_risk",
     "effective_mode": "dry_run",
-    "decision": "blocked",
+    "gate_decision": "blocked",
+    "gate_reason": [
+      "RISK_STATE_PAUSED",
+      "MANUAL_CONFIRMATION_MISSING"
+    ],
+    "approver": null,
+    "approved_at": null,
     "recorded_at": "2026-03-22T08:00:00Z"
   }
 }
@@ -131,6 +138,8 @@
 
 1. 每次门禁判定都必须生成审计记录。
 2. 记录必须可被 `run_id/session_id` 检索。
+3. `gate_reason` 不得为空，必须能独立解释本次放行或阻断原因。
+4. 若 `gate_decision=allowed`，`approver` 与 `approved_at` 必填；若为阻断，可为空。
 
 ## consumer_gate_result
 
@@ -159,5 +168,5 @@
 ## 兼容性
 
 1. 新增字段可追加，不允许改变既有字段语义。
-2. `decision` 枚举值变更必须经过独立 spec review。
-3. `reasons` 的新增代码允许追加，不允许复用同义码造成歧义。
+2. `gate_decision` 枚举值变更必须经过独立 spec review。
+3. `gate_reason` 的新增代码允许追加，不允许复用同义码造成歧义。

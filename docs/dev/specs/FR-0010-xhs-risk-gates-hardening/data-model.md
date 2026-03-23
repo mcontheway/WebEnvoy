@@ -66,12 +66,17 @@
 - `execution_mode` ENUM NOT NULL
 - `effective_mode` ENUM NOT NULL
 - `gate_decision` ENUM NOT NULL
+- `gate_reason` JSON array NOT NULL
+- `approver` string NULL
+- `approved_at` datetime NULL
 - `recorded_at` datetime NOT NULL
 
 约束：
 
 1. 所有门禁判定都必须写一条 `AuditRecord`。
 2. `run_id + recorded_at` 必须可排序，支持时间线复盘。
+3. `gate_reason` 必须至少包含 1 项，保证门禁审计可独立复盘。
+4. `gate_decision=allowed` 时，`approver` 与 `approved_at` 必填。
 
 ## 生命周期
 
