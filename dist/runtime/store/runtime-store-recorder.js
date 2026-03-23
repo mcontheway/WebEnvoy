@@ -18,11 +18,90 @@ const resolveSessionId = (summary) => {
     return null;
 };
 const toSummaryText = (summary) => JSON.stringify(summary);
+const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value
+    : null;
+const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
+const asBoolean = (value) => value === true;
 const buildEvent = (context, input) => ({
     runId: context.run_id,
     eventTime: new Date().toISOString(),
     ...input
 });
+const extractGateApprovalInput = (source) => {
+    const approvalRecord = asObject(source.approval_record);
+    if (!approvalRecord) {
+        return null;
+    }
+    const runId = asString(source.run_id) ??
+        asString((asObject(source.audit_record) ?? {}).run_id) ??
+        asString((asObject(source.gate_input) ?? {}).run_id);
+    if (!runId) {
+        return null;
+    }
+    const checksObject = asObject(approvalRecord.checks) ?? {};
+    return {
+        runId,
+        approved: asBoolean(approvalRecord.approved),
+        approver: asString(approvalRecord.approver),
+        approvedAt: asString(approvalRecord.approved_at),
+        checks: Object.fromEntries(Object.entries(checksObject).map(([key, value]) => [key, asBoolean(value)]))
+    };
+};
+const extractGateAuditRecordInput = (source) => {
+    const auditRecord = asObject(source.audit_record);
+    if (!auditRecord) {
+        return null;
+    }
+    const runId = asString(auditRecord.run_id);
+    const sessionId = asString(auditRecord.session_id);
+    const profile = asString(auditRecord.profile);
+    const eventId = asString(auditRecord.event_id);
+    const targetDomain = asString(auditRecord.target_domain);
+    const targetTabId = asInteger(auditRecord.target_tab_id);
+    const targetPage = asString(auditRecord.target_page);
+    const actionType = asString(auditRecord.action_type);
+    const requestedExecutionMode = asString(auditRecord.requested_execution_mode);
+    const effectiveExecutionMode = asString(auditRecord.effective_execution_mode);
+    const gateDecision = asString(auditRecord.gate_decision);
+    const recordedAt = asString(auditRecord.recorded_at);
+    const gateReasons = Array.isArray(auditRecord.gate_reasons)
+        ? auditRecord.gate_reasons.filter((item) => typeof item === "string" && item.trim().length > 0)
+        : [];
+    if (!runId ||
+        !sessionId ||
+        !profile ||
+        !eventId ||
+        !targetDomain ||
+        targetTabId === null ||
+        !targetPage ||
+        !actionType ||
+        !requestedExecutionMode ||
+        !effectiveExecutionMode ||
+        !gateDecision ||
+        !recordedAt ||
+        gateReasons.length === 0) {
+        return null;
+    }
+    return {
+        eventId,
+        runId,
+        sessionId,
+        profile,
+        targetDomain,
+        targetTabId,
+        targetPage,
+        actionType,
+        requestedExecutionMode,
+        effectiveExecutionMode,
+        gateDecision,
+        gateReasons,
+        approver: asString(auditRecord.approver),
+        approvedAt: asString(auditRecord.approved_at),
+        recordedAt
+    };
+};
 export class RuntimeStoreRecorder {
     #store;
     #startedAtByRunId = new Map();
@@ -40,6 +119,16 @@ export class RuntimeStoreRecorder {
         const startedAt = new Date().toISOString();
         this.#startedAtByRunId.set(runId, startedAt);
         return startedAt;
+    }
+    async #recordGateArtifacts(source) {
+        const approvalInput = extractGateApprovalInput(source);
+        if (approvalInput && this.#store.upsertGateApproval) {
+            await this.#store.upsertGateApproval(approvalInput);
+        }
+        const auditInput = extractGateAuditRecordInput(source);
+        if (auditInput && this.#store.appendGateAuditRecord) {
+            await this.#store.appendGateAuditRecord(auditInput);
+        }
     }
     async recordStart(context) {
         await this.#store.upsertRun({
@@ -81,6 +170,7 @@ export class RuntimeStoreRecorder {
                 failurePoint: null,
                 summary: toSummaryText(summary)
             }));
+            await this.#recordGateArtifacts(summary);
         }
         finally {
             this.#startedAtByRunId.delete(context.run_id);
@@ -106,6 +196,9 @@ export class RuntimeStoreRecorder {
                 failurePoint: context.command,
                 summary: `${error.code}: ${error.message}`
             }));
+            if (error.details) {
+                await this.#recordGateArtifacts(error.details);
+            }
         }
         finally {
             this.#startedAtByRunId.delete(context.run_id);

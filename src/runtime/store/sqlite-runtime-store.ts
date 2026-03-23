@@ -40,6 +40,86 @@ export interface AppendRunEventResult {
   event_time: string;
 }
 
+export interface UpsertGateApprovalInput {
+  runId: string;
+  approved: boolean;
+  approver: string | null;
+  approvedAt: string | null;
+  checks: Record<string, boolean>;
+}
+
+export interface GateApprovalRecord {
+  approval_id: string;
+  run_id: string;
+  approved: boolean;
+  approver: string | null;
+  approved_at: string | null;
+  checks: Record<string, boolean>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AppendGateAuditRecordInput {
+  eventId: string;
+  runId: string;
+  sessionId: string;
+  profile: string;
+  targetDomain: string;
+  targetTabId: number;
+  targetPage: string;
+  actionType: string;
+  requestedExecutionMode: string;
+  effectiveExecutionMode: string;
+  gateDecision: string;
+  gateReasons: string[];
+  approver: string | null;
+  approvedAt: string | null;
+  recordedAt: string;
+}
+
+export interface GateAuditRecord {
+  event_id: string;
+  run_id: string;
+  session_id: string;
+  profile: string;
+  target_domain: string;
+  target_tab_id: number;
+  target_page: string;
+  action_type: string;
+  requested_execution_mode: string;
+  effective_execution_mode: string;
+  gate_decision: string;
+  gate_reasons: string[];
+  approver: string | null;
+  approved_at: string | null;
+  recorded_at: string;
+  created_at: string;
+}
+
+export interface GetAuditTrailByRunIdResult {
+  approval_record: GateApprovalRecord | null;
+  audit_records: GateAuditRecord[];
+}
+
+export interface ListAuditRecordsInput {
+  run_id?: string;
+  session_id?: string;
+  profile?: string;
+  limit?: number;
+}
+
+export interface ListGateAuditRecordsInput {
+  runId?: string;
+  sessionId?: string;
+  profile?: string;
+  limit?: number;
+}
+
+export interface GetGateAuditTrailResult {
+  approvalRecord: GateApprovalRecord | null;
+  auditRecords: GateAuditRecord[];
+}
+
 export interface RuntimeRunRecord {
   run_id: string;
   session_id: string | null;
@@ -88,12 +168,27 @@ export class RuntimeStoreError extends Error {
   }
 }
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const SUMMARY_MAX_CHARS = 512;
 const SQLITE_BUSY_MESSAGE = /SQLITE_BUSY|database is locked/i;
 const SQLITE_OPEN_RETRY_LIMIT = 3;
 type DatabaseSyncConstructor = new (path: string) => DatabaseSync;
 let databaseSyncCtorCache: DatabaseSyncConstructor | null | undefined;
+const GATE_ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
+const GATE_EXECUTION_MODES = new Set([
+  "dry_run",
+  "recon",
+  "live_read_high_risk",
+  "live_write"
+]);
+const GATE_DECISIONS = new Set(["allowed", "blocked"]);
+const REQUIRED_APPROVAL_CHECKS = new Set([
+  "target_domain_confirmed",
+  "target_tab_confirmed",
+  "target_page_confirmed",
+  "risk_state_checked",
+  "action_type_confirmed"
+]);
 
 const sanitizeSummary = (summary: string | null): string | null => {
   if (summary === null) {
@@ -114,6 +209,39 @@ const sanitizeSummary = (summary: string | null): string | null => {
 
 const isIsoLike = (value: string): boolean =>
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value);
+
+const parseJsonObject = <T extends Record<string, unknown>>(
+  value: unknown,
+  fallback: T
+): T => {
+  if (typeof value !== "string" || value.length === 0) {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as T)
+      : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const parseJsonArray = (value: unknown): string[] => {
+  if (typeof value !== "string" || value.length === 0) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string" && item.length > 0)
+      : [];
+  } catch {
+    return [];
+  }
+};
 
 export const resolveRuntimeStorePath = (cwd: string): string =>
   path.join(cwd, ".webenvoy", "runtime", "store.sqlite");
@@ -223,6 +351,42 @@ export class SQLiteRuntimeStore {
       );
       CREATE INDEX IF NOT EXISTS idx_runtime_events_run_time
         ON runtime_events(run_id, event_time ASC);
+      CREATE TABLE IF NOT EXISTS runtime_gate_approvals (
+        approval_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL UNIQUE,
+        approved INTEGER NOT NULL,
+        approver TEXT,
+        approved_at TEXT,
+        checks_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+      );
+      CREATE TABLE IF NOT EXISTS runtime_gate_audit_records (
+        event_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        profile TEXT NOT NULL,
+        target_domain TEXT NOT NULL,
+        target_tab_id INTEGER NOT NULL,
+        target_page TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        requested_execution_mode TEXT NOT NULL,
+        effective_execution_mode TEXT NOT NULL,
+        gate_decision TEXT NOT NULL,
+        gate_reasons_json TEXT NOT NULL,
+        approver TEXT,
+        approved_at TEXT,
+        recorded_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_run_recorded
+        ON runtime_gate_audit_records(run_id, recorded_at ASC);
+      CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_session_recorded
+        ON runtime_gate_audit_records(session_id, recorded_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_profile_recorded
+        ON runtime_gate_audit_records(profile, recorded_at DESC);
     `);
 
     const row = this.#db
@@ -235,12 +399,62 @@ export class SQLiteRuntimeStore {
       return;
     }
 
-    if (Number(row.value) !== SCHEMA_VERSION) {
+    const version = Number(row.value);
+    if (version === 1) {
+      this.#migrateV1ToV2();
+      return;
+    }
+
+    if (version !== SCHEMA_VERSION) {
       throw new RuntimeStoreError(
         "ERR_RUNTIME_STORE_SCHEMA_MISMATCH",
         `schema mismatch: ${row.value ?? "unknown"}`
       );
     }
+  }
+
+  #migrateV1ToV2(): void {
+    this.#db.exec(`
+      CREATE TABLE IF NOT EXISTS runtime_gate_approvals (
+        approval_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL UNIQUE,
+        approved INTEGER NOT NULL,
+        approver TEXT,
+        approved_at TEXT,
+        checks_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+      );
+      CREATE TABLE IF NOT EXISTS runtime_gate_audit_records (
+        event_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        profile TEXT NOT NULL,
+        target_domain TEXT NOT NULL,
+        target_tab_id INTEGER NOT NULL,
+        target_page TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        requested_execution_mode TEXT NOT NULL,
+        effective_execution_mode TEXT NOT NULL,
+        gate_decision TEXT NOT NULL,
+        gate_reasons_json TEXT NOT NULL,
+        approver TEXT,
+        approved_at TEXT,
+        recorded_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_run_recorded
+        ON runtime_gate_audit_records(run_id, recorded_at ASC);
+      CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_session_recorded
+        ON runtime_gate_audit_records(session_id, recorded_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_profile_recorded
+        ON runtime_gate_audit_records(profile, recorded_at DESC);
+    `);
+    this.#db
+      .prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'")
+      .run(String(SCHEMA_VERSION));
   }
 
   close(): void {
@@ -353,6 +567,109 @@ export class SQLiteRuntimeStore {
     }
   }
 
+  async upsertGateApproval(input: UpsertGateApprovalInput): Promise<GateApprovalRecord> {
+    this.#assertGateApprovalInput(input);
+    try {
+      const runExists = this.#db
+        .prepare("SELECT run_id FROM runtime_runs WHERE run_id = ?")
+        .get(input.runId) as { run_id?: string } | undefined;
+      if (!runExists) {
+        throw new RuntimeStoreError("ERR_RUNTIME_STORE_RUN_NOT_FOUND", "run not found");
+      }
+
+      const nowIso = new Date().toISOString();
+      const approvalId = `gate_appr_${input.runId}`;
+      this.#db
+        .prepare(
+          `
+          INSERT INTO runtime_gate_approvals(
+            approval_id, run_id, approved, approver, approved_at, checks_json, created_at, updated_at
+          ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(run_id) DO UPDATE SET
+            approved = excluded.approved,
+            approver = excluded.approver,
+            approved_at = excluded.approved_at,
+            checks_json = excluded.checks_json,
+            updated_at = excluded.updated_at
+        `
+        )
+        .run(
+          approvalId,
+          input.runId,
+          input.approved ? 1 : 0,
+          input.approver,
+          input.approvedAt,
+          JSON.stringify(input.checks),
+          nowIso,
+          nowIso
+        );
+
+      return this.#getGateApprovalByRunId(input.runId);
+    } catch (error) {
+      throw this.#toStoreDbError(error);
+    }
+  }
+
+  async appendGateAuditRecord(input: AppendGateAuditRecordInput): Promise<GateAuditRecord> {
+    this.#assertGateAuditRecordInput(input);
+    try {
+      const runExists = this.#db
+        .prepare("SELECT run_id FROM runtime_runs WHERE run_id = ?")
+        .get(input.runId) as { run_id?: string } | undefined;
+      if (!runExists) {
+        throw new RuntimeStoreError("ERR_RUNTIME_STORE_RUN_NOT_FOUND", "run not found");
+      }
+
+      const createdAt = new Date().toISOString();
+      this.#db
+        .prepare(
+          `
+          INSERT INTO runtime_gate_audit_records(
+            event_id, run_id, session_id, profile, target_domain, target_tab_id, target_page,
+            action_type, requested_execution_mode, effective_execution_mode, gate_decision,
+            gate_reasons_json, approver, approved_at, recorded_at, created_at
+          ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(event_id) DO UPDATE SET
+            session_id = excluded.session_id,
+            profile = excluded.profile,
+            target_domain = excluded.target_domain,
+            target_tab_id = excluded.target_tab_id,
+            target_page = excluded.target_page,
+            action_type = excluded.action_type,
+            requested_execution_mode = excluded.requested_execution_mode,
+            effective_execution_mode = excluded.effective_execution_mode,
+            gate_decision = excluded.gate_decision,
+            gate_reasons_json = excluded.gate_reasons_json,
+            approver = excluded.approver,
+            approved_at = excluded.approved_at,
+            recorded_at = excluded.recorded_at
+        `
+        )
+        .run(
+          input.eventId,
+          input.runId,
+          input.sessionId,
+          input.profile,
+          input.targetDomain,
+          input.targetTabId,
+          input.targetPage,
+          input.actionType,
+          input.requestedExecutionMode,
+          input.effectiveExecutionMode,
+          input.gateDecision,
+          JSON.stringify(input.gateReasons),
+          input.approver,
+          input.approvedAt,
+          input.recordedAt,
+          createdAt
+        );
+
+      return this.#getGateAuditRecordByEventId(input.eventId);
+    } catch (error) {
+      throw this.#toStoreDbError(error);
+    }
+  }
+
   async getRunTrace(runId: string): Promise<GetRunTraceResult> {
     if (!runId.trim()) {
       throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "run_id is required");
@@ -382,6 +699,159 @@ export class SQLiteRuntimeStore {
     return {
       run: run ?? null,
       events
+    };
+  }
+
+  async getGateAuditTrail(runId: string): Promise<GetGateAuditTrailResult> {
+    if (!runId.trim()) {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "run_id is required");
+    }
+
+    return {
+      approvalRecord: this.#getOptionalGateApprovalByRunId(runId),
+      auditRecords: this.#listGateAuditRecords({ runId })
+    };
+  }
+
+  async listGateAuditRecords(input: ListGateAuditRecordsInput): Promise<GateAuditRecord[]> {
+    return this.#listGateAuditRecords(input);
+  }
+
+  async upsertApprovalRecord(input: UpsertGateApprovalInput): Promise<GateApprovalRecord> {
+    return this.upsertGateApproval(input);
+  }
+
+  async appendAuditRecord(input: AppendGateAuditRecordInput): Promise<GateAuditRecord> {
+    return this.appendGateAuditRecord(input);
+  }
+
+  async getAuditTrailByRunId(runId: string): Promise<GetAuditTrailByRunIdResult> {
+    const result = await this.getGateAuditTrail(runId);
+    return {
+      approval_record: result.approvalRecord,
+      audit_records: result.auditRecords
+    };
+  }
+
+  async listAuditRecords(input: ListAuditRecordsInput): Promise<GateAuditRecord[]> {
+    return this.#listGateAuditRecords({
+      runId: input.run_id,
+      sessionId: input.session_id,
+      profile: input.profile,
+      limit: input.limit
+    });
+  }
+
+  #listGateAuditRecords(input: ListGateAuditRecordsInput): GateAuditRecord[] {
+    this.#assertListGateAuditInput(input);
+
+    const clauses: string[] = [];
+    const values: Array<string | number> = [];
+
+    if (input.runId?.trim()) {
+      clauses.push("run_id = ?");
+      values.push(input.runId.trim());
+    }
+    if (input.sessionId?.trim()) {
+      clauses.push("session_id = ?");
+      values.push(input.sessionId.trim());
+    }
+    if (input.profile?.trim()) {
+      clauses.push("profile = ?");
+      values.push(input.profile.trim());
+    }
+
+    const limit =
+      typeof input.limit === "number" && Number.isInteger(input.limit)
+        ? Math.max(1, Math.min(input.limit, 100))
+        : 50;
+
+    values.push(limit);
+    const sql = `
+      SELECT event_id, run_id, session_id, profile, target_domain, target_tab_id, target_page,
+             action_type, requested_execution_mode, effective_execution_mode, gate_decision,
+             gate_reasons_json, approver, approved_at, recorded_at, created_at
+      FROM runtime_gate_audit_records
+      ${clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : ""}
+      ORDER BY recorded_at DESC
+      LIMIT ?
+    `;
+
+    const rows = this.#db.prepare(sql).all(...values) as unknown as Array<
+      Omit<GateAuditRecord, "gate_reasons"> & { gate_reasons_json: string }
+    >;
+    return rows.map((row) => ({
+      ...row,
+      gate_reasons: parseJsonArray(row.gate_reasons_json)
+    }));
+  }
+
+  #getOptionalGateApprovalByRunId(runId: string): GateApprovalRecord | null {
+    const row = this.#db
+      .prepare(
+        `
+      SELECT approval_id, run_id, approved, approver, approved_at, checks_json, created_at, updated_at
+      FROM runtime_gate_approvals
+      WHERE run_id = ?
+    `
+      )
+      .get(runId) as
+      | (Omit<GateApprovalRecord, "approved" | "checks"> & {
+          approved: number;
+          checks_json: string;
+        })
+      | undefined;
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      approval_id: row.approval_id,
+      run_id: row.run_id,
+      approved: row.approved === 1,
+      approver: row.approver,
+      approved_at: row.approved_at,
+      checks: Object.fromEntries(
+        Object.entries(parseJsonObject<Record<string, unknown>>(row.checks_json, {})).map(
+          ([key, value]) => [key, value === true]
+        )
+      ),
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    };
+  }
+
+  #getGateApprovalByRunId(runId: string): GateApprovalRecord {
+    const record = this.#getOptionalGateApprovalByRunId(runId);
+    if (!record) {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_RUN_NOT_FOUND", "gate approval not found");
+    }
+    return record;
+  }
+
+  #getGateAuditRecordByEventId(eventId: string): GateAuditRecord {
+    const row = this.#db
+      .prepare(
+        `
+      SELECT event_id, run_id, session_id, profile, target_domain, target_tab_id, target_page,
+             action_type, requested_execution_mode, effective_execution_mode, gate_decision,
+             gate_reasons_json, approver, approved_at, recorded_at, created_at
+      FROM runtime_gate_audit_records
+      WHERE event_id = ?
+    `
+      )
+      .get(eventId) as
+      | (Omit<GateAuditRecord, "gate_reasons"> & { gate_reasons_json: string })
+      | undefined;
+
+    if (!row) {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_RUN_NOT_FOUND", "gate audit record not found");
+    }
+
+    return {
+      ...row,
+      gate_reasons: parseJsonArray(row.gate_reasons_json)
     };
   }
 
@@ -415,6 +885,121 @@ export class SQLiteRuntimeStore {
     }
     if (!isIsoLike(input.eventTime)) {
       throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid event_time");
+    }
+  }
+
+  #assertGateApprovalInput(input: UpsertGateApprovalInput): void {
+    if (!input.runId.trim()) {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "run_id is required");
+    }
+    if (!input.checks || typeof input.checks !== "object") {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "checks is required");
+    }
+    for (const check of REQUIRED_APPROVAL_CHECKS) {
+      if (typeof input.checks[check] !== "boolean") {
+        throw new RuntimeStoreError(
+          "ERR_RUNTIME_STORE_INVALID_INPUT",
+          `checks.${check} is required`
+        );
+      }
+    }
+    if (input.approved) {
+      if (!input.approver?.trim() || !input.approvedAt || !isIsoLike(input.approvedAt)) {
+        throw new RuntimeStoreError(
+          "ERR_RUNTIME_STORE_INVALID_INPUT",
+          "approved record requires approver and approved_at"
+        );
+      }
+    } else if (input.approvedAt !== null && !isIsoLike(input.approvedAt)) {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid approved_at");
+    }
+  }
+
+  #assertGateAuditRecordInput(input: AppendGateAuditRecordInput): void {
+    if (
+      !input.eventId.trim() ||
+      !input.runId.trim() ||
+      !input.sessionId.trim() ||
+      !input.profile.trim() ||
+      !input.targetDomain.trim() ||
+      !input.targetPage.trim() ||
+      !input.actionType.trim() ||
+      !input.requestedExecutionMode.trim() ||
+      !input.effectiveExecutionMode.trim() ||
+      !input.gateDecision.trim()
+    ) {
+      throw new RuntimeStoreError(
+        "ERR_RUNTIME_STORE_INVALID_INPUT",
+        "missing required gate audit fields"
+      );
+    }
+    if (!Number.isInteger(input.targetTabId) || input.targetTabId <= 0) {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid target_tab_id");
+    }
+    if (!GATE_ACTION_TYPES.has(input.actionType)) {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid action_type");
+    }
+    if (!GATE_EXECUTION_MODES.has(input.requestedExecutionMode)) {
+      throw new RuntimeStoreError(
+        "ERR_RUNTIME_STORE_INVALID_INPUT",
+        "invalid requested_execution_mode"
+      );
+    }
+    if (!GATE_EXECUTION_MODES.has(input.effectiveExecutionMode)) {
+      throw new RuntimeStoreError(
+        "ERR_RUNTIME_STORE_INVALID_INPUT",
+        "invalid effective_execution_mode"
+      );
+    }
+    if (!GATE_DECISIONS.has(input.gateDecision)) {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid gate_decision");
+    }
+    if (!Array.isArray(input.gateReasons) || input.gateReasons.length === 0) {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "gate_reasons is required");
+    }
+    for (const reason of input.gateReasons) {
+      if (typeof reason !== "string" || reason.trim().length === 0) {
+        throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid gate_reasons");
+      }
+    }
+    if (!isIsoLike(input.recordedAt)) {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid recorded_at");
+    }
+    const requiresApprovalEvidence =
+      input.gateDecision === "allowed" &&
+      (input.requestedExecutionMode === "live_read_high_risk" ||
+        input.requestedExecutionMode === "live_write" ||
+        input.effectiveExecutionMode === "live_read_high_risk" ||
+        input.effectiveExecutionMode === "live_write");
+    if (
+      requiresApprovalEvidence &&
+      (!input.approver?.trim() || !input.approvedAt || !isIsoLike(input.approvedAt))
+    ) {
+      throw new RuntimeStoreError(
+        "ERR_RUNTIME_STORE_INVALID_INPUT",
+        "allowed record requires approver and approved_at"
+      );
+    }
+    if (input.approvedAt !== null && !isIsoLike(input.approvedAt)) {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid approved_at");
+    }
+  }
+
+  #assertListGateAuditInput(input: ListGateAuditRecordsInput): void {
+    if (input.runId !== undefined && input.runId.trim().length === 0) {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "run_id is empty");
+    }
+    if (input.sessionId !== undefined && input.sessionId.trim().length === 0) {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "session_id is empty");
+    }
+    if (input.profile !== undefined && input.profile.trim().length === 0) {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "profile is empty");
+    }
+    if (
+      input.limit !== undefined &&
+      (!Number.isInteger(input.limit) || input.limit <= 0 || input.limit > 100)
+    ) {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid limit");
     }
   }
 }

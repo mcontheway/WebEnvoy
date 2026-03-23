@@ -7,8 +7,18 @@ import {
 import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
+import {
+  RuntimeStoreError,
+  SQLiteRuntimeStore,
+  resolveRuntimeStorePath
+} from "../runtime/store/sqlite-runtime-store.js";
 
 const asBoolean = (value: unknown): boolean => value === true;
+const asString = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const asInteger = (value: unknown): number | null =>
+  typeof value === "number" && Number.isInteger(value) ? value : null;
+
 const resolveRuntimeBridge = (): NativeMessagingBridge => {
   if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
     return new NativeMessagingBridge({
@@ -82,6 +92,76 @@ const runtimeStop = async (context: RuntimeContext) =>
     params: context.params
   });
 
+const runtimeAuditQuery = async (context: RuntimeContext) => {
+  const runId = asString(context.params.run_id);
+  const sessionId = asString(context.params.session_id);
+  const profile = asString(context.params.profile);
+  const limitRaw = asInteger(context.params.limit);
+  const limit = limitRaw === null ? 20 : Math.max(1, Math.min(100, limitRaw));
+
+  if (!runId && !sessionId && !profile) {
+    throw new CliError("ERR_CLI_INVALID_ARGS", "审计查询参数不合法", {
+      details: {
+        ability_id: "runtime.audit",
+        stage: "input_validation",
+        reason: "AUDIT_QUERY_FILTER_MISSING"
+      }
+    });
+  }
+
+  let store: SQLiteRuntimeStore | null = null;
+  try {
+    store = new SQLiteRuntimeStore(resolveRuntimeStorePath(context.cwd));
+    if (runId) {
+      const trail = await store.getGateAuditTrail(runId);
+      return {
+        query: {
+          run_id: runId
+        },
+        approval_record: trail.approvalRecord,
+        audit_records: trail.auditRecords
+      };
+    }
+
+    const records = await store.listGateAuditRecords({
+      sessionId: sessionId ?? undefined,
+      profile: profile ?? undefined,
+      limit
+    });
+    return {
+      query: {
+        ...(sessionId ? { session_id: sessionId } : {}),
+        ...(profile ? { profile } : {}),
+        limit
+      },
+      audit_records: records
+    };
+  } catch (error) {
+    if (error instanceof RuntimeStoreError) {
+      if (error.code === "ERR_RUNTIME_STORE_INVALID_INPUT") {
+        throw new CliError("ERR_CLI_INVALID_ARGS", "审计查询参数不合法", {
+          details: {
+            ability_id: "runtime.audit",
+            stage: "input_validation",
+            reason: "AUDIT_QUERY_INVALID_INPUT"
+          }
+        });
+      }
+      throw new CliError("ERR_RUNTIME_UNAVAILABLE", `运行记录存储失败: ${error.code}`, {
+        retryable: error.code !== "ERR_RUNTIME_STORE_SCHEMA_MISMATCH",
+        cause: error
+      });
+    }
+    throw error;
+  } finally {
+    try {
+      store?.close();
+    } catch {
+      // Best-effort close for read-only query path.
+    }
+  }
+};
+
 const runtimeHelp = async () => ({
   usage: "webenvoy <command> [--params '<json>'] [--profile <profile>] [--run-id <run_id>]",
   commands: [
@@ -91,6 +171,7 @@ const runtimeHelp = async () => ({
     "runtime.login",
     "runtime.status",
     "runtime.stop",
+    "runtime.audit",
     "xhs.search"
   ],
   notes: ["--params 必须是 JSON 对象字符串", "stdout 只输出单个 JSON 对象"]
@@ -130,5 +211,10 @@ export const runtimeCommands = (): CommandDefinition[] => [
     status: "implemented",
     requiresProfile: true,
     handler: runtimeStop
+  },
+  {
+    name: "runtime.audit",
+    status: "implemented",
+    handler: runtimeAuditQuery
   }
 ];
