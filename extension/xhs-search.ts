@@ -107,6 +107,7 @@ interface GateOutcomeRecord {
 }
 
 interface ConsumerGateResult {
+  risk_state: RiskState;
   target_domain: string | null;
   target_tab_id: number | null;
   target_page: string | null;
@@ -135,6 +136,7 @@ interface XhsExecutionAuditRecord {
   run_id: string;
   session_id: string;
   profile: string;
+  risk_state: RiskState;
   target_domain: string | null;
   target_tab_id: number | null;
   target_page: string | null;
@@ -356,6 +358,7 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
         requestedExecutionMode === "live_read_high_risk" || requestedExecutionMode === "live_write"
     },
     consumer_gate_result: {
+      risk_state: riskState,
       target_domain: targetDomain,
       target_tab_id: targetTabId,
       target_page: targetPage,
@@ -538,6 +541,7 @@ const createAuditRecord = (
   run_id: context.runId,
   session_id: context.sessionId,
   profile: context.profile,
+  risk_state: gate.gate_input.risk_state,
   target_domain: gate.consumer_gate_result.target_domain,
   target_tab_id: gate.consumer_gate_result.target_tab_id,
   target_page: gate.consumer_gate_result.target_page,

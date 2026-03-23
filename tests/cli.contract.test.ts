@@ -985,13 +985,27 @@ describe("webenvoy cli contract", () => {
         audit_records: [
           {
             run_id: runId,
+            risk_state: "allowed",
             gate_decision: "allowed",
             requested_execution_mode: "live_read_high_risk",
             effective_execution_mode: "live_read_high_risk",
             approver: "qa-reviewer",
             approved_at: "2026-03-23T10:00:00Z"
           }
-        ]
+        ],
+        risk_state_output: {
+          current_state: "allowed",
+          issue_action_matrix: [
+            {
+              issue_scope: "issue_208",
+              state: "allowed"
+            },
+            {
+              issue_scope: "issue_209",
+              state: "allowed"
+            }
+          ]
+        }
       }
     });
     expect(
@@ -1058,13 +1072,27 @@ describe("webenvoy cli contract", () => {
           {
             run_id: runId,
             session_id: sessionId,
+            risk_state: "allowed",
             gate_decision: "blocked",
             requested_execution_mode: "live_read_high_risk",
             effective_execution_mode: "dry_run",
             approver: null,
             approved_at: null
           }
-        ]
+        ],
+        risk_state_output: {
+          current_state: "allowed",
+          issue_action_matrix: [
+            {
+              issue_scope: "issue_208",
+              state: "allowed"
+            },
+            {
+              issue_scope: "issue_209",
+              state: "allowed"
+            }
+          ]
+        }
       }
     });
     expect(

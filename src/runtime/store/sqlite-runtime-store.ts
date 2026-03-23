@@ -64,6 +64,7 @@ export interface AppendGateAuditRecordInput {
   runId: string;
   sessionId: string;
   profile: string;
+  riskState: string;
   targetDomain: string;
   targetTabId: number;
   targetPage: string;
@@ -82,6 +83,7 @@ export interface GateAuditRecord {
   run_id: string;
   session_id: string;
   profile: string;
+  risk_state: string;
   target_domain: string;
   target_tab_id: number;
   target_page: string;
@@ -168,7 +170,7 @@ export class RuntimeStoreError extends Error {
   }
 }
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const SUMMARY_MAX_CHARS = 512;
 const SQLITE_BUSY_MESSAGE = /SQLITE_BUSY|database is locked/i;
 const SQLITE_OPEN_RETRY_LIMIT = 3;
@@ -181,6 +183,7 @@ const GATE_EXECUTION_MODES = new Set([
   "live_read_high_risk",
   "live_write"
 ]);
+const GATE_RISK_STATES = new Set(["paused", "limited", "allowed"]);
 const GATE_DECISIONS = new Set(["allowed", "blocked"]);
 const REQUIRED_APPROVAL_CHECKS = new Set([
   "target_domain_confirmed",
@@ -367,6 +370,7 @@ export class SQLiteRuntimeStore {
         run_id TEXT NOT NULL,
         session_id TEXT NOT NULL,
         profile TEXT NOT NULL,
+        risk_state TEXT NOT NULL,
         target_domain TEXT NOT NULL,
         target_tab_id INTEGER NOT NULL,
         target_page TEXT NOT NULL,
@@ -404,6 +408,10 @@ export class SQLiteRuntimeStore {
       this.#migrateV1ToV2();
       return;
     }
+    if (version === 2) {
+      this.#migrateV2ToV3();
+      return;
+    }
 
     if (version !== SCHEMA_VERSION) {
       throw new RuntimeStoreError(
@@ -431,6 +439,7 @@ export class SQLiteRuntimeStore {
         run_id TEXT NOT NULL,
         session_id TEXT NOT NULL,
         profile TEXT NOT NULL,
+        risk_state TEXT NOT NULL DEFAULT 'paused',
         target_domain TEXT NOT NULL,
         target_tab_id INTEGER NOT NULL,
         target_page TEXT NOT NULL,
@@ -451,6 +460,16 @@ export class SQLiteRuntimeStore {
         ON runtime_gate_audit_records(session_id, recorded_at DESC);
       CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_profile_recorded
         ON runtime_gate_audit_records(profile, recorded_at DESC);
+    `);
+    this.#db
+      .prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'")
+      .run(String(SCHEMA_VERSION));
+  }
+
+  #migrateV2ToV3(): void {
+    this.#db.exec(`
+      ALTER TABLE runtime_gate_audit_records
+      ADD COLUMN risk_state TEXT NOT NULL DEFAULT 'paused';
     `);
     this.#db
       .prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'")
@@ -625,13 +644,14 @@ export class SQLiteRuntimeStore {
         .prepare(
           `
           INSERT INTO runtime_gate_audit_records(
-            event_id, run_id, session_id, profile, target_domain, target_tab_id, target_page,
+            event_id, run_id, session_id, profile, risk_state, target_domain, target_tab_id, target_page,
             action_type, requested_execution_mode, effective_execution_mode, gate_decision,
             gate_reasons_json, approver, approved_at, recorded_at, created_at
-          ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(event_id) DO UPDATE SET
             session_id = excluded.session_id,
             profile = excluded.profile,
+            risk_state = excluded.risk_state,
             target_domain = excluded.target_domain,
             target_tab_id = excluded.target_tab_id,
             target_page = excluded.target_page,
@@ -650,6 +670,7 @@ export class SQLiteRuntimeStore {
           input.runId,
           input.sessionId,
           input.profile,
+          input.riskState,
           input.targetDomain,
           input.targetTabId,
           input.targetPage,
@@ -768,7 +789,7 @@ export class SQLiteRuntimeStore {
 
     values.push(limit);
     const sql = `
-      SELECT event_id, run_id, session_id, profile, target_domain, target_tab_id, target_page,
+      SELECT event_id, run_id, session_id, profile, risk_state, target_domain, target_tab_id, target_page,
              action_type, requested_execution_mode, effective_execution_mode, gate_decision,
              gate_reasons_json, approver, approved_at, recorded_at, created_at
       FROM runtime_gate_audit_records
@@ -834,7 +855,7 @@ export class SQLiteRuntimeStore {
     const row = this.#db
       .prepare(
         `
-      SELECT event_id, run_id, session_id, profile, target_domain, target_tab_id, target_page,
+      SELECT event_id, run_id, session_id, profile, risk_state, target_domain, target_tab_id, target_page,
              action_type, requested_execution_mode, effective_execution_mode, gate_decision,
              gate_reasons_json, approver, approved_at, recorded_at, created_at
       FROM runtime_gate_audit_records
@@ -921,6 +942,7 @@ export class SQLiteRuntimeStore {
       !input.runId.trim() ||
       !input.sessionId.trim() ||
       !input.profile.trim() ||
+      !input.riskState.trim() ||
       !input.targetDomain.trim() ||
       !input.targetPage.trim() ||
       !input.actionType.trim() ||
@@ -935,6 +957,9 @@ export class SQLiteRuntimeStore {
     }
     if (!Number.isInteger(input.targetTabId) || input.targetTabId <= 0) {
       throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid target_tab_id");
+    }
+    if (!GATE_RISK_STATES.has(input.riskState)) {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid risk_state");
     }
     if (!GATE_ACTION_TYPES.has(input.actionType)) {
       throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid action_type");

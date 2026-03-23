@@ -58,6 +58,7 @@ const extractGateAuditRecordInput = (source) => {
     const sessionId = asString(auditRecord.session_id);
     const profile = asString(auditRecord.profile);
     const eventId = asString(auditRecord.event_id);
+    const riskState = asString(auditRecord.risk_state);
     const targetDomain = asString(auditRecord.target_domain);
     const targetTabId = asInteger(auditRecord.target_tab_id);
     const targetPage = asString(auditRecord.target_page);
@@ -73,6 +74,7 @@ const extractGateAuditRecordInput = (source) => {
         !sessionId ||
         !profile ||
         !eventId ||
+        !riskState ||
         !targetDomain ||
         targetTabId === null ||
         !targetPage ||
@@ -89,6 +91,7 @@ const extractGateAuditRecordInput = (source) => {
         runId,
         sessionId,
         profile,
+        riskState,
         targetDomain,
         targetTabId,
         targetPage,

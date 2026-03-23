@@ -3,10 +3,14 @@ import { NativeMessagingBridge, NativeMessagingTransportError } from "../runtime
 import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
+import { buildUnifiedRiskStateOutput, resolveRiskState } from "../runtime/risk-state.js";
 import { RuntimeStoreError, SQLiteRuntimeStore, resolveRuntimeStorePath } from "../runtime/store/sqlite-runtime-store.js";
 const asBoolean = (value) => value === true;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
+const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value
+    : null;
 const resolveRuntimeBridge = () => {
     if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
         return new NativeMessagingBridge({
@@ -18,6 +22,24 @@ const resolveRuntimeBridge = () => {
     });
 };
 const profileRuntime = new ProfileRuntimeService();
+const resolveCurrentRiskState = (approvalRecord, auditRecords) => {
+    const latestAudit = auditRecords[0] ?? null;
+    const auditRiskState = latestAudit?.risk_state;
+    if (typeof auditRiskState === "string") {
+        return resolveRiskState(auditRiskState);
+    }
+    const approvalChecks = asObject(approvalRecord?.checks);
+    if (approvalRecord?.approved === true && approvalChecks?.risk_state_checked === true) {
+        return "allowed";
+    }
+    const gateReasons = Array.isArray(latestAudit?.gate_reasons)
+        ? latestAudit.gate_reasons.filter((item) => typeof item === "string")
+        : [];
+    if (gateReasons.some((reason) => reason === "RISK_STATE_LIMITED")) {
+        return "limited";
+    }
+    return "paused";
+};
 const runtimePing = async (context) => {
     if (asBoolean(context.params.simulate_runtime_unavailable)) {
         throw new CliError("ERR_RUNTIME_UNAVAILABLE", "运行时不可用", { retryable: true });
@@ -88,12 +110,14 @@ const runtimeAuditQuery = async (context) => {
         store = new SQLiteRuntimeStore(resolveRuntimeStorePath(context.cwd));
         if (runId) {
             const trail = await store.getGateAuditTrail(runId);
+            const currentRiskState = resolveCurrentRiskState(asObject(trail.approvalRecord), trail.auditRecords.map((record) => record));
             return {
                 query: {
                     run_id: runId
                 },
                 approval_record: trail.approvalRecord,
-                audit_records: trail.auditRecords
+                audit_records: trail.auditRecords,
+                risk_state_output: buildUnifiedRiskStateOutput(currentRiskState)
             };
         }
         const records = await store.listGateAuditRecords({
@@ -101,13 +125,15 @@ const runtimeAuditQuery = async (context) => {
             profile: profile ?? undefined,
             limit
         });
+        const currentRiskState = resolveCurrentRiskState(null, records.map((record) => record));
         return {
             query: {
                 ...(sessionId ? { session_id: sessionId } : {}),
                 ...(profile ? { profile } : {}),
                 limit
             },
-            audit_records: records
+            audit_records: records,
+            risk_state_output: buildUnifiedRiskStateOutput(currentRiskState)
         };
     }
     catch (error) {

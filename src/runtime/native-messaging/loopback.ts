@@ -214,6 +214,7 @@ const buildLoopbackGate = (
         requestedExecutionMode === "live_read_high_risk" || requestedExecutionMode === "live_write"
     },
     consumerGateResult: {
+      risk_state: riskState,
       target_domain: targetDomain,
       target_tab_id: targetTabId,
       target_page: targetPage,
@@ -244,6 +245,7 @@ const buildLoopbackAuditRecord = (input: {
   run_id: input.runId,
   session_id: input.sessionId,
   profile: input.profile,
+  risk_state: String(input.gate.gateInput.risk_state ?? "paused"),
   target_domain: input.gate.consumerGateResult.target_domain,
   target_tab_id: input.gate.consumerGateResult.target_tab_id,
   target_page: input.gate.consumerGateResult.target_page,
