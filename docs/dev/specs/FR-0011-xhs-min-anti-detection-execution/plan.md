@@ -77,4 +77,4 @@
 4. `risks.md` 中 stop-ship 与回滚路径可执行。
 5. `#208/#209` 的前置关系已在 issue/PR 描述中明确引用本 FR。
 6. `#208/#209` 三态差异化阻断矩阵与状态变更审计字段已冻结。
-7. `live_read_limited` 的公开模式语义、审批证据要求与 `blocked` 时的 `effective_execution_mode` 语义已冻结，可被 `#255` 直接消费。
+7. `live_read_limited` 的公开模式语义、审批证据要求与 `blocked` 时的 `effective_execution_mode` 语义已冻结；是否进入 `#255` 的实现准入，以上游 FR-0010/FR-0011 的真实 review 收口结果为准。
