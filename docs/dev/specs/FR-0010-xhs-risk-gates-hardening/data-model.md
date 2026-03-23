@@ -13,7 +13,7 @@
 - `target_tab_id` integer NOT NULL
 - `target_page` string NOT NULL
 - `action_type` ENUM NOT NULL (`read` | `write` | `irreversible_write`)
-- `requested_execution_mode` ENUM NOT NULL (`dry_run` | `recon` | `live_read_high_risk` | `live_write`)
+- `requested_execution_mode` ENUM NOT NULL (`dry_run` | `recon` | `live_read_limited` | `live_read_high_risk` | `live_write`)
 - `risk_state` ENUM NOT NULL (`paused` | `limited` | `allowed`)
 - `created_at` datetime NOT NULL
 
@@ -26,7 +26,7 @@
 
 - `decision_id` string PK
 - `run_id` string NOT NULL
-- `effective_execution_mode` ENUM NOT NULL (`dry_run` | `recon` | `live_read_high_risk` | `live_write`)
+- `effective_execution_mode` ENUM NOT NULL (`dry_run` | `recon` | `live_read_limited` | `live_read_high_risk` | `live_write`)
 - `gate_decision` ENUM NOT NULL (`allowed` | `blocked`)
 - `gate_reasons` JSON array NOT NULL
 - `requires_manual_confirmation` boolean NOT NULL
@@ -36,6 +36,7 @@
 
 1. `gate_decision=blocked` 时，`gate_reasons` 必须至少包含 1 项。
 2. 默认情况下 `effective_execution_mode` 不得为 `live_*`。
+3. `gate_decision=blocked` 时，`effective_execution_mode` 只能表示真实未继续 live 的降级模式，不得返回未实际执行的 `live_*`。
 
 ## 实体 3：ApprovalRecord
 
@@ -55,6 +56,7 @@
   - `target_page_confirmed` boolean
   - `risk_state_checked` boolean
   - `action_type_confirmed` boolean
+3. `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited`、`live_read_high_risk` 或 `live_write` 且门禁放行时，`ApprovalRecord` 不得缺失。
 
 ## 实体 4：AuditRecord
 
@@ -80,6 +82,7 @@
 2. `run_id + recorded_at` 必须可排序，支持时间线复盘。
 3. `gate_reasons` 必须至少包含 1 项，保证门禁审计可独立复盘。
 4. `gate_decision=allowed` 时，`approver` 与 `approved_at` 必填。
+5. `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited`、`live_read_high_risk` 或 `live_write` 且门禁放行时，审计记录必须能独立证明审批已完成。
 
 ## 生命周期
 
@@ -92,7 +95,7 @@
 
 - 与 `FR-0009`：FR-0009 保留治理基线；FR-0010 作为 Sprint 2 实现与测试的唯一消费契约。
 - 与 `FR-0004`：复用运行标识与最小可观测信息，不重建外层错误壳。
-- 与 Sprint 2 issue 分解：`#218/#219/#221/#223` 与 `#208/#209` 共享同一冻结字段（`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`）。
+- 与 Sprint 2 issue 分解：`#218/#219/#221/#223` 与 `#208/#209` 及后续 Sprint 3 follow-up 共享同一冻结字段（`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`）。
 
 ## FR-0009 -> FR-0010 字段迁移映射（规约层）
 

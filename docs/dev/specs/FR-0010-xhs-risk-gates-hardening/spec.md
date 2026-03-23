@@ -21,7 +21,7 @@
 3. 建立默认 `dry_run/recon` 执行模式，并定义升级到 live 的前置条件。
 4. 建立人工确认与审计记录最小闭环，支持事后追溯与回滚。
 5. 将 `#208` 与 `#209` 统一纳入同一门禁模型。
-6. 冻结统一门禁输出对象，确保 `#208/#209` 消费同一字段口径（`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`）。
+6. 冻结统一门禁输出对象，确保 `#208/#209` 与后续 Sprint 3 follow-up 消费同一字段口径（`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`）。
 
 ## 非目标
 
@@ -54,11 +54,12 @@
 - 请求方模式必须写入 `requested_execution_mode`。
 - 门禁生效模式必须写入 `effective_execution_mode`。
 - 默认生效模式必须为 `dry_run` 或 `recon`。
-- `live_read_high_risk` 与 `live_write` 默认阻断，只有在升级前置满足时才允许进入。
+- `live_read_limited`、`live_read_high_risk` 与 `live_write` 进入 live 前都必须满足升级前置；若前置缺失则默认阻断。
 - 升级 live 前置至少包含：
   - 风险状态检查通过
   - 人工确认通过
   - 审批记录落盘
+  - 审批检查项完整
 
 ### 4. 人工确认与审计（承载 #221）
 
@@ -69,6 +70,7 @@
   - approver / approved_at
   - gate_decision / gate_reasons
 - 任意 live 放行必须可追溯到审批记录。
+- `live_read_limited` 不得绕开审批记录、审计记录或冻结字段独立放行。
 
 ### 5. 与 #208 / #209 的统一约束
 
@@ -109,6 +111,7 @@ Given 未满足 live 升级前置
 When 请求进入执行阶段
 Then 默认模式为 `dry_run` 或 `recon`
 And `live_read_high_risk` 与 `live_write` 被阻断
+And `live_read_limited` 在未满足升级前置时同样被阻断
 
 ### 场景 3：显式目标页确认
 
@@ -147,14 +150,14 @@ And 不存在某一事项绕过门禁的路径
 4. 显式目标域/目标页确认（含 `target_tab_id`）、人工确认、审计记录要求均已冻结。
 5. `#208` 与 `#209` 的后续 live 扩展前置条件已统一。
 6. 输出对象可被实现层与后续事项稳定消费。
-7. `requested_execution_mode` 与 `effective_execution_mode` 语义已无歧义。
+7. `requested_execution_mode` 与 `effective_execution_mode` 语义已无歧义，且其正式枚举已覆盖 `live_read_limited`。
 8. `gate_decision`（标量）与 `gate_outcome`（对象层）命名冲突已消除。
 9. `gate_reasons` 为唯一正式原因字段。
 
 ## 与 FR-0009 的替代与兼容关系
 
 - 关系声明：`FR-0009` 继续作为治理基线；Sprint 2 实现与测试统一消费 `FR-0010` 契约对象。
-- 替代范围：`FR-0009` 的 `execution_mode_gate` 与 `resume_requirements` 在实现入口侧由 FR-0010 的 `gate_input/gate_outcome/approval_record/audit_record/consumer_gate_result` 承接。
+- 替代范围：`FR-0009` 的 `execution_mode_gate` 与 `resume_requirements` 在实现入口侧由 FR-0010 的 `gate_input/gate_outcome/approval_record/audit_record/consumer_gate_result` 承接；后续 FR 只能在保持该对象单口径的前提下扩展受控 live 模式。
 - 兼容要求：若存在旧消费者仍依赖 FR-0009 字段，必须在实现 PR 提供显式映射，不得在 FR-0010 契约中并存双语义字段。
 - 迁移完成判定：`#218/#219/#221/#208/#209` 仅消费 FR-0010 冻结字段后，FR-0009 机器字段视为历史参考，不再作为实现准入输入。
 
