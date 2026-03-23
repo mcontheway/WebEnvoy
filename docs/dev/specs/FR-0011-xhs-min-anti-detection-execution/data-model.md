@@ -18,13 +18,13 @@
 
 ## 实体 2：ReadExecutionPolicy
 
-- `default_mode` ENUM NOT NULL（`dry_run` | `recon` | `live_read_limited` | `live_read_high_risk`）
+- `default_mode` ENUM NOT NULL（`dry_run` | `recon`）
 - `allowed_modes` ARRAY NOT NULL
 - `blocked_actions` ARRAY NOT NULL
 - `live_entry_requirements` ARRAY NOT NULL
 
 约束：
-- `default_mode` 在 FR-0011 生效阶段不得为高风险 live。
+- `default_mode` 在 FR-0011 生效阶段只能是 `dry_run` 或 `recon`，不得为任何 `live_*`。
 - `live_read_limited` 作为 `allowed_modes` 成员时，表示正式公开的受控 live 模式，不得仅作为内部 fallback 枚举存在。
 - `blocked_actions` 为空时视为无效对象。
 - `live_entry_requirements` 必须显式覆盖 `risk_state_checked`、`target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`action_type_confirmed`、人工确认、完整审批证据与审计证据，不得弱于 `FR-0010.ApprovalRecord` / `FR-0010.AuditRecord`。
