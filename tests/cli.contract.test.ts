@@ -914,6 +914,165 @@ describe("webenvoy cli contract", () => {
     });
   });
 
+  itWithSqlite("queries persisted gate audit trail by run_id after live approval", async () => {
+    const cwd = await createRuntimeCwd();
+    const runId = "run-audit-query-allowed-001";
+
+    const executeResult = runCli([
+      "xhs.search",
+      "--run-id",
+      runId,
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          ...scopedReadGateOptions,
+          simulate_result: "success",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], cwd, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+    expect(executeResult.status).toBe(0);
+
+    const queryResult = runCli([
+      "runtime.audit",
+      "--run-id",
+      "run-audit-query-read-001",
+      "--params",
+      JSON.stringify({
+        run_id: runId
+      })
+    ], cwd);
+    expect(queryResult.status).toBe(0);
+    const body = parseSingleJsonLine(queryResult.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.audit",
+      status: "success",
+      summary: {
+        query: {
+          run_id: runId
+        },
+        approval_record: {
+          run_id: runId,
+          approved: true,
+          approver: "qa-reviewer",
+          approved_at: "2026-03-23T10:00:00Z"
+        },
+        audit_records: [
+          {
+            run_id: runId,
+            gate_decision: "allowed",
+            requested_execution_mode: "live_read_high_risk",
+            effective_execution_mode: "live_read_high_risk",
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z"
+          }
+        ]
+      }
+    });
+    expect(
+      ((((body.summary as Record<string, unknown>).audit_records as Record<string, unknown>[])[0]
+        .gate_reasons as string[]) ?? [])
+    ).toEqual(["LIVE_MODE_APPROVED"]);
+  });
+
+  itWithSqlite("queries persisted blocked gate audit records by session_id filter", async () => {
+    const cwd = await createRuntimeCwd();
+    const runId = "run-audit-query-blocked-001";
+
+    const executeResult = runCli([
+      "xhs.search",
+      "--run-id",
+      runId,
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          ...scopedReadGateOptions,
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed"
+        }
+      })
+    ], cwd, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+    expect(executeResult.status).toBe(6);
+    const executeBody = parseSingleJsonLine(executeResult.stdout);
+    const sessionId = String(
+      (((executeBody.error as Record<string, unknown>).details as Record<string, unknown>)
+        .audit_record as Record<string, unknown>).session_id
+    );
+
+    const queryResult = runCli([
+      "runtime.audit",
+      "--run-id",
+      "run-audit-query-read-002",
+      "--params",
+      JSON.stringify({
+        session_id: sessionId
+      })
+    ], cwd);
+    expect(queryResult.status).toBe(0);
+    const body = parseSingleJsonLine(queryResult.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.audit",
+      status: "success",
+      summary: {
+        query: {
+          session_id: sessionId
+        },
+        audit_records: [
+          {
+            run_id: runId,
+            session_id: sessionId,
+            gate_decision: "blocked",
+            requested_execution_mode: "live_read_high_risk",
+            effective_execution_mode: "dry_run",
+            approver: null,
+            approved_at: null
+          }
+        ]
+      }
+    });
+    expect(
+      ((((body.summary as Record<string, unknown>).audit_records as Record<string, unknown>[])[0]
+        .gate_reasons as string[]) ?? [])
+    ).toEqual(expect.arrayContaining(["MANUAL_CONFIRMATION_MISSING"]));
+  });
+
   it("returns invalid args when xhs.search requested_execution_mode is missing", () => {
     const result = runCli([
       "xhs.search",

@@ -4,6 +4,8 @@ import {
   RuntimeStoreError,
   SQLiteRuntimeStore,
   type AppendRunEventInput,
+  type AppendGateAuditRecordInput,
+  type UpsertGateApprovalInput,
   type UpsertRunInput,
   resolveRuntimeStorePath
 } from "./sqlite-runtime-store.js";
@@ -32,6 +34,19 @@ const resolveSessionId = (summary: JsonObject): string | null => {
 
 const toSummaryText = (summary: JsonObject): string => JSON.stringify(summary);
 
+const asObject = (value: unknown): JsonObject | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as JsonObject)
+    : null;
+
+const asString = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+
+const asInteger = (value: unknown): number | null =>
+  typeof value === "number" && Number.isInteger(value) ? value : null;
+
+const asBoolean = (value: unknown): boolean => value === true;
+
 const buildEvent = (
   context: RuntimeContext,
   input: Omit<AppendRunEventInput, "runId" | "eventTime">
@@ -44,8 +59,101 @@ const buildEvent = (
 interface RuntimeStoreWriter {
   upsertRun(input: UpsertRunInput): Promise<unknown>;
   appendRunEvent(input: AppendRunEventInput): Promise<unknown>;
+  upsertGateApproval?(input: UpsertGateApprovalInput): Promise<unknown>;
+  appendGateAuditRecord?(input: AppendGateAuditRecordInput): Promise<unknown>;
   close(): void;
 }
+
+const extractGateApprovalInput = (
+  source: JsonObject
+): UpsertGateApprovalInput | null => {
+  const approvalRecord = asObject(source.approval_record);
+  if (!approvalRecord) {
+    return null;
+  }
+
+  const runId =
+    asString(source.run_id) ??
+    asString((asObject(source.audit_record) ?? {}).run_id) ??
+    asString((asObject(source.gate_input) ?? {}).run_id);
+  if (!runId) {
+    return null;
+  }
+
+  const checksObject = asObject(approvalRecord.checks) ?? {};
+  return {
+    runId,
+    approved: asBoolean(approvalRecord.approved),
+    approver: asString(approvalRecord.approver),
+    approvedAt: asString(approvalRecord.approved_at),
+    checks: Object.fromEntries(
+      Object.entries(checksObject).map(([key, value]) => [key, asBoolean(value)])
+    )
+  };
+};
+
+const extractGateAuditRecordInput = (
+  source: JsonObject
+): AppendGateAuditRecordInput | null => {
+  const auditRecord = asObject(source.audit_record);
+  if (!auditRecord) {
+    return null;
+  }
+
+  const runId = asString(auditRecord.run_id);
+  const sessionId = asString(auditRecord.session_id);
+  const profile = asString(auditRecord.profile);
+  const eventId = asString(auditRecord.event_id);
+  const targetDomain = asString(auditRecord.target_domain);
+  const targetTabId = asInteger(auditRecord.target_tab_id);
+  const targetPage = asString(auditRecord.target_page);
+  const actionType = asString(auditRecord.action_type);
+  const requestedExecutionMode = asString(auditRecord.requested_execution_mode);
+  const effectiveExecutionMode = asString(auditRecord.effective_execution_mode);
+  const gateDecision = asString(auditRecord.gate_decision);
+  const recordedAt = asString(auditRecord.recorded_at);
+  const gateReasons = Array.isArray(auditRecord.gate_reasons)
+    ? auditRecord.gate_reasons.filter(
+        (item): item is string => typeof item === "string" && item.trim().length > 0
+      )
+    : [];
+
+  if (
+    !runId ||
+    !sessionId ||
+    !profile ||
+    !eventId ||
+    !targetDomain ||
+    targetTabId === null ||
+    !targetPage ||
+    !actionType ||
+    !requestedExecutionMode ||
+    !effectiveExecutionMode ||
+    !gateDecision ||
+    !recordedAt ||
+    gateReasons.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    eventId,
+    runId,
+    sessionId,
+    profile,
+    targetDomain,
+    targetTabId,
+    targetPage,
+    actionType,
+    requestedExecutionMode,
+    effectiveExecutionMode,
+    gateDecision,
+    gateReasons,
+    approver: asString(auditRecord.approver),
+    approvedAt: asString(auditRecord.approved_at),
+    recordedAt
+  };
+};
 
 export class RuntimeStoreRecorder {
   #store: RuntimeStoreWriter;
@@ -67,6 +175,18 @@ export class RuntimeStoreRecorder {
     const startedAt = new Date().toISOString();
     this.#startedAtByRunId.set(runId, startedAt);
     return startedAt;
+  }
+
+  async #recordGateArtifacts(source: JsonObject): Promise<void> {
+    const approvalInput = extractGateApprovalInput(source);
+    if (approvalInput && this.#store.upsertGateApproval) {
+      await this.#store.upsertGateApproval(approvalInput);
+    }
+
+    const auditInput = extractGateAuditRecordInput(source);
+    if (auditInput && this.#store.appendGateAuditRecord) {
+      await this.#store.appendGateAuditRecord(auditInput);
+    }
   }
 
   async recordStart(context: RuntimeContext): Promise<void> {
@@ -114,6 +234,7 @@ export class RuntimeStoreRecorder {
           summary: toSummaryText(summary)
         })
       );
+      await this.#recordGateArtifacts(summary);
     } finally {
       this.#startedAtByRunId.delete(context.run_id);
     }
@@ -141,6 +262,9 @@ export class RuntimeStoreRecorder {
           summary: `${error.code}: ${error.message}`
         })
       );
+      if (error.details) {
+        await this.#recordGateArtifacts(error.details);
+      }
     } finally {
       this.#startedAtByRunId.delete(context.run_id);
     }

@@ -204,6 +204,184 @@ describeWithSqlite("sqlite-runtime-store", () => {
     ]);
   });
 
+  it("persists approval_record and audit_record and queries by run_id", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    await store.upsertRun({
+      runId: "run-gate-001",
+      sessionId: "session-gate-1",
+      profileName: "profile-a",
+      command: "xhs.search",
+      status: "succeeded",
+      startedAt: "2026-03-23T10:00:00.000Z",
+      endedAt: "2026-03-23T10:00:01.000Z",
+      errorCode: null
+    });
+
+    await store.upsertApprovalRecord({
+      runId: "run-gate-001",
+      approved: true,
+      approver: "qa-reviewer",
+      approvedAt: "2026-03-23T10:00:10.000Z",
+      checks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      }
+    });
+    await store.appendAuditRecord({
+      eventId: "gate_evt_run-gate-001_1",
+      runId: "run-gate-001",
+      sessionId: "session-gate-1",
+      profile: "profile-a",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 32,
+      targetPage: "search_result_tab",
+      actionType: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      effectiveExecutionMode: "live_read_high_risk",
+      gateDecision: "allowed",
+      gateReasons: ["LIVE_MODE_APPROVED"],
+      approver: "qa-reviewer",
+      approvedAt: "2026-03-23T10:00:10.000Z",
+      recordedAt: "2026-03-23T10:00:11.000Z"
+    });
+
+    const trail = await store.getAuditTrailByRunId("run-gate-001");
+    store.close();
+
+    expect(trail.approval_record).toMatchObject({
+      run_id: "run-gate-001",
+      approved: true,
+      approver: "qa-reviewer",
+      approved_at: "2026-03-23T10:00:10.000Z"
+    });
+    expect(trail.audit_records).toHaveLength(1);
+    expect(trail.audit_records[0]).toMatchObject({
+      run_id: "run-gate-001",
+      session_id: "session-gate-1",
+      profile: "profile-a",
+      target_domain: "www.xiaohongshu.com",
+      target_tab_id: 32,
+      target_page: "search_result_tab",
+      action_type: "read",
+      requested_execution_mode: "live_read_high_risk",
+      effective_execution_mode: "live_read_high_risk",
+      gate_decision: "allowed",
+      gate_reasons: ["LIVE_MODE_APPROVED"]
+    });
+  });
+
+  it("lists audit records by session_id/profile filters", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+
+    await store.upsertRun({
+      runId: "run-gate-filter-1",
+      sessionId: "session-a",
+      profileName: "profile-a",
+      command: "xhs.search",
+      status: "succeeded",
+      startedAt: "2026-03-23T10:00:00.000Z",
+      endedAt: "2026-03-23T10:00:01.000Z",
+      errorCode: null
+    });
+    await store.upsertRun({
+      runId: "run-gate-filter-2",
+      sessionId: "session-b",
+      profileName: "profile-b",
+      command: "xhs.search",
+      status: "succeeded",
+      startedAt: "2026-03-23T10:01:00.000Z",
+      endedAt: "2026-03-23T10:01:01.000Z",
+      errorCode: null
+    });
+
+    await store.appendAuditRecord({
+      eventId: "gate_evt_run-gate-filter-1",
+      runId: "run-gate-filter-1",
+      sessionId: "session-a",
+      profile: "profile-a",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 11,
+      targetPage: "search_result_tab",
+      actionType: "read",
+      requestedExecutionMode: "recon",
+      effectiveExecutionMode: "recon",
+      gateDecision: "blocked",
+      gateReasons: ["DEFAULT_MODE_RECON"],
+      approver: null,
+      approvedAt: null,
+      recordedAt: "2026-03-23T10:00:20.000Z"
+    });
+    await store.appendAuditRecord({
+      eventId: "gate_evt_run-gate-filter-2",
+      runId: "run-gate-filter-2",
+      sessionId: "session-b",
+      profile: "profile-b",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 22,
+      targetPage: "search_result_tab",
+      actionType: "read",
+      requestedExecutionMode: "recon",
+      effectiveExecutionMode: "recon",
+      gateDecision: "blocked",
+      gateReasons: ["DEFAULT_MODE_RECON"],
+      approver: null,
+      approvedAt: null,
+      recordedAt: "2026-03-23T10:01:20.000Z"
+    });
+
+    const bySession = await store.listAuditRecords({ session_id: "session-a" });
+    const byProfile = await store.listAuditRecords({ profile: "profile-b" });
+    store.close();
+
+    expect(bySession).toHaveLength(1);
+    expect(bySession[0]?.run_id).toBe("run-gate-filter-1");
+    expect(byProfile).toHaveLength(1);
+    expect(byProfile[0]?.run_id).toBe("run-gate-filter-2");
+  });
+
+  it("rejects allowed audit record without approver/approved_at", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    await store.upsertRun({
+      runId: "run-gate-invalid-001",
+      sessionId: "session-gate-invalid",
+      profileName: "profile-a",
+      command: "xhs.search",
+      status: "succeeded",
+      startedAt: "2026-03-23T11:00:00.000Z",
+      endedAt: "2026-03-23T11:00:01.000Z",
+      errorCode: null
+    });
+
+    await expect(
+      store.appendAuditRecord({
+        eventId: "gate_evt_run-gate-invalid-001",
+        runId: "run-gate-invalid-001",
+        sessionId: "session-gate-invalid",
+        profile: "profile-a",
+        targetDomain: "www.xiaohongshu.com",
+        targetTabId: 33,
+        targetPage: "search_result_tab",
+        actionType: "read",
+        requestedExecutionMode: "live_read_high_risk",
+        effectiveExecutionMode: "live_read_high_risk",
+        gateDecision: "allowed",
+        gateReasons: ["LIVE_MODE_APPROVED"],
+        approver: null,
+        approvedAt: null,
+        recordedAt: "2026-03-23T11:00:02.000Z"
+      })
+    ).rejects.toMatchObject<Partial<RuntimeStoreError>>({
+      code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+    });
+    store.close();
+  });
+
   it("fails on schema mismatch", async () => {
     const cwd = await createTempCwd();
     const dbPath = resolveRuntimeStorePath(cwd);
