@@ -19,7 +19,7 @@ warn() {
 }
 
 SPEC_SUITE_FILE_REGEX='^docs/dev/specs/FR-[0-9][0-9][0-9][0-9]-[^/]+/'
-GOVERNANCE_FILE_REGEX='^(docs/dev/architecture/|docs/dev/AGENTS\.md|docs/AGENTS\.md|docs/research/ref/AGENTS\.md|AGENTS\.md|vision\.md|code_review\.md|spec_review\.md|scripts/spec-guard\.sh|\.github/workflows/spec-guard\.yml|\.github/PULL_REQUEST_TEMPLATE\.md|\.githooks/)'
+GOVERNANCE_FILE_REGEX='^(docs/dev/architecture/|docs/dev/templates/|docs/dev/AGENTS\.md|docs/AGENTS\.md|docs/research/ref/AGENTS\.md|AGENTS\.md|vision\.md|code_review\.md|spec_review\.md|scripts/spec-guard\.sh|\.github/workflows/spec-guard\.yml|\.github/PULL_REQUEST_TEMPLATE\.md|\.githooks/)'
 
 resolve_base_ref() {
   if [[ -n "${SPEC_GUARD_BASE_REF:-}" ]]; then
