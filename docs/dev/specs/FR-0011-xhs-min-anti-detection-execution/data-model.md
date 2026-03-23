@@ -17,7 +17,7 @@
 
 ## 实体 2：ReadExecutionPolicy
 
-- `default_mode` ENUM NOT NULL（`dry_run` | `recon` | `live_limited`）
+- `default_mode` ENUM NOT NULL（`dry_run` | `recon` | `live_read_limited` | `live_read_high_risk`）
 - `allowed_modes` ARRAY NOT NULL
 - `blocked_actions` ARRAY NOT NULL
 - `live_entry_requirements` ARRAY NOT NULL
@@ -39,11 +39,14 @@
 
 - `min_action_interval_ms` INTEGER NOT NULL
 - `min_experiment_interval_ms` INTEGER NOT NULL
-- `cooldown_after_risk_minutes` INTEGER NOT NULL
+- `cooldown_strategy` ENUM NOT NULL（`exponential_backoff`）
+- `cooldown_base_minutes` INTEGER NOT NULL
+- `cooldown_cap_minutes` INTEGER NOT NULL
 - `resume_probe_mode` ENUM NOT NULL（`recon_only` | `dry_run_only`）
 
 约束：
 - 所有间隔字段必须 > 0。
+- `cooldown_strategy` 当前只允许 `exponential_backoff`，不得回退为固定冷却。
 
 ## 实体 5：RiskStateMachine
 
@@ -54,6 +57,38 @@
 约束：
 - `states` 缺任一基线状态视为无效。
 - `hard_block_when_paused` 不能为空。
+
+## 实体 6：IssueActionMatrix
+
+- `issue_scope` ENUM NOT NULL（`issue_208` | `issue_209`）
+- `state` ENUM NOT NULL（`paused` | `limited` | `allowed`）
+- `allowed_actions` ARRAY NOT NULL
+- `blocked_actions` ARRAY NOT NULL
+
+约束：
+- `issue_208` 与 `issue_209` 必须覆盖相同的 `state` 枚举集合。
+- `paused` 的 `allowed_actions` 只能包含 `dry_run` 或 `recon` 类动作。
+- `paused` 的 `blocked_actions` 必须显式覆盖所有 live 动作，不得依赖实现推断补全。
+- `issue_208` 在 `limited` 下不得出现不可逆写动作。
+- `blocked_actions` 不得为空，必须与 `allowed_actions` 一起定义完整边界。
+
+## 实体 7：RiskTransitionAuditRecord
+
+- `run_id` TEXT NOT NULL
+- `session_id` TEXT NOT NULL
+- `issue_scope` ENUM NOT NULL（`issue_208` | `issue_209` | `shared`）
+- `prev_state` ENUM NOT NULL（`paused` | `limited` | `allowed`）
+- `next_state` ENUM NOT NULL（`paused` | `limited` | `allowed`）
+- `trigger` TEXT NOT NULL
+- `decision` ENUM NOT NULL（`allow` | `block` | `rollback`）
+- `approver` TEXT NULL
+- `approved_at` TEXT NULL
+- `reason` TEXT NOT NULL
+
+约束：
+- 缺失 `run_id/session_id/prev_state/next_state/decision/reason` 任一字段时，状态变更无效。
+- 当 `trigger` 依赖人工批准恢复，或 `next_state=allowed` 会扩大 live 放行范围时，缺失 `approver/approved_at` 不得判定为有效。
+- 状态变更无效时，执行层必须回退到 `paused` 并阻断 live。
 
 ## 生命周期
 

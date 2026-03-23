@@ -11,12 +11,14 @@
 
 ## 输出对象
 
-必须包含以下五个对象：
+必须包含以下七个对象：
 1. `plugin_gate_ownership`
 2. `read_execution_policy`
 3. `write_interaction_tier`
 4. `session_rhythm_policy`
 5. `risk_state_machine`
+6. `issue_action_matrix`
+7. `risk_transition_audit`
 
 ## plugin_gate_ownership
 
@@ -41,7 +43,7 @@
 {
   "read_execution_policy": {
     "default_mode": "dry_run",
-    "allowed_modes": ["dry_run", "recon", "live_limited"],
+    "allowed_modes": ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
     "blocked_actions": ["expand_new_live_surface_without_gate"],
     "live_entry_requirements": [
       "risk_state_not_paused",
@@ -75,7 +77,9 @@
   "session_rhythm_policy": {
     "min_action_interval_ms": 3000,
     "min_experiment_interval_ms": 30000,
-    "cooldown_after_risk_minutes": 60,
+    "cooldown_strategy": "exponential_backoff",
+    "cooldown_base_minutes": 30,
+    "cooldown_cap_minutes": 720,
     "resume_probe_mode": "recon_only"
   }
 }
@@ -90,10 +94,128 @@
     "transitions": [
       { "from": "allowed", "to": "limited", "trigger": "risk_signal_detected" },
       { "from": "limited", "to": "paused", "trigger": "account_alert_or_repeat_risk" },
-      { "from": "paused", "to": "limited", "trigger": "cooldown_passed_and_manual_approve" },
-      { "from": "limited", "to": "allowed", "trigger": "stability_window_passed" }
+      { "from": "paused", "to": "limited", "trigger": "cooldown_backoff_window_passed_and_manual_approve" },
+      { "from": "limited", "to": "allowed", "trigger": "stability_window_passed_and_manual_approve" }
     ],
-    "hard_block_when_paused": ["live_write", "high_risk_live_read"]
+    "hard_block_when_paused": ["live_write", "live_read_high_risk"]
+  }
+}
+```
+
+## issue_action_matrix
+
+```json
+{
+  "issue_action_matrix": {
+    "entries": [
+      {
+        "issue_scope": "issue_208",
+        "state": "paused",
+        "allowed_actions": ["dry_run", "recon"],
+        "blocked_actions": [
+          "live_read_limited",
+          "live_read_high_risk",
+          "reversible_interaction_with_approval",
+          "live_write",
+          "irreversible_write",
+          "expand_new_live_surface_without_gate"
+        ]
+      },
+      {
+        "issue_scope": "issue_208",
+        "state": "limited",
+        "allowed_actions": ["dry_run", "recon", "reversible_interaction_with_approval"],
+        "blocked_actions": [
+          "live_read_limited",
+          "live_read_high_risk",
+          "irreversible_write",
+          "live_write",
+          "expand_new_live_surface_without_gate"
+        ]
+      },
+      {
+        "issue_scope": "issue_208",
+        "state": "allowed",
+        "allowed_actions": ["dry_run", "recon", "reversible_interaction_with_approval"],
+        "blocked_actions": [
+          "live_read_limited",
+          "live_read_high_risk",
+          "irreversible_write",
+          "live_write",
+          "expand_new_live_surface_without_gate"
+        ]
+      },
+      {
+        "issue_scope": "issue_209",
+        "state": "paused",
+        "allowed_actions": ["dry_run", "recon"],
+        "blocked_actions": [
+          "live_read_limited",
+          "live_read_high_risk",
+          "live_write",
+          "irreversible_write",
+          "expand_new_live_surface_without_gate"
+        ]
+      },
+      {
+        "issue_scope": "issue_209",
+        "state": "limited",
+        "allowed_actions": ["dry_run", "recon", "live_read_limited"],
+        "blocked_actions": [
+          "live_read_high_risk",
+          "live_write",
+          "irreversible_write",
+          "expand_new_live_surface_without_gate"
+        ]
+      },
+      {
+        "issue_scope": "issue_209",
+        "state": "allowed",
+        "allowed_actions": [
+          "dry_run",
+          "recon",
+          "live_read_limited",
+          "live_read_high_risk"
+        ],
+        "blocked_actions": [
+          "live_write",
+          "irreversible_write",
+          "expand_new_live_surface_without_gate"
+        ]
+      }
+    ]
+  }
+}
+```
+
+约束：
+- `issue_208` 与 `issue_209` 必须共享同一状态集合（`paused/limited/allowed`）。
+- `paused` 下两者都不得包含任何 live 写或高风险 live 读动作。
+- `limited` 下 `issue_208` 不得包含不可逆写动作。
+- 每个 `(issue_scope, state)` 都必须同时定义 `allowed_actions` 与 `blocked_actions`，不得把阻断集合留给实现阶段猜测。
+
+## risk_transition_audit
+
+```json
+{
+  "risk_transition_audit": {
+    "required_fields": [
+      "run_id",
+      "session_id",
+      "issue_scope",
+      "prev_state",
+      "next_state",
+      "trigger",
+      "decision",
+      "reason"
+    ],
+    "approval_fields_required_when": [
+      "cooldown_backoff_window_passed_and_manual_approve",
+      "stability_window_passed_and_manual_approve",
+      "next_state_is_allowed"
+    ],
+    "on_missing_record": "force_pause_and_block_live",
+    "rollback_entrypoint": "risk_state_reset_to_paused"
   }
 }
 ```
@@ -103,3 +225,5 @@
 1. 新字段可追加，不允许改变既有字段语义。
 2. `states` 不允许删除 `paused/limited/allowed` 任一状态。
 3. `hard_block_when_paused` 缩减必须经过独立 spec review 说明。
+4. `issue_action_matrix` 不允许为 `#208` 和 `#209` 定义不同状态集合。
+5. `risk_transition_audit.required_fields` 缺失任一字段时，live 放行判定无效。
