@@ -62,10 +62,7 @@
       "approval_record_approved_true",
       "approval_record_approver_present",
       "approval_record_approved_at_present",
-      "approval_record_checks_all_true",
-      "audit_record_present",
-      "audit_record_approver_present_when_allowed",
-      "audit_record_approved_at_present_when_allowed"
+      "approval_record_checks_all_true"
     ]
   }
 }
@@ -78,9 +75,9 @@
 - `gate_input_risk_state_limited_or_allowed` 表示 `FR-0010.gate_input.risk_state` 只能为 `limited` 或 `allowed`；若为 `paused`，不得进入 live 判定。
 - `approval_record_approved_true` 表示 `FR-0010.approval_record.approved=true`；`approval_record_approver_present` / `approval_record_approved_at_present` 表示 `approver` 与 `approved_at` 已填写。
 - `approval_record_checks_all_true` 表示 `FR-0010.approval_record.checks.target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`risk_state_checked`、`action_type_confirmed` 全为 `true`。
-- `audit_record_present` 表示存在可检索的 `FR-0010.audit_record`；`audit_record_approver_present_when_allowed` / `audit_record_approved_at_present_when_allowed` 表示 `gate_decision=allowed` 时，审计记录中的 `approver` 与 `approved_at` 已填写。
 - `manual_confirmation_recorded` 不再作为独立机器条件名存在；人工确认的正式机器承载统一落在 `approval_record.approved=true`、`approver`、`approved_at` 与完整 `checks` 上。
 - `live_entry_requirements` 必须与 `FR-0010.approval_record` / `FR-0010.audit_record` 的完整审批与审计证据保持同一口径，至少显式覆盖 `risk_state_checked` 与 `action_type_confirmed`，不允许保留更宽松的只读前置。
+- `FR-0010.audit_record` 在本 FR 中继续作为门禁判定后的必写审计留痕，而不是 live 放行前置；当 `gate_decision=allowed` 时，审计记录必须能独立证明审批已完成。
 - 具体 `(issue_scope, state, execution_mode)` 是否允许，必须再受 `issue_action_matrix` 的显式边界约束；若与 `live_entry_requirements` 出现冲突，以 `issue_action_matrix` 为准。
 - 若请求被门禁阻断，`effective_execution_mode` 不得表达未实际继续执行的 `live_*` 模式。
 
@@ -202,10 +199,7 @@
               "approval_record_approved_true",
               "approval_record_approver_present",
               "approval_record_approved_at_present",
-              "approval_record_checks_all_true",
-              "audit_record_present",
-              "audit_record_approver_present_when_allowed",
-              "audit_record_approved_at_present_when_allowed"
+              "approval_record_checks_all_true"
             ]
           }
         ],
@@ -230,10 +224,7 @@
               "approval_record_approved_true",
               "approval_record_approver_present",
               "approval_record_approved_at_present",
-              "approval_record_checks_all_true",
-              "audit_record_present",
-              "audit_record_approver_present_when_allowed",
-              "audit_record_approved_at_present_when_allowed"
+              "approval_record_checks_all_true"
             ]
           },
           {
@@ -242,10 +233,7 @@
               "approval_record_approved_true",
               "approval_record_approver_present",
               "approval_record_approved_at_present",
-              "approval_record_checks_all_true",
-              "audit_record_present",
-              "audit_record_approver_present_when_allowed",
-              "audit_record_approved_at_present_when_allowed"
+              "approval_record_checks_all_true"
             ]
           }
         ],
