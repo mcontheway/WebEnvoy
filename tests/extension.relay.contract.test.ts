@@ -273,6 +273,7 @@ describe("extension background relay contract", () => {
         requires_manual_confirmation: false
       },
       consumer_gate_result: {
+        risk_state: "paused",
         requested_execution_mode: null,
         effective_execution_mode: null,
         gate_decision: "blocked",
@@ -1188,6 +1189,7 @@ describe("extension background relay contract", () => {
           requires_manual_confirmation: true
         },
         consumer_gate_result: {
+          risk_state: "allowed",
           requested_execution_mode: "live_read_high_risk",
           effective_execution_mode: "live_read_high_risk",
           gate_decision: "allowed",
@@ -1202,6 +1204,7 @@ describe("extension background relay contract", () => {
           run_id: "run-xhs-live-allowed-001",
           session_id: "nm-session-001",
           profile: "profile-a",
+          risk_state: "allowed",
           target_domain: "www.xiaohongshu.com",
           target_tab_id: 32,
           target_page: "search_result_tab",

@@ -814,6 +814,7 @@ describe("extension service worker recovery contract", () => {
               action: "read"
             },
             consumer_gate_result: {
+              risk_state: "allowed",
               target_domain: "www.xiaohongshu.com",
               target_tab_id: 32,
               target_page: "search_result_tab",
@@ -847,6 +848,7 @@ describe("extension service worker recovery contract", () => {
             action: "read"
           },
           consumer_gate_result: {
+            risk_state: "allowed",
             requested_execution_mode: "live_read_high_risk",
             effective_execution_mode: "live_read_high_risk",
             gate_decision: "allowed",
