@@ -884,7 +884,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
     expect(trail.audit_records[0]?.issue_scope).toBe("issue_208");
   });
 
-  it("backfills creator publish legacy write audit records to issue_208 after v4->v5 migration", async () => {
+  it("keeps ambiguous creator publish legacy write audit records unclassified after v4->v5 migration", async () => {
     const cwd = await createTempCwd();
     const dbPath = resolveRuntimeStorePath(cwd);
     const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
@@ -980,6 +980,6 @@ describeWithSqlite("sqlite-runtime-store", () => {
     const trail = await store.getAuditTrailByRunId("run-v4-legacy-ambiguous-write");
     store.close();
 
-    expect(trail.audit_records[0]?.issue_scope).toBe("issue_208");
+    expect(trail.audit_records[0]?.issue_scope).toBeNull();
   });
 });
