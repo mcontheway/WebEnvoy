@@ -54,6 +54,7 @@
 
 约束：
 
+- `action_kind` 只允许 `click`、`focus`、`keyboard_input`、`composition_input`、`hover`、`scroll`。
 - `preferred_path` 只能是 `real_input` 或 `mixed_input`。
 - `fallback_path` 只允许为 `synthetic_chain` 或为空。
 - `mixed_input` 表示“真实 focus / click + 合成输入链”的混合路径。
@@ -84,9 +85,10 @@
 
 约束：
 
+- `action_kind` 只允许 `click`、`focus`、`keyboard_input`、`composition_input`、`hover`、`scroll`。
 - `required_events` 不得为空。
 - `completion_signal` 至少包含一个可判定结果。
-- 若 `action_kind=plain_text_input`，`required_events` 不得自动继承 `composition*` 事件。
+- 若 `action_kind=keyboard_input`，`required_events` 不得自动继承 `composition*` 事件。
 - 若 `requires_settled_wait=true`，执行方必须进入统一状态收敛等待。
 
 ## rhythm_profile
@@ -97,6 +99,8 @@
     "profile_name": "default_layer2",
     "hover_confirm_min_ms": 80,
     "hover_confirm_max_ms": 200,
+    "click_jitter_min_px": 2,
+    "click_jitter_max_px": 8,
     "typing_delay_min_ms": 60,
     "typing_delay_max_ms": 220,
     "punctuation_pause_multiplier": 1.8,
@@ -111,6 +115,7 @@
 约束：
 
 - 本对象只表达事件级节奏，不承载跨页面或跨 session 状态。
+- `click_jitter_max_px` 必须 >= `click_jitter_min_px`。
 - `lookback_probability` 只用于滚动段内的回头翻看，不等于 Layer 3 的完整浏览行为。
 
 ## strategy_selection
@@ -155,7 +160,7 @@
 
 - `rhythm_profile_source` 只允许 `default` 或 `platform_override`。
 - `failure_category` 为空表示该次链路未进入失败分类。
-- 最小失败分类建议至少覆盖：
+- `failure_category` 非空时，只允许：
   - `focus_not_acquired`
   - `framework_state_not_updated`
   - `target_drifted`

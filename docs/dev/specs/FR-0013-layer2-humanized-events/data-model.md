@@ -46,9 +46,9 @@ FR-0013 的新增对象必须把这些对象视为前置输入或外部约束，
 
 约束：
 
-- `chain_name` 至少覆盖 `focus_acquire`、`plain_text_input`、`composition_input`、`hover_click`、`change_blur_finalize`。
+- `chain_name` 至少覆盖 `focus_acquire`、`keyboard_input`、`composition_input`、`hover_click`、`change_blur_finalize`。
 - `required_events` 不得为空。
-- `plain_text_input` 与 `composition_input` 的 `required_events` 不得完全相同。
+- `keyboard_input` 与 `composition_input` 的 `required_events` 不得完全相同。
 - 若 `completion_signal` 为空，视为无效对象。
 
 ## 实体 3：Layer2RhythmProfile
@@ -56,6 +56,8 @@ FR-0013 的新增对象必须把这些对象视为前置输入或外部约束，
 - `profile_name` TEXT NOT NULL
 - `hover_confirm_min_ms` INTEGER NOT NULL
 - `hover_confirm_max_ms` INTEGER NOT NULL
+- `click_jitter_min_px` INTEGER NOT NULL
+- `click_jitter_max_px` INTEGER NOT NULL
 - `typing_delay_min_ms` INTEGER NOT NULL
 - `typing_delay_max_ms` INTEGER NOT NULL
 - `punctuation_pause_multiplier` REAL NOT NULL
@@ -68,6 +70,7 @@ FR-0013 的新增对象必须把这些对象视为前置输入或外部约束，
 
 - 所有时间和距离字段必须 > 0。
 - `hover_confirm_max_ms` 必须 >= `hover_confirm_min_ms`。
+- `click_jitter_max_px` 必须 >= `click_jitter_min_px`。
 - `typing_delay_max_ms` 必须 >= `typing_delay_min_ms`。
 - 概率字段必须在 `0` 到 `1` 之间。
 - 本对象只表达事件级节奏，不得承载 session 级状态或跨页面记忆。
@@ -96,7 +99,7 @@ FR-0013 的新增对象必须把这些对象视为前置输入或外部约束，
 - `rhythm_profile_source` ENUM NOT NULL（`default` | `platform_override`）
 - `settled_wait_applied` BOOLEAN NOT NULL
 - `settled_wait_result` ENUM NOT NULL（`settled` | `timeout` | `skipped`）
-- `failure_category` TEXT NULL
+- `failure_category` ENUM NULL（`focus_not_acquired` | `framework_state_not_updated` | `target_drifted` | `blocked_by_fr0011`）
 
 约束：
 
