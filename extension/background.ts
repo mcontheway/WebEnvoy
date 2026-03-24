@@ -1173,7 +1173,7 @@ class ChromeBackgroundBridge {
         capability_result: {
           ability_id: String(ability.id ?? "xhs.note.search.v1"),
           layer: String(ability.layer ?? "L3"),
-          action: String(consumerGateResult.action_type ?? ability.action ?? "write"),
+          action: String(consumerGateResult.action_type ?? "read"),
           outcome: "partial",
           data_ref: {
             query: String(input.query ?? "")
@@ -1246,6 +1246,9 @@ class ChromeBackgroundBridge {
     }
     if (!actionType) {
       pushReason("ACTION_TYPE_NOT_EXPLICIT");
+    }
+    if (abilityActionType && actionType && abilityActionType !== actionType) {
+      pushReason("ABILITY_ACTION_CONTEXT_MISMATCH");
     }
     if (!targetDomain) {
       pushReason("TARGET_DOMAIN_NOT_EXPLICIT");
@@ -1352,8 +1355,8 @@ class ChromeBackgroundBridge {
       };
     } else if (
       issueScope !== "issue_208" &&
-      ((actionType !== null && actionType !== "read") ||
-        (abilityActionType !== null && abilityActionType !== "read"))
+      actionType !== null &&
+      actionType !== "read"
     ) {
       if (isLiveReadMode) {
         pushReason("ACTION_TYPE_MODE_MISMATCH");

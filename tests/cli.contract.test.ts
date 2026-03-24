@@ -1802,7 +1802,7 @@ describe("webenvoy cli contract", () => {
     });
   });
 
-  itWithSqlite("returns runtime unavailable when audit records contain unresolved issue_scope", async () => {
+  itWithSqlite("filters unresolved issue_scope rows from runtime.audit query results", async () => {
     const cwd = await createRuntimeCwd();
     const dbPath = resolveRuntimeStorePath(cwd);
     const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
@@ -1916,24 +1916,131 @@ describe("webenvoy cli contract", () => {
         run_id: "run-audit-missing-issue-scope-001"
       })
     ], cwd);
-    expect(queryResult.status).toBe(5);
+    expect(queryResult.status).toBe(0);
     const body = parseSingleJsonLine(queryResult.stdout);
     expect(body).toMatchObject({
       command: "runtime.audit",
-      status: "error",
-      error: {
-        code: "ERR_RUNTIME_UNAVAILABLE",
-        retryable: false,
-        details: {
-          ability_id: "runtime.audit",
-          stage: "execution",
-          reason: "AUDIT_QUERY_ISSUE_SCOPE_UNRESOLVED",
-          query: {
-            run_id: "run-audit-missing-issue-scope-001"
-          }
-        }
+      status: "success",
+      summary: {
+        query: {
+          run_id: "run-audit-missing-issue-scope-001"
+        },
+        audit_records: [],
+        write_action_matrix_decisions: null
       }
     });
+  });
+
+  itWithSqlite("keeps resolved audit records queryable when session window also contains unresolved legacy rows", async () => {
+    const cwd = await createRuntimeCwd();
+    const runId = "run-audit-query-session-mixed-001";
+
+    const executeResult = runCli([
+      "xhs.search",
+      "--run-id",
+      runId,
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 91,
+          target_page: "search_result_tab",
+          issue_scope: "issue_209",
+          action_type: "read",
+          requested_execution_mode: "dry_run",
+          risk_state: "paused"
+        }
+      })
+    ], cwd, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+    expect(executeResult.status).toBe(0);
+    const executeBody = parseSingleJsonLine(executeResult.stdout);
+    const sessionId = String(
+      (((executeBody.summary as Record<string, unknown>).audit_record as Record<string, unknown>)
+        .session_id)
+    );
+
+    const dbPath = resolveRuntimeStorePath(cwd);
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    const db = new DatabaseSyncCtor(dbPath);
+    db.prepare(
+      `INSERT INTO runtime_runs(
+        run_id, session_id, profile_name, command, status, started_at, ended_at, error_code, created_at, updated_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "run-audit-missing-issue-scope-002",
+      sessionId,
+      "xhs_account_001",
+      "xhs.search",
+      "failed",
+      "2026-03-23T10:20:00.000Z",
+      "2026-03-23T10:20:01.000Z",
+      "ERR_CLI_INVALID_ARGS",
+      "2026-03-23T10:20:00.000Z",
+      "2026-03-23T10:20:01.000Z"
+    );
+    db.prepare(
+      `INSERT INTO runtime_gate_audit_records(
+        event_id, run_id, session_id, profile, issue_scope, risk_state, next_state, transition_trigger, target_domain, target_tab_id,
+        target_page, action_type, requested_execution_mode, effective_execution_mode, gate_decision, gate_reasons_json, approver,
+        approved_at, recorded_at, created_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "evt-audit-missing-issue-scope-002",
+      "run-audit-missing-issue-scope-002",
+      sessionId,
+      "xhs_account_001",
+      null,
+      "paused",
+      "paused",
+      "gate_evaluation",
+      "creator.xiaohongshu.com",
+      52,
+      "creator_publish_tab",
+      "write",
+      "dry_run",
+      "dry_run",
+      "blocked",
+      JSON.stringify(["ISSUE_ACTION_MATRIX_BLOCKED"]),
+      null,
+      null,
+      "2026-03-23T10:20:11.000Z",
+      "2026-03-23T10:20:11.000Z"
+    );
+    db.close();
+
+    const queryResult = runCli([
+      "runtime.audit",
+      "--run-id",
+      "run-audit-mixed-session-query-001",
+      "--params",
+      JSON.stringify({
+        session_id: sessionId,
+        limit: 10
+      })
+    ], cwd);
+    expect(queryResult.status).toBe(0);
+    const body = parseSingleJsonLine(queryResult.stdout);
+    expect(body.summary).toMatchObject({
+      audit_records: [
+        expect.objectContaining({
+          run_id: runId,
+          issue_scope: "issue_209"
+        })
+      ]
+    });
+    expect((body.summary.audit_records as Record<string, unknown>[])).toHaveLength(1);
   });
 
   it("returns invalid args when xhs.search requested_execution_mode is missing", () => {

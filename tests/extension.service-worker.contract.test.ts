@@ -1157,7 +1157,7 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("short-circuits non-issue_208 non-read request in background without forwarding", async () => {
+  it("blocks ability.action mismatch in background with the same gate reason as relay", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
     startChromeBackgroundBridge(chromeApi);
@@ -1165,17 +1165,17 @@ describe("extension service worker recovery contract", () => {
     await Promise.resolve();
 
     firstPort.onMessageListeners[0]?.({
-      id: "run-xhs-non-issue208-non-read-bg-short-circuit-001",
-      method: "bridge.forward",
-      profile: "profile-a",
-      params: {
-        session_id: "nm-session-001",
-        run_id: "run-xhs-non-issue208-non-read-bg-short-circuit-001",
-        command: "xhs.search",
-        command_params: {
-          ability: {
-            id: "xhs.note.search.v1",
-            layer: "L3",
+        id: "run-xhs-ability-action-mismatch-bg-001",
+        method: "bridge.forward",
+        profile: "profile-a",
+        params: {
+          session_id: "nm-session-001",
+          run_id: "run-xhs-ability-action-mismatch-bg-001",
+          command: "xhs.search",
+          command_params: {
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
             action: "write"
           },
           input: {
@@ -1202,12 +1202,16 @@ describe("extension service worker recovery contract", () => {
 
     const blocked = firstPort.postMessage.mock.calls
       .map((call) => call[0] as { id?: string; status?: string; error?: { code?: string }; payload?: Record<string, unknown> })
-      .find((message) => message.id === "run-xhs-non-issue208-non-read-bg-short-circuit-001");
+      .find((message) => message.id === "run-xhs-ability-action-mismatch-bg-001");
     expect(blocked?.status).toBe("error");
     expect(blocked?.error?.code).toBe("ERR_TRANSPORT_FORWARD_FAILED");
     const payload = asRecord(blocked?.payload) ?? {};
     const consumerGateResult = asRecord(payload.consumer_gate_result);
     expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.action_type).toBe("read");
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["ABILITY_ACTION_CONTEXT_MISMATCH"])
+    );
   });
 
   it("allows issue_208 reversible_interaction_with_approval in limited/allowed only with complete approval", async () => {

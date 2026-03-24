@@ -83,27 +83,11 @@ const enrichAuditRecordWithWriteTier = (auditRecord: Record<string, unknown>) =>
   };
 };
 
-const assertResolvedIssueScopeForAuditQuery = (
-  auditRecords: Record<string, unknown>[],
-  query: Record<string, unknown>
-): void => {
-  const unresolvedRecord = auditRecords.find(
-    (record) => asString(record.issue_scope) === null
-  );
-  if (!unresolvedRecord) {
-    return;
-  }
-
-  throw new CliError("ERR_RUNTIME_UNAVAILABLE", "审计记录存在未恢复的 issue_scope", {
-    retryable: false,
-    details: {
-      ability_id: "runtime.audit",
-      stage: "execution",
-      reason: "AUDIT_QUERY_ISSUE_SCOPE_UNRESOLVED",
-      query
-    }
+const filterResolvedAuditRecords = (auditRecords: Record<string, unknown>[]) =>
+  auditRecords.filter((record) => {
+    const issueScope = asString(record.issue_scope);
+    return issueScope !== null && isIssueScope(issueScope);
   });
-};
 
 const resolveCurrentRiskState = (
   approvalRecord: Record<string, unknown> | null,
@@ -242,9 +226,7 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
       const enrichedAuditRecords = trail.auditRecords.map((record) =>
         enrichAuditRecordWithWriteTier(record as unknown as Record<string, unknown>)
       );
-      assertResolvedIssueScopeForAuditQuery(enrichedAuditRecords, {
-        run_id: runId
-      });
+      const resolvedAuditRecords = filterResolvedAuditRecords(enrichedAuditRecords);
       const currentRiskState = resolveCurrentRiskState(
         asObject(trail.approvalRecord),
         enrichedAuditRecords
@@ -254,10 +236,10 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
           run_id: runId
         },
         approval_record: trail.approvalRecord,
-        audit_records: enrichedAuditRecords,
+        audit_records: resolvedAuditRecords,
         write_interaction_tier: WRITE_INTERACTION_TIER,
         write_action_matrix_decisions:
-          (enrichedAuditRecords[0] as Record<string, unknown> | undefined)
+          (resolvedAuditRecords[0] as Record<string, unknown> | undefined)
             ?.write_action_matrix_decisions ?? null,
         risk_state_output: buildUnifiedRiskStateOutput(currentRiskState, {
           auditRecords: enrichedAuditRecords
@@ -273,11 +255,7 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
     const enrichedAuditRecords = records.map((record) =>
       enrichAuditRecordWithWriteTier(record as unknown as Record<string, unknown>)
     );
-    assertResolvedIssueScopeForAuditQuery(enrichedAuditRecords, {
-      ...(sessionId ? { session_id: sessionId } : {}),
-      ...(profile ? { profile } : {}),
-      limit
-    });
+    const resolvedAuditRecords = filterResolvedAuditRecords(enrichedAuditRecords);
     const currentRiskState = resolveCurrentRiskState(
       null,
       enrichedAuditRecords
@@ -288,7 +266,7 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
         ...(profile ? { profile } : {}),
         limit
       },
-      audit_records: enrichedAuditRecords,
+      audit_records: resolvedAuditRecords,
       write_interaction_tier: WRITE_INTERACTION_TIER,
       write_action_matrix_decisions: null,
       risk_state_output: buildUnifiedRiskStateOutput(currentRiskState, {
