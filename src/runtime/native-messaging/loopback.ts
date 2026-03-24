@@ -248,7 +248,7 @@ const buildLoopbackGate = (
   if (requestedExecutionMode === "live_write" && actionType === "irreversible_write") {
     gateReasons.push("IRREVERSIBLE_WRITE_NOT_ALLOWED");
   }
-  if (requestedExecutionMode === "live_write") {
+  if (requestedExecutionMode === "live_write" && !issue208WriteGateOnly) {
     gateReasons.push("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
   }
   if (targetDomain === XHS_WRITE_DOMAIN && actionType === "read") {
@@ -273,7 +273,7 @@ const buildLoopbackGate = (
     requestedExecutionMode !== null
   ) {
     gateDecision = "blocked";
-    effectiveExecutionMode = requestedExecutionMode;
+    effectiveExecutionMode = resolveLoopbackFallbackMode(requestedExecutionMode, riskState);
 
     if (
       writeMatrixDecision.decision === "blocked" ||

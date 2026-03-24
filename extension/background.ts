@@ -1395,8 +1395,6 @@ class ChromeBackgroundBridge {
         ? gateOnlyEffectiveExecutionMode
         : requestedExecutionMode ?? "dry_run"
       : resolveBlockedFallbackMode(requestedExecutionMode, riskState);
-    const auditRequestedExecutionMode =
-      allowed && issue208WriteGateOnly ? effectiveExecutionMode : requestedExecutionMode;
     if (allowed && requestedExecutionMode === "dry_run") {
       gateReasons.push("DEFAULT_MODE_DRY_RUN");
     }
@@ -1420,7 +1418,7 @@ class ChromeBackgroundBridge {
       target_tab_id: targetTabId,
       target_page: targetPage,
       action_type: actionType,
-      requested_execution_mode: auditRequestedExecutionMode,
+      requested_execution_mode: requestedExecutionMode,
       effective_execution_mode: effectiveExecutionMode,
       gate_decision: gateDecision,
       gate_reasons: gateReasons,
@@ -1440,7 +1438,7 @@ class ChromeBackgroundBridge {
       target_tab_id: targetTabId,
       target_page: targetPage,
       action_type: actionType,
-      requested_execution_mode: auditRequestedExecutionMode,
+      requested_execution_mode: requestedExecutionMode,
       effective_execution_mode: effectiveExecutionMode,
       gate_decision: gateDecision,
       gate_reasons: gateReasons,
@@ -1457,7 +1455,7 @@ class ChromeBackgroundBridge {
       prevState: riskState,
       decision: gateDecision,
       gateReasons,
-      requestedExecutionMode: auditRequestedExecutionMode,
+      requestedExecutionMode,
       approvalRecord,
       auditRecords: [auditRecord],
       now: auditRecord.recorded_at
@@ -1485,7 +1483,7 @@ class ChromeBackgroundBridge {
         target_tab_id: targetTabId,
         target_page: targetPage,
         action_type: actionType,
-        requested_execution_mode: auditRequestedExecutionMode,
+        requested_execution_mode: requestedExecutionMode,
         risk_state: riskState
       },
       gate_outcome: {
@@ -1497,8 +1495,7 @@ class ChromeBackgroundBridge {
       consumer_gate_result: consumerGateResult,
       approval_record: approvalRecord,
       issue_action_matrix: resolvedIssueActionMatrixEntry,
-      write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier,
-      write_interaction_tier_contract: WRITE_INTERACTION_TIER,
+      write_interaction_tier: WRITE_INTERACTION_TIER,
       write_action_matrix_decisions: writeActionMatrixDecisions,
       ...(writeGateOnlyApprovalDecision ? { write_gate_only_decision: writeGateOnlyApprovalDecision } : {}),
       risk_state_output: buildUnifiedRiskStateOutput(

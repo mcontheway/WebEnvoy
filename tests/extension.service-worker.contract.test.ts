@@ -1276,9 +1276,9 @@ describe("extension service worker recovery contract", () => {
     const gateOutcome = asRecord(summary.gate_outcome);
     const consumerGateResult = asRecord(summary.consumer_gate_result);
     const auditRecord = asRecord(summary.audit_record);
-    expect(gateInput?.requested_execution_mode).toBe("dry_run");
+    expect(gateInput?.requested_execution_mode).toBe("live_write");
     expect(gateOutcome?.effective_execution_mode).toBe("dry_run");
-    expect(consumerGateResult?.requested_execution_mode).toBe("dry_run");
+    expect(consumerGateResult?.requested_execution_mode).toBe("live_write");
     expect(consumerGateResult?.effective_execution_mode).toBe("dry_run");
     expect(consumerGateResult?.gate_reasons).toEqual(
       expect.arrayContaining([
@@ -1286,8 +1286,17 @@ describe("extension service worker recovery contract", () => {
         "WRITE_INTERACTION_TIER_REVERSIBLE_INTERACTION"
       ])
     );
-    expect(auditRecord?.requested_execution_mode).toBe("dry_run");
+    expect(auditRecord?.requested_execution_mode).toBe("live_write");
     expect(auditRecord?.effective_execution_mode).toBe("dry_run");
+    expect(summary.write_interaction_tier).toMatchObject({
+      tiers: [
+        { name: "observe_only", live_allowed: false },
+        { name: "reversible_interaction", live_allowed: "limited" },
+        { name: "irreversible_write", live_allowed: false }
+      ],
+      synthetic_event_default: "blocked",
+      upload_injection_default: "blocked"
+    });
   });
 
   it("keeps issue_208 irreversible_write blocked and exposes irreversible write tier", async () => {
