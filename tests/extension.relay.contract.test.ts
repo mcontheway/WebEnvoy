@@ -24,6 +24,31 @@ const waitForResponse = (relay: BackgroundRelay, timeoutMs = 500): Promise<Bridg
     }, timeoutMs);
   });
 
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const resolveWriteInteractionTier = (payload: Record<string, unknown>): string | null => {
+  const direct = payload.write_interaction_tier;
+  if (typeof direct === "string") {
+    return direct;
+  }
+  const consumerGateResult = asRecord(payload.consumer_gate_result);
+  if (typeof consumerGateResult?.write_interaction_tier === "string") {
+    return consumerGateResult.write_interaction_tier;
+  }
+  const writeActionMatrix = asRecord(payload.write_action_matrix);
+  if (typeof writeActionMatrix?.write_interaction_tier === "string") {
+    return writeActionMatrix.write_interaction_tier;
+  }
+  const writeActionMatrixDecisions = asRecord(payload.write_action_matrix_decisions);
+  if (typeof writeActionMatrixDecisions?.write_interaction_tier === "string") {
+    return writeActionMatrixDecisions.write_interaction_tier;
+  }
+  return null;
+};
+
 describe("extension background relay contract", () => {
   const approvedLiveOptions = {
     target_domain: "www.xiaohongshu.com",
@@ -778,7 +803,9 @@ describe("extension background relay contract", () => {
     expect(
       (((response.payload as Record<string, unknown>).consumer_gate_result as Record<string, unknown>)
         .gate_reasons as string[])
-    ).toEqual(expect.arrayContaining(["ACTION_TYPE_NOT_EXPLICIT", "ACTION_DOMAIN_MISMATCH"]));
+    ).toEqual(
+      expect.arrayContaining(["ACTION_TYPE_NOT_EXPLICIT", "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"])
+    );
   });
 
   it("blocks live_write because xhs.search is a read-only command", async () => {
@@ -852,8 +879,7 @@ describe("extension background relay contract", () => {
         .gate_reasons as string[])
     ).toEqual(
       expect.arrayContaining([
-        "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND",
-        "ACTION_TYPE_UNSUPPORTED_FOR_COMMAND"
+        "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"
       ])
     );
   });
@@ -1036,6 +1062,301 @@ describe("extension background relay contract", () => {
       ])
     );
     expect(fetchCalled).toBe(false);
+  });
+
+  it("blocks issue_208 write action in paused state and returns reversible write tier", async () => {
+    let fetchCalled = false;
+    const contentScript = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_000,
+        randomId: () => "relay-issue-208-paused-write-id",
+        getLocationHref: () => "https://creator.xiaohongshu.com/publish/publish",
+        getDocumentTitle: () => "Creator Publish",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=valid;",
+        callSignature: async () => ({
+          "X-s": "signed",
+          "X-t": "1"
+        }),
+        fetchJson: async () => {
+          fetchCalled = true;
+          throw new Error("paused issue_208 write should not hit fetch");
+        }
+      }
+    });
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-issue-208-paused-write-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-issue-208-paused-write-001",
+        command: "xhs.search",
+        command_params: {
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "write"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            target_domain: "creator.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "creator_publish_tab",
+            issue_scope: "issue_208",
+            action_type: "write",
+            requested_execution_mode: "dry_run",
+            risk_state: "paused",
+            approval_record: {
+              approved: true,
+              approver: "qa-reviewer",
+              approved_at: "2026-03-23T10:00:00Z",
+              checks: {
+                target_domain_confirmed: true,
+                target_tab_confirmed: true,
+                target_page_confirmed: true,
+                risk_state_checked: true,
+                action_type_confirmed: true
+              }
+            }
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    const response = await responsePromise;
+    expect(response.status).toBe("error");
+    expect(response.error?.code).toBe("ERR_EXECUTION_FAILED");
+    const payload = asRecord(response.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(resolveWriteInteractionTier(payload)).toBe("reversible_interaction");
+    expect(fetchCalled).toBe(false);
+  });
+
+  it("allows issue_208 reversible_interaction_with_approval only when approval is complete", async () => {
+    const states: Array<"limited" | "allowed"> = ["limited", "allowed"];
+    for (const state of states) {
+      const blockedContentScript = new ContentScriptHandler({
+        xhsEnv: {
+          now: () => 1_000,
+          randomId: () => `relay-issue-208-${state}-missing-approval-id`,
+          getLocationHref: () => "https://creator.xiaohongshu.com/publish/publish",
+          getDocumentTitle: () => "Creator Publish",
+          getReadyState: () => "complete",
+          getCookie: () => "a1=valid;",
+          callSignature: async () => ({
+            "X-s": "signed",
+            "X-t": "1"
+          }),
+          fetchJson: async () => {
+            throw new Error("missing approval should not hit fetch");
+          }
+        }
+      });
+      const blockedRelay = new BackgroundRelay(blockedContentScript, { forwardTimeoutMs: 200 });
+      const blockedResponsePromise = waitForResponse(blockedRelay);
+      blockedRelay.onNativeRequest({
+        id: `forward-xhs-issue-208-${state}-missing-approval-001`,
+        method: "bridge.forward",
+        params: {
+          session_id: "nm-session-001",
+          run_id: `run-xhs-issue-208-${state}-missing-approval-001`,
+          command: "xhs.search",
+          command_params: {
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
+              action: "write"
+            },
+            input: {
+              query: "露营装备"
+            },
+            options: {
+              target_domain: "creator.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "creator_publish_tab",
+              issue_scope: "issue_208",
+              action_type: "write",
+              requested_execution_mode: "dry_run",
+              risk_state: state,
+              approval_record: {
+                approved: false,
+                approver: null,
+                approved_at: null,
+                checks: {
+                  target_domain_confirmed: false,
+                  target_tab_confirmed: false,
+                  target_page_confirmed: false,
+                  risk_state_checked: false,
+                  action_type_confirmed: false
+                }
+              }
+            }
+          },
+          cwd: "/workspace/WebEnvoy"
+        },
+        profile: "profile-a",
+        timeout_ms: 200
+      });
+      const blockedResponse = await blockedResponsePromise;
+      expect(blockedResponse.status).toBe("error");
+      const blockedPayload = asRecord(blockedResponse.payload) ?? {};
+      const blockedConsumerGateResult = asRecord(blockedPayload.consumer_gate_result);
+      expect(blockedConsumerGateResult?.gate_decision).toBe("blocked");
+      expect(resolveWriteInteractionTier(blockedPayload)).toBe("reversible_interaction");
+
+      const approvedContentScript = new ContentScriptHandler({
+        xhsEnv: {
+          now: () => 1_000,
+          randomId: () => `relay-issue-208-${state}-approved-id`,
+          getLocationHref: () => "https://creator.xiaohongshu.com/publish/publish",
+          getDocumentTitle: () => "Creator Publish",
+          getReadyState: () => "complete",
+          getCookie: () => "a1=valid;",
+          callSignature: async () => ({
+            "X-s": "signed",
+            "X-t": "1"
+          }),
+          fetchJson: async () => {
+            throw new Error("issue_208 reversible write should remain gate-only in contract test");
+          }
+        }
+      });
+      const approvedRelay = new BackgroundRelay(approvedContentScript, { forwardTimeoutMs: 200 });
+      const approvedResponsePromise = waitForResponse(approvedRelay);
+      approvedRelay.onNativeRequest({
+        id: `forward-xhs-issue-208-${state}-approved-001`,
+        method: "bridge.forward",
+        params: {
+          session_id: "nm-session-001",
+          run_id: `run-xhs-issue-208-${state}-approved-001`,
+          command: "xhs.search",
+          command_params: {
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
+              action: "write"
+            },
+            input: {
+              query: "露营装备"
+            },
+            options: {
+              simulate_result: "success",
+              target_domain: "creator.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "creator_publish_tab",
+              issue_scope: "issue_208",
+              action_type: "write",
+              requested_execution_mode: "dry_run",
+              risk_state: state,
+              approval_record: {
+                approved: true,
+                approver: "qa-reviewer",
+                approved_at: "2026-03-23T10:00:00Z",
+                checks: {
+                  target_domain_confirmed: true,
+                  target_tab_confirmed: true,
+                  target_page_confirmed: true,
+                  risk_state_checked: true,
+                  action_type_confirmed: true
+                }
+              }
+            }
+          },
+          cwd: "/workspace/WebEnvoy"
+        },
+        profile: "profile-a",
+        timeout_ms: 200
+      });
+      const approvedResponse = await approvedResponsePromise;
+      expect(approvedResponse.status).toBe("success");
+      const approvedPayload = asRecord(approvedResponse.payload) ?? {};
+      const summary = asRecord(approvedPayload.summary) ?? {};
+      const approvedConsumerGateResult = asRecord(summary.consumer_gate_result);
+      expect(approvedConsumerGateResult?.gate_decision).toBe("allowed");
+      expect(resolveWriteInteractionTier(summary)).toBe("reversible_interaction");
+    }
+  });
+
+  it("keeps issue_208 irreversible_write blocked and returns irreversible write tier", async () => {
+    const contentScript = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_000,
+        randomId: () => "relay-issue-208-irreversible-id",
+        getLocationHref: () => "https://creator.xiaohongshu.com/publish/publish",
+        getDocumentTitle: () => "Creator Publish",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=valid;",
+        callSignature: async () => ({
+          "X-s": "signed",
+          "X-t": "1"
+        }),
+        fetchJson: async () => {
+          throw new Error("irreversible write should not hit fetch");
+        }
+      }
+    });
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-issue-208-irreversible-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-issue-208-irreversible-001",
+        command: "xhs.search",
+        command_params: {
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "write"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            target_domain: "creator.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "creator_publish_tab",
+            issue_scope: "issue_208",
+            action_type: "irreversible_write",
+            requested_execution_mode: "dry_run",
+            risk_state: "allowed",
+            approval_record: {
+              approved: true,
+              approver: "qa-reviewer",
+              approved_at: "2026-03-23T10:00:00Z",
+              checks: {
+                target_domain_confirmed: true,
+                target_tab_confirmed: true,
+                target_page_confirmed: true,
+                risk_state_checked: true,
+                action_type_confirmed: true
+              }
+            }
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    const response = await responsePromise;
+    expect(response.status).toBe("error");
+    const payload = asRecord(response.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(resolveWriteInteractionTier(payload)).toBe("irreversible_write");
   });
 
   it("blocks live approval when caller target scope mismatches actual context", async () => {

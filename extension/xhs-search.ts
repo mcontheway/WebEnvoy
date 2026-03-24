@@ -1,4 +1,20 @@
-import { buildRiskTransitionAudit } from "../shared/risk-state.js";
+import {
+  APPROVAL_CHECK_KEYS,
+  EXECUTION_MODES,
+  WRITE_INTERACTION_TIER,
+  buildRiskTransitionAudit,
+  buildUnifiedRiskStateOutput,
+  getWriteActionMatrixDecisions,
+  getIssueActionMatrixEntry,
+  resolveIssueScope as resolveSharedIssueScope,
+  resolveRiskState as resolveSharedRiskState,
+  type ExecutionMode,
+  type IssueActionMatrixEntry,
+  type IssueScope,
+  type RiskState,
+  type WriteActionMatrixDecisionsOutput,
+  type WriteInteractionTier
+} from "../shared/risk-state.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -15,6 +31,7 @@ export interface XhsSearchOptions {
   timeout_ms?: number;
   simulate_result?: string;
   x_s_common?: string;
+  issue_scope?: string;
   target_domain?: string;
   target_tab_id?: number;
   target_page?: string;
@@ -73,20 +90,8 @@ interface SearchExecutionFailure {
 export type SearchExecutionResult = SearchExecutionSuccess | SearchExecutionFailure;
 
 type ActionType = "read" | "write" | "irreversible_write";
-type RequestedExecutionMode =
-  | "dry_run"
-  | "recon"
-  | "live_read_limited"
-  | "live_read_high_risk"
-  | "live_write";
-type EffectiveExecutionMode =
-  | "dry_run"
-  | "recon"
-  | "live_read_limited"
-  | "live_read_high_risk"
-  | "live_write"
-  | null;
-type RiskState = "paused" | "limited" | "allowed";
+type RequestedExecutionMode = ExecutionMode;
+type EffectiveExecutionMode = RequestedExecutionMode | null;
 
 interface ScopeContextRecord {
   platform: "xhs";
@@ -99,6 +104,7 @@ interface GateInputRecord {
   run_id: string;
   session_id: string;
   profile: string;
+  issue_scope: IssueScope;
   target_domain: string | null;
   target_tab_id: number | null;
   target_page: string | null;
@@ -116,6 +122,7 @@ interface GateOutcomeRecord {
 
 interface ConsumerGateResult {
   risk_state: RiskState;
+  issue_scope: IssueScope;
   target_domain: string | null;
   target_tab_id: number | null;
   target_page: string | null;
@@ -124,6 +131,7 @@ interface ConsumerGateResult {
   effective_execution_mode: EffectiveExecutionMode;
   gate_decision: "allowed" | "blocked";
   gate_reasons: string[];
+  write_interaction_tier?: string | null;
 }
 
 interface XhsSearchGate {
@@ -134,16 +142,9 @@ interface XhsSearchGate {
     blocked_actions: string[];
     live_entry_requirements: string[];
   };
-  issue_action_matrix: {
-    issue_scope: "issue_209";
-    state: RiskState;
-    allowed_actions: string[];
-    conditional_actions: Array<{
-      action: string;
-      requires: string[];
-    }>;
-    blocked_actions: string[];
-  };
+  issue_action_matrix: IssueActionMatrixEntry;
+  write_interaction_tier: WriteInteractionTier;
+  write_action_matrix_decisions: WriteActionMatrixDecisionsOutput | null;
   gate_input: Omit<GateInputRecord, "run_id" | "session_id" | "profile">;
   gate_outcome: GateOutcomeRecord;
   consumer_gate_result: ConsumerGateResult;
@@ -160,6 +161,7 @@ interface XhsExecutionAuditRecord {
   run_id: string;
   session_id: string;
   profile: string;
+  issue_scope: IssueScope;
   risk_state: RiskState;
   next_state?: RiskState;
   transition_trigger?: string;
@@ -173,6 +175,8 @@ interface XhsExecutionAuditRecord {
   gate_reasons: string[];
   approver: string | null;
   approved_at: string | null;
+  write_interaction_tier?: string | null;
+  write_action_matrix_decisions?: WriteActionMatrixDecisionsOutput | null;
   risk_signal?: boolean;
   recovery_signal?: boolean;
   session_rhythm_state?: "normal" | "cooldown" | "recovery";
@@ -192,14 +196,7 @@ const XHS_READ_DOMAIN = "www.xiaohongshu.com";
 const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
 const XHS_ALLOWED_DOMAINS = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
 const ACTION_TYPES = new Set<ActionType>(["read", "write", "irreversible_write"]);
-const REQUESTED_EXECUTION_MODES = new Set<RequestedExecutionMode>([
-  "dry_run",
-  "recon",
-  "live_read_limited",
-  "live_read_high_risk",
-  "live_write"
-]);
-const RISK_STATES = new Set<RiskState>(["paused", "limited", "allowed"]);
+const REQUESTED_EXECUTION_MODES = new Set<RequestedExecutionMode>(EXECUTION_MODES);
 const READ_EXECUTION_POLICY = {
   default_mode: "dry_run" as const,
   allowed_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"] as const,
@@ -217,76 +214,7 @@ const READ_EXECUTION_POLICY = {
     "approval_record_checks_all_true"
   ] as const
 };
-const ISSUE_209_ACTION_MATRIX = {
-  paused: {
-    issue_scope: "issue_209",
-    state: "paused",
-    allowed_actions: ["dry_run", "recon"],
-    conditional_actions: [],
-    blocked_actions: [
-      "live_read_limited",
-      "live_read_high_risk",
-      "live_write",
-      "irreversible_write",
-      "expand_new_live_surface_without_gate"
-    ]
-  },
-  limited: {
-    issue_scope: "issue_209",
-    state: "limited",
-    allowed_actions: ["dry_run", "recon"],
-    conditional_actions: [
-      {
-        action: "live_read_limited",
-        requires: [
-          "approval_record_approved_true",
-          "approval_record_approver_present",
-          "approval_record_approved_at_present",
-          "approval_record_checks_all_true"
-        ]
-      }
-    ],
-    blocked_actions: [
-      "live_read_high_risk",
-      "live_write",
-      "irreversible_write",
-      "expand_new_live_surface_without_gate"
-    ]
-  },
-  allowed: {
-    issue_scope: "issue_209",
-    state: "allowed",
-    allowed_actions: ["dry_run", "recon"],
-    conditional_actions: [
-      {
-        action: "live_read_limited",
-        requires: [
-          "approval_record_approved_true",
-          "approval_record_approver_present",
-          "approval_record_approved_at_present",
-          "approval_record_checks_all_true"
-        ]
-      },
-      {
-        action: "live_read_high_risk",
-        requires: [
-          "approval_record_approved_true",
-          "approval_record_approver_present",
-          "approval_record_approved_at_present",
-          "approval_record_checks_all_true"
-        ]
-      }
-    ],
-    blocked_actions: ["live_write", "irreversible_write", "expand_new_live_surface_without_gate"]
-  }
-} as const;
-const REQUIRED_APPROVAL_CHECKS = [
-  "target_domain_confirmed",
-  "target_tab_confirmed",
-  "target_page_confirmed",
-  "risk_state_checked",
-  "action_type_confirmed"
-] as const;
+const REQUIRED_APPROVAL_CHECKS = APPROVAL_CHECK_KEYS;
 
 const asRecord = (value: unknown): JsonRecord | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -313,24 +241,22 @@ const resolveRequestedExecutionMode = (value: unknown): RequestedExecutionMode |
     ? (value as RequestedExecutionMode)
     : null;
 
-const resolveRiskState = (value: unknown): RiskState =>
-  typeof value === "string" && RISK_STATES.has(value as RiskState)
-    ? (value as RiskState)
-    : "paused";
+const resolveRiskState = (value: unknown): RiskState => resolveSharedRiskState(value);
 
-const resolveIssue209Matrix = (state: RiskState): XhsSearchGate["issue_action_matrix"] => {
-  const entry = ISSUE_209_ACTION_MATRIX[state];
-  return {
-    issue_scope: entry.issue_scope,
-    state: entry.state,
-    allowed_actions: [...entry.allowed_actions],
-    conditional_actions: entry.conditional_actions.map((item) => ({
-      action: item.action,
-      requires: [...item.requires]
-    })),
-    blocked_actions: [...entry.blocked_actions]
-  };
-};
+const resolveIssueScope = (value: unknown): IssueScope => resolveSharedIssueScope(value);
+
+const resolveIssueActionMatrix = (
+  issueScope: IssueScope,
+  state: RiskState
+): XhsSearchGate["issue_action_matrix"] => getIssueActionMatrixEntry(issueScope, state);
+const resolveWriteActionMatrix = (
+  issueScope: IssueScope,
+  actionType: ActionType | null,
+  requestedExecutionMode: RequestedExecutionMode | null
+): WriteActionMatrixDecisionsOutput | null =>
+  actionType === null || requestedExecutionMode === null
+    ? null
+    : getWriteActionMatrixDecisions(issueScope, actionType, requestedExecutionMode);
 
 const resolveReadExecutionPolicy = (): XhsSearchGate["read_execution_policy"] => ({
   default_mode: READ_EXECUTION_POLICY.default_mode,
@@ -369,9 +295,17 @@ const normalizeApprovalRecord = (
 const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
   const actionType = resolveActionType(options.action_type);
   const requestedExecutionMode = resolveRequestedExecutionMode(options.requested_execution_mode);
+  const issueScope = resolveIssueScope(options.issue_scope);
   const riskState = resolveRiskState(options.risk_state);
   const readExecutionPolicy = resolveReadExecutionPolicy();
-  const issueActionMatrix = resolveIssue209Matrix(riskState);
+  const issueActionMatrix = resolveIssueActionMatrix(issueScope, riskState);
+  const writeActionMatrixDecisions = resolveWriteActionMatrix(
+    issueScope,
+    actionType,
+    requestedExecutionMode
+  );
+  const currentWriteActionDecision =
+    writeActionMatrixDecisions?.decisions.find((entry) => entry.state === riskState) ?? null;
   const fallbackMode = resolveFallbackMode(requestedExecutionMode ?? "dry_run", riskState);
   const targetDomain = asNonEmptyString(options.target_domain);
   const targetTabId = asInteger(options.target_tab_id);
@@ -416,8 +350,6 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
   }
   if (abilityAction && actionType && abilityAction !== actionType) {
     gateReasons.push("ABILITY_ACTION_CONTEXT_MISMATCH");
-  } else if (actionType && actionType !== "read") {
-    gateReasons.push("ACTION_TYPE_UNSUPPORTED_FOR_COMMAND");
   }
   if (requestedExecutionMode === "live_write" && actionType === "irreversible_write") {
     gateReasons.push("IRREVERSIBLE_WRITE_NOT_ALLOWED");
@@ -428,7 +360,7 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
   if (targetDomain === XHS_WRITE_DOMAIN && actionType === "read") {
     gateReasons.push("ACTION_DOMAIN_MISMATCH");
   }
-  if (targetDomain === XHS_READ_DOMAIN && actionType !== "read") {
+  if (targetDomain === XHS_READ_DOMAIN && actionType && actionType !== "read") {
     gateReasons.push("ACTION_DOMAIN_MISMATCH");
   }
 
@@ -440,6 +372,37 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
       requestedExecutionMode === "live_write"
     ) {
       effectiveExecutionMode = fallbackMode;
+    }
+  } else if (
+    actionType &&
+    actionType !== "read" &&
+    requestedExecutionMode !== null &&
+    currentWriteActionDecision
+  ) {
+    effectiveExecutionMode = requestedExecutionMode;
+    gateDecision = "blocked";
+
+    if (
+      currentWriteActionDecision.decision === "blocked" ||
+      currentWriteActionDecision.decision === "not_applicable"
+    ) {
+      gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
+      gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
+    } else if (currentWriteActionDecision.decision === "conditional") {
+      const missingChecks = REQUIRED_APPROVAL_CHECKS.filter((key) => !approvalRecord.checks[key]);
+      if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
+        gateReasons.push("MANUAL_CONFIRMATION_MISSING");
+      }
+      if (missingChecks.length > 0) {
+        gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
+      }
+      if (gateReasons.length === 0) {
+        gateDecision = "allowed";
+        gateReasons.push("WRITE_INTERACTION_APPROVED");
+      }
+    } else {
+      gateDecision = "allowed";
+      gateReasons.push("WRITE_INTERACTION_ALLOWED");
     }
   } else if (requestedExecutionMode === "dry_run" || requestedExecutionMode === "recon") {
     gateReasons.push(
@@ -458,21 +421,25 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
     if (requestedExecutionMode === "live_write" && actionType === "read") {
       gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
     }
-    if (
-      requestedExecutionMode &&
-      !issueActionMatrix.conditional_actions.some((entry) => entry.action === requestedExecutionMode) &&
-      (requestedExecutionMode === "live_read_limited" ||
-        requestedExecutionMode === "live_read_high_risk")
-    ) {
-      gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
-      gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
+    const isLiveReadMode =
+      requestedExecutionMode === "live_read_limited" ||
+      requestedExecutionMode === "live_read_high_risk";
+    const isBlockedByStateMatrix =
+      requestedExecutionMode !== null &&
+      issueActionMatrix.blocked_actions.includes(requestedExecutionMode);
+    if (isBlockedByStateMatrix) {
+      if (isLiveReadMode) {
+        gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
+        gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
+      } else {
+        gateReasons.push("ISSUE_ACTION_BLOCKED_BY_STATE_MATRIX");
+      }
     }
 
     const liveModeCanEnter =
       requestedExecutionMode !== null &&
       issueActionMatrix.conditional_actions.some((entry) => entry.action === requestedExecutionMode) &&
-      (requestedExecutionMode === "live_read_limited" ||
-        requestedExecutionMode === "live_read_high_risk");
+      isLiveReadMode;
 
     if (liveModeCanEnter) {
       const missingChecks = REQUIRED_APPROVAL_CHECKS.filter((key) => !approvalRecord.checks[key]);
@@ -500,7 +467,10 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
     },
     read_execution_policy: readExecutionPolicy,
     issue_action_matrix: issueActionMatrix,
+    write_interaction_tier: WRITE_INTERACTION_TIER,
+    write_action_matrix_decisions: writeActionMatrixDecisions,
     gate_input: {
+      issue_scope: issueScope,
       target_domain: targetDomain,
       target_tab_id: targetTabId,
       target_page: targetPage,
@@ -519,6 +489,7 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
     },
     consumer_gate_result: {
       risk_state: riskState,
+      issue_scope: issueScope,
       target_domain: targetDomain,
       target_tab_id: targetTabId,
       target_page: targetPage,
@@ -526,11 +497,24 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
       requested_execution_mode: requestedExecutionMode,
       effective_execution_mode: effectiveExecutionMode,
       gate_decision: gateDecision,
-      gate_reasons: gateReasons
+      gate_reasons: gateReasons,
+      write_interaction_tier: writeActionMatrixDecisions?.write_interaction_tier ?? null
     },
     approval_record: approvalRecord
   };
 };
+
+const resolveRiskStateOutput = (
+  gate: XhsSearchGate,
+  auditRecord?: XhsExecutionAuditRecord
+) =>
+  buildUnifiedRiskStateOutput(
+    resolveRiskState(auditRecord?.next_state ?? gate.gate_input.risk_state),
+    {
+      auditRecords: auditRecord ? [auditRecord as unknown as Record<string, unknown>] : [],
+      now: auditRecord?.recorded_at ?? Date.now()
+    }
+  );
 
 const createGateOnlySuccess = (
   input: {
@@ -568,8 +552,11 @@ const createGateOnlySuccess = (
       gate_outcome: gate.gate_outcome,
       read_execution_policy: gate.read_execution_policy,
       issue_action_matrix: gate.issue_action_matrix,
+      write_interaction_tier: gate.write_interaction_tier,
+      write_action_matrix_decisions: gate.write_action_matrix_decisions,
       consumer_gate_result: gate.consumer_gate_result,
       approval_record: gate.approval_record,
+      risk_state_output: resolveRiskStateOutput(gate, auditRecord),
       audit_record: auditRecord
     },
     observability: {
@@ -688,8 +675,11 @@ const createFailure = (
           gate_outcome: gate.gate_outcome,
           read_execution_policy: gate.read_execution_policy,
           issue_action_matrix: gate.issue_action_matrix,
+          write_interaction_tier: gate.write_interaction_tier,
+          write_action_matrix_decisions: gate.write_action_matrix_decisions,
           consumer_gate_result: gate.consumer_gate_result,
           approval_record: gate.approval_record,
+          risk_state_output: resolveRiskStateOutput(gate, auditRecord),
           ...(auditRecord ? { audit_record: auditRecord } : {})
         }
       : {})
@@ -718,6 +708,7 @@ const createAuditRecord = (
     run_id: context.runId,
     session_id: context.sessionId,
     profile: context.profile,
+    issue_scope: gate.gate_input.issue_scope,
     risk_state: gate.gate_input.risk_state,
     target_domain: gate.consumer_gate_result.target_domain,
     target_tab_id: gate.consumer_gate_result.target_tab_id,
@@ -729,6 +720,8 @@ const createAuditRecord = (
     gate_reasons: [...gate.consumer_gate_result.gate_reasons],
     approver: gate.approval_record.approver,
     approved_at: gate.approval_record.approved_at,
+    write_interaction_tier: gate.write_action_matrix_decisions?.write_interaction_tier ?? null,
+    write_action_matrix_decisions: gate.write_action_matrix_decisions,
     risk_signal: riskSignal,
     recovery_signal: recoverySignal,
     session_rhythm_state: riskSignal ? "cooldown" : recoverySignal ? "recovery" : "normal",
@@ -739,7 +732,7 @@ const createAuditRecord = (
   const transitionAudit = buildRiskTransitionAudit({
     runId: context.runId,
     sessionId: context.sessionId,
-    issueScope: "issue_209",
+    issueScope: gate.gate_input.issue_scope,
     prevState: gate.gate_input.risk_state,
     decision: gate.consumer_gate_result.gate_decision,
     gateReasons: [...gate.consumer_gate_result.gate_reasons],
@@ -1031,6 +1024,7 @@ export const executeXhsSearch = async (
             issue_action_matrix: gate.issue_action_matrix,
             consumer_gate_result: gate.consumer_gate_result,
             approval_record: gate.approval_record,
+            risk_state_output: resolveRiskStateOutput(gate, auditRecord),
             audit_record: auditRecord
           }
         }
@@ -1049,6 +1043,7 @@ export const executeXhsSearch = async (
         issue_action_matrix: gate.issue_action_matrix,
         consumer_gate_result: gate.consumer_gate_result,
         approval_record: gate.approval_record,
+        risk_state_output: resolveRiskStateOutput(gate, auditRecord),
         audit_record: auditRecord
       }
     };
@@ -1240,6 +1235,7 @@ export const executeXhsSearch = async (
         issue_action_matrix: gate.issue_action_matrix,
         consumer_gate_result: gate.consumer_gate_result,
         approval_record: gate.approval_record,
+        risk_state_output: resolveRiskStateOutput(gate, auditRecord),
         audit_record: auditRecord
       },
       observability: createObservability({

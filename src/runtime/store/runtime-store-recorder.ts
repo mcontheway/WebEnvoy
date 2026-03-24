@@ -1,5 +1,6 @@
 import type { CliError } from "../../core/errors.js";
 import type { JsonObject, RuntimeContext } from "../../core/types.js";
+import { getWriteActionMatrixDecisions } from "../../../shared/risk-state.js";
 import {
   RuntimeStoreError,
   SQLiteRuntimeStore,
@@ -46,6 +47,19 @@ const asInteger = (value: unknown): number | null =>
   typeof value === "number" && Number.isInteger(value) ? value : null;
 
 const asBoolean = (value: unknown): boolean => value === true;
+
+const resolveActionTypeFromWriteTier = (value: unknown): string | null => {
+  if (value === "irreversible_write") {
+    return "irreversible_write";
+  }
+  if (value === "reversible_interaction") {
+    return "write";
+  }
+  if (value === "observe_only") {
+    return "read";
+  }
+  return null;
+};
 
 const buildEvent = (
   context: RuntimeContext,
@@ -97,15 +111,35 @@ const extractGateAuditRecordInput = (
 ): AppendGateAuditRecordInput | null => {
   const auditRecord = asObject(source.audit_record);
   const transitionAudit = asObject(source.risk_transition_audit);
+  const gateInput = asObject(source.gate_input);
+  const consumerGateResult = asObject(source.consumer_gate_result);
+  const providedWriteActionDecisions = asObject(source.write_action_matrix_decisions);
   if (!auditRecord) {
     return null;
   }
 
-  const runId = asString(auditRecord.run_id);
-  const sessionId = asString(auditRecord.session_id);
-  const profile = asString(auditRecord.profile);
+  const derivedWriteActionDecisions = getWriteActionMatrixDecisions(
+    asString(auditRecord.issue_scope) ??
+      asString(gateInput?.issue_scope) ??
+      asString(transitionAudit?.issue_scope),
+    asString(auditRecord.action_type) ??
+      asString(consumerGateResult?.action_type) ??
+      asString(gateInput?.action_type) ??
+      asString(providedWriteActionDecisions?.action_type),
+    asString(auditRecord.requested_execution_mode) ??
+      asString(consumerGateResult?.requested_execution_mode) ??
+      asString(gateInput?.requested_execution_mode) ??
+      asString(providedWriteActionDecisions?.requested_execution_mode)
+  );
+  const runId =
+    asString(auditRecord.run_id) ?? asString(gateInput?.run_id) ?? asString(source.run_id);
+  const sessionId =
+    asString(auditRecord.session_id) ??
+    asString(gateInput?.session_id) ??
+    asString(source.session_id);
+  const profile = asString(auditRecord.profile) ?? asString(gateInput?.profile) ?? asString(source.profile);
   const eventId = asString(auditRecord.event_id);
-  const riskState = asString(auditRecord.risk_state);
+  const riskState = asString(auditRecord.risk_state) ?? asString(consumerGateResult?.risk_state);
   const nextState =
     asString(auditRecord.next_state) ?? asString(transitionAudit?.next_state) ?? riskState;
   const transitionTrigger =
@@ -115,15 +149,35 @@ const extractGateAuditRecordInput = (
   const targetDomain = asString(auditRecord.target_domain);
   const targetTabId = asInteger(auditRecord.target_tab_id);
   const targetPage = asString(auditRecord.target_page);
-  const actionType = asString(auditRecord.action_type);
-  const requestedExecutionMode = asString(auditRecord.requested_execution_mode);
-  const effectiveExecutionMode = asString(auditRecord.effective_execution_mode);
-  const gateDecision = asString(auditRecord.gate_decision);
+  const actionType =
+    asString(auditRecord.action_type) ??
+    asString(consumerGateResult?.action_type) ??
+    asString(gateInput?.action_type) ??
+    asString(providedWriteActionDecisions?.action_type) ??
+    resolveActionTypeFromWriteTier(derivedWriteActionDecisions.write_interaction_tier);
+  const requestedExecutionMode =
+    asString(auditRecord.requested_execution_mode) ??
+    asString(consumerGateResult?.requested_execution_mode) ??
+    asString(gateInput?.requested_execution_mode) ??
+    asString(providedWriteActionDecisions?.requested_execution_mode) ??
+    asString(derivedWriteActionDecisions.requested_execution_mode);
+  const effectiveExecutionMode =
+    asString(auditRecord.effective_execution_mode) ??
+    asString(consumerGateResult?.effective_execution_mode) ??
+    requestedExecutionMode;
+  const gateDecision =
+    asString(auditRecord.gate_decision) ??
+    asString(consumerGateResult?.gate_decision) ??
+    asString(asObject(source.gate_outcome)?.gate_decision);
   const recordedAt = asString(auditRecord.recorded_at);
   const gateReasons = Array.isArray(auditRecord.gate_reasons)
     ? auditRecord.gate_reasons.filter(
         (item): item is string => typeof item === "string" && item.trim().length > 0
       )
+    : Array.isArray(consumerGateResult?.gate_reasons)
+      ? consumerGateResult.gate_reasons.filter(
+          (item): item is string => typeof item === "string" && item.trim().length > 0
+        )
     : [];
 
   if (

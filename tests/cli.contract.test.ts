@@ -106,6 +106,41 @@ const parseSingleJsonLine = (stdout: string) => {
   return JSON.parse(lines[0]) as Record<string, unknown>;
 };
 
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const resolveCliGateEnvelope = (body: Record<string, unknown>): Record<string, unknown> => {
+  const summary = asRecord(body.summary);
+  if (summary) {
+    return summary;
+  }
+  const error = asRecord(body.error);
+  const details = asRecord(error?.details);
+  return details ?? {};
+};
+
+const resolveWriteInteractionTier = (envelope: Record<string, unknown>): string | null => {
+  const direct = envelope.write_interaction_tier;
+  if (typeof direct === "string") {
+    return direct;
+  }
+  const consumerGateResult = asRecord(envelope.consumer_gate_result);
+  if (typeof consumerGateResult?.write_interaction_tier === "string") {
+    return consumerGateResult.write_interaction_tier;
+  }
+  const writeActionMatrix = asRecord(envelope.write_action_matrix);
+  if (typeof writeActionMatrix?.write_interaction_tier === "string") {
+    return writeActionMatrix.write_interaction_tier;
+  }
+  const writeActionMatrixDecisions = asRecord(envelope.write_action_matrix_decisions);
+  if (typeof writeActionMatrixDecisions?.write_interaction_tier === "string") {
+    return writeActionMatrixDecisions.write_interaction_tier;
+  }
+  return null;
+};
+
 const scopedXhsGateOptions = {
   target_domain: "www.xiaohongshu.com",
   target_tab_id: 32,
@@ -651,7 +686,9 @@ describe("webenvoy cli contract", () => {
     });
     expect(
       (((body.error as Record<string, unknown>).details as Record<string, unknown>).gate_reasons as string[])
-    ).toEqual(expect.arrayContaining(["ACTION_TYPE_NOT_EXPLICIT", "ACTION_DOMAIN_MISMATCH"]));
+    ).toEqual(
+      expect.arrayContaining(["ACTION_TYPE_NOT_EXPLICIT", "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"])
+    );
   });
 
   it("blocks live_write because xhs.search is a read-only command", () => {
@@ -700,8 +737,7 @@ describe("webenvoy cli contract", () => {
       (((body.error as Record<string, unknown>).details as Record<string, unknown>).gate_reasons as string[])
     ).toEqual(
       expect.arrayContaining([
-        "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND",
-        "ACTION_TYPE_UNSUPPORTED_FOR_COMMAND"
+        "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"
       ])
     );
   });
@@ -814,6 +850,263 @@ describe("webenvoy cli contract", () => {
         "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"
       ])
     );
+  });
+
+  it("blocks issue_208 write paths in paused state and exposes write interaction tier", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          issue_scope: "issue_208",
+          action_type: "write",
+          requested_execution_mode: "dry_run",
+          risk_state: "paused",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    const gateEnvelope = resolveCliGateEnvelope(body);
+    const consumerGateResult = asRecord(gateEnvelope.consumer_gate_result);
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(resolveWriteInteractionTier(gateEnvelope)).toBe("reversible_interaction");
+  });
+
+  it("allows reversible_interaction_with_approval for issue_208 only when approval is complete", () => {
+    const states: Array<"limited" | "allowed"> = ["limited", "allowed"];
+    for (const state of states) {
+      const blocked = runCli([
+        "xhs.search",
+        "--profile",
+        "xhs_account_001",
+        "--params",
+        JSON.stringify({
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "write"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            target_domain: "creator.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "creator_publish_tab",
+            issue_scope: "issue_208",
+            action_type: "write",
+            requested_execution_mode: "dry_run",
+            risk_state: state,
+            approval_record: {
+              approved: false,
+              approver: null,
+              approved_at: null,
+              checks: {
+                target_domain_confirmed: false,
+                target_tab_confirmed: false,
+                target_page_confirmed: false,
+                risk_state_checked: false,
+                action_type_confirmed: false
+              }
+            }
+          }
+        })
+      ], repoRoot, {
+        WEBENVOY_NATIVE_TRANSPORT: "loopback"
+      });
+      expect(blocked.status).toBe(6);
+      const blockedBody = parseSingleJsonLine(blocked.stdout);
+      const blockedEnvelope = resolveCliGateEnvelope(blockedBody);
+      const blockedConsumerGateResult = asRecord(blockedEnvelope.consumer_gate_result);
+      expect(blockedConsumerGateResult?.gate_decision).toBe("blocked");
+      expect(resolveWriteInteractionTier(blockedEnvelope)).toBe("reversible_interaction");
+
+      const approved = runCli([
+        "xhs.search",
+        "--profile",
+        "xhs_account_001",
+        "--params",
+        JSON.stringify({
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "write"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            simulate_result: "success",
+            target_domain: "creator.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "creator_publish_tab",
+            issue_scope: "issue_208",
+            action_type: "write",
+            requested_execution_mode: "dry_run",
+            risk_state: state,
+            approval_record: {
+              approved: true,
+              approver: "qa-reviewer",
+              approved_at: "2026-03-23T10:00:00Z",
+              checks: {
+                target_domain_confirmed: true,
+                target_tab_confirmed: true,
+                target_page_confirmed: true,
+                risk_state_checked: true,
+                action_type_confirmed: true
+              }
+            }
+          }
+        })
+      ], repoRoot, {
+        WEBENVOY_NATIVE_TRANSPORT: "loopback"
+      });
+      expect(approved.status).toBe(0);
+      const approvedBody = parseSingleJsonLine(approved.stdout);
+      const approvedEnvelope = resolveCliGateEnvelope(approvedBody);
+      const approvedConsumerGateResult = asRecord(approvedEnvelope.consumer_gate_result);
+      expect(approvedConsumerGateResult?.gate_decision).toBe("allowed");
+      expect(resolveWriteInteractionTier(approvedEnvelope)).toBe("reversible_interaction");
+    }
+  });
+
+  it("keeps issue_208 irreversible_write blocked and exposes irreversible write tier", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          issue_scope: "issue_208",
+          action_type: "irreversible_write",
+          requested_execution_mode: "dry_run",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    const gateEnvelope = resolveCliGateEnvelope(body);
+    const consumerGateResult = asRecord(gateEnvelope.consumer_gate_result);
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(resolveWriteInteractionTier(gateEnvelope)).toBe("irreversible_write");
+  });
+
+  it("keeps issue_208 live_write as gate-only in loopback while exposing non-live effective mode", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          issue_scope: "issue_208",
+          action_type: "write",
+          requested_execution_mode: "live_write",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    const gateEnvelope = resolveCliGateEnvelope(body);
+    const consumerGateResult = asRecord(gateEnvelope.consumer_gate_result);
+    const gateInput = asRecord(gateEnvelope.gate_input);
+    const gateOutcome = asRecord(gateEnvelope.gate_outcome);
+    const auditRecord = asRecord(gateEnvelope.audit_record);
+    expect(gateInput?.requested_execution_mode).toBe("live_write");
+    expect(gateOutcome?.effective_execution_mode).toBe("dry_run");
+    expect(consumerGateResult?.requested_execution_mode).toBe("live_write");
+    expect(consumerGateResult?.effective_execution_mode).toBe("dry_run");
+    expect(consumerGateResult?.gate_decision).toBe("allowed");
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["WRITE_INTERACTION_APPROVED"])
+    );
+    expect(auditRecord?.requested_execution_mode).toBe("live_write");
+    expect(auditRecord?.effective_execution_mode).toBe("dry_run");
+    expect(resolveWriteInteractionTier(gateEnvelope)).toBe("reversible_interaction");
   });
 
   it("allows live_read_high_risk with explicit approval and emits consumer_gate_result", () => {
@@ -1119,7 +1412,11 @@ describe("webenvoy cli contract", () => {
             {
               issue_scope: "issue_208",
               state: "allowed",
-              conditional_actions: []
+              conditional_actions: [
+                {
+                  action: "reversible_interaction_with_approval"
+                }
+              ]
             },
             {
               issue_scope: "issue_209",
@@ -1231,7 +1528,11 @@ describe("webenvoy cli contract", () => {
             {
               issue_scope: "issue_208",
               state: "limited",
-              conditional_actions: []
+              conditional_actions: [
+                {
+                  action: "reversible_interaction_with_approval"
+                }
+              ]
             },
             {
               issue_scope: "issue_209",

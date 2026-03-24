@@ -325,6 +325,9 @@ export class ContentScriptHandler {
             ...(typeof options.action_type === "string"
               ? { action_type: options.action_type }
               : {}),
+            ...(typeof options.issue_scope === "string"
+              ? { issue_scope: options.issue_scope }
+              : {}),
             ...(typeof options.requested_execution_mode === "string"
               ? { requested_execution_mode: options.requested_execution_mode }
               : {}),

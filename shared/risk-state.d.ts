@@ -6,12 +6,17 @@ export type ExecutionMode =
   | "live_read_limited"
   | "live_read_high_risk"
   | "live_write";
+export type ActionType = "read" | "write" | "irreversible_write";
 export type ApprovalCheckKey =
   | "target_domain_confirmed"
   | "target_tab_confirmed"
   | "target_page_confirmed"
   | "risk_state_checked"
   | "action_type_confirmed";
+export type WriteInteractionTierName =
+  | "observe_only"
+  | "reversible_interaction"
+  | "irreversible_write";
 
 export interface RiskStateTransition {
   from: RiskState;
@@ -39,6 +44,30 @@ export interface SessionRhythmPolicy {
   resume_probe_mode: "recon_only";
 }
 
+export interface WriteInteractionTier {
+  tiers: Array<{
+    name: WriteInteractionTierName;
+    live_allowed: false | "limited";
+  }>;
+  synthetic_event_default: "blocked";
+  upload_injection_default: "blocked";
+}
+
+export interface WriteActionMatrixDecision {
+  state: RiskState;
+  decision: "allowed" | "conditional" | "blocked" | "not_applicable";
+  requires: string[];
+}
+
+export interface WriteActionMatrixDecisionsOutput {
+  issue_scope: IssueScope;
+  action_type: ActionType;
+  requested_execution_mode: ExecutionMode | null;
+  write_interaction_tier: WriteInteractionTierName;
+  matrix_actions: string[];
+  decisions: WriteActionMatrixDecision[];
+}
+
 export interface SessionRhythmOutput {
   state: "normal" | "cooldown" | "recovery";
   triggered_by: string | null;
@@ -62,6 +91,7 @@ export declare const RISK_STATE_TRANSITIONS: readonly RiskStateTransition[];
 export declare const ISSUE_ACTION_MATRIX: readonly IssueActionMatrixEntry[];
 export declare const SESSION_RHYTHM_POLICY: SessionRhythmPolicy;
 export declare const RISK_STATE_MACHINE: RiskStateMachine;
+export declare const WRITE_INTERACTION_TIER: WriteInteractionTier;
 
 export declare const isRiskState: (value: unknown) => value is RiskState;
 export declare const resolveRiskState: (value: unknown) => RiskState;
@@ -73,6 +103,11 @@ export declare const getIssueActionMatrixEntry: (
   issueScope: IssueScope,
   state: RiskState
 ) => IssueActionMatrixEntry;
+export declare const getWriteActionMatrixDecisions: (
+  issueScope: unknown,
+  actionType: unknown,
+  requestedExecutionMode: unknown
+) => WriteActionMatrixDecisionsOutput;
 export declare const isApprovalRecordComplete: (approvalRecord: unknown) => boolean;
 export declare const buildSessionRhythmOutput: (
   state: RiskState,

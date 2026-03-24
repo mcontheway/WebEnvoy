@@ -1,4 +1,5 @@
 import {
+  WRITE_INTERACTION_TIER as SHARED_WRITE_INTERACTION_TIER,
   APPROVAL_CHECK_KEYS as SHARED_APPROVAL_CHECK_KEYS,
   EXECUTION_MODES as SHARED_EXECUTION_MODES,
   ISSUE_ACTION_MATRIX as SHARED_ISSUE_ACTION_MATRIX,
@@ -10,6 +11,7 @@ import {
   buildRiskTransitionAudit,
   buildSessionRhythmOutput,
   buildUnifiedRiskStateOutput,
+  getWriteActionMatrixDecisions,
   getIssueActionMatrixEntry,
   getRiskRecoveryRequirements,
   isApprovalRecordComplete,
@@ -20,30 +22,43 @@ import {
   resolveIssueScope,
   resolveRiskState,
   type ApprovalCheckKey,
+  type ActionType,
   type ExecutionMode,
   type IssueActionMatrixEntry,
   type IssueScope,
   type RiskState,
   type RiskStateTransition,
   type SessionRhythmOutput,
-  type SessionRhythmPolicy
+  type SessionRhythmPolicy,
+  type WriteActionMatrixDecisionsOutput,
+  type WriteInteractionTier,
+  type WriteInteractionTierName
 } from "../../shared/risk-state.js";
 
 export type {
   ApprovalCheckKey,
+  ActionType,
   ExecutionMode,
   IssueActionMatrixEntry,
   IssueScope,
   RiskState,
   RiskStateTransition,
   SessionRhythmOutput,
-  SessionRhythmPolicy
+  SessionRhythmPolicy,
+  WriteActionMatrixDecisionsOutput,
+  WriteInteractionTier,
+  WriteInteractionTierName
 };
 
 export const RISK_STATES: RiskState[] = [...SHARED_RISK_STATES];
 export const ISSUE_SCOPES: IssueScope[] = [...SHARED_ISSUE_SCOPES];
 export const EXECUTION_MODES: ExecutionMode[] = [...SHARED_EXECUTION_MODES];
 export const APPROVAL_CHECK_KEYS: ApprovalCheckKey[] = [...SHARED_APPROVAL_CHECK_KEYS];
+export const WRITE_INTERACTION_TIER: WriteInteractionTier = {
+  tiers: SHARED_WRITE_INTERACTION_TIER.tiers.map((entry) => ({ ...entry })),
+  synthetic_event_default: SHARED_WRITE_INTERACTION_TIER.synthetic_event_default,
+  upload_injection_default: SHARED_WRITE_INTERACTION_TIER.upload_injection_default
+};
 export const RISK_STATE_TRANSITIONS: RiskStateTransition[] = SHARED_RISK_STATE_TRANSITIONS.map(
   (entry) => ({ ...entry })
 );
@@ -67,6 +82,7 @@ export {
   buildRiskTransitionAudit,
   buildSessionRhythmOutput,
   buildUnifiedRiskStateOutput,
+  getWriteActionMatrixDecisions,
   getIssueActionMatrixEntry,
   getRiskRecoveryRequirements,
   isApprovalRecordComplete,

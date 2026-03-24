@@ -1,17 +1,10 @@
-import { buildRiskTransitionAudit } from "../shared/risk-state.js";
+import { APPROVAL_CHECK_KEYS, EXECUTION_MODES, WRITE_INTERACTION_TIER, buildRiskTransitionAudit, buildUnifiedRiskStateOutput, getWriteActionMatrixDecisions, getIssueActionMatrixEntry, resolveIssueScope as resolveSharedIssueScope, resolveRiskState as resolveSharedRiskState } from "../shared/risk-state.js";
 const SEARCH_ENDPOINT = "/api/sns/web/v1/search/notes";
 const XHS_READ_DOMAIN = "www.xiaohongshu.com";
 const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
 const XHS_ALLOWED_DOMAINS = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
 const ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
-const REQUESTED_EXECUTION_MODES = new Set([
-    "dry_run",
-    "recon",
-    "live_read_limited",
-    "live_read_high_risk",
-    "live_write"
-]);
-const RISK_STATES = new Set(["paused", "limited", "allowed"]);
+const REQUESTED_EXECUTION_MODES = new Set(EXECUTION_MODES);
 const READ_EXECUTION_POLICY = {
     default_mode: "dry_run",
     allowed_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
@@ -29,76 +22,7 @@ const READ_EXECUTION_POLICY = {
         "approval_record_checks_all_true"
     ]
 };
-const ISSUE_209_ACTION_MATRIX = {
-    paused: {
-        issue_scope: "issue_209",
-        state: "paused",
-        allowed_actions: ["dry_run", "recon"],
-        conditional_actions: [],
-        blocked_actions: [
-            "live_read_limited",
-            "live_read_high_risk",
-            "live_write",
-            "irreversible_write",
-            "expand_new_live_surface_without_gate"
-        ]
-    },
-    limited: {
-        issue_scope: "issue_209",
-        state: "limited",
-        allowed_actions: ["dry_run", "recon"],
-        conditional_actions: [
-            {
-                action: "live_read_limited",
-                requires: [
-                    "approval_record_approved_true",
-                    "approval_record_approver_present",
-                    "approval_record_approved_at_present",
-                    "approval_record_checks_all_true"
-                ]
-            }
-        ],
-        blocked_actions: [
-            "live_read_high_risk",
-            "live_write",
-            "irreversible_write",
-            "expand_new_live_surface_without_gate"
-        ]
-    },
-    allowed: {
-        issue_scope: "issue_209",
-        state: "allowed",
-        allowed_actions: ["dry_run", "recon"],
-        conditional_actions: [
-            {
-                action: "live_read_limited",
-                requires: [
-                    "approval_record_approved_true",
-                    "approval_record_approver_present",
-                    "approval_record_approved_at_present",
-                    "approval_record_checks_all_true"
-                ]
-            },
-            {
-                action: "live_read_high_risk",
-                requires: [
-                    "approval_record_approved_true",
-                    "approval_record_approver_present",
-                    "approval_record_approved_at_present",
-                    "approval_record_checks_all_true"
-                ]
-            }
-        ],
-        blocked_actions: ["live_write", "irreversible_write", "expand_new_live_surface_without_gate"]
-    }
-};
-const REQUIRED_APPROVAL_CHECKS = [
-    "target_domain_confirmed",
-    "target_tab_confirmed",
-    "target_page_confirmed",
-    "risk_state_checked",
-    "action_type_confirmed"
-];
+const REQUIRED_APPROVAL_CHECKS = APPROVAL_CHECK_KEYS;
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
@@ -112,22 +36,12 @@ const resolveActionType = (value) => typeof value === "string" && ACTION_TYPES.h
 const resolveRequestedExecutionMode = (value) => typeof value === "string" && REQUESTED_EXECUTION_MODES.has(value)
     ? value
     : null;
-const resolveRiskState = (value) => typeof value === "string" && RISK_STATES.has(value)
-    ? value
-    : "paused";
-const resolveIssue209Matrix = (state) => {
-    const entry = ISSUE_209_ACTION_MATRIX[state];
-    return {
-        issue_scope: entry.issue_scope,
-        state: entry.state,
-        allowed_actions: [...entry.allowed_actions],
-        conditional_actions: entry.conditional_actions.map((item) => ({
-            action: item.action,
-            requires: [...item.requires]
-        })),
-        blocked_actions: [...entry.blocked_actions]
-    };
-};
+const resolveRiskState = (value) => resolveSharedRiskState(value);
+const resolveIssueScope = (value) => resolveSharedIssueScope(value);
+const resolveIssueActionMatrix = (issueScope, state) => getIssueActionMatrixEntry(issueScope, state);
+const resolveWriteActionMatrix = (issueScope, actionType, requestedExecutionMode) => actionType === null || requestedExecutionMode === null
+    ? null
+    : getWriteActionMatrixDecisions(issueScope, actionType, requestedExecutionMode);
 const resolveReadExecutionPolicy = () => ({
     default_mode: READ_EXECUTION_POLICY.default_mode,
     allowed_modes: [...READ_EXECUTION_POLICY.allowed_modes],
@@ -154,9 +68,12 @@ const normalizeApprovalRecord = (value) => {
 const resolveGate = (options) => {
     const actionType = resolveActionType(options.action_type);
     const requestedExecutionMode = resolveRequestedExecutionMode(options.requested_execution_mode);
+    const issueScope = resolveIssueScope(options.issue_scope);
     const riskState = resolveRiskState(options.risk_state);
     const readExecutionPolicy = resolveReadExecutionPolicy();
-    const issueActionMatrix = resolveIssue209Matrix(riskState);
+    const issueActionMatrix = resolveIssueActionMatrix(issueScope, riskState);
+    const writeActionMatrixDecisions = resolveWriteActionMatrix(issueScope, actionType, requestedExecutionMode);
+    const currentWriteActionDecision = writeActionMatrixDecisions?.decisions.find((entry) => entry.state === riskState) ?? null;
     const fallbackMode = resolveFallbackMode(requestedExecutionMode ?? "dry_run", riskState);
     const targetDomain = asNonEmptyString(options.target_domain);
     const targetTabId = asInteger(options.target_tab_id);
@@ -202,9 +119,6 @@ const resolveGate = (options) => {
     if (abilityAction && actionType && abilityAction !== actionType) {
         gateReasons.push("ABILITY_ACTION_CONTEXT_MISMATCH");
     }
-    else if (actionType && actionType !== "read") {
-        gateReasons.push("ACTION_TYPE_UNSUPPORTED_FOR_COMMAND");
-    }
     if (requestedExecutionMode === "live_write" && actionType === "irreversible_write") {
         gateReasons.push("IRREVERSIBLE_WRITE_NOT_ALLOWED");
     }
@@ -214,7 +128,7 @@ const resolveGate = (options) => {
     if (targetDomain === XHS_WRITE_DOMAIN && actionType === "read") {
         gateReasons.push("ACTION_DOMAIN_MISMATCH");
     }
-    if (targetDomain === XHS_READ_DOMAIN && actionType !== "read") {
+    if (targetDomain === XHS_READ_DOMAIN && actionType && actionType !== "read") {
         gateReasons.push("ACTION_DOMAIN_MISMATCH");
     }
     if (gateReasons.length > 0) {
@@ -223,6 +137,35 @@ const resolveGate = (options) => {
             requestedExecutionMode === "live_read_high_risk" ||
             requestedExecutionMode === "live_write") {
             effectiveExecutionMode = fallbackMode;
+        }
+    }
+    else if (actionType &&
+        actionType !== "read" &&
+        requestedExecutionMode !== null &&
+        currentWriteActionDecision) {
+        effectiveExecutionMode = requestedExecutionMode;
+        gateDecision = "blocked";
+        if (currentWriteActionDecision.decision === "blocked" ||
+            currentWriteActionDecision.decision === "not_applicable") {
+            gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
+            gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
+        }
+        else if (currentWriteActionDecision.decision === "conditional") {
+            const missingChecks = REQUIRED_APPROVAL_CHECKS.filter((key) => !approvalRecord.checks[key]);
+            if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
+                gateReasons.push("MANUAL_CONFIRMATION_MISSING");
+            }
+            if (missingChecks.length > 0) {
+                gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
+            }
+            if (gateReasons.length === 0) {
+                gateDecision = "allowed";
+                gateReasons.push("WRITE_INTERACTION_APPROVED");
+            }
+        }
+        else {
+            gateDecision = "allowed";
+            gateReasons.push("WRITE_INTERACTION_ALLOWED");
         }
     }
     else if (requestedExecutionMode === "dry_run" || requestedExecutionMode === "recon") {
@@ -240,17 +183,22 @@ const resolveGate = (options) => {
         if (requestedExecutionMode === "live_write" && actionType === "read") {
             gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
         }
-        if (requestedExecutionMode &&
-            !issueActionMatrix.conditional_actions.some((entry) => entry.action === requestedExecutionMode) &&
-            (requestedExecutionMode === "live_read_limited" ||
-                requestedExecutionMode === "live_read_high_risk")) {
-            gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
-            gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
+        const isLiveReadMode = requestedExecutionMode === "live_read_limited" ||
+            requestedExecutionMode === "live_read_high_risk";
+        const isBlockedByStateMatrix = requestedExecutionMode !== null &&
+            issueActionMatrix.blocked_actions.includes(requestedExecutionMode);
+        if (isBlockedByStateMatrix) {
+            if (isLiveReadMode) {
+                gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
+                gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
+            }
+            else {
+                gateReasons.push("ISSUE_ACTION_BLOCKED_BY_STATE_MATRIX");
+            }
         }
         const liveModeCanEnter = requestedExecutionMode !== null &&
             issueActionMatrix.conditional_actions.some((entry) => entry.action === requestedExecutionMode) &&
-            (requestedExecutionMode === "live_read_limited" ||
-                requestedExecutionMode === "live_read_high_risk");
+            isLiveReadMode;
         if (liveModeCanEnter) {
             const missingChecks = REQUIRED_APPROVAL_CHECKS.filter((key) => !approvalRecord.checks[key]);
             if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
@@ -275,7 +223,10 @@ const resolveGate = (options) => {
         },
         read_execution_policy: readExecutionPolicy,
         issue_action_matrix: issueActionMatrix,
+        write_interaction_tier: WRITE_INTERACTION_TIER,
+        write_action_matrix_decisions: writeActionMatrixDecisions,
         gate_input: {
+            issue_scope: issueScope,
             target_domain: targetDomain,
             target_tab_id: targetTabId,
             target_page: targetPage,
@@ -293,6 +244,7 @@ const resolveGate = (options) => {
         },
         consumer_gate_result: {
             risk_state: riskState,
+            issue_scope: issueScope,
             target_domain: targetDomain,
             target_tab_id: targetTabId,
             target_page: targetPage,
@@ -300,11 +252,16 @@ const resolveGate = (options) => {
             requested_execution_mode: requestedExecutionMode,
             effective_execution_mode: effectiveExecutionMode,
             gate_decision: gateDecision,
-            gate_reasons: gateReasons
+            gate_reasons: gateReasons,
+            write_interaction_tier: writeActionMatrixDecisions?.write_interaction_tier ?? null
         },
         approval_record: approvalRecord
     };
 };
+const resolveRiskStateOutput = (gate, auditRecord) => buildUnifiedRiskStateOutput(resolveRiskState(auditRecord?.next_state ?? gate.gate_input.risk_state), {
+    auditRecords: auditRecord ? [auditRecord] : [],
+    now: auditRecord?.recorded_at ?? Date.now()
+});
 const createGateOnlySuccess = (input, gate, auditRecord, env) => ({
     ok: true,
     payload: {
@@ -331,8 +288,11 @@ const createGateOnlySuccess = (input, gate, auditRecord, env) => ({
             gate_outcome: gate.gate_outcome,
             read_execution_policy: gate.read_execution_policy,
             issue_action_matrix: gate.issue_action_matrix,
+            write_interaction_tier: gate.write_interaction_tier,
+            write_action_matrix_decisions: gate.write_action_matrix_decisions,
             consumer_gate_result: gate.consumer_gate_result,
             approval_record: gate.approval_record,
+            risk_state_output: resolveRiskStateOutput(gate, auditRecord),
             audit_record: auditRecord
         },
         observability: {
@@ -424,8 +384,11 @@ const createFailure = (code, message, details, observability, diagnosis, gate, a
                 gate_outcome: gate.gate_outcome,
                 read_execution_policy: gate.read_execution_policy,
                 issue_action_matrix: gate.issue_action_matrix,
+                write_interaction_tier: gate.write_interaction_tier,
+                write_action_matrix_decisions: gate.write_action_matrix_decisions,
                 consumer_gate_result: gate.consumer_gate_result,
                 approval_record: gate.approval_record,
+                risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                 ...(auditRecord ? { audit_record: auditRecord } : {})
             }
             : {})
@@ -446,6 +409,7 @@ const createAuditRecord = (context, gate, env) => {
         run_id: context.runId,
         session_id: context.sessionId,
         profile: context.profile,
+        issue_scope: gate.gate_input.issue_scope,
         risk_state: gate.gate_input.risk_state,
         target_domain: gate.consumer_gate_result.target_domain,
         target_tab_id: gate.consumer_gate_result.target_tab_id,
@@ -457,6 +421,8 @@ const createAuditRecord = (context, gate, env) => {
         gate_reasons: [...gate.consumer_gate_result.gate_reasons],
         approver: gate.approval_record.approver,
         approved_at: gate.approval_record.approved_at,
+        write_interaction_tier: gate.write_action_matrix_decisions?.write_interaction_tier ?? null,
+        write_action_matrix_decisions: gate.write_action_matrix_decisions,
         risk_signal: riskSignal,
         recovery_signal: recoverySignal,
         session_rhythm_state: riskSignal ? "cooldown" : recoverySignal ? "recovery" : "normal",
@@ -467,7 +433,7 @@ const createAuditRecord = (context, gate, env) => {
     const transitionAudit = buildRiskTransitionAudit({
         runId: context.runId,
         sessionId: context.sessionId,
-        issueScope: "issue_209",
+        issueScope: gate.gate_input.issue_scope,
         prevState: gate.gate_input.risk_state,
         decision: gate.consumer_gate_result.gate_decision,
         gateReasons: [...gate.consumer_gate_result.gate_reasons],
@@ -709,6 +675,7 @@ export const executeXhsSearch = async (input, env) => {
                         issue_action_matrix: gate.issue_action_matrix,
                         consumer_gate_result: gate.consumer_gate_result,
                         approval_record: gate.approval_record,
+                        risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                         audit_record: auditRecord
                     }
                 }
@@ -726,6 +693,7 @@ export const executeXhsSearch = async (input, env) => {
                 issue_action_matrix: gate.issue_action_matrix,
                 consumer_gate_result: gate.consumer_gate_result,
                 approval_record: gate.approval_record,
+                risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                 audit_record: auditRecord
             }
         };
@@ -878,6 +846,7 @@ export const executeXhsSearch = async (input, env) => {
                 issue_action_matrix: gate.issue_action_matrix,
                 consumer_gate_result: gate.consumer_gate_result,
                 approval_record: gate.approval_record,
+                risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                 audit_record: auditRecord
             },
             observability: createObservability({

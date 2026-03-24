@@ -156,9 +156,14 @@ const pickGateErrorDetails = (payload, details) => {
         "scope_context",
         "gate_input",
         "gate_outcome",
+        "read_execution_policy",
+        "issue_action_matrix",
+        "write_interaction_tier",
+        "write_action_matrix_decisions",
         "consumer_gate_result",
         "approval_record",
-        "audit_record"
+        "audit_record",
+        "risk_state_output"
     ];
     const picked = {};
     for (const key of detailKeys) {

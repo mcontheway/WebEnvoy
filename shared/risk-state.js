@@ -14,6 +14,12 @@ const APPROVAL_CHECK_KEYS = [
   "risk_state_checked",
   "action_type_confirmed"
 ];
+const APPROVAL_EVIDENCE_REQUIREMENTS = [
+  "approval_record_approved_true",
+  "approval_record_approver_present",
+  "approval_record_approved_at_present",
+  "approval_record_checks_all_true"
+];
 const RISK_STATE_TRANSITIONS = [
   { from: "allowed", to: "limited", trigger: "risk_signal_detected" },
   { from: "limited", to: "paused", trigger: "account_alert_or_repeat_risk" },
@@ -46,8 +52,13 @@ const ISSUE_ACTION_MATRIX = [
   {
     issue_scope: "issue_208",
     state: "limited",
-    allowed_actions: ["dry_run", "recon", "reversible_interaction_with_approval"],
-    conditional_actions: [],
+    allowed_actions: ["dry_run", "recon"],
+    conditional_actions: [
+      {
+        action: "reversible_interaction_with_approval",
+        requires: [...APPROVAL_EVIDENCE_REQUIREMENTS]
+      }
+    ],
     blocked_actions: [
       "live_read_limited",
       "live_read_high_risk",
@@ -59,8 +70,13 @@ const ISSUE_ACTION_MATRIX = [
   {
     issue_scope: "issue_208",
     state: "allowed",
-    allowed_actions: ["dry_run", "recon", "reversible_interaction_with_approval"],
-    conditional_actions: [],
+    allowed_actions: ["dry_run", "recon"],
+    conditional_actions: [
+      {
+        action: "reversible_interaction_with_approval",
+        requires: [...APPROVAL_EVIDENCE_REQUIREMENTS]
+      }
+    ],
     blocked_actions: [
       "live_read_limited",
       "live_read_high_risk",
@@ -144,7 +160,17 @@ const RISK_STATE_MACHINE = {
   transitions: RISK_STATE_TRANSITIONS,
   hard_block_when_paused: ["live_read_limited", "live_read_high_risk", "live_write"]
 };
+const WRITE_INTERACTION_TIER = {
+  tiers: [
+    { name: "observe_only", live_allowed: false },
+    { name: "reversible_interaction", live_allowed: "limited" },
+    { name: "irreversible_write", live_allowed: false }
+  ],
+  synthetic_event_default: "blocked",
+  upload_injection_default: "blocked"
+};
 const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
+const ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
 const RISK_SIGNAL_REASONS = new Set([
   "MANUAL_CONFIRMATION_MISSING",
   "APPROVAL_CHECKS_INCOMPLETE",
@@ -218,6 +244,80 @@ const toIsoString = (value) => {
   const parsed = parseTimestamp(value);
   return parsed === null ? null : new Date(parsed).toISOString();
 };
+const resolveActionType = (value) =>
+  typeof value === "string" && ACTION_TYPES.has(value) ? value : "read";
+const resolveExecutionMode = (value) =>
+  typeof value === "string" && EXECUTION_MODES.includes(value) ? value : null;
+const resolveWriteInteractionTier = (actionType, requestedExecutionMode) => {
+  if (actionType === "irreversible_write") {
+    return "irreversible_write";
+  }
+  if (actionType === "write" || requestedExecutionMode === "live_write") {
+    return "reversible_interaction";
+  }
+  return "observe_only";
+};
+const resolveWriteTierMatrixAction = (tierName) => {
+  if (tierName === "reversible_interaction") {
+    return "reversible_interaction_with_approval";
+  }
+  if (tierName === "irreversible_write") {
+    return "irreversible_write";
+  }
+  return null;
+};
+const resolveMatrixActionDecision = (entry, actions) => {
+  if (actions.length === 0) {
+    return { decision: "not_applicable", requires: [] };
+  }
+  if (actions.some((action) => entry.blocked_actions.includes(action))) {
+    return { decision: "blocked", requires: [] };
+  }
+  const conditional = entry.conditional_actions.find((item) => actions.includes(item.action)) ?? null;
+  if (conditional) {
+    return { decision: "conditional", requires: [...conditional.requires] };
+  }
+  if (actions.includes("reversible_interaction_with_approval")) {
+    return { decision: "conditional", requires: [...APPROVAL_EVIDENCE_REQUIREMENTS] };
+  }
+  if (actions.every((action) => entry.allowed_actions.includes(action))) {
+    return { decision: "allowed", requires: [] };
+  }
+  return { decision: "blocked", requires: [] };
+};
+const getWriteActionMatrixDecisions = (issueScope, actionType, requestedExecutionMode) => {
+  const resolvedIssueScope = resolveIssueScope(issueScope);
+  const resolvedActionType = resolveActionType(actionType);
+  const resolvedRequestedExecutionMode = resolveExecutionMode(requestedExecutionMode);
+  const writeInteractionTier = resolveWriteInteractionTier(
+    resolvedActionType,
+    resolvedRequestedExecutionMode
+  );
+  const writeTierMatrixAction = resolveWriteTierMatrixAction(writeInteractionTier);
+  const matrixActions =
+    writeTierMatrixAction !== null
+      ? [writeTierMatrixAction]
+      : resolvedRequestedExecutionMode !== null
+        ? [resolvedRequestedExecutionMode]
+        : [];
+
+  return {
+    issue_scope: resolvedIssueScope,
+    action_type: resolvedActionType,
+    requested_execution_mode: resolvedRequestedExecutionMode,
+    write_interaction_tier: writeInteractionTier,
+    matrix_actions: [...matrixActions],
+    decisions: RISK_STATES.map((state) => {
+      const entry = getIssueActionMatrixEntry(resolvedIssueScope, state);
+      const { decision, requires } = resolveMatrixActionDecision(entry, matrixActions);
+      return {
+        state,
+        decision,
+        requires
+      };
+    })
+  };
+};
 const isLiveExecutionMode = (value) =>
   typeof value === "string" && LIVE_EXECUTION_MODES.has(value);
 const isApprovalRecordComplete = (approvalRecord) => {
@@ -237,11 +337,11 @@ const isRiskSignalRecord = (record) => {
   if (asBoolean(record.risk_signal)) {
     return true;
   }
-  if (!isLiveExecutionMode(record.requested_execution_mode)) {
-    return false;
-  }
   if (record.gate_decision === "blocked") {
-    return true;
+    return isLiveExecutionMode(record.requested_execution_mode);
+  }
+  if (!isLiveExecutionMode(record.effective_execution_mode)) {
+    return false;
   }
   const reasons = Array.isArray(record.gate_reasons)
     ? record.gate_reasons.filter((item) => typeof item === "string")
@@ -255,7 +355,7 @@ const isRecoverySignalRecord = (record) => {
   if (asBoolean(record.recovery_signal)) {
     return true;
   }
-  return record.gate_decision === "allowed" && isLiveExecutionMode(record.requested_execution_mode);
+  return record.gate_decision === "allowed" && isLiveExecutionMode(record.effective_execution_mode);
 };
 const normalizeAuditRecords = (auditRecords) =>
   (Array.isArray(auditRecords) ? auditRecords : [])
@@ -439,9 +539,11 @@ export {
   RISK_STATE_MACHINE,
   RISK_STATE_TRANSITIONS,
   SESSION_RHYTHM_POLICY,
+  WRITE_INTERACTION_TIER,
   buildRiskTransitionAudit,
   buildSessionRhythmOutput,
   buildUnifiedRiskStateOutput,
+  getWriteActionMatrixDecisions,
   getIssueActionMatrixEntry,
   getRiskRecoveryRequirements,
   isApprovalRecordComplete,

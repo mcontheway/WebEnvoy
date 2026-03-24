@@ -1,4 +1,5 @@
 import { CliError } from "../core/errors.js";
+import { WRITE_INTERACTION_TIER, getWriteActionMatrixDecisions } from "../../shared/risk-state.js";
 import { NativeMessagingBridge, NativeMessagingTransportError } from "../runtime/native-messaging/bridge.js";
 import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
@@ -11,6 +12,7 @@ const asInteger = (value) => typeof value === "number" && Number.isInteger(value
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
+const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 const resolveRuntimeBridge = () => {
     if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
         return new NativeMessagingBridge({
@@ -22,6 +24,23 @@ const resolveRuntimeBridge = () => {
     });
 };
 const profileRuntime = new ProfileRuntimeService();
+const deriveWriteActionDecisions = (auditRecord) => getWriteActionMatrixDecisions(asString(auditRecord.issue_scope), asString(auditRecord.action_type), asString(auditRecord.requested_execution_mode));
+const enrichAuditRecordWithWriteTier = (auditRecord) => {
+    const writeActionMatrixDecisions = deriveWriteActionDecisions(auditRecord);
+    const existingGateReasons = asStringArray(auditRecord.gate_reasons);
+    const derivedGateReasons = [...existingGateReasons];
+    const tierReason = `WRITE_INTERACTION_TIER_${String(writeActionMatrixDecisions.write_interaction_tier).toUpperCase()}`;
+    if (writeActionMatrixDecisions.action_type !== "read" &&
+        !derivedGateReasons.some((reason) => reason === tierReason)) {
+        derivedGateReasons.push(tierReason);
+    }
+    return {
+        ...auditRecord,
+        gate_reasons: derivedGateReasons,
+        write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier,
+        write_action_matrix_decisions: writeActionMatrixDecisions
+    };
+};
 const resolveCurrentRiskState = (approvalRecord, auditRecords) => {
     const latestAudit = auditRecords[0] ?? null;
     const auditNextState = latestAudit?.next_state;
@@ -133,15 +152,19 @@ const runtimeAuditQuery = async (context) => {
         store = new SQLiteRuntimeStore(resolveRuntimeStorePath(context.cwd));
         if (runId) {
             const trail = await store.getGateAuditTrail(runId);
-            const currentRiskState = resolveCurrentRiskState(asObject(trail.approvalRecord), trail.auditRecords.map((record) => record));
+            const enrichedAuditRecords = trail.auditRecords.map((record) => enrichAuditRecordWithWriteTier(record));
+            const currentRiskState = resolveCurrentRiskState(asObject(trail.approvalRecord), enrichedAuditRecords);
             return {
                 query: {
                     run_id: runId
                 },
                 approval_record: trail.approvalRecord,
-                audit_records: trail.auditRecords,
+                audit_records: enrichedAuditRecords,
+                write_interaction_tier: WRITE_INTERACTION_TIER,
+                write_action_matrix_decisions: enrichedAuditRecords[0]
+                    ?.write_action_matrix_decisions ?? null,
                 risk_state_output: buildUnifiedRiskStateOutput(currentRiskState, {
-                    auditRecords: trail.auditRecords
+                    auditRecords: enrichedAuditRecords
                 })
             };
         }
@@ -150,16 +173,20 @@ const runtimeAuditQuery = async (context) => {
             profile: profile ?? undefined,
             limit
         });
-        const currentRiskState = resolveCurrentRiskState(null, records.map((record) => record));
+        const enrichedAuditRecords = records.map((record) => enrichAuditRecordWithWriteTier(record));
+        const currentRiskState = resolveCurrentRiskState(null, enrichedAuditRecords);
         return {
             query: {
                 ...(sessionId ? { session_id: sessionId } : {}),
                 ...(profile ? { profile } : {}),
                 limit
             },
-            audit_records: records,
+            audit_records: enrichedAuditRecords,
+            write_interaction_tier: WRITE_INTERACTION_TIER,
+            write_action_matrix_decisions: enrichedAuditRecords[0]
+                ?.write_action_matrix_decisions ?? null,
             risk_state_output: buildUnifiedRiskStateOutput(currentRiskState, {
-                auditRecords: records
+                auditRecords: enrichedAuditRecords
             })
         };
     }
