@@ -331,6 +331,12 @@ export class SQLiteRuntimeStore {
         this.#db.exec(`
       ALTER TABLE runtime_gate_audit_records
       ADD COLUMN issue_scope TEXT;
+      UPDATE runtime_gate_audit_records
+      SET issue_scope = CASE
+        WHEN action_type = 'read' THEN 'issue_209'
+        ELSE 'issue_208'
+      END
+      WHERE issue_scope IS NULL OR issue_scope = '';
     `);
         this.#db
             .prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'")
