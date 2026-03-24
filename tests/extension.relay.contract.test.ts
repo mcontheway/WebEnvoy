@@ -1141,6 +1141,95 @@ describe("extension background relay contract", () => {
     expect(fetchCalled).toBe(false);
   });
 
+  it("keeps issue_208 blocked live_write on fallback mode in relay path", async () => {
+    let fetchCalled = false;
+    const contentScript = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_000,
+        randomId: () => "relay-issue-208-paused-live-write-id",
+        getLocationHref: () => "https://creator.xiaohongshu.com/publish/publish",
+        getDocumentTitle: () => "Creator Publish",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=valid;",
+        callSignature: async () => ({
+          "X-s": "signed",
+          "X-t": "1"
+        }),
+        fetchJson: async () => {
+          fetchCalled = true;
+          throw new Error("blocked issue_208 live_write should not hit fetch");
+        }
+      }
+    });
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-issue-208-paused-live-write-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-issue-208-paused-live-write-001",
+        command: "xhs.search",
+        command_params: {
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "write"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            target_domain: "creator.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "creator_publish_tab",
+            issue_scope: "issue_208",
+            action_type: "write",
+            requested_execution_mode: "live_write",
+            risk_state: "paused",
+            approval_record: {
+              approved: true,
+              approver: "qa-reviewer",
+              approved_at: "2026-03-23T10:00:00Z",
+              checks: {
+                target_domain_confirmed: true,
+                target_tab_confirmed: true,
+                target_page_confirmed: true,
+                risk_state_checked: true,
+                action_type_confirmed: true
+              }
+            }
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    const response = await responsePromise;
+    expect(response.status).toBe("error");
+    expect(response.error?.code).toBe("ERR_EXECUTION_FAILED");
+    expect(response.payload).toMatchObject({
+      details: {
+        reason: "EXECUTION_MODE_GATE_BLOCKED"
+      },
+      gate_outcome: {
+        effective_execution_mode: "dry_run",
+        gate_decision: "blocked"
+      },
+      consumer_gate_result: {
+        issue_scope: "issue_208",
+        action_type: "write",
+        requested_execution_mode: "live_write",
+        effective_execution_mode: "dry_run",
+        gate_decision: "blocked"
+      }
+    });
+    expect(fetchCalled).toBe(false);
+  });
+
   it("allows issue_208 reversible_interaction_with_approval only when approval is complete", async () => {
     const states: Array<"limited" | "allowed"> = ["limited", "allowed"];
     for (const state of states) {

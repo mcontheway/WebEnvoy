@@ -380,7 +380,7 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
     requestedExecutionMode !== null &&
     currentWriteActionDecision
   ) {
-    effectiveExecutionMode = requestedExecutionMode;
+    effectiveExecutionMode = fallbackMode;
     gateDecision = "blocked";
 
     if (

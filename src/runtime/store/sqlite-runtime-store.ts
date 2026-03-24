@@ -502,6 +502,7 @@ export class SQLiteRuntimeStore {
       SET next_state = risk_state
       WHERE next_state IS NULL OR next_state = '';
     `);
+    this.#backfillIssueScope();
     this.#db
       .prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'")
       .run(String(SCHEMA_VERSION));
@@ -519,16 +520,26 @@ export class SQLiteRuntimeStore {
       SET next_state = risk_state
       WHERE next_state IS NULL OR next_state = '';
     `);
+    this.#backfillIssueScope();
     this.#db
       .prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'")
       .run(String(SCHEMA_VERSION));
   }
 
   #migrateV4ToV5(): void {
-    // Prefer lossless restoration signals and mark ambiguous legacy rows explicitly.
     this.#db.exec(`
       ALTER TABLE runtime_gate_audit_records
       ADD COLUMN issue_scope TEXT;
+    `);
+    this.#backfillIssueScope();
+    this.#db
+      .prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'")
+      .run(String(SCHEMA_VERSION));
+  }
+
+  #backfillIssueScope(): void {
+    // Prefer lossless restoration signals and mark ambiguous legacy rows explicitly.
+    this.#db.exec(`
       UPDATE runtime_gate_audit_records
       SET issue_scope = CASE
         WHEN issue_scope IS NOT NULL AND issue_scope != '' THEN issue_scope
@@ -548,9 +559,6 @@ export class SQLiteRuntimeStore {
       END
       WHERE issue_scope IS NULL OR issue_scope = '';
     `);
-    this.#db
-      .prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'")
-      .run(String(SCHEMA_VERSION));
   }
 
   close(): void {

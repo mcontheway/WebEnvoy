@@ -144,7 +144,7 @@ const resolveGate = (options) => {
         actionType !== "read" &&
         requestedExecutionMode !== null &&
         currentWriteActionDecision) {
-        effectiveExecutionMode = requestedExecutionMode;
+        effectiveExecutionMode = fallbackMode;
         gateDecision = "blocked";
         if (currentWriteActionDecision.decision === "blocked" ||
             currentWriteActionDecision.decision === "not_applicable") {
