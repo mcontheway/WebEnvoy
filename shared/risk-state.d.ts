@@ -23,7 +23,29 @@ export interface IssueActionMatrixEntry {
   issue_scope: IssueScope;
   state: RiskState;
   allowed_actions: string[];
+  conditional_actions: Array<{
+    action: string;
+    requires: string[];
+  }>;
   blocked_actions: string[];
+}
+
+export interface SessionRhythmPolicy {
+  min_action_interval_ms: number;
+  min_experiment_interval_ms: number;
+  cooldown_strategy: "exponential_backoff";
+  cooldown_base_minutes: number;
+  cooldown_cap_minutes: number;
+  resume_probe_mode: "recon_only";
+}
+
+export interface SessionRhythmOutput {
+  state: "normal" | "cooldown" | "recovery";
+  triggered_by: string | null;
+  cooldown_until: string | null;
+  recovery_started_at: string | null;
+  last_event_at: string | null;
+  source_event_id: string | null;
 }
 
 export interface RiskStateMachine {
@@ -38,6 +60,7 @@ export declare const EXECUTION_MODES: readonly ExecutionMode[];
 export declare const APPROVAL_CHECK_KEYS: readonly ApprovalCheckKey[];
 export declare const RISK_STATE_TRANSITIONS: readonly RiskStateTransition[];
 export declare const ISSUE_ACTION_MATRIX: readonly IssueActionMatrixEntry[];
+export declare const SESSION_RHYTHM_POLICY: SessionRhythmPolicy;
 export declare const RISK_STATE_MACHINE: RiskStateMachine;
 
 export declare const isRiskState: (value: unknown) => value is RiskState;
@@ -50,9 +73,47 @@ export declare const getIssueActionMatrixEntry: (
   issueScope: IssueScope,
   state: RiskState
 ) => IssueActionMatrixEntry;
+export declare const isApprovalRecordComplete: (approvalRecord: unknown) => boolean;
+export declare const buildSessionRhythmOutput: (
+  state: RiskState,
+  options?: {
+    auditRecords?: Array<Record<string, unknown>>;
+    now?: number | string | Date;
+  }
+) => SessionRhythmOutput;
+export declare const buildRiskTransitionAudit: (input: {
+  runId: string;
+  sessionId: string;
+  issueScope: IssueScope;
+  prevState: RiskState;
+  decision: "allowed" | "blocked";
+  gateReasons: string[];
+  requestedExecutionMode?: string | null;
+  approvalRecord?: unknown;
+  auditRecords?: Array<Record<string, unknown>>;
+  now?: number | string | Date;
+}) => {
+  run_id: string;
+  session_id: string;
+  issue_scope: IssueScope;
+  prev_state: RiskState;
+  next_state: RiskState;
+  trigger: string;
+  decision: "allowed" | "blocked";
+  reason: string;
+  approver: string | null;
+};
 export declare const getRiskRecoveryRequirements: (state: RiskState) => string[];
-export declare const buildUnifiedRiskStateOutput: (state: RiskState) => {
+export declare const buildUnifiedRiskStateOutput: (
+  state: RiskState,
+  options?: {
+    auditRecords?: Array<Record<string, unknown>>;
+    now?: number | string | Date;
+  }
+) => {
   current_state: RiskState;
+  session_rhythm_policy: SessionRhythmPolicy;
+  session_rhythm: SessionRhythmOutput;
   risk_state_machine: {
     states: RiskState[];
     transitions: RiskStateTransition[];

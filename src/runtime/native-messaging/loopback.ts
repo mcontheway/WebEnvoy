@@ -4,6 +4,7 @@ import {
   APPROVAL_CHECK_KEYS,
   EXECUTION_MODES,
   ISSUE_SCOPES,
+  buildRiskTransitionAudit,
   buildUnifiedRiskStateOutput,
   getIssueActionMatrixEntry,
   resolveIssueScope as resolveSharedIssueScope,
@@ -49,6 +50,23 @@ type LoopbackIssueActionMatrixEntry = IssueActionMatrixEntry;
 const LOOPBACK_EXECUTION_MODES = new Set<LoopbackExecutionMode>(EXECUTION_MODES);
 const LOOPBACK_ACTION_TYPES = new Set<LoopbackActionType>(["read", "write", "irreversible_write"]);
 const LOOPBACK_REQUIRED_APPROVAL_CHECKS = APPROVAL_CHECK_KEYS;
+const LOOPBACK_READ_EXECUTION_POLICY = {
+  default_mode: "dry_run",
+  allowed_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+  blocked_actions: ["expand_new_live_surface_without_gate"],
+  live_entry_requirements: [
+    "gate_input_risk_state_limited_or_allowed",
+    "risk_state_checked",
+    "target_domain_confirmed",
+    "target_tab_confirmed",
+    "target_page_confirmed",
+    "action_type_confirmed",
+    "approval_record_approved_true",
+    "approval_record_approver_present",
+    "approval_record_approved_at_present",
+    "approval_record_checks_all_true"
+  ]
+} as const;
 
 const LOOPBACK_SCOPE_CONTEXT = {
   platform: "xhs",
@@ -212,7 +230,9 @@ const buildLoopbackGate = (
 
     const liveModeCanEnter =
       requestedExecutionMode !== null &&
-      issueActionMatrix.allowed_actions.includes(requestedExecutionMode) &&
+      issueActionMatrix.conditional_actions.some(
+        (entry) => entry.action === requestedExecutionMode
+      ) &&
       (requestedExecutionMode === "live_read_limited" ||
         requestedExecutionMode === "live_read_high_risk");
 
@@ -315,39 +335,58 @@ const buildLoopbackGatePayload = (input: {
   profile: string;
   gate: ReturnType<typeof buildLoopbackGate>;
   auditRecord: Record<string, unknown>;
-}): Record<string, unknown> => ({
-  plugin_gate_ownership: LOOPBACK_PLUGIN_GATE_OWNERSHIP,
-  scope_context: input.gate.scopeContext,
-  gate_input: {
-    run_id: input.runId,
-    session_id: input.sessionId,
-    profile: input.profile,
-    ...input.gate.gateInput
-  },
-  gate_outcome: input.gate.gateOutcome,
-  consumer_gate_result: input.gate.consumerGateResult,
-  approval_record: input.gate.approvalRecord,
-  issue_action_matrix: input.gate.issueActionMatrix,
-  risk_state_output: buildUnifiedRiskStateOutput(
-    resolveLoopbackRiskState(input.gate.gateInput.risk_state)
-  ),
-  audit_record: input.auditRecord,
-  risk_transition_audit: {
-    run_id: input.runId,
-    session_id: input.sessionId,
-    issue_scope: String(input.gate.gateInput.issue_scope ?? "issue_209"),
-    prev_state: String(input.gate.gateInput.risk_state ?? "paused"),
-    next_state: String(input.gate.gateInput.risk_state ?? "paused"),
-    trigger: "gate_evaluation",
-    decision: String(input.gate.consumerGateResult.gate_decision ?? "blocked"),
-    reason:
-      Array.isArray(input.gate.consumerGateResult.gate_reasons) &&
-      input.gate.consumerGateResult.gate_reasons.length > 0
-        ? String(input.gate.consumerGateResult.gate_reasons[0])
-        : "GATE_DECISION_RECORDED",
-    approver: input.gate.approvalRecord.approver ?? null
-  }
-});
+}): Record<string, unknown> => {
+  const riskTransitionAudit = buildRiskTransitionAudit({
+    runId: input.runId,
+    sessionId: input.sessionId,
+    issueScope: resolveLoopbackIssueScope(input.gate.gateInput.issue_scope),
+    prevState: resolveLoopbackRiskState(input.gate.gateInput.risk_state),
+    decision:
+      input.gate.consumerGateResult.gate_decision === "allowed" ? "allowed" : "blocked",
+    gateReasons: Array.isArray(input.gate.consumerGateResult.gate_reasons)
+      ? input.gate.consumerGateResult.gate_reasons.map((item) => String(item))
+      : [],
+    requestedExecutionMode: asString(input.gate.gateInput.requested_execution_mode),
+    approvalRecord: input.gate.approvalRecord,
+    auditRecords: [input.auditRecord],
+    now: String(input.auditRecord.recorded_at ?? "")
+  });
+  const resolvedRiskState = resolveLoopbackRiskState(riskTransitionAudit.next_state);
+  const resolvedIssueActionMatrix = resolveLoopbackIssueActionMatrixEntry(
+    resolveLoopbackIssueScope(input.gate.gateInput.issue_scope),
+    resolvedRiskState
+  );
+  const persistedAuditRecord: Record<string, unknown> = {
+    ...input.auditRecord,
+    next_state: riskTransitionAudit.next_state,
+    transition_trigger: riskTransitionAudit.trigger
+  };
+
+  return {
+    plugin_gate_ownership: LOOPBACK_PLUGIN_GATE_OWNERSHIP,
+    scope_context: input.gate.scopeContext,
+    gate_input: {
+      run_id: input.runId,
+      session_id: input.sessionId,
+      profile: input.profile,
+      ...input.gate.gateInput
+    },
+    gate_outcome: input.gate.gateOutcome,
+    consumer_gate_result: input.gate.consumerGateResult,
+    approval_record: input.gate.approvalRecord,
+    issue_action_matrix: resolvedIssueActionMatrix,
+    read_execution_policy: LOOPBACK_READ_EXECUTION_POLICY,
+    risk_state_output: buildUnifiedRiskStateOutput(
+      resolvedRiskState,
+      {
+        auditRecords: [persistedAuditRecord],
+        now: String(persistedAuditRecord.recorded_at ?? "")
+      }
+    ),
+    audit_record: persistedAuditRecord,
+    risk_transition_audit: riskTransitionAudit
+  };
+};
 
 class InMemoryPort<TMessage> {
   #listeners = new Set<(message: TMessage) => void>();

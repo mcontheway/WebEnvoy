@@ -51,6 +51,7 @@ const extractGateApprovalInput = (source) => {
 };
 const extractGateAuditRecordInput = (source) => {
     const auditRecord = asObject(source.audit_record);
+    const transitionAudit = asObject(source.risk_transition_audit);
     if (!auditRecord) {
         return null;
     }
@@ -59,6 +60,10 @@ const extractGateAuditRecordInput = (source) => {
     const profile = asString(auditRecord.profile);
     const eventId = asString(auditRecord.event_id);
     const riskState = asString(auditRecord.risk_state);
+    const nextState = asString(auditRecord.next_state) ?? asString(transitionAudit?.next_state) ?? riskState;
+    const transitionTrigger = asString(auditRecord.transition_trigger) ??
+        asString(transitionAudit?.trigger) ??
+        "gate_evaluation";
     const targetDomain = asString(auditRecord.target_domain);
     const targetTabId = asInteger(auditRecord.target_tab_id);
     const targetPage = asString(auditRecord.target_page);
@@ -75,6 +80,8 @@ const extractGateAuditRecordInput = (source) => {
         !profile ||
         !eventId ||
         !riskState ||
+        !nextState ||
+        !transitionTrigger ||
         !targetDomain ||
         targetTabId === null ||
         !targetPage ||
@@ -92,6 +99,8 @@ const extractGateAuditRecordInput = (source) => {
         sessionId,
         profile,
         riskState,
+        nextState,
+        transitionTrigger,
         targetDomain,
         targetTabId,
         targetPage,

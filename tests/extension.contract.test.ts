@@ -26,7 +26,10 @@ describe("extension build contract", () => {
     const backgroundBuild = fs.readFileSync(backgroundBuildPath, "utf8");
     expect(backgroundBuild).toContain("live_read_limited");
     expect(backgroundBuild).toContain("plugin_gate_ownership");
+    expect(backgroundBuild).toContain("read_execution_policy");
     expect(backgroundBuild).toContain("risk_state_output");
+    expect(backgroundBuild).toContain("conditional_actions");
+    expect(backgroundBuild).toContain("risk_transition_audit");
     expect(backgroundBuild).toContain("recovery_requirements");
   });
 });

@@ -6,6 +6,7 @@ import {
 import {
   APPROVAL_CHECK_KEYS,
   EXECUTION_MODES,
+  buildRiskTransitionAudit,
   buildUnifiedRiskStateOutput,
   getIssueActionMatrixEntry,
   resolveIssueScope as resolveSharedIssueScope,
@@ -157,6 +158,23 @@ const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
 const XHS_DOMAIN_ALLOWLIST = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
 const XHS_EXECUTION_MODES = new Set<XhsExecutionMode>(EXECUTION_MODES);
 const XHS_REQUIRED_APPROVAL_CHECKS = APPROVAL_CHECK_KEYS;
+const XHS_READ_EXECUTION_POLICY = {
+  default_mode: "dry_run",
+  allowed_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+  blocked_actions: ["expand_new_live_surface_without_gate"],
+  live_entry_requirements: [
+    "gate_input_risk_state_limited_or_allowed",
+    "risk_state_checked",
+    "target_domain_confirmed",
+    "target_tab_confirmed",
+    "target_page_confirmed",
+    "action_type_confirmed",
+    "approval_record_approved_true",
+    "approval_record_approver_present",
+    "approval_record_approved_at_present",
+    "approval_record_checks_all_true"
+  ]
+} as const;
 const XHS_SCOPE_CONTEXT = {
   platform: "xhs",
   read_domain: XHS_READ_DOMAIN,
@@ -164,7 +182,9 @@ const XHS_SCOPE_CONTEXT = {
   domain_mixing_forbidden: true
 } as const;
 const XHS_GATE_CONTRACT_MARKERS = {
-  recovery_requirements: "recovery_requirements"
+  recovery_requirements: "recovery_requirements",
+  session_rhythm_policy: "session_rhythm_policy",
+  session_rhythm: "session_rhythm"
 } as const;
 const XHS_PLUGIN_GATE_OWNERSHIP = {
   background_gate: ["target_domain_check", "target_tab_check", "mode_gate", "risk_state_gate"],
@@ -1121,7 +1141,13 @@ class ChromeBackgroundBridge {
         pushReason("ISSUE_ACTION_BLOCKED_BY_STATE_MATRIX");
       }
     }
-    if (isLiveReadMode && !isBlockedByStateMatrix) {
+    const conditionalRequirement =
+      requestedExecutionMode === null
+        ? null
+        : issueActionMatrixEntry.conditional_actions.find(
+            (entry) => entry.action === requestedExecutionMode
+          ) ?? null;
+    if (isLiveReadMode && !isBlockedByStateMatrix && conditionalRequirement) {
       if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
         pushReason("MANUAL_CONFIRMATION_MISSING");
       }
@@ -1213,20 +1239,32 @@ class ChromeBackgroundBridge {
       approved_at: approvalRecord.approved_at,
       recorded_at: new Date().toISOString()
     };
-    const riskTransitionAudit = {
-      run_id: runId,
-      session_id: sessionId,
-      issue_scope: issueScope,
-      prev_state: riskState,
-      next_state: riskState,
-      trigger: "gate_evaluation",
+    const riskTransitionAudit = buildRiskTransitionAudit({
+      runId,
+      sessionId,
+      issueScope,
+      prevState: riskState,
       decision: gateDecision,
-      reason: gateReasons[0] ?? "GATE_DECISION_RECORDED",
-      approver: approvalRecord.approver
+      gateReasons,
+      requestedExecutionMode,
+      approvalRecord,
+      auditRecords: [auditRecord],
+      now: auditRecord.recorded_at
+    });
+    const resolvedRiskState = resolveSharedRiskState(riskTransitionAudit.next_state);
+    const resolvedIssueActionMatrixEntry = resolveIssueActionMatrixEntry(
+      issueScope,
+      resolvedRiskState
+    );
+    const persistedAuditRecord = {
+      ...auditRecord,
+      next_state: riskTransitionAudit.next_state,
+      transition_trigger: riskTransitionAudit.trigger
     };
-    const gatePayload = {
+    const gatePayload: Record<string, unknown> = {
       plugin_gate_ownership: XHS_PLUGIN_GATE_OWNERSHIP,
       scope_context: XHS_SCOPE_CONTEXT,
+      read_execution_policy: XHS_READ_EXECUTION_POLICY,
       gate_input: {
         run_id: runId,
         session_id: sessionId,
@@ -1247,11 +1285,17 @@ class ChromeBackgroundBridge {
       },
       consumer_gate_result: consumerGateResult,
       approval_record: approvalRecord,
-      issue_action_matrix: issueActionMatrixEntry,
-      risk_state_output: buildUnifiedRiskStateOutput(riskState),
-      audit_record: auditRecord,
+      issue_action_matrix: resolvedIssueActionMatrixEntry,
+      risk_state_output: buildUnifiedRiskStateOutput(
+        resolvedRiskState,
+        {
+          auditRecords: [persistedAuditRecord],
+          now: persistedAuditRecord.recorded_at
+        }
+      ),
+      audit_record: persistedAuditRecord,
       risk_transition_audit: riskTransitionAudit
-    } satisfies Record<string, unknown>;
+    };
 
     return {
       allowed,

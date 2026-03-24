@@ -1424,6 +1424,11 @@ describe("extension background relay contract", () => {
           gate_reasons: ["LIVE_MODE_APPROVED"],
           requires_manual_confirmation: true
         },
+        read_execution_policy: {
+          default_mode: "dry_run",
+          allowed_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+          blocked_actions: ["expand_new_live_surface_without_gate"]
+        },
         consumer_gate_result: {
           risk_state: "allowed",
           requested_execution_mode: "live_read_high_risk",
@@ -1450,7 +1455,12 @@ describe("extension background relay contract", () => {
           gate_decision: "allowed",
           gate_reasons: ["LIVE_MODE_APPROVED"],
           approver: "qa-reviewer",
-          approved_at: "2026-03-23T10:00:00Z"
+          approved_at: "2026-03-23T10:00:00Z",
+          risk_signal: false,
+          recovery_signal: false,
+          session_rhythm_state: "normal",
+          cooldown_until: null,
+          recovery_started_at: null
         }
       }
     });

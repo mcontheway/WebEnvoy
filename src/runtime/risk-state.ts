@@ -6,9 +6,13 @@ import {
   RISK_STATES as SHARED_RISK_STATES,
   RISK_STATE_MACHINE as SHARED_RISK_STATE_MACHINE,
   RISK_STATE_TRANSITIONS as SHARED_RISK_STATE_TRANSITIONS,
+  SESSION_RHYTHM_POLICY as SHARED_SESSION_RHYTHM_POLICY,
+  buildRiskTransitionAudit,
+  buildSessionRhythmOutput,
   buildUnifiedRiskStateOutput,
   getIssueActionMatrixEntry,
   getRiskRecoveryRequirements,
+  isApprovalRecordComplete,
   isIssueScope,
   isRiskState,
   listIssueActionMatrix,
@@ -20,10 +24,21 @@ import {
   type IssueActionMatrixEntry,
   type IssueScope,
   type RiskState,
-  type RiskStateTransition
+  type RiskStateTransition,
+  type SessionRhythmOutput,
+  type SessionRhythmPolicy
 } from "../../shared/risk-state.js";
 
-export type { ApprovalCheckKey, ExecutionMode, IssueActionMatrixEntry, IssueScope, RiskState, RiskStateTransition };
+export type {
+  ApprovalCheckKey,
+  ExecutionMode,
+  IssueActionMatrixEntry,
+  IssueScope,
+  RiskState,
+  RiskStateTransition,
+  SessionRhythmOutput,
+  SessionRhythmPolicy
+};
 
 export const RISK_STATES: RiskState[] = [...SHARED_RISK_STATES];
 export const ISSUE_SCOPES: IssueScope[] = [...SHARED_ISSUE_SCOPES];
@@ -32,9 +47,14 @@ export const APPROVAL_CHECK_KEYS: ApprovalCheckKey[] = [...SHARED_APPROVAL_CHECK
 export const RISK_STATE_TRANSITIONS: RiskStateTransition[] = SHARED_RISK_STATE_TRANSITIONS.map(
   (entry) => ({ ...entry })
 );
+export const SESSION_RHYTHM_POLICY: SessionRhythmPolicy = { ...SHARED_SESSION_RHYTHM_POLICY };
 export const ISSUE_ACTION_MATRIX: IssueActionMatrixEntry[] = SHARED_ISSUE_ACTION_MATRIX.map((entry) => ({
   ...entry,
   allowed_actions: [...entry.allowed_actions],
+  conditional_actions: entry.conditional_actions.map((item) => ({
+    action: item.action,
+    requires: [...item.requires]
+  })),
   blocked_actions: [...entry.blocked_actions]
 }));
 export const RISK_STATE_MACHINE = {
@@ -44,9 +64,12 @@ export const RISK_STATE_MACHINE = {
 };
 
 export {
+  buildRiskTransitionAudit,
+  buildSessionRhythmOutput,
   buildUnifiedRiskStateOutput,
   getIssueActionMatrixEntry,
   getRiskRecoveryRequirements,
+  isApprovalRecordComplete,
   isIssueScope,
   isRiskState,
   listIssueActionMatrix,

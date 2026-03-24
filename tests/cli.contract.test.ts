@@ -974,8 +974,40 @@ describe("webenvoy cli contract", () => {
           gate_decision: "allowed",
           gate_reasons: ["LIVE_MODE_APPROVED"]
         },
+        issue_action_matrix: {
+          issue_scope: "issue_209",
+          state: "limited",
+          allowed_actions: ["dry_run", "recon"],
+          conditional_actions: [
+            {
+              action: "live_read_limited",
+              requires: [
+                "approval_record_approved_true",
+                "approval_record_approver_present",
+                "approval_record_approved_at_present",
+                "approval_record_checks_all_true"
+              ]
+            }
+          ]
+        },
         risk_state_output: {
           current_state: "limited",
+          session_rhythm_policy: {
+            min_action_interval_ms: 3000,
+            min_experiment_interval_ms: 30000,
+            cooldown_strategy: "exponential_backoff",
+            cooldown_base_minutes: 30,
+            cooldown_cap_minutes: 720,
+            resume_probe_mode: "recon_only"
+          },
+          session_rhythm: {
+            state: "recovery",
+            triggered_by: "LIVE_MODE_APPROVED",
+            cooldown_until: null,
+            recovery_started_at: expect.any(String),
+            last_event_at: expect.any(String),
+            source_event_id: expect.any(String)
+          },
           recovery_requirements: [
             "stability_window_passed_and_manual_approve",
             "risk_state_checked",
@@ -1067,14 +1099,39 @@ describe("webenvoy cli contract", () => {
         ],
         risk_state_output: {
           current_state: "allowed",
+          session_rhythm_policy: {
+            min_action_interval_ms: 3000,
+            min_experiment_interval_ms: 30000,
+            cooldown_strategy: "exponential_backoff",
+            cooldown_base_minutes: 30,
+            cooldown_cap_minutes: 720,
+            resume_probe_mode: "recon_only"
+          },
+          session_rhythm: {
+            state: "normal",
+            triggered_by: "LIVE_MODE_APPROVED",
+            cooldown_until: null,
+            recovery_started_at: null,
+            last_event_at: expect.any(String),
+            source_event_id: expect.any(String)
+          },
           issue_action_matrix: [
             {
               issue_scope: "issue_208",
-              state: "allowed"
+              state: "allowed",
+              conditional_actions: []
             },
             {
               issue_scope: "issue_209",
-              state: "allowed"
+              state: "allowed",
+              conditional_actions: [
+                {
+                  action: "live_read_limited"
+                },
+                {
+                  action: "live_read_high_risk"
+                }
+              ]
             }
           ]
         }
@@ -1153,15 +1210,37 @@ describe("webenvoy cli contract", () => {
           }
         ],
         risk_state_output: {
-          current_state: "allowed",
+          current_state: "limited",
+          session_rhythm_policy: {
+            min_action_interval_ms: 3000,
+            min_experiment_interval_ms: 30000,
+            cooldown_strategy: "exponential_backoff",
+            cooldown_base_minutes: 30,
+            cooldown_cap_minutes: 720,
+            resume_probe_mode: "recon_only"
+          },
+          session_rhythm: {
+            state: "recovery",
+            triggered_by: "MANUAL_CONFIRMATION_MISSING",
+            cooldown_until: expect.any(String),
+            recovery_started_at: expect.any(String),
+            last_event_at: expect.any(String),
+            source_event_id: expect.any(String)
+          },
           issue_action_matrix: [
             {
               issue_scope: "issue_208",
-              state: "allowed"
+              state: "limited",
+              conditional_actions: []
             },
             {
               issue_scope: "issue_209",
-              state: "allowed"
+              state: "limited",
+              conditional_actions: [
+                {
+                  action: "live_read_limited"
+                }
+              ]
             }
           ]
         }

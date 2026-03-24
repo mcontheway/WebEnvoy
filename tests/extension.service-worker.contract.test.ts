@@ -738,8 +738,8 @@ describe("extension service worker recovery contract", () => {
         risk_transition_audit: {
           issue_scope: "issue_209",
           prev_state: "allowed",
-          next_state: "allowed",
-          trigger: "gate_evaluation",
+          next_state: "limited",
+          trigger: "risk_signal_detected",
           decision: "blocked"
         },
         consumer_gate_result: {
@@ -754,11 +754,48 @@ describe("extension service worker recovery contract", () => {
           gate_decision: "blocked",
           gate_reasons: ["MANUAL_CONFIRMATION_MISSING", "APPROVAL_CHECKS_INCOMPLETE"]
         },
+        read_execution_policy: {
+          default_mode: "dry_run",
+          allowed_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+          blocked_actions: ["expand_new_live_surface_without_gate"]
+        },
+        issue_action_matrix: {
+          issue_scope: "issue_209",
+          state: "limited",
+          allowed_actions: ["dry_run", "recon"],
+          conditional_actions: [
+            {
+              action: "live_read_limited",
+              requires: [
+                "approval_record_approved_true",
+                "approval_record_approver_present",
+                "approval_record_approved_at_present",
+                "approval_record_checks_all_true"
+              ]
+            }
+          ]
+        },
         risk_state_output: {
-          current_state: "allowed",
+          current_state: "limited",
+          session_rhythm_policy: {
+            min_action_interval_ms: 3000,
+            min_experiment_interval_ms: 30000,
+            cooldown_strategy: "exponential_backoff",
+            cooldown_base_minutes: 30,
+            cooldown_cap_minutes: 720,
+            resume_probe_mode: "recon_only"
+          },
+          session_rhythm: {
+            state: "cooldown",
+            triggered_by: "MANUAL_CONFIRMATION_MISSING",
+            cooldown_until: expect.any(String),
+            recovery_started_at: null,
+            last_event_at: expect.any(String),
+            source_event_id: expect.any(String)
+          },
           recovery_requirements: [
-            "manual_confirmation_recorded",
-            "target_scope_confirmed",
+            "stability_window_passed_and_manual_approve",
+            "risk_state_checked",
             "audit_record_present"
           ]
         }

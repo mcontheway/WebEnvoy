@@ -46,7 +46,35 @@ const resolveCurrentRiskState = (
   auditRecords: Record<string, unknown>[]
 ): RiskState => {
   const latestAudit = auditRecords[0] ?? null;
+  const auditNextState = latestAudit?.next_state;
   const auditRiskState = latestAudit?.risk_state;
+  if (typeof auditNextState === "string") {
+    return resolveRiskState(auditNextState);
+  }
+  const latestRequestedMode =
+    typeof latestAudit?.requested_execution_mode === "string"
+      ? latestAudit.requested_execution_mode
+      : null;
+  const latestGateDecision =
+    latestAudit?.gate_decision === "allowed" || latestAudit?.gate_decision === "blocked"
+      ? latestAudit.gate_decision
+      : null;
+  const isLatestLiveMode =
+    latestRequestedMode === "live_read_limited" ||
+    latestRequestedMode === "live_read_high_risk" ||
+    latestRequestedMode === "live_write";
+
+  if (latestGateDecision === "blocked" && isLatestLiveMode) {
+    const resolvedAuditRiskState = resolveRiskState(auditRiskState);
+    if (resolvedAuditRiskState === "allowed") {
+      return "limited";
+    }
+    if (resolvedAuditRiskState === "limited") {
+      return "paused";
+    }
+    return resolvedAuditRiskState;
+  }
+
   if (typeof auditRiskState === "string") {
     return resolveRiskState(auditRiskState);
   }
@@ -157,7 +185,9 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
         },
         approval_record: trail.approvalRecord,
         audit_records: trail.auditRecords,
-        risk_state_output: buildUnifiedRiskStateOutput(currentRiskState)
+        risk_state_output: buildUnifiedRiskStateOutput(currentRiskState, {
+          auditRecords: trail.auditRecords as unknown as Record<string, unknown>[]
+        })
       };
     }
 
@@ -177,7 +207,9 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
         limit
       },
       audit_records: records,
-      risk_state_output: buildUnifiedRiskStateOutput(currentRiskState)
+      risk_state_output: buildUnifiedRiskStateOutput(currentRiskState, {
+        auditRecords: records as unknown as Record<string, unknown>[]
+      })
     };
   } catch (error) {
     if (error instanceof RuntimeStoreError) {
