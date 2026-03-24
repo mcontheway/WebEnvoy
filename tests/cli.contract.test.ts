@@ -1802,7 +1802,7 @@ describe("webenvoy cli contract", () => {
     });
   });
 
-  itWithSqlite("returns null write matrix for legacy_unclassified audit records", async () => {
+  itWithSqlite("returns null write matrix for audit records with missing issue_scope", async () => {
     const cwd = await createRuntimeCwd();
     const dbPath = resolveRuntimeStorePath(cwd);
     const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
@@ -1866,8 +1866,8 @@ describe("webenvoy cli contract", () => {
         run_id, session_id, profile_name, command, status, started_at, ended_at, error_code, created_at, updated_at
       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
-      "run-audit-legacy-unclassified-001",
-      "session-audit-legacy-unclassified-001",
+      "run-audit-missing-issue-scope-001",
+      "session-audit-missing-issue-scope-001",
       "xhs_account_001",
       "xhs.search",
       "failed",
@@ -1884,11 +1884,11 @@ describe("webenvoy cli contract", () => {
         approved_at, recorded_at, created_at
       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
-      "evt-audit-legacy-unclassified-001",
-      "run-audit-legacy-unclassified-001",
-      "session-audit-legacy-unclassified-001",
+      "evt-audit-missing-issue-scope-001",
+      "run-audit-missing-issue-scope-001",
+      "session-audit-missing-issue-scope-001",
       "xhs_account_001",
-      "legacy_unclassified",
+      null,
       "allowed",
       "allowed",
       "gate_evaluation",
@@ -1910,10 +1910,10 @@ describe("webenvoy cli contract", () => {
     const queryResult = runCli([
       "runtime.audit",
       "--run-id",
-      "run-audit-legacy-unclassified-query-001",
+      "run-audit-missing-issue-scope-query-001",
       "--params",
       JSON.stringify({
-        run_id: "run-audit-legacy-unclassified-001"
+        run_id: "run-audit-missing-issue-scope-001"
       })
     ], cwd);
     expect(queryResult.status).toBe(0);
@@ -1923,12 +1923,12 @@ describe("webenvoy cli contract", () => {
       status: "success",
       summary: {
         query: {
-          run_id: "run-audit-legacy-unclassified-001"
+          run_id: "run-audit-missing-issue-scope-001"
         },
         audit_records: [
           {
-            run_id: "run-audit-legacy-unclassified-001",
-            issue_scope: "legacy_unclassified"
+            run_id: "run-audit-missing-issue-scope-001",
+            issue_scope: null
           }
         ],
         write_action_matrix_decisions: null

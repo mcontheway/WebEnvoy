@@ -538,7 +538,7 @@ export class SQLiteRuntimeStore {
   }
 
   #backfillIssueScope(): void {
-    // Prefer lossless restoration signals and mark ambiguous legacy rows explicitly.
+    // Prefer lossless restoration signals and keep legacy rows inside the frozen issue_scope enum.
     this.#db.exec(`
       UPDATE runtime_gate_audit_records
       SET issue_scope = CASE
@@ -549,13 +549,12 @@ export class SQLiteRuntimeStore {
         WHEN action_type = 'read' THEN 'issue_209'
         WHEN target_domain = 'creator.xiaohongshu.com'
              AND target_page IN ('creator_publish_tab', 'publish_page')
-             AND (
-               requested_execution_mode = 'live_write'
-               OR effective_execution_mode = 'live_write'
-               OR action_type = 'irreversible_write'
-             )
+             AND action_type IN ('write', 'irreversible_write')
           THEN 'issue_208'
-        ELSE 'legacy_unclassified'
+        WHEN target_domain = 'creator.xiaohongshu.com'
+             AND target_page IN ('creator_publish_tab', 'publish_page')
+          THEN 'issue_208'
+        ELSE 'issue_209'
       END
       WHERE issue_scope IS NULL OR issue_scope = '';
     `);
