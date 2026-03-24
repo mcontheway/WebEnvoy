@@ -1109,6 +1109,57 @@ describe("webenvoy cli contract", () => {
     expect(resolveWriteInteractionTier(gateEnvelope)).toBe("reversible_interaction");
   });
 
+  it("blocks issue_209 write dry_run even with complete approval to keep gate-only scoped to issue_208", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          issue_scope: "issue_209",
+          action_type: "write",
+          requested_execution_mode: "dry_run",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    const gateEnvelope = resolveCliGateEnvelope(body);
+    const consumerGateResult = asRecord(gateEnvelope.consumer_gate_result);
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["RISK_STATE_ALLOWED", "ISSUE_ACTION_MATRIX_BLOCKED"])
+    );
+  });
+
   it("allows live_read_high_risk with explicit approval and emits consumer_gate_result", () => {
     const result = runCli([
       "xhs.search",
@@ -1382,6 +1433,7 @@ describe("webenvoy cli contract", () => {
         audit_records: [
           {
             run_id: runId,
+            issue_scope: "issue_209",
             risk_state: "allowed",
             gate_decision: "allowed",
             requested_execution_mode: "live_read_high_risk",
@@ -1390,6 +1442,9 @@ describe("webenvoy cli contract", () => {
             approved_at: "2026-03-23T10:00:00Z"
           }
         ],
+        write_action_matrix_decisions: {
+          issue_scope: "issue_209"
+        },
         risk_state_output: {
           current_state: "allowed",
           session_rhythm_policy: {
@@ -1498,6 +1553,7 @@ describe("webenvoy cli contract", () => {
           {
             run_id: runId,
             session_id: sessionId,
+            issue_scope: "issue_209",
             risk_state: "allowed",
             gate_decision: "blocked",
             requested_execution_mode: "live_read_high_risk",
@@ -1506,6 +1562,7 @@ describe("webenvoy cli contract", () => {
             approved_at: null
           }
         ],
+        write_action_matrix_decisions: null,
         risk_state_output: {
           current_state: "limited",
           session_rhythm_policy: {
@@ -1551,6 +1608,72 @@ describe("webenvoy cli contract", () => {
       ((((body.summary as Record<string, unknown>).audit_records as Record<string, unknown>[])[0]
         .gate_reasons as string[]) ?? [])
     ).toEqual(expect.arrayContaining(["MANUAL_CONFIRMATION_MISSING"]));
+  });
+
+  itWithSqlite("persists issue_scope for issue_208 audit records and returns matching write matrix query", async () => {
+    const cwd = await createRuntimeCwd();
+    const runId = "run-audit-query-issue-scope-208-001";
+
+    const executeResult = runCli([
+      "xhs.search",
+      "--run-id",
+      runId,
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 91,
+          target_page: "publish_page",
+          issue_scope: "issue_208",
+          action_type: "write",
+          requested_execution_mode: "dry_run",
+          risk_state: "paused"
+        }
+      })
+    ], cwd, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+    expect(executeResult.status).toBe(6);
+
+    const queryResult = runCli([
+      "runtime.audit",
+      "--run-id",
+      "run-audit-query-issue-scope-208-002",
+      "--params",
+      JSON.stringify({
+        run_id: runId
+      })
+    ], cwd);
+    expect(queryResult.status).toBe(0);
+    const body = parseSingleJsonLine(queryResult.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.audit",
+      status: "success",
+      summary: {
+        query: {
+          run_id: runId
+        },
+        audit_records: [
+          {
+            run_id: runId,
+            issue_scope: "issue_208"
+          }
+        ],
+        write_action_matrix_decisions: {
+          issue_scope: "issue_208"
+        }
+      }
+    });
   });
 
   it("returns invalid args when xhs.search requested_execution_mode is missing", () => {

@@ -374,6 +374,7 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
       effectiveExecutionMode = fallbackMode;
     }
   } else if (
+    issueScope === "issue_208" &&
     actionType &&
     actionType !== "read" &&
     requestedExecutionMode !== null &&
@@ -404,6 +405,10 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
       gateDecision = "allowed";
       gateReasons.push("WRITE_INTERACTION_ALLOWED");
     }
+  } else if (actionType && actionType !== "read") {
+    gateDecision = "blocked";
+    gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
+    gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
   } else if (requestedExecutionMode === "dry_run" || requestedExecutionMode === "recon") {
     gateReasons.push(
       requestedExecutionMode === "recon" ? "DEFAULT_MODE_RECON" : "DEFAULT_MODE_DRY_RUN"

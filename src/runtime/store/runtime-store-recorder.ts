@@ -140,6 +140,12 @@ const extractGateAuditRecordInput = (
   const profile = asString(auditRecord.profile) ?? asString(gateInput?.profile) ?? asString(source.profile);
   const eventId = asString(auditRecord.event_id);
   const riskState = asString(auditRecord.risk_state) ?? asString(consumerGateResult?.risk_state);
+  const issueScope =
+    asString(auditRecord.issue_scope) ??
+    asString(gateInput?.issue_scope) ??
+    asString(transitionAudit?.issue_scope) ??
+    asString(consumerGateResult?.issue_scope) ??
+    asString(providedWriteActionDecisions?.issue_scope);
   const nextState =
     asString(auditRecord.next_state) ?? asString(transitionAudit?.next_state) ?? riskState;
   const transitionTrigger =
@@ -184,6 +190,7 @@ const extractGateAuditRecordInput = (
     !runId ||
     !sessionId ||
     !profile ||
+    !issueScope ||
     !eventId ||
     !riskState ||
     !nextState ||
@@ -206,6 +213,7 @@ const extractGateAuditRecordInput = (
     runId,
     sessionId,
     profile,
+    issueScope,
     riskState,
     nextState,
     transitionTrigger,
