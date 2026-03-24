@@ -413,6 +413,7 @@ describe("extension service worker recovery contract", () => {
             target_domain: "www.xiaohongshu.com",
             target_tab_id: 32,
             target_page: "search_result_tab",
+            action_type: "read",
             requested_execution_mode: "dry_run"
           }
         },
