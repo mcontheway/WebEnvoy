@@ -949,13 +949,15 @@ class ChromeBackgroundBridge {
         const targetPage = asNonEmptyString(rawTargetPage);
         const issueScope = resolveIssueScope(rawIssueScope);
         const riskState = resolveRiskState(rawRiskState);
-        const actionType = parseActionType(rawActionType) ?? "read";
+        const actionType = parseActionType(rawActionType);
         const requestedExecutionMode = parseRequestedExecutionMode(rawRequestedExecutionMode);
         const approvalRecord = normalizeApprovalRecord(rawApprovalRecord);
         const issueActionMatrixEntry = resolveIssueActionMatrixEntry(issueScope, riskState);
-        const writeActionMatrixDecisions = getWriteActionMatrixDecisions(issueScope, actionType, requestedExecutionMode);
+        const writeActionMatrixDecisions = getWriteActionMatrixDecisions(issueScope, actionType ?? "read", requestedExecutionMode);
         const writeMatrixDecision = resolveWriteMatrixDecision(writeActionMatrixDecisions, riskState);
-        const issue208WriteGateOnly = issueScope === "issue_208" && writeActionMatrixDecisions.write_interaction_tier !== "observe_only";
+        const issue208WriteGateOnly = issueScope === "issue_208" &&
+            actionType !== null &&
+            writeActionMatrixDecisions.write_interaction_tier !== "observe_only";
         const writeTierReason = `WRITE_INTERACTION_TIER_${writeActionMatrixDecisions.write_interaction_tier.toUpperCase()}`;
         const gateReasons = [];
         let writeGateOnlyApprovalDecision = null;
@@ -967,6 +969,9 @@ class ChromeBackgroundBridge {
         };
         if (!requestedExecutionMode) {
             pushReason("REQUESTED_EXECUTION_MODE_NOT_EXPLICIT");
+        }
+        if (!actionType) {
+            pushReason("ACTION_TYPE_NOT_EXPLICIT");
         }
         if (!targetDomain) {
             pushReason("TARGET_DOMAIN_NOT_EXPLICIT");
@@ -983,7 +988,7 @@ class ChromeBackgroundBridge {
         if (targetDomain === XHS_WRITE_DOMAIN && actionType === "read") {
             pushReason("ACTION_DOMAIN_MISMATCH");
         }
-        if (targetDomain === XHS_READ_DOMAIN && actionType !== "read") {
+        if (targetDomain === XHS_READ_DOMAIN && actionType !== null && actionType !== "read") {
             pushReason("ACTION_DOMAIN_MISMATCH");
         }
         if (requestedExecutionMode === "live_write" && !issue208WriteGateOnly) {
@@ -1094,9 +1099,13 @@ class ChromeBackgroundBridge {
             (issue208WriteGateOnly &&
                 (writeMatrixDecision.decision === "conditional" ||
                     writeActionMatrixDecisions.write_interaction_tier === "reversible_interaction"));
+        const gateOnlyEffectiveExecutionMode = requestedExecutionMode === "recon" ? "recon" : "dry_run";
         const effectiveExecutionMode = allowed
-            ? requestedExecutionMode ?? "dry_run"
+            ? issue208WriteGateOnly
+                ? gateOnlyEffectiveExecutionMode
+                : requestedExecutionMode ?? "dry_run"
             : resolveBlockedFallbackMode(requestedExecutionMode, riskState);
+        const auditRequestedExecutionMode = allowed && issue208WriteGateOnly ? effectiveExecutionMode : requestedExecutionMode;
         if (allowed && requestedExecutionMode === "dry_run") {
             gateReasons.push("DEFAULT_MODE_DRY_RUN");
         }
@@ -1118,7 +1127,7 @@ class ChromeBackgroundBridge {
             target_tab_id: targetTabId,
             target_page: targetPage,
             action_type: actionType,
-            requested_execution_mode: requestedExecutionMode,
+            requested_execution_mode: auditRequestedExecutionMode,
             effective_execution_mode: effectiveExecutionMode,
             gate_decision: gateDecision,
             gate_reasons: gateReasons,
@@ -1138,7 +1147,7 @@ class ChromeBackgroundBridge {
             target_tab_id: targetTabId,
             target_page: targetPage,
             action_type: actionType,
-            requested_execution_mode: requestedExecutionMode,
+            requested_execution_mode: auditRequestedExecutionMode,
             effective_execution_mode: effectiveExecutionMode,
             gate_decision: gateDecision,
             gate_reasons: gateReasons,
@@ -1155,7 +1164,7 @@ class ChromeBackgroundBridge {
             prevState: riskState,
             decision: gateDecision,
             gateReasons,
-            requestedExecutionMode,
+            requestedExecutionMode: auditRequestedExecutionMode,
             approvalRecord,
             auditRecords: [auditRecord],
             now: auditRecord.recorded_at
@@ -1180,7 +1189,7 @@ class ChromeBackgroundBridge {
                 target_tab_id: targetTabId,
                 target_page: targetPage,
                 action_type: actionType,
-                requested_execution_mode: requestedExecutionMode,
+                requested_execution_mode: auditRequestedExecutionMode,
                 risk_state: riskState
             },
             gate_outcome: {

@@ -1016,6 +1016,62 @@ describe("extension service worker recovery contract", () => {
     expect(resolveWriteInteractionTier(payload)).toBe("reversible_interaction");
   });
 
+  it("blocks background gate when action_type is omitted even if ability context is write", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-missing-action-type-bg-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-missing-action-type-bg-001",
+        command: "xhs.search",
+        command_params: {
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "write"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "search_result_tab",
+            requested_execution_mode: "live_write",
+            risk_state: "allowed"
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-missing-action-type-bg-001");
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult?.action_type).toBeNull();
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["ACTION_TYPE_NOT_EXPLICIT", "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"])
+    );
+  });
+
   it("allows issue_208 reversible_interaction_with_approval in limited/allowed only with complete approval", async () => {
     const states: Array<"limited" | "allowed"> = ["limited", "allowed"];
 
@@ -1163,6 +1219,75 @@ describe("extension service worker recovery contract", () => {
       expect(writeGateOnlyDecision?.execution_enabled).toBe(false);
       expect(resolveWriteInteractionTier(summary)).toBe("reversible_interaction");
     }
+  });
+
+  it("keeps issue_208 gate-only approval on non-live effective mode even when request asks for live_write", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-issue-208-live-write-gate-only-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-issue-208-live-write-gate-only-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          issue_scope: "issue_208",
+          target_domain: "creator.xiaohongshu.com",
+          target_page: "creator_publish_tab",
+          action_type: "write",
+          requested_execution_mode: "live_write",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const approved = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: { summary?: Record<string, unknown> } })
+      .find((message) => message.id === "run-xhs-issue-208-live-write-gate-only-001");
+    expect(approved?.status).toBe("success");
+    const summary = asRecord(approved?.payload?.summary) ?? {};
+    const gateInput = asRecord(summary.gate_input);
+    const gateOutcome = asRecord(summary.gate_outcome);
+    const consumerGateResult = asRecord(summary.consumer_gate_result);
+    const auditRecord = asRecord(summary.audit_record);
+    expect(gateInput?.requested_execution_mode).toBe("dry_run");
+    expect(gateOutcome?.effective_execution_mode).toBe("dry_run");
+    expect(consumerGateResult?.requested_execution_mode).toBe("dry_run");
+    expect(consumerGateResult?.effective_execution_mode).toBe("dry_run");
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining([
+        "WRITE_EXECUTION_GATE_ONLY",
+        "WRITE_INTERACTION_TIER_REVERSIBLE_INTERACTION"
+      ])
+    );
+    expect(auditRecord?.requested_execution_mode).toBe("dry_run");
+    expect(auditRecord?.effective_execution_mode).toBe("dry_run");
   });
 
   it("keeps issue_208 irreversible_write blocked and exposes irreversible write tier", async () => {
