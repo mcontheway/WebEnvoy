@@ -1,174 +1,56 @@
-export type RiskState = "paused" | "limited" | "allowed";
-export type IssueScope = "issue_208" | "issue_209";
+import {
+  APPROVAL_CHECK_KEYS as SHARED_APPROVAL_CHECK_KEYS,
+  EXECUTION_MODES as SHARED_EXECUTION_MODES,
+  ISSUE_ACTION_MATRIX as SHARED_ISSUE_ACTION_MATRIX,
+  ISSUE_SCOPES as SHARED_ISSUE_SCOPES,
+  RISK_STATES as SHARED_RISK_STATES,
+  RISK_STATE_MACHINE as SHARED_RISK_STATE_MACHINE,
+  RISK_STATE_TRANSITIONS as SHARED_RISK_STATE_TRANSITIONS,
+  buildUnifiedRiskStateOutput,
+  getIssueActionMatrixEntry,
+  getRiskRecoveryRequirements,
+  isIssueScope,
+  isRiskState,
+  listIssueActionMatrix,
+  listRiskStateTransitions,
+  resolveIssueScope,
+  resolveRiskState,
+  type ApprovalCheckKey,
+  type ExecutionMode,
+  type IssueActionMatrixEntry,
+  type IssueScope,
+  type RiskState,
+  type RiskStateTransition
+} from "../../shared/risk-state.js";
 
-export interface RiskStateTransition {
-  from: RiskState;
-  to: RiskState;
-  trigger: string;
-}
+export type { ApprovalCheckKey, ExecutionMode, IssueActionMatrixEntry, IssueScope, RiskState, RiskStateTransition };
 
-export interface IssueActionMatrixEntry {
-  issue_scope: IssueScope;
-  state: RiskState;
-  allowed_actions: string[];
-  blocked_actions: string[];
-}
-
-const RISK_STATES: RiskState[] = ["paused", "limited", "allowed"];
-
-const RISK_STATE_TRANSITIONS: RiskStateTransition[] = [
-  { from: "allowed", to: "limited", trigger: "risk_signal_detected" },
-  { from: "limited", to: "paused", trigger: "account_alert_or_repeat_risk" },
-  {
-    from: "paused",
-    to: "limited",
-    trigger: "cooldown_backoff_window_passed_and_manual_approve"
-  },
-  {
-    from: "limited",
-    to: "allowed",
-    trigger: "stability_window_passed_and_manual_approve"
-  }
-];
-
-const ISSUE_ACTION_MATRIX: IssueActionMatrixEntry[] = [
-  {
-    issue_scope: "issue_208",
-    state: "paused",
-    allowed_actions: ["dry_run", "recon"],
-    blocked_actions: [
-      "live_read_limited",
-      "live_read_high_risk",
-      "reversible_interaction_with_approval",
-      "live_write",
-      "irreversible_write",
-      "expand_new_live_surface_without_gate"
-    ]
-  },
-  {
-    issue_scope: "issue_208",
-    state: "limited",
-    allowed_actions: ["dry_run", "recon", "reversible_interaction_with_approval"],
-    blocked_actions: [
-      "live_read_limited",
-      "live_read_high_risk",
-      "irreversible_write",
-      "live_write",
-      "expand_new_live_surface_without_gate"
-    ]
-  },
-  {
-    issue_scope: "issue_208",
-    state: "allowed",
-    allowed_actions: ["dry_run", "recon", "reversible_interaction_with_approval"],
-    blocked_actions: [
-      "live_read_limited",
-      "live_read_high_risk",
-      "irreversible_write",
-      "live_write",
-      "expand_new_live_surface_without_gate"
-    ]
-  },
-  {
-    issue_scope: "issue_209",
-    state: "paused",
-    allowed_actions: ["dry_run", "recon"],
-    blocked_actions: [
-      "live_read_limited",
-      "live_read_high_risk",
-      "live_write",
-      "irreversible_write",
-      "expand_new_live_surface_without_gate"
-    ]
-  },
-  {
-    issue_scope: "issue_209",
-    state: "limited",
-    allowed_actions: ["dry_run", "recon", "live_read_limited"],
-    blocked_actions: [
-      "live_read_high_risk",
-      "live_write",
-      "irreversible_write",
-      "expand_new_live_surface_without_gate"
-    ]
-  },
-  {
-    issue_scope: "issue_209",
-    state: "allowed",
-    allowed_actions: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
-    blocked_actions: ["live_write", "irreversible_write", "expand_new_live_surface_without_gate"]
-  }
-];
-
-export const isRiskState = (value: unknown): value is RiskState =>
-  typeof value === "string" && RISK_STATES.includes(value as RiskState);
-
-export const resolveRiskState = (value: unknown): RiskState =>
-  isRiskState(value) ? value : "paused";
-
-export const listRiskStateTransitions = (): RiskStateTransition[] =>
-  RISK_STATE_TRANSITIONS.map((entry) => ({ ...entry }));
-
-export const listIssueActionMatrix = (): IssueActionMatrixEntry[] =>
-  ISSUE_ACTION_MATRIX.map((entry) => ({
-    ...entry,
-    allowed_actions: [...entry.allowed_actions],
-    blocked_actions: [...entry.blocked_actions]
-  }));
-
-export const getIssueActionMatrixEntry = (
-  issueScope: IssueScope,
-  state: RiskState
-): IssueActionMatrixEntry => {
-  const matched = ISSUE_ACTION_MATRIX.find(
-    (entry) => entry.issue_scope === issueScope && entry.state === state
-  );
-  if (!matched) {
-    return {
-      issue_scope: issueScope,
-      state,
-      allowed_actions: ["dry_run", "recon"],
-      blocked_actions: ["expand_new_live_surface_without_gate"]
-    };
-  }
-  return {
-    ...matched,
-    allowed_actions: [...matched.allowed_actions],
-    blocked_actions: [...matched.blocked_actions]
-  };
+export const RISK_STATES: RiskState[] = [...SHARED_RISK_STATES];
+export const ISSUE_SCOPES: IssueScope[] = [...SHARED_ISSUE_SCOPES];
+export const EXECUTION_MODES: ExecutionMode[] = [...SHARED_EXECUTION_MODES];
+export const APPROVAL_CHECK_KEYS: ApprovalCheckKey[] = [...SHARED_APPROVAL_CHECK_KEYS];
+export const RISK_STATE_TRANSITIONS: RiskStateTransition[] = SHARED_RISK_STATE_TRANSITIONS.map(
+  (entry) => ({ ...entry })
+);
+export const ISSUE_ACTION_MATRIX: IssueActionMatrixEntry[] = SHARED_ISSUE_ACTION_MATRIX.map((entry) => ({
+  ...entry,
+  allowed_actions: [...entry.allowed_actions],
+  blocked_actions: [...entry.blocked_actions]
+}));
+export const RISK_STATE_MACHINE = {
+  states: [...SHARED_RISK_STATE_MACHINE.states],
+  transitions: SHARED_RISK_STATE_MACHINE.transitions.map((entry) => ({ ...entry })),
+  hard_block_when_paused: [...SHARED_RISK_STATE_MACHINE.hard_block_when_paused]
 };
 
-export const getRiskRecoveryRequirements = (state: RiskState): string[] => {
-  switch (state) {
-    case "paused":
-      return [
-        "cooldown_backoff_window_passed_and_manual_approve",
-        "risk_state_checked",
-        "audit_record_present"
-      ];
-    case "limited":
-      return [
-        "stability_window_passed_and_manual_approve",
-        "risk_state_checked",
-        "audit_record_present"
-      ];
-    case "allowed":
-      return ["manual_confirmation_recorded", "target_scope_confirmed", "audit_record_present"];
-    default:
-      return ["audit_record_present"];
-  }
+export {
+  buildUnifiedRiskStateOutput,
+  getIssueActionMatrixEntry,
+  getRiskRecoveryRequirements,
+  isIssueScope,
+  isRiskState,
+  listIssueActionMatrix,
+  listRiskStateTransitions,
+  resolveIssueScope,
+  resolveRiskState
 };
-
-export const buildUnifiedRiskStateOutput = (state: RiskState) => ({
-  current_state: state,
-  risk_state_machine: {
-    states: [...RISK_STATES],
-    transitions: listRiskStateTransitions(),
-    hard_block_when_paused: ["live_write", "live_read_high_risk"]
-  },
-  issue_action_matrix: [
-    getIssueActionMatrixEntry("issue_208", state),
-    getIssueActionMatrixEntry("issue_209", state)
-  ],
-  recovery_requirements: getRiskRecoveryRequirements(state)
-});

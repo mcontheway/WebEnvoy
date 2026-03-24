@@ -1,25 +1,12 @@
 import { BRIDGE_PROTOCOL, ensureBridgeRequestEnvelope } from "./protocol.js";
+import { APPROVAL_CHECK_KEYS, EXECUTION_MODES, ISSUE_SCOPES, buildUnifiedRiskStateOutput, getIssueActionMatrixEntry, resolveIssueScope as resolveSharedIssueScope, resolveRiskState as resolveSharedRiskState } from "../../../shared/risk-state.js";
 const RELAY_PATH = "host>background>content-script>background>host";
 const XHS_READ_DOMAIN = "www.xiaohongshu.com";
 const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
 const XHS_ALLOWED_DOMAINS = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
-const LOOPBACK_EXECUTION_MODES = new Set([
-    "dry_run",
-    "recon",
-    "live_read_limited",
-    "live_read_high_risk",
-    "live_write"
-]);
-const LOOPBACK_RISK_STATES = new Set(["paused", "limited", "allowed"]);
-const LOOPBACK_ISSUE_SCOPES = new Set(["issue_208", "issue_209"]);
+const LOOPBACK_EXECUTION_MODES = new Set(EXECUTION_MODES);
 const LOOPBACK_ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
-const LOOPBACK_REQUIRED_APPROVAL_CHECKS = [
-    "target_domain_confirmed",
-    "target_tab_confirmed",
-    "target_page_confirmed",
-    "risk_state_checked",
-    "action_type_confirmed"
-];
+const LOOPBACK_REQUIRED_APPROVAL_CHECKS = APPROVAL_CHECK_KEYS;
 const LOOPBACK_SCOPE_CONTEXT = {
     platform: "xhs",
     read_domain: XHS_READ_DOMAIN,
@@ -32,92 +19,6 @@ const LOOPBACK_PLUGIN_GATE_OWNERSHIP = {
     main_world_gate: ["signed_call_scope_check"],
     cli_role: "request_and_result_shell_only"
 };
-const LOOPBACK_RISK_STATE_MACHINE = {
-    states: ["paused", "limited", "allowed"],
-    transitions: [
-        { from: "allowed", to: "limited", trigger: "risk_signal_detected" },
-        { from: "limited", to: "paused", trigger: "account_alert_or_repeat_risk" },
-        {
-            from: "paused",
-            to: "limited",
-            trigger: "cooldown_backoff_window_passed_and_manual_approve"
-        },
-        {
-            from: "limited",
-            to: "allowed",
-            trigger: "stability_window_passed_and_manual_approve"
-        }
-    ],
-    hard_block_when_paused: ["live_write", "live_read_high_risk"]
-};
-const LOOPBACK_ISSUE_ACTION_MATRIX = [
-    {
-        issue_scope: "issue_208",
-        state: "paused",
-        allowed_actions: ["dry_run", "recon"],
-        blocked_actions: [
-            "live_read_limited",
-            "live_read_high_risk",
-            "reversible_interaction_with_approval",
-            "live_write",
-            "irreversible_write",
-            "expand_new_live_surface_without_gate"
-        ]
-    },
-    {
-        issue_scope: "issue_208",
-        state: "limited",
-        allowed_actions: ["dry_run", "recon", "reversible_interaction_with_approval"],
-        blocked_actions: [
-            "live_read_limited",
-            "live_read_high_risk",
-            "irreversible_write",
-            "live_write",
-            "expand_new_live_surface_without_gate"
-        ]
-    },
-    {
-        issue_scope: "issue_208",
-        state: "allowed",
-        allowed_actions: ["dry_run", "recon", "reversible_interaction_with_approval"],
-        blocked_actions: [
-            "live_read_limited",
-            "live_read_high_risk",
-            "irreversible_write",
-            "live_write",
-            "expand_new_live_surface_without_gate"
-        ]
-    },
-    {
-        issue_scope: "issue_209",
-        state: "paused",
-        allowed_actions: ["dry_run", "recon"],
-        blocked_actions: [
-            "live_read_limited",
-            "live_read_high_risk",
-            "live_write",
-            "irreversible_write",
-            "expand_new_live_surface_without_gate"
-        ]
-    },
-    {
-        issue_scope: "issue_209",
-        state: "limited",
-        allowed_actions: ["dry_run", "recon", "live_read_limited"],
-        blocked_actions: [
-            "live_read_high_risk",
-            "live_write",
-            "irreversible_write",
-            "expand_new_live_surface_without_gate"
-        ]
-    },
-    {
-        issue_scope: "issue_209",
-        state: "allowed",
-        allowed_actions: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
-        blocked_actions: ["live_write", "irreversible_write", "expand_new_live_surface_without_gate"]
-    }
-];
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
@@ -134,54 +35,18 @@ const resolveLoopbackActionType = (options) => {
 const resolveLoopbackExecutionMode = (value) => typeof value === "string" && LOOPBACK_EXECUTION_MODES.has(value)
     ? value
     : null;
-const resolveLoopbackRiskState = (value) => typeof value === "string" && LOOPBACK_RISK_STATES.has(value)
+const resolveLoopbackRiskState = (value) => resolveSharedRiskState(value);
+const resolveLoopbackIssueScope = (value) => ISSUE_SCOPES.includes(value)
     ? value
-    : "paused";
-const resolveLoopbackIssueScope = (value) => typeof value === "string" && LOOPBACK_ISSUE_SCOPES.has(value)
-    ? value
-    : "issue_209";
+    : resolveSharedIssueScope(value);
 const resolveLoopbackIssueActionMatrixEntry = (issueScope, riskState) => {
-    const matched = LOOPBACK_ISSUE_ACTION_MATRIX.find((entry) => entry.issue_scope === issueScope && entry.state === riskState);
-    if (!matched) {
-        return {
-            issue_scope: issueScope,
-            state: riskState,
-            allowed_actions: ["dry_run", "recon"],
-            blocked_actions: ["expand_new_live_surface_without_gate"]
-        };
-    }
-    return {
-        issue_scope: matched.issue_scope,
-        state: matched.state,
-        allowed_actions: [...matched.allowed_actions],
-        blocked_actions: [...matched.blocked_actions]
-    };
+    return getIssueActionMatrixEntry(issueScope, riskState);
 };
 const resolveLoopbackFallbackMode = (requestedExecutionMode, riskState) => {
     if (requestedExecutionMode === "live_write") {
         return "dry_run";
     }
     return riskState === "limited" ? "recon" : "dry_run";
-};
-const resolveLoopbackRecoveryRequirements = (state) => {
-    switch (state) {
-        case "paused":
-            return [
-                "cooldown_backoff_window_passed_and_manual_approve",
-                "risk_state_checked",
-                "audit_record_present"
-            ];
-        case "limited":
-            return [
-                "stability_window_passed_and_manual_approve",
-                "risk_state_checked",
-                "audit_record_present"
-            ];
-        case "allowed":
-            return ["manual_confirmation_recorded", "target_scope_confirmed", "audit_record_present"];
-        default:
-            return ["audit_record_present"];
-    }
 };
 const buildLoopbackGate = (options, abilityAction) => {
     const requestedExecutionMode = resolveLoopbackExecutionMode(options.requested_execution_mode);
@@ -356,19 +221,7 @@ const buildLoopbackGatePayload = (input) => ({
     consumer_gate_result: input.gate.consumerGateResult,
     approval_record: input.gate.approvalRecord,
     issue_action_matrix: input.gate.issueActionMatrix,
-    risk_state_output: {
-        current_state: resolveLoopbackRiskState(input.gate.gateInput.risk_state),
-        risk_state_machine: {
-            states: [...LOOPBACK_RISK_STATE_MACHINE.states],
-            transitions: LOOPBACK_RISK_STATE_MACHINE.transitions.map((transition) => ({ ...transition })),
-            hard_block_when_paused: [...LOOPBACK_RISK_STATE_MACHINE.hard_block_when_paused]
-        },
-        issue_action_matrix: [
-            resolveLoopbackIssueActionMatrixEntry("issue_208", resolveLoopbackRiskState(input.gate.gateInput.risk_state)),
-            resolveLoopbackIssueActionMatrixEntry("issue_209", resolveLoopbackRiskState(input.gate.gateInput.risk_state))
-        ],
-        recovery_requirements: resolveLoopbackRecoveryRequirements(resolveLoopbackRiskState(input.gate.gateInput.risk_state))
-    },
+    risk_state_output: buildUnifiedRiskStateOutput(resolveLoopbackRiskState(input.gate.gateInput.risk_state)),
     audit_record: input.auditRecord,
     risk_transition_audit: {
         run_id: input.runId,

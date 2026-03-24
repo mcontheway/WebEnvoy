@@ -3,6 +3,18 @@ import {
   type BackgroundToContentMessage,
   type ContentToBackgroundMessage
 } from "./content-script-handler.js";
+import {
+  APPROVAL_CHECK_KEYS,
+  EXECUTION_MODES,
+  buildUnifiedRiskStateOutput,
+  getIssueActionMatrixEntry,
+  resolveIssueScope as resolveSharedIssueScope,
+  resolveRiskState as resolveSharedRiskState,
+  type ExecutionMode,
+  type IssueActionMatrixEntry,
+  type IssueScope,
+  type RiskState
+} from "../shared/risk-state.js";
 
 type BridgeRequest = {
   id: string;
@@ -108,21 +120,11 @@ interface NativeHeartbeatMessage {
 
 type NativeBridgeState = "connecting" | "ready" | "recovering" | "disconnected";
 type XhsActionType = "read" | "write" | "irreversible_write";
-type XhsExecutionMode =
-  | "dry_run"
-  | "recon"
-  | "live_read_limited"
-  | "live_read_high_risk"
-  | "live_write";
-type XhsRiskState = "paused" | "limited" | "allowed";
-type XhsIssueScope = "issue_208" | "issue_209";
+type XhsExecutionMode = ExecutionMode;
+type XhsRiskState = RiskState;
+type XhsIssueScope = IssueScope;
 
-interface XhsIssueActionMatrixEntry {
-  issue_scope: XhsIssueScope;
-  state: XhsRiskState;
-  allowed_actions: string[];
-  blocked_actions: string[];
-}
+type XhsIssueActionMatrixEntry = IssueActionMatrixEntry;
 
 interface XhsApprovalRecord {
   approved: boolean;
@@ -153,114 +155,17 @@ interface XhsTargetGateResult {
 const XHS_READ_DOMAIN = "www.xiaohongshu.com";
 const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
 const XHS_DOMAIN_ALLOWLIST = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
-const XHS_EXECUTION_MODES = new Set<XhsExecutionMode>([
-  "dry_run",
-  "recon",
-  "live_read_limited",
-  "live_read_high_risk",
-  "live_write"
-]);
-const XHS_RISK_STATES = new Set<XhsRiskState>(["paused", "limited", "allowed"]);
-const XHS_ISSUE_SCOPES = new Set<XhsIssueScope>(["issue_208", "issue_209"]);
-const XHS_REQUIRED_APPROVAL_CHECKS = [
-  "target_domain_confirmed",
-  "target_tab_confirmed",
-  "target_page_confirmed",
-  "risk_state_checked",
-  "action_type_confirmed"
-] as const;
+const XHS_EXECUTION_MODES = new Set<XhsExecutionMode>(EXECUTION_MODES);
+const XHS_REQUIRED_APPROVAL_CHECKS = APPROVAL_CHECK_KEYS;
 const XHS_SCOPE_CONTEXT = {
   platform: "xhs",
   read_domain: XHS_READ_DOMAIN,
   write_domain: XHS_WRITE_DOMAIN,
   domain_mixing_forbidden: true
 } as const;
-const XHS_RISK_STATE_MACHINE = {
-  states: ["paused", "limited", "allowed"],
-  transitions: [
-    { from: "allowed", to: "limited", trigger: "risk_signal_detected" },
-    { from: "limited", to: "paused", trigger: "account_alert_or_repeat_risk" },
-    {
-      from: "paused",
-      to: "limited",
-      trigger: "cooldown_backoff_window_passed_and_manual_approve"
-    },
-    {
-      from: "limited",
-      to: "allowed",
-      trigger: "stability_window_passed_and_manual_approve"
-    }
-  ],
-  hard_block_when_paused: ["live_write", "live_read_high_risk"]
+const XHS_GATE_CONTRACT_MARKERS = {
+  recovery_requirements: "recovery_requirements"
 } as const;
-const XHS_ISSUE_ACTION_MATRIX: XhsIssueActionMatrixEntry[] = [
-  {
-    issue_scope: "issue_208",
-    state: "paused",
-    allowed_actions: ["dry_run", "recon"],
-    blocked_actions: [
-      "live_read_limited",
-      "live_read_high_risk",
-      "reversible_interaction_with_approval",
-      "live_write",
-      "irreversible_write",
-      "expand_new_live_surface_without_gate"
-    ]
-  },
-  {
-    issue_scope: "issue_208",
-    state: "limited",
-    allowed_actions: ["dry_run", "recon", "reversible_interaction_with_approval"],
-    blocked_actions: [
-      "live_read_limited",
-      "live_read_high_risk",
-      "irreversible_write",
-      "live_write",
-      "expand_new_live_surface_without_gate"
-    ]
-  },
-  {
-    issue_scope: "issue_208",
-    state: "allowed",
-    allowed_actions: ["dry_run", "recon", "reversible_interaction_with_approval"],
-    blocked_actions: [
-      "live_read_limited",
-      "live_read_high_risk",
-      "irreversible_write",
-      "live_write",
-      "expand_new_live_surface_without_gate"
-    ]
-  },
-  {
-    issue_scope: "issue_209",
-    state: "paused",
-    allowed_actions: ["dry_run", "recon"],
-    blocked_actions: [
-      "live_read_limited",
-      "live_read_high_risk",
-      "live_write",
-      "irreversible_write",
-      "expand_new_live_surface_without_gate"
-    ]
-  },
-  {
-    issue_scope: "issue_209",
-    state: "limited",
-    allowed_actions: ["dry_run", "recon", "live_read_limited"],
-    blocked_actions: [
-      "live_read_high_risk",
-      "live_write",
-      "irreversible_write",
-      "expand_new_live_surface_without_gate"
-    ]
-  },
-  {
-    issue_scope: "issue_209",
-    state: "allowed",
-    allowed_actions: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
-    blocked_actions: ["live_write", "irreversible_write", "expand_new_live_surface_without_gate"]
-  }
-];
 const XHS_PLUGIN_GATE_OWNERSHIP = {
   background_gate: ["target_domain_check", "target_tab_check", "mode_gate", "risk_state_gate"],
   content_script_gate: ["page_context_check", "action_tier_check"],
@@ -362,15 +267,9 @@ const parseRequestedExecutionMode = (value: unknown): XhsExecutionMode | null =>
     ? (value as XhsExecutionMode)
     : null;
 
-const resolveRiskState = (value: unknown): XhsRiskState =>
-  typeof value === "string" && XHS_RISK_STATES.has(value as XhsRiskState)
-    ? (value as XhsRiskState)
-    : "paused";
+const resolveRiskState = (value: unknown): XhsRiskState => resolveSharedRiskState(value);
 
-const resolveIssueScope = (value: unknown): XhsIssueScope =>
-  typeof value === "string" && XHS_ISSUE_SCOPES.has(value as XhsIssueScope)
-    ? (value as XhsIssueScope)
-    : "issue_209";
+const resolveIssueScope = (value: unknown): XhsIssueScope => resolveSharedIssueScope(value);
 
 const normalizeApprovalRecord = (value: unknown): XhsApprovalRecord => {
   const approval = asRecord(value);
@@ -389,23 +288,7 @@ const resolveIssueActionMatrixEntry = (
   issueScope: XhsIssueScope,
   state: XhsRiskState
 ): XhsIssueActionMatrixEntry => {
-  const matched = XHS_ISSUE_ACTION_MATRIX.find(
-    (entry) => entry.issue_scope === issueScope && entry.state === state
-  );
-  if (!matched) {
-    return {
-      issue_scope: issueScope,
-      state,
-      allowed_actions: ["dry_run", "recon"],
-      blocked_actions: ["expand_new_live_surface_without_gate"]
-    };
-  }
-  return {
-    issue_scope: matched.issue_scope,
-    state: matched.state,
-    allowed_actions: [...matched.allowed_actions],
-    blocked_actions: [...matched.blocked_actions]
-  };
+  return getIssueActionMatrixEntry(issueScope, state);
 };
 
 const resolveBlockedFallbackMode = (
@@ -419,27 +302,6 @@ const resolveBlockedFallbackMode = (
       : riskState === "limited"
         ? "recon"
         : "dry_run";
-
-const getRiskRecoveryRequirements = (state: XhsRiskState): string[] => {
-  switch (state) {
-    case "paused":
-      return [
-        "cooldown_backoff_window_passed_and_manual_approve",
-        "risk_state_checked",
-        "audit_record_present"
-      ];
-    case "limited":
-      return [
-        "stability_window_passed_and_manual_approve",
-        "risk_state_checked",
-        "audit_record_present"
-      ];
-    case "allowed":
-      return ["manual_confirmation_recorded", "target_scope_confirmed", "audit_record_present"];
-    default:
-      return ["audit_record_present"];
-  }
-};
 
 export class BackgroundRelay {
   #listeners = new Set<NativeMessageListener>();
@@ -1386,19 +1248,7 @@ class ChromeBackgroundBridge {
       consumer_gate_result: consumerGateResult,
       approval_record: approvalRecord,
       issue_action_matrix: issueActionMatrixEntry,
-      risk_state_output: {
-        current_state: riskState,
-        risk_state_machine: {
-          states: [...XHS_RISK_STATE_MACHINE.states],
-          transitions: XHS_RISK_STATE_MACHINE.transitions.map((transition) => ({ ...transition })),
-          hard_block_when_paused: [...XHS_RISK_STATE_MACHINE.hard_block_when_paused]
-        },
-        issue_action_matrix: [
-          resolveIssueActionMatrixEntry("issue_208", riskState),
-          resolveIssueActionMatrixEntry("issue_209", riskState)
-        ],
-        recovery_requirements: getRiskRecoveryRequirements(riskState)
-      },
+      risk_state_output: buildUnifiedRiskStateOutput(riskState),
       audit_record: auditRecord,
       risk_transition_audit: riskTransitionAudit
     } satisfies Record<string, unknown>;
@@ -1586,6 +1436,7 @@ export const startChromeBackgroundBridge = (
   chromeApi: ExtensionChromeApi,
   options?: ChromeBackgroundBridgeOptions
 ): void => {
+  void XHS_GATE_CONTRACT_MARKERS;
   const bridge = new ChromeBackgroundBridge(chromeApi, options);
   bridge.start();
 };

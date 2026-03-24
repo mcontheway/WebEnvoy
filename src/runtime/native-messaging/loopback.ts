@@ -1,5 +1,18 @@
 import { BRIDGE_PROTOCOL, ensureBridgeRequestEnvelope, type BridgeRequestEnvelope, type BridgeResponseEnvelope } from "./protocol.js";
 import type { NativeBridgeTransport } from "./transport.js";
+import {
+  APPROVAL_CHECK_KEYS,
+  EXECUTION_MODES,
+  ISSUE_SCOPES,
+  buildUnifiedRiskStateOutput,
+  getIssueActionMatrixEntry,
+  resolveIssueScope as resolveSharedIssueScope,
+  resolveRiskState as resolveSharedRiskState,
+  type ExecutionMode,
+  type IssueActionMatrixEntry,
+  type IssueScope,
+  type RiskState
+} from "../../../shared/risk-state.js";
 
 type HostMessage =
   | { kind: "request"; envelope: BridgeRequestEnvelope }
@@ -27,40 +40,15 @@ const XHS_READ_DOMAIN = "www.xiaohongshu.com";
 const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
 const XHS_ALLOWED_DOMAINS = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
 type LoopbackActionType = "read" | "write" | "irreversible_write";
-type LoopbackExecutionMode =
-  | "dry_run"
-  | "recon"
-  | "live_read_limited"
-  | "live_read_high_risk"
-  | "live_write";
+type LoopbackExecutionMode = ExecutionMode;
 type LoopbackEffectiveExecutionMode = LoopbackExecutionMode | null;
-type LoopbackRiskState = "paused" | "limited" | "allowed";
-type LoopbackIssueScope = "issue_208" | "issue_209";
+type LoopbackRiskState = RiskState;
+type LoopbackIssueScope = IssueScope;
+type LoopbackIssueActionMatrixEntry = IssueActionMatrixEntry;
 
-interface LoopbackIssueActionMatrixEntry {
-  issue_scope: LoopbackIssueScope;
-  state: LoopbackRiskState;
-  allowed_actions: string[];
-  blocked_actions: string[];
-}
-
-const LOOPBACK_EXECUTION_MODES = new Set<LoopbackExecutionMode>([
-  "dry_run",
-  "recon",
-  "live_read_limited",
-  "live_read_high_risk",
-  "live_write"
-]);
-const LOOPBACK_RISK_STATES = new Set<LoopbackRiskState>(["paused", "limited", "allowed"]);
-const LOOPBACK_ISSUE_SCOPES = new Set<LoopbackIssueScope>(["issue_208", "issue_209"]);
+const LOOPBACK_EXECUTION_MODES = new Set<LoopbackExecutionMode>(EXECUTION_MODES);
 const LOOPBACK_ACTION_TYPES = new Set<LoopbackActionType>(["read", "write", "irreversible_write"]);
-const LOOPBACK_REQUIRED_APPROVAL_CHECKS = [
-  "target_domain_confirmed",
-  "target_tab_confirmed",
-  "target_page_confirmed",
-  "risk_state_checked",
-  "action_type_confirmed"
-] as const;
+const LOOPBACK_REQUIRED_APPROVAL_CHECKS = APPROVAL_CHECK_KEYS;
 
 const LOOPBACK_SCOPE_CONTEXT = {
   platform: "xhs",
@@ -74,92 +62,6 @@ const LOOPBACK_PLUGIN_GATE_OWNERSHIP = {
   main_world_gate: ["signed_call_scope_check"],
   cli_role: "request_and_result_shell_only"
 } as const;
-const LOOPBACK_RISK_STATE_MACHINE = {
-  states: ["paused", "limited", "allowed"],
-  transitions: [
-    { from: "allowed", to: "limited", trigger: "risk_signal_detected" },
-    { from: "limited", to: "paused", trigger: "account_alert_or_repeat_risk" },
-    {
-      from: "paused",
-      to: "limited",
-      trigger: "cooldown_backoff_window_passed_and_manual_approve"
-    },
-    {
-      from: "limited",
-      to: "allowed",
-      trigger: "stability_window_passed_and_manual_approve"
-    }
-  ],
-  hard_block_when_paused: ["live_write", "live_read_high_risk"]
-} as const;
-const LOOPBACK_ISSUE_ACTION_MATRIX: LoopbackIssueActionMatrixEntry[] = [
-  {
-    issue_scope: "issue_208",
-    state: "paused",
-    allowed_actions: ["dry_run", "recon"],
-    blocked_actions: [
-      "live_read_limited",
-      "live_read_high_risk",
-      "reversible_interaction_with_approval",
-      "live_write",
-      "irreversible_write",
-      "expand_new_live_surface_without_gate"
-    ]
-  },
-  {
-    issue_scope: "issue_208",
-    state: "limited",
-    allowed_actions: ["dry_run", "recon", "reversible_interaction_with_approval"],
-    blocked_actions: [
-      "live_read_limited",
-      "live_read_high_risk",
-      "irreversible_write",
-      "live_write",
-      "expand_new_live_surface_without_gate"
-    ]
-  },
-  {
-    issue_scope: "issue_208",
-    state: "allowed",
-    allowed_actions: ["dry_run", "recon", "reversible_interaction_with_approval"],
-    blocked_actions: [
-      "live_read_limited",
-      "live_read_high_risk",
-      "irreversible_write",
-      "live_write",
-      "expand_new_live_surface_without_gate"
-    ]
-  },
-  {
-    issue_scope: "issue_209",
-    state: "paused",
-    allowed_actions: ["dry_run", "recon"],
-    blocked_actions: [
-      "live_read_limited",
-      "live_read_high_risk",
-      "live_write",
-      "irreversible_write",
-      "expand_new_live_surface_without_gate"
-    ]
-  },
-  {
-    issue_scope: "issue_209",
-    state: "limited",
-    allowed_actions: ["dry_run", "recon", "live_read_limited"],
-    blocked_actions: [
-      "live_read_high_risk",
-      "live_write",
-      "irreversible_write",
-      "expand_new_live_surface_without_gate"
-    ]
-  },
-  {
-    issue_scope: "issue_209",
-    state: "allowed",
-    allowed_actions: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
-    blocked_actions: ["live_write", "irreversible_write", "expand_new_live_surface_without_gate"]
-  }
-];
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -187,37 +89,18 @@ const resolveLoopbackExecutionMode = (value: unknown): LoopbackExecutionMode | n
     ? (value as LoopbackExecutionMode)
     : null;
 
-const resolveLoopbackRiskState = (value: unknown): LoopbackRiskState =>
-  typeof value === "string" && LOOPBACK_RISK_STATES.has(value as LoopbackRiskState)
-    ? (value as LoopbackRiskState)
-    : "paused";
+const resolveLoopbackRiskState = (value: unknown): LoopbackRiskState => resolveSharedRiskState(value);
 
 const resolveLoopbackIssueScope = (value: unknown): LoopbackIssueScope =>
-  typeof value === "string" && LOOPBACK_ISSUE_SCOPES.has(value as LoopbackIssueScope)
+  ISSUE_SCOPES.includes(value as LoopbackIssueScope)
     ? (value as LoopbackIssueScope)
-    : "issue_209";
+    : resolveSharedIssueScope(value);
 
 const resolveLoopbackIssueActionMatrixEntry = (
   issueScope: LoopbackIssueScope,
   riskState: LoopbackRiskState
 ): LoopbackIssueActionMatrixEntry => {
-  const matched = LOOPBACK_ISSUE_ACTION_MATRIX.find(
-    (entry) => entry.issue_scope === issueScope && entry.state === riskState
-  );
-  if (!matched) {
-    return {
-      issue_scope: issueScope,
-      state: riskState,
-      allowed_actions: ["dry_run", "recon"],
-      blocked_actions: ["expand_new_live_surface_without_gate"]
-    };
-  }
-  return {
-    issue_scope: matched.issue_scope,
-    state: matched.state,
-    allowed_actions: [...matched.allowed_actions],
-    blocked_actions: [...matched.blocked_actions]
-  };
+  return getIssueActionMatrixEntry(issueScope, riskState);
 };
 
 const resolveLoopbackFallbackMode = (
@@ -228,27 +111,6 @@ const resolveLoopbackFallbackMode = (
     return "dry_run";
   }
   return riskState === "limited" ? "recon" : "dry_run";
-};
-
-const resolveLoopbackRecoveryRequirements = (state: LoopbackRiskState): string[] => {
-  switch (state) {
-    case "paused":
-      return [
-        "cooldown_backoff_window_passed_and_manual_approve",
-        "risk_state_checked",
-        "audit_record_present"
-      ];
-    case "limited":
-      return [
-        "stability_window_passed_and_manual_approve",
-        "risk_state_checked",
-        "audit_record_present"
-      ];
-    case "allowed":
-      return ["manual_confirmation_recorded", "target_scope_confirmed", "audit_record_present"];
-    default:
-      return ["audit_record_present"];
-  }
 };
 
 const buildLoopbackGate = (
@@ -466,21 +328,9 @@ const buildLoopbackGatePayload = (input: {
   consumer_gate_result: input.gate.consumerGateResult,
   approval_record: input.gate.approvalRecord,
   issue_action_matrix: input.gate.issueActionMatrix,
-  risk_state_output: {
-    current_state: resolveLoopbackRiskState(input.gate.gateInput.risk_state),
-    risk_state_machine: {
-      states: [...LOOPBACK_RISK_STATE_MACHINE.states],
-      transitions: LOOPBACK_RISK_STATE_MACHINE.transitions.map((transition) => ({ ...transition })),
-      hard_block_when_paused: [...LOOPBACK_RISK_STATE_MACHINE.hard_block_when_paused]
-    },
-    issue_action_matrix: [
-      resolveLoopbackIssueActionMatrixEntry("issue_208", resolveLoopbackRiskState(input.gate.gateInput.risk_state)),
-      resolveLoopbackIssueActionMatrixEntry("issue_209", resolveLoopbackRiskState(input.gate.gateInput.risk_state))
-    ],
-    recovery_requirements: resolveLoopbackRecoveryRequirements(
-      resolveLoopbackRiskState(input.gate.gateInput.risk_state)
-    )
-  },
+  risk_state_output: buildUnifiedRiskStateOutput(
+    resolveLoopbackRiskState(input.gate.gateInput.risk_state)
+  ),
   audit_record: input.auditRecord,
   risk_transition_audit: {
     run_id: input.runId,
