@@ -1,4 +1,4 @@
-# FR-0012 实施计划
+# FR-0014 实施计划
 
 ## 实施目标
 
@@ -108,7 +108,7 @@
 
 ## 进入实现前条件
 
-1. FR-0012 spec review 通过，且无“重定义 `#226` 基线”类阻断项。
+1. FR-0014 spec review 通过，且无“重定义 `#226` 基线”类阻断项。
 2. `contracts/session-rhythm-engine.md`、`data-model.md`、`risks.md` 被 reviewer 认可足以支撑实现。
 3. 后续实现 PR 明确只围绕 Layer 3 节律引擎，不混入 Layer 1/2/4 或 `#208` 的正式验证实现。
 4. 实现 PR 提前声明持久化落点、回滚入口与 `runtime.audit` 投影范围。

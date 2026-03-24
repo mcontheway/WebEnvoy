@@ -1,4 +1,4 @@
-# FR-0012 数据模型（Layer 3 完整 session 行为节律引擎）
+# FR-0014 数据模型（Layer 3 完整 session 行为节律引擎）
 
 ## 范围说明
 
@@ -171,4 +171,4 @@
 - `approval_record`、`audit_record`、`consumer_gate_result` 继续沿用 `FR-0010/0011` 语义。
 - `paused|limited|allowed` 继续是唯一正式风险状态集合。
 - `cooldown_strategy=exponential_backoff` 与 `resume_probe_mode=recon_only` 继续继承 `#226` 最小基线。
-- FR-0012 只追加窗口、阶段、事件、决策和状态视图对象；任何字段语义变更必须走独立 spec review。
+- FR-0014 只追加窗口、阶段、事件、决策和状态视图对象；任何字段语义变更必须走独立 spec review。
