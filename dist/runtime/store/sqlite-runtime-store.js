@@ -352,8 +352,7 @@ export class SQLiteRuntimeStore {
         WHEN target_domain = 'creator.xiaohongshu.com'
              AND target_page IN ('creator_publish_tab', 'publish_page')
              AND (
-               requested_execution_mode = 'live_write'
-               OR effective_execution_mode = 'live_write'
+               effective_execution_mode = 'live_write'
                OR action_type = 'irreversible_write'
              )
           THEN 'issue_208'
