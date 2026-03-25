@@ -1009,7 +1009,11 @@ class ChromeBackgroundBridge {
     if (!fingerprintRuntime || fingerprintRuntime.profile !== profile) {
       return;
     }
-    const sessionId = asNonEmptyString(startupTrust.session_id ?? startupTrust.sessionId) ?? this.#sessionId;
+    const explicitSessionId = asNonEmptyString(startupTrust.session_id ?? startupTrust.sessionId);
+    if (explicitSessionId && explicitSessionId !== this.#sessionId) {
+      return;
+    }
+    const sessionId = explicitSessionId ?? this.#sessionId;
     this.#upsertTrustedFingerprintContext(profile, sessionId, fingerprintRuntime);
   }
 

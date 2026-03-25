@@ -92,6 +92,7 @@ const primeTrustedFingerprintContext = async (input: {
   runId: string;
   profile: string;
   fingerprintContext: Record<string, unknown>;
+  sessionId?: string;
   tabId?: number;
 }) => {
   const requiredPatches = Array.isArray(
@@ -111,6 +112,7 @@ const primeTrustedFingerprintContext = async (input: {
         startup_fingerprint_trust: {
           run_id: input.runId,
           profile: input.profile,
+          session_id: input.sessionId ?? "nm-session-001",
           trusted: true,
           fingerprint_runtime: {
             ...input.fingerprintContext,
@@ -1779,6 +1781,7 @@ describe("extension service worker recovery contract", () => {
           startup_fingerprint_trust: {
             run_id: startupRunId,
             profile,
+            session_id: "nm-session-001",
             trusted: true,
             fingerprint_runtime: {
               ...fingerprintContext,
@@ -1900,6 +1903,14 @@ describe("extension service worker recovery contract", () => {
       sessionId: "nm-session-002"
     });
     await Promise.resolve();
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-live-recovery-untrusted-001",
+      profile: "profile-a",
+      fingerprintContext,
+      sessionId: "nm-session-001"
+    });
 
     secondPort.onMessageListeners[0]?.({
       id: "run-xhs-live-recovery-untrusted-001",
@@ -2125,7 +2136,7 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("rotates trusted fingerprint context when startup trust overwrites same profile::runId", async () => {
+  it("rotates trusted fingerprint context when startup trust overwrites same profile::session", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
