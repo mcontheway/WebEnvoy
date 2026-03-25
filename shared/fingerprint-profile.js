@@ -196,6 +196,7 @@ const resolveChromeVersion = (input) => {
 
 const buildDefaultUserAgent = (environment, input) => {
   const archToken = environment.arch === "arm64" ? "ARM 64" : "Win64; x64";
+  const linuxArchToken = environment.arch === "arm64" ? "arm64" : "x86_64";
   const chromeVersion = resolveChromeVersion(input) ?? "0.0.0.0";
 
   if (environment.os_family === "macos") {
@@ -207,7 +208,35 @@ const buildDefaultUserAgent = (environment, input) => {
     return `Mozilla/5.0 (Windows NT 10.0; ${archToken}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
   }
 
-  return `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+  return `Mozilla/5.0 (X11; Linux ${linuxArchToken}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+};
+
+const isLikelyLinuxKernelVersion = (value) =>
+  typeof value === "string" &&
+  /^\d+\.\d+\.\d+/.test(value);
+
+const harmonizeExistingBundleEnvironment = (bundle, actualEnvironment) => {
+  const cloned = cloneJson(bundle);
+  if (!isEnvironment(cloned.environment)) {
+    return cloned;
+  }
+
+  const actualOsFamily = normalizePlatform(actualEnvironment?.os_family);
+  const actualOsVersion = normalizeOsVersion(actualOsFamily, actualEnvironment?.os_version ?? "unknown");
+  if (
+    actualOsFamily === "linux" &&
+    cloned.environment.os_family === "linux" &&
+    isLikelyLinuxKernelVersion(cloned.environment.os_version) &&
+    actualOsVersion !== "unknown" &&
+    cloned.environment.os_version !== actualOsVersion
+  ) {
+    cloned.environment = {
+      ...cloned.environment,
+      os_version: actualOsVersion
+    };
+  }
+
+  return cloned;
 };
 
 const readPath = (target, path) => {
@@ -353,7 +382,7 @@ const buildFingerprintProfileBundle = (input) => {
       : `${profileName}-canvas-seed`;
 
   if (isFingerprintProfileBundle(input.existingBundle)) {
-    return cloneJson(input.existingBundle);
+    return harmonizeExistingBundleEnvironment(input.existingBundle, input.environment);
   }
 
   const screen = selectBySeed(`${profileName}:screen`, SCREEN_CANDIDATES);

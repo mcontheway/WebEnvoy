@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ProfileStore, PROFILE_META_FILENAME } from "../profile-store.js";
-import { buildFingerprintProfileBundle } from "../../../shared/fingerprint-profile.js";
+import {
+  buildFingerprintProfileBundle,
+  buildFingerprintRuntimeContext
+} from "../../../shared/fingerprint-profile.js";
 
 const tempDirs: string[] = [];
 const originalBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
@@ -328,5 +331,66 @@ describe("profile-store", () => {
     });
     expect(bundle.ua).toContain("Mac OS X 15_0");
     expect(bundle.ua).not.toContain("Mac OS X 24_4_0");
+  });
+
+  it("uses arm64 architecture token for Linux default UA when profile arch is arm64", () => {
+    const bundle = buildFingerprintProfileBundle({
+      profileName: "default",
+      fingerprintSeeds: {
+        audioNoiseSeed: "default-audio-seed",
+        canvasNoiseSeed: "default-canvas-seed"
+      },
+      environment: {
+        os_family: "linux",
+        os_version: "6.8.0",
+        arch: "arm64"
+      },
+      timezone: "Asia/Shanghai"
+    });
+
+    expect(bundle.ua).toContain("X11; Linux arm64");
+    expect(bundle.ua).not.toContain("Linux x86_64");
+  });
+
+  it("keeps linux legacy kernel-version bundle live-compatible after distro-version truth source switch", () => {
+    const existingBundle = buildFingerprintProfileBundle({
+      profileName: "linux-profile",
+      fingerprintSeeds: {
+        audioNoiseSeed: "linux-audio-seed",
+        canvasNoiseSeed: "linux-canvas-seed"
+      },
+      environment: {
+        os_family: "linux",
+        os_version: "6.8.0-55-generic",
+        arch: "x64"
+      },
+      timezone: "Asia/Shanghai",
+      browserVersion: "Chromium 146.0.0.0"
+    });
+
+    const runtime = buildFingerprintRuntimeContext({
+      profile: "linux-profile",
+      metaPresent: true,
+      fingerprintSeeds: {
+        audioNoiseSeed: "linux-audio-seed",
+        canvasNoiseSeed: "linux-canvas-seed"
+      },
+      existingBundle,
+      actualEnvironment: {
+        os_family: "linux",
+        os_version: "24.04",
+        arch: "x64"
+      },
+      requestedExecutionMode: "live_read_limited",
+      timezone: "Asia/Shanghai"
+    });
+
+    expect(runtime.fingerprint_profile_bundle.environment).toMatchObject({
+      os_family: "linux",
+      os_version: "24.04",
+      arch: "x64"
+    });
+    expect(runtime.fingerprint_consistency_check.reason_codes).not.toContain("OS_VERSION_MISMATCH");
+    expect(runtime.execution.live_allowed).toBe(true);
   });
 });

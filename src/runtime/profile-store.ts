@@ -76,6 +76,7 @@ const PROFILE_STATES: readonly ProfileState[] = [
   "stopped"
 ];
 const PROXY_BINDING_SOURCES = ["runtime.start", "runtime.login"] as const;
+const LINUX_KERNEL_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+._][0-9A-Za-z._+-]+)*$/u;
 
 const validateProfileName = (profileName: string, rootDir: string): void => {
   if (!PROFILE_NAME_PATTERN.test(profileName)) {
@@ -120,6 +121,45 @@ const resolveBrowserVersionFromResolvedExecutable = async (): Promise<string | n
 
 const withBrowserVersion = <T extends object>(input: T, browserVersion: string | null): T =>
   ({ ...(input as Record<string, unknown>), browserVersion } as T);
+
+const isLegacyLinuxKernelVersion = (value: string): boolean =>
+  LINUX_KERNEL_VERSION_PATTERN.test(value);
+
+const migrateLegacyLinuxKernelBundleOsVersion = (meta: ProfileMeta): ProfileMeta | null => {
+  if (!meta.fingerprintProfileBundle) {
+    return null;
+  }
+
+  const expectedEnvironment = meta.fingerprintProfileBundle.environment;
+  if (expectedEnvironment.os_family !== "linux") {
+    return null;
+  }
+
+  const actualEnvironment = resolveCurrentFingerprintEnvironment();
+  if (actualEnvironment.os_family !== "linux") {
+    return null;
+  }
+  if (actualEnvironment.os_version === "unknown") {
+    return null;
+  }
+  if (expectedEnvironment.os_version === actualEnvironment.os_version) {
+    return null;
+  }
+  if (!isLegacyLinuxKernelVersion(expectedEnvironment.os_version)) {
+    return null;
+  }
+
+  return {
+    ...meta,
+    fingerprintProfileBundle: {
+      ...meta.fingerprintProfileBundle,
+      environment: {
+        ...expectedEnvironment,
+        os_version: actualEnvironment.os_version
+      }
+    }
+  };
+};
 
 function assertProfileMeta(value: unknown): asserts value is ProfileMeta {
   if (!isObjectRecord(value)) {
@@ -287,6 +327,13 @@ export class ProfileStore {
           await this.writeMeta(profileName, migratedMeta);
         }
         return migratedMeta;
+      }
+      const migratedLinuxMeta = migrateLegacyLinuxKernelBundleOsVersion(parsed);
+      if (migratedLinuxMeta) {
+        if (options.mode !== "readonly") {
+          await this.writeMeta(profileName, migratedLinuxMeta);
+        }
+        return migratedLinuxMeta;
       }
       return parsed;
     } catch (error) {

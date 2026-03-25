@@ -12,7 +12,6 @@ const contentScriptBuildPath = path.join(extensionRoot, "build", "content-script
 const expectedMainWorldBridgeMatches = [
   "https://www.xiaohongshu.com/*",
   "https://creator.xiaohongshu.com/*",
-  "https://edith.xiaohongshu.com/*",
   "http://127.0.0.1/*",
   "http://localhost/*"
 ];
