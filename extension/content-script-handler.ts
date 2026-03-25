@@ -1,5 +1,7 @@
 import { executeXhsSearch, type SearchExecutionResult, type XhsSearchEnvironment } from "./xhs-search.js";
 import {
+  DEFAULT_MIME_TYPE_DESCRIPTORS,
+  DEFAULT_PLUGIN_DESCRIPTORS,
   ensureFingerprintRuntimeContext,
   type FingerprintRuntimeContext
 } from "../shared/fingerprint-profile.js";
@@ -192,6 +194,8 @@ const mainWorldCall = async <T>(request: {
             const patchNameSet = new Set(requiredPatches);
             const appliedPatches = [];
             const missingRequiredPatches = [];
+            const pluginDescriptors = ${JSON.stringify(DEFAULT_PLUGIN_DESCRIPTORS)};
+            const mimeTypeDescriptors = ${JSON.stringify(DEFAULT_MIME_TYPE_DESCRIPTORS)};
             const AUDIO_PATCH_MARKER = "__webenvoy_audio_context_patched__";
             const AUDIO_NOISE_SEED_KEY = "__webenvoy_audio_noise_seed__";
             const defineGetter = (target, property, getter) => {
@@ -200,32 +204,61 @@ const mainWorldCall = async <T>(request: {
                 get: getter
               });
             };
-            const createPluginArray = () => {
-              const plugins = [
-                {
-                  name: "Chrome PDF Viewer",
-                  filename: "internal-pdf-viewer",
-                  description: "Portable Document Format"
-                }
-              ];
+            const createPluginAndMimeTypeArrays = () => {
+              const pluginByName = new Map();
+              const plugins = pluginDescriptors.map((descriptor) => {
+                const plugin = {
+                  name: descriptor.name,
+                  filename: descriptor.filename,
+                  description: descriptor.description,
+                  length: 0
+                };
+                plugin.item = (index) => plugin[index] ?? null;
+                plugin.namedItem = (name) => {
+                  if (typeof name !== "string") {
+                    return null;
+                  }
+                  for (let index = 0; index < plugin.length; index += 1) {
+                    const entry = plugin[index];
+                    if (entry && entry.type === name) {
+                      return entry;
+                    }
+                  }
+                  return null;
+                };
+                pluginByName.set(plugin.name, plugin);
+                return plugin;
+              });
               plugins.item = (index) => plugins[index] ?? null;
-              plugins.namedItem = (name) => plugins.find((plugin) => plugin.name === name) ?? null;
+              plugins.namedItem = (name) =>
+                plugins.find((plugin) => plugin.name === name) ?? null;
               plugins.refresh = () => undefined;
-              return plugins;
-            };
-            const createMimeTypeArray = () => {
-              const mimeTypes = [
-                {
-                  type: "application/pdf",
-                  suffixes: "pdf",
-                  description: "Portable Document Format"
+
+              const mimeTypes = mimeTypeDescriptors.map((descriptor) => {
+                const linkedPlugin =
+                  pluginByName.get(descriptor.enabledPlugin) ??
+                  plugins[0] ??
+                  null;
+                const mimeType = {
+                  type: descriptor.type,
+                  suffixes: descriptor.suffixes,
+                  description: descriptor.description,
+                  enabledPlugin: linkedPlugin
+                };
+                if (linkedPlugin) {
+                  const nextIndex =
+                    typeof linkedPlugin.length === "number" ? linkedPlugin.length : 0;
+                  linkedPlugin[nextIndex] = mimeType;
+                  linkedPlugin.length = nextIndex + 1;
                 }
-              ];
+                return mimeType;
+              });
               mimeTypes.item = (index) => mimeTypes[index] ?? null;
               mimeTypes.namedItem = (name) =>
                 mimeTypes.find((mimeType) => mimeType.type === name) ?? null;
-              return mimeTypes;
+              return { plugins, mimeTypes };
             };
+            const pluginAndMimeTypes = createPluginAndMimeTypeArrays();
             const markAudioContextPatched = () => {
               if (!bundle || !patchNameSet.has("audio_context")) {
                 return;
@@ -301,12 +334,12 @@ const mainWorldCall = async <T>(request: {
               appliedPatches.push("battery");
             }
             if (patchNameSet.has("navigator_plugins") && window.navigator) {
-              const plugins = createPluginArray();
+              const plugins = pluginAndMimeTypes.plugins;
               defineGetter(window.navigator, "plugins", () => plugins);
               appliedPatches.push("navigator_plugins");
             }
             if (patchNameSet.has("navigator_mime_types") && window.navigator) {
-              const mimeTypes = createMimeTypeArray();
+              const mimeTypes = pluginAndMimeTypes.mimeTypes;
               defineGetter(window.navigator, "mimeTypes", () => mimeTypes);
               appliedPatches.push("navigator_mime_types");
             }

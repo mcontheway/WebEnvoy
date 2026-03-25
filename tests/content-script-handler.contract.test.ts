@@ -270,8 +270,25 @@ describe("content-script handler contract", () => {
       expect(injection?.source).toBe("profile_meta");
       const battery = await (mockWindow.navigator as Navigator & { getBattery?: () => Promise<{ level: number }> }).getBattery?.();
       expect(battery?.level).toBe(0.75);
-      expect((mockWindow.navigator as Navigator & { plugins?: { length: number } }).plugins?.length).toBe(1);
-      expect((mockWindow.navigator as Navigator & { mimeTypes?: { length: number } }).mimeTypes?.length).toBe(1);
+      const plugins = (mockWindow.navigator as Navigator & { plugins?: Record<string, unknown>[] }).plugins;
+      const mimeTypes =
+        (mockWindow.navigator as Navigator & { mimeTypes?: Record<string, unknown>[] }).mimeTypes;
+      expect(plugins?.length).toBeGreaterThan(1);
+      expect(mimeTypes?.length).toBeGreaterThan(1);
+      const chromePdfViewer = (plugins as unknown as { namedItem?: (name: string) => Record<string, unknown> | null })
+        ?.namedItem?.("Chrome PDF Viewer");
+      const applicationPdfMimeType = (mimeTypes as unknown as {
+        namedItem?: (name: string) => Record<string, unknown> | null;
+      })?.namedItem?.("application/pdf");
+      expect(chromePdfViewer).toBeTruthy();
+      expect(applicationPdfMimeType?.enabledPlugin).toBe(chromePdfViewer);
+      expect(
+        (
+          chromePdfViewer as {
+            namedItem?: (name: string) => Record<string, unknown> | null;
+          }
+        )?.namedItem?.("application/pdf")
+      ).toBe(applicationPdfMimeType);
       const offlineAudioContext = new ((mockWindow as unknown as { OfflineAudioContext: new () => { startRendering(): Promise<{ getChannelData(channel: number): Float32Array }> } }).OfflineAudioContext)();
       const renderedBuffer = await offlineAudioContext.startRendering();
       const channelData = renderedBuffer.getChannelData(0);

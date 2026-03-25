@@ -134,6 +134,9 @@ const ensureFingerprintExecutionAllowed = (requestedExecutionMode, fingerprintRu
         }
     });
 };
+const buildExtensionBootstrapInput = (fingerprintRuntime) => ({
+    fingerprint_runtime: fingerprintRuntime
+});
 const mapRuntimeError = (error) => {
     if (error instanceof CliError) {
         return error;
@@ -250,7 +253,8 @@ export class ProfileRuntimeService {
                 profileDir,
                 proxyUrl: session.proxyBinding?.url ?? null,
                 runId: input.runId,
-                params: input.params
+                params: input.params,
+                extensionBootstrap: buildExtensionBootstrapInput(fingerprintRuntime)
             });
             launchedControllerPid = browserLaunch.controllerPid;
             await this.#updateLockOwnerPid(lockPath, input.runId, browserLaunch.controllerPid, nowIso);
@@ -368,7 +372,8 @@ export class ProfileRuntimeService {
                     profileDir,
                     proxyUrl: session.proxyBinding?.url ?? null,
                     runId: input.runId,
-                    params: input.params
+                    params: input.params,
+                    extensionBootstrap: buildExtensionBootstrapInput(fingerprintRuntime)
                 });
                 launchedControllerPid = browserLaunch.controllerPid;
                 await this.#updateLockOwnerPid(lockPath, input.runId, browserLaunch.controllerPid, nowIso);

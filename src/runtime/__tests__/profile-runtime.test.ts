@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ProfileRuntimeService } from "../profile-runtime.js";
 import { BROWSER_STATE_FILENAME } from "../browser-launcher.js";
+import type { BrowserLaunchInput } from "../browser-launcher.js";
 import type { ProfileLock } from "../profile-lock.js";
 import { ProfileStore, type ProfileMeta } from "../profile-store.js";
 
@@ -852,6 +853,58 @@ describe("profile-runtime login", () => {
 });
 
 describe("profile-runtime fingerprint runtime contract", () => {
+  it("passes extensionBootstrap to launcher with the same fingerprint_runtime payload", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-fingerprint-bootstrap-"));
+    tempDirs.push(baseDir);
+    const launchInputs: BrowserLaunchInput[] = [];
+    const service = createTestService({
+      isProcessAlive: () => true,
+      browserLauncher: {
+        launch: async (input) => {
+          launchInputs.push(input);
+          return {
+            browserPath: "/mock/chrome",
+            browserPid: 999999,
+            controllerPid: 999998,
+            launchArgs: ["about:blank"],
+            launchedAt: new Date().toISOString()
+          };
+        },
+        shutdown: async () => undefined
+      }
+    });
+
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "fingerprint_bootstrap_start_profile",
+      runId: "run-runtime-test-fingerprint-bootstrap-001",
+      params: {}
+    });
+    const startLaunch = launchInputs[0];
+    expect(startLaunch.command).toBe("runtime.start");
+    expect(startLaunch.extensionBootstrap).toMatchObject({
+      fingerprint_runtime: started.fingerprint_runtime
+    });
+    expect(
+      (startLaunch.extensionBootstrap as { fingerprint_runtime: unknown }).fingerprint_runtime
+    ).toEqual(started.fingerprint_runtime);
+
+    const loginStart = await service.login({
+      cwd: baseDir,
+      profile: "fingerprint_bootstrap_login_profile",
+      runId: "run-runtime-test-fingerprint-bootstrap-002",
+      params: {}
+    });
+    const loginLaunch = launchInputs[1];
+    expect(loginLaunch.command).toBe("runtime.login");
+    expect(loginLaunch.extensionBootstrap).toMatchObject({
+      fingerprint_runtime: loginStart.fingerprint_runtime
+    });
+    expect(
+      (loginLaunch.extensionBootstrap as { fingerprint_runtime: unknown }).fingerprint_runtime
+    ).toEqual(loginStart.fingerprint_runtime);
+  });
+
   it("returns fingerprint_runtime on start/status/stop/login", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-fingerprint-runtime-"));
     tempDirs.push(baseDir);

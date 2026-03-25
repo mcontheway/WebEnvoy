@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { access, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 const KNOWN_BROWSER_CANDIDATES = {
@@ -46,6 +46,9 @@ export class BrowserLaunchError extends Error {
 }
 export const BROWSER_STATE_FILENAME = "__webenvoy_browser_instance.json";
 export const BROWSER_CONTROL_FILENAME = "__webenvoy_browser_control.json";
+export const EXTENSION_STAGING_DIRNAME = "__webenvoy_extension_staging";
+export const EXTENSION_BOOTSTRAP_FILENAME = "__webenvoy_fingerprint_bootstrap.json";
+export const EXTENSION_BOOTSTRAP_SCRIPT_FILENAME = "__webenvoy_fingerprint_bootstrap.js";
 const READY_WAIT_MAX_ATTEMPTS = 20;
 const READY_WAIT_INTERVAL_MS = 150;
 const READY_MIN_UPTIME_MS = 600;
@@ -53,6 +56,17 @@ const READY_CONFIRM_DELAY_MS = 120;
 const SUPERVISOR_STATE_WAIT_ATTEMPTS = 40;
 const SUPERVISOR_STATE_WAIT_INTERVAL_MS = 80;
 const SUPERVISOR_SHUTDOWN_TIMEOUT_MS = 4_000;
+const EXTENSION_BOOTSTRAP_PARAMS_KEY = "extensionBootstrap";
+const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
+const CONTENT_SCRIPT_ENTRY_PATH = "build/content-script.js";
+const EXTENSION_BOOTSTRAP_SCRIPT_PATH = `build/${EXTENSION_BOOTSTRAP_SCRIPT_FILENAME}`;
+const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value
+    : null;
+const sanitizePathSegment = (value) => {
+    const normalized = value.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^_+|_+$/g, "");
+    return normalized.length > 0 ? normalized : "default";
+};
 const parseOptionalString = (value) => {
     if (value === undefined || value === null) {
         return null;
@@ -272,6 +286,90 @@ const resolveSupervisorScriptPath = async () => {
     }
     throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "缺少浏览器控制进程脚本 browser-supervisor.js");
 };
+const resolveExtensionSourceDir = async () => {
+    const moduleDir = dirname(fileURLToPath(import.meta.url));
+    const candidates = [join(moduleDir, "..", "..", "extension"), join(process.cwd(), "extension")];
+    for (const candidate of candidates) {
+        const manifestPath = join(candidate, "manifest.json");
+        const backgroundPath = join(candidate, "build", "background.js");
+        const contentScriptPath = join(candidate, "build", "content-script.js");
+        if ((await pathExists(manifestPath)) &&
+            (await pathExists(backgroundPath)) &&
+            (await pathExists(contentScriptPath))) {
+            return candidate;
+        }
+    }
+    throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "缺少可加载 extension 构建产物，请先构建 extension");
+};
+const resolveExtensionBootstrapPayload = (input) => {
+    if (input.extensionBootstrap) {
+        return { ...input.extensionBootstrap };
+    }
+    const fromParams = asRecord(input.params[EXTENSION_BOOTSTRAP_PARAMS_KEY]);
+    return fromParams ? { ...fromParams } : null;
+};
+const buildBootstrapScriptSource = (payload) => [
+    "(() => {",
+    `  globalThis["${FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY}"] = ${JSON.stringify(payload)};`,
+    "})();",
+    ""
+].join("\n");
+const injectBootstrapScriptIntoManifest = async (manifestPath) => {
+    const raw = await readFile(manifestPath, "utf8");
+    const parsed = JSON.parse(raw);
+    const contentScripts = parsed.content_scripts;
+    if (!Array.isArray(contentScripts)) {
+        throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "staged extension manifest 缺少 content_scripts，无法注入 bootstrap 脚本");
+    }
+    let injected = false;
+    for (const entry of contentScripts) {
+        const record = asRecord(entry);
+        if (!record) {
+            continue;
+        }
+        const jsEntries = record.js;
+        if (!Array.isArray(jsEntries)) {
+            continue;
+        }
+        const scripts = jsEntries.filter((item) => typeof item === "string");
+        const contentIndex = scripts.indexOf(CONTENT_SCRIPT_ENTRY_PATH);
+        if (contentIndex < 0) {
+            continue;
+        }
+        const deduped = scripts.filter((item) => item !== EXTENSION_BOOTSTRAP_SCRIPT_PATH);
+        const insertIndex = deduped.indexOf(CONTENT_SCRIPT_ENTRY_PATH);
+        deduped.splice(insertIndex, 0, EXTENSION_BOOTSTRAP_SCRIPT_PATH);
+        record.js = deduped;
+        injected = true;
+    }
+    if (!injected) {
+        throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "staged extension manifest 未包含 build/content-script.js，无法注入 bootstrap 脚本");
+    }
+    await writeFile(manifestPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+};
+const stageExtensionForRun = async (input) => {
+    const extensionSourceDir = await resolveExtensionSourceDir();
+    const stagedExtensionDir = join(input.profileDir, EXTENSION_STAGING_DIRNAME, sanitizePathSegment(input.runId));
+    const stagedExtensionParent = join(input.profileDir, EXTENSION_STAGING_DIRNAME);
+    await mkdir(stagedExtensionParent, { recursive: true });
+    await rm(stagedExtensionDir, { recursive: true, force: true });
+    await cp(extensionSourceDir, stagedExtensionDir, { recursive: true });
+    const bootstrapPath = join(stagedExtensionDir, EXTENSION_BOOTSTRAP_FILENAME);
+    const envelope = {
+        schemaVersion: 1,
+        runId: input.runId,
+        writtenAt: new Date().toISOString(),
+        extension_bootstrap: input.extensionBootstrap
+    };
+    await writeFile(bootstrapPath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
+    const bootstrapScriptPath = join(stagedExtensionDir, EXTENSION_BOOTSTRAP_SCRIPT_PATH);
+    await writeFile(bootstrapScriptPath, buildBootstrapScriptSource(input.extensionBootstrap), "utf8");
+    await injectBootstrapScriptIntoManifest(join(stagedExtensionDir, "manifest.json"));
+    return { stagedExtensionDir, bootstrapPath, bootstrapScriptPath };
+};
+const cleanupStagedExtensions = async (profileDir) => {
+    await rm(join(profileDir, EXTENSION_STAGING_DIRNAME), { recursive: true, force: true });
+};
 const shouldLaunchHeadless = (params) => params.headless !== false;
 const assertProcessAlive = (pid) => {
     try {
@@ -379,12 +477,20 @@ const launchProcess = async (supervisorScriptPath, executablePath, args, input) 
 export const launchBrowser = async (input) => {
     const executablePath = await resolveExecutablePath(input.params);
     const supervisorScriptPath = await resolveSupervisorScriptPath();
+    const extensionBootstrap = resolveExtensionBootstrapPayload(input);
+    const extensionStaging = await stageExtensionForRun({
+        profileDir: input.profileDir,
+        runId: input.runId,
+        extensionBootstrap
+    });
     const launchArgs = [
         `--user-data-dir=${input.profileDir}`,
         "--profile-directory=Default",
         "--new-window",
         "--no-first-run",
-        "--no-default-browser-check"
+        "--no-default-browser-check",
+        `--disable-extensions-except=${extensionStaging.stagedExtensionDir}`,
+        `--load-extension=${extensionStaging.stagedExtensionDir}`
     ];
     if (input.proxyUrl !== null) {
         launchArgs.push(`--proxy-server=${input.proxyUrl}`);
@@ -398,6 +504,7 @@ export const launchBrowser = async (input) => {
     const stateFilePath = getStateFilePath(input.profileDir);
     const controlFilePath = getControlFilePath(input.profileDir);
     let controllerPid = null;
+    let launchSucceeded = false;
     try {
         await mkdir(input.profileDir, { recursive: true });
         await deleteFileQuietly(stateFilePath);
@@ -416,6 +523,7 @@ export const launchBrowser = async (input) => {
             expectedControllerPid: launched.pid
         });
         await waitForBrowserReady(input.profileDir, state.browserPid, launched.launchedAtMs);
+        launchSucceeded = true;
         return {
             browserPath: executablePath,
             browserPid: state.browserPid,
@@ -440,6 +548,11 @@ export const launchBrowser = async (input) => {
             cause: error
         });
     }
+    finally {
+        if (!launchSucceeded) {
+            await cleanupStagedExtensions(input.profileDir);
+        }
+    }
 };
 export const shutdownBrowserSession = async (input) => {
     const timeoutMs = input.timeoutMs ?? SUPERVISOR_SHUTDOWN_TIMEOUT_MS;
@@ -458,6 +571,7 @@ export const shutdownBrowserSession = async (input) => {
     if (!isProcessAlive(input.controllerPid)) {
         if (await terminateBrowserPid(state.browserPid, timeoutMs)) {
             await cleanupSupervisorArtifacts(input.profileDir);
+            await cleanupStagedExtensions(input.profileDir);
             return;
         }
         throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器控制进程已断开，且孤儿浏览器关闭超时");
@@ -473,6 +587,7 @@ export const shutdownBrowserSession = async (input) => {
         const controllerAlive = isProcessAlive(input.controllerPid);
         const nextState = await readInstanceState(stateFilePath);
         if (!controllerAlive && nextState === null) {
+            await cleanupStagedExtensions(input.profileDir);
             return;
         }
         await sleep(100);
@@ -490,12 +605,14 @@ export const shutdownBrowserSession = async (input) => {
         const controllerAlive = isProcessAlive(input.controllerPid);
         const nextState = await readInstanceState(stateFilePath);
         if (!controllerAlive && nextState === null) {
+            await cleanupStagedExtensions(input.profileDir);
             return;
         }
         await sleep(100);
     }
     if (await terminateBrowserPid(state.browserPid, 1_000)) {
         await cleanupSupervisorArtifacts(input.profileDir);
+        await cleanupStagedExtensions(input.profileDir);
         return;
     }
     throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器控制进程关闭超时");

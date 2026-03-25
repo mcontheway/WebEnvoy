@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   BROWSER_CONTROL_FILENAME,
+  EXTENSION_BOOTSTRAP_FILENAME,
+  EXTENSION_BOOTSTRAP_SCRIPT_FILENAME,
+  EXTENSION_STAGING_DIRNAME,
   BROWSER_STATE_FILENAME,
   BrowserLaunchError,
   launchBrowser,
@@ -16,6 +19,14 @@ const tempDirs: string[] = [];
 
 const originalBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
 const originalBrowserMockLog = process.env.WEBENVOY_BROWSER_MOCK_LOG;
+
+const restoreEnv = (key: "WEBENVOY_BROWSER_PATH" | "WEBENVOY_BROWSER_MOCK_LOG", value: string | undefined): void => {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = value;
+};
 
 const createMockBrowserExecutable = async (): Promise<{ scriptPath: string; logPath: string }> => {
   const dir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-"));
@@ -86,6 +97,27 @@ const waitForLaunchLog = async (logPath: string): Promise<string> => {
   throw lastError ?? new Error("mock browser launch log not written in time");
 };
 
+const parseLaunchArgs = (launchLog: string): string[] => {
+  const firstLine = launchLog
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  if (!firstLine) {
+    return [];
+  }
+  const parsed = JSON.parse(firstLine) as { args?: unknown };
+  return Array.isArray(parsed.args) ? (parsed.args as string[]) : [];
+};
+
+const findArgValue = (args: string[], prefix: string): string | null => {
+  for (const arg of args) {
+    if (arg.startsWith(prefix)) {
+      return arg.slice(prefix.length);
+    }
+  }
+  return null;
+};
+
 const waitForExit = async (pid: number): Promise<void> => {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     try {
@@ -105,8 +137,8 @@ const waitForExit = async (pid: number): Promise<void> => {
 };
 
 afterEach(async () => {
-  process.env.WEBENVOY_BROWSER_PATH = originalBrowserPath;
-  process.env.WEBENVOY_BROWSER_MOCK_LOG = originalBrowserMockLog;
+  restoreEnv("WEBENVOY_BROWSER_PATH", originalBrowserPath);
+  restoreEnv("WEBENVOY_BROWSER_MOCK_LOG", originalBrowserMockLog);
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
     if (dir) {
@@ -138,9 +170,15 @@ describe("browser-launcher", () => {
     expect(profileStat.isDirectory()).toBe(true);
 
     const launchLog = await waitForLaunchLog(logPath);
-    expect(launchLog).toContain(`--user-data-dir=${profileDir}`);
-    expect(launchLog).toContain("--proxy-server=http://127.0.0.1:8080");
-    expect(launchLog).toContain("about:blank");
+    const launchArgs = parseLaunchArgs(launchLog);
+    expect(launchArgs).toContain(`--user-data-dir=${profileDir}`);
+    expect(launchArgs).toContain("--proxy-server=http://127.0.0.1:8080");
+    expect(launchArgs).toContain("about:blank");
+    const disableExtensionsExcept = findArgValue(launchArgs, "--disable-extensions-except=");
+    const loadExtension = findArgValue(launchArgs, "--load-extension=");
+    expect(disableExtensionsExcept).toBeTruthy();
+    expect(loadExtension).toBeTruthy();
+    expect(disableExtensionsExcept).toBe(loadExtension);
 
     await shutdownBrowserSession({
       profileDir,
@@ -152,6 +190,73 @@ describe("browser-launcher", () => {
     });
     await expect(readFile(join(profileDir, BROWSER_CONTROL_FILENAME), "utf8")).rejects.toMatchObject({
       code: "ENOENT"
+    });
+    await expect(
+      stat(join(profileDir, EXTENSION_STAGING_DIRNAME))
+    ).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
+  it("stages per-run extension payload and writes bootstrap file", async () => {
+    const { scriptPath, logPath } = await createMockBrowserExecutable();
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-extension-stage-"));
+    tempDirs.push(profileDir);
+    process.env.WEBENVOY_BROWSER_PATH = scriptPath;
+    process.env.WEBENVOY_BROWSER_MOCK_LOG = logPath;
+    const extensionBootstrap = {
+      fingerprint_profile_bundle: {
+        ua: "unit-test-agent"
+      },
+      fingerprint_patch_manifest: {
+        required_patches: ["audio_context"]
+      }
+    };
+
+    const launched = await launchBrowser({
+      command: "runtime.start",
+      profileDir,
+      proxyUrl: null,
+      runId: "run-launcher-test-extension-stage-001",
+      params: {},
+      extensionBootstrap
+    });
+
+    const launchArgs = parseLaunchArgs(await waitForLaunchLog(logPath));
+    const stagedExtensionPath = findArgValue(launchArgs, "--load-extension=");
+    expect(stagedExtensionPath).toBeTruthy();
+    expect(stagedExtensionPath).toContain(EXTENSION_STAGING_DIRNAME);
+    expect(stagedExtensionPath).toContain("run-launcher-test-extension-stage-001");
+    const manifestRaw = await readFile(join(stagedExtensionPath as string, "manifest.json"), "utf8");
+    const manifest = JSON.parse(manifestRaw) as {
+      content_scripts?: Array<{ js?: string[] }>;
+    };
+    const contentScriptEntries = manifest.content_scripts?.[0]?.js ?? [];
+    expect(contentScriptEntries[0]).toBe(`build/${EXTENSION_BOOTSTRAP_SCRIPT_FILENAME}`);
+    expect(contentScriptEntries[1]).toBe("build/content-script.js");
+    const bootstrapRaw = await readFile(
+      join(stagedExtensionPath as string, EXTENSION_BOOTSTRAP_FILENAME),
+      "utf8"
+    );
+    const bootstrap = JSON.parse(bootstrapRaw) as {
+      schemaVersion: number;
+      runId: string;
+      extension_bootstrap: Record<string, unknown> | null;
+    };
+    expect(bootstrap.schemaVersion).toBe(1);
+    expect(bootstrap.runId).toBe("run-launcher-test-extension-stage-001");
+    expect(bootstrap.extension_bootstrap).toEqual(extensionBootstrap);
+    const bootstrapScriptRaw = await readFile(
+      join(stagedExtensionPath as string, "build", EXTENSION_BOOTSTRAP_SCRIPT_FILENAME),
+      "utf8"
+    );
+    expect(bootstrapScriptRaw).toContain("__webenvoy_fingerprint_bootstrap_payload__");
+    expect(bootstrapScriptRaw).toContain("unit-test-agent");
+
+    await shutdownBrowserSession({
+      profileDir,
+      controllerPid: launched.controllerPid,
+      runId: "run-launcher-test-extension-stage-001"
     });
   });
 

@@ -73,6 +73,7 @@ interface BrowserLauncherLike {
     proxyUrl: string | null;
     runId: string;
     params: JsonObject;
+    extensionBootstrap?: JsonObject | null;
   }): Promise<BrowserLaunchResult>;
   shutdown(input: {
     profileDir: string;
@@ -254,6 +255,16 @@ const ensureFingerprintExecutionAllowed = (
   );
 };
 
+type ExtensionBootstrapInput = {
+  fingerprint_runtime: ReturnType<typeof buildFingerprintContextForMeta>;
+};
+
+const buildExtensionBootstrapInput = (
+  fingerprintRuntime: ReturnType<typeof buildFingerprintContextForMeta>
+): ExtensionBootstrapInput => ({
+  fingerprint_runtime: fingerprintRuntime
+});
+
 const mapRuntimeError = (error: unknown): CliError => {
   if (error instanceof CliError) {
     return error;
@@ -384,7 +395,8 @@ export class ProfileRuntimeService {
         profileDir,
         proxyUrl: session.proxyBinding?.url ?? null,
         runId: input.runId,
-        params: input.params
+        params: input.params,
+        extensionBootstrap: buildExtensionBootstrapInput(fingerprintRuntime)
       });
       launchedControllerPid = browserLaunch.controllerPid;
       await this.#updateLockOwnerPid(lockPath, input.runId, browserLaunch.controllerPid, nowIso);
@@ -529,7 +541,8 @@ export class ProfileRuntimeService {
           profileDir,
           proxyUrl: session.proxyBinding?.url ?? null,
           runId: input.runId,
-          params: input.params
+          params: input.params,
+          extensionBootstrap: buildExtensionBootstrapInput(fingerprintRuntime)
         });
         launchedControllerPid = browserLaunch.controllerPid;
         await this.#updateLockOwnerPid(lockPath, input.runId, browserLaunch.controllerPid, nowIso);
