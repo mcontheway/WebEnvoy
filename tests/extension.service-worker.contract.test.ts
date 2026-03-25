@@ -1745,6 +1745,245 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
+  it("invalidates trusted fingerprint context after disconnect/recovery with new session", async () => {
+    const firstPort = createMockPort();
+    const secondPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort, secondPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+
+    startChromeBackgroundBridge(chromeApi, {
+      heartbeatIntervalMs: 10_000,
+      recoveryRetryIntervalMs: 5,
+      recoveryWindowMs: 100
+    });
+    respondHandshake(firstPort, {
+      sessionId: "nm-session-001"
+    });
+    await Promise.resolve();
+
+    const fingerprintContext = createFingerprintRuntimeContext();
+    await primeTrustedFingerprintContext({
+      mockPort: firstPort,
+      runtimeMessageListeners,
+      runId: "run-xhs-live-recovery-untrusted-001",
+      profile: "profile-a",
+      fingerprintContext
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onDisconnectListeners[0]?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    respondHandshake(secondPort, {
+      sessionId: "nm-session-002"
+    });
+    await Promise.resolve();
+
+    secondPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-recovery-untrusted-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-002",
+        run_id: "run-xhs-live-recovery-untrusted-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = secondPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-live-recovery-untrusted-001");
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_UNTRUSTED"]);
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_CONTEXT_UNTRUSTED", "FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+  });
+
+  it("rotates trusted fingerprint context when runtime.ping overwrites same profile::runId", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const runId = "run-xhs-live-trust-rotate-001";
+    const profile = "profile-a";
+    const trustedAllowed = createFingerprintRuntimeContext({
+      live_allowed: true,
+      live_decision: "allowed",
+      allowed_execution_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+      reason_codes: []
+    });
+    const trustedBlocked = createFingerprintRuntimeContext({
+      live_allowed: false,
+      live_decision: "dry_run_only",
+      allowed_execution_modes: ["dry_run", "recon"],
+      reason_codes: ["PROFILE_FIELD_MISSING"]
+    });
+
+    await primeTrustedFingerprintContext({
+      mockPort: firstPort,
+      runtimeMessageListeners,
+      runId,
+      profile,
+      fingerprintContext: trustedAllowed
+    });
+    await primeTrustedFingerprintContext({
+      mockPort: firstPort,
+      runtimeMessageListeners,
+      runId,
+      profile,
+      fingerprintContext: trustedBlocked
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onMessageListeners[0]?.({
+      id: runId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: trustedBlocked
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === runId);
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["PROFILE_FIELD_MISSING"]);
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+  });
+
+  it("invalidates trust when live request fingerprint_context changes without re-prime", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const runId = "run-xhs-live-context-drift-001";
+    const profile = "profile-a";
+    const trustedContext = createFingerprintRuntimeContext();
+    const driftedContext = createFingerprintRuntimeContext({
+      live_allowed: false,
+      live_decision: "dry_run_only",
+      allowed_execution_modes: ["dry_run", "recon"],
+      reason_codes: ["OS_FAMILY_MISMATCH"]
+    });
+
+    await primeTrustedFingerprintContext({
+      mockPort: firstPort,
+      runtimeMessageListeners,
+      runId,
+      profile,
+      fingerprintContext: trustedContext
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onMessageListeners[0]?.({
+      id: `${runId}-drifted`,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: driftedContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const firstBlocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === `${runId}-drifted`);
+    const firstPayload = asRecord(firstBlocked?.payload) ?? {};
+    const firstConsumerGateResult = asRecord(firstPayload.consumer_gate_result);
+    expect(firstConsumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_UNTRUSTED"]);
+
+    firstPort.onMessageListeners[0]?.({
+      id: `${runId}-after-invalidation`,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: trustedContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const secondBlocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === `${runId}-after-invalidation`);
+    expect(secondBlocked?.status).toBe("error");
+    const secondPayload = asRecord(secondBlocked?.payload) ?? {};
+    const secondConsumerGateResult = asRecord(secondPayload.consumer_gate_result);
+    expect(secondConsumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_UNTRUSTED"]);
+    expect(secondConsumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_CONTEXT_UNTRUSTED", "FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+  });
+
   it("forwards top-level requested_execution_mode live path and relays required-patch missing block", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
@@ -1850,6 +2089,62 @@ describe("extension service worker recovery contract", () => {
           }
         }
       }
+    });
+    const blockedPayload = asRecord(blocked?.payload) ?? {};
+    const gateOutcome = asRecord(blockedPayload.gate_outcome);
+    const consumerGateResult = asRecord(blockedPayload.consumer_gate_result);
+    const fingerprintExecution = asRecord(blockedPayload.fingerprint_execution);
+    const auditRecord = asRecord(blockedPayload.audit_record);
+    const gateOutcomeExecutionFailure = asRecord(gateOutcome?.execution_failure);
+    const consumerGateExecutionFailure = asRecord(consumerGateResult?.execution_failure);
+    const fingerprintExecutionFailure = asRecord(fingerprintExecution?.execution_failure);
+    const auditExecutionFailure = asRecord(auditRecord?.execution_failure);
+    expect(gateOutcome?.gate_decision).toBe("blocked");
+    expect(gateOutcome?.fingerprint_gate_decision).toBe("blocked");
+    expect(gateOutcome?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_REQUIRED_PATCH_MISSING"])
+    );
+    expect(gateOutcomeExecutionFailure).toMatchObject({
+      stage: "execution",
+      reason: "FINGERPRINT_REQUIRED_PATCH_MISSING",
+      requested_execution_mode: "live_read_limited",
+      missing_required_patches: ["unknown_required_patch"]
+    });
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(
+      expect.arrayContaining(["FINGERPRINT_REQUIRED_PATCH_MISSING"])
+    );
+    expect(consumerGateExecutionFailure).toMatchObject({
+      stage: "execution",
+      reason: "FINGERPRINT_REQUIRED_PATCH_MISSING",
+      requested_execution_mode: "live_read_limited",
+      missing_required_patches: ["unknown_required_patch"]
+    });
+    expect(fingerprintExecution?.live_allowed).toBe(false);
+    expect(fingerprintExecution?.live_decision).toBe("dry_run_only");
+    expect(fingerprintExecution?.allowed_execution_modes).toEqual(
+      expect.arrayContaining(["dry_run", "recon"])
+    );
+    expect(fingerprintExecution?.reason_codes).toEqual(
+      expect.arrayContaining(["FINGERPRINT_REQUIRED_PATCH_MISSING"])
+    );
+    expect(fingerprintExecution?.missing_required_patches).toEqual(["unknown_required_patch"]);
+    expect(fingerprintExecutionFailure).toMatchObject({
+      stage: "execution",
+      reason: "FINGERPRINT_REQUIRED_PATCH_MISSING",
+      requested_execution_mode: "live_read_limited",
+      missing_required_patches: ["unknown_required_patch"]
+    });
+    expect(auditRecord?.gate_decision).toBe("blocked");
+    expect(auditRecord?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_REQUIRED_PATCH_MISSING"])
+    );
+    expect(auditExecutionFailure).toMatchObject({
+      stage: "execution",
+      reason: "FINGERPRINT_REQUIRED_PATCH_MISSING",
+      requested_execution_mode: "live_read_limited",
+      missing_required_patches: ["unknown_required_patch"]
     });
   });
 

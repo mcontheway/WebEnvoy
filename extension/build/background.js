@@ -82,6 +82,7 @@ const scoreXhsTab = (tab) => {
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
+const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 const resolveFingerprintContext = (commandParams) => {
     const context = ensureFingerprintRuntimeContext(commandParams.fingerprint_context);
     return context ? { ...context } : null;
@@ -216,6 +217,8 @@ const resolveBlockedFallbackMode = (requestedExecutionMode, riskState) => reques
             ? "recon"
             : "dry_run";
 const buildTrustedFingerprintContextKey = (profile, runId) => `${profile}::${runId}`;
+const serializeFingerprintRuntimeContext = (fingerprintRuntime) => JSON.stringify(fingerprintRuntime);
+const isFingerprintRuntimeContextEquivalent = (left, right) => serializeFingerprintRuntimeContext(left) === serializeFingerprintRuntimeContext(right);
 export class BackgroundRelay {
     contentScript;
     #listeners = new Set();
@@ -510,6 +513,7 @@ class ChromeBackgroundBridge {
         this.#pendingHandshakeId = null;
         this.#pendingHeartbeatId = null;
         this.#missedHeartbeatCount = 0;
+        this.#clearTrustedFingerprintContexts();
         this.#failAllPending({
             code: "ERR_TRANSPORT_DISCONNECTED",
             message
@@ -554,10 +558,14 @@ class ChromeBackgroundBridge {
             this.#handleDisconnect(`incompatible protocol: ${protocol ?? "unknown"}`);
             return;
         }
+        const prevSessionId = this.#sessionId;
         const sessionId = typeof response.summary.session_id === "string" && response.summary.session_id.length > 0
             ? response.summary.session_id
             : this.#sessionId;
         this.#sessionId = sessionId;
+        if (sessionId !== prevSessionId) {
+            this.#clearTrustedFingerprintContexts();
+        }
         this.#state = "ready";
         this.#recoveryDeadlineMs = null;
         this.#stopRecoveryLoop();
@@ -592,6 +600,7 @@ class ChromeBackgroundBridge {
     }
     #enterRecovery(message) {
         const recoveryWindowMs = this.options?.recoveryWindowMs ?? 30_000;
+        this.#clearTrustedFingerprintContexts();
         this.#state = "recovering";
         this.#recoveryDeadlineMs = Date.now() + recoveryWindowMs;
         this.#startRecoveryLoop();
@@ -634,6 +643,15 @@ class ChromeBackgroundBridge {
         this.#handshakeSeq += 1;
         return `bg-open-${this.#handshakeSeq.toString().padStart(4, "0")}`;
     }
+    #clearTrustedFingerprintContexts() {
+        if (this.#trustedFingerprintContexts.size === 0) {
+            return;
+        }
+        this.#trustedFingerprintContexts.clear();
+    }
+    #clearTrustedFingerprintContextByRun(profile, runId) {
+        this.#trustedFingerprintContexts.delete(buildTrustedFingerprintContextKey(profile, runId));
+    }
     #rememberTrustedFingerprintContext(request, payload, ok) {
         if (!ok) {
             return;
@@ -653,8 +671,21 @@ class ChromeBackgroundBridge {
         if (fingerprintRuntime.profile !== profile) {
             return;
         }
+        const sessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
         const key = buildTrustedFingerprintContextKey(profile, runId);
-        this.#trustedFingerprintContexts.set(key, { ...fingerprintRuntime });
+        const serializedFingerprintRuntime = serializeFingerprintRuntimeContext(fingerprintRuntime);
+        const existing = this.#trustedFingerprintContexts.get(key);
+        const shouldRotate = !!existing &&
+            (existing.sessionId !== sessionId ||
+                existing.serializedFingerprintRuntime !== serializedFingerprintRuntime);
+        if (shouldRotate) {
+            this.#trustedFingerprintContexts.delete(key);
+        }
+        this.#trustedFingerprintContexts.set(key, {
+            sessionId,
+            fingerprintRuntime: { ...fingerprintRuntime },
+            serializedFingerprintRuntime
+        });
         if (this.#trustedFingerprintContexts.size <= MAX_TRUSTED_FINGERPRINT_CONTEXTS) {
             return;
         }
@@ -671,7 +702,33 @@ class ChromeBackgroundBridge {
         const runId = String(request.params.run_id ?? request.id);
         const key = buildTrustedFingerprintContextKey(profile, runId);
         const trusted = this.#trustedFingerprintContexts.get(key);
-        return trusted ? { ...trusted } : null;
+        if (!trusted) {
+            return null;
+        }
+        if (trusted.sessionId !== this.#sessionId) {
+            this.#trustedFingerprintContexts.delete(key);
+            return null;
+        }
+        return { ...trusted.fingerprintRuntime };
+    }
+    #resolveValidatedTrustedFingerprintContext(request, requestedFingerprintContext) {
+        const trusted = this.#resolveTrustedFingerprintContext(request);
+        if (!trusted) {
+            return null;
+        }
+        if (requestedFingerprintContext &&
+            !isFingerprintRuntimeContextEquivalent(trusted, requestedFingerprintContext)) {
+            const profile = asNonEmptyString(request.profile);
+            if (profile) {
+                const runId = String(request.params.run_id ?? request.id);
+                this.#clearTrustedFingerprintContextByRun(profile, runId);
+            }
+            else {
+                this.#clearTrustedFingerprintContexts();
+            }
+            return null;
+        }
+        return trusted;
     }
     async #onNativeRequest(request) {
         if (request.method === "bridge.open") {
@@ -857,7 +914,7 @@ class ChromeBackgroundBridge {
         const requestedLiveMode = requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
         const requestedFingerprintContext = resolveFingerprintContext(commandParams);
         const trustedFingerprintContext = command === "xhs.search" && requestedLiveMode
-            ? this.#resolveTrustedFingerprintContext(request)
+            ? this.#resolveValidatedTrustedFingerprintContext(request, requestedFingerprintContext)
             : null;
         const forwardFingerprintContext = trustedFingerprintContext ?? requestedFingerprintContext;
         let tabId;
@@ -994,6 +1051,72 @@ class ChromeBackgroundBridge {
                 failure_site: null
             }
         };
+    }
+    #appendGateReason(target, reason) {
+        const gateReasons = asStringArray(target.gate_reasons);
+        if (!gateReasons.includes(reason)) {
+            gateReasons.push(reason);
+        }
+        target.gate_reasons = gateReasons;
+    }
+    #backfillExecutionFailureIntoGatePayload(gatePayload, payload) {
+        const details = asRecord(payload.details);
+        if (!details) {
+            return;
+        }
+        const stage = asNonEmptyString(details.stage);
+        const reason = asNonEmptyString(details.reason);
+        if (stage !== "execution" || !reason) {
+            return;
+        }
+        const isFingerprintFailure = reason.startsWith("FINGERPRINT_");
+        const gateOutcome = asRecord(gatePayload.gate_outcome);
+        if (gateOutcome) {
+            gateOutcome.gate_decision = "blocked";
+            this.#appendGateReason(gateOutcome, reason);
+            if (isFingerprintFailure) {
+                gateOutcome.fingerprint_gate_decision = "blocked";
+            }
+        }
+        const consumerGateResult = asRecord(gatePayload.consumer_gate_result);
+        if (consumerGateResult) {
+            consumerGateResult.gate_decision = "blocked";
+            this.#appendGateReason(consumerGateResult, reason);
+            if (isFingerprintFailure) {
+                consumerGateResult.fingerprint_gate_decision = "blocked";
+                const reasonCodes = asStringArray(consumerGateResult.fingerprint_reason_codes);
+                if (!reasonCodes.includes(reason)) {
+                    reasonCodes.push(reason);
+                }
+                consumerGateResult.fingerprint_reason_codes = reasonCodes;
+            }
+        }
+        if (isFingerprintFailure) {
+            const runtime = asRecord(payload.fingerprint_runtime);
+            const runtimeExecution = asRecord(runtime?.execution);
+            const fingerprintExecution = runtimeExecution
+                ? { ...runtimeExecution }
+                : asRecord(gatePayload.fingerprint_execution);
+            if (fingerprintExecution) {
+                fingerprintExecution.live_allowed = false;
+                fingerprintExecution.live_decision = "dry_run_only";
+                const allowedModes = asStringArray(fingerprintExecution.allowed_execution_modes);
+                const fallbackModes = allowedModes.filter((mode) => mode === "dry_run" || mode === "recon");
+                fingerprintExecution.allowed_execution_modes =
+                    fallbackModes.length > 0 ? fallbackModes : ["dry_run"];
+                const reasonCodes = asStringArray(fingerprintExecution.reason_codes);
+                if (!reasonCodes.includes(reason)) {
+                    reasonCodes.push(reason);
+                }
+                fingerprintExecution.reason_codes = reasonCodes;
+                gatePayload.fingerprint_execution = fingerprintExecution;
+            }
+        }
+        const auditRecord = asRecord(gatePayload.audit_record);
+        if (auditRecord) {
+            auditRecord.gate_decision = "blocked";
+            this.#appendGateReason(auditRecord, reason);
+        }
     }
     async #evaluateXhsTargetGate(request) {
         const commandParams = asRecord(request.params.command_params) ?? {};
@@ -1179,7 +1302,7 @@ class ChromeBackgroundBridge {
         }
         const shouldEvaluateTrustedFingerprintGate = requestedLiveMode && !issue208WriteGateOnly && gateReasons.length === 0;
         if (shouldEvaluateTrustedFingerprintGate) {
-            const trustedFingerprintContext = this.#resolveTrustedFingerprintContext(request);
+            const trustedFingerprintContext = this.#resolveValidatedTrustedFingerprintContext(request, requestedFingerprintContext);
             fingerprintExecution = trustedFingerprintContext?.execution ?? null;
             fingerprintReasonCodes = (Array.isArray(fingerprintExecution?.reason_codes) ? fingerprintExecution.reason_codes : []).filter((code) => typeof code === "string");
             if (fingerprintExecution === null) {
@@ -1371,6 +1494,9 @@ class ChromeBackgroundBridge {
             ? { ...result.payload }
             : {};
         this.#rememberTrustedFingerprintContext(request, payload, result.ok === true);
+        if (pending.gatePayload && result.ok !== true) {
+            this.#backfillExecutionFailureIntoGatePayload(pending.gatePayload, payload);
+        }
         const summary = typeof payload.summary === "object" && payload.summary !== null
             ? payload.summary
             : null;

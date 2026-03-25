@@ -8,8 +8,6 @@ const REQUIRED_PATCHES = [
 const OPTIONAL_PATCHES = [
   "hardware_concurrency",
   "device_memory",
-  "screen_color_depth",
-  "screen_pixel_depth",
   "performance_memory",
   "permissions_api",
   "navigator_connection"
@@ -22,8 +20,6 @@ const FIELD_DEPENDENCIES = {
   navigator_mime_types: [],
   hardware_concurrency: ["hardwareConcurrency"],
   device_memory: ["deviceMemory"],
-  screen_color_depth: ["screen.colorDepth"],
-  screen_pixel_depth: ["screen.pixelDepth"],
   performance_memory: ["deviceMemory"],
   permissions_api: [],
   navigator_connection: []
