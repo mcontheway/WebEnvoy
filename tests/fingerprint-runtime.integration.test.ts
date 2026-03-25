@@ -783,24 +783,6 @@ const withCdpSession = async <T>(
   }
 };
 
-const createProbeTargetSnapshot = async (
-  browserWsUrl: string,
-  cdpPort: number,
-  probeUrl: string,
-  timeoutMs: number
-): Promise<PageTargetSnapshot> => {
-  const createdTarget = await withCdpSession(browserWsUrl, async (send) => {
-    return await send("Target.createTarget", { url: probeUrl });
-  });
-  const targetId = createdTarget.targetId;
-  if (typeof targetId !== "string" || targetId.length === 0) {
-    throw new Error(
-      `Target.createTarget returned invalid target id: ${safeJsonStringify(createdTarget)}`
-    );
-  }
-  return await waitForTargetSnapshotById(cdpPort, targetId, timeoutMs);
-};
-
 const evaluateInPage = async (
   send: CdpSend,
   expression: string
@@ -1138,7 +1120,6 @@ describe("fingerprint runtime real browser integration", () => {
       throw new Error("fixture server address unavailable");
     }
     const probeUrl = `http://127.0.0.1:${address.port}/probe`;
-    const bootstrapUrl = "about:blank";
 
     const profile = "fr0012_real_browser_profile";
     const runId = "run-real-browser-001";
@@ -1155,7 +1136,7 @@ describe("fingerprint runtime real browser integration", () => {
             runId,
             "--params",
             JSON.stringify({
-              startUrl: bootstrapUrl,
+              startUrl: probeUrl,
               headless: false
             })
           ],
@@ -1189,23 +1170,17 @@ describe("fingerprint runtime real browser integration", () => {
         async () => readBrowserTargetDiagnostics(browserWsUrl, { probeUrl })
       );
       expect(browserTargetDiagnostics.hasExtensionServiceWorker).toBe(true);
-      const bootstrapPageWsUrl = await runStage(
+      const wsUrl = await runStage(
         stageState,
-        "resolve-bootstrap-page-target-ws-url",
-        async () => ensurePageTargetWebSocketUrl(cdpPort, bootstrapUrl, 20_000)
+        "resolve-probe-page-target-ws-url",
+        async () => ensurePageTargetWebSocketUrl(cdpPort, probeUrl, 20_000)
       );
-      await runStage(stageState, "bring-bootstrap-page-to-front", async () =>
-        bringPageToFront(bootstrapPageWsUrl)
+      await runStage(stageState, "bring-probe-page-to-front", async () =>
+        bringPageToFront(wsUrl)
       );
-      const bootstrapTarget = await runStage(stageState, "snapshot-bootstrap-target", async () =>
-        waitForTargetSnapshotByWsUrl(cdpPort, bootstrapPageWsUrl, 20_000)
+      const probeTarget = await runStage(stageState, "snapshot-probe-target", async () =>
+        waitForTargetSnapshotByWsUrl(cdpPort, wsUrl, 20_000)
       );
-      expect(bootstrapTarget.url).toBe(bootstrapUrl);
-      const probeTarget = await runStage(stageState, "create-probe-target-explicitly", async () =>
-        createProbeTargetSnapshot(browserWsUrl, cdpPort, probeUrl, 20_000)
-      );
-      const wsUrl = probeTarget.webSocketDebuggerUrl;
-      await runStage(stageState, "bring-probe-target-to-front", async () => bringPageToFront(wsUrl));
       const targetBeforeNavigation = await runStage(
         stageState,
         "snapshot-probe-target-before-navigation",
