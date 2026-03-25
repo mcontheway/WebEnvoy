@@ -14,6 +14,8 @@ export {
 const FINGERPRINT_CONTEXT_CACHE_KEY = "__webenvoy_fingerprint_context__";
 const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
 const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
+const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
+const STARTUP_FINGERPRINT_INSTALL_TIMEOUT_MS = 5_000;
 
 type ContentScriptStorageArea = {
   get?: (
@@ -62,6 +64,13 @@ type MainWorldFingerprintInstallRequest = {
   };
 };
 
+type MainWorldResultEnvelope = {
+  id?: unknown;
+  ok?: unknown;
+  result?: unknown;
+  message?: unknown;
+};
+
 const normalizeForwardMessage = (
   request: Partial<BackgroundToContentMessage> & { id: string }
 ): BackgroundToContentMessage => ({
@@ -108,6 +117,16 @@ const asNonEmptyString = (value: unknown): string | null =>
 
 const asStringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+
+const createWindowEvent = (type: string, detail: unknown): Event => {
+  if (typeof CustomEvent === "function") {
+    return new CustomEvent(type, { detail });
+  }
+  return {
+    type,
+    detail
+  } as unknown as Event;
+};
 
 const resolveBootstrapFingerprintContext = (value: unknown): BootstrapFingerprintContext => {
   const direct = ensureFingerprintRuntimeContext(value);
@@ -218,13 +237,16 @@ const persistExtensionFingerprintContext = (
   }
 };
 
-const installStartupFingerprintPatch = (fingerprintRuntime: FingerprintRuntimeContext): void => {
+const installStartupFingerprintPatch = async (
+  fingerprintRuntime: FingerprintRuntimeContext
+): Promise<Record<string, unknown> | null> => {
   if (
     typeof window === "undefined" ||
     typeof window.dispatchEvent !== "function" ||
-    typeof CustomEvent !== "function"
+    typeof window.addEventListener !== "function" ||
+    typeof window.removeEventListener !== "function"
   ) {
-    return;
+    return null;
   }
 
   const installRequest: MainWorldFingerprintInstallRequest = {
@@ -238,15 +260,95 @@ const installStartupFingerprintPatch = (fingerprintRuntime: FingerprintRuntimeCo
     }
   };
 
-  try {
-    window.dispatchEvent(
-      new CustomEvent(MAIN_WORLD_REQUEST_EVENT, {
-        detail: installRequest
-      })
-    );
-  } catch {
-    // ignore startup install dispatch failures
+  return await new Promise<Record<string, unknown> | null>((resolve) => {
+    let settled = false;
+    const finish = (state: Record<string, unknown> | null): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      window.removeEventListener(MAIN_WORLD_RESULT_EVENT, onResult as EventListener);
+      resolve(state);
+    };
+    const onResult = (event: Event): void => {
+      const detail = asRecord((event as CustomEvent<MainWorldResultEnvelope>).detail);
+      if (!detail || detail.id !== installRequest.id) {
+        return;
+      }
+      if (detail.ok !== true) {
+        const message = asNonEmptyString(detail.message);
+        finish({
+          installed: false,
+          error: message ?? "startup fingerprint install failed"
+        });
+        return;
+      }
+      const installState = asRecord(detail.result);
+      if (!installState) {
+        finish({
+          installed: false,
+          error: "startup fingerprint install result missing"
+        });
+        return;
+      }
+      finish(installState);
+    };
+    const timeout = setTimeout(() => {
+      finish({
+        installed: false,
+        error: "startup fingerprint install timeout"
+      });
+    }, STARTUP_FINGERPRINT_INSTALL_TIMEOUT_MS);
+    window.addEventListener(MAIN_WORLD_RESULT_EVENT, onResult as EventListener);
+
+    try {
+      window.dispatchEvent(createWindowEvent(MAIN_WORLD_REQUEST_EVENT, installRequest));
+    } catch {
+      finish({
+        installed: false,
+        error: "startup fingerprint install dispatch failed"
+      });
+    }
+  });
+};
+
+const installAndEmitStartupFingerprintTrust = (
+  runtime: ContentScriptRuntime,
+  input: {
+    runId: string | null;
+    fingerprintRuntime: FingerprintRuntimeContext;
   }
+): void => {
+  void installStartupFingerprintPatch(input.fingerprintRuntime).then((installState) => {
+    if (!input.runId) {
+      return;
+    }
+    const trusted = installState?.installed === true;
+    const withInjection = installState
+      ? {
+          ...input.fingerprintRuntime,
+          injection: installState
+        }
+      : input.fingerprintRuntime;
+    runtime.sendMessage?.({
+      kind: "result",
+      id: `startup-fingerprint-trust:${input.runId}`,
+      ok: true,
+      payload: {
+        startup_fingerprint_trust: {
+          run_id: input.runId,
+          profile: input.fingerprintRuntime.profile,
+          trusted,
+          fingerprint_runtime: withInjection,
+          install_state: {
+            status: trusted ? "installed" : "failed",
+            ...(installState ?? {})
+          }
+        }
+      }
+    });
+  });
 };
 
 export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean => {
@@ -259,7 +361,10 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
   const bootstrapContext = bootstrapInput.fingerprintRuntime;
   if (bootstrapContext) {
     persistExtensionFingerprintContext(bootstrapContext, bootstrapInput.runId);
-    installStartupFingerprintPatch(bootstrapContext);
+    installAndEmitStartupFingerprintTrust(runtime, {
+      runId: bootstrapInput.runId,
+      fingerprintRuntime: bootstrapContext
+    });
   }
 
   handler.onResult((message) => {

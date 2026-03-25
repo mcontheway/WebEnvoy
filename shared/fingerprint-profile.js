@@ -204,6 +204,15 @@ const isBattery = (value) =>
   value.level >= 0 &&
   value.level <= 1;
 
+const isLegacyMigration = (value) =>
+  isObjectRecord(value) &&
+  value.status === "backfilled_from_legacy" &&
+  typeof value.migrated_at === "string" &&
+  value.migrated_at.length > 0 &&
+  Number.isInteger(value.source_schema_version) &&
+  Array.isArray(value.reason_codes) &&
+  value.reason_codes.every((code) => typeof code === "string");
+
 const isFingerprintProfileBundle = (value) =>
   isObjectRecord(value) &&
   typeof value.ua === "string" &&
@@ -216,7 +225,8 @@ const isFingerprintProfileBundle = (value) =>
   Number.isFinite(value.audioNoiseSeed) &&
   typeof value.canvasNoiseSeed === "number" &&
   Number.isFinite(value.canvasNoiseSeed) &&
-  isEnvironment(value.environment);
+  isEnvironment(value.environment) &&
+  (value.legacy_migration === undefined || isLegacyMigration(value.legacy_migration));
 
 const isPatchManifest = (value) =>
   isObjectRecord(value) &&
@@ -334,6 +344,30 @@ const buildFingerprintProfileBundle = (input) => {
   };
 };
 
+const markFingerprintProfileBundleAsLegacyBackfilled = (input) => {
+  const bundle = buildFingerprintProfileBundle(input);
+  const sourceSchemaVersion =
+    Number.isInteger(input.sourceSchemaVersion) && input.sourceSchemaVersion > 0
+      ? input.sourceSchemaVersion
+      : 1;
+  const reasonCodes =
+    Array.isArray(input.reasonCodes) && input.reasonCodes.every((code) => typeof code === "string")
+      ? [...new Set(input.reasonCodes)]
+      : ["LEGACY_PROFILE_BUNDLE_MIGRATED"];
+  return {
+    ...bundle,
+    legacy_migration: {
+      status: "backfilled_from_legacy",
+      migrated_at:
+        typeof input.migratedAt === "string" && input.migratedAt.length > 0
+          ? input.migratedAt
+          : new Date().toISOString(),
+      source_schema_version: sourceSchemaVersion,
+      reason_codes: reasonCodes
+    }
+  };
+};
+
 const buildFingerprintPatchManifest = (input) => {
   const bundle = input.bundle;
   const unsupportedReasonCodes = [];
@@ -345,6 +379,10 @@ const buildFingerprintPatchManifest = (input) => {
       unsupportedReasonCodes.push("PROFILE_FIELD_MISSING");
       break;
     }
+  }
+
+  if (isLegacyMigration(bundle.legacy_migration)) {
+    unsupportedReasonCodes.push(...bundle.legacy_migration.reason_codes);
   }
 
   return {
@@ -478,6 +516,7 @@ export {
   buildFingerprintProfileBundle,
   buildFingerprintRuntimeContext,
   buildIncompleteFingerprintRuntimeContext,
+  markFingerprintProfileBundleAsLegacyBackfilled,
   ensureFingerprintRuntimeContext,
   isConsistencyCheck,
   isFingerprintProfileBundle,

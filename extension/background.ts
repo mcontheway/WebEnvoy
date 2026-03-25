@@ -436,6 +436,7 @@ const isFingerprintRuntimeContextEquivalent = (
 ): boolean => serializeFingerprintRuntimeContext(left) === serializeFingerprintRuntimeContext(right);
 
 const TRUST_INVALIDATION_COMMANDS = new Set(["runtime.stop", "runtime.start", "runtime.login"]);
+// Trust must be primed by commands that actually traverse the extension bridge.
 const TRUST_PRIMING_COMMANDS = new Set(["runtime.start", "runtime.login", "runtime.status"]);
 
 export class BackgroundRelay {
@@ -990,6 +991,31 @@ class ChromeBackgroundBridge {
     }
     const sessionId =
       asNonEmptyString(request.params.session_id) ?? this.#sessionId;
+    this.#upsertTrustedFingerprintContext(profile, runId, sessionId, fingerprintRuntime);
+  }
+
+  #rememberStartupTrustedFingerprintContext(payload: Record<string, unknown>): void {
+    const startupTrust = asRecord(payload.startup_fingerprint_trust);
+    if (!startupTrust) {
+      return;
+    }
+    const installState = asRecord(startupTrust.install_state);
+    const trustedByFlag = startupTrust.trusted === true;
+    const trustedByInstallState =
+      installState?.installed === true || installState?.status === "installed";
+    if (!trustedByFlag && !trustedByInstallState) {
+      return;
+    }
+    const runId = asNonEmptyString(startupTrust.run_id ?? startupTrust.runId);
+    const profile = asNonEmptyString(startupTrust.profile);
+    if (!runId || !profile) {
+      return;
+    }
+    const fingerprintRuntime = ensureFingerprintRuntimeContext(startupTrust.fingerprint_runtime ?? null);
+    if (!fingerprintRuntime || fingerprintRuntime.profile !== profile) {
+      return;
+    }
+    const sessionId = asNonEmptyString(startupTrust.session_id ?? startupTrust.sessionId) ?? this.#sessionId;
     this.#upsertTrustedFingerprintContext(profile, runId, sessionId, fingerprintRuntime);
   }
 
@@ -1947,6 +1973,7 @@ class ChromeBackgroundBridge {
         : {};
     const pending = this.#pending.get(result.id);
     if (!pending) {
+      this.#rememberStartupTrustedFingerprintContext(payload);
       return;
     }
 

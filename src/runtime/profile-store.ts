@@ -5,6 +5,7 @@ import { join, resolve, sep } from "node:path";
 import {
   buildFingerprintProfileBundle,
   isFingerprintProfileBundle,
+  markFingerprintProfileBundleAsLegacyBackfilled,
   normalizeArch,
   normalizePlatform,
   type FingerprintProfileBundle
@@ -203,6 +204,16 @@ const parseMeta = (raw: string): ProfileMeta => {
   return parsed;
 };
 
+const buildLegacyBundleMigration = (meta: ProfileMeta): FingerprintProfileBundle =>
+  markFingerprintProfileBundleAsLegacyBackfilled({
+    profileName: meta.profileName,
+    fingerprintSeeds: meta.fingerprintSeeds,
+    environment: resolveCurrentEnvironment(),
+    migratedAt: meta.updatedAt,
+    sourceSchemaVersion: meta.schemaVersion,
+    reasonCodes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
+  });
+
 export class ProfileStore {
   private readonly rootDir: string;
 
@@ -232,7 +243,16 @@ export class ProfileStore {
     const metaPath = this.getMetaPath(profileName);
     try {
       const raw = await this.fs.readFile(metaPath, "utf8");
-      return parseMeta(raw);
+      const parsed = parseMeta(raw);
+      if (parsed.fingerprintProfileBundle === undefined) {
+        const migratedMeta: ProfileMeta = {
+          ...parsed,
+          fingerprintProfileBundle: buildLegacyBundleMigration(parsed)
+        };
+        await this.writeMeta(profileName, migratedMeta);
+        return migratedMeta;
+      }
+      return parsed;
     } catch (error) {
       const maybeNodeError = error as NodeJS.ErrnoException;
       if (maybeNodeError.code === "ENOENT") {

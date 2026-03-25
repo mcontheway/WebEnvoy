@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { release } from "node:os";
 import { join, resolve, sep } from "node:path";
-import { buildFingerprintProfileBundle, isFingerprintProfileBundle, normalizeArch, normalizePlatform } from "../../shared/fingerprint-profile.js";
+import { buildFingerprintProfileBundle, isFingerprintProfileBundle, markFingerprintProfileBundleAsLegacyBackfilled, normalizeArch, normalizePlatform } from "../../shared/fingerprint-profile.js";
 export const PROFILE_META_FILENAME = "__webenvoy_meta.json";
 const DEFAULT_FILE_SYSTEM = {
     mkdir,
@@ -127,6 +127,14 @@ const parseMeta = (raw) => {
     assertProfileMeta(parsed);
     return parsed;
 };
+const buildLegacyBundleMigration = (meta) => markFingerprintProfileBundleAsLegacyBackfilled({
+    profileName: meta.profileName,
+    fingerprintSeeds: meta.fingerprintSeeds,
+    environment: resolveCurrentEnvironment(),
+    migratedAt: meta.updatedAt,
+    sourceSchemaVersion: meta.schemaVersion,
+    reasonCodes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
+});
 export class ProfileStore {
     rootDir;
     fs;
@@ -150,7 +158,16 @@ export class ProfileStore {
         const metaPath = this.getMetaPath(profileName);
         try {
             const raw = await this.fs.readFile(metaPath, "utf8");
-            return parseMeta(raw);
+            const parsed = parseMeta(raw);
+            if (parsed.fingerprintProfileBundle === undefined) {
+                const migratedMeta = {
+                    ...parsed,
+                    fingerprintProfileBundle: buildLegacyBundleMigration(parsed)
+                };
+                await this.writeMeta(profileName, migratedMeta);
+                return migratedMeta;
+            }
+            return parsed;
         }
         catch (error) {
             const maybeNodeError = error;

@@ -5,6 +5,7 @@ import { ContentScriptHandler, bootstrapContentScript } from "../extension/conte
 const FINGERPRINT_CONTEXT_CACHE_KEY = "__webenvoy_fingerprint_context__";
 const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
 const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
+const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
 
 const createFingerprintContext = () => ({
   profile: "profile-a",
@@ -188,14 +189,38 @@ const createStartupInstallProbeWindow = (
 ): {
   window: {
     sessionStorage: Storage & { read: (key: string) => string | null };
+    addEventListener: (type: string, listener: EventListener) => void;
+    removeEventListener: (type: string, listener: EventListener) => void;
     dispatchEvent: (event: Event) => boolean;
   };
   startupInstallRequests: Record<string, unknown>[];
 } => {
   const startupInstallRequests: Record<string, unknown>[] = [];
+  const listeners = new Map<string, Set<EventListener>>();
+  const emit = (type: string, detail: unknown): void => {
+    const handlers = listeners.get(type);
+    if (!handlers) {
+      return;
+    }
+    const event = {
+      type,
+      detail
+    } as unknown as Event;
+    for (const listener of handlers) {
+      listener(event);
+    }
+  };
   return {
     window: {
       sessionStorage,
+      addEventListener(type, listener) {
+        const handlers = listeners.get(type) ?? new Set<EventListener>();
+        handlers.add(listener);
+        listeners.set(type, handlers);
+      },
+      removeEventListener(type, listener) {
+        listeners.get(type)?.delete(listener);
+      },
       dispatchEvent(event: Event) {
         const customEvent = event as CustomEvent<unknown>;
         if (customEvent.type !== MAIN_WORLD_REQUEST_EVENT) {
@@ -204,6 +229,26 @@ const createStartupInstallProbeWindow = (
         const detail = asRecord(customEvent.detail);
         if (detail?.type === "fingerprint-install") {
           startupInstallRequests.push(detail);
+          emit(MAIN_WORLD_RESULT_EVENT, {
+            id: detail.id,
+            ok: true,
+            result: {
+              installed: true,
+              required_patches: [
+                "audio_context",
+                "battery",
+                "navigator_plugins",
+                "navigator_mime_types"
+              ],
+              applied_patches: [
+                "audio_context",
+                "battery",
+                "navigator_plugins",
+                "navigator_mime_types"
+              ],
+              missing_required_patches: []
+            }
+          });
         }
         return true;
       }
@@ -220,7 +265,7 @@ afterEach(() => {
 });
 
 describe("content-script bootstrap contract", () => {
-  it("auto-installs fingerprint patch from startup bootstrap payload at bootstrap without trust restore", () => {
+  it("auto-installs fingerprint patch from startup bootstrap payload and emits startup trust via extension runtime", async () => {
     const context = createFingerprintContext();
     (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = {
       run_id: "run-bootstrap-001",
@@ -248,6 +293,7 @@ describe("content-script bootstrap contract", () => {
       .mockReturnValue(true);
 
     const bootstrapped = bootstrapContentScript(runtime);
+    await Promise.resolve();
 
     expect(bootstrapped).toBe(true);
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
@@ -267,6 +313,24 @@ describe("content-script bootstrap contract", () => {
       source: "profile_meta"
     });
     expect(extensionStorage.read("startup_fingerprint_trust")).toBeNull();
+    expect(runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "result",
+        id: "startup-fingerprint-trust:run-bootstrap-001",
+        ok: true,
+        payload: {
+          startup_fingerprint_trust: expect.objectContaining({
+            run_id: "run-bootstrap-001",
+            profile: "profile-a",
+            trusted: true,
+            install_state: expect.objectContaining({
+              status: "installed",
+              installed: true
+            })
+          })
+        }
+      })
+    );
   });
 
   it("does not install fingerprint patch during bootstrap when startup payload is missing", async () => {
@@ -308,6 +372,7 @@ describe("content-script bootstrap contract", () => {
     expect(bootstrapped).toBe(true);
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
     expect(startupInstallRequests).toHaveLength(1);
+    expect(runtime.sendMessage).not.toHaveBeenCalled();
   });
 
   it("still auto-installs fingerprint patch during bootstrap when extension storage cache exists", async () => {
@@ -338,6 +403,7 @@ describe("content-script bootstrap contract", () => {
     await Promise.resolve();
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
     expect(startupInstallRequests).toHaveLength(1);
+    expect(runtime.sendMessage).not.toHaveBeenCalled();
   });
 
   it("persists normalized fingerprint context from forwarded messages", () => {
@@ -404,5 +470,6 @@ describe("content-script bootstrap contract", () => {
     await Promise.resolve();
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
     expect(startupInstallRequests).toHaveLength(1);
+    expect(runtime.sendMessage).not.toHaveBeenCalled();
   });
 });

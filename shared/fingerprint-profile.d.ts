@@ -26,6 +26,12 @@ export interface FingerprintProfileBundle {
   audioNoiseSeed: number;
   canvasNoiseSeed: number;
   environment: FingerprintEnvironment;
+  legacy_migration?: {
+    status: "backfilled_from_legacy";
+    migrated_at: string;
+    source_schema_version: number;
+    reason_codes: string[];
+  };
 }
 
 export interface FingerprintPatchManifest {
@@ -95,6 +101,17 @@ export declare const buildFingerprintProfileBundle: (input: {
   environment?: Partial<FingerprintEnvironment> | null;
   timezone?: string | null;
   ua?: string | null;
+}) => FingerprintProfileBundle;
+export declare const markFingerprintProfileBundleAsLegacyBackfilled: (input: {
+  profileName: string;
+  fingerprintSeeds?: FingerprintSeedSource | null;
+  existingBundle?: unknown;
+  environment?: Partial<FingerprintEnvironment> | null;
+  timezone?: string | null;
+  ua?: string | null;
+  migratedAt?: string | null;
+  sourceSchemaVersion?: number | null;
+  reasonCodes?: string[] | null;
 }) => FingerprintProfileBundle;
 export declare const buildFingerprintPatchManifest: (input: {
   profile: string;

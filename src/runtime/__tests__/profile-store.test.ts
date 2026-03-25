@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -115,7 +115,7 @@ describe("profile-store", () => {
     expect(meta?.localStorageSnapshots).toHaveLength(1);
   });
 
-  it("keeps legacy meta without bundle field untouched for runtime-level migration handling", async () => {
+  it("backfills legacy meta without bundle field and persists degraded migration marker", async () => {
     const store = await createStore();
     await store.ensureProfileDir("legacy");
     const metaPath = store.getMetaPath("legacy");
@@ -148,7 +148,29 @@ describe("profile-store", () => {
 
     const meta = await store.readMeta("legacy");
     expect(meta).not.toBeNull();
-    expect(meta?.fingerprintProfileBundle).toBeUndefined();
+    expect(meta?.fingerprintProfileBundle).toMatchObject({
+      environment: {
+        os_family: expect.any(String),
+        os_version: expect.any(String),
+        arch: expect.any(String)
+      },
+      legacy_migration: {
+        status: "backfilled_from_legacy",
+        source_schema_version: 1,
+        reason_codes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
+      }
+    });
+
+    const persistedRaw = await readFile(metaPath, "utf8");
+    const persistedMeta = JSON.parse(persistedRaw) as {
+      fingerprintProfileBundle?: {
+        legacy_migration?: Record<string, unknown>;
+      };
+    };
+    expect(persistedMeta.fingerprintProfileBundle?.legacy_migration).toMatchObject({
+      status: "backfilled_from_legacy",
+      reason_codes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
+    });
   });
 
   it("returns null when meta does not exist", async () => {

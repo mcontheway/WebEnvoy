@@ -1058,7 +1058,7 @@ describe("profile-runtime fingerprint runtime contract", () => {
     });
   });
 
-  it("treats legacy profile without fingerprint bundle as degraded and blocks live", async () => {
+  it("backfills legacy profile bundle, keeps degraded reason, and blocks live", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-fingerprint-legacy-"));
     tempDirs.push(baseDir);
     const service = createTestService({
@@ -1105,14 +1105,47 @@ describe("profile-runtime fingerprint runtime contract", () => {
     expect(status).toMatchObject({
       fingerprint_runtime: {
         source: "profile_meta",
-        fingerprint_profile_bundle: null,
+        fingerprint_profile_bundle: {
+          legacy_migration: {
+            status: "backfilled_from_legacy",
+            reason_codes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
+          }
+        },
         execution: {
           live_allowed: false,
           live_decision: "dry_run_only",
           allowed_execution_modes: ["dry_run", "recon"],
-          reason_codes: ["PROFILE_FIELD_MISSING"]
+          reason_codes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
         }
       }
+    });
+
+    const degradedStart = await service.start({
+      cwd: baseDir,
+      profile: "legacy_profile",
+      runId: "run-runtime-test-fingerprint-legacy-start",
+      params: {}
+    });
+    expect(degradedStart).toMatchObject({
+      fingerprint_runtime: {
+        fingerprint_profile_bundle: {
+          legacy_migration: {
+            status: "backfilled_from_legacy"
+          }
+        },
+        execution: {
+          live_allowed: false,
+          allowed_execution_modes: ["dry_run", "recon"],
+          reason_codes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
+        }
+      }
+    });
+
+    await service.stop({
+      cwd: baseDir,
+      profile: "legacy_profile",
+      runId: "run-runtime-test-fingerprint-legacy-start",
+      params: {}
     });
 
     await expect(
@@ -1130,6 +1163,12 @@ describe("profile-runtime fingerprint runtime contract", () => {
 
     const storedMetaRaw = await readFile(store.getMetaPath("legacy_profile"), "utf8");
     const storedMeta = JSON.parse(storedMetaRaw) as ProfileMeta;
-    expect(storedMeta.fingerprintProfileBundle).toBeUndefined();
+    expect(storedMeta.fingerprintProfileBundle).toMatchObject({
+      legacy_migration: {
+        status: "backfilled_from_legacy",
+        source_schema_version: 1,
+        reason_codes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
+      }
+    });
   });
 });

@@ -88,43 +88,45 @@ const respondHandshake = (
 };
 
 const primeTrustedFingerprintContext = async (input: {
-  mockPort: ReturnType<typeof createMockPort>;
   runtimeMessageListeners: Array<(message: unknown, sender: { tab?: { id?: number } }) => void>;
   runId: string;
   profile: string;
   fingerprintContext: Record<string, unknown>;
-  primeCommand?: "runtime.start" | "runtime.login" | "runtime.status";
   tabId?: number;
 }) => {
-  const primeCommand = input.primeCommand ?? "runtime.start";
-  input.mockPort.onMessageListeners[0]?.({
-    id: `prime-${input.runId}`,
-    method: "bridge.forward",
-    profile: input.profile,
-    params: {
-      session_id: "nm-session-001",
-      run_id: input.runId,
-      command: primeCommand,
-      command_params: {
-        fingerprint_context: input.fingerprintContext
-      },
-      cwd: "/workspace/WebEnvoy"
-    },
-    timeout_ms: 100
-  });
-  await Promise.resolve();
-  await Promise.resolve();
-
+  const requiredPatches = Array.isArray(
+    (asRecord(input.fingerprintContext.fingerprint_patch_manifest) ?? {}).required_patches
+  )
+    ? (
+        (asRecord(input.fingerprintContext.fingerprint_patch_manifest) ?? {})
+          .required_patches as unknown[]
+      ).filter((entry): entry is string => typeof entry === "string")
+    : [];
   input.runtimeMessageListeners[0]?.(
     {
       kind: "result",
-      id: `prime-${input.runId}`,
+      id: `startup-fingerprint-trust:${input.runId}`,
       ok: true,
       payload: {
-        message: `${primeCommand} ok`,
-        run_id: input.runId,
-        profile: input.profile,
-        fingerprint_runtime: input.fingerprintContext
+        startup_fingerprint_trust: {
+          run_id: input.runId,
+          profile: input.profile,
+          fingerprint_runtime: {
+            ...input.fingerprintContext,
+            injection: {
+              installed: true,
+              required_patches: requiredPatches,
+              applied_patches: requiredPatches,
+              missing_required_patches: []
+            }
+          },
+          install_state: {
+            status: "installed",
+            required_patches: requiredPatches,
+            applied_patches: requiredPatches,
+            missing_required_patches: []
+          }
+        }
       }
     },
     {
@@ -133,6 +135,7 @@ const primeTrustedFingerprintContext = async (input: {
       }
     }
   );
+  await Promise.resolve();
   await Promise.resolve();
 };
 
@@ -1545,12 +1548,10 @@ describe("extension service worker recovery contract", () => {
       reason_codes: ["PROFILE_FIELD_MISSING"]
     });
     await primeTrustedFingerprintContext({
-      mockPort: firstPort,
       runtimeMessageListeners,
       runId: "run-xhs-live-blocked-by-fingerprint-001",
       profile: "profile-a",
-      fingerprintContext,
-      primeCommand: "runtime.status"
+      fingerprintContext
     });
     chromeApi.tabs.sendMessage.mockClear();
 
@@ -1608,12 +1609,10 @@ describe("extension service worker recovery contract", () => {
       reason_codes: ["OS_FAMILY_MISMATCH"]
     });
     await primeTrustedFingerprintContext({
-      mockPort: firstPort,
       runtimeMessageListeners,
       runId: "run-xhs-live-blocked-by-fingerprint-002",
       profile: "profile-a",
-      fingerprintContext,
-      primeCommand: "runtime.login"
+      fingerprintContext
     });
     chromeApi.tabs.sendMessage.mockClear();
 
@@ -1749,7 +1748,7 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("keeps live mode blocked when startup bootstrap trust payload arrives before first live request", async () => {
+  it("allows direct live mode when startup bootstrap trust payload arrives before first live request", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -1826,19 +1825,39 @@ describe("extension service worker recovery contract", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
-    const blocked = firstPort.postMessage.mock.calls
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: liveRequestId,
+        command: "xhs.search"
+      })
+    );
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: liveRequestId,
+        ok: true,
+        payload: {
+          summary: {
+            capability_result: {
+              outcome: "success"
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const allowed = firstPort.postMessage.mock.calls
       .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
       .find((message) => message.id === liveRequestId);
-    expect(blocked?.status).toBe("error");
-    const payload = asRecord(blocked?.payload) ?? {};
-    const consumerGateResult = asRecord(payload.consumer_gate_result);
-    expect(payload.fingerprint_execution).toBeNull();
-    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
-    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_UNTRUSTED"]);
-    expect(consumerGateResult?.gate_reasons).toEqual(
-      expect.arrayContaining(["FINGERPRINT_CONTEXT_UNTRUSTED", "FINGERPRINT_EXECUTION_BLOCKED"])
-    );
+    expect(allowed?.status).toBe("success");
   });
 
   it("invalidates trusted fingerprint context after disconnect/recovery with new session", async () => {
@@ -1861,7 +1880,6 @@ describe("extension service worker recovery contract", () => {
 
     const fingerprintContext = createFingerprintRuntimeContext();
     await primeTrustedFingerprintContext({
-      mockPort: firstPort,
       runtimeMessageListeners,
       runId: "run-xhs-live-recovery-untrusted-001",
       profile: "profile-a",
@@ -1927,7 +1945,6 @@ describe("extension service worker recovery contract", () => {
     const profile = "profile-a";
     const fingerprintContext = createFingerprintRuntimeContext();
     await primeTrustedFingerprintContext({
-      mockPort: firstPort,
       runtimeMessageListeners,
       runId,
       profile,
@@ -2016,7 +2033,7 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("rotates trusted fingerprint context when runtime.status overwrites same profile::runId", async () => {
+  it("rotates trusted fingerprint context when startup trust overwrites same profile::runId", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -2042,19 +2059,16 @@ describe("extension service worker recovery contract", () => {
     });
 
     await primeTrustedFingerprintContext({
-      mockPort: firstPort,
       runtimeMessageListeners,
       runId,
       profile,
       fingerprintContext: trustedAllowed
     });
     await primeTrustedFingerprintContext({
-      mockPort: firstPort,
       runtimeMessageListeners,
       runId,
       profile,
-      fingerprintContext: trustedBlocked,
-      primeCommand: "runtime.status"
+      fingerprintContext: trustedBlocked
     });
     chromeApi.tabs.sendMessage.mockClear();
 
@@ -2114,7 +2128,6 @@ describe("extension service worker recovery contract", () => {
     });
 
     await primeTrustedFingerprintContext({
-      mockPort: firstPort,
       runtimeMessageListeners,
       runId,
       profile,
@@ -2197,7 +2210,6 @@ describe("extension service worker recovery contract", () => {
     const fingerprintContext = createFingerprintRuntimeContext();
     fingerprintContext.fingerprint_patch_manifest.required_patches.push("unknown_required_patch");
     await primeTrustedFingerprintContext({
-      mockPort: firstPort,
       runtimeMessageListeners,
       runId: "run-xhs-live-top-level-patch-missing-001",
       profile: "profile-a",
@@ -2513,7 +2525,6 @@ describe("extension service worker recovery contract", () => {
     respondHandshake(firstPort);
     await Promise.resolve();
     await primeTrustedFingerprintContext({
-      mockPort: firstPort,
       runtimeMessageListeners,
       runId: "run-xhs-live-limited-approved-001",
       profile: "profile-a",
@@ -2627,7 +2638,6 @@ describe("extension service worker recovery contract", () => {
     respondHandshake(firstPort);
     await Promise.resolve();
     await primeTrustedFingerprintContext({
-      mockPort: firstPort,
       runtimeMessageListeners,
       runId: "run-xhs-live-mode-approved-001",
       profile: "profile-a",
