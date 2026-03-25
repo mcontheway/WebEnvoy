@@ -280,10 +280,7 @@ const buildFingerprintProfileBundle = (input) => {
       : `${profileName}-canvas-seed`;
 
   if (isFingerprintProfileBundle(input.existingBundle)) {
-    return {
-      ...cloneJson(input.existingBundle),
-      environment
-    };
+    return cloneJson(input.existingBundle);
   }
 
   const screen = selectBySeed(`${profileName}:screen`, SCREEN_CANDIDATES);

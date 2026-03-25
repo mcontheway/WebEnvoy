@@ -33,6 +33,19 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
     ? (value as Record<string, unknown>)
     : null;
 
+const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
+
+const asString = (value: unknown): string | null =>
+  typeof value === "string" && value.length > 0 ? value : null;
+
+const asStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
+const resolveRequestedExecutionMode = (message: BackgroundToContentMessage): string | null => {
+  const options = asRecord(message.commandParams.options);
+  return asString(options?.requested_execution_mode);
+};
+
 const resolveFingerprintContextFromMessage = (
   message: BackgroundToContentMessage
 ): FingerprintRuntimeContext | null => {
@@ -45,6 +58,21 @@ const resolveFingerprintContextFromMessage = (
     asRecord(message.commandParams)?.fingerprint_context ?? null
   );
   return fallback ?? null;
+};
+
+const resolveMissingRequiredFingerprintPatches = (
+  fingerprintRuntime: Record<string, unknown>
+): string[] => {
+  const injection = asRecord(fingerprintRuntime.injection);
+  const requiredPatches = asStringArray(injection?.required_patches);
+  const missingRequiredPatches = asStringArray(injection?.missing_required_patches);
+  if (missingRequiredPatches.length > 0) {
+    return missingRequiredPatches;
+  }
+  if (injection?.installed === true) {
+    return [];
+  }
+  return requiredPatches;
 };
 
 export const resolveFingerprintContextForContract = (
@@ -152,13 +180,14 @@ const mainWorldCall = async <T>(request: {
           }
           if (request.type === "fingerprint-install") {
             const runtime = request.payload.fingerprint_runtime ?? null;
-            const bundle = runtime?.fingerprint_profile_bundle ?? null;
-            const patchNameSet = new Set(
-              Array.isArray(runtime?.fingerprint_patch_manifest?.required_patches)
-                ? runtime.fingerprint_patch_manifest.required_patches
-                : []
-            );
+            const bundle =
+              runtime && typeof runtime === "object" ? runtime.fingerprint_profile_bundle ?? null : null;
+            const requiredPatches = Array.isArray(runtime?.fingerprint_patch_manifest?.required_patches)
+              ? runtime.fingerprint_patch_manifest.required_patches
+              : [];
+            const patchNameSet = new Set(requiredPatches);
             const appliedPatches = [];
+            const missingRequiredPatches = [];
             const defineGetter = (target, property, getter) => {
               Object.defineProperty(target, property, {
                 configurable: true,
@@ -191,25 +220,47 @@ const mainWorldCall = async <T>(request: {
                 mimeTypes.find((mimeType) => mimeType.type === name) ?? null;
               return mimeTypes;
             };
-            if (bundle && patchNameSet.has("audio_context") && typeof window.AudioContext === "function") {
-              const originalCreateAnalyser = window.AudioContext.prototype.createAnalyser;
-              if (typeof originalCreateAnalyser === "function") {
-                window.AudioContext.prototype.createAnalyser = function (...args) {
-                  const analyser = originalCreateAnalyser.apply(this, args);
-                  if (analyser && typeof analyser.getFloatFrequencyData === "function") {
-                    const originalGetFloatFrequencyData = analyser.getFloatFrequencyData.bind(analyser);
-                    analyser.getFloatFrequencyData = (array) => {
-                      originalGetFloatFrequencyData(array);
-                      if (array && typeof array.length === "number" && array.length > 0) {
-                        array[0] = array[0] + bundle.audioNoiseSeed;
-                      }
-                    };
-                  }
-                  return analyser;
-                };
-                appliedPatches.push("audio_context");
+            const markAudioContextPatched = () => {
+              if (!bundle || !patchNameSet.has("audio_context")) {
+                return;
               }
-            }
+              const OfflineCtor =
+                typeof window.OfflineAudioContext === "function"
+                  ? window.OfflineAudioContext
+                  : typeof window.webkitOfflineAudioContext === "function"
+                    ? window.webkitOfflineAudioContext
+                    : null;
+              if (!OfflineCtor) {
+                return;
+              }
+              const originalStartRendering = OfflineCtor.prototype?.startRendering;
+              if (typeof originalStartRendering !== "function") {
+                return;
+              }
+              const patchAudioBuffer = (audioBuffer) => {
+                if (!audioBuffer || typeof audioBuffer.getChannelData !== "function") {
+                  return audioBuffer;
+                }
+                const originalGetChannelData = audioBuffer.getChannelData.bind(audioBuffer);
+                audioBuffer.getChannelData = (channel) => {
+                  const channelData = originalGetChannelData(channel);
+                  if (channelData && typeof channelData.length === "number" && channelData.length > 0) {
+                    channelData[0] = channelData[0] + bundle.audioNoiseSeed;
+                  }
+                  return channelData;
+                };
+                return audioBuffer;
+              };
+              OfflineCtor.prototype.startRendering = function (...args) {
+                const renderingResult = originalStartRendering.apply(this, args);
+                if (renderingResult && typeof renderingResult.then === "function") {
+                  return renderingResult.then((audioBuffer) => patchAudioBuffer(audioBuffer));
+                }
+                return patchAudioBuffer(renderingResult);
+              };
+              appliedPatches.push("audio_context");
+            };
+            markAudioContextPatched();
             if (bundle && patchNameSet.has("battery") && window.navigator) {
               window.navigator.getBattery = () =>
                 Promise.resolve({
@@ -235,13 +286,20 @@ const mainWorldCall = async <T>(request: {
               defineGetter(window.navigator, "mimeTypes", () => mimeTypes);
               appliedPatches.push("navigator_mime_types");
             }
+            for (const patchName of requiredPatches) {
+              if (!appliedPatches.includes(patchName)) {
+                missingRequiredPatches.push(patchName);
+              }
+            }
             window.__webenvoy_fingerprint_runtime__ = runtime;
             emit({
               id: request.id,
               ok: true,
               result: {
-                installed: appliedPatches.length > 0,
+                installed: missingRequiredPatches.length === 0,
                 applied_patches: appliedPatches,
+                required_patches: requiredPatches,
+                missing_required_patches: missingRequiredPatches,
                 source: typeof runtime?.source === "string" ? runtime.source : "unknown"
               }
             });
@@ -392,10 +450,15 @@ export class ContentScriptHandler {
         injection: installResult
       };
     } catch (error) {
+      const requiredPatches = asStringArray(
+        asRecord(fingerprintRuntime.fingerprint_patch_manifest)?.required_patches
+      );
       return {
         ...fingerprintRuntime,
         injection: {
           installed: false,
+          required_patches: requiredPatches,
+          missing_required_patches: requiredPatches,
           error: error instanceof Error ? error.message : String(error)
         }
       };
@@ -446,6 +509,34 @@ export class ContentScriptHandler {
 
   async #handleXhsSearch(message: BackgroundToContentMessage): Promise<void> {
     const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
+    const requestedExecutionMode = resolveRequestedExecutionMode(message);
+    const missingRequiredPatches =
+      fingerprintRuntime !== null ? resolveMissingRequiredFingerprintPatches(fingerprintRuntime) : [];
+    if (
+      requestedExecutionMode !== null &&
+      LIVE_EXECUTION_MODES.has(requestedExecutionMode) &&
+      missingRequiredPatches.length > 0
+    ) {
+      this.#emit({
+        kind: "result",
+        id: message.id,
+        ok: false,
+        error: {
+          code: "ERR_EXECUTION_FAILED",
+          message: "fingerprint required patches missing for live execution"
+        },
+        payload: {
+          details: {
+            stage: "execution",
+            reason: "FINGERPRINT_REQUIRED_PATCH_MISSING",
+            requested_execution_mode: requestedExecutionMode,
+            missing_required_patches: missingRequiredPatches
+          },
+          ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {})
+        }
+      });
+      return;
+    }
     const ability = asRecord(message.commandParams.ability);
     const input = asRecord(message.commandParams.input);
     const options = asRecord(message.commandParams.options) ?? {};

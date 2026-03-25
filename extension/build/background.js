@@ -19,6 +19,11 @@ const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
 const XHS_DOMAIN_ALLOWLIST = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
 const XHS_ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
 const XHS_EXECUTION_MODES = new Set(EXECUTION_MODES);
+const XHS_LIVE_EXECUTION_MODES = new Set([
+    "live_read_limited",
+    "live_read_high_risk",
+    "live_write"
+]);
 const XHS_REQUIRED_APPROVAL_CHECKS = APPROVAL_CHECK_KEYS;
 const XHS_WRITE_APPROVAL_REQUIREMENTS = [
     "approval_record_approved_true",
@@ -137,7 +142,8 @@ const xhsGateReasonMessage = (reason) => {
         TARGET_TAB_NOT_FOUND: "target tab is unavailable",
         TARGET_DOMAIN_MISMATCH: "target tab domain does not match target_domain",
         TARGET_PAGE_MISMATCH: "target tab page does not match target_page",
-        TARGET_TAB_URL_INVALID: "target tab url is invalid"
+        TARGET_TAB_URL_INVALID: "target tab url is invalid",
+        FINGERPRINT_EXECUTION_BLOCKED: "fingerprint runtime blocks live execution for this profile"
     };
     return mapping[reason] ?? "xhs target gate blocked";
 };
@@ -955,6 +961,9 @@ class ChromeBackgroundBridge {
         const rawIssueScope = readGateParam("issue_scope");
         const rawRiskState = readGateParam("risk_state");
         const rawApprovalRecord = readGateParam("approval_record") ?? readGateParam("approval");
+        const fingerprintContext = resolveFingerprintContext(commandParams);
+        const fingerprintExecution = fingerprintContext?.execution ?? null;
+        const fingerprintReasonCodes = (Array.isArray(fingerprintExecution?.reason_codes) ? fingerprintExecution.reason_codes : []).filter((code) => typeof code === "string");
         const targetDomain = asNonEmptyString(rawTargetDomain);
         const targetTabId = asInteger(rawTargetTabId);
         const targetPage = asNonEmptyString(rawTargetPage);
@@ -970,6 +979,19 @@ class ChromeBackgroundBridge {
         const issue208WriteGateOnly = issueScope === "issue_208" &&
             actionType !== null &&
             writeActionMatrixDecisions.write_interaction_tier !== "observe_only";
+        const requestedLiveMode = requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
+        const fingerprintLiveBlocked = requestedLiveMode &&
+            fingerprintExecution !== null &&
+            (fingerprintExecution.live_allowed !== true ||
+                fingerprintExecution.live_decision === "dry_run_only" ||
+                !fingerprintExecution.allowed_execution_modes.includes(requestedExecutionMode));
+        const fingerprintGateDecision = requestedLiveMode
+            ? fingerprintExecution === null
+                ? "not_provided"
+                : fingerprintLiveBlocked
+                    ? "blocked"
+                    : "allowed"
+            : "allowed";
         const writeTierReason = `WRITE_INTERACTION_TIER_${writeActionMatrixDecisions.write_interaction_tier.toUpperCase()}`;
         const gateReasons = [];
         let writeGateOnlyApprovalDecision = null;
@@ -1008,6 +1030,9 @@ class ChromeBackgroundBridge {
         }
         if (requestedExecutionMode === "live_write" && !issue208WriteGateOnly) {
             pushReason("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
+        }
+        if (fingerprintLiveBlocked) {
+            pushReason("FINGERPRINT_EXECUTION_BLOCKED");
         }
         const isLiveReadMode = requestedExecutionMode === "live_read_limited" ||
             requestedExecutionMode === "live_read_high_risk";
@@ -1154,6 +1179,8 @@ class ChromeBackgroundBridge {
             effective_execution_mode: effectiveExecutionMode,
             gate_decision: gateDecision,
             gate_reasons: gateReasons,
+            fingerprint_gate_decision: fingerprintGateDecision,
+            fingerprint_reason_codes: fingerprintReasonCodes,
             write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier
         };
         const runId = String(request.params.run_id ?? request.id);
@@ -1213,14 +1240,17 @@ class ChromeBackgroundBridge {
                 target_page: targetPage,
                 action_type: actionType,
                 requested_execution_mode: requestedExecutionMode,
-                risk_state: riskState
+                risk_state: riskState,
+                fingerprint_gate_decision: fingerprintGateDecision
             },
             gate_outcome: {
                 effective_execution_mode: effectiveExecutionMode,
                 gate_decision: gateDecision,
                 gate_reasons: gateReasons,
-                requires_manual_confirmation: requiresManualConfirmation
+                requires_manual_confirmation: requiresManualConfirmation,
+                fingerprint_gate_decision: fingerprintGateDecision
             },
+            fingerprint_execution: fingerprintExecution ? { ...fingerprintExecution } : null,
             consumer_gate_result: consumerGateResult,
             approval_record: approvalRecord,
             issue_action_matrix: resolvedIssueActionMatrixEntry,

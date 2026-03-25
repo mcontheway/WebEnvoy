@@ -979,10 +979,27 @@ describe("profile-runtime fingerprint runtime contract", () => {
     });
     expect(status).toMatchObject({
       fingerprint_runtime: {
+        fingerprint_profile_bundle: {
+          environment: {
+            os_family: "linux",
+            os_version: "99.99",
+            arch: "x64"
+          }
+        },
+        fingerprint_consistency_check: {
+          expected_environment: {
+            os_family: "linux",
+            os_version: "99.99",
+            arch: "x64"
+          },
+          decision: "mismatch",
+          reason_codes: expect.arrayContaining(["OS_VERSION_MISMATCH"])
+        },
         execution: {
           live_allowed: false,
           live_decision: "dry_run_only",
-          allowed_execution_modes: ["dry_run", "recon"]
+          allowed_execution_modes: ["dry_run", "recon"],
+          reason_codes: expect.arrayContaining(["OS_VERSION_MISMATCH"])
         }
       }
     });

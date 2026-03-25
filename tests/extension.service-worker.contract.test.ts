@@ -98,6 +98,80 @@ const createXhsCommandParams = (overrides?: Record<string, unknown>) => ({
   ...overrides
 });
 
+const createApprovedReadApprovalRecord = () => ({
+  approved: true,
+  approver: "qa-reviewer",
+  approved_at: "2026-03-23T10:00:00Z",
+  checks: {
+    target_domain_confirmed: true,
+    target_tab_confirmed: true,
+    target_page_confirmed: true,
+    risk_state_checked: true,
+    action_type_confirmed: true
+  }
+});
+
+const createFingerprintRuntimeContext = (executionOverrides?: Record<string, unknown>) => ({
+  profile: "profile-a",
+  source: "profile_meta",
+  fingerprint_profile_bundle: {
+    ua: "Mozilla/5.0",
+    hardwareConcurrency: 8,
+    deviceMemory: 8,
+    screen: {
+      width: 1440,
+      height: 900,
+      colorDepth: 24,
+      pixelDepth: 24
+    },
+    battery: {
+      level: 0.73,
+      charging: false
+    },
+    timezone: "Asia/Shanghai",
+    audioNoiseSeed: 0.000047231,
+    canvasNoiseSeed: 0.000083154,
+    environment: {
+      os_family: "macos",
+      os_version: "14.6",
+      arch: "arm64"
+    }
+  },
+  fingerprint_patch_manifest: {
+    profile: "profile-a",
+    manifest_version: "1",
+    required_patches: ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"],
+    optional_patches: [],
+    field_dependencies: {
+      audio_context: ["audioNoiseSeed"],
+      battery: ["battery.level", "battery.charging"]
+    },
+    unsupported_reason_codes: []
+  },
+  fingerprint_consistency_check: {
+    profile: "profile-a",
+    expected_environment: {
+      os_family: "macos",
+      os_version: "14.6",
+      arch: "arm64"
+    },
+    actual_environment: {
+      os_family: "macos",
+      os_version: "14.6",
+      arch: "arm64"
+    },
+    decision: "match",
+    reason_codes: []
+  },
+  execution: {
+    live_allowed: true,
+    live_decision: "allowed",
+    allowed_execution_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+    reason_codes: [],
+    ...(executionOverrides ?? {})
+  }
+});
+
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -224,70 +298,9 @@ describe("extension service worker recovery contract", () => {
     respondHandshake(firstPort);
     await Promise.resolve();
 
-    const fingerprintContext = {
-      profile: "profile-a",
-      source: "profile_meta",
-      fingerprint_profile_bundle: {
-        ua: "Mozilla/5.0",
-        hardwareConcurrency: 8,
-        deviceMemory: 8,
-        screen: {
-          width: 1440,
-          height: 900,
-          colorDepth: 24,
-          pixelDepth: 24
-        },
-        battery: {
-          level: 0.73,
-          charging: false
-        },
-        timezone: "Asia/Shanghai",
-        audioNoiseSeed: 0.000047231,
-        canvasNoiseSeed: 0.000083154,
-        environment: {
-          os_family: "macos",
-          os_version: "14.6",
-          arch: "arm64"
-        }
-      },
-      fingerprint_patch_manifest: {
-        profile: "profile-a",
-        manifest_version: "1",
-        required_patches: [
-          "audio_context",
-          "battery",
-          "navigator_plugins",
-          "navigator_mime_types"
-        ],
-        optional_patches: [],
-        field_dependencies: {
-          audio_context: ["audioNoiseSeed"],
-          battery: ["battery.level", "battery.charging"]
-        },
-        unsupported_reason_codes: []
-      },
-      fingerprint_consistency_check: {
-        profile: "profile-a",
-        expected_environment: {
-          os_family: "macos",
-          os_version: "14.6",
-          arch: "arm64"
-        },
-        actual_environment: {
-          os_family: "macos",
-          os_version: "14.6",
-          arch: "arm64"
-        },
-        decision: "match",
-        reason_codes: []
-      },
-      execution: {
-        live_allowed: true,
-        live_decision: "allowed",
-        allowed_execution_modes: ["dry_run", "recon", "live_read_limited"],
-        reason_codes: []
-      }
-    };
+    const fingerprintContext = createFingerprintRuntimeContext({
+      allowed_execution_modes: ["dry_run", "recon", "live_read_limited"]
+    });
 
     firstPort.onMessageListeners[0]?.({
       id: "run-fingerprint-forward-001",
@@ -1462,6 +1475,112 @@ describe("extension service worker recovery contract", () => {
       expect(writeGateOnlyDecision?.execution_enabled).toBe(false);
       expect(resolveWriteInteractionTier(summary)).toBe("reversible_interaction");
     }
+  });
+
+  it("blocks live mode when fingerprint_context.execution.live_allowed=false", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-blocked-by-fingerprint-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-blocked-by-fingerprint-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: createFingerprintRuntimeContext({
+            live_allowed: false,
+            live_decision: "dry_run_only",
+            allowed_execution_modes: ["dry_run", "recon"],
+            reason_codes: ["PROFILE_FIELD_MISSING"]
+          })
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-live-blocked-by-fingerprint-001");
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const gateOutcome = asRecord(payload.gate_outcome);
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(gateOutcome?.effective_execution_mode).toBe("dry_run");
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["PROFILE_FIELD_MISSING"]);
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+  });
+
+  it("blocks live mode when fingerprint_context.execution.live_decision=dry_run_only", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-blocked-by-fingerprint-002",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-blocked-by-fingerprint-002",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: createFingerprintRuntimeContext({
+            live_allowed: true,
+            live_decision: "dry_run_only",
+            allowed_execution_modes: ["dry_run", "recon"],
+            reason_codes: ["OS_FAMILY_MISMATCH"]
+          })
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-live-blocked-by-fingerprint-002");
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const gateOutcome = asRecord(payload.gate_outcome);
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(gateOutcome?.effective_execution_mode).toBe("recon");
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["OS_FAMILY_MISMATCH"]);
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_EXECUTION_BLOCKED"])
+    );
   });
 
   it("keeps issue_208 gate-only approval on non-live effective mode even when request asks for live_write", async () => {

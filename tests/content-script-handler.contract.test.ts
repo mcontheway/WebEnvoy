@@ -130,11 +130,13 @@ const withMockMainWorld = async (
       href: "https://www.xiaohongshu.com/search_result?keyword=test"
     },
     navigator: {},
-    AudioContext: class MockAudioContext {
-      createAnalyser() {
+    OfflineAudioContext: class MockOfflineAudioContext {
+      async startRendering() {
+        const channelData = new Float32Array(1);
+        channelData[0] = 1;
         return {
-          getFloatFrequencyData(array: Float32Array) {
-            array[0] = 1;
+          getChannelData() {
+            return channelData;
           }
         };
       }
@@ -270,11 +272,10 @@ describe("content-script handler contract", () => {
       expect(battery?.level).toBe(0.75);
       expect((mockWindow.navigator as Navigator & { plugins?: { length: number } }).plugins?.length).toBe(1);
       expect((mockWindow.navigator as Navigator & { mimeTypes?: { length: number } }).mimeTypes?.length).toBe(1);
-      const audioContext = new ((mockWindow as unknown as { AudioContext: new () => { createAnalyser(): { getFloatFrequencyData(array: Float32Array): void } } }).AudioContext)();
-      const analyser = audioContext.createAnalyser();
-      const values = new Float32Array(1);
-      analyser.getFloatFrequencyData(values);
-      expect(values[0]).toBeGreaterThan(1);
+      const offlineAudioContext = new ((mockWindow as unknown as { OfflineAudioContext: new () => { startRendering(): Promise<{ getChannelData(channel: number): Float32Array }> } }).OfflineAudioContext)();
+      const renderedBuffer = await offlineAudioContext.startRendering();
+      const channelData = renderedBuffer.getChannelData(0);
+      expect(channelData[0]).toBeGreaterThan(1);
     });
   });
 
@@ -308,6 +309,59 @@ describe("content-script handler contract", () => {
       expect(results[0]?.ok).toBe(false);
       expect(injection?.installed).toBe(true);
       expect(injection?.source).toBe("profile_meta");
+    });
+  });
+
+  it("blocks live xhs.search when required fingerprint patches are missing", async () => {
+    await withMockMainWorld(async () => {
+      const fingerprintContext = createFingerprintContext();
+      fingerprintContext.fingerprint_patch_manifest.required_patches.push("unknown_required_patch");
+
+      const handler = new ContentScriptHandler();
+      const results: Array<Record<string, unknown>> = [];
+      handler.onResult((message) => {
+        results.push(message as unknown as Record<string, unknown>);
+      });
+
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "run-xhs-live-block-001",
+        runId: "run-xhs-live-block-001",
+        tabId: 1,
+        profile: "profile-a",
+        cwd: "/workspace/WebEnvoy",
+        timeoutMs: 1_000,
+        command: "xhs.search",
+        params: {},
+        commandParams: {
+          ability: {
+            id: "xhs.search",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "test"
+          },
+          options: {
+            requested_execution_mode: "live_read_limited"
+          }
+        },
+        fingerprintContext
+      });
+
+      await waitForResult(results);
+
+      const payload = results[0]?.payload as Record<string, unknown>;
+      const details = payload?.details as Record<string, unknown>;
+      const fingerprintRuntime = payload?.fingerprint_runtime as Record<string, unknown>;
+      const injection = fingerprintRuntime?.injection as Record<string, unknown>;
+      expect(results[0]?.ok).toBe(false);
+      expect((results[0]?.error as { code?: string } | undefined)?.code).toBe("ERR_EXECUTION_FAILED");
+      expect(details?.reason).toBe("FINGERPRINT_REQUIRED_PATCH_MISSING");
+      expect(details?.requested_execution_mode).toBe("live_read_limited");
+      expect(details?.missing_required_patches).toContain("unknown_required_patch");
+      expect(injection?.installed).toBe(false);
+      expect(injection?.missing_required_patches).toContain("unknown_required_patch");
     });
   });
 });
