@@ -423,8 +423,8 @@ const resolveBlockedFallbackMode = (
         ? "recon"
         : "dry_run";
 
-const buildTrustedFingerprintContextKey = (profile: string, runId: string): string =>
-  `${profile}::${runId}`;
+const buildTrustedFingerprintContextKey = (profile: string, sessionId: string): string =>
+  `${profile}::${sessionId}`;
 
 const serializeFingerprintRuntimeContext = (
   fingerprintRuntime: FingerprintRuntimeContext
@@ -924,8 +924,8 @@ class ChromeBackgroundBridge {
     this.#trustedFingerprintContexts.clear();
   }
 
-  #clearTrustedFingerprintContextByRun(profile: string, runId: string): void {
-    this.#trustedFingerprintContexts.delete(buildTrustedFingerprintContextKey(profile, runId));
+  #clearTrustedFingerprintContextBySession(profile: string, sessionId: string): void {
+    this.#trustedFingerprintContexts.delete(buildTrustedFingerprintContextKey(profile, sessionId));
   }
 
   #clearTrustedFingerprintContextsByProfile(profile: string): void {
@@ -943,15 +943,11 @@ class ChromeBackgroundBridge {
     }
 
     const profile = asNonEmptyString(request.profile);
-    const runId = asNonEmptyString(request.params.run_id);
+    const sessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
 
     if (command === "runtime.stop") {
-      if (profile && runId) {
-        this.#clearTrustedFingerprintContextByRun(profile, runId);
-        return;
-      }
       if (profile) {
-        this.#clearTrustedFingerprintContextsByProfile(profile);
+        this.#clearTrustedFingerprintContextBySession(profile, sessionId);
         return;
       }
       this.#clearTrustedFingerprintContexts();
@@ -981,7 +977,6 @@ class ChromeBackgroundBridge {
     if (!profile) {
       return;
     }
-    const runId = String(request.params.run_id ?? request.id);
     const fingerprintRuntime = ensureFingerprintRuntimeContext(payload.fingerprint_runtime ?? null);
     if (!fingerprintRuntime) {
       return;
@@ -991,7 +986,7 @@ class ChromeBackgroundBridge {
     }
     const sessionId =
       asNonEmptyString(request.params.session_id) ?? this.#sessionId;
-    this.#upsertTrustedFingerprintContext(profile, runId, sessionId, fingerprintRuntime);
+    this.#upsertTrustedFingerprintContext(profile, sessionId, fingerprintRuntime);
   }
 
   #rememberStartupTrustedFingerprintContext(payload: Record<string, unknown>): void {
@@ -1006,9 +1001,8 @@ class ChromeBackgroundBridge {
     if (!trustedByFlag && !trustedByInstallState) {
       return;
     }
-    const runId = asNonEmptyString(startupTrust.run_id ?? startupTrust.runId);
     const profile = asNonEmptyString(startupTrust.profile);
-    if (!runId || !profile) {
+    if (!profile) {
       return;
     }
     const fingerprintRuntime = ensureFingerprintRuntimeContext(startupTrust.fingerprint_runtime ?? null);
@@ -1016,7 +1010,7 @@ class ChromeBackgroundBridge {
       return;
     }
     const sessionId = asNonEmptyString(startupTrust.session_id ?? startupTrust.sessionId) ?? this.#sessionId;
-    this.#upsertTrustedFingerprintContext(profile, runId, sessionId, fingerprintRuntime);
+    this.#upsertTrustedFingerprintContext(profile, sessionId, fingerprintRuntime);
   }
 
   #normalizeTrustedFingerprintRuntime(
@@ -1040,12 +1034,11 @@ class ChromeBackgroundBridge {
 
   #upsertTrustedFingerprintContext(
     profile: string,
-    runId: string,
     sessionId: string,
     fingerprintRuntime: FingerprintRuntimeContext
   ): void {
     const normalized = this.#normalizeTrustedFingerprintRuntime(fingerprintRuntime);
-    const key = buildTrustedFingerprintContextKey(profile, runId);
+    const key = buildTrustedFingerprintContextKey(profile, sessionId);
     const serializedFingerprintRuntime = serializeFingerprintRuntimeContext(normalized);
     const existing = this.#trustedFingerprintContexts.get(key);
     const shouldRotate =
@@ -1074,8 +1067,8 @@ class ChromeBackgroundBridge {
     if (!profile) {
       return null;
     }
-    const runId = String(request.params.run_id ?? request.id);
-    const key = buildTrustedFingerprintContextKey(profile, runId);
+    const sessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
+    const key = buildTrustedFingerprintContextKey(profile, sessionId);
     const trusted = this.#trustedFingerprintContexts.get(key);
     if (!trusted) {
       return null;
@@ -1101,8 +1094,8 @@ class ChromeBackgroundBridge {
     ) {
       const profile = asNonEmptyString(request.profile);
       if (profile) {
-        const runId = String(request.params.run_id ?? request.id);
-        this.#clearTrustedFingerprintContextByRun(profile, runId);
+        const sessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
+        this.#clearTrustedFingerprintContextBySession(profile, sessionId);
       } else {
         this.#clearTrustedFingerprintContexts();
       }

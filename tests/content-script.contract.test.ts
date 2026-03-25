@@ -294,6 +294,7 @@ describe("content-script bootstrap contract", () => {
 
     const bootstrapped = bootstrapContentScript(runtime);
     await Promise.resolve();
+    await Promise.resolve();
 
     expect(bootstrapped).toBe(true);
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);

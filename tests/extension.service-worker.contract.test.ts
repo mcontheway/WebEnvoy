@@ -111,6 +111,7 @@ const primeTrustedFingerprintContext = async (input: {
         startup_fingerprint_trust: {
           run_id: input.runId,
           profile: input.profile,
+          trusted: true,
           fingerprint_runtime: {
             ...input.fingerprintContext,
             injection: {
@@ -122,6 +123,7 @@ const primeTrustedFingerprintContext = async (input: {
           },
           install_state: {
             status: "installed",
+            installed: true,
             required_patches: requiredPatches,
             applied_patches: requiredPatches,
             missing_required_patches: []
@@ -1748,7 +1750,7 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("allows direct live mode when startup bootstrap trust payload arrives before first live request", async () => {
+  it("reuses startup trust across different run_id within the same session", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -1758,7 +1760,8 @@ describe("extension service worker recovery contract", () => {
     respondHandshake(firstPort);
     await Promise.resolve();
 
-    const runId = "run-xhs-live-trusted-by-runtime-start-001";
+    const startupRunId = "run-xhs-live-trusted-by-runtime-start-001";
+    const liveRunId = "run-xhs-live-consume-startup-trust-002";
     const profile = "profile-a";
     const fingerprintContext = createFingerprintRuntimeContext({
       live_allowed: true,
@@ -1770,12 +1773,13 @@ describe("extension service worker recovery contract", () => {
     runtimeMessageListeners[0]?.(
       {
         kind: "result",
-        id: `startup-fingerprint-trust:${runId}`,
+        id: `startup-fingerprint-trust:${startupRunId}`,
         ok: true,
         payload: {
           startup_fingerprint_trust: {
-            run_id: runId,
+            run_id: startupRunId,
             profile,
+            trusted: true,
             fingerprint_runtime: {
               ...fingerprintContext,
               injection: {
@@ -1787,6 +1791,7 @@ describe("extension service worker recovery contract", () => {
             },
             install_state: {
               status: "installed",
+              installed: true,
               required_patches: ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"],
               applied_patches: ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"],
               missing_required_patches: []
@@ -1803,14 +1808,14 @@ describe("extension service worker recovery contract", () => {
     await Promise.resolve();
     chromeApi.tabs.sendMessage.mockClear();
 
-    const liveRequestId = `${runId}-live`;
+    const liveRequestId = `${liveRunId}-live`;
     firstPort.onMessageListeners[0]?.({
       id: liveRequestId,
       method: "bridge.forward",
       profile,
       params: {
         session_id: "nm-session-001",
-        run_id: runId,
+        run_id: liveRunId,
         command: "xhs.search",
         command_params: createXhsCommandParams({
           requested_execution_mode: "live_read_high_risk",
@@ -1931,7 +1936,94 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("invalidates trusted fingerprint context after runtime.stop for same profile::runId", async () => {
+  it("reuses startup trust across new run_id in the same session for live xhs.search", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort, {
+      sessionId: "nm-session-001"
+    });
+    await Promise.resolve();
+
+    const startupRunId = "run-startup-trust-001";
+    const liveRunId = "run-live-followup-002";
+    const profile = "profile-a";
+    const fingerprintContext = createFingerprintRuntimeContext();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: startupRunId,
+      profile,
+      fingerprintContext
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onMessageListeners[0]?.({
+      id: liveRunId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: liveRunId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const liveDispatch = chromeApi.tabs.sendMessage.mock.calls.find(
+      (call) => (call[1] as { id?: string } | undefined)?.id === liveRunId
+    );
+    expect(liveDispatch).toBeDefined();
+    expect((liveDispatch?.[1] as { command?: string } | undefined)?.command).toBe("xhs.search");
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: liveRunId,
+        ok: true,
+        payload: {
+          summary: {
+            query: "露营",
+            items: []
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; error?: { code?: string }; payload?: Record<string, unknown> })
+      .find(
+        (message) =>
+          message.id === liveRunId &&
+          message.status === "error" &&
+          message.error?.code === "FINGERPRINT_CONTEXT_UNTRUSTED"
+      );
+    expect(blocked).toBeUndefined();
+
+    const succeeded = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string })
+      .find((message) => message.id === liveRunId);
+    expect(succeeded?.status).toBe("success");
+  });
+
+  it("invalidates trusted fingerprint context after runtime.stop for same profile::session", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [

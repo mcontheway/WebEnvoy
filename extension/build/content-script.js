@@ -36,6 +36,15 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     : null;
 const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
+const createWindowEvent = (type, detail) => {
+    if (typeof CustomEvent === "function") {
+        return new CustomEvent(type, { detail });
+    }
+    return {
+        type,
+        detail
+    };
+};
 const resolveBootstrapFingerprintContext = (value) => {
     const direct = ensureFingerprintRuntimeContext(value);
     if (direct) {
@@ -131,8 +140,7 @@ const installStartupFingerprintPatch = async (fingerprintRuntime) => {
     if (typeof window === "undefined" ||
         typeof window.dispatchEvent !== "function" ||
         typeof window.addEventListener !== "function" ||
-        typeof window.removeEventListener !== "function" ||
-        typeof CustomEvent !== "function") {
+        typeof window.removeEventListener !== "function") {
         return null;
     }
     const installRequest = {
@@ -186,9 +194,7 @@ const installStartupFingerprintPatch = async (fingerprintRuntime) => {
         }, STARTUP_FINGERPRINT_INSTALL_TIMEOUT_MS);
         window.addEventListener(MAIN_WORLD_RESULT_EVENT, onResult);
         try {
-            window.dispatchEvent(new CustomEvent(MAIN_WORLD_REQUEST_EVENT, {
-                detail: installRequest
-            }));
+            window.dispatchEvent(createWindowEvent(MAIN_WORLD_REQUEST_EVENT, installRequest));
         }
         catch {
             finish({
