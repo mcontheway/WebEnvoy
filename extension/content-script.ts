@@ -81,18 +81,6 @@ const normalizeForwardMessage = (
   )
 });
 
-const readWindowCachedFingerprintContext = (): unknown => {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  try {
-    const raw = window.sessionStorage?.getItem(FINGERPRINT_CONTEXT_CACHE_KEY) ?? null;
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-};
-
 const readBootstrapFingerprintContext = (): unknown =>
   (globalThis as ContentScriptBootstrapHost)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] ?? null;
 
@@ -195,49 +183,6 @@ const getExtensionStorageArea = (): ContentScriptStorageArea | null => {
   return area;
 };
 
-const readExtensionCachedFingerprintContext = async (
-  scopedKey: string
-): Promise<unknown> => {
-  const storageArea = getExtensionStorageArea();
-  const storageGet = storageArea?.get;
-  if (typeof storageGet !== "function") {
-    return null;
-  }
-
-  return await new Promise<unknown>((resolve) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      resolve(null);
-    }, 50);
-    const finish = (value: unknown) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      resolve(value);
-    };
-
-    try {
-      const maybePromise = storageGet(
-        [scopedKey],
-        (items) => finish(items?.[scopedKey] ?? null)
-      );
-      if (maybePromise && typeof (maybePromise as Promise<Record<string, unknown>>).then === "function") {
-        (maybePromise as Promise<Record<string, unknown>>)
-          .then((items) => finish(items?.[scopedKey] ?? null))
-          .catch(() => finish(null));
-      }
-    } catch {
-      finish(null);
-    }
-  });
-};
-
 const persistExtensionFingerprintContext = (
   normalized: FingerprintRuntimeContext,
   runId: string | null | undefined
@@ -266,47 +211,13 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
   }
 
   const handler = new ContentScriptHandler();
-  let bootstrapInstalled = false;
-  let bootstrapScopeKey: string | null = null;
-  const installBootstrapFingerprintPatch = (fingerprintContext: unknown): void => {
-    if (bootstrapInstalled) {
-      return;
-    }
-    const normalizedContext = normalizeFingerprintRuntimeContextInput(fingerprintContext);
-    if (!normalizedContext) {
-      return;
-    }
-    bootstrapScopeKey = buildScopedCacheKey(normalizedContext, null);
-    bootstrapInstalled = true;
-    handler.onBackgroundMessage(
-      normalizeForwardMessage({
-        id: "__webenvoy-bootstrap-fingerprint__",
-        runId: "__webenvoy-bootstrap-fingerprint__",
-        command: "runtime.ping",
-        commandParams: {},
-        params: {},
-        timeoutMs: 1_000,
-        cwd: "",
-        fingerprintContext: normalizedContext
-      })
-    );
-  };
-
-  installBootstrapFingerprintPatch(readBootstrapFingerprintContext());
-  if (bootstrapScopeKey) {
-    const windowCachedContext = readWindowCachedFingerprintContext();
-    if (windowCachedContext !== null) {
-      const normalizedWindowContext = normalizeFingerprintRuntimeContextInput(windowCachedContext);
-      if (
-        normalizedWindowContext &&
-        buildScopedCacheKey(normalizedWindowContext, null) === bootstrapScopeKey
-      ) {
-        installBootstrapFingerprintPatch(windowCachedContext);
-      }
-    }
-    void readExtensionCachedFingerprintContext(bootstrapScopeKey).then((cachedContext) => {
-      installBootstrapFingerprintPatch(cachedContext);
-    });
+  const bootstrapContext = normalizeFingerprintRuntimeContextInput(
+    readBootstrapFingerprintContext()
+  );
+  if (bootstrapContext) {
+    // Keep startup bootstrap context as cache only. Do not auto-trigger fingerprint patch install.
+    persistWindowFingerprintContext(bootstrapContext, null);
+    persistExtensionFingerprintContext(bootstrapContext, null);
   }
 
   handler.onResult((message) => {

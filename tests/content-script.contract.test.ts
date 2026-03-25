@@ -185,11 +185,18 @@ afterEach(() => {
 });
 
 describe("content-script bootstrap contract", () => {
-  it("installs fingerprint patch synchronously from startup bootstrap payload", () => {
-    (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] =
-      createFingerprintContext();
+  it("does not auto-install fingerprint patch from startup bootstrap payload", () => {
+    const context = createFingerprintContext();
+    (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = context;
+    const scopedKey = buildScopedCacheKey(context, null);
     const sessionStorage = createSessionStorage();
+    const extensionStorage = createExtensionStorageArea();
     (globalThis as { window?: unknown }).window = { sessionStorage };
+    (globalThis as { chrome?: unknown }).chrome = {
+      storage: {
+        session: extensionStorage
+      }
+    };
 
     const { runtime } = createRuntime();
     const onBackgroundMessage = vi
@@ -199,10 +206,15 @@ describe("content-script bootstrap contract", () => {
     const bootstrapped = bootstrapContentScript(runtime);
 
     expect(bootstrapped).toBe(true);
-    expect(onBackgroundMessage).toHaveBeenCalledTimes(1);
-    const [message] = onBackgroundMessage.mock.calls[0] ?? [];
-    expect((message as { command?: string }).command).toBe("runtime.ping");
-    expect((message as { id?: string }).id).toBe("__webenvoy-bootstrap-fingerprint__");
+    expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
+    expect(JSON.parse(sessionStorage.read(scopedKey) ?? "{}")).toMatchObject({
+      profile: "profile-a",
+      source: "profile_meta"
+    });
+    expect(extensionStorage.read(scopedKey)).toMatchObject({
+      profile: "profile-a",
+      source: "profile_meta"
+    });
   });
 
   it("does not install fingerprint patch during bootstrap when startup payload is missing", async () => {
@@ -222,7 +234,7 @@ describe("content-script bootstrap contract", () => {
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
   });
 
-  it("installs fingerprint patch at bootstrap when cached context exists", () => {
+  it("does not auto-install fingerprint patch at bootstrap when cached context exists", () => {
     const context = createFingerprintContext();
     (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = context;
     const cacheKey = buildScopedCacheKey(context, null);
@@ -239,13 +251,10 @@ describe("content-script bootstrap contract", () => {
     const bootstrapped = bootstrapContentScript(runtime);
 
     expect(bootstrapped).toBe(true);
-    expect(onBackgroundMessage).toHaveBeenCalledTimes(1);
-    const [message] = onBackgroundMessage.mock.calls[0] ?? [];
-    expect((message as { command?: string }).command).toBe("runtime.ping");
-    expect((message as { id?: string }).id).toBe("__webenvoy-bootstrap-fingerprint__");
+    expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
   });
 
-  it("does not reinstall fingerprint patch from extension storage after bootstrap install", async () => {
+  it("does not auto-install fingerprint patch from extension storage during bootstrap", async () => {
     const context = createFingerprintContext();
     (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = context;
     const cacheKey = buildScopedCacheKey(context, null);
@@ -268,12 +277,9 @@ describe("content-script bootstrap contract", () => {
     const bootstrapped = bootstrapContentScript(runtime);
 
     expect(bootstrapped).toBe(true);
-    expect(onBackgroundMessage).toHaveBeenCalledTimes(1);
+    expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
     await Promise.resolve();
-    expect(onBackgroundMessage).toHaveBeenCalledTimes(1);
-    const [message] = onBackgroundMessage.mock.calls[0] ?? [];
-    expect((message as { command?: string }).command).toBe("runtime.ping");
-    expect((message as { id?: string }).id).toBe("__webenvoy-bootstrap-fingerprint__");
+    expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
   });
 
   it("persists normalized fingerprint context from forwarded messages", () => {
@@ -319,7 +325,7 @@ describe("content-script bootstrap contract", () => {
     expect(sessionStorage.read(FINGERPRINT_CONTEXT_CACHE_KEY)).toBeNull();
   });
 
-  it("does not bootstrap from mismatched scoped cache across profile/run", async () => {
+  it("does not auto-install from scoped cache during bootstrap across profile/run", async () => {
     const bootstrapContext = createFingerprintContext();
     const foreignContext = {
       ...createFingerprintContext(),
@@ -340,12 +346,8 @@ describe("content-script bootstrap contract", () => {
 
     const bootstrapped = bootstrapContentScript(runtime);
     expect(bootstrapped).toBe(true);
-    expect(onBackgroundMessage).toHaveBeenCalledTimes(1);
-    const [message] = onBackgroundMessage.mock.calls[0] ?? [];
-    expect((message as { fingerprintContext?: { profile?: string } }).fingerprintContext?.profile).toBe(
-      "profile-a"
-    );
+    expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
     await Promise.resolve();
-    expect(onBackgroundMessage).toHaveBeenCalledTimes(1);
+    expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
   });
 });
