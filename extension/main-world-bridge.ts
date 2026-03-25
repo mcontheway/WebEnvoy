@@ -1,6 +1,6 @@
 type RecordValue = Record<string, unknown>;
 
-type MainWorldRequestType = "xhs-sign" | "fingerprint-install";
+type MainWorldRequestType = "fingerprint-install";
 
 type MainWorldRequest = {
   id: string;
@@ -15,10 +15,7 @@ type MainWorldResult = {
   message?: string;
 };
 
-type MainWorldWindow = Window &
-  typeof globalThis & {
-    _webmsxyw?: (uri: string, body: unknown) => unknown;
-  };
+type MainWorldWindow = Window & typeof globalThis;
 
 const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
 const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
@@ -79,7 +76,7 @@ const asStringArray = (value: unknown): string[] =>
 const asNumber = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
 
-const emitResult = (result: MainWorldResult): void => {
+const emitResult = async (result: MainWorldResult): Promise<void> => {
   window.dispatchEvent(
     new CustomEvent(MAIN_WORLD_RESULT_EVENT, {
       detail: result
@@ -371,7 +368,7 @@ const parseMainWorldRequest = (event: Event): MainWorldRequest | null => {
   }
   const id = asString(detail.id);
   const type = detail.type;
-  if (!id || (type !== "xhs-sign" && type !== "fingerprint-install")) {
+  if (!id || type !== "fingerprint-install") {
     return null;
   }
   return {
@@ -381,38 +378,10 @@ const parseMainWorldRequest = (event: Event): MainWorldRequest | null => {
   };
 };
 
-const handleRequest = (request: MainWorldRequest): void => {
-  if (request.type === "xhs-sign") {
-    const signatureFn = mainWindow._webmsxyw;
-    if (typeof signatureFn !== "function") {
-      emitResult({
-        id: request.id,
-        ok: false,
-        message: "window._webmsxyw is not available"
-      });
-      return;
-    }
-    const uri = asString(request.payload.uri);
-    if (!uri) {
-      emitResult({
-        id: request.id,
-        ok: false,
-        message: "xhs-sign requires uri"
-      });
-      return;
-    }
-    const result = signatureFn(uri, request.payload.body);
-    emitResult({
-      id: request.id,
-      ok: true,
-      result
-    });
-    return;
-  }
-
+const handleRequest = async (request: MainWorldRequest): Promise<void> => {
   const runtime = asRecord(request.payload.fingerprint_runtime ?? null);
   const result = installFingerprintRuntime(runtime);
-  emitResult({
+  await emitResult({
     id: request.id,
     ok: true,
     result
@@ -424,13 +393,11 @@ window.addEventListener(MAIN_WORLD_REQUEST_EVENT, (event: Event) => {
   if (!request) {
     return;
   }
-  try {
-    handleRequest(request);
-  } catch (error) {
-    emitResult({
+  void handleRequest(request).catch(async (error) => {
+    await emitResult({
       id: request.id,
       ok: false,
       message: error instanceof Error ? error.message : String(error)
     });
-  }
+  });
 });

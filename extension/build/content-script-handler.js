@@ -81,24 +81,35 @@ const mainWorldCall = async (request) => {
         ? crypto.randomUUID()
         : `mw-${Date.now()}`;
     return await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-            window.removeEventListener(MAIN_WORLD_RESULT_EVENT, listener);
-            reject(new Error("main world bridge response timeout"));
-        }, MAIN_WORLD_CALL_TIMEOUT_MS);
-        const listener = (event) => {
-            const customEvent = event;
-            if (!customEvent.detail || customEvent.detail.id !== requestId) {
+        let settled = false;
+        const complete = (fn) => {
+            if (settled) {
                 return;
             }
+            settled = true;
             clearTimeout(timeout);
             window.removeEventListener(MAIN_WORLD_RESULT_EVENT, listener);
-            if (customEvent.detail.ok === true) {
-                resolve(customEvent.detail.result);
+            fn();
+        };
+        const timeout = setTimeout(() => {
+            complete(() => {
+                reject(new Error("main world bridge response timeout"));
+            });
+        }, MAIN_WORLD_CALL_TIMEOUT_MS);
+        const listener = (event) => {
+            const detail = asRecord(event.detail);
+            if (!detail || detail.id !== requestId) {
                 return;
             }
-            reject(new Error(typeof customEvent.detail.message === "string"
-                ? customEvent.detail.message
-                : "main world call failed"));
+            if (detail.ok === true) {
+                complete(() => {
+                    resolve(detail.result);
+                });
+                return;
+            }
+            complete(() => {
+                reject(new Error(typeof detail.message === "string" ? detail.message : "main world call failed"));
+            });
         };
         window.addEventListener(MAIN_WORLD_RESULT_EVENT, listener);
         const requestDetail = {
@@ -109,6 +120,43 @@ const mainWorldCall = async (request) => {
             detail: requestDetail
         }));
     });
+};
+const requestXhsSignatureViaExtension = async (uri, body) => {
+    const runtime = globalThis.chrome?.runtime;
+    const sendMessage = runtime?.sendMessage;
+    if (!sendMessage) {
+        throw new Error("extension runtime.sendMessage is unavailable");
+    }
+    const request = {
+        kind: "xhs-sign-request",
+        uri,
+        body
+    };
+    const response = await new Promise((resolve, reject) => {
+        try {
+            const maybePromise = sendMessage(request, (message) => {
+                resolve(message ?? { ok: false, error: { message: "xhs-sign response missing" } });
+            });
+            if (maybePromise && typeof maybePromise.then === "function") {
+                void maybePromise
+                    .then((message) => {
+                    if (message) {
+                        resolve(message);
+                    }
+                })
+                    .catch((error) => {
+                    reject(error);
+                });
+            }
+        }
+        catch (error) {
+            reject(error);
+        }
+    });
+    if (!response.ok || !response.result) {
+        throw new Error(typeof response.error?.message === "string" ? response.error.message : "xhs-sign failed");
+    }
+    return response.result;
 };
 const resolveRequiredFingerprintPatches = (fingerprintRuntime) => asStringArray(asRecord(fingerprintRuntime.fingerprint_patch_manifest)?.required_patches);
 const probeAudioFirstSample = async () => {
@@ -247,13 +295,7 @@ const createBrowserEnvironment = () => ({
     getDocumentTitle: () => document.title,
     getReadyState: () => document.readyState,
     getCookie: () => document.cookie,
-    callSignature: async (uri, payload) => await mainWorldCall({
-        type: "xhs-sign",
-        payload: {
-            uri,
-            body: payload
-        }
-    }),
+    callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
     fetchJson: async (input) => {
         const controller = new AbortController();
         const timer = setTimeout(() => {
@@ -349,7 +391,7 @@ export class ContentScriptHandler {
                 type: "fingerprint-install",
                 payload: {
                     fingerprint_runtime: fingerprintRuntime
-                }
+                },
             });
             const verifiedInjection = await verifyFingerprintInstallResult({
                 fingerprintRuntime,

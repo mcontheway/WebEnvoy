@@ -7,6 +7,10 @@
     "service_worker": "build/background.js",
     "type": "module"
   },
+  "host_permissions": [
+    "https://www.xiaohongshu.com/*",
+    "https://creator.xiaohongshu.com/*"
+  ],
   "content_scripts": [
     {
       "matches": [
@@ -26,5 +30,5 @@
       "run_at": "document_start"
     }
   ],
-  "permissions": ["nativeMessaging", "storage"]
+  "permissions": ["nativeMessaging", "storage", "scripting"]
 }

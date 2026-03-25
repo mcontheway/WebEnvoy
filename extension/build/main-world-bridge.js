@@ -46,7 +46,7 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
 const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 const asNumber = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
-const emitResult = (result) => {
+const emitResult = async (result) => {
     window.dispatchEvent(new CustomEvent(MAIN_WORLD_RESULT_EVENT, {
         detail: result
     }));
@@ -280,7 +280,7 @@ const parseMainWorldRequest = (event) => {
     }
     const id = asString(detail.id);
     const type = detail.type;
-    if (!id || (type !== "xhs-sign" && type !== "fingerprint-install")) {
+    if (!id || type !== "fingerprint-install") {
         return null;
     }
     return {
@@ -289,37 +289,10 @@ const parseMainWorldRequest = (event) => {
         payload: asRecord(detail.payload) ?? {}
     };
 };
-const handleRequest = (request) => {
-    if (request.type === "xhs-sign") {
-        const signatureFn = mainWindow._webmsxyw;
-        if (typeof signatureFn !== "function") {
-            emitResult({
-                id: request.id,
-                ok: false,
-                message: "window._webmsxyw is not available"
-            });
-            return;
-        }
-        const uri = asString(request.payload.uri);
-        if (!uri) {
-            emitResult({
-                id: request.id,
-                ok: false,
-                message: "xhs-sign requires uri"
-            });
-            return;
-        }
-        const result = signatureFn(uri, request.payload.body);
-        emitResult({
-            id: request.id,
-            ok: true,
-            result
-        });
-        return;
-    }
+const handleRequest = async (request) => {
     const runtime = asRecord(request.payload.fingerprint_runtime ?? null);
     const result = installFingerprintRuntime(runtime);
-    emitResult({
+    await emitResult({
         id: request.id,
         ok: true,
         result
@@ -330,14 +303,11 @@ window.addEventListener(MAIN_WORLD_REQUEST_EVENT, (event) => {
     if (!request) {
         return;
     }
-    try {
-        handleRequest(request);
-    }
-    catch (error) {
-        emitResult({
+    void handleRequest(request).catch(async (error) => {
+        await emitResult({
             id: request.id,
             ok: false,
             message: error instanceof Error ? error.message : String(error)
         });
-    }
+    });
 });

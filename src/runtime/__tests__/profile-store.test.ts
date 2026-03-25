@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,8 +8,28 @@ import { ProfileStore, PROFILE_META_FILENAME } from "../profile-store.js";
 import { buildFingerprintProfileBundle } from "../../../shared/fingerprint-profile.js";
 
 const tempDirs: string[] = [];
+const originalBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+const originalBrowserVersion = process.env.WEBENVOY_BROWSER_VERSION;
+
+const resolveCurrentTimezone = (): string => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+};
 
 afterEach(async () => {
+  if (originalBrowserPath === undefined) {
+    delete process.env.WEBENVOY_BROWSER_PATH;
+  } else {
+    process.env.WEBENVOY_BROWSER_PATH = originalBrowserPath;
+  }
+  if (originalBrowserVersion === undefined) {
+    delete process.env.WEBENVOY_BROWSER_VERSION;
+  } else {
+    process.env.WEBENVOY_BROWSER_VERSION = originalBrowserVersion;
+  }
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
     if (dir) {
@@ -17,6 +37,27 @@ afterEach(async () => {
     }
   }
 });
+
+const createMockBrowserExecutable = async (
+  versionOutput: string = "Chromium 146.0.0.0"
+): Promise<string> => {
+  const dir = await mkdtemp(join(tmpdir(), "webenvoy-profile-store-browser-"));
+  tempDirs.push(dir);
+  const scriptPath = join(dir, "mock-browser.mjs");
+  await writeFile(
+    scriptPath,
+    `#!/usr/bin/env node
+if (process.argv.includes("--version")) {
+  console.log(${JSON.stringify(versionOutput)});
+  process.exit(0);
+}
+setInterval(() => {}, 1000);
+`,
+    "utf8"
+  );
+  await chmod(scriptPath, 0o755);
+  return scriptPath;
+};
 
 const createStore = async () => {
   const root = await mkdtemp(join(tmpdir(), "webenvoy-profile-store-"));
@@ -26,6 +67,10 @@ const createStore = async () => {
 
 describe("profile-store", () => {
   it("creates profile directory and initializes minimal meta", async () => {
+    const browserPath = await createMockBrowserExecutable("Chromium 146.0.0.0");
+    process.env.WEBENVOY_BROWSER_PATH = browserPath;
+    process.env.WEBENVOY_BROWSER_VERSION = "Chromium 9.9.9.9";
+
     const store = await createStore();
     const meta = await store.initializeMeta("default", "2026-03-19T10:00:00.000Z");
 
@@ -44,6 +89,9 @@ describe("profile-store", () => {
       os_version: expect.any(String),
       arch: expect.any(String)
     });
+    expect(meta.fingerprintProfileBundle?.timezone).toBe(resolveCurrentTimezone());
+    expect(meta.fingerprintProfileBundle?.ua).toContain("Chrome/146.0.0.0");
+    expect(meta.fingerprintProfileBundle?.ua).not.toContain("Chrome/9.9.9.9");
     expect(meta.localStorageSnapshots).toEqual([]);
 
     const profileDir = store.getProfileDir("default");
@@ -116,6 +164,10 @@ describe("profile-store", () => {
   });
 
   it("backfills legacy meta without bundle field and persists degraded migration marker", async () => {
+    const browserPath = await createMockBrowserExecutable("Chromium 146.0.0.0");
+    process.env.WEBENVOY_BROWSER_PATH = browserPath;
+    process.env.WEBENVOY_BROWSER_VERSION = "Chromium 9.9.9.9";
+
     const store = await createStore();
     await store.ensureProfileDir("legacy");
     const metaPath = store.getMetaPath("legacy");
@@ -149,17 +201,21 @@ describe("profile-store", () => {
     const meta = await store.readMeta("legacy");
     expect(meta).not.toBeNull();
     expect(meta?.fingerprintProfileBundle).toMatchObject({
+      ua: expect.stringContaining("Chrome/146.0.0.0"),
       environment: {
         os_family: expect.any(String),
         os_version: expect.any(String),
         arch: expect.any(String)
       },
+      timezone: "unknown",
       legacy_migration: {
         status: "backfilled_from_legacy",
         source_schema_version: 1,
         reason_codes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
       }
     });
+    expect(meta?.fingerprintProfileBundle?.ua).not.toContain("Chrome/9.9.9.9");
+    expect(meta?.fingerprintProfileBundle?.timezone).not.toBe(resolveCurrentTimezone());
 
     const persistedRaw = await readFile(metaPath, "utf8");
     const persistedMeta = JSON.parse(persistedRaw) as {

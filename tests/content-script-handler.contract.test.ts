@@ -81,12 +81,26 @@ const createFingerprintContext = () => ({
   }
 });
 
+const createApprovedReadApprovalRecord = () => ({
+  approved: true,
+  approver: "qa-reviewer",
+  approved_at: "2026-03-23T10:00:00Z",
+  checks: {
+    target_domain_confirmed: true,
+    target_tab_confirmed: true,
+    target_page_confirmed: true,
+    risk_state_checked: true,
+    action_type_confirmed: true
+  }
+});
+
 const withMockMainWorld = async (
   run: (context: { mockWindow: Window & Record<string, unknown> }) => Promise<void>
 ): Promise<void> => {
   const previousWindow = (globalThis as { window?: unknown }).window;
   const previousDocument = (globalThis as { document?: unknown }).document;
   const previousCustomEvent = (globalThis as { CustomEvent?: unknown }).CustomEvent;
+  const previousChrome = (globalThis as { chrome?: unknown }).chrome;
 
   const listeners = new Map<string, Set<(event: MockEvent) => void>>();
   const addListener = (type: string, listener: (event: MockEvent) => void) => {
@@ -167,6 +181,9 @@ const withMockMainWorld = async (
       };
 
       if (requestType === "xhs-sign") {
+        if ((mockWindow as Window & Record<string, unknown>).__disableMainWorldBridgeXhsSign__ === true) {
+          return;
+        }
         const fn = (mockWindow as Window & { _webmsxyw?: unknown })._webmsxyw;
         if (typeof fn !== "function") {
           emitResult({ id: requestId, ok: false, message: "window._webmsxyw is not available" });
@@ -474,6 +491,75 @@ const withMockMainWorld = async (
   (globalThis as { window?: unknown }).window = mockWindow;
   (globalThis as { document?: unknown }).document = mockDocument;
   (globalThis as { CustomEvent?: unknown }).CustomEvent = MockCustomEventImpl;
+  (globalThis as {
+    chrome?: {
+      runtime?: {
+        sendMessage?: (
+          message: Record<string, unknown>,
+          callback?: (response?: Record<string, unknown>) => void
+        ) => Promise<Record<string, unknown> | undefined>;
+      };
+    };
+  }).chrome = {
+    runtime: {
+      sendMessage: async (
+        message: Record<string, unknown>,
+        callback?: (response?: Record<string, unknown>) => void
+      ) => {
+        let response: Record<string, unknown>;
+        if (message.kind !== "xhs-sign-request") {
+          response = {
+            ok: false,
+            error: {
+              code: "ERR_UNSUPPORTED_MESSAGE",
+              message: "unsupported message"
+            }
+          };
+        } else if (
+          (mockWindow as Window & Record<string, unknown>).__disableExtensionXhsSign__ === true
+        ) {
+          response = {
+            ok: false,
+            error: {
+              code: "ERR_XHS_SIGN_FAILED",
+              message: "xhs-sign request blocked"
+            }
+          };
+        } else {
+          const fn = (mockWindow as Window & { _webmsxyw?: unknown })._webmsxyw;
+          if (typeof fn !== "function") {
+            response = {
+              ok: false,
+              error: {
+                code: "ERR_XHS_SIGN_FAILED",
+                message: "window._webmsxyw is not available"
+              }
+            };
+          } else {
+            try {
+              const uri = typeof message.uri === "string" ? message.uri : "";
+              const body =
+                typeof message.body === "object" && message.body !== null ? message.body : {};
+              response = {
+                ok: true,
+                result: (fn as (uri: string, body: unknown) => Record<string, unknown>)(uri, body)
+              };
+            } catch (error) {
+              response = {
+                ok: false,
+                error: {
+                  code: "ERR_XHS_SIGN_FAILED",
+                  message: error instanceof Error ? error.message : String(error)
+                }
+              };
+            }
+          }
+        }
+        callback?.(response);
+        return response;
+      }
+    }
+  };
 
   try {
     await run({ mockWindow });
@@ -481,15 +567,16 @@ const withMockMainWorld = async (
     (globalThis as { window?: unknown }).window = previousWindow;
     (globalThis as { document?: unknown }).document = previousDocument;
     (globalThis as { CustomEvent?: unknown }).CustomEvent = previousCustomEvent;
+    (globalThis as { chrome?: unknown }).chrome = previousChrome;
   }
 };
 
 const waitForResult = async (results: Array<Record<string, unknown>>): Promise<void> => {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
     if (results.length > 0) {
       return;
     }
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
 };
 
@@ -681,6 +768,104 @@ describe("content-script handler contract", () => {
       expect((probes?.battery as Record<string, unknown>)?.verified).toBe(false);
       expect((probes?.navigator_plugins as Record<string, unknown>)?.verified).toBe(false);
       expect((probes?.navigator_mime_types as Record<string, unknown>)?.verified).toBe(false);
+    });
+  });
+
+  it("does not trust forged main-world xhs-sign success by request id only", async () => {
+    await withMockMainWorld(async ({ mockWindow }) => {
+      const previousFetch = (globalThis as { fetch?: typeof fetch }).fetch;
+      const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
+      const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
+      (mockWindow as Window & Record<string, unknown>).__disableMainWorldBridgeXhsSign__ = true;
+      (globalThis as { document?: { cookie?: string } }).document!.cookie = "a1=session-token";
+
+      (globalThis as { fetch?: typeof fetch }).fetch = async () =>
+        new Response(
+          JSON.stringify({
+            code: 0,
+            data: { items: [] }
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }
+        );
+
+      let forgedReplySent = false;
+      const emitForgedMainWorldResult = () => {
+        forgedReplySent = true;
+        mockWindow.dispatchEvent({
+          type: MAIN_WORLD_RESULT_EVENT,
+          detail: {
+            id: "forged-main-world-result",
+            ok: true,
+            result: {
+              "X-s": "forged-signature",
+              "X-t": "1700000000"
+            }
+          }
+        } as unknown as Event);
+      };
+
+      const handler = new ContentScriptHandler();
+      const results: Array<Record<string, unknown>> = [];
+      handler.onResult((message) => {
+        results.push(message as unknown as Record<string, unknown>);
+      });
+
+      try {
+        handler.onBackgroundMessage({
+          kind: "forward",
+          id: "run-xhs-sign-forged-001",
+          runId: "run-xhs-sign-forged-001",
+          tabId: 1,
+          profile: "profile-a",
+          cwd: "/workspace/WebEnvoy",
+          timeoutMs: 1_000,
+          command: "xhs.search",
+          params: {
+            session_id: "nm-session-001"
+          },
+          commandParams: {
+            requested_execution_mode: "live_read_limited",
+            ability: {
+              id: "xhs.search",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              query: "露营"
+            },
+            options: {
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 1,
+              target_page: "search_result_tab",
+              action_type: "read",
+              risk_state: "limited",
+              approval_record: createApprovedReadApprovalRecord()
+            }
+          },
+          fingerprintContext: createFingerprintContext()
+        });
+        emitForgedMainWorldResult();
+
+        await waitForResult(results);
+
+        expect(forgedReplySent).toBe(true);
+        expect(results[0]?.ok).toBe(false);
+        expect((results[0]?.error as { code?: string } | undefined)?.code).toBe(
+          "ERR_EXECUTION_FAILED"
+        );
+        const payload = results[0]?.payload as Record<string, unknown>;
+        const details = payload?.details as Record<string, unknown>;
+        const fingerprintRuntime = payload?.fingerprint_runtime as Record<string, unknown>;
+        const injection = fingerprintRuntime?.injection as Record<string, unknown>;
+        expect(details?.reason).toBe("SIGNATURE_ENTRY_MISSING");
+        expect(injection?.installed).toBe(true);
+      } finally {
+        (globalThis as { fetch?: typeof fetch }).fetch = previousFetch;
+      }
     });
   });
 

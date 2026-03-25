@@ -26,6 +26,18 @@ export type ContentToBackgroundMessage = {
   error?: { code: string; message: string };
 };
 
+type XhsSignRequestMessage = {
+  kind: "xhs-sign-request";
+  uri: string;
+  body: Record<string, unknown>;
+};
+
+type XhsSignResponseMessage = {
+  ok: boolean;
+  result?: { "X-s": string; "X-t": string | number };
+  error?: { code?: string; message?: string };
+};
+
 export type ContentMessageListener = (message: ContentToBackgroundMessage) => void;
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -130,8 +142,15 @@ const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
 const MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
 const AUDIO_PATCH_EPSILON = 1e-12;
 
+type MainWorldResultEnvelope = {
+  id?: unknown;
+  ok?: unknown;
+  result?: unknown;
+  message?: unknown;
+};
+
 const mainWorldCall = async <T>(request: {
-  type: "xhs-sign" | "fingerprint-install";
+  type: "fingerprint-install";
   payload: Record<string, unknown>;
 }): Promise<T> => {
   const requestId =
@@ -140,32 +159,41 @@ const mainWorldCall = async <T>(request: {
       : `mw-${Date.now()}`;
 
   return await new Promise<T>((resolve, reject) => {
-    const timeout = setTimeout(() => {
+    let settled = false;
+    const complete = (fn: () => void): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
       window.removeEventListener(MAIN_WORLD_RESULT_EVENT, listener as EventListener);
-      reject(new Error("main world bridge response timeout"));
+      fn();
+    };
+    const timeout = setTimeout(() => {
+      complete(() => {
+        reject(new Error("main world bridge response timeout"));
+      });
     }, MAIN_WORLD_CALL_TIMEOUT_MS);
 
     const listener = (event: Event) => {
-      const customEvent = event as CustomEvent<Record<string, unknown>>;
-      if (!customEvent.detail || customEvent.detail.id !== requestId) {
+      const detail = asRecord((event as CustomEvent<Record<string, unknown>>).detail) as MainWorldResultEnvelope | null;
+      if (!detail || detail.id !== requestId) {
+        return;
+      }
+      if (detail.ok === true) {
+        complete(() => {
+          resolve(detail.result as T);
+        });
         return;
       }
 
-      clearTimeout(timeout);
-      window.removeEventListener(MAIN_WORLD_RESULT_EVENT, listener as EventListener);
-
-      if (customEvent.detail.ok === true) {
-        resolve(customEvent.detail.result as T);
-        return;
-      }
-
-      reject(
-        new Error(
-          typeof customEvent.detail.message === "string"
-            ? customEvent.detail.message
-            : "main world call failed"
-        )
-      );
+      complete(() => {
+        reject(
+          new Error(
+            typeof detail.message === "string" ? detail.message : "main world call failed"
+          )
+        );
+      });
     };
 
     window.addEventListener(MAIN_WORLD_RESULT_EVENT, listener as EventListener);
@@ -179,6 +207,60 @@ const mainWorldCall = async <T>(request: {
       })
     );
   });
+};
+
+const requestXhsSignatureViaExtension = async (
+  uri: string,
+  body: Record<string, unknown>
+): Promise<{ "X-s": string; "X-t": string | number }> => {
+  const runtime = (globalThis as {
+    chrome?: {
+      runtime?: {
+        sendMessage?: (
+          message: XhsSignRequestMessage,
+          callback?: (response?: XhsSignResponseMessage) => void
+        ) => Promise<XhsSignResponseMessage | undefined> | void;
+      };
+    };
+  }).chrome?.runtime;
+  const sendMessage = runtime?.sendMessage;
+  if (!sendMessage) {
+    throw new Error("extension runtime.sendMessage is unavailable");
+  }
+
+  const request: XhsSignRequestMessage = {
+    kind: "xhs-sign-request",
+    uri,
+    body
+  };
+
+  const response = await new Promise<XhsSignResponseMessage>((resolve, reject) => {
+    try {
+      const maybePromise = sendMessage(request, (message?: XhsSignResponseMessage) => {
+        resolve(message ?? { ok: false, error: { message: "xhs-sign response missing" } });
+      });
+      if (maybePromise && typeof (maybePromise as Promise<unknown>).then === "function") {
+        void (maybePromise as Promise<XhsSignResponseMessage | undefined>)
+          .then((message) => {
+            if (message) {
+              resolve(message);
+            }
+          })
+          .catch((error) => {
+            reject(error);
+          });
+      }
+    } catch (error) {
+      reject(error);
+    }
+  });
+
+  if (!response.ok || !response.result) {
+    throw new Error(
+      typeof response.error?.message === "string" ? response.error.message : "xhs-sign failed"
+    );
+  }
+  return response.result;
 };
 
 const resolveRequiredFingerprintPatches = (
@@ -339,14 +421,7 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
   getDocumentTitle: () => document.title,
   getReadyState: () => document.readyState,
   getCookie: () => document.cookie,
-  callSignature: async (uri, payload) =>
-    await mainWorldCall<{ "X-s": string; "X-t": string | number }>({
-      type: "xhs-sign",
-      payload: {
-        uri,
-        body: payload
-      }
-    }),
+  callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
   fetchJson: async (input) => {
     const controller = new AbortController();
     const timer = setTimeout(() => {
@@ -456,7 +531,7 @@ export class ContentScriptHandler {
         type: "fingerprint-install",
         payload: {
           fingerprint_runtime: fingerprintRuntime
-        }
+        },
       });
       const verifiedInjection = await verifyFingerprintInstallResult({
         fingerprintRuntime,

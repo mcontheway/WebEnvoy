@@ -410,8 +410,13 @@ class ChromeBackgroundBridge {
     }
     start() {
         this.#connectNativePort();
-        this.chromeApi.runtime.onMessage.addListener((message, sender) => {
+        this.chromeApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
+            if (this.#isXhsSignRequestMessage(message)) {
+                void this.#handleXhsSignRequest(message, sender, sendResponse);
+                return true;
+            }
             this.#onContentScriptResult(message, sender);
+            return undefined;
         });
         this.chromeApi.runtime.onInstalled?.addListener(() => this.#connectNativePort());
         this.chromeApi.runtime.onStartup?.addListener(() => this.#connectNativePort());
@@ -1645,6 +1650,84 @@ class ChromeBackgroundBridge {
         return (readTimeoutMs(request.timeout_ms) ??
             this.options?.forwardTimeoutMs ??
             defaultForwardTimeoutMs);
+    }
+    #isXhsSignRequestMessage(message) {
+        const record = asRecord(message);
+        return (record?.kind === "xhs-sign-request" &&
+            typeof record.uri === "string" &&
+            record.uri.length > 0 &&
+            asRecord(record.body) !== null);
+    }
+    async #executeXhsSignInMainWorld(tabId, uri, body) {
+        if (!this.chromeApi.scripting?.executeScript) {
+            throw new Error("chrome.scripting.executeScript is unavailable");
+        }
+        const results = await this.chromeApi.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            func: (inputUri, inputBody) => {
+                const signatureFn = window._webmsxyw;
+                if (typeof signatureFn !== "function") {
+                    throw new Error("window._webmsxyw is not available");
+                }
+                if (typeof inputUri !== "string" || inputUri.length === 0) {
+                    throw new Error("xhs-sign requires uri");
+                }
+                const result = signatureFn(inputUri, typeof inputBody === "object" && inputBody !== null ? inputBody : {});
+                const xSignature = typeof result?.["X-s"] === "string" ? result["X-s"] : null;
+                const xTimestamp = result?.["X-t"];
+                if (!xSignature || (typeof xTimestamp !== "string" && typeof xTimestamp !== "number")) {
+                    throw new Error("xhs-sign result is invalid");
+                }
+                return {
+                    "X-s": xSignature,
+                    "X-t": xTimestamp
+                };
+            },
+            args: [uri, body]
+        });
+        const first = Array.isArray(results) ? results[0] : null;
+        const signature = asRecord(first?.result);
+        if (!signature ||
+            typeof signature["X-s"] !== "string" ||
+            (typeof signature["X-t"] !== "string" && typeof signature["X-t"] !== "number")) {
+            throw new Error("xhs-sign result is invalid");
+        }
+        return {
+            "X-s": signature["X-s"],
+            "X-t": signature["X-t"]
+        };
+    }
+    async #handleXhsSignRequest(message, sender, sendResponse) {
+        const tabId = asInteger(sender.tab?.id);
+        const senderUrl = asNonEmptyString(sender.tab?.url);
+        const parsedSenderUrl = senderUrl ? parseUrl(senderUrl) : null;
+        if (tabId === null || !parsedSenderUrl || !XHS_DOMAIN_ALLOWLIST.has(parsedSenderUrl.hostname)) {
+            sendResponse({
+                ok: false,
+                error: {
+                    code: "ERR_XHS_SIGN_FORBIDDEN",
+                    message: "xhs-sign request is out of allowlist scope"
+                }
+            });
+            return;
+        }
+        try {
+            const result = await this.#executeXhsSignInMainWorld(tabId, message.uri, message.body);
+            sendResponse({
+                ok: true,
+                result
+            });
+        }
+        catch (error) {
+            sendResponse({
+                ok: false,
+                error: {
+                    code: "ERR_XHS_SIGN_FAILED",
+                    message: error instanceof Error ? error.message : String(error)
+                }
+            });
+        }
     }
     #onContentScriptResult(message, sender) {
         const result = message;

@@ -82,6 +82,13 @@ const parseOptionalString = (value) => {
     }
     return normalized;
 };
+const readTrimmedEnvString = (value) => {
+    if (typeof value !== "string") {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
 const parseStartUrl = (params) => {
     const raw = params.startUrl;
     if (raw === undefined || raw === null) {
@@ -251,6 +258,16 @@ const resolveCommandFromPath = async (command) => {
     }
     return null;
 };
+const resolveExplicitBrowserPathFromEnv = async () => {
+    const explicitFromEnv = readTrimmedEnvString(process.env.WEBENVOY_BROWSER_PATH);
+    if (!explicitFromEnv) {
+        return null;
+    }
+    if (isAbsolute(explicitFromEnv) || hasPathSegment(explicitFromEnv)) {
+        return explicitFromEnv;
+    }
+    return resolveCommandFromPath(explicitFromEnv);
+};
 const readBrowserVersionOutput = async (executablePath) => {
     return await new Promise((resolve) => {
         const child = spawn(executablePath, ["--version"], {
@@ -346,6 +363,25 @@ const resolveExecutablePath = async (params) => {
         throw new BrowserLaunchError("BROWSER_NOT_FOUND", "未找到受支持的可加载扩展浏览器；Google Chrome 137+ 已禁用命令行 --load-extension，请安装 Chrome for Testing / Chromium，或通过 WEBENVOY_BROWSER_PATH 指向它们");
     }
     throw new BrowserLaunchError("BROWSER_NOT_FOUND", "未找到系统 Chrome/Chromium，可通过受信环境变量 WEBENVOY_BROWSER_PATH 显式指定");
+};
+export const resolveBrowserVersionOutputForFingerprint = async (executablePath) => {
+    if (executablePath) {
+        return readTrimmedEnvString(await readBrowserVersionOutput(executablePath));
+    }
+    try {
+        const truthSource = await resolveBrowserVersionTruthSource();
+        return truthSource.browserVersion;
+    }
+    catch {
+        return null;
+    }
+};
+export const resolveBrowserVersionTruthSource = async (params = {}) => {
+    const executablePath = await resolveExecutablePath(params);
+    return {
+        executablePath,
+        browserVersion: readTrimmedEnvString(await readBrowserVersionOutput(executablePath))
+    };
 };
 const resolveSupervisorScriptPath = async () => {
     const moduleDir = dirname(fileURLToPath(import.meta.url));

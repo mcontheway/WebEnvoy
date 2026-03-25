@@ -148,6 +148,14 @@ const parseOptionalString = (value: unknown): string | null => {
   return normalized;
 };
 
+const readTrimmedEnvString = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+};
+
 const parseStartUrl = (params: JsonObject): string => {
   const raw = params.startUrl;
   if (raw === undefined || raw === null) {
@@ -338,6 +346,17 @@ const resolveCommandFromPath = async (command: string): Promise<string | null> =
   return null;
 };
 
+const resolveExplicitBrowserPathFromEnv = async (): Promise<string | null> => {
+  const explicitFromEnv = readTrimmedEnvString(process.env.WEBENVOY_BROWSER_PATH);
+  if (!explicitFromEnv) {
+    return null;
+  }
+  if (isAbsolute(explicitFromEnv) || hasPathSegment(explicitFromEnv)) {
+    return explicitFromEnv;
+  }
+  return resolveCommandFromPath(explicitFromEnv);
+};
+
 const readBrowserVersionOutput = async (executablePath: string): Promise<string | null> => {
   return await new Promise<string | null>((resolve) => {
     const child = spawn(executablePath, ["--version"], {
@@ -452,6 +471,35 @@ const resolveExecutablePath = async (params: JsonObject): Promise<string> => {
     "BROWSER_NOT_FOUND",
     "未找到系统 Chrome/Chromium，可通过受信环境变量 WEBENVOY_BROWSER_PATH 显式指定"
   );
+};
+
+export const resolveBrowserVersionOutputForFingerprint = async (
+  executablePath?: string
+): Promise<string | null> => {
+  if (executablePath) {
+    return readTrimmedEnvString(await readBrowserVersionOutput(executablePath));
+  }
+  try {
+    const truthSource = await resolveBrowserVersionTruthSource();
+    return truthSource.browserVersion;
+  } catch {
+    return null;
+  }
+};
+
+export interface BrowserVersionTruthSource {
+  executablePath: string;
+  browserVersion: string | null;
+}
+
+export const resolveBrowserVersionTruthSource = async (
+  params: JsonObject = {}
+): Promise<BrowserVersionTruthSource> => {
+  const executablePath = await resolveExecutablePath(params);
+  return {
+    executablePath,
+    browserVersion: readTrimmedEnvString(await readBrowserVersionOutput(executablePath))
+  };
 };
 
 const resolveSupervisorScriptPath = async (): Promise<string> => {

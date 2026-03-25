@@ -158,19 +158,56 @@ const roundNumber = (value, digits = 6) => {
 
 const selectBySeed = (seed, candidates) => candidates[hashString(seed) % candidates.length];
 
-const buildDefaultUserAgent = (environment) => {
+const extractChromeVersion = (value) => {
+  if (typeof value !== "string" || value.length === 0) {
+    return null;
+  }
+
+  const uaMatch = value.match(/\b(?:Chrome|Chromium)\/(\d+\.\d+\.\d+\.\d+)\b/i);
+  if (uaMatch) {
+    return uaMatch[1];
+  }
+
+  const binaryVersionMatch = value.match(
+    /\b(?:Google Chrome|Chrome for Testing|Chromium)\s+(\d+\.\d+\.\d+\.\d+)\b/i
+  );
+  if (binaryVersionMatch) {
+    return binaryVersionMatch[1];
+  }
+
+  return null;
+};
+
+const resolveChromeVersion = (input) => {
+  const explicitVersion = extractChromeVersion(input.browserVersion);
+  if (explicitVersion) {
+    return explicitVersion;
+  }
+
+  if (typeof navigator !== "undefined" && typeof navigator.userAgent === "string") {
+    const fromNavigator = extractChromeVersion(navigator.userAgent);
+    if (fromNavigator) {
+      return fromNavigator;
+    }
+  }
+
+  return null;
+};
+
+const buildDefaultUserAgent = (environment, input) => {
   const archToken = environment.arch === "arm64" ? "ARM 64" : "Win64; x64";
+  const chromeVersion = resolveChromeVersion(input) ?? "0.0.0.0";
 
   if (environment.os_family === "macos") {
     const version = String(environment.os_version ?? "14_0").replace(/\./g, "_");
-    return `Mozilla/5.0 (Macintosh; Intel Mac OS X ${version}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36`;
+    return `Mozilla/5.0 (Macintosh; Intel Mac OS X ${version}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
   }
 
   if (environment.os_family === "windows") {
-    return `Mozilla/5.0 (Windows NT 10.0; ${archToken}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36`;
+    return `Mozilla/5.0 (Windows NT 10.0; ${archToken}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
   }
 
-  return "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+  return `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
 };
 
 const readPath = (target, path) => {
@@ -332,7 +369,7 @@ const buildFingerprintProfileBundle = (input) => {
     ua:
       typeof input.ua === "string" && input.ua.length > 0
         ? input.ua
-        : buildDefaultUserAgent(environment),
+        : buildDefaultUserAgent(environment, input),
     hardwareConcurrency,
     deviceMemory,
     screen: cloneJson(screen),

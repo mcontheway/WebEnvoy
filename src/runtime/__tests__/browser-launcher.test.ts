@@ -12,6 +12,7 @@ import {
   BROWSER_STATE_FILENAME,
   BrowserLaunchError,
   launchBrowser,
+  resolveBrowserVersionOutputForFingerprint,
   shutdownBrowserSession
 } from "../browser-launcher.js";
 
@@ -20,9 +21,18 @@ const tempDirs: string[] = [];
 const originalBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
 const originalBrowserMockLog = process.env.WEBENVOY_BROWSER_MOCK_LOG;
 const originalBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+const originalRealChromeBin = process.env.WEBENVOY_REAL_CHROME_BIN;
+const originalRealBrowserPath = process.env.WEBENVOY_REAL_BROWSER_PATH;
+const originalBrowserVersion = process.env.WEBENVOY_BROWSER_VERSION;
 
 const restoreEnv = (
-  key: "WEBENVOY_BROWSER_PATH" | "WEBENVOY_BROWSER_MOCK_LOG" | "WEBENVOY_BROWSER_MOCK_VERSION",
+  key:
+    | "WEBENVOY_BROWSER_PATH"
+    | "WEBENVOY_BROWSER_MOCK_LOG"
+    | "WEBENVOY_BROWSER_MOCK_VERSION"
+    | "WEBENVOY_REAL_CHROME_BIN"
+    | "WEBENVOY_REAL_BROWSER_PATH"
+    | "WEBENVOY_BROWSER_VERSION",
   value: string | undefined
 ): void => {
   if (value === undefined) {
@@ -77,6 +87,25 @@ const createCrashBrowserExecutable = async (): Promise<string> => {
     scriptPath,
     `#!/usr/bin/env node
 setTimeout(() => process.exit(0), 50);
+`,
+    "utf8"
+  );
+  await chmod(scriptPath, 0o755);
+  return scriptPath;
+};
+
+const createFixedVersionBrowserExecutable = async (versionOutput: string): Promise<string> => {
+  const dir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-fixed-version-"));
+  tempDirs.push(dir);
+  const scriptPath = join(dir, "fixed-version-browser.mjs");
+  await writeFile(
+    scriptPath,
+    `#!/usr/bin/env node
+if (process.argv.includes("--version")) {
+  console.log(${JSON.stringify(versionOutput)});
+  process.exit(0);
+}
+setInterval(() => {}, 1000);
 `,
     "utf8"
   );
@@ -149,6 +178,9 @@ afterEach(async () => {
   restoreEnv("WEBENVOY_BROWSER_PATH", originalBrowserPath);
   restoreEnv("WEBENVOY_BROWSER_MOCK_LOG", originalBrowserMockLog);
   restoreEnv("WEBENVOY_BROWSER_MOCK_VERSION", originalBrowserMockVersion);
+  restoreEnv("WEBENVOY_REAL_CHROME_BIN", originalRealChromeBin);
+  restoreEnv("WEBENVOY_REAL_BROWSER_PATH", originalRealBrowserPath);
+  restoreEnv("WEBENVOY_BROWSER_VERSION", originalBrowserVersion);
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
     if (dir) {
@@ -158,6 +190,18 @@ afterEach(async () => {
 });
 
 describe("browser-launcher", () => {
+  it("binds fingerprint browser version probe to the resolved executable path", async () => {
+    const resolvedExecutable = await createFixedVersionBrowserExecutable("Chromium 146.0.0.0");
+    const unrelatedExecutable = await createFixedVersionBrowserExecutable("Chromium 999.0.0.0");
+    process.env.WEBENVOY_BROWSER_PATH = resolvedExecutable;
+    process.env.WEBENVOY_REAL_CHROME_BIN = unrelatedExecutable;
+    process.env.WEBENVOY_REAL_BROWSER_PATH = unrelatedExecutable;
+    process.env.WEBENVOY_BROWSER_VERSION = "Chromium 1.0.0.0";
+
+    const versionOutput = await resolveBrowserVersionOutputForFingerprint();
+    expect(versionOutput).toBe("Chromium 146.0.0.0");
+  });
+
   it("launches browser executable with profile user-data-dir args", async () => {
     const { scriptPath, logPath } = await createMockBrowserExecutable();
     const profileBaseDir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-profile-"));

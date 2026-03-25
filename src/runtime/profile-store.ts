@@ -10,6 +10,7 @@ import {
   normalizePlatform,
   type FingerprintProfileBundle
 } from "../../shared/fingerprint-profile.js";
+import { resolveBrowserVersionTruthSource } from "./browser-launcher.js";
 import type { ProfileState } from "./profile-state.js";
 import type { ProxyBinding } from "./proxy-binding.js";
 
@@ -102,6 +103,26 @@ const resolveCurrentEnvironment = () => ({
   os_version: release(),
   arch: normalizeArch(process.arch)
 });
+
+const resolveCurrentTimezone = (): string => {
+  try {
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof timezone === "string" && timezone.length > 0 ? timezone : "UTC";
+  } catch {
+    return "UTC";
+  }
+};
+
+const resolveBrowserVersionFromResolvedExecutable = async (): Promise<string | null> => {
+  try {
+    return (await resolveBrowserVersionTruthSource()).browserVersion;
+  } catch {
+    return null;
+  }
+};
+
+const withBrowserVersion = <T extends object>(input: T, browserVersion: string | null): T =>
+  ({ ...(input as Record<string, unknown>), browserVersion } as T);
 
 function assertProfileMeta(value: unknown): asserts value is ProfileMeta {
   if (!isObjectRecord(value)) {
@@ -204,15 +225,26 @@ const parseMeta = (raw: string): ProfileMeta => {
   return parsed;
 };
 
-const buildLegacyBundleMigration = (meta: ProfileMeta): FingerprintProfileBundle =>
-  markFingerprintProfileBundleAsLegacyBackfilled({
-    profileName: meta.profileName,
-    fingerprintSeeds: meta.fingerprintSeeds,
-    environment: resolveCurrentEnvironment(),
-    migratedAt: meta.updatedAt,
-    sourceSchemaVersion: meta.schemaVersion,
-    reasonCodes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
-  });
+const buildLegacyBundleMigration = async (input: {
+  meta: ProfileMeta;
+  browserVersion: string | null;
+  timezone: string;
+}): Promise<FingerprintProfileBundle> => {
+  return markFingerprintProfileBundleAsLegacyBackfilled(
+    withBrowserVersion(
+      {
+        profileName: input.meta.profileName,
+        fingerprintSeeds: input.meta.fingerprintSeeds,
+        timezone: input.timezone,
+        environment: resolveCurrentEnvironment(),
+        migratedAt: input.meta.updatedAt,
+        sourceSchemaVersion: input.meta.schemaVersion,
+        reasonCodes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
+      },
+      input.browserVersion
+    )
+  );
+};
 
 export class ProfileStore {
   private readonly rootDir: string;
@@ -245,9 +277,14 @@ export class ProfileStore {
       const raw = await this.fs.readFile(metaPath, "utf8");
       const parsed = parseMeta(raw);
       if (parsed.fingerprintProfileBundle === undefined) {
+        const browserVersion = await resolveBrowserVersionFromResolvedExecutable();
         const migratedMeta: ProfileMeta = {
           ...parsed,
-          fingerprintProfileBundle: buildLegacyBundleMigration(parsed)
+          fingerprintProfileBundle: await buildLegacyBundleMigration({
+            meta: parsed,
+            browserVersion,
+            timezone: "unknown"
+          })
         };
         await this.writeMeta(profileName, migratedMeta);
         return migratedMeta;
@@ -281,6 +318,8 @@ export class ProfileStore {
 
   async initializeMeta(profileName: string, nowIso: string): Promise<ProfileMeta> {
     const profileDir = await this.ensureProfileDir(profileName);
+    const browserVersion = await resolveBrowserVersionFromResolvedExecutable();
+    const timezone = resolveCurrentTimezone();
 
     const meta: ProfileMeta = {
       schemaVersion: 1,
@@ -293,12 +332,18 @@ export class ProfileStore {
         canvasNoiseSeed: `${profileName}-canvas-seed`
       },
       fingerprintProfileBundle: buildFingerprintProfileBundle({
-        profileName,
-        fingerprintSeeds: {
-          audioNoiseSeed: `${profileName}-audio-seed`,
-          canvasNoiseSeed: `${profileName}-canvas-seed`
-        },
-        environment: resolveCurrentEnvironment()
+        ...withBrowserVersion(
+          {
+            profileName,
+            fingerprintSeeds: {
+              audioNoiseSeed: `${profileName}-audio-seed`,
+              canvasNoiseSeed: `${profileName}-canvas-seed`
+            },
+            timezone,
+            environment: resolveCurrentEnvironment()
+          },
+          browserVersion
+        )
       }),
       localStorageSnapshots: [],
       createdAt: nowIso,

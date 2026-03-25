@@ -31,8 +31,13 @@ const createMockPort = () => {
 const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
   let connectIndex = 0;
   const runtimeMessageListeners: Array<
-    (message: unknown, sender: { tab?: { id?: number; url?: string }; url?: string }) => void
+    (
+      message: unknown,
+      sender: { tab?: { id?: number; url?: string }; url?: string },
+      sendResponse?: (response: unknown) => void
+    ) => boolean | void
   > = [];
+  const executeScript = vi.fn(async () => [{ result: { "X-s": "signed", "X-t": "1700000000" } }]);
   const chromeApi = {
     runtime: {
       connectNative: vi.fn(() => {
@@ -42,7 +47,11 @@ const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
       }),
       onMessage: {
         addListener: (
-          listener: (message: unknown, sender: { tab?: { id?: number; url?: string }; url?: string }) => void
+          listener: (
+            message: unknown,
+            sender: { tab?: { id?: number; url?: string }; url?: string },
+            sendResponse: (response: unknown) => void
+          ) => boolean | void
         ) => {
           runtimeMessageListeners.push(listener);
         }
@@ -57,12 +66,16 @@ const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
     tabs: {
       query: vi.fn(async () => [{ id: 11 }]),
       sendMessage: vi.fn(async () => {})
+    },
+    scripting: {
+      executeScript
     }
   };
 
   return {
     chromeApi,
-    runtimeMessageListeners
+    runtimeMessageListeners,
+    executeScript
   };
 };
 
@@ -91,7 +104,11 @@ const respondHandshake = (
 
 const primeTrustedFingerprintContext = async (input: {
   runtimeMessageListeners: Array<
-    (message: unknown, sender: { tab?: { id?: number; url?: string }; url?: string }) => void
+    (
+      message: unknown,
+      sender: { tab?: { id?: number; url?: string }; url?: string },
+      sendResponse?: (response: unknown) => void
+    ) => boolean | void
   >;
   runId: string;
   profile: string;
@@ -3279,5 +3296,122 @@ describe("extension service worker recovery contract", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("executes xhs-sign in MAIN world through extension-private rpc", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+
+    startChromeBackgroundBridge(chromeApi);
+
+    let response: unknown;
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "xhs-sign-request",
+        uri: "/api/sns/web/v1/search/notes",
+        body: { keyword: "露营" }
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+        }
+      },
+      (message) => {
+        response = message;
+      }
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 32 },
+        world: "MAIN",
+        args: ["/api/sns/web/v1/search/notes", { keyword: "露营" }]
+      })
+    );
+    expect(response).toEqual({
+      ok: true,
+      result: {
+        "X-s": "signed",
+        "X-t": "1700000000"
+      }
+    });
+  });
+
+  it("rejects xhs-sign requests from non-allowlisted sender tabs", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+
+    startChromeBackgroundBridge(chromeApi);
+
+    let response: unknown;
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "xhs-sign-request",
+        uri: "/api/sns/web/v1/search/notes",
+        body: { keyword: "露营" }
+      },
+      {
+        tab: {
+          id: 44,
+          url: "https://example.com/"
+        }
+      },
+      (message) => {
+        response = message;
+      }
+    );
+
+    await Promise.resolve();
+
+    expect(executeScript).not.toHaveBeenCalled();
+    expect(response).toEqual({
+      ok: false,
+      error: {
+        code: "ERR_XHS_SIGN_FORBIDDEN",
+        message: "xhs-sign request is out of allowlist scope"
+      }
+    });
+  });
+
+  it("returns xhs-sign failure when MAIN world executeScript fails", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    executeScript.mockRejectedValueOnce(new Error("window._webmsxyw is not available"));
+
+    startChromeBackgroundBridge(chromeApi);
+
+    let response: unknown;
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "xhs-sign-request",
+        uri: "/api/sns/web/v1/search/notes",
+        body: { keyword: "露营" }
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+        }
+      },
+      (message) => {
+        response = message;
+      }
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(executeScript).toHaveBeenCalledTimes(1);
+    expect(response).toEqual({
+      ok: false,
+      error: {
+        code: "ERR_XHS_SIGN_FAILED",
+        message: "window._webmsxyw is not available"
+      }
+    });
   });
 });

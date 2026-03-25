@@ -108,7 +108,13 @@ interface ExtensionChromeApi {
   runtime: {
     connectNative(hostName: string): ExtensionPort;
     onMessage: {
-      addListener(listener: (message: unknown, sender: RuntimeMessageSender) => void): void;
+      addListener(
+        listener: (
+          message: unknown,
+          sender: RuntimeMessageSender,
+          sendResponse: (response: unknown) => void
+        ) => boolean | void
+      ): void;
     };
     onInstalled?: {
       addListener(listener: () => void): void;
@@ -125,7 +131,27 @@ interface ExtensionChromeApi {
     }): Promise<ExtensionTab[]>;
     sendMessage(tabId: number, message: BackgroundToContentMessage): Promise<void>;
   };
+  scripting?: {
+    executeScript(input: {
+      target: { tabId: number };
+      world: "MAIN" | "ISOLATED";
+      func: (...args: unknown[]) => unknown;
+      args?: unknown[];
+    }): Promise<Array<{ result?: unknown }>>;
+  };
 }
+
+type XhsSignRequestMessage = {
+  kind: "xhs-sign-request";
+  uri: string;
+  body: Record<string, unknown>;
+};
+
+type XhsSignResponseMessage = {
+  ok: boolean;
+  result?: { "X-s": string; "X-t": string | number };
+  error?: { code: string; message: string };
+};
 
 interface NativeHeartbeatMessage {
   id: string;
@@ -647,8 +673,13 @@ class ChromeBackgroundBridge {
 
   start(): void {
     this.#connectNativePort();
-    this.chromeApi.runtime.onMessage.addListener((message, sender) => {
+    this.chromeApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (this.#isXhsSignRequestMessage(message)) {
+        void this.#handleXhsSignRequest(message, sender, sendResponse);
+        return true;
+      }
       this.#onContentScriptResult(message, sender);
+      return undefined;
     });
     this.chromeApi.runtime.onInstalled?.addListener(() => this.#connectNativePort());
     this.chromeApi.runtime.onStartup?.addListener(() => this.#connectNativePort());
@@ -2049,6 +2080,103 @@ class ChromeBackgroundBridge {
       this.options?.forwardTimeoutMs ??
       defaultForwardTimeoutMs
     );
+  }
+
+  #isXhsSignRequestMessage(message: unknown): message is XhsSignRequestMessage {
+    const record = asRecord(message);
+    return (
+      record?.kind === "xhs-sign-request" &&
+      typeof record.uri === "string" &&
+      record.uri.length > 0 &&
+      asRecord(record.body) !== null
+    );
+  }
+
+  async #executeXhsSignInMainWorld(
+    tabId: number,
+    uri: string,
+    body: Record<string, unknown>
+  ): Promise<{ "X-s": string; "X-t": string | number }> {
+    if (!this.chromeApi.scripting?.executeScript) {
+      throw new Error("chrome.scripting.executeScript is unavailable");
+    }
+
+    const results = await this.chromeApi.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: (inputUri: unknown, inputBody: unknown) => {
+        const signatureFn = (window as Window & { _webmsxyw?: unknown })._webmsxyw;
+        if (typeof signatureFn !== "function") {
+          throw new Error("window._webmsxyw is not available");
+        }
+        if (typeof inputUri !== "string" || inputUri.length === 0) {
+          throw new Error("xhs-sign requires uri");
+        }
+        const result = signatureFn(
+          inputUri,
+          typeof inputBody === "object" && inputBody !== null ? inputBody : {}
+        ) as Record<string, unknown>;
+        const xSignature = typeof result?.["X-s"] === "string" ? result["X-s"] : null;
+        const xTimestamp = result?.["X-t"];
+        if (!xSignature || (typeof xTimestamp !== "string" && typeof xTimestamp !== "number")) {
+          throw new Error("xhs-sign result is invalid");
+        }
+        return {
+          "X-s": xSignature,
+          "X-t": xTimestamp
+        };
+      },
+      args: [uri, body]
+    });
+    const first = Array.isArray(results) ? results[0] : null;
+    const signature = asRecord(first?.result);
+    if (
+      !signature ||
+      typeof signature["X-s"] !== "string" ||
+      (typeof signature["X-t"] !== "string" && typeof signature["X-t"] !== "number")
+    ) {
+      throw new Error("xhs-sign result is invalid");
+    }
+    return {
+      "X-s": signature["X-s"],
+      "X-t": signature["X-t"]
+    };
+  }
+
+  async #handleXhsSignRequest(
+    message: XhsSignRequestMessage,
+    sender: RuntimeMessageSender,
+    sendResponse: (response: XhsSignResponseMessage) => void
+  ): Promise<void> {
+    const tabId = asInteger(sender.tab?.id);
+    const senderUrl = asNonEmptyString(sender.tab?.url);
+    const parsedSenderUrl = senderUrl ? parseUrl(senderUrl) : null;
+    if (tabId === null || !parsedSenderUrl || !XHS_DOMAIN_ALLOWLIST.has(parsedSenderUrl.hostname)) {
+      sendResponse({
+        ok: false,
+        error: {
+          code: "ERR_XHS_SIGN_FORBIDDEN",
+          message: "xhs-sign request is out of allowlist scope"
+        }
+      });
+      return;
+    }
+
+    try {
+      const result = await this.#executeXhsSignInMainWorld(tabId, message.uri, message.body);
+      sendResponse({
+        ok: true,
+        result
+      });
+    } catch (error) {
+      sendResponse({
+        ok: false,
+        error: {
+          code: "ERR_XHS_SIGN_FAILED",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      });
+    }
   }
 
   #onContentScriptResult(message: unknown, sender: RuntimeMessageSender): void {
