@@ -213,6 +213,7 @@ const XHS_GATE_CONTRACT_MARKERS = {
   session_rhythm_policy: "session_rhythm_policy",
   session_rhythm: "session_rhythm"
 } as const;
+const MAX_TRUSTED_FINGERPRINT_CONTEXTS = 64;
 const XHS_PLUGIN_GATE_OWNERSHIP = {
   background_gate: ["target_domain_check", "target_tab_check", "mode_gate", "risk_state_gate"],
   content_script_gate: ["page_context_check", "action_tier_check"],
@@ -310,6 +311,8 @@ const xhsGateReasonMessage = (reason: string): string => {
     MANUAL_CONFIRMATION_MISSING: "manual confirmation is required for live mode",
     APPROVAL_CHECKS_INCOMPLETE: "approval checks are incomplete",
     FINGERPRINT_CONTEXT_MISSING: "fingerprint context is required for live execution",
+    FINGERPRINT_CONTEXT_UNTRUSTED:
+      "fingerprint context is not trusted for current run/profile",
     TARGET_TAB_NOT_FOUND: "target tab is unavailable",
     TARGET_DOMAIN_MISMATCH: "target tab domain does not match target_domain",
     TARGET_PAGE_MISMATCH: "target tab page does not match target_page",
@@ -410,6 +413,9 @@ const resolveBlockedFallbackMode = (
       : riskState === "limited"
         ? "recon"
         : "dry_run";
+
+const buildTrustedFingerprintContextKey = (profile: string, runId: string): string =>
+  `${profile}::${runId}`;
 
 export class BackgroundRelay {
   #listeners = new Set<NativeMessageListener>();
@@ -591,6 +597,7 @@ export class BackgroundRelay {
 class ChromeBackgroundBridge {
   #port: ExtensionPort | null = null;
   #pending = new Map<string, PendingForward>();
+  #trustedFingerprintContexts = new Map<string, FingerprintRuntimeContext>();
   #recoveryQueue: QueuedForwardRequest[] = [];
   #heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   #heartbeatTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -882,6 +889,51 @@ class ChromeBackgroundBridge {
     return `bg-open-${this.#handshakeSeq.toString().padStart(4, "0")}`;
   }
 
+  #rememberTrustedFingerprintContext(
+    request: BridgeRequest,
+    payload: Record<string, unknown>,
+    ok: boolean
+  ): void {
+    if (!ok) {
+      return;
+    }
+    if (String(request.params.command ?? "") !== "runtime.ping") {
+      return;
+    }
+    const profile = asNonEmptyString(request.profile);
+    if (!profile) {
+      return;
+    }
+    const runId = String(request.params.run_id ?? request.id);
+    const fingerprintRuntime = ensureFingerprintRuntimeContext(payload.fingerprint_runtime ?? null);
+    if (!fingerprintRuntime) {
+      return;
+    }
+    if (fingerprintRuntime.profile !== profile) {
+      return;
+    }
+    const key = buildTrustedFingerprintContextKey(profile, runId);
+    this.#trustedFingerprintContexts.set(key, { ...fingerprintRuntime });
+    if (this.#trustedFingerprintContexts.size <= MAX_TRUSTED_FINGERPRINT_CONTEXTS) {
+      return;
+    }
+    const oldestKey = this.#trustedFingerprintContexts.keys().next().value;
+    if (typeof oldestKey === "string") {
+      this.#trustedFingerprintContexts.delete(oldestKey);
+    }
+  }
+
+  #resolveTrustedFingerprintContext(request: BridgeRequest): FingerprintRuntimeContext | null {
+    const profile = asNonEmptyString(request.profile);
+    if (!profile) {
+      return null;
+    }
+    const runId = String(request.params.run_id ?? request.id);
+    const key = buildTrustedFingerprintContextKey(profile, runId);
+    const trusted = this.#trustedFingerprintContexts.get(key);
+    return trusted ? { ...trusted } : null;
+  }
+
   async #onNativeRequest(request: BridgeRequest): Promise<void> {
     if (request.method === "bridge.open") {
       this.#emit({
@@ -1067,6 +1119,24 @@ class ChromeBackgroundBridge {
   async #dispatchForward(request: BridgeRequest, deadlineMs?: number): Promise<void> {
     const requestDeadlineMs = deadlineMs ?? Date.now() + this.#resolveForwardTimeoutMs(request);
     const command = String(request.params.command ?? "");
+    const commandParams =
+      typeof request.params.command_params === "object" && request.params.command_params !== null
+        ? (request.params.command_params as Record<string, unknown>)
+        : {};
+    const optionParams = asRecord(commandParams.options);
+    const requestedExecutionMode = parseRequestedExecutionMode(
+      Object.prototype.hasOwnProperty.call(commandParams, "requested_execution_mode")
+        ? commandParams.requested_execution_mode
+        : optionParams?.requested_execution_mode
+    );
+    const requestedLiveMode =
+      requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
+    const requestedFingerprintContext = resolveFingerprintContext(commandParams);
+    const trustedFingerprintContext =
+      command === "xhs.search" && requestedLiveMode
+        ? this.#resolveTrustedFingerprintContext(request)
+        : null;
+    const forwardFingerprintContext = trustedFingerprintContext ?? requestedFingerprintContext;
     let tabId: number | null;
     let consumerGateResult: XhsTargetGateResult["consumerGateResult"] | undefined;
     let gatePayload: XhsTargetGateResult["gatePayload"] | undefined;
@@ -1164,15 +1234,8 @@ class ChromeBackgroundBridge {
         typeof request.params === "object" && request.params !== null
           ? { ...(request.params as Record<string, unknown>) }
           : {},
-      commandParams:
-        typeof request.params.command_params === "object" && request.params.command_params !== null
-          ? (request.params.command_params as Record<string, unknown>)
-          : {},
-      fingerprintContext: resolveFingerprintContext(
-        typeof request.params.command_params === "object" && request.params.command_params !== null
-          ? (request.params.command_params as Record<string, unknown>)
-          : {}
-      )
+      commandParams,
+      fingerprintContext: forwardFingerprintContext
     };
 
     try {
@@ -1237,9 +1300,9 @@ class ChromeBackgroundBridge {
     const rawIssueScope = readGateParam("issue_scope");
     const rawRiskState = readGateParam("risk_state");
     const rawApprovalRecord = readGateParam("approval_record") ?? readGateParam("approval");
-    const fingerprintContext = resolveFingerprintContext(commandParams);
-    const fingerprintExecution = fingerprintContext?.execution ?? null;
-    const fingerprintReasonCodes = (
+    const requestedFingerprintContext = resolveFingerprintContext(commandParams);
+    let fingerprintExecution = requestedFingerprintContext?.execution ?? null;
+    let fingerprintReasonCodes = (
       Array.isArray(fingerprintExecution?.reason_codes) ? fingerprintExecution.reason_codes : []
     ).filter((code): code is string => typeof code === "string");
     const targetDomain = asNonEmptyString(rawTargetDomain);
@@ -1264,20 +1327,11 @@ class ChromeBackgroundBridge {
       writeActionMatrixDecisions.write_interaction_tier !== "observe_only";
     const requestedLiveMode =
       requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
-    const fingerprintContextMissing =
-      requestedLiveMode && !issue208WriteGateOnly && fingerprintExecution === null;
-    const fingerprintLiveBlocked =
-      requestedLiveMode &&
-      !issue208WriteGateOnly &&
-      (fingerprintExecution === null ||
-        fingerprintExecution.live_allowed !== true ||
-        fingerprintExecution.live_decision === "dry_run_only" ||
-        !fingerprintExecution.allowed_execution_modes.includes(requestedExecutionMode));
-    const fingerprintGateDecision: "allowed" | "blocked" =
-      requestedLiveMode && fingerprintLiveBlocked ? "blocked" : "allowed";
-    const resolvedFingerprintReasonCodes = fingerprintContextMissing
-      ? ["FINGERPRINT_CONTEXT_MISSING"]
-      : fingerprintReasonCodes;
+    let fingerprintContextMissing = false;
+    let fingerprintContextUntrusted = false;
+    let fingerprintLiveBlocked = false;
+    let fingerprintGateDecision: "allowed" | "blocked" = "allowed";
+    let resolvedFingerprintReasonCodes = [...fingerprintReasonCodes];
     const writeTierReason = `WRITE_INTERACTION_TIER_${writeActionMatrixDecisions.write_interaction_tier.toUpperCase()}`;
     const gateReasons: string[] = [];
     let writeGateOnlyApprovalDecision: Record<string, unknown> | null = null;
@@ -1318,12 +1372,6 @@ class ChromeBackgroundBridge {
 
     if (requestedExecutionMode === "live_write" && !issue208WriteGateOnly) {
       pushReason("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
-    }
-    if (fingerprintContextMissing) {
-      pushReason("FINGERPRINT_CONTEXT_MISSING");
-    }
-    if (fingerprintLiveBlocked) {
-      pushReason("FINGERPRINT_EXECUTION_BLOCKED");
     }
     const isLiveReadMode =
       requestedExecutionMode === "live_read_limited" ||
@@ -1440,6 +1488,42 @@ class ChromeBackgroundBridge {
           }
         }
       }
+    }
+    const shouldEvaluateTrustedFingerprintGate =
+      requestedLiveMode && !issue208WriteGateOnly && gateReasons.length === 0;
+    if (shouldEvaluateTrustedFingerprintGate) {
+      const trustedFingerprintContext = this.#resolveTrustedFingerprintContext(request);
+      fingerprintExecution = trustedFingerprintContext?.execution ?? null;
+      fingerprintReasonCodes = (
+        Array.isArray(fingerprintExecution?.reason_codes) ? fingerprintExecution.reason_codes : []
+      ).filter((code): code is string => typeof code === "string");
+      if (fingerprintExecution === null) {
+        fingerprintContextMissing = requestedFingerprintContext === null;
+        fingerprintContextUntrusted = requestedFingerprintContext !== null;
+        if (fingerprintContextMissing) {
+          pushReason("FINGERPRINT_CONTEXT_MISSING");
+          resolvedFingerprintReasonCodes = ["FINGERPRINT_CONTEXT_MISSING"];
+        } else {
+          pushReason("FINGERPRINT_CONTEXT_UNTRUSTED");
+          resolvedFingerprintReasonCodes = ["FINGERPRINT_CONTEXT_UNTRUSTED"];
+        }
+        pushReason("FINGERPRINT_EXECUTION_BLOCKED");
+      } else if (
+        requestedExecutionMode !== null &&
+        (fingerprintExecution.live_allowed !== true ||
+          fingerprintExecution.live_decision === "dry_run_only" ||
+          !fingerprintExecution.allowed_execution_modes.includes(requestedExecutionMode))
+      ) {
+        fingerprintLiveBlocked = true;
+        pushReason("FINGERPRINT_EXECUTION_BLOCKED");
+        resolvedFingerprintReasonCodes = [...fingerprintReasonCodes];
+      } else {
+        resolvedFingerprintReasonCodes = [...fingerprintReasonCodes];
+      }
+      fingerprintGateDecision =
+        fingerprintContextMissing || fingerprintContextUntrusted || fingerprintLiveBlocked
+          ? "blocked"
+          : "allowed";
     }
     if (issue208WriteGateOnly) {
       if (!gateReasons.includes(writeTierReason)) {
@@ -1619,6 +1703,7 @@ class ChromeBackgroundBridge {
       typeof result.payload === "object" && result.payload !== null
         ? { ...(result.payload as Record<string, unknown>) }
         : {};
+    this.#rememberTrustedFingerprintContext(request, payload, result.ok === true);
     const summary =
       typeof payload.summary === "object" && payload.summary !== null
         ? (payload.summary as Record<string, unknown>)

@@ -72,6 +72,20 @@ const createFingerprintContext = () => ({
   }
 });
 
+const buildScopedCacheKey = (
+  context: ReturnType<typeof createFingerprintContext>,
+  runId: string | null
+): string => {
+  const runToken = runId && runId.trim().length > 0 ? runId.trim() : "run_unknown";
+  const allowedModes = [...context.execution.allowed_execution_modes].sort().join(",");
+  const reasonCodes = [...context.execution.reason_codes].sort().join(",");
+  const executionToken = `${context.execution.live_decision}|${allowedModes}|${reasonCodes}`.replace(
+    /[^a-zA-Z0-9._-]/g,
+    "_"
+  );
+  return `${FINGERPRINT_CONTEXT_CACHE_KEY}:${context.profile}:${runToken}:${executionToken}`;
+};
+
 const createSessionStorage = (
   initial?: Record<string, string>
 ): Storage & {
@@ -209,8 +223,11 @@ describe("content-script bootstrap contract", () => {
   });
 
   it("installs fingerprint patch at bootstrap when cached context exists", () => {
+    const context = createFingerprintContext();
+    (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = context;
+    const cacheKey = buildScopedCacheKey(context, null);
     const sessionStorage = createSessionStorage({
-      [FINGERPRINT_CONTEXT_CACHE_KEY]: JSON.stringify(createFingerprintContext())
+      [cacheKey]: JSON.stringify(context)
     });
     (globalThis as { window?: unknown }).window = { sessionStorage };
 
@@ -228,10 +245,13 @@ describe("content-script bootstrap contract", () => {
     expect((message as { id?: string }).id).toBe("__webenvoy-bootstrap-fingerprint__");
   });
 
-  it("installs fingerprint patch from extension storage when window cache is missing", async () => {
+  it("does not reinstall fingerprint patch from extension storage after bootstrap install", async () => {
+    const context = createFingerprintContext();
+    (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = context;
+    const cacheKey = buildScopedCacheKey(context, null);
     const sessionStorage = createSessionStorage();
     const extensionStorage = createExtensionStorageArea({
-      [FINGERPRINT_CONTEXT_CACHE_KEY]: createFingerprintContext()
+      [cacheKey]: context
     });
     (globalThis as { window?: unknown }).window = { sessionStorage };
     (globalThis as { chrome?: unknown }).chrome = {
@@ -248,11 +268,9 @@ describe("content-script bootstrap contract", () => {
     const bootstrapped = bootstrapContentScript(runtime);
 
     expect(bootstrapped).toBe(true);
-    expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
-
-    await vi.waitFor(() => {
-      expect(onBackgroundMessage).toHaveBeenCalledTimes(1);
-    });
+    expect(onBackgroundMessage).toHaveBeenCalledTimes(1);
+    await Promise.resolve();
+    expect(onBackgroundMessage).toHaveBeenCalledTimes(1);
     const [message] = onBackgroundMessage.mock.calls[0] ?? [];
     expect((message as { command?: string }).command).toBe("runtime.ping");
     expect((message as { id?: string }).id).toBe("__webenvoy-bootstrap-fingerprint__");
@@ -276,25 +294,58 @@ describe("content-script bootstrap contract", () => {
     expect(bootstrapContentScript(runtime)).toBe(true);
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
 
+    const context = createFingerprintContext();
     dispatch({
       kind: "forward",
       id: "run-001",
       command: "runtime.ping",
       commandParams: {
-        fingerprint_context: createFingerprintContext()
+        fingerprint_context: context
       }
     });
 
     expect(onBackgroundMessage).toHaveBeenCalledTimes(1);
-    const persistedRaw = sessionStorage.read(FINGERPRINT_CONTEXT_CACHE_KEY);
+    const scopedKey = buildScopedCacheKey(context, "run-001");
+    const persistedRaw = sessionStorage.read(scopedKey);
     expect(persistedRaw).not.toBeNull();
     expect(JSON.parse(persistedRaw ?? "{}")).toMatchObject({
       profile: "profile-a",
       source: "profile_meta"
     });
-    expect(extensionStorage.read(FINGERPRINT_CONTEXT_CACHE_KEY)).toMatchObject({
+    expect(extensionStorage.read(scopedKey)).toMatchObject({
       profile: "profile-a",
       source: "profile_meta"
     });
+    expect(sessionStorage.read(FINGERPRINT_CONTEXT_CACHE_KEY)).toBeNull();
+  });
+
+  it("does not bootstrap from mismatched scoped cache across profile/run", async () => {
+    const bootstrapContext = createFingerprintContext();
+    const foreignContext = {
+      ...createFingerprintContext(),
+      profile: "profile-b"
+    };
+    (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = {
+      fingerprint_runtime: bootstrapContext
+    };
+    const sessionStorage = createSessionStorage({
+      [buildScopedCacheKey(foreignContext, null)]: JSON.stringify(foreignContext)
+    });
+    (globalThis as { window?: unknown }).window = { sessionStorage };
+
+    const { runtime } = createRuntime();
+    const onBackgroundMessage = vi
+      .spyOn(ContentScriptHandler.prototype, "onBackgroundMessage")
+      .mockReturnValue(true);
+
+    const bootstrapped = bootstrapContentScript(runtime);
+    expect(bootstrapped).toBe(true);
+    expect(onBackgroundMessage).toHaveBeenCalledTimes(1);
+    const [message] = onBackgroundMessage.mock.calls[0] ?? [];
+    expect((message as { fingerprintContext?: { profile?: string } }).fingerprintContext?.profile).toBe(
+      "profile-a"
+    );
+    await Promise.resolve();
+    expect(onBackgroundMessage).toHaveBeenCalledTimes(1);
   });
 });

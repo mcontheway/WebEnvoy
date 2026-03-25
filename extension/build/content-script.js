@@ -40,12 +40,67 @@ const readWindowCachedFingerprintContext = () => {
     }
 };
 const readBootstrapFingerprintContext = () => globalThis[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] ?? null;
-const persistWindowFingerprintContext = (fingerprintContext) => {
-    if (typeof window === "undefined" || fingerprintContext === null || fingerprintContext === undefined) {
+const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value
+    : null;
+const normalizeFingerprintRuntimeContextInput = (value) => {
+    const direct = ensureFingerprintRuntimeContext(value);
+    if (direct) {
+        return direct;
+    }
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    return ensureFingerprintRuntimeContext(record.fingerprint_runtime ?? null);
+};
+const sanitizeScopePart = (value) => value.replace(/[^a-zA-Z0-9._-]/g, "_");
+const resolveRunToken = (normalized, runId) => {
+    if (typeof runId === "string" && runId.trim().length > 0) {
+        return sanitizeScopePart(runId.trim());
+    }
+    const record = asRecord(normalized);
+    const directRunId = record?.runId ?? record?.run_id;
+    if (typeof directRunId === "string" && directRunId.trim().length > 0) {
+        return sanitizeScopePart(directRunId.trim());
+    }
+    return "run_unknown";
+};
+const buildExecutionScopeToken = (normalized) => {
+    const execution = asRecord(asRecord(normalized)?.execution ?? null);
+    if (!execution) {
+        return "execution_unknown";
+    }
+    const liveDecision = typeof execution.live_decision === "string" ? execution.live_decision : "unknown";
+    const allowedModes = Array.isArray(execution.allowed_execution_modes)
+        ? execution.allowed_execution_modes
+            .filter((mode) => typeof mode === "string")
+            .sort()
+            .join(",")
+        : "";
+    const reasonCodes = Array.isArray(execution.reason_codes)
+        ? execution.reason_codes
+            .filter((code) => typeof code === "string")
+            .sort()
+            .join(",")
+        : "";
+    const token = `${liveDecision}|${allowedModes}|${reasonCodes}`;
+    return sanitizeScopePart(token.length > 0 ? token : "execution_unknown");
+};
+const buildScopedCacheKey = (normalized, runId) => {
+    const profile = sanitizeScopePart(normalized.profile);
+    const runToken = resolveRunToken(normalized, runId);
+    const executionToken = buildExecutionScopeToken(normalized);
+    return `${FINGERPRINT_CONTEXT_CACHE_KEY}:${profile}:${runToken}:${executionToken}`;
+};
+const persistWindowFingerprintContext = (normalized, runId) => {
+    if (typeof window === "undefined") {
         return;
     }
+    const scopedKey = buildScopedCacheKey(normalized, runId);
     try {
-        window.sessionStorage?.setItem(FINGERPRINT_CONTEXT_CACHE_KEY, JSON.stringify(fingerprintContext));
+        window.sessionStorage?.setItem(scopedKey, JSON.stringify(normalized));
+        window.sessionStorage?.removeItem(FINGERPRINT_CONTEXT_CACHE_KEY);
     }
     catch {
         // ignore cache failures (quota, privacy mode, etc.)
@@ -63,7 +118,7 @@ const getExtensionStorageArea = () => {
     }
     return area;
 };
-const readExtensionCachedFingerprintContext = async () => {
+const readExtensionCachedFingerprintContext = async (scopedKey) => {
     const storageArea = getExtensionStorageArea();
     const storageGet = storageArea?.get;
     if (typeof storageGet !== "function") {
@@ -87,10 +142,10 @@ const readExtensionCachedFingerprintContext = async () => {
             resolve(value);
         };
         try {
-            const maybePromise = storageGet([FINGERPRINT_CONTEXT_CACHE_KEY], (items) => finish(items?.[FINGERPRINT_CONTEXT_CACHE_KEY] ?? null));
+            const maybePromise = storageGet([scopedKey], (items) => finish(items?.[scopedKey] ?? null));
             if (maybePromise && typeof maybePromise.then === "function") {
                 maybePromise
-                    .then((items) => finish(items?.[FINGERPRINT_CONTEXT_CACHE_KEY] ?? null))
+                    .then((items) => finish(items?.[scopedKey] ?? null))
                     .catch(() => finish(null));
             }
         }
@@ -99,17 +154,15 @@ const readExtensionCachedFingerprintContext = async () => {
         }
     });
 };
-const persistExtensionFingerprintContext = (fingerprintContext) => {
-    if (fingerprintContext === null || fingerprintContext === undefined) {
-        return;
-    }
+const persistExtensionFingerprintContext = (normalized, runId) => {
     const storageArea = getExtensionStorageArea();
     if (!storageArea || typeof storageArea.set !== "function") {
         return;
     }
+    const scopedKey = buildScopedCacheKey(normalized, runId);
     try {
         const maybePromise = storageArea.set({
-            [FINGERPRINT_CONTEXT_CACHE_KEY]: fingerprintContext
+            [scopedKey]: normalized
         });
         if (maybePromise && typeof maybePromise.catch === "function") {
             void maybePromise.catch(() => undefined);
@@ -125,14 +178,16 @@ export const bootstrapContentScript = (runtime) => {
     }
     const handler = new ContentScriptHandler();
     let bootstrapInstalled = false;
+    let bootstrapScopeKey = null;
     const installBootstrapFingerprintPatch = (fingerprintContext) => {
         if (bootstrapInstalled) {
             return;
         }
-        const normalizedContext = ensureFingerprintRuntimeContext(fingerprintContext);
+        const normalizedContext = normalizeFingerprintRuntimeContextInput(fingerprintContext);
         if (!normalizedContext) {
             return;
         }
+        bootstrapScopeKey = buildScopedCacheKey(normalizedContext, null);
         bootstrapInstalled = true;
         handler.onBackgroundMessage(normalizeForwardMessage({
             id: "__webenvoy-bootstrap-fingerprint__",
@@ -146,10 +201,19 @@ export const bootstrapContentScript = (runtime) => {
         }));
     };
     installBootstrapFingerprintPatch(readBootstrapFingerprintContext());
-    installBootstrapFingerprintPatch(readWindowCachedFingerprintContext());
-    void readExtensionCachedFingerprintContext().then((cachedContext) => {
-        installBootstrapFingerprintPatch(cachedContext);
-    });
+    if (bootstrapScopeKey) {
+        const windowCachedContext = readWindowCachedFingerprintContext();
+        if (windowCachedContext !== null) {
+            const normalizedWindowContext = normalizeFingerprintRuntimeContextInput(windowCachedContext);
+            if (normalizedWindowContext &&
+                buildScopedCacheKey(normalizedWindowContext, null) === bootstrapScopeKey) {
+                installBootstrapFingerprintPatch(windowCachedContext);
+            }
+        }
+        void readExtensionCachedFingerprintContext(bootstrapScopeKey).then((cachedContext) => {
+            installBootstrapFingerprintPatch(cachedContext);
+        });
+    }
     handler.onResult((message) => {
         runtime.sendMessage?.(message);
     });
@@ -159,8 +223,10 @@ export const bootstrapContentScript = (runtime) => {
             return;
         }
         const normalized = normalizeForwardMessage(request);
-        persistWindowFingerprintContext(normalized.fingerprintContext);
-        persistExtensionFingerprintContext(normalized.fingerprintContext);
+        if (normalized.fingerprintContext) {
+            persistWindowFingerprintContext(normalized.fingerprintContext, normalized.runId);
+            persistExtensionFingerprintContext(normalized.fingerprintContext, normalized.runId);
+        }
         const accepted = handler.onBackgroundMessage(normalized);
         if (!accepted) {
             runtime.sendMessage?.({

@@ -44,6 +44,10 @@ type ContentScriptBootstrapHost = {
   [FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY]?: unknown;
 };
 
+type FingerprintRuntimeContext = NonNullable<
+  ReturnType<typeof ensureFingerprintRuntimeContext>
+>;
+
 const normalizeForwardMessage = (
   request: Partial<BackgroundToContentMessage> & { id: string }
 ): BackgroundToContentMessage => ({
@@ -92,15 +96,87 @@ const readWindowCachedFingerprintContext = (): unknown => {
 const readBootstrapFingerprintContext = (): unknown =>
   (globalThis as ContentScriptBootstrapHost)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] ?? null;
 
-const persistWindowFingerprintContext = (fingerprintContext: unknown): void => {
-  if (typeof window === "undefined" || fingerprintContext === null || fingerprintContext === undefined) {
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const normalizeFingerprintRuntimeContextInput = (
+  value: unknown
+): FingerprintRuntimeContext | null => {
+  const direct = ensureFingerprintRuntimeContext(value);
+  if (direct) {
+    return direct;
+  }
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  return ensureFingerprintRuntimeContext(record.fingerprint_runtime ?? null);
+};
+
+const sanitizeScopePart = (value: string): string =>
+  value.replace(/[^a-zA-Z0-9._-]/g, "_");
+
+const resolveRunToken = (
+  normalized: FingerprintRuntimeContext,
+  runId: string | null | undefined
+): string => {
+  if (typeof runId === "string" && runId.trim().length > 0) {
+    return sanitizeScopePart(runId.trim());
+  }
+  const record = asRecord(normalized);
+  const directRunId = record?.runId ?? record?.run_id;
+  if (typeof directRunId === "string" && directRunId.trim().length > 0) {
+    return sanitizeScopePart(directRunId.trim());
+  }
+  return "run_unknown";
+};
+
+const buildExecutionScopeToken = (normalized: FingerprintRuntimeContext): string => {
+  const execution = asRecord(asRecord(normalized)?.execution ?? null);
+  if (!execution) {
+    return "execution_unknown";
+  }
+  const liveDecision =
+    typeof execution.live_decision === "string" ? execution.live_decision : "unknown";
+  const allowedModes = Array.isArray(execution.allowed_execution_modes)
+    ? execution.allowed_execution_modes
+        .filter((mode): mode is string => typeof mode === "string")
+        .sort()
+        .join(",")
+    : "";
+  const reasonCodes = Array.isArray(execution.reason_codes)
+    ? execution.reason_codes
+        .filter((code): code is string => typeof code === "string")
+        .sort()
+        .join(",")
+    : "";
+  const token = `${liveDecision}|${allowedModes}|${reasonCodes}`;
+  return sanitizeScopePart(token.length > 0 ? token : "execution_unknown");
+};
+
+const buildScopedCacheKey = (
+  normalized: FingerprintRuntimeContext,
+  runId: string | null | undefined
+): string => {
+  const profile = sanitizeScopePart(normalized.profile);
+  const runToken = resolveRunToken(normalized, runId);
+  const executionToken = buildExecutionScopeToken(normalized);
+  return `${FINGERPRINT_CONTEXT_CACHE_KEY}:${profile}:${runToken}:${executionToken}`;
+};
+
+const persistWindowFingerprintContext = (
+  normalized: FingerprintRuntimeContext,
+  runId: string | null | undefined
+): void => {
+  if (typeof window === "undefined") {
     return;
   }
+  const scopedKey = buildScopedCacheKey(normalized, runId);
   try {
-    window.sessionStorage?.setItem(
-      FINGERPRINT_CONTEXT_CACHE_KEY,
-      JSON.stringify(fingerprintContext)
-    );
+    window.sessionStorage?.setItem(scopedKey, JSON.stringify(normalized));
+    window.sessionStorage?.removeItem(FINGERPRINT_CONTEXT_CACHE_KEY);
   } catch {
     // ignore cache failures (quota, privacy mode, etc.)
   }
@@ -119,7 +195,9 @@ const getExtensionStorageArea = (): ContentScriptStorageArea | null => {
   return area;
 };
 
-const readExtensionCachedFingerprintContext = async (): Promise<unknown> => {
+const readExtensionCachedFingerprintContext = async (
+  scopedKey: string
+): Promise<unknown> => {
   const storageArea = getExtensionStorageArea();
   const storageGet = storageArea?.get;
   if (typeof storageGet !== "function") {
@@ -146,12 +224,12 @@ const readExtensionCachedFingerprintContext = async (): Promise<unknown> => {
 
     try {
       const maybePromise = storageGet(
-        [FINGERPRINT_CONTEXT_CACHE_KEY],
-        (items) => finish(items?.[FINGERPRINT_CONTEXT_CACHE_KEY] ?? null)
+        [scopedKey],
+        (items) => finish(items?.[scopedKey] ?? null)
       );
       if (maybePromise && typeof (maybePromise as Promise<Record<string, unknown>>).then === "function") {
         (maybePromise as Promise<Record<string, unknown>>)
-          .then((items) => finish(items?.[FINGERPRINT_CONTEXT_CACHE_KEY] ?? null))
+          .then((items) => finish(items?.[scopedKey] ?? null))
           .catch(() => finish(null));
       }
     } catch {
@@ -160,18 +238,19 @@ const readExtensionCachedFingerprintContext = async (): Promise<unknown> => {
   });
 };
 
-const persistExtensionFingerprintContext = (fingerprintContext: unknown): void => {
-  if (fingerprintContext === null || fingerprintContext === undefined) {
-    return;
-  }
+const persistExtensionFingerprintContext = (
+  normalized: FingerprintRuntimeContext,
+  runId: string | null | undefined
+): void => {
   const storageArea = getExtensionStorageArea();
   if (!storageArea || typeof storageArea.set !== "function") {
     return;
   }
+  const scopedKey = buildScopedCacheKey(normalized, runId);
 
   try {
     const maybePromise = storageArea.set({
-      [FINGERPRINT_CONTEXT_CACHE_KEY]: fingerprintContext
+      [scopedKey]: normalized
     });
     if (maybePromise && typeof (maybePromise as Promise<void>).catch === "function") {
       void (maybePromise as Promise<void>).catch(() => undefined);
@@ -188,14 +267,16 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
 
   const handler = new ContentScriptHandler();
   let bootstrapInstalled = false;
+  let bootstrapScopeKey: string | null = null;
   const installBootstrapFingerprintPatch = (fingerprintContext: unknown): void => {
     if (bootstrapInstalled) {
       return;
     }
-    const normalizedContext = ensureFingerprintRuntimeContext(fingerprintContext);
+    const normalizedContext = normalizeFingerprintRuntimeContextInput(fingerprintContext);
     if (!normalizedContext) {
       return;
     }
+    bootstrapScopeKey = buildScopedCacheKey(normalizedContext, null);
     bootstrapInstalled = true;
     handler.onBackgroundMessage(
       normalizeForwardMessage({
@@ -212,10 +293,21 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
   };
 
   installBootstrapFingerprintPatch(readBootstrapFingerprintContext());
-  installBootstrapFingerprintPatch(readWindowCachedFingerprintContext());
-  void readExtensionCachedFingerprintContext().then((cachedContext) => {
-    installBootstrapFingerprintPatch(cachedContext);
-  });
+  if (bootstrapScopeKey) {
+    const windowCachedContext = readWindowCachedFingerprintContext();
+    if (windowCachedContext !== null) {
+      const normalizedWindowContext = normalizeFingerprintRuntimeContextInput(windowCachedContext);
+      if (
+        normalizedWindowContext &&
+        buildScopedCacheKey(normalizedWindowContext, null) === bootstrapScopeKey
+      ) {
+        installBootstrapFingerprintPatch(windowCachedContext);
+      }
+    }
+    void readExtensionCachedFingerprintContext(bootstrapScopeKey).then((cachedContext) => {
+      installBootstrapFingerprintPatch(cachedContext);
+    });
+  }
 
   handler.onResult((message) => {
     runtime.sendMessage?.(message);
@@ -229,8 +321,10 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
     const normalized = normalizeForwardMessage(
       request as Partial<BackgroundToContentMessage> & { id: string }
     );
-    persistWindowFingerprintContext(normalized.fingerprintContext);
-    persistExtensionFingerprintContext(normalized.fingerprintContext);
+    if (normalized.fingerprintContext) {
+      persistWindowFingerprintContext(normalized.fingerprintContext, normalized.runId);
+      persistExtensionFingerprintContext(normalized.fingerprintContext, normalized.runId);
+    }
     const accepted = handler.onBackgroundMessage(normalized);
     if (!accepted) {
       runtime.sendMessage?.({

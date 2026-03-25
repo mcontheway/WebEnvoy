@@ -87,6 +87,53 @@ const respondHandshake = (
   });
 };
 
+const primeTrustedFingerprintContext = async (input: {
+  mockPort: ReturnType<typeof createMockPort>;
+  runtimeMessageListeners: Array<(message: unknown, sender: { tab?: { id?: number } }) => void>;
+  runId: string;
+  profile: string;
+  fingerprintContext: Record<string, unknown>;
+  tabId?: number;
+}) => {
+  input.mockPort.onMessageListeners[0]?.({
+    id: `prime-${input.runId}`,
+    method: "bridge.forward",
+    profile: input.profile,
+    params: {
+      session_id: "nm-session-001",
+      run_id: input.runId,
+      command: "runtime.ping",
+      command_params: {
+        fingerprint_context: input.fingerprintContext
+      },
+      cwd: "/workspace/WebEnvoy"
+    },
+    timeout_ms: 100
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  input.runtimeMessageListeners[0]?.(
+    {
+      kind: "result",
+      id: `prime-${input.runId}`,
+      ok: true,
+      payload: {
+        message: "pong",
+        run_id: input.runId,
+        profile: input.profile,
+        fingerprint_runtime: input.fingerprintContext
+      }
+    },
+    {
+      tab: {
+        id: input.tabId ?? 11
+      }
+    }
+  );
+  await Promise.resolve();
+};
+
 const createXhsCommandParams = (overrides?: Record<string, unknown>) => ({
   issue_scope: "issue_209",
   target_domain: "www.xiaohongshu.com",
@@ -1482,13 +1529,27 @@ describe("extension service worker recovery contract", () => {
 
   it("blocks live mode when fingerprint_context.execution.live_allowed=false", async () => {
     const firstPort = createMockPort();
-    const { chromeApi } = createChromeApi([firstPort]);
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
       { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
     ]);
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
     await Promise.resolve();
+    const fingerprintContext = createFingerprintRuntimeContext({
+      live_allowed: false,
+      live_decision: "dry_run_only",
+      allowed_execution_modes: ["dry_run", "recon"],
+      reason_codes: ["PROFILE_FIELD_MISSING"]
+    });
+    await primeTrustedFingerprintContext({
+      mockPort: firstPort,
+      runtimeMessageListeners,
+      runId: "run-xhs-live-blocked-by-fingerprint-001",
+      profile: "profile-a",
+      fingerprintContext
+    });
+    chromeApi.tabs.sendMessage.mockClear();
 
     firstPort.onMessageListeners[0]?.({
       id: "run-xhs-live-blocked-by-fingerprint-001",
@@ -1502,12 +1563,7 @@ describe("extension service worker recovery contract", () => {
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
-          fingerprint_context: createFingerprintRuntimeContext({
-            live_allowed: false,
-            live_decision: "dry_run_only",
-            allowed_execution_modes: ["dry_run", "recon"],
-            reason_codes: ["PROFILE_FIELD_MISSING"]
-          })
+          fingerprint_context: fingerprintContext
         }),
         cwd: "/workspace/WebEnvoy"
       },
@@ -1535,13 +1591,27 @@ describe("extension service worker recovery contract", () => {
 
   it("blocks live mode when fingerprint_context.execution.live_decision=dry_run_only", async () => {
     const firstPort = createMockPort();
-    const { chromeApi } = createChromeApi([firstPort]);
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
       { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
     ]);
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
     await Promise.resolve();
+    const fingerprintContext = createFingerprintRuntimeContext({
+      live_allowed: true,
+      live_decision: "dry_run_only",
+      allowed_execution_modes: ["dry_run", "recon"],
+      reason_codes: ["OS_FAMILY_MISMATCH"]
+    });
+    await primeTrustedFingerprintContext({
+      mockPort: firstPort,
+      runtimeMessageListeners,
+      runId: "run-xhs-live-blocked-by-fingerprint-002",
+      profile: "profile-a",
+      fingerprintContext
+    });
+    chromeApi.tabs.sendMessage.mockClear();
 
     firstPort.onMessageListeners[0]?.({
       id: "run-xhs-live-blocked-by-fingerprint-002",
@@ -1555,12 +1625,7 @@ describe("extension service worker recovery contract", () => {
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           approval_record: createApprovedReadApprovalRecord(),
-          fingerprint_context: createFingerprintRuntimeContext({
-            live_allowed: true,
-            live_decision: "dry_run_only",
-            allowed_execution_modes: ["dry_run", "recon"],
-            reason_codes: ["OS_FAMILY_MISMATCH"]
-          })
+          fingerprint_context: fingerprintContext
         }),
         cwd: "/workspace/WebEnvoy"
       },
@@ -1634,6 +1699,52 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
+  it("blocks live mode when fingerprint_context exists but is not trusted for run/profile", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-blocked-by-fingerprint-untrusted-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-blocked-by-fingerprint-untrusted-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: createFingerprintRuntimeContext()
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-live-blocked-by-fingerprint-untrusted-001");
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(payload.fingerprint_execution).toBeNull();
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_UNTRUSTED"]);
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_CONTEXT_UNTRUSTED", "FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+  });
+
   it("forwards top-level requested_execution_mode live path and relays required-patch missing block", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
@@ -1646,6 +1757,13 @@ describe("extension service worker recovery contract", () => {
 
     const fingerprintContext = createFingerprintRuntimeContext();
     fingerprintContext.fingerprint_patch_manifest.required_patches.push("unknown_required_patch");
+    await primeTrustedFingerprintContext({
+      mockPort: firstPort,
+      runtimeMessageListeners,
+      runId: "run-xhs-live-top-level-patch-missing-001",
+      profile: "profile-a",
+      fingerprintContext
+    });
 
     firstPort.onMessageListeners[0]?.({
       id: "run-xhs-live-top-level-patch-missing-001",
@@ -1878,6 +1996,13 @@ describe("extension service worker recovery contract", () => {
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
     await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      mockPort: firstPort,
+      runtimeMessageListeners,
+      runId: "run-xhs-live-limited-approved-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext()
+    });
 
     firstPort.onMessageListeners[0]?.({
       id: "run-xhs-live-limited-approved-001",
@@ -1985,6 +2110,13 @@ describe("extension service worker recovery contract", () => {
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
     await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      mockPort: firstPort,
+      runtimeMessageListeners,
+      runId: "run-xhs-live-mode-approved-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext()
+    });
 
     firstPort.onMessageListeners[0]?.({
       id: "run-xhs-live-mode-approved-001",
