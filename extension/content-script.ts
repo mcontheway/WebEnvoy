@@ -184,22 +184,6 @@ const buildScopedCacheKey = (
   return `${FINGERPRINT_CONTEXT_CACHE_KEY}:${profile}:${runToken}:${executionToken}`;
 };
 
-const persistWindowFingerprintContext = (
-  normalized: FingerprintRuntimeContext,
-  runId: string | null | undefined
-): void => {
-  if (typeof window === "undefined") {
-    return;
-  }
-  const scopedKey = buildScopedCacheKey(normalized, runId);
-  try {
-    window.sessionStorage?.setItem(scopedKey, JSON.stringify(normalized));
-    window.sessionStorage?.removeItem(FINGERPRINT_CONTEXT_CACHE_KEY);
-  } catch {
-    // ignore cache failures (quota, privacy mode, etc.)
-  }
-};
-
 const getExtensionStorageArea = (): ContentScriptStorageArea | null => {
   const chromeApi = (globalThis as { chrome?: ContentScriptChromeApi }).chrome;
   const storage = chromeApi?.storage;
@@ -217,6 +201,8 @@ const persistExtensionFingerprintContext = (
   normalized: FingerprintRuntimeContext,
   runId: string | null | undefined
 ): void => {
+  // Keep fingerprint runtime context in extension-private storage only.
+  // Never mirror it to page-readable sessionStorage/localStorage.
   const storageArea = getExtensionStorageArea();
   if (!storageArea || typeof storageArea.set !== "function") {
     return;
@@ -404,7 +390,6 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
   if (bootstrapContext) {
     // Startup install goes directly to main-world bridge; do not proxy through runtime.ping.
     scheduleStartupFingerprintInstall(runtime, bootstrapContext, bootstrapInput.runId);
-    persistWindowFingerprintContext(bootstrapContext, bootstrapInput.runId);
     persistExtensionFingerprintContext(bootstrapContext, bootstrapInput.runId);
   }
 
@@ -421,7 +406,6 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
       request as Partial<BackgroundToContentMessage> & { id: string }
     );
     if (normalized.fingerprintContext) {
-      persistWindowFingerprintContext(normalized.fingerprintContext, normalized.runId);
       persistExtensionFingerprintContext(normalized.fingerprintContext, normalized.runId);
     }
     const accepted = handler.onBackgroundMessage(normalized);

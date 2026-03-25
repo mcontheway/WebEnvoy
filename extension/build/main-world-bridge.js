@@ -1,8 +1,8 @@
 "use strict";
 const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
 const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
-const AUDIO_PATCH_MARKER = "__webenvoy_audio_context_patched__";
-const AUDIO_NOISE_SEED_KEY = "__webenvoy_audio_noise_seed__";
+const patchedAudioContextPrototypes = new WeakSet();
+const audioNoiseSeedByPrototype = new WeakMap();
 const DEFAULT_PLUGIN_DESCRIPTORS = [
     {
         name: "Chrome PDF Viewer",
@@ -126,8 +126,8 @@ const installFingerprintRuntime = (runtime) => {
             const prototype = OfflineCtor.prototype;
             const originalStartRendering = prototype.startRendering;
             if (typeof originalStartRendering === "function") {
-                prototype[AUDIO_NOISE_SEED_KEY] = audioNoiseSeed;
-                if (prototype[AUDIO_PATCH_MARKER] === true) {
+                audioNoiseSeedByPrototype.set(prototype, audioNoiseSeed);
+                if (patchedAudioContextPrototypes.has(prototype)) {
                     appliedPatches.push("audio_context");
                 }
                 else {
@@ -143,7 +143,7 @@ const installFingerprintRuntime = (runtime) => {
                                 typeof channelData.length === "number" &&
                                 channelData.length > 0 &&
                                 !patchedChannelData.has(channelData)) {
-                                const noiseSeed = asNumber(prototype[AUDIO_NOISE_SEED_KEY]) ?? audioNoiseSeed;
+                                const noiseSeed = audioNoiseSeedByPrototype.get(prototype) ?? audioNoiseSeed;
                                 channelData[0] = channelData[0] + noiseSeed;
                                 patchedChannelData.add(channelData);
                             }
@@ -151,14 +151,15 @@ const installFingerprintRuntime = (runtime) => {
                         };
                         return audioBuffer;
                     };
+                    const originalStartRenderingFn = originalStartRendering;
                     prototype.startRendering = function (...args) {
-                        const renderingResult = originalStartRendering.apply(this, args);
+                        const renderingResult = originalStartRenderingFn.apply(this, args);
                         if (renderingResult && typeof renderingResult.then === "function") {
                             return renderingResult.then((audioBuffer) => patchAudioBuffer(audioBuffer));
                         }
                         return patchAudioBuffer(renderingResult);
                     };
-                    prototype[AUDIO_PATCH_MARKER] = true;
+                    patchedAudioContextPrototypes.add(prototype);
                     appliedPatches.push("audio_context");
                 }
             }
@@ -196,7 +197,6 @@ const installFingerprintRuntime = (runtime) => {
             missingRequiredPatches.push(patchName);
         }
     }
-    mainWindow.__webenvoy_fingerprint_runtime__ = runtime;
     return {
         installed: missingRequiredPatches.length === 0,
         applied_patches: appliedPatches,
@@ -257,22 +257,19 @@ const handleRequest = (request) => {
         result
     });
 };
-if (!mainWindow.__webenvoy_main_world_bridge_installed__) {
-    mainWindow.__webenvoy_main_world_bridge_installed__ = true;
-    window.addEventListener(MAIN_WORLD_REQUEST_EVENT, (event) => {
-        const request = parseMainWorldRequest(event);
-        if (!request) {
-            return;
-        }
-        try {
-            handleRequest(request);
-        }
-        catch (error) {
-            emitResult({
-                id: request.id,
-                ok: false,
-                message: error instanceof Error ? error.message : String(error)
-            });
-        }
-    });
-}
+window.addEventListener(MAIN_WORLD_REQUEST_EVENT, (event) => {
+    const request = parseMainWorldRequest(event);
+    if (!request) {
+        return;
+    }
+    try {
+        handleRequest(request);
+    }
+    catch (error) {
+        emitResult({
+            id: request.id,
+            ok: false,
+            message: error instanceof Error ? error.message : String(error)
+        });
+    }
+});

@@ -836,9 +836,7 @@ const waitForPageStability = async (
         `(() => ({
           href: location.href,
           title: document.title,
-          readyState: document.readyState,
-          hasRuntime: Boolean(window.__webenvoy_fingerprint_runtime__),
-          hasBootstrapPayload: Boolean(globalThis.__webenvoy_fingerprint_bootstrap_payload__)
+          readyState: document.readyState
         }))();`
       );
       if (
@@ -1012,32 +1010,60 @@ const waitForFingerprintProbe = async (
           }
           const probe = await evaluateInPage(
             send,
-            `(() => {
-              const runtime = window.__webenvoy_fingerprint_runtime__;
-              const runtimeObj = runtime && typeof runtime === "object" ? runtime : null;
-              const injection = runtimeObj && runtimeObj.injection && typeof runtimeObj.injection === "object"
-                ? runtimeObj.injection
-                : null;
-              const requiredPatches = Array.isArray(injection?.required_patches)
-                ? injection.required_patches
-                : [];
-              const missingRequiredPatches = Array.isArray(injection?.missing_required_patches)
-                ? injection.missing_required_patches
-                : [];
+            `(async () => {
+              const pluginsLength = typeof navigator.plugins?.length === "number" ? navigator.plugins.length : -1;
+              const mimeTypesLength = typeof navigator.mimeTypes?.length === "number" ? navigator.mimeTypes.length : -1;
+              const hasGetBattery = typeof navigator.getBattery === "function";
+              let batteryProbeSucceeded = false;
+              let batteryHasExpectedShape = false;
+              let batteryProbeError = null;
+              if (hasGetBattery) {
+                try {
+                  const battery = await navigator.getBattery();
+                  batteryProbeSucceeded = true;
+                  batteryHasExpectedShape =
+                    typeof battery === "object" &&
+                    battery !== null &&
+                    typeof battery.charging === "boolean" &&
+                    typeof battery.level === "number";
+                } catch (error) {
+                  batteryProbeError = error instanceof Error ? error.message : String(error);
+                }
+              }
+              const requiredPatches = [
+                "navigator.plugins.length>0",
+                "navigator.mimeTypes.length>0",
+                "navigator.getBattery()",
+                "battery shape"
+              ];
+              const missingRequiredPatches = [
+                ...(pluginsLength > 0 ? [] : ["navigator.plugins.length>0"]),
+                ...(mimeTypesLength > 0 ? [] : ["navigator.mimeTypes.length>0"]),
+                ...(hasGetBattery ? [] : ["navigator.getBattery()"]),
+                ...(batteryProbeSucceeded && batteryHasExpectedShape ? [] : ["battery shape"])
+              ];
+              const hasPatchSignals =
+                pluginsLength > 0 &&
+                mimeTypesLength > 0 &&
+                hasGetBattery &&
+                batteryProbeSucceeded &&
+                batteryHasExpectedShape;
               return {
-                hasRuntime: Boolean(runtimeObj),
-                hasMainWorldBridgeInstalled: Boolean(window.__webenvoy_main_world_bridge_installed__),
-                installed: injection?.installed === true,
+                hasPatchSignals,
+                installed: missingRequiredPatches.length === 0,
                 requiredPatches,
                 missingRequiredPatches,
-                pluginsLength: typeof navigator.plugins?.length === "number" ? navigator.plugins.length : -1,
-                mimeTypesLength: typeof navigator.mimeTypes?.length === "number" ? navigator.mimeTypes.length : -1,
-                hasGetBattery: typeof navigator.getBattery === "function"
+                pluginsLength,
+                mimeTypesLength,
+                hasGetBattery,
+                batteryProbeSucceeded,
+                batteryHasExpectedShape,
+                batteryProbeError
               };
             })();`
           );
           lastProbe = probe;
-          if (probe?.hasRuntime === true && (!requireInstalled || probe.installed === true)) {
+          if (probe && (!requireInstalled || probe.installed === true)) {
             return {
               ...(probe ?? {}),
               cdpRecent
@@ -1223,8 +1249,6 @@ describe("fingerprint runtime real browser integration", () => {
         title: "probe",
         readyState: "complete"
       });
-      expect(typeof pageBeforePing.hasRuntime).toBe("boolean");
-      expect(typeof pageBeforePing.hasBootstrapPayload).toBe("boolean");
       const targetBeforePing = await runStage(stageState, "snapshot-target-before-ping", async () =>
         waitForTargetSnapshotByWsUrl(cdpPort, wsUrl, 20_000)
       );
@@ -1254,8 +1278,7 @@ describe("fingerprint runtime real browser integration", () => {
       const pingBody = parseSingleJsonLine(ping.stdout);
       expect(pingBody.status).toBe("success");
       const pingRuntime = extractPingFingerprintRuntime(pingBody);
-      const hasMainWorldBridgeSignal = pingRuntime.injection !== null;
-      if (hasMainWorldBridgeSignal) {
+      if (pingRuntime.injection !== null) {
         expect(pingRuntime.injection?.installed).toBe(true);
       }
       const targetAfterPing = await runStage(stageState, "snapshot-target-after-ping", async () =>
@@ -1280,16 +1303,18 @@ describe("fingerprint runtime real browser integration", () => {
           stagedBootstrapDiagnostics,
           browserTargetDiagnostics
         }, {
-          requireInstalled: hasMainWorldBridgeSignal
+          requireInstalled: true
         })
       );
 
-      expect(probe.hasRuntime).toBe(true);
-      expect(probe.hasMainWorldBridgeInstalled).toBe(true);
-      if (hasMainWorldBridgeSignal) {
-        expect(probe.installed).toBe(true);
-        expect(probe.missingRequiredPatches).toEqual([]);
-      }
+      expect(probe.installed).toBe(true);
+      expect(probe.hasPatchSignals).toBe(true);
+      expect(probe.pluginsLength).toBeGreaterThan(0);
+      expect(probe.mimeTypesLength).toBeGreaterThan(0);
+      expect(probe.hasGetBattery).toBe(true);
+      expect(probe.batteryProbeSucceeded).toBe(true);
+      expect(probe.batteryHasExpectedShape).toBe(true);
+      expect(probe.missingRequiredPatches).toEqual([]);
       if (probe.cdpRecent) {
         expect(hasInlineScriptCspViolation(probe.cdpRecent)).toBe(false);
         expect(hasMainWorldBridgeTimeout(probe.cdpRecent)).toBe(false);

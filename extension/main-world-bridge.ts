@@ -18,14 +18,12 @@ type MainWorldResult = {
 type MainWorldWindow = Window &
   typeof globalThis & {
     _webmsxyw?: (uri: string, body: unknown) => unknown;
-    __webenvoy_fingerprint_runtime__?: unknown;
-    __webenvoy_main_world_bridge_installed__?: boolean;
   };
 
 const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
 const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
-const AUDIO_PATCH_MARKER = "__webenvoy_audio_context_patched__";
-const AUDIO_NOISE_SEED_KEY = "__webenvoy_audio_noise_seed__";
+const patchedAudioContextPrototypes = new WeakSet<object>();
+const audioNoiseSeedByPrototype = new WeakMap<object, number>();
 
 const DEFAULT_PLUGIN_DESCRIPTORS = [
   {
@@ -172,11 +170,13 @@ const installFingerprintRuntime = (runtime: RecordValue | null): RecordValue => 
           ? webkitOfflineAudioContextCtor
           : null;
     if (audioNoiseSeed !== null && OfflineCtor) {
-      const prototype = OfflineCtor.prototype as unknown as RecordValue;
+      const prototype = OfflineCtor.prototype as object & {
+        startRendering?: (...args: unknown[]) => unknown;
+      };
       const originalStartRendering = prototype.startRendering;
       if (typeof originalStartRendering === "function") {
-        prototype[AUDIO_NOISE_SEED_KEY] = audioNoiseSeed;
-        if (prototype[AUDIO_PATCH_MARKER] === true) {
+        audioNoiseSeedByPrototype.set(prototype, audioNoiseSeed);
+        if (patchedAudioContextPrototypes.has(prototype)) {
           appliedPatches.push("audio_context");
         } else {
           const patchedChannelData = new WeakSet<Float32Array>();
@@ -193,8 +193,7 @@ const installFingerprintRuntime = (runtime: RecordValue | null): RecordValue => 
                 channelData.length > 0 &&
                 !patchedChannelData.has(channelData)
               ) {
-                const noiseSeed =
-                  asNumber((prototype as RecordValue)[AUDIO_NOISE_SEED_KEY]) ?? audioNoiseSeed;
+                const noiseSeed = audioNoiseSeedByPrototype.get(prototype) ?? audioNoiseSeed;
                 channelData[0] = channelData[0] + noiseSeed;
                 patchedChannelData.add(channelData);
               }
@@ -202,11 +201,9 @@ const installFingerprintRuntime = (runtime: RecordValue | null): RecordValue => 
             };
             return audioBuffer;
           };
+          const originalStartRenderingFn = originalStartRendering as (...args: unknown[]) => unknown;
           prototype.startRendering = function (...args: unknown[]) {
-            const renderingResult = (originalStartRendering as (...args: unknown[]) => unknown).apply(
-              this,
-              args
-            );
+            const renderingResult = originalStartRenderingFn.apply(this, args);
             if (renderingResult && typeof (renderingResult as Promise<unknown>).then === "function") {
               return (renderingResult as Promise<unknown>).then((audioBuffer) =>
                 patchAudioBuffer(audioBuffer)
@@ -214,7 +211,7 @@ const installFingerprintRuntime = (runtime: RecordValue | null): RecordValue => 
             }
             return patchAudioBuffer(renderingResult);
           };
-          prototype[AUDIO_PATCH_MARKER] = true;
+          patchedAudioContextPrototypes.add(prototype);
           appliedPatches.push("audio_context");
         }
       }
@@ -257,8 +254,6 @@ const installFingerprintRuntime = (runtime: RecordValue | null): RecordValue => 
       missingRequiredPatches.push(patchName);
     }
   }
-
-  mainWindow.__webenvoy_fingerprint_runtime__ = runtime;
 
   return {
     installed: missingRequiredPatches.length === 0,
@@ -324,21 +319,18 @@ const handleRequest = (request: MainWorldRequest): void => {
   });
 };
 
-if (!mainWindow.__webenvoy_main_world_bridge_installed__) {
-  mainWindow.__webenvoy_main_world_bridge_installed__ = true;
-  window.addEventListener(MAIN_WORLD_REQUEST_EVENT, (event: Event) => {
-    const request = parseMainWorldRequest(event);
-    if (!request) {
-      return;
-    }
-    try {
-      handleRequest(request);
-    } catch (error) {
-      emitResult({
-        id: request.id,
-        ok: false,
-        message: error instanceof Error ? error.message : String(error)
-      });
-    }
-  });
-}
+window.addEventListener(MAIN_WORLD_REQUEST_EVENT, (event: Event) => {
+  const request = parseMainWorldRequest(event);
+  if (!request) {
+    return;
+  }
+  try {
+    handleRequest(request);
+  } catch (error) {
+    emitResult({
+      id: request.id,
+      ok: false,
+      message: error instanceof Error ? error.message : String(error)
+    });
+  }
+});

@@ -207,10 +207,8 @@ describe("content-script bootstrap contract", () => {
 
     expect(bootstrapped).toBe(true);
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
-    expect(JSON.parse(sessionStorage.read(scopedKey) ?? "{}")).toMatchObject({
-      profile: "profile-a",
-      source: "profile_meta"
-    });
+    expect(sessionStorage.read(scopedKey)).toBeNull();
+    expect(sessionStorage.read(FINGERPRINT_CONTEXT_CACHE_KEY)).toBeNull();
     expect(extensionStorage.read(scopedKey)).toMatchObject({
       profile: "profile-a",
       source: "profile_meta"
@@ -312,12 +310,7 @@ describe("content-script bootstrap contract", () => {
 
     expect(onBackgroundMessage).toHaveBeenCalledTimes(1);
     const scopedKey = buildScopedCacheKey(context, "run-001");
-    const persistedRaw = sessionStorage.read(scopedKey);
-    expect(persistedRaw).not.toBeNull();
-    expect(JSON.parse(persistedRaw ?? "{}")).toMatchObject({
-      profile: "profile-a",
-      source: "profile_meta"
-    });
+    expect(sessionStorage.read(scopedKey)).toBeNull();
     expect(extensionStorage.read(scopedKey)).toMatchObject({
       profile: "profile-a",
       source: "profile_meta"

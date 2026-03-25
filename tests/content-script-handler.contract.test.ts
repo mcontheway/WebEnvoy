@@ -118,6 +118,8 @@ const withMockMainWorld = async (
   }
   const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
   const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
+  const patchedAudioContextPrototypes = new WeakSet<object>();
+  const audioNoiseSeedByPrototype = new WeakMap<object, number>();
 
   const mockWindow = {
     location: {
@@ -277,36 +279,30 @@ const withMockMainWorld = async (
             typeof bundle?.audioNoiseSeed === "number"
               ? bundle.audioNoiseSeed
               : 0.000001;
-          const markerKey = "__webenvoy_audio_context_patched__";
-          const seedKey = "__webenvoy_audio_noise_seed__";
-          const windowRecord = mockWindow as Window & Record<string, unknown>;
-          if (windowRecord[markerKey] !== true) {
-            const BaseOfflineAudioContext = mockWindow.OfflineAudioContext;
-            const originalStartRendering =
-              BaseOfflineAudioContext && BaseOfflineAudioContext.prototype
-                ? BaseOfflineAudioContext.prototype.startRendering
-                : null;
-            if (typeof originalStartRendering === "function") {
-              BaseOfflineAudioContext.prototype.startRendering = async function (
-                this: { [seedKey]?: unknown }
-              ) {
-                const rendered = await originalStartRendering.apply(this);
+          const BaseOfflineAudioContext = mockWindow.OfflineAudioContext;
+          const prototype =
+            BaseOfflineAudioContext && BaseOfflineAudioContext.prototype
+              ? (BaseOfflineAudioContext.prototype as {
+                  startRendering?: (...args: unknown[]) => Promise<{
+                    getChannelData(channel: number): Float32Array;
+                  }>;
+                })
+              : null;
+          const originalStartRendering = prototype?.startRendering;
+          if (prototype && typeof originalStartRendering === "function") {
+            audioNoiseSeedByPrototype.set(prototype, noiseSeed);
+            if (!patchedAudioContextPrototypes.has(prototype)) {
+              prototype.startRendering = async function (...args: unknown[]) {
+                const rendered = await originalStartRendering.apply(this, args);
                 const channelData = rendered.getChannelData(0);
-                const baseSeed =
-                  typeof this[seedKey] === "number"
-                    ? (this[seedKey] as number)
-                    : typeof windowRecord[seedKey] === "number"
-                      ? (windowRecord[seedKey] as number)
-                      : noiseSeed;
-                this[seedKey] = baseSeed;
-                windowRecord[seedKey] = baseSeed;
+                const baseSeed = audioNoiseSeedByPrototype.get(prototype) ?? noiseSeed;
                 if (channelData.length > 0) {
                   channelData[0] += baseSeed;
                 }
                 return rendered;
               };
+              patchedAudioContextPrototypes.add(prototype);
             }
-            windowRecord[markerKey] = true;
           }
           appliedPatches.push("audio_context");
         }
@@ -314,7 +310,6 @@ const withMockMainWorld = async (
         const missingRequiredPatches = requiredPatches.filter(
           (patch) => !appliedPatches.includes(patch)
         );
-        (mockWindow as Window & Record<string, unknown>).__webenvoy_fingerprint_runtime__ = runtime;
         emitResult({
           id: requestId,
           ok: true,
@@ -463,6 +458,12 @@ describe("content-script handler contract", () => {
       const renderedBuffer = await offlineAudioContext.startRendering();
       const channelData = renderedBuffer.getChannelData(0);
       expect(channelData[0]).toBeGreaterThan(1);
+      expect(
+        (mockWindow as Window & Record<string, unknown>).__webenvoy_fingerprint_runtime__
+      ).toBeUndefined();
+      expect(
+        (mockWindow as Window & Record<string, unknown>).__webenvoy_main_world_bridge_installed__
+      ).toBeUndefined();
     });
   });
 
