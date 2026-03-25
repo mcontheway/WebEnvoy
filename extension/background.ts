@@ -435,6 +435,8 @@ const isFingerprintRuntimeContextEquivalent = (
   right: FingerprintRuntimeContext
 ): boolean => serializeFingerprintRuntimeContext(left) === serializeFingerprintRuntimeContext(right);
 
+const TRUST_INVALIDATION_COMMANDS = new Set(["runtime.stop", "runtime.start", "runtime.login"]);
+
 export class BackgroundRelay {
   #listeners = new Set<NativeMessageListener>();
   #pending = new Map<string, PendingForward>();
@@ -823,7 +825,7 @@ class ChromeBackgroundBridge {
         ? response.summary.session_id
         : this.#sessionId;
     this.#sessionId = sessionId;
-    if (sessionId !== prevSessionId) {
+    if (sessionId !== prevSessionId || this.#state !== "ready") {
       this.#clearTrustedFingerprintContexts();
     }
     this.#state = "ready";
@@ -922,6 +924,43 @@ class ChromeBackgroundBridge {
 
   #clearTrustedFingerprintContextByRun(profile: string, runId: string): void {
     this.#trustedFingerprintContexts.delete(buildTrustedFingerprintContextKey(profile, runId));
+  }
+
+  #clearTrustedFingerprintContextsByProfile(profile: string): void {
+    const profilePrefix = `${profile}::`;
+    for (const key of this.#trustedFingerprintContexts.keys()) {
+      if (key.startsWith(profilePrefix)) {
+        this.#trustedFingerprintContexts.delete(key);
+      }
+    }
+  }
+
+  #invalidateTrustedFingerprintContextForCommand(request: BridgeRequest, command: string): void {
+    if (!TRUST_INVALIDATION_COMMANDS.has(command)) {
+      return;
+    }
+
+    const profile = asNonEmptyString(request.profile);
+    const runId = asNonEmptyString(request.params.run_id);
+
+    if (command === "runtime.stop") {
+      if (profile && runId) {
+        this.#clearTrustedFingerprintContextByRun(profile, runId);
+        return;
+      }
+      if (profile) {
+        this.#clearTrustedFingerprintContextsByProfile(profile);
+        return;
+      }
+      this.#clearTrustedFingerprintContexts();
+      return;
+    }
+
+    if (profile) {
+      this.#clearTrustedFingerprintContextsByProfile(profile);
+      return;
+    }
+    this.#clearTrustedFingerprintContexts();
   }
 
   #rememberTrustedFingerprintContext(
@@ -1200,6 +1239,7 @@ class ChromeBackgroundBridge {
   async #dispatchForward(request: BridgeRequest, deadlineMs?: number): Promise<void> {
     const requestDeadlineMs = deadlineMs ?? Date.now() + this.#resolveForwardTimeoutMs(request);
     const command = String(request.params.command ?? "");
+    this.#invalidateTrustedFingerprintContextForCommand(request, command);
     const commandParams =
       typeof request.params.command_params === "object" && request.params.command_params !== null
         ? (request.params.command_params as Record<string, unknown>)
@@ -1373,15 +1413,15 @@ class ChromeBackgroundBridge {
   #backfillExecutionFailureIntoGatePayload(
     gatePayload: Record<string, unknown>,
     payload: Record<string, unknown>
-  ): void {
+  ): boolean {
     const details = asRecord(payload.details);
     if (!details) {
-      return;
+      return false;
     }
     const stage = asNonEmptyString(details.stage);
     const reason = asNonEmptyString(details.reason);
     if (stage !== "execution" || !reason) {
-      return;
+      return false;
     }
     const requestedExecutionMode = asNonEmptyString(details.requested_execution_mode);
     const missingRequiredPatches = asStringArray(details.missing_required_patches);
@@ -1454,6 +1494,7 @@ class ChromeBackgroundBridge {
       this.#appendGateReason(auditRecord, reason);
       auditRecord.execution_failure = { ...executionFailure };
     }
+    return true;
   }
 
   async #evaluateXhsTargetGate(request: BridgeRequest): Promise<XhsTargetGateResult> {
@@ -1882,13 +1923,31 @@ class ChromeBackgroundBridge {
         ? { ...(result.payload as Record<string, unknown>) }
         : {};
     this.#rememberTrustedFingerprintContext(request, payload, result.ok === true);
-    if (pending.gatePayload && result.ok !== true) {
-      this.#backfillExecutionFailureIntoGatePayload(pending.gatePayload, payload);
-    }
+    const backfilledExecutionFailure = pending.gatePayload
+      ? this.#backfillExecutionFailureIntoGatePayload(pending.gatePayload, payload)
+      : false;
     const summary =
       typeof payload.summary === "object" && payload.summary !== null
         ? (payload.summary as Record<string, unknown>)
         : null;
+    if (pending.gatePayload && backfilledExecutionFailure) {
+      // Ensure audit-trace fields reflect the final blocked decision even if content payload already had stale copies.
+      for (const key of [
+        "gate_outcome",
+        "consumer_gate_result",
+        "audit_record",
+        "fingerprint_execution"
+      ]) {
+        if (!Object.prototype.hasOwnProperty.call(pending.gatePayload, key)) {
+          continue;
+        }
+        const value = pending.gatePayload[key];
+        payload[key] = value;
+        if (summary !== null) {
+          summary[key] = value;
+        }
+      }
+    }
     if (pending.gatePayload) {
       for (const [key, value] of Object.entries(pending.gatePayload)) {
         const hasInPayload = Object.prototype.hasOwnProperty.call(payload, key);

@@ -1817,6 +1817,109 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
+  it("invalidates trusted fingerprint context after runtime.stop for same profile::runId", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const runId = "run-xhs-live-stop-untrusted-001";
+    const profile = "profile-a";
+    const fingerprintContext = createFingerprintRuntimeContext();
+    await primeTrustedFingerprintContext({
+      mockPort: firstPort,
+      runtimeMessageListeners,
+      runId,
+      profile,
+      fingerprintContext
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    const stopRequestId = `${runId}-stop`;
+    firstPort.onMessageListeners[0]?.({
+      id: stopRequestId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "runtime.stop",
+        command_params: {},
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: stopRequestId,
+        ok: true,
+        payload: {
+          message: "stopped",
+          run_id: runId,
+          profile
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const stopDispatch = chromeApi.tabs.sendMessage.mock.calls.find(
+      (call) => (call[1] as { id?: string } | undefined)?.id === stopRequestId
+    );
+    expect(stopDispatch).toBeDefined();
+
+    const liveRequestId = `${runId}-live-after-stop`;
+    firstPort.onMessageListeners[0]?.({
+      id: liveRequestId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const liveDispatch = chromeApi.tabs.sendMessage.mock.calls.find(
+      (call) => (call[1] as { id?: string } | undefined)?.id === liveRequestId
+    );
+    expect(liveDispatch).toBeUndefined();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === liveRequestId);
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_UNTRUSTED"]);
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_CONTEXT_UNTRUSTED", "FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+  });
+
   it("rotates trusted fingerprint context when runtime.ping overwrites same profile::runId", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
@@ -2051,6 +2154,27 @@ describe("extension service worker recovery contract", () => {
             reason: "FINGERPRINT_REQUIRED_PATCH_MISSING",
             requested_execution_mode: "live_read_limited",
             missing_required_patches: ["unknown_required_patch"]
+          },
+          gate_outcome: {
+            gate_decision: "allowed",
+            gate_reasons: ["LIVE_MODE_APPROVED"],
+            fingerprint_gate_decision: "allowed"
+          },
+          consumer_gate_result: {
+            gate_decision: "allowed",
+            gate_reasons: ["LIVE_MODE_APPROVED"],
+            fingerprint_gate_decision: "allowed",
+            fingerprint_reason_codes: []
+          },
+          fingerprint_execution: {
+            live_allowed: true,
+            live_decision: "allowed",
+            allowed_execution_modes: ["live_read_limited"],
+            reason_codes: []
+          },
+          audit_record: {
+            gate_decision: "allowed",
+            gate_reasons: ["LIVE_MODE_APPROVED"]
           },
           fingerprint_runtime: {
             ...fingerprintContext,
