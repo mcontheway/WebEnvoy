@@ -436,12 +436,7 @@ const isFingerprintRuntimeContextEquivalent = (
 ): boolean => serializeFingerprintRuntimeContext(left) === serializeFingerprintRuntimeContext(right);
 
 const TRUST_INVALIDATION_COMMANDS = new Set(["runtime.stop", "runtime.start", "runtime.login"]);
-const TRUST_PRIMING_COMMANDS = new Set([
-  "runtime.ping",
-  "runtime.start",
-  "runtime.login",
-  "runtime.status"
-]);
+const TRUST_PRIMING_COMMANDS = new Set(["runtime.ping"]);
 
 export class BackgroundRelay {
   #listeners = new Set<NativeMessageListener>();
@@ -995,8 +990,37 @@ class ChromeBackgroundBridge {
     }
     const sessionId =
       asNonEmptyString(request.params.session_id) ?? this.#sessionId;
+    this.#upsertTrustedFingerprintContext(profile, runId, sessionId, fingerprintRuntime);
+  }
+
+  #normalizeTrustedFingerprintRuntime(
+    fingerprintRuntime: FingerprintRuntimeContext
+  ): FingerprintRuntimeContext {
+    return {
+      profile: fingerprintRuntime.profile,
+      source: fingerprintRuntime.source,
+      fingerprint_profile_bundle: fingerprintRuntime.fingerprint_profile_bundle
+        ? JSON.parse(JSON.stringify(fingerprintRuntime.fingerprint_profile_bundle))
+        : null,
+      fingerprint_patch_manifest: fingerprintRuntime.fingerprint_patch_manifest
+        ? JSON.parse(JSON.stringify(fingerprintRuntime.fingerprint_patch_manifest))
+        : null,
+      fingerprint_consistency_check: JSON.parse(
+        JSON.stringify(fingerprintRuntime.fingerprint_consistency_check)
+      ),
+      execution: JSON.parse(JSON.stringify(fingerprintRuntime.execution))
+    };
+  }
+
+  #upsertTrustedFingerprintContext(
+    profile: string,
+    runId: string,
+    sessionId: string,
+    fingerprintRuntime: FingerprintRuntimeContext
+  ): void {
+    const normalized = this.#normalizeTrustedFingerprintRuntime(fingerprintRuntime);
     const key = buildTrustedFingerprintContextKey(profile, runId);
-    const serializedFingerprintRuntime = serializeFingerprintRuntimeContext(fingerprintRuntime);
+    const serializedFingerprintRuntime = serializeFingerprintRuntimeContext(normalized);
     const existing = this.#trustedFingerprintContexts.get(key);
     const shouldRotate =
       !!existing &&
@@ -1007,7 +1031,7 @@ class ChromeBackgroundBridge {
     }
     this.#trustedFingerprintContexts.set(key, {
       sessionId,
-      fingerprintRuntime: { ...fingerprintRuntime },
+      fingerprintRuntime: normalized,
       serializedFingerprintRuntime
     });
     if (this.#trustedFingerprintContexts.size <= MAX_TRUSTED_FINGERPRINT_CONTEXTS) {
@@ -1017,6 +1041,44 @@ class ChromeBackgroundBridge {
     if (typeof oldestKey === "string") {
       this.#trustedFingerprintContexts.delete(oldestKey);
     }
+  }
+
+  #consumeStartupFingerprintTrust(payload: Record<string, unknown>): boolean {
+    const trust = asRecord(payload.startup_fingerprint_trust);
+    if (!trust) {
+      return false;
+    }
+    const profile = asNonEmptyString(trust.profile);
+    const runId = asNonEmptyString(trust.run_id);
+    const fingerprintRuntime = ensureFingerprintRuntimeContext(trust.fingerprint_runtime ?? null);
+    if (!profile || !runId || !fingerprintRuntime || fingerprintRuntime.profile !== profile) {
+      return true;
+    }
+
+    const installState = asRecord(trust.install_state);
+    const status = asNonEmptyString(installState?.status) ?? "failed";
+    const installMissing = asStringArray(installState?.missing_required_patches);
+    const runtimeRecord = asRecord(fingerprintRuntime as unknown as Record<string, unknown>);
+    const runtimeInjection = asRecord(runtimeRecord?.injection);
+    const runtimeMissing = asStringArray(runtimeInjection?.missing_required_patches);
+    const effectiveMissing = installMissing.length > 0 ? installMissing : runtimeMissing;
+    const installed = status === "installed" && effectiveMissing.length === 0;
+
+    if (!installed) {
+      this.#clearTrustedFingerprintContextByRun(profile, runId);
+      return true;
+    }
+
+    const trustedFingerprintRuntime = ensureFingerprintRuntimeContext({
+      ...fingerprintRuntime,
+      injection: undefined
+    });
+    if (!trustedFingerprintRuntime) {
+      return true;
+    }
+
+    this.#upsertTrustedFingerprintContext(profile, runId, this.#sessionId, trustedFingerprintRuntime);
+    return true;
   }
 
   #resolveTrustedFingerprintContext(request: BridgeRequest): FingerprintRuntimeContext | null {
@@ -1917,18 +1979,19 @@ class ChromeBackgroundBridge {
       return;
     }
 
+    const payload =
+      typeof result.payload === "object" && result.payload !== null
+        ? { ...(result.payload as Record<string, unknown>) }
+        : {};
     const pending = this.#pending.get(result.id);
     if (!pending) {
+      this.#consumeStartupFingerprintTrust(payload);
       return;
     }
 
     clearTimeout(pending.timeout);
     this.#pending.delete(result.id);
     const request = pending.request;
-    const payload =
-      typeof result.payload === "object" && result.payload !== null
-        ? { ...(result.payload as Record<string, unknown>) }
-        : {};
     this.#rememberTrustedFingerprintContext(request, payload, result.ok === true);
     const backfilledExecutionFailure = pending.gatePayload
       ? this.#backfillExecutionFailureIntoGatePayload(pending.gatePayload, payload)

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ProfileStore, PROFILE_META_FILENAME } from "../profile-store.js";
+import { buildFingerprintProfileBundle } from "../../../shared/fingerprint-profile.js";
 
 const tempDirs: string[] = [];
 
@@ -180,5 +181,29 @@ describe("profile-store", () => {
     await expect(store.initializeMeta("..", "2026-03-19T10:00:00.000Z")).rejects.toThrow(
       /invalid profile name/i
     );
+  });
+
+  it("normalizes macOS darwin kernel version for bundle environment and default UA", () => {
+    const bundle = buildFingerprintProfileBundle({
+      profileName: "default",
+      fingerprintSeeds: {
+        audioNoiseSeed: "default-audio-seed",
+        canvasNoiseSeed: "default-canvas-seed"
+      },
+      environment: {
+        os_family: "darwin",
+        os_version: "24.4.0",
+        arch: "arm64"
+      },
+      timezone: "Asia/Shanghai"
+    });
+
+    expect(bundle.environment).toMatchObject({
+      os_family: "macos",
+      os_version: "15.0",
+      arch: "arm64"
+    });
+    expect(bundle.ua).toContain("Mac OS X 15_0");
+    expect(bundle.ua).not.toContain("Mac OS X 24_4_0");
   });
 });

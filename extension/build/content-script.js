@@ -5,6 +5,7 @@ const FINGERPRINT_CONTEXT_CACHE_KEY = "__webenvoy_fingerprint_context__";
 const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
 const MAIN_WORLD_REQUEST_EVENT = "__webenvoy_main_world_request__";
 const MAIN_WORLD_RESULT_EVENT = "__webenvoy_main_world_result__";
+const STARTUP_FINGERPRINT_TRUST_ID_PREFIX = "startup-fingerprint-trust";
 const MAIN_WORLD_INSTALL_TIMEOUT_MS = 800;
 const STARTUP_INSTALL_RETRY_DELAYS_MS = [0, 40, 120];
 const normalizeForwardMessage = (request) => ({
@@ -35,16 +36,27 @@ const readBootstrapFingerprintContext = () => globalThis[FINGERPRINT_BOOTSTRAP_P
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
-const normalizeFingerprintRuntimeContextInput = (value) => {
+const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const asStringArray = (value) => Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
+const resolveBootstrapFingerprintContext = (value) => {
     const direct = ensureFingerprintRuntimeContext(value);
     if (direct) {
-        return direct;
+        return {
+            fingerprintRuntime: direct,
+            runId: null
+        };
     }
     const record = asRecord(value);
     if (!record) {
-        return null;
+        return {
+            fingerprintRuntime: null,
+            runId: null
+        };
     }
-    return ensureFingerprintRuntimeContext(record.fingerprint_runtime ?? null);
+    return {
+        fingerprintRuntime: ensureFingerprintRuntimeContext(record.fingerprint_runtime ?? null),
+        runId: asNonEmptyString(record.run_id ?? record.runId)
+    };
 };
 const sanitizeScopePart = (value) => value.replace(/[^a-zA-Z0-9._-]/g, "_");
 const resolveRunToken = (normalized, runId) => {
@@ -144,7 +156,7 @@ const installFingerprintRuntimeInMainWorld = async (normalized) => {
         throw new Error("main world bridge unavailable");
     }
     const requestId = createMainWorldRequestId();
-    await new Promise((resolve, reject) => {
+    return await new Promise((resolve, reject) => {
         const listener = (event) => {
             const detail = asRecord(event.detail);
             if (!detail || detail.id !== requestId) {
@@ -153,7 +165,7 @@ const installFingerprintRuntimeInMainWorld = async (normalized) => {
             clearTimeout(timer);
             window.removeEventListener(MAIN_WORLD_RESULT_EVENT, listener);
             if (detail.ok === true) {
-                resolve();
+                resolve(asRecord(detail.result) ?? {});
                 return;
             }
             reject(new Error(typeof detail.message === "string" ? detail.message : "main world fingerprint install failed"));
@@ -174,16 +186,74 @@ const installFingerprintRuntimeInMainWorld = async (normalized) => {
         }));
     });
 };
-const scheduleStartupFingerprintInstall = (normalized) => {
-    let attempt = 0;
+const emitStartupFingerprintTrust = (runtime, normalized, runId, state) => {
+    const runToken = runId && runId.length > 0 ? runId : "run_unknown";
+    const fingerprintRuntimeForTrust = {
+        ...normalized,
+        injection: {
+            installed: state.status === "installed",
+            required_patches: state.requiredPatches,
+            applied_patches: state.appliedPatches,
+            missing_required_patches: state.missingRequiredPatches,
+            ...(state.error ? { error: state.error } : {})
+        }
+    };
+    runtime.sendMessage?.({
+        kind: "result",
+        id: `${STARTUP_FINGERPRINT_TRUST_ID_PREFIX}:${runToken}`,
+        ok: true,
+        payload: {
+            startup_fingerprint_trust: {
+                run_id: runToken,
+                profile: normalized.profile,
+                fingerprint_runtime: fingerprintRuntimeForTrust,
+                install_state: {
+                    status: state.status,
+                    required_patches: state.requiredPatches,
+                    applied_patches: state.appliedPatches,
+                    missing_required_patches: state.missingRequiredPatches,
+                    ...(state.error ? { error: state.error } : {})
+                }
+            }
+        }
+    });
+};
+const scheduleStartupFingerprintInstall = (runtime, normalized, runId) => {
+    const requiredPatches = asStringArray(asRecord(normalized.fingerprint_patch_manifest)?.required_patches);
+    let attempts = 0;
     const runAttempt = () => {
-        void installFingerprintRuntimeInMainWorld(normalized).catch(() => {
-            attempt += 1;
-            if (attempt >= STARTUP_INSTALL_RETRY_DELAYS_MS.length) {
+        attempts += 1;
+        void installFingerprintRuntimeInMainWorld(normalized)
+            .then((installResult) => {
+            const appliedPatches = asStringArray(installResult.applied_patches);
+            const missingRequiredPatches = asStringArray(installResult.missing_required_patches);
+            const effectiveMissing = missingRequiredPatches.length > 0
+                ? missingRequiredPatches
+                : requiredPatches.filter((patch) => !appliedPatches.includes(patch));
+            const installed = installResult.installed !== false && effectiveMissing.length === 0;
+            emitStartupFingerprintTrust(runtime, normalized, runId, {
+                status: installed ? "installed" : "failed",
+                requiredPatches,
+                appliedPatches,
+                missingRequiredPatches: effectiveMissing,
+                error: installed
+                    ? null
+                    : asNonEmptyString(installResult.error) ?? "startup fingerprint install incomplete"
+            });
+        })
+            .catch((error) => {
+            if (attempts < STARTUP_INSTALL_RETRY_DELAYS_MS.length) {
+                const delay = STARTUP_INSTALL_RETRY_DELAYS_MS[attempts] ?? 0;
+                setTimeout(runAttempt, delay);
                 return;
             }
-            const delay = STARTUP_INSTALL_RETRY_DELAYS_MS[attempt] ?? 0;
-            setTimeout(runAttempt, delay);
+            emitStartupFingerprintTrust(runtime, normalized, runId, {
+                status: "failed",
+                requiredPatches,
+                appliedPatches: [],
+                missingRequiredPatches: requiredPatches,
+                error: error instanceof Error ? error.message : String(error)
+            });
         });
     };
     runAttempt();
@@ -193,12 +263,13 @@ export const bootstrapContentScript = (runtime) => {
         return false;
     }
     const handler = new ContentScriptHandler();
-    const bootstrapContext = normalizeFingerprintRuntimeContextInput(readBootstrapFingerprintContext());
+    const bootstrapInput = resolveBootstrapFingerprintContext(readBootstrapFingerprintContext());
+    const bootstrapContext = bootstrapInput.fingerprintRuntime;
     if (bootstrapContext) {
         // Startup install goes directly to main-world bridge; do not proxy through runtime.ping.
-        scheduleStartupFingerprintInstall(bootstrapContext);
-        persistWindowFingerprintContext(bootstrapContext, null);
-        persistExtensionFingerprintContext(bootstrapContext, null);
+        scheduleStartupFingerprintInstall(runtime, bootstrapContext, bootstrapInput.runId);
+        persistWindowFingerprintContext(bootstrapContext, bootstrapInput.runId);
+        persistExtensionFingerprintContext(bootstrapContext, bootstrapInput.runId);
     }
     handler.onResult((message) => {
         runtime.sendMessage?.(message);

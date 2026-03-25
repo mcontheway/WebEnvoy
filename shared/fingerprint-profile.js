@@ -105,6 +105,37 @@ const normalizeArch = (arch) => {
   return typeof arch === "string" && arch.length > 0 ? arch : "unknown";
 };
 
+const normalizeOsVersion = (osFamily, rawVersion) => {
+  if (typeof rawVersion !== "string" || rawVersion.length === 0) {
+    return "unknown";
+  }
+
+  if (osFamily !== "macos") {
+    return rawVersion;
+  }
+
+  const matched = rawVersion.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?$/);
+  if (!matched) {
+    return rawVersion;
+  }
+
+  const darwinMajor = Number.parseInt(matched[1], 10);
+  if (!Number.isInteger(darwinMajor)) {
+    return rawVersion;
+  }
+
+  // `os.release()` on macOS returns Darwin kernel versions (for example: 24.4.0),
+  // while browser UA must use macOS product versions.
+  if (darwinMajor >= 20) {
+    return `${darwinMajor - 9}.0`;
+  }
+  if (darwinMajor >= 4 && darwinMajor <= 19) {
+    return `10.${darwinMajor - 4}`;
+  }
+
+  return rawVersion;
+};
+
 const hashString = (value) => {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
@@ -221,6 +252,7 @@ const isRuntimeContext = (value) =>
 
 const buildIncompleteFingerprintRuntimeContext = (input) => {
   const reasonCode = input.reasonCode;
+  const actualOsFamily = normalizePlatform(input.actualEnvironment?.os_family);
   return {
     profile: input.profile,
     source: input.metaPresent ? "profile_meta" : "profile_missing",
@@ -234,12 +266,8 @@ const buildIncompleteFingerprintRuntimeContext = (input) => {
         arch: "unknown"
       },
       actual_environment: {
-        os_family: normalizePlatform(input.actualEnvironment?.os_family),
-        os_version:
-          typeof input.actualEnvironment?.os_version === "string" &&
-          input.actualEnvironment.os_version.length > 0
-            ? input.actualEnvironment.os_version
-            : "unknown",
+        os_family: actualOsFamily,
+        os_version: normalizeOsVersion(actualOsFamily, input.actualEnvironment?.os_version ?? "unknown"),
         arch: normalizeArch(input.actualEnvironment?.arch)
       },
       decision: "mismatch",
@@ -255,12 +283,10 @@ const buildIncompleteFingerprintRuntimeContext = (input) => {
 };
 
 const buildFingerprintProfileBundle = (input) => {
+  const osFamily = normalizePlatform(input.environment?.os_family);
   const environment = {
-    os_family: normalizePlatform(input.environment?.os_family),
-    os_version:
-      typeof input.environment?.os_version === "string" && input.environment.os_version.length > 0
-        ? input.environment.os_version
-        : "unknown",
+    os_family: osFamily,
+    os_version: normalizeOsVersion(osFamily, input.environment?.os_version ?? "unknown"),
     arch: normalizeArch(input.environment?.arch)
   };
 
@@ -340,13 +366,10 @@ const buildFingerprintConsistencyCheck = (input) => {
           os_version: "unknown",
           arch: "unknown"
         };
+  const actualOsFamily = normalizePlatform(input.actualEnvironment?.os_family);
   const actual = {
-    os_family: normalizePlatform(input.actualEnvironment?.os_family),
-    os_version:
-      typeof input.actualEnvironment?.os_version === "string" &&
-      input.actualEnvironment.os_version.length > 0
-        ? input.actualEnvironment.os_version
-        : "unknown",
+    os_family: actualOsFamily,
+    os_version: normalizeOsVersion(actualOsFamily, input.actualEnvironment?.os_version ?? "unknown"),
     arch: normalizeArch(input.actualEnvironment?.arch)
   };
   const reasonCodes = [];

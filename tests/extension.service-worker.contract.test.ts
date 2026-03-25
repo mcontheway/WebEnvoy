@@ -1745,7 +1745,7 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("allows first live mode when trust comes from runtime.start fingerprint contract", async () => {
+  it("allows first live mode when startup bootstrap trust is synced before first live request", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -1763,34 +1763,32 @@ describe("extension service worker recovery contract", () => {
       allowed_execution_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
       reason_codes: []
     });
-    const runtimeStartRequestId = `${runId}-start`;
-
-    firstPort.onMessageListeners[0]?.({
-      id: runtimeStartRequestId,
-      method: "bridge.forward",
-      profile,
-      params: {
-        session_id: "nm-session-001",
-        run_id: runId,
-        command: "runtime.start",
-        command_params: {},
-        cwd: "/workspace/WebEnvoy"
-      },
-      timeout_ms: 100
-    });
-    await Promise.resolve();
-    await Promise.resolve();
 
     runtimeMessageListeners[0]?.(
       {
         kind: "result",
-        id: runtimeStartRequestId,
+        id: `startup-fingerprint-trust:${runId}`,
         ok: true,
         payload: {
-          message: "runtime started",
-          run_id: runId,
-          profile,
-          fingerprint_runtime: fingerprintContext
+          startup_fingerprint_trust: {
+            run_id: runId,
+            profile,
+            fingerprint_runtime: {
+              ...fingerprintContext,
+              injection: {
+                installed: true,
+                required_patches: ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"],
+                applied_patches: ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"],
+                missing_required_patches: []
+              }
+            },
+            install_state: {
+              status: "installed",
+              required_patches: ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"],
+              applied_patches: ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"],
+              missing_required_patches: []
+            }
+          }
         }
       },
       {

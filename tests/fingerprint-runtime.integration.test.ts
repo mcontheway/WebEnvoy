@@ -552,6 +552,26 @@ const readBrowserTargetDiagnostics = async (
     };
   });
 
+const waitForBrowserTargetDiagnostics = async (
+  browserWsUrl: string,
+  timeoutMs: number,
+  options?: { probeUrl?: string; requireExtensionServiceWorker?: boolean }
+): Promise<Record<string, unknown>> => {
+  const deadline = Date.now() + timeoutMs;
+  let lastDiagnostics: Record<string, unknown> | null = null;
+  while (Date.now() < deadline) {
+    const diagnostics = await readBrowserTargetDiagnostics(browserWsUrl, options);
+    lastDiagnostics = diagnostics;
+    if (options?.requireExtensionServiceWorker !== true || diagnostics.hasExtensionServiceWorker === true) {
+      return diagnostics;
+    }
+    await wait(250);
+  }
+  throw new Error(
+    `browser target diagnostics did not satisfy requirements within timeout: ${safeJsonStringify(lastDiagnostics)}`
+  );
+};
+
 const collectRealBrowserFailureDiagnostics = async (params: {
   cdpPort: number;
   probeUrl: string;
@@ -1167,7 +1187,11 @@ describe("fingerprint runtime real browser integration", () => {
       const browserTargetDiagnostics = await runStage(
         stageState,
         "read-browser-target-diagnostics",
-        async () => readBrowserTargetDiagnostics(browserWsUrl, { probeUrl })
+        async () =>
+          waitForBrowserTargetDiagnostics(browserWsUrl, 20_000, {
+            probeUrl,
+            requireExtensionServiceWorker: true
+          })
       );
       expect(browserTargetDiagnostics.hasExtensionServiceWorker).toBe(true);
       const wsUrl = await runStage(

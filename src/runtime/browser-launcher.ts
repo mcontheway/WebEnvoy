@@ -733,9 +733,13 @@ const stageExtensionForRun = async (input: {
   await writeFile(bootstrapPath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
 
   const bootstrapScriptPath = join(stagedExtensionDir, EXTENSION_BOOTSTRAP_SCRIPT_PATH);
+  const bootstrapScriptPayload = {
+    ...(input.extensionBootstrap ?? {}),
+    run_id: input.runId
+  };
   await writeFile(
     bootstrapScriptPath,
-    buildBootstrapScriptSource(input.extensionBootstrap),
+    buildBootstrapScriptSource(bootstrapScriptPayload),
     "utf8"
   );
   await rewriteStagedContentScriptForRuntime({
