@@ -13,6 +13,7 @@ import type { ProfileState } from "./profile-state.js";
 import type { ProxyBinding } from "./proxy-binding.js";
 
 export const PROFILE_META_FILENAME = "__webenvoy_meta.json";
+const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
 export type ReadMetaMode = "readonly" | "migrate";
 
 export interface ReadMetaOptions {
@@ -266,7 +267,21 @@ const buildLegacyBundleMigration = async (input: {
   meta: ProfileMeta;
   browserVersion: string | null;
   timezone: string;
+  intent: "transient_backfill" | "persistent_upgrade";
 }): Promise<FingerprintProfileBundle> => {
+  if (input.intent === "persistent_upgrade") {
+    return buildFingerprintProfileBundle(
+      withBrowserVersion(
+        {
+          profileName: input.meta.profileName,
+          fingerprintSeeds: input.meta.fingerprintSeeds,
+          timezone: input.timezone,
+          environment: resolveCurrentFingerprintEnvironment()
+        },
+        input.browserVersion
+      )
+    );
+  }
   return markFingerprintProfileBundleAsLegacyBackfilled(
     withBrowserVersion(
       {
@@ -314,16 +329,19 @@ export class ProfileStore {
       const raw = await this.fs.readFile(metaPath, "utf8");
       const parsed = parseMeta(raw);
       if (parsed.fingerprintProfileBundle === undefined) {
+        const legacyBackfillMode = await this.resolveLegacyBackfillMode(profileName, options);
         const browserVersion = await resolveBrowserVersionFromResolvedExecutable();
         const migratedMeta: ProfileMeta = {
           ...parsed,
           fingerprintProfileBundle: await buildLegacyBundleMigration({
             meta: parsed,
             browserVersion,
-            timezone: "unknown"
+            timezone: legacyBackfillMode === "migrate" ? resolveCurrentTimezone() : "unknown",
+            intent:
+              legacyBackfillMode === "migrate" ? "persistent_upgrade" : "transient_backfill"
           })
         };
-        if (options.mode !== "readonly") {
+        if (legacyBackfillMode === "migrate") {
           await this.writeMeta(profileName, migratedMeta);
         }
         return migratedMeta;
@@ -402,5 +420,30 @@ export class ProfileStore {
 
     await this.writeMeta(profileName, meta);
     return meta;
+  }
+
+  private async resolveLegacyBackfillMode(
+    profileName: string,
+    options: ReadMetaOptions
+  ): Promise<ReadMetaMode> {
+    if (options.mode === "migrate") {
+      return "migrate";
+    }
+    if (options.mode === "readonly") {
+      return "readonly";
+    }
+
+    const lockPath = join(this.getProfileDir(profileName), PROFILE_LOCK_FILENAME);
+    try {
+      const raw = await this.fs.readFile(lockPath, "utf8");
+      const parsed = JSON.parse(raw) as unknown;
+      if (isObjectRecord(parsed) && Number.isInteger(parsed.ownerPid) && parsed.ownerPid === process.pid) {
+        return "migrate";
+      }
+    } catch {
+      // Treat lock read/parse failures as readonly fallback to avoid write side effects.
+    }
+
+    return "readonly";
   }
 }

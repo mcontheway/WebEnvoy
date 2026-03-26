@@ -620,6 +620,49 @@ describe("content-script handler contract", () => {
     expect(JSON.parse(decoded)).toEqual(payload);
   });
 
+  it("does not broadcast main-world channel names to page events", () => {
+    const previousWindow = (globalThis as { window?: unknown }).window;
+    const previousCustomEvent = (globalThis as { CustomEvent?: unknown }).CustomEvent;
+    const dispatchedTypes: string[] = [];
+    const addedEvents: string[] = [];
+
+    class MockCustomEventImpl<T> implements MockCustomEvent<T> {
+      readonly type: string;
+      readonly detail: T;
+
+      constructor(type: string, init: { detail: T }) {
+        this.type = type;
+        this.detail = init.detail;
+      }
+    }
+
+    const mockWindow = {
+      addEventListener: (type: string) => {
+        addedEvents.push(type);
+      },
+      removeEventListener: () => {},
+      dispatchEvent: (event: MockEvent) => {
+        dispatchedTypes.push(event.type);
+      }
+    };
+
+    (globalThis as { window?: unknown }).window = mockWindow;
+    (globalThis as { CustomEvent?: unknown }).CustomEvent = MockCustomEventImpl;
+    resetMainWorldEventChannelForContract();
+
+    try {
+      expect(installMainWorldEventChannelSecret(MAIN_WORLD_CHANNEL_SECRET)).toBe(true);
+      expect(addedEvents).toEqual(
+        expect.arrayContaining([resolveMainWorldEventNamesForSecret(MAIN_WORLD_CHANNEL_SECRET).resultEvent])
+      );
+      expect(dispatchedTypes).toEqual([]);
+    } finally {
+      resetMainWorldEventChannelForContract();
+      (globalThis as { window?: unknown }).window = previousWindow;
+      (globalThis as { CustomEvent?: unknown }).CustomEvent = previousCustomEvent;
+    }
+  });
+
   it("normalizes fingerprint_context from command params", () => {
     const fingerprintContext = createFingerprintContext();
     const resolved = resolveFingerprintContextForContract({

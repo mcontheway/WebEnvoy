@@ -57,6 +57,7 @@ type FingerprintRuntimeContext = NonNullable<
 type BootstrapFingerprintContext = {
   fingerprintRuntime: FingerprintRuntimeContext | null;
   runId: string | null;
+  sessionId: string | null;
   mainWorldSecret: string | null;
 };
 
@@ -178,25 +179,30 @@ const deriveMainWorldSecretFromBootstrapPayload = (value: unknown): string | nul
 
 const resolveBootstrapFingerprintContext = (value: unknown): BootstrapFingerprintContext => {
   const mainWorldSecret = deriveMainWorldSecretFromBootstrapPayload(value);
+  const record = asRecord(value);
+  const runId = asNonEmptyString(record?.run_id ?? record?.runId);
+  const sessionId = asNonEmptyString(record?.session_id ?? record?.sessionId);
   const direct = ensureFingerprintRuntimeContext(value);
   if (direct) {
     return {
       fingerprintRuntime: direct,
-      runId: null,
+      runId,
+      sessionId,
       mainWorldSecret
     };
   }
-  const record = asRecord(value);
   if (!record) {
     return {
       fingerprintRuntime: null,
       runId: null,
+      sessionId: null,
       mainWorldSecret: null
     };
   }
   return {
     fingerprintRuntime: ensureFingerprintRuntimeContext(record.fingerprint_runtime ?? null),
-    runId: asNonEmptyString(record.run_id ?? record.runId),
+    runId,
+    sessionId,
     mainWorldSecret
   };
 };
@@ -298,6 +304,7 @@ const loadBootstrapFingerprintContextFromExtension = async (
     return {
       fingerprintRuntime: null,
       runId: null,
+      sessionId: null,
       mainWorldSecret: null
     };
   }
@@ -308,6 +315,7 @@ const loadBootstrapFingerprintContextFromExtension = async (
       return {
         fingerprintRuntime: null,
         runId: null,
+        sessionId: null,
         mainWorldSecret: null
       };
     }
@@ -316,12 +324,14 @@ const loadBootstrapFingerprintContextFromExtension = async (
     return {
       fingerprintRuntime: resolved.fingerprintRuntime,
       runId: resolved.runId ?? asNonEmptyString(envelope?.run_id ?? envelope?.runId),
+      sessionId: resolved.sessionId ?? asNonEmptyString(envelope?.session_id ?? envelope?.sessionId),
       mainWorldSecret: resolved.mainWorldSecret
     };
   } catch {
     return {
       fingerprintRuntime: null,
       runId: null,
+      sessionId: null,
       mainWorldSecret: null
     };
   }
@@ -337,11 +347,12 @@ const installAndEmitStartupFingerprintTrust = (
   runtime: ContentScriptRuntime,
   input: {
     runId: string | null;
+    sessionId: string | null;
     fingerprintRuntime: FingerprintRuntimeContext;
   }
 ): void => {
   installStartupFingerprintPatch(input.fingerprintRuntime);
-  if (!input.runId) {
+  if (!input.runId || !input.sessionId) {
     return;
   }
   runtime.sendMessage?.({
@@ -352,6 +363,7 @@ const installAndEmitStartupFingerprintTrust = (
       startup_fingerprint_trust: {
         run_id: input.runId,
         profile: input.fingerprintRuntime.profile,
+        session_id: input.sessionId,
         fingerprint_runtime: input.fingerprintRuntime,
         trust_source: STARTUP_TRUST_SOURCE,
         bootstrap_attested: true,
@@ -375,6 +387,7 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
     persistExtensionFingerprintContext(bootstrapContext, bootstrapInput.runId);
     installAndEmitStartupFingerprintTrust(runtime, {
       runId: bootstrapInput.runId,
+      sessionId: bootstrapInput.sessionId,
       fingerprintRuntime: bootstrapContext
     });
   } else {
@@ -389,6 +402,7 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
       );
       installAndEmitStartupFingerprintTrust(runtime, {
         runId: resolvedBootstrap.runId,
+        sessionId: resolvedBootstrap.sessionId,
         fingerprintRuntime: resolvedBootstrap.fingerprintRuntime
       });
     });

@@ -1,5 +1,4 @@
 "use strict";
-const MAIN_WORLD_CHANNEL_INIT_EVENT = "__webenvoy_main_world_channel_init__";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 let activeMainWorldEventChannel = null;
@@ -315,10 +314,13 @@ const handleRequest = async (request) => {
     });
 };
 const isValidChannelEventName = (value, prefix) => value.startsWith(prefix) && /^[A-Za-z0-9_.:-]+$/.test(value) && value.length <= 128;
-const parseMainWorldEventChannel = (event) => {
-    const detail = asRecord(event.detail);
-    const requestEvent = asString(detail?.request_event ?? detail?.requestEvent);
-    const resultEvent = asString(detail?.result_event ?? detail?.resultEvent);
+const resolveExpectedMainWorldEventChannel = () => {
+    const requestEvent = typeof EXPECTED_MAIN_WORLD_REQUEST_EVENT === "string"
+        ? EXPECTED_MAIN_WORLD_REQUEST_EVENT
+        : null;
+    const resultEvent = typeof EXPECTED_MAIN_WORLD_RESULT_EVENT === "string"
+        ? EXPECTED_MAIN_WORLD_RESULT_EVENT
+        : null;
     if (!requestEvent || !resultEvent) {
         return null;
     }
@@ -360,11 +362,7 @@ const attachMainWorldEventChannel = (channel) => {
     };
     window.addEventListener(channel.requestEvent, activeMainWorldRequestListener);
 };
-const bootstrapMainWorldEventChannel = (event) => {
-    const channel = parseMainWorldEventChannel(event);
-    if (!channel) {
-        return;
-    }
-    attachMainWorldEventChannel(channel);
-};
-window.addEventListener(MAIN_WORLD_CHANNEL_INIT_EVENT, bootstrapMainWorldEventChannel);
+const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
+if (expectedMainWorldEventChannel) {
+    attachMainWorldEventChannel(expectedMainWorldEventChannel);
+}

@@ -72,7 +72,6 @@ const encodeUtf8Base64 = (value) => {
     throw new Error("base64 encoder is unavailable");
 };
 export const encodeMainWorldPayload = (value) => encodeUtf8Base64(JSON.stringify(value));
-const MAIN_WORLD_CHANNEL_INIT_EVENT = "__webenvoy_main_world_channel_init__";
 const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
@@ -106,15 +105,6 @@ const createWindowEvent = (type, detail) => {
         type,
         detail
     };
-};
-const emitMainWorldChannelInitEvent = (channel) => {
-    if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
-        return;
-    }
-    window.dispatchEvent(createWindowEvent(MAIN_WORLD_CHANNEL_INIT_EVENT, {
-        request_event: channel.requestEvent,
-        result_event: channel.resultEvent
-    }));
 };
 const onMainWorldResultEvent = (event) => {
     const detail = asRecord(event.detail);
@@ -164,7 +154,6 @@ export const installMainWorldEventChannelSecret = (secret) => {
     if (mainWorldEventChannel &&
         mainWorldEventChannel.secret === normalizedSecret &&
         mainWorldResultListenerEventName === names.resultEvent) {
-        emitMainWorldChannelInitEvent(mainWorldEventChannel);
         return true;
     }
     detachMainWorldResultListener();
@@ -176,7 +165,6 @@ export const installMainWorldEventChannelSecret = (secret) => {
         requestEvent: names.requestEvent,
         resultEvent: names.resultEvent
     };
-    emitMainWorldChannelInitEvent(mainWorldEventChannel);
     return true;
 };
 export const resetMainWorldEventChannelForContract = () => {
@@ -199,7 +187,6 @@ const mainWorldCall = async (request) => {
             reject(new Error("main world event channel unavailable"));
             return;
         }
-        emitMainWorldChannelInitEvent(mainWorldEventChannel);
         const timeout = setTimeout(() => {
             pendingMainWorldRequests.delete(requestId);
             reject(new Error("main world event channel response timeout"));

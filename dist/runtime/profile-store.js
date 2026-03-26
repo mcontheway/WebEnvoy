@@ -4,6 +4,7 @@ import { buildFingerprintProfileBundle, isFingerprintProfileBundle, markFingerpr
 import { resolveBrowserVersionTruthSource } from "./browser-launcher.js";
 import { resolveCurrentFingerprintEnvironment } from "./fingerprint-runtime.js";
 export const PROFILE_META_FILENAME = "__webenvoy_meta.json";
+const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
 const DEFAULT_FILE_SYSTEM = {
     mkdir,
     readFile,
@@ -176,6 +177,14 @@ const parseMeta = (raw) => {
     return parsed;
 };
 const buildLegacyBundleMigration = async (input) => {
+    if (input.intent === "persistent_upgrade") {
+        return buildFingerprintProfileBundle(withBrowserVersion({
+            profileName: input.meta.profileName,
+            fingerprintSeeds: input.meta.fingerprintSeeds,
+            timezone: input.timezone,
+            environment: resolveCurrentFingerprintEnvironment()
+        }, input.browserVersion));
+    }
     return markFingerprintProfileBundleAsLegacyBackfilled(withBrowserVersion({
         profileName: input.meta.profileName,
         fingerprintSeeds: input.meta.fingerprintSeeds,
@@ -211,16 +220,18 @@ export class ProfileStore {
             const raw = await this.fs.readFile(metaPath, "utf8");
             const parsed = parseMeta(raw);
             if (parsed.fingerprintProfileBundle === undefined) {
+                const legacyBackfillMode = await this.resolveLegacyBackfillMode(profileName, options);
                 const browserVersion = await resolveBrowserVersionFromResolvedExecutable();
                 const migratedMeta = {
                     ...parsed,
                     fingerprintProfileBundle: await buildLegacyBundleMigration({
                         meta: parsed,
                         browserVersion,
-                        timezone: "unknown"
+                        timezone: legacyBackfillMode === "migrate" ? resolveCurrentTimezone() : "unknown",
+                        intent: legacyBackfillMode === "migrate" ? "persistent_upgrade" : "transient_backfill"
                     })
                 };
-                if (options.mode !== "readonly") {
+                if (legacyBackfillMode === "migrate") {
                     await this.writeMeta(profileName, migratedMeta);
                 }
                 return migratedMeta;
@@ -291,5 +302,25 @@ export class ProfileStore {
         };
         await this.writeMeta(profileName, meta);
         return meta;
+    }
+    async resolveLegacyBackfillMode(profileName, options) {
+        if (options.mode === "migrate") {
+            return "migrate";
+        }
+        if (options.mode === "readonly") {
+            return "readonly";
+        }
+        const lockPath = join(this.getProfileDir(profileName), PROFILE_LOCK_FILENAME);
+        try {
+            const raw = await this.fs.readFile(lockPath, "utf8");
+            const parsed = JSON.parse(raw);
+            if (isObjectRecord(parsed) && Number.isInteger(parsed.ownerPid) && parsed.ownerPid === process.pid) {
+                return "migrate";
+            }
+        }
+        catch {
+            // Treat lock read/parse failures as readonly fallback to avoid write side effects.
+        }
+        return "readonly";
     }
 }

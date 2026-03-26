@@ -166,7 +166,7 @@ describe("profile-store", () => {
     expect(meta?.localStorageSnapshots).toHaveLength(1);
   });
 
-  it("backfills legacy meta without bundle field and persists degraded migration marker", async () => {
+  it("reads legacy meta without bundle field as transient backfill by default", async () => {
     const browserPath = await createMockBrowserExecutable("Chromium 146.0.0.0");
     process.env.WEBENVOY_BROWSER_PATH = browserPath;
     process.env.WEBENVOY_BROWSER_VERSION = "Chromium 9.9.9.9";
@@ -226,10 +226,7 @@ describe("profile-store", () => {
         legacy_migration?: Record<string, unknown>;
       };
     };
-    expect(persistedMeta.fingerprintProfileBundle?.legacy_migration).toMatchObject({
-      status: "backfilled_from_legacy",
-      reason_codes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
-    });
+    expect(persistedMeta.fingerprintProfileBundle).toBeUndefined();
   });
 
   it("reads legacy meta in readonly mode without persisting backfill", async () => {
@@ -275,6 +272,58 @@ describe("profile-store", () => {
     const persistedRaw = await readFile(metaPath, "utf8");
     const persistedMeta = JSON.parse(persistedRaw) as { fingerprintProfileBundle?: unknown };
     expect(persistedMeta.fingerprintProfileBundle).toBeUndefined();
+  });
+
+  it("persists upgraded bundle when legacy meta is read in migrate mode", async () => {
+    const browserPath = await createMockBrowserExecutable("Chromium 146.0.0.0");
+    process.env.WEBENVOY_BROWSER_PATH = browserPath;
+
+    const store = await createStore();
+    await store.ensureProfileDir("legacy-migrate");
+    const metaPath = store.getMetaPath("legacy-migrate");
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          profileName: "legacy-migrate",
+          profileDir: store.getProfileDir("legacy-migrate"),
+          profileState: "ready",
+          proxyBinding: null,
+          fingerprintSeeds: {
+            audioNoiseSeed: "legacy-audio-seed",
+            canvasNoiseSeed: "legacy-canvas-seed"
+          },
+          localStorageSnapshots: [],
+          createdAt: "2026-03-19T10:00:00.000Z",
+          updatedAt: "2026-03-19T10:01:00.000Z",
+          lastStartedAt: "2026-03-19T10:01:00.000Z",
+          lastLoginAt: null,
+          lastStoppedAt: null,
+          lastDisconnectedAt: null
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const meta = await store.readMeta("legacy-migrate", { mode: "migrate" });
+    expect(meta?.fingerprintProfileBundle?.legacy_migration).toBeUndefined();
+    expect(meta?.fingerprintProfileBundle?.timezone).toBe(resolveCurrentTimezone());
+    expect(meta?.fingerprintProfileBundle?.ua).toContain("Chrome/146.0.0.0");
+
+    const persistedRaw = await readFile(metaPath, "utf8");
+    const persistedMeta = JSON.parse(persistedRaw) as {
+      fingerprintProfileBundle?: {
+        legacy_migration?: Record<string, unknown>;
+        timezone?: string;
+        ua?: string;
+      };
+    };
+    expect(persistedMeta.fingerprintProfileBundle?.legacy_migration).toBeUndefined();
+    expect(persistedMeta.fingerprintProfileBundle?.timezone).toBe(resolveCurrentTimezone());
+    expect(persistedMeta.fingerprintProfileBundle?.ua).toContain("Chrome/146.0.0.0");
   });
 
   it("returns null when meta does not exist", async () => {

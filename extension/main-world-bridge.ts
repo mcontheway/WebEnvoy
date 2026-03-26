@@ -22,9 +22,10 @@ type MainWorldEventChannel = {
   resultEvent: string;
 };
 
-const MAIN_WORLD_CHANNEL_INIT_EVENT = "__webenvoy_main_world_channel_init__";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
+declare const EXPECTED_MAIN_WORLD_REQUEST_EVENT: string | undefined;
+declare const EXPECTED_MAIN_WORLD_RESULT_EVENT: string | undefined;
 let activeMainWorldEventChannel: MainWorldEventChannel | null = null;
 let activeMainWorldRequestListener: ((event: Event) => void) | null = null;
 const patchedAudioContextPrototypes = new WeakSet<object>();
@@ -411,10 +412,15 @@ const handleRequest = async (request: MainWorldRequest): Promise<void> => {
 const isValidChannelEventName = (value: string, prefix: string): boolean =>
   value.startsWith(prefix) && /^[A-Za-z0-9_.:-]+$/.test(value) && value.length <= 128;
 
-const parseMainWorldEventChannel = (event: Event): MainWorldEventChannel | null => {
-  const detail = asRecord((event as CustomEvent<unknown>).detail);
-  const requestEvent = asString(detail?.request_event ?? detail?.requestEvent);
-  const resultEvent = asString(detail?.result_event ?? detail?.resultEvent);
+const resolveExpectedMainWorldEventChannel = (): MainWorldEventChannel | null => {
+  const requestEvent =
+    typeof EXPECTED_MAIN_WORLD_REQUEST_EVENT === "string"
+      ? EXPECTED_MAIN_WORLD_REQUEST_EVENT
+      : null;
+  const resultEvent =
+    typeof EXPECTED_MAIN_WORLD_RESULT_EVENT === "string"
+      ? EXPECTED_MAIN_WORLD_RESULT_EVENT
+      : null;
   if (!requestEvent || !resultEvent) {
     return null;
   }
@@ -460,12 +466,7 @@ const attachMainWorldEventChannel = (channel: MainWorldEventChannel): void => {
   window.addEventListener(channel.requestEvent, activeMainWorldRequestListener as EventListener);
 };
 
-const bootstrapMainWorldEventChannel = (event: Event): void => {
-  const channel = parseMainWorldEventChannel(event);
-  if (!channel) {
-    return;
-  }
-  attachMainWorldEventChannel(channel);
-};
-
-window.addEventListener(MAIN_WORLD_CHANNEL_INIT_EVENT, bootstrapMainWorldEventChannel);
+const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
+if (expectedMainWorldEventChannel) {
+  attachMainWorldEventChannel(expectedMainWorldEventChannel);
+}

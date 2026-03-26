@@ -1058,7 +1058,7 @@ describe("profile-runtime fingerprint runtime contract", () => {
     });
   });
 
-  it("backfills legacy profile bundle, keeps degraded reason, and blocks live", async () => {
+  it("keeps legacy profile readonly on status and upgrades it to a live-compatible bundle on start", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-fingerprint-legacy-"));
     tempDirs.push(baseDir);
     const service = createTestService({
@@ -1126,26 +1126,29 @@ describe("profile-runtime fingerprint runtime contract", () => {
     };
     expect(storedAfterStatus.fingerprintProfileBundle).toBeUndefined();
 
-    const degradedStart = await service.start({
+    const upgradedStart = await service.start({
       cwd: baseDir,
       profile: "legacy_profile",
       runId: "run-runtime-test-fingerprint-legacy-start",
       params: {}
     });
-    expect(degradedStart).toMatchObject({
+    expect(upgradedStart).toMatchObject({
       fingerprint_runtime: {
         fingerprint_profile_bundle: {
-          legacy_migration: {
-            status: "backfilled_from_legacy"
-          }
+          timezone: expect.any(String),
+          ua: expect.stringContaining("Chrome/")
         },
         execution: {
-          live_allowed: false,
-          allowed_execution_modes: ["dry_run", "recon"],
-          reason_codes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
+          live_allowed: true,
+          live_decision: "allowed"
         }
       }
     });
+
+    const storedMetaRaw = await readFile(store.getMetaPath("legacy_profile"), "utf8");
+    const storedMeta = JSON.parse(storedMetaRaw) as ProfileMeta;
+    expect(storedMeta.fingerprintProfileBundle?.legacy_migration).toBeUndefined();
+    expect(storedMeta.fingerprintProfileBundle?.timezone).toBeTruthy();
 
     await service.stop({
       cwd: baseDir,
@@ -1163,17 +1166,12 @@ describe("profile-runtime fingerprint runtime contract", () => {
           requested_execution_mode: "live_read_limited"
         }
       })
-    ).rejects.toMatchObject({
-      code: "ERR_PROFILE_INVALID"
-    });
-
-    const storedMetaRaw = await readFile(store.getMetaPath("legacy_profile"), "utf8");
-    const storedMeta = JSON.parse(storedMetaRaw) as ProfileMeta;
-    expect(storedMeta.fingerprintProfileBundle).toMatchObject({
-      legacy_migration: {
-        status: "backfilled_from_legacy",
-        source_schema_version: 1,
-        reason_codes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
+    ).resolves.toMatchObject({
+      fingerprint_runtime: {
+        execution: {
+          live_allowed: true,
+          live_decision: "allowed"
+        }
       }
     });
   });

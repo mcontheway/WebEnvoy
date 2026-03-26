@@ -5,7 +5,6 @@ import { resetMainWorldEventChannelForContract } from "../extension/content-scri
 
 const FINGERPRINT_CONTEXT_CACHE_KEY = "__webenvoy_fingerprint_context__";
 const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
-const MAIN_WORLD_CHANNEL_INIT_EVENT = "__webenvoy_main_world_channel_init__";
 
 const createFingerprintContext = () => ({
   profile: "profile-a",
@@ -228,20 +227,16 @@ const createStartupInstallProbeWindow = (
       },
       dispatchEvent(event: Event) {
         const customEvent = event as CustomEvent<unknown>;
-        if (customEvent.type === MAIN_WORLD_CHANNEL_INIT_EVENT) {
-          const detail = asRecord(customEvent.detail);
-          requestEventName =
-            typeof detail?.request_event === "string"
-              ? detail.request_event
-              : typeof detail?.requestEvent === "string"
-                ? detail.requestEvent
-                : null;
-          resultEventName =
-            typeof detail?.result_event === "string"
-              ? detail.result_event
-              : typeof detail?.resultEvent === "string"
-                ? detail.resultEvent
-                : null;
+        const detailRecord = asRecord(customEvent.detail);
+        if (
+          !requestEventName &&
+          typeof customEvent.type === "string" &&
+          customEvent.type.startsWith("__mw_req__") &&
+          detailRecord?.type === "fingerprint-install" &&
+          typeof detailRecord.id === "string"
+        ) {
+          requestEventName = customEvent.type;
+          resultEventName = customEvent.type.replace("__mw_req__", "__mw_res__");
         }
 
         if (requestEventName && customEvent.type === requestEventName) {
@@ -296,6 +291,7 @@ describe("content-script bootstrap contract", () => {
     const context = createFingerprintContext();
     (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = {
       run_id: "run-bootstrap-001",
+      session_id: "nm-session-001",
       fingerprint_runtime: context,
       startup_fingerprint_trust: {
         profile: "profile-a",
@@ -349,6 +345,7 @@ describe("content-script bootstrap contract", () => {
         payload: {
           startup_fingerprint_trust: expect.objectContaining({
             run_id: "run-bootstrap-001",
+            session_id: "nm-session-001",
             profile: "profile-a",
             trust_source: "extension_bootstrap_context",
             bootstrap_attested: true,
@@ -510,12 +507,7 @@ describe("content-script bootstrap contract", () => {
       profile: "profile-a",
       source: "profile_meta"
     });
-    expect(runtime.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "startup-fingerprint-trust:run-bootstrap-fetch-001",
-        ok: true
-      })
-    );
+    expect(runtime.sendMessage).not.toHaveBeenCalled();
   });
 
   it("persists normalized fingerprint context from forwarded messages", () => {

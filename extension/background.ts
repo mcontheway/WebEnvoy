@@ -1106,15 +1106,14 @@ class ChromeBackgroundBridge {
       return;
     }
     const explicitSessionId = asNonEmptyString(startupTrust.session_id ?? startupTrust.sessionId);
-    if (explicitSessionId && explicitSessionId !== this.#sessionId) {
+    if (!explicitSessionId || explicitSessionId !== this.#sessionId) {
       return;
     }
     const senderBinding = await this.#resolveStartupTrustSenderBinding(sender);
     if (!senderBinding) {
       return;
     }
-    const sessionId = explicitSessionId ?? this.#sessionId;
-    this.#upsertTrustedFingerprintContext(profile, sessionId, fingerprintRuntime, {
+    this.#upsertTrustedFingerprintContext(profile, explicitSessionId, fingerprintRuntime, {
       sourceTabId: senderBinding.tabId,
       sourceDomain: senderBinding.domain
     });
