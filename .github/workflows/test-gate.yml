@@ -40,14 +40,16 @@ jobs:
 
           process_only="yes"
           guardrail_only="yes"
+          guardrail_changed="no"
           workflow_changed="no"
           if [ "${#changed_files[@]}" -eq 0 ]; then
             process_only="no"
             guardrail_only="no"
+            guardrail_changed="no"
           else
             for file in "${changed_files[@]}"; do
               case "$file" in
-                .github/workflows/*.yml|.github/workflows/*.yaml)
+                .github/workflows/*)
                   workflow_changed="yes"
                   ;;
               esac
@@ -63,10 +65,11 @@ jobs:
               esac
 
               case "$file" in
-                ".github/workflows/test-gate.yml"|\
+                ".github/workflows/"*|\
                 "scripts/pr-guardian.sh"|\
                 "scripts/merge-pr.sh"|\
                 tests/pr-guardian*.test.sh)
+                  guardrail_changed="yes"
                   ;;
                 *)
                   guardrail_only="no"
@@ -78,6 +81,7 @@ jobs:
           {
             echo "process_only=$process_only"
             echo "guardrail_only=$guardrail_only"
+            echo "guardrail_changed=$guardrail_changed"
             echo "workflow_changed=$workflow_changed"
             echo "changed_count=${#changed_files[@]}"
           } >> "$GITHUB_OUTPUT"
@@ -86,6 +90,7 @@ jobs:
           printf '%s\n' "${changed_files[@]}"
           echo "process_only=$process_only"
           echo "guardrail_only=$guardrail_only"
+          echo "guardrail_changed=$guardrail_changed"
 
       - name: Validate Changed Workflows
         if: ${{ steps.change-scope.outputs.workflow_changed == 'yes' }}
@@ -105,7 +110,7 @@ jobs:
                 continue
               fi
               case "$candidate" in
-                .github/workflows/*.yml|.github/workflows/*.yaml)
+                .github/workflows/*)
                   if [ -f "$candidate" ]; then
                     workflow_files+=("$candidate")
                   fi
@@ -126,10 +131,10 @@ jobs:
           ./actionlint -color "${unique_workflow_files[@]}"
 
       - name: Run Guardrail Fixed Validation
-        if: ${{ steps.change-scope.outputs.guardrail_only == 'yes' }}
+        if: ${{ steps.change-scope.outputs.guardrail_changed == 'yes' }}
         run: |
           set -euo pipefail
-          echo "Guardrail-only change detected, running merge-guard checks."
+          echo "Guardrail-related change detected, running merge-guard checks."
           bash tests/pr-guardian.merge-guard.test.sh
 
           for script in scripts/pr-guardian.sh scripts/merge-pr.sh; do

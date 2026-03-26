@@ -67,11 +67,6 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "review" ]]; then
   exit 0
 fi
 
-if [[ "${1:-}" == "pr" && "${2:-}" == "comment" ]]; then
-  echo "$*" >> "${MOCK_GH_REVIEW_LOG:?missing MOCK_GH_REVIEW_LOG}"
-  exit 0
-fi
-
 if [[ "${1:-}" == "pr" && "${2:-}" == "merge" ]]; then
   echo "$*" >> "${MOCK_GH_MERGE_LOG:?missing MOCK_GH_MERGE_LOG}"
   exit 0
@@ -84,7 +79,7 @@ if [[ "${1:-}" == "api" ]]; then
     if [[ "${arg}" == "--paginate" ]]; then
       has_paginate=1
     fi
-    if [[ "${arg}" == "user" || "${arg}" == repos/:owner/:repo/pulls/*/reviews || "${arg}" == repos/:owner/:repo/issues/*/comments ]]; then
+    if [[ "${arg}" == "user" || "${arg}" == repos/:owner/:repo/pulls/*/reviews ]]; then
       endpoint="${arg}"
     fi
   done
@@ -112,10 +107,6 @@ if [[ "${1:-}" == "api" ]]; then
     exit 0
   fi
 
-  if [[ "${endpoint}" == repos/:owner/:repo/issues/*/comments ]]; then
-    cat "${MOCK_GH_PR_COMMENTS_JSON:?missing MOCK_GH_PR_COMMENTS_JSON}"
-    exit 0
-  fi
 fi
 
 echo "unexpected gh call: $*" >&2
@@ -145,6 +136,15 @@ assert_file_contains() {
   local expected="$2"
   if ! grep -Fq -- "${expected}" "${file}"; then
     echo "expected '${expected}' in ${file}" >&2
+    exit 1
+  fi
+}
+
+assert_file_not_contains() {
+  local file="$1"
+  local unexpected="$2"
+  if grep -Fq -- "${unexpected}" "${file}"; then
+    echo "did not expect '${unexpected}' in ${file}" >&2
     exit 1
   fi
 }
@@ -248,10 +248,6 @@ setup_merge_if_safe_fixture() {
   MOCK_GH_REVIEWS_JSON="${TEST_TMP_DIR}/${case_name}/mock/reviews.json"
   printf '[[{"user":{"login":"%s"},"commit_id":"%s","state":"%s"}]]\n' "${reviewer}" "${review_commit}" "${review_state}" > "${MOCK_GH_REVIEWS_JSON}"
   export MOCK_GH_REVIEWS_JSON
-
-  MOCK_GH_PR_COMMENTS_JSON="${TEST_TMP_DIR}/${case_name}/mock/pr-comments.json"
-  printf '%s\n' '[[]]' > "${MOCK_GH_PR_COMMENTS_JSON}"
-  export MOCK_GH_PR_COMMENTS_JSON
 
   if [[ "${require_paginate}" == "1" ]]; then
     MOCK_GH_REVIEWS_REQUIRE_PAGINATE=1
@@ -409,20 +405,30 @@ test_merge_if_safe_rejects_when_latest_review_state_regresses_on_same_head() {
   assert_file_empty "${MOCK_GH_MERGE_LOG}"
 }
 
-test_merge_if_safe_self_review_allows_comment_fallback_for_same_head() {
+test_post_review_self_review_uses_review_event_and_merge_gate_uses_reviews_api() {
   setup_merge_if_safe_fixture \
-    "merge-self-review-comment-fallback" \
+    "post-review-self-review-event" \
     "review-bot" \
     "review-bot" \
-    "APPROVED" \
+    "COMMENTED" \
     "head-sha-123" \
     "0"
 
-  printf '%s\n' '[[{"user":{"login":"review-bot"},"commit_id":"head-sha-123","state":"APPROVED"}]]' > "${MOCK_GH_REVIEWS_JSON}"
-  printf '%s\n' '[[{"user":{"login":"review-bot"},"body":"review body\n<!-- pr-guardian-self-review-head:head-sha-123 -->"}]]' > "${MOCK_GH_PR_COMMENTS_JSON}"
+  REVIEW_MD_FILE="${TMP_DIR}/review.md"
+  printf '%s\n' "self review body" > "${REVIEW_MD_FILE}"
+  export REVIEW_MD_FILE
+
+  RESULT_FILE="${TMP_DIR}/review.json"
+  printf '%s\n' '{"verdict":"APPROVE","safe_to_merge":true,"findings":[]}' > "${RESULT_FILE}"
+  export RESULT_FILE
+
+  assert_pass post_review 274
+  assert_file_contains "${MOCK_GH_REVIEW_LOG}" "pr review 274 --comment --body-file"
+  assert_file_not_contains "${MOCK_GH_REVIEW_LOG}" "pr comment 274"
 
   assert_pass merge_if_safe 274 0
-  assert_file_contains "${MOCK_GH_CALLS_LOG}" "repos/:owner/:repo/issues/274/comments"
+  assert_file_contains "${MOCK_GH_CALLS_LOG}" "repos/:owner/:repo/pulls/274/reviews"
+  assert_file_not_contains "${MOCK_GH_CALLS_LOG}" "repos/:owner/:repo/issues/274/comments"
   assert_file_contains "${MOCK_GH_MERGE_LOG}" "--match-head-commit head-sha-123"
 }
 
@@ -436,7 +442,7 @@ main() {
   assert_fail run_all_checks_pass_without_required_checks_reported
 
   test_merge_if_safe_without_post_review_respects_comment_contract
-  test_merge_if_safe_self_review_allows_comment_fallback_for_same_head
+  test_post_review_self_review_uses_review_event_and_merge_gate_uses_reviews_api
   test_merge_if_safe_finds_head_review_across_paginated_reviews
   test_post_review_fails_when_head_changes_after_review_snapshot
   test_merge_if_safe_fails_when_head_changes_after_review_snapshot

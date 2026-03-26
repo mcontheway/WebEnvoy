@@ -208,19 +208,9 @@ submit_review_event() {
   local pr_number="$1"
   local verdict="$2"
   local reviewer="$3"
-  local self_review_comment_file
-  local self_review_marker
 
   if [[ -n "${PR_AUTHOR:-}" ]] && [[ "${PR_AUTHOR}" == "${reviewer}" ]]; then
-    self_review_comment_file="${TMP_DIR}/self-review-comment.md"
-    self_review_marker="<!-- pr-guardian-self-review-head:${HEAD_SHA} -->"
-    {
-      cat "${REVIEW_MD_FILE}"
-      echo
-      echo "${self_review_marker}"
-    } > "${self_review_comment_file}"
-
-    gh pr comment "${pr_number}" --body-file "${self_review_comment_file}" >/dev/null
+    gh pr review "${pr_number}" --comment --body-file "${REVIEW_MD_FILE}" >/dev/null
     return
   fi
 
@@ -257,23 +247,6 @@ head_has_expected_review_state() {
           (last | (.state // "") == $expected_state)
         end
     ' "${reviews_file}" >/dev/null 2>&1
-}
-
-head_has_expected_self_comment_for_head() {
-  local pr_number="$1"
-  local reviewer="$2"
-  local comments_file="${TMP_DIR}/issue-comments.json"
-  local self_review_marker="<!-- pr-guardian-self-review-head:${HEAD_SHA} -->"
-
-  gh api --paginate --slurp "repos/:owner/:repo/issues/${pr_number}/comments" > "${comments_file}"
-
-  jq -e \
-    --arg reviewer "${reviewer}" \
-    --arg self_review_marker "${self_review_marker}" \
-    'any(.[][];
-      (.user.login // "") == $reviewer
-      and ((.body // "") | contains($self_review_marker))
-    )' "${comments_file}" >/dev/null 2>&1
 }
 
 wait_for_expected_review_state() {
@@ -490,14 +463,7 @@ merge_if_safe() {
   esac
 
   if ! wait_for_expected_review_state "${pr_number}" "${HEAD_SHA}" "${current_user}" "${expected_review_state}"; then
-    if [[ -n "${PR_AUTHOR:-}" ]] \
-      && [[ "${PR_AUTHOR}" == "${current_user}" ]] \
-      && [[ "${expected_review_state}" == "COMMENTED" ]] \
-      && head_has_expected_self_comment_for_head "${pr_number}" "${current_user}"; then
-      :
-    else
-      die "当前 HEAD (${HEAD_SHA}) 缺少 ${current_user} 的已完成 GitHub review（期望状态: ${expected_review_state}，已重试 ${PR_GUARDIAN_REVIEW_STATE_MAX_ATTEMPTS:-3} 次），拒绝合并。"
-    fi
+    die "当前 HEAD (${HEAD_SHA}) 缺少 ${current_user} 的已完成 GitHub review（期望状态: ${expected_review_state}，已重试 ${PR_GUARDIAN_REVIEW_STATE_MAX_ATTEMPTS:-3} 次），拒绝合并。"
   fi
 
   if ! all_required_checks_pass "${pr_number}"; then
