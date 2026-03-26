@@ -299,14 +299,15 @@ print_summary() {
   echo
 }
 
-all_required_checks_pass() {
+all_checks_pass() {
   local pr_number="$1"
   local checks_file="${TMP_DIR}/checks.json"
 
-  gh pr checks "${pr_number}" --required --json name,bucket,state,link > "${checks_file}"
+  gh pr checks "${pr_number}" --json name,bucket,state,link > "${checks_file}"
 
   if [[ "$(jq 'length' "${checks_file}")" -eq 0 ]]; then
-    return 0
+    echo "警告: PR #${pr_number} 未发现任何检查记录，按阻断处理。" >&2
+    return 1
   fi
 
   jq -e 'all(.[]; .bucket == "pass")' "${checks_file}" >/dev/null 2>&1
@@ -318,20 +319,25 @@ merge_if_safe() {
   local safe_to_merge
   local verdict
   local mergeable
+  local merge_state_status
   local is_draft
 
   verdict="$(jq -r '.verdict' "${RESULT_FILE}")"
   safe_to_merge="$(jq -r '.safe_to_merge' "${RESULT_FILE}")"
   mergeable="$(jq -r '.mergeable' "${META_FILE}")"
+  merge_state_status="$(jq -r '.mergeStateStatus' "${META_FILE}")"
   is_draft="$(jq -r '.isDraft' "${META_FILE}")"
 
+  [[ "${BASE_REF}" == "main" ]] || die "仅允许合并到 main，当前 base: ${BASE_REF}"
   [[ "${is_draft}" == "false" ]] || die "PR 仍是 Draft，拒绝合并。"
   [[ "${verdict}" == "APPROVE" ]] || die "Codex 审查未批准，拒绝合并。"
   [[ "${safe_to_merge}" == "true" ]] || die "审查结果认为当前 PR 不安全，拒绝合并。"
   [[ "${mergeable}" == "MERGEABLE" ]] || die "GitHub 判定当前 PR 不可合并，状态为: ${mergeable}"
+  [[ "${merge_state_status}" == "CLEAN" || "${merge_state_status}" == "HAS_HOOKS" || "${merge_state_status}" == "UNSTABLE" ]] \
+    || die "GitHub mergeStateStatus 阻断合并，状态为: ${merge_state_status}"
 
-  if ! all_required_checks_pass "${pr_number}"; then
-    die "必需状态检查尚未全部通过，拒绝合并。"
+  if ! all_checks_pass "${pr_number}"; then
+    die "GitHub checks 未全部通过（或无 checks），拒绝合并。"
   fi
 
   if [[ "${delete_branch}" == "1" ]]; then
