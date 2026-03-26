@@ -21,6 +21,10 @@ import {
   type WriteActionMatrixDecision,
   type WriteActionMatrixDecisionsOutput
 } from "../shared/risk-state.js";
+import {
+  ensureFingerprintRuntimeContext,
+  type FingerprintRuntimeContext
+} from "../shared/fingerprint-profile.js";
 
 type BridgeRequest = {
   id: string;
@@ -52,6 +56,14 @@ interface QueuedForwardRequest {
   deadlineMs: number;
 }
 
+interface TrustedFingerprintContextEntry {
+  sessionId: string;
+  fingerprintRuntime: FingerprintRuntimeContext;
+  serializedFingerprintRuntime: string;
+  sourceTabId: number | null;
+  sourceDomain: string | null;
+}
+
 const defaultForwardTimeoutMs = 3_000;
 const defaultHandshakeTimeoutMs = 30_000;
 const defaultNativeHostName = "com.webenvoy.host";
@@ -70,7 +82,9 @@ const readTimeoutMs = (value: unknown): number | null => {
 type RuntimeMessageSender = {
   tab?: {
     id?: number;
+    url?: string;
   };
+  url?: string;
 };
 
 type ExtensionTab = {
@@ -94,7 +108,13 @@ interface ExtensionChromeApi {
   runtime: {
     connectNative(hostName: string): ExtensionPort;
     onMessage: {
-      addListener(listener: (message: unknown, sender: RuntimeMessageSender) => void): void;
+      addListener(
+        listener: (
+          message: unknown,
+          sender: RuntimeMessageSender,
+          sendResponse: (response: unknown) => void
+        ) => boolean | void
+      ): void;
     };
     onInstalled?: {
       addListener(listener: () => void): void;
@@ -111,7 +131,27 @@ interface ExtensionChromeApi {
     }): Promise<ExtensionTab[]>;
     sendMessage(tabId: number, message: BackgroundToContentMessage): Promise<void>;
   };
+  scripting?: {
+    executeScript(input: {
+      target: { tabId: number };
+      world: "MAIN" | "ISOLATED";
+      func: (...args: unknown[]) => unknown;
+      args?: unknown[];
+    }): Promise<Array<{ result?: unknown }>>;
+  };
 }
+
+type XhsSignRequestMessage = {
+  kind: "xhs-sign-request";
+  uri: string;
+  body: Record<string, unknown>;
+};
+
+type XhsSignResponseMessage = {
+  ok: boolean;
+  result?: { "X-s": string; "X-t": string | number };
+  error?: { code: string; message: string };
+};
 
 interface NativeHeartbeatMessage {
   id: string;
@@ -157,6 +197,8 @@ interface XhsTargetGateResult {
     effective_execution_mode: XhsExecutionMode;
     gate_decision: "allowed" | "blocked";
     gate_reasons: string[];
+    fingerprint_gate_decision?: "allowed" | "blocked";
+    fingerprint_reason_codes?: string[];
     write_interaction_tier?: string | null;
   };
   gatePayload: Record<string, unknown>;
@@ -165,8 +207,14 @@ interface XhsTargetGateResult {
 const XHS_READ_DOMAIN = "www.xiaohongshu.com";
 const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
 const XHS_DOMAIN_ALLOWLIST = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
+const STARTUP_TRUST_ALLOWLIST_URLS = [`*://${XHS_READ_DOMAIN}/*`, `*://${XHS_WRITE_DOMAIN}/*`];
 const XHS_ACTION_TYPES = new Set<XhsActionType>(["read", "write", "irreversible_write"]);
 const XHS_EXECUTION_MODES = new Set<XhsExecutionMode>(EXECUTION_MODES);
+const XHS_LIVE_EXECUTION_MODES = new Set<XhsExecutionMode>([
+  "live_read_limited",
+  "live_read_high_risk",
+  "live_write"
+]);
 const XHS_REQUIRED_APPROVAL_CHECKS = APPROVAL_CHECK_KEYS;
 const XHS_WRITE_APPROVAL_REQUIREMENTS = [
   "approval_record_approved_true",
@@ -202,6 +250,8 @@ const XHS_GATE_CONTRACT_MARKERS = {
   session_rhythm_policy: "session_rhythm_policy",
   session_rhythm: "session_rhythm"
 } as const;
+const STARTUP_TRUST_SOURCE = "extension_bootstrap_context";
+const MAX_TRUSTED_FINGERPRINT_CONTEXTS = 64;
 const XHS_PLUGIN_GATE_OWNERSHIP = {
   background_gate: ["target_domain_check", "target_tab_check", "mode_gate", "risk_state_gate"],
   content_script_gate: ["page_context_check", "action_tier_check"],
@@ -227,6 +277,16 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+
+const asStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
+const resolveFingerprintContext = (
+  commandParams: Record<string, unknown>
+): FingerprintRuntimeContext | null => {
+  const context = ensureFingerprintRuntimeContext(commandParams.fingerprint_context);
+  return context ? { ...context } : null;
+};
 
 const asNonEmptyString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -291,10 +351,14 @@ const xhsGateReasonMessage = (reason: string): string => {
     RISK_STATE_LIMITED: "risk state limited blocks high-risk live read",
     MANUAL_CONFIRMATION_MISSING: "manual confirmation is required for live mode",
     APPROVAL_CHECKS_INCOMPLETE: "approval checks are incomplete",
+    FINGERPRINT_CONTEXT_MISSING: "fingerprint context is required for live execution",
+    FINGERPRINT_CONTEXT_UNTRUSTED:
+      "fingerprint context is not trusted for current run/profile",
     TARGET_TAB_NOT_FOUND: "target tab is unavailable",
     TARGET_DOMAIN_MISMATCH: "target tab domain does not match target_domain",
     TARGET_PAGE_MISMATCH: "target tab page does not match target_page",
-    TARGET_TAB_URL_INVALID: "target tab url is invalid"
+    TARGET_TAB_URL_INVALID: "target tab url is invalid",
+    FINGERPRINT_EXECUTION_BLOCKED: "fingerprint runtime blocks live execution for this profile"
   };
   return mapping[reason] ?? "xhs target gate blocked";
 };
@@ -391,6 +455,22 @@ const resolveBlockedFallbackMode = (
         ? "recon"
         : "dry_run";
 
+const buildTrustedFingerprintContextKey = (profile: string, sessionId: string): string =>
+  `${profile}::${sessionId}`;
+
+const serializeFingerprintRuntimeContext = (
+  fingerprintRuntime: FingerprintRuntimeContext
+): string => JSON.stringify(fingerprintRuntime);
+
+const isFingerprintRuntimeContextEquivalent = (
+  left: FingerprintRuntimeContext,
+  right: FingerprintRuntimeContext
+): boolean => serializeFingerprintRuntimeContext(left) === serializeFingerprintRuntimeContext(right);
+
+const TRUST_INVALIDATION_COMMANDS = new Set(["runtime.stop", "runtime.start", "runtime.login"]);
+// Trust must come from startup trust bound to an allowlist page, not generic bridge commands.
+const TRUST_PRIMING_COMMANDS = new Set<string>();
+
 export class BackgroundRelay {
   #listeners = new Set<NativeMessageListener>();
   #pending = new Map<string, PendingForward>();
@@ -482,7 +562,8 @@ export class BackgroundRelay {
         typeof request.params === "object" && request.params !== null
           ? { ...(request.params as Record<string, unknown>) }
           : {},
-      commandParams
+      commandParams,
+      fingerprintContext: resolveFingerprintContext(commandParams)
     };
     try {
       const accepted = this.contentScript.onBackgroundMessage(forward);
@@ -570,6 +651,7 @@ export class BackgroundRelay {
 class ChromeBackgroundBridge {
   #port: ExtensionPort | null = null;
   #pending = new Map<string, PendingForward>();
+  #trustedFingerprintContexts = new Map<string, TrustedFingerprintContextEntry>();
   #recoveryQueue: QueuedForwardRequest[] = [];
   #heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   #heartbeatTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -591,8 +673,13 @@ class ChromeBackgroundBridge {
 
   start(): void {
     this.#connectNativePort();
-    this.chromeApi.runtime.onMessage.addListener((message, sender) => {
+    this.chromeApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (this.#isXhsSignRequestMessage(message)) {
+        void this.#handleXhsSignRequest(message, sender, sendResponse);
+        return true;
+      }
       this.#onContentScriptResult(message, sender);
+      return undefined;
     });
     this.chromeApi.runtime.onInstalled?.addListener(() => this.#connectNativePort());
     this.chromeApi.runtime.onStartup?.addListener(() => this.#connectNativePort());
@@ -712,6 +799,7 @@ class ChromeBackgroundBridge {
     this.#pendingHandshakeId = null;
     this.#pendingHeartbeatId = null;
     this.#missedHeartbeatCount = 0;
+    this.#clearTrustedFingerprintContexts();
     this.#failAllPending({
       code: "ERR_TRANSPORT_DISCONNECTED",
       message
@@ -770,11 +858,15 @@ class ChromeBackgroundBridge {
       return;
     }
 
+    const prevSessionId = this.#sessionId;
     const sessionId =
       typeof response.summary.session_id === "string" && response.summary.session_id.length > 0
         ? response.summary.session_id
         : this.#sessionId;
     this.#sessionId = sessionId;
+    if (sessionId !== prevSessionId) {
+      this.#clearTrustedFingerprintContexts();
+    }
     this.#state = "ready";
     this.#recoveryDeadlineMs = null;
     this.#stopRecoveryLoop();
@@ -859,6 +951,285 @@ class ChromeBackgroundBridge {
   #nextHandshakeId(): string {
     this.#handshakeSeq += 1;
     return `bg-open-${this.#handshakeSeq.toString().padStart(4, "0")}`;
+  }
+
+  #clearTrustedFingerprintContexts(): void {
+    if (this.#trustedFingerprintContexts.size === 0) {
+      return;
+    }
+    this.#trustedFingerprintContexts.clear();
+  }
+
+  #clearTrustedFingerprintContextBySession(profile: string, sessionId: string): void {
+    this.#trustedFingerprintContexts.delete(buildTrustedFingerprintContextKey(profile, sessionId));
+  }
+
+  #clearTrustedFingerprintContextsByProfile(profile: string): void {
+    const profilePrefix = `${profile}::`;
+    for (const key of this.#trustedFingerprintContexts.keys()) {
+      if (key.startsWith(profilePrefix)) {
+        this.#trustedFingerprintContexts.delete(key);
+      }
+    }
+  }
+
+  #invalidateTrustedFingerprintContextForCommand(request: BridgeRequest, command: string): void {
+    if (!TRUST_INVALIDATION_COMMANDS.has(command)) {
+      return;
+    }
+
+    const profile = asNonEmptyString(request.profile);
+    const sessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
+
+    if (command === "runtime.stop") {
+      if (profile) {
+        this.#clearTrustedFingerprintContextBySession(profile, sessionId);
+        return;
+      }
+      this.#clearTrustedFingerprintContexts();
+      return;
+    }
+
+    if (profile) {
+      this.#clearTrustedFingerprintContextsByProfile(profile);
+      return;
+    }
+    this.#clearTrustedFingerprintContexts();
+  }
+
+  #rememberTrustedFingerprintContext(
+    request: BridgeRequest,
+    payload: Record<string, unknown>,
+    ok: boolean
+  ): void {
+    if (!ok) {
+      return;
+    }
+    const command = String(request.params.command ?? "");
+    if (!TRUST_PRIMING_COMMANDS.has(command)) {
+      return;
+    }
+    const profile = asNonEmptyString(request.profile);
+    if (!profile) {
+      return;
+    }
+    const fingerprintRuntime = ensureFingerprintRuntimeContext(payload.fingerprint_runtime ?? null);
+    if (!fingerprintRuntime) {
+      return;
+    }
+    if (fingerprintRuntime.profile !== profile) {
+      return;
+    }
+    const sessionId =
+      asNonEmptyString(request.params.session_id) ?? this.#sessionId;
+    this.#upsertTrustedFingerprintContext(profile, sessionId, fingerprintRuntime);
+  }
+
+  async #resolveStartupTrustSenderBinding(
+    sender: RuntimeMessageSender
+  ): Promise<{ tabId: number; domain: string } | null> {
+    const tabId = asInteger(sender.tab?.id);
+    if (tabId === null) {
+      return null;
+    }
+
+    const senderUrl = asNonEmptyString(sender.tab?.url ?? sender.url);
+    if (senderUrl) {
+      const parsedSenderUrl = parseUrl(senderUrl);
+      if (!parsedSenderUrl || !XHS_DOMAIN_ALLOWLIST.has(parsedSenderUrl.hostname)) {
+        return null;
+      }
+      return {
+        tabId,
+        domain: parsedSenderUrl.hostname
+      };
+    }
+
+    const allowlistTabs = await this.chromeApi.tabs.query({
+      url: STARTUP_TRUST_ALLOWLIST_URLS
+    });
+    const senderTab = allowlistTabs.find((tab) => tab.id === tabId);
+    const senderTabUrl = typeof senderTab?.url === "string" ? senderTab.url : "";
+    const parsedTabUrl = parseUrl(senderTabUrl);
+    if (!parsedTabUrl || !XHS_DOMAIN_ALLOWLIST.has(parsedTabUrl.hostname)) {
+      return null;
+    }
+    return {
+      tabId,
+      domain: parsedTabUrl.hostname
+    };
+  }
+
+  #resolveRequestTargetBinding(
+    request: BridgeRequest
+  ): { tabId: number; domain: string } | null {
+    const commandParams = asRecord(request.params.command_params) ?? {};
+    const options = asRecord(commandParams.options);
+    const readTarget = (key: string): unknown =>
+      Object.prototype.hasOwnProperty.call(commandParams, key)
+        ? commandParams[key]
+        : options?.[key];
+    const targetTabId = asInteger(readTarget("target_tab_id"));
+    const targetDomain = asNonEmptyString(readTarget("target_domain"));
+    if (targetTabId === null || !targetDomain || !XHS_DOMAIN_ALLOWLIST.has(targetDomain)) {
+      return null;
+    }
+    return {
+      tabId: targetTabId,
+      domain: targetDomain
+    };
+  }
+
+  async #rememberStartupTrustedFingerprintContext(
+    payload: Record<string, unknown>,
+    sender: RuntimeMessageSender
+  ): Promise<void> {
+    const startupTrust = asRecord(payload.startup_fingerprint_trust);
+    if (!startupTrust) {
+      return;
+    }
+    const trustSource = asNonEmptyString(startupTrust.trust_source ?? startupTrust.source);
+    if (trustSource !== STARTUP_TRUST_SOURCE) {
+      return;
+    }
+    if (startupTrust.bootstrap_attested !== true) {
+      return;
+    }
+    if (startupTrust.main_world_result_used_for_trust === true) {
+      return;
+    }
+    const profile = asNonEmptyString(startupTrust.profile);
+    if (!profile) {
+      return;
+    }
+    const fingerprintRuntime = ensureFingerprintRuntimeContext(startupTrust.fingerprint_runtime ?? null);
+    if (!fingerprintRuntime || fingerprintRuntime.profile !== profile) {
+      return;
+    }
+    const explicitSessionId = asNonEmptyString(startupTrust.session_id ?? startupTrust.sessionId);
+    if (!explicitSessionId || explicitSessionId !== this.#sessionId) {
+      return;
+    }
+    const senderBinding = await this.#resolveStartupTrustSenderBinding(sender);
+    if (!senderBinding) {
+      return;
+    }
+    this.#upsertTrustedFingerprintContext(profile, explicitSessionId, fingerprintRuntime, {
+      sourceTabId: senderBinding.tabId,
+      sourceDomain: senderBinding.domain
+    });
+  }
+
+  #normalizeTrustedFingerprintRuntime(
+    fingerprintRuntime: FingerprintRuntimeContext
+  ): FingerprintRuntimeContext {
+    return {
+      profile: fingerprintRuntime.profile,
+      source: fingerprintRuntime.source,
+      fingerprint_profile_bundle: fingerprintRuntime.fingerprint_profile_bundle
+        ? JSON.parse(JSON.stringify(fingerprintRuntime.fingerprint_profile_bundle))
+        : null,
+      fingerprint_patch_manifest: fingerprintRuntime.fingerprint_patch_manifest
+        ? JSON.parse(JSON.stringify(fingerprintRuntime.fingerprint_patch_manifest))
+        : null,
+      fingerprint_consistency_check: JSON.parse(
+        JSON.stringify(fingerprintRuntime.fingerprint_consistency_check)
+      ),
+      execution: JSON.parse(JSON.stringify(fingerprintRuntime.execution))
+    };
+  }
+
+  #upsertTrustedFingerprintContext(
+    profile: string,
+    sessionId: string,
+    fingerprintRuntime: FingerprintRuntimeContext,
+    source?: {
+      sourceTabId: number | null;
+      sourceDomain: string | null;
+    }
+  ): void {
+    const normalized = this.#normalizeTrustedFingerprintRuntime(fingerprintRuntime);
+    const key = buildTrustedFingerprintContextKey(profile, sessionId);
+    const serializedFingerprintRuntime = serializeFingerprintRuntimeContext(normalized);
+    const sourceTabId = source?.sourceTabId ?? null;
+    const sourceDomain = source?.sourceDomain ?? null;
+    const existing = this.#trustedFingerprintContexts.get(key);
+    const shouldRotate =
+      !!existing &&
+      (existing.sessionId !== sessionId ||
+        existing.serializedFingerprintRuntime !== serializedFingerprintRuntime ||
+        existing.sourceTabId !== sourceTabId ||
+        existing.sourceDomain !== sourceDomain);
+    if (shouldRotate) {
+      this.#trustedFingerprintContexts.delete(key);
+    }
+    this.#trustedFingerprintContexts.set(key, {
+      sessionId,
+      fingerprintRuntime: normalized,
+      serializedFingerprintRuntime,
+      sourceTabId,
+      sourceDomain
+    });
+    if (this.#trustedFingerprintContexts.size <= MAX_TRUSTED_FINGERPRINT_CONTEXTS) {
+      return;
+    }
+    const oldestKey = this.#trustedFingerprintContexts.keys().next().value;
+    if (typeof oldestKey === "string") {
+      this.#trustedFingerprintContexts.delete(oldestKey);
+    }
+  }
+
+  #resolveTrustedFingerprintContext(request: BridgeRequest): TrustedFingerprintContextEntry | null {
+    const profile = asNonEmptyString(request.profile);
+    if (!profile) {
+      return null;
+    }
+    const sessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
+    const key = buildTrustedFingerprintContextKey(profile, sessionId);
+    const trusted = this.#trustedFingerprintContexts.get(key);
+    if (!trusted) {
+      return null;
+    }
+    if (trusted.sessionId !== this.#sessionId) {
+      this.#trustedFingerprintContexts.delete(key);
+      return null;
+    }
+    return trusted;
+  }
+
+  #resolveValidatedTrustedFingerprintContext(
+    request: BridgeRequest,
+    requestedFingerprintContext: FingerprintRuntimeContext | null
+  ): FingerprintRuntimeContext | null {
+    const trustedEntry = this.#resolveTrustedFingerprintContext(request);
+    if (!trustedEntry) {
+      return null;
+    }
+    const trusted = trustedEntry.fingerprintRuntime;
+    if (
+      requestedFingerprintContext &&
+      !isFingerprintRuntimeContextEquivalent(trusted, requestedFingerprintContext)
+    ) {
+      const profile = asNonEmptyString(request.profile);
+      if (profile) {
+        const sessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
+        this.#clearTrustedFingerprintContextBySession(profile, sessionId);
+      } else {
+        this.#clearTrustedFingerprintContexts();
+      }
+      return null;
+    }
+    const requestTargetBinding = this.#resolveRequestTargetBinding(request);
+    if (
+      trustedEntry.sourceTabId !== null &&
+      trustedEntry.sourceDomain !== null &&
+      (!requestTargetBinding ||
+        requestTargetBinding.tabId !== trustedEntry.sourceTabId ||
+        requestTargetBinding.domain !== trustedEntry.sourceDomain)
+    ) {
+      return null;
+    }
+    return { ...trusted };
   }
 
   async #onNativeRequest(request: BridgeRequest): Promise<void> {
@@ -1046,6 +1417,25 @@ class ChromeBackgroundBridge {
   async #dispatchForward(request: BridgeRequest, deadlineMs?: number): Promise<void> {
     const requestDeadlineMs = deadlineMs ?? Date.now() + this.#resolveForwardTimeoutMs(request);
     const command = String(request.params.command ?? "");
+    this.#invalidateTrustedFingerprintContextForCommand(request, command);
+    const commandParams =
+      typeof request.params.command_params === "object" && request.params.command_params !== null
+        ? (request.params.command_params as Record<string, unknown>)
+        : {};
+    const optionParams = asRecord(commandParams.options);
+    const requestedExecutionMode = parseRequestedExecutionMode(
+      Object.prototype.hasOwnProperty.call(commandParams, "requested_execution_mode")
+        ? commandParams.requested_execution_mode
+        : optionParams?.requested_execution_mode
+    );
+    const requestedLiveMode =
+      requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
+    const requestedFingerprintContext = resolveFingerprintContext(commandParams);
+    const trustedFingerprintContext =
+      command === "xhs.search" && requestedLiveMode
+        ? this.#resolveValidatedTrustedFingerprintContext(request, requestedFingerprintContext)
+        : null;
+    const forwardFingerprintContext = trustedFingerprintContext ?? requestedFingerprintContext;
     let tabId: number | null;
     let consumerGateResult: XhsTargetGateResult["consumerGateResult"] | undefined;
     let gatePayload: XhsTargetGateResult["gatePayload"] | undefined;
@@ -1143,10 +1533,8 @@ class ChromeBackgroundBridge {
         typeof request.params === "object" && request.params !== null
           ? { ...(request.params as Record<string, unknown>) }
           : {},
-      commandParams:
-        typeof request.params.command_params === "object" && request.params.command_params !== null
-          ? (request.params.command_params as Record<string, unknown>)
-          : {}
+      commandParams,
+      fingerprintContext: forwardFingerprintContext
     };
 
     try {
@@ -1192,6 +1580,101 @@ class ChromeBackgroundBridge {
     };
   }
 
+  #appendGateReason(target: Record<string, unknown>, reason: string): void {
+    const gateReasons = asStringArray(target.gate_reasons);
+    if (!gateReasons.includes(reason)) {
+      gateReasons.push(reason);
+    }
+    target.gate_reasons = gateReasons;
+  }
+
+  #backfillExecutionFailureIntoGatePayload(
+    gatePayload: Record<string, unknown>,
+    payload: Record<string, unknown>
+  ): boolean {
+    const details = asRecord(payload.details);
+    if (!details) {
+      return false;
+    }
+    const stage = asNonEmptyString(details.stage);
+    const reason = asNonEmptyString(details.reason);
+    if (stage !== "execution" || !reason) {
+      return false;
+    }
+    const requestedExecutionMode = asNonEmptyString(details.requested_execution_mode);
+    const missingRequiredPatches = asStringArray(details.missing_required_patches);
+    const executionFailure: Record<string, unknown> = {
+      stage,
+      reason,
+      ...(requestedExecutionMode ? { requested_execution_mode: requestedExecutionMode } : {}),
+      ...(missingRequiredPatches.length > 0
+        ? { missing_required_patches: [...missingRequiredPatches] }
+        : {})
+    };
+
+    const isFingerprintFailure = reason.startsWith("FINGERPRINT_");
+    const gateOutcome = asRecord(gatePayload.gate_outcome);
+    if (gateOutcome) {
+      gateOutcome.gate_decision = "blocked";
+      this.#appendGateReason(gateOutcome, reason);
+      gateOutcome.execution_failure = { ...executionFailure };
+      if (isFingerprintFailure) {
+        gateOutcome.fingerprint_gate_decision = "blocked";
+      }
+    }
+
+    const consumerGateResult = asRecord(gatePayload.consumer_gate_result);
+    if (consumerGateResult) {
+      consumerGateResult.gate_decision = "blocked";
+      this.#appendGateReason(consumerGateResult, reason);
+      consumerGateResult.execution_failure = { ...executionFailure };
+      if (isFingerprintFailure) {
+        consumerGateResult.fingerprint_gate_decision = "blocked";
+        const reasonCodes = asStringArray(consumerGateResult.fingerprint_reason_codes);
+        if (!reasonCodes.includes(reason)) {
+          reasonCodes.push(reason);
+        }
+        consumerGateResult.fingerprint_reason_codes = reasonCodes;
+      }
+    }
+
+    if (isFingerprintFailure) {
+      const runtime = asRecord(payload.fingerprint_runtime);
+      const runtimeExecution = asRecord(runtime?.execution);
+      const fingerprintExecution = runtimeExecution
+        ? { ...runtimeExecution }
+        : asRecord(gatePayload.fingerprint_execution)
+          ? { ...(asRecord(gatePayload.fingerprint_execution) as Record<string, unknown>) }
+          : null;
+      if (fingerprintExecution) {
+        fingerprintExecution.live_allowed = false;
+        fingerprintExecution.live_decision = "dry_run_only";
+        const allowedModes = asStringArray(fingerprintExecution.allowed_execution_modes);
+        const fallbackModes = allowedModes.filter((mode) => mode === "dry_run" || mode === "recon");
+        fingerprintExecution.allowed_execution_modes =
+          fallbackModes.length > 0 ? fallbackModes : ["dry_run"];
+        const reasonCodes = asStringArray(fingerprintExecution.reason_codes);
+        if (!reasonCodes.includes(reason)) {
+          reasonCodes.push(reason);
+        }
+        fingerprintExecution.reason_codes = reasonCodes;
+        fingerprintExecution.execution_failure = { ...executionFailure };
+        if (missingRequiredPatches.length > 0) {
+          fingerprintExecution.missing_required_patches = [...missingRequiredPatches];
+        }
+        gatePayload.fingerprint_execution = fingerprintExecution;
+      }
+    }
+
+    const auditRecord = asRecord(gatePayload.audit_record);
+    if (auditRecord) {
+      auditRecord.gate_decision = "blocked";
+      this.#appendGateReason(auditRecord, reason);
+      auditRecord.execution_failure = { ...executionFailure };
+    }
+    return true;
+  }
+
   async #evaluateXhsTargetGate(request: BridgeRequest): Promise<XhsTargetGateResult> {
     const commandParams = asRecord(request.params.command_params) ?? {};
     const abilityParams = asRecord(commandParams.ability);
@@ -1211,6 +1694,11 @@ class ChromeBackgroundBridge {
     const rawIssueScope = readGateParam("issue_scope");
     const rawRiskState = readGateParam("risk_state");
     const rawApprovalRecord = readGateParam("approval_record") ?? readGateParam("approval");
+    const requestedFingerprintContext = resolveFingerprintContext(commandParams);
+    let fingerprintExecution = requestedFingerprintContext?.execution ?? null;
+    let fingerprintReasonCodes = (
+      Array.isArray(fingerprintExecution?.reason_codes) ? fingerprintExecution.reason_codes : []
+    ).filter((code): code is string => typeof code === "string");
     const targetDomain = asNonEmptyString(rawTargetDomain);
     const targetTabId = asInteger(rawTargetTabId);
     const targetPage = asNonEmptyString(rawTargetPage);
@@ -1231,6 +1719,13 @@ class ChromeBackgroundBridge {
       issueScope === "issue_208" &&
       actionType !== null &&
       writeActionMatrixDecisions.write_interaction_tier !== "observe_only";
+    const requestedLiveMode =
+      requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
+    let fingerprintContextMissing = false;
+    let fingerprintContextUntrusted = false;
+    let fingerprintLiveBlocked = false;
+    let fingerprintGateDecision: "allowed" | "blocked" = "allowed";
+    let resolvedFingerprintReasonCodes = [...fingerprintReasonCodes];
     const writeTierReason = `WRITE_INTERACTION_TIER_${writeActionMatrixDecisions.write_interaction_tier.toUpperCase()}`;
     const gateReasons: string[] = [];
     let writeGateOnlyApprovalDecision: Record<string, unknown> | null = null;
@@ -1388,6 +1883,45 @@ class ChromeBackgroundBridge {
         }
       }
     }
+    const shouldEvaluateTrustedFingerprintGate =
+      requestedLiveMode && !issue208WriteGateOnly && gateReasons.length === 0;
+    if (shouldEvaluateTrustedFingerprintGate) {
+      const trustedFingerprintContext = this.#resolveValidatedTrustedFingerprintContext(
+        request,
+        requestedFingerprintContext
+      );
+      fingerprintExecution = trustedFingerprintContext?.execution ?? null;
+      fingerprintReasonCodes = (
+        Array.isArray(fingerprintExecution?.reason_codes) ? fingerprintExecution.reason_codes : []
+      ).filter((code): code is string => typeof code === "string");
+      if (fingerprintExecution === null) {
+        fingerprintContextMissing = requestedFingerprintContext === null;
+        fingerprintContextUntrusted = requestedFingerprintContext !== null;
+        if (fingerprintContextMissing) {
+          pushReason("FINGERPRINT_CONTEXT_MISSING");
+          resolvedFingerprintReasonCodes = ["FINGERPRINT_CONTEXT_MISSING"];
+        } else {
+          pushReason("FINGERPRINT_CONTEXT_UNTRUSTED");
+          resolvedFingerprintReasonCodes = ["FINGERPRINT_CONTEXT_UNTRUSTED"];
+        }
+        pushReason("FINGERPRINT_EXECUTION_BLOCKED");
+      } else if (
+        requestedExecutionMode !== null &&
+        (fingerprintExecution.live_allowed !== true ||
+          fingerprintExecution.live_decision === "dry_run_only" ||
+          !fingerprintExecution.allowed_execution_modes.includes(requestedExecutionMode))
+      ) {
+        fingerprintLiveBlocked = true;
+        pushReason("FINGERPRINT_EXECUTION_BLOCKED");
+        resolvedFingerprintReasonCodes = [...fingerprintReasonCodes];
+      } else {
+        resolvedFingerprintReasonCodes = [...fingerprintReasonCodes];
+      }
+      fingerprintGateDecision =
+        fingerprintContextMissing || fingerprintContextUntrusted || fingerprintLiveBlocked
+          ? "blocked"
+          : "allowed";
+    }
     if (issue208WriteGateOnly) {
       if (!gateReasons.includes(writeTierReason)) {
         gateReasons.push(writeTierReason);
@@ -1438,6 +1972,8 @@ class ChromeBackgroundBridge {
       effective_execution_mode: effectiveExecutionMode,
       gate_decision: gateDecision,
       gate_reasons: gateReasons,
+      fingerprint_gate_decision: fingerprintGateDecision,
+      fingerprint_reason_codes: resolvedFingerprintReasonCodes,
       write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier
     };
     const runId = String(request.params.run_id ?? request.id);
@@ -1500,14 +2036,17 @@ class ChromeBackgroundBridge {
         target_page: targetPage,
         action_type: actionType,
         requested_execution_mode: requestedExecutionMode,
-        risk_state: riskState
+        risk_state: riskState,
+        fingerprint_gate_decision: fingerprintGateDecision
       },
       gate_outcome: {
         effective_execution_mode: effectiveExecutionMode,
         gate_decision: gateDecision,
         gate_reasons: gateReasons,
-        requires_manual_confirmation: requiresManualConfirmation
+        requires_manual_confirmation: requiresManualConfirmation,
+        fingerprint_gate_decision: fingerprintGateDecision
       },
+      fingerprint_execution: fingerprintExecution ? { ...fingerprintExecution } : null,
       consumer_gate_result: consumerGateResult,
       approval_record: approvalRecord,
       issue_action_matrix: resolvedIssueActionMatrixEntry,
@@ -1543,28 +2082,148 @@ class ChromeBackgroundBridge {
     );
   }
 
+  #isXhsSignRequestMessage(message: unknown): message is XhsSignRequestMessage {
+    const record = asRecord(message);
+    return (
+      record?.kind === "xhs-sign-request" &&
+      typeof record.uri === "string" &&
+      record.uri.length > 0 &&
+      asRecord(record.body) !== null
+    );
+  }
+
+  async #executeXhsSignInMainWorld(
+    tabId: number,
+    uri: string,
+    body: Record<string, unknown>
+  ): Promise<{ "X-s": string; "X-t": string | number }> {
+    if (!this.chromeApi.scripting?.executeScript) {
+      throw new Error("chrome.scripting.executeScript is unavailable");
+    }
+
+    const results = await this.chromeApi.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: (inputUri: unknown, inputBody: unknown) => {
+        const signatureFn = (window as Window & { _webmsxyw?: unknown })._webmsxyw;
+        if (typeof signatureFn !== "function") {
+          throw new Error("window._webmsxyw is not available");
+        }
+        if (typeof inputUri !== "string" || inputUri.length === 0) {
+          throw new Error("xhs-sign requires uri");
+        }
+        const result = signatureFn(
+          inputUri,
+          typeof inputBody === "object" && inputBody !== null ? inputBody : {}
+        ) as Record<string, unknown>;
+        const xSignature = typeof result?.["X-s"] === "string" ? result["X-s"] : null;
+        const xTimestamp = result?.["X-t"];
+        if (!xSignature || (typeof xTimestamp !== "string" && typeof xTimestamp !== "number")) {
+          throw new Error("xhs-sign result is invalid");
+        }
+        return {
+          "X-s": xSignature,
+          "X-t": xTimestamp
+        };
+      },
+      args: [uri, body]
+    });
+    const first = Array.isArray(results) ? results[0] : null;
+    const signature = asRecord(first?.result);
+    if (
+      !signature ||
+      typeof signature["X-s"] !== "string" ||
+      (typeof signature["X-t"] !== "string" && typeof signature["X-t"] !== "number")
+    ) {
+      throw new Error("xhs-sign result is invalid");
+    }
+    return {
+      "X-s": signature["X-s"],
+      "X-t": signature["X-t"]
+    };
+  }
+
+  async #handleXhsSignRequest(
+    message: XhsSignRequestMessage,
+    sender: RuntimeMessageSender,
+    sendResponse: (response: XhsSignResponseMessage) => void
+  ): Promise<void> {
+    const tabId = asInteger(sender.tab?.id);
+    const senderUrl = asNonEmptyString(sender.tab?.url);
+    const parsedSenderUrl = senderUrl ? parseUrl(senderUrl) : null;
+    if (tabId === null || !parsedSenderUrl || !XHS_DOMAIN_ALLOWLIST.has(parsedSenderUrl.hostname)) {
+      sendResponse({
+        ok: false,
+        error: {
+          code: "ERR_XHS_SIGN_FORBIDDEN",
+          message: "xhs-sign request is out of allowlist scope"
+        }
+      });
+      return;
+    }
+
+    try {
+      const result = await this.#executeXhsSignInMainWorld(tabId, message.uri, message.body);
+      sendResponse({
+        ok: true,
+        result
+      });
+    } catch (error) {
+      sendResponse({
+        ok: false,
+        error: {
+          code: "ERR_XHS_SIGN_FAILED",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      });
+    }
+  }
+
   #onContentScriptResult(message: unknown, sender: RuntimeMessageSender): void {
     const result = message as Partial<ContentToBackgroundMessage> | null;
     if (!result || result.kind !== "result" || typeof result.id !== "string") {
       return;
     }
 
+    const payload =
+      typeof result.payload === "object" && result.payload !== null
+        ? { ...(result.payload as Record<string, unknown>) }
+        : {};
     const pending = this.#pending.get(result.id);
     if (!pending) {
+      void this.#rememberStartupTrustedFingerprintContext(payload, sender);
       return;
     }
 
     clearTimeout(pending.timeout);
     this.#pending.delete(result.id);
     const request = pending.request;
-    const payload =
-      typeof result.payload === "object" && result.payload !== null
-        ? { ...(result.payload as Record<string, unknown>) }
-        : {};
+    this.#rememberTrustedFingerprintContext(request, payload, result.ok === true);
+    const backfilledExecutionFailure = pending.gatePayload
+      ? this.#backfillExecutionFailureIntoGatePayload(pending.gatePayload, payload)
+      : false;
     const summary =
       typeof payload.summary === "object" && payload.summary !== null
         ? (payload.summary as Record<string, unknown>)
         : null;
+    if (pending.gatePayload && backfilledExecutionFailure) {
+      // Ensure audit-trace fields reflect the final blocked decision even if content payload already had stale copies.
+      for (const key of [
+        "gate_outcome",
+        "consumer_gate_result",
+        "audit_record",
+        "fingerprint_execution"
+      ]) {
+        if (!Object.prototype.hasOwnProperty.call(pending.gatePayload, key)) {
+          continue;
+        }
+        const value = pending.gatePayload[key];
+        payload[key] = value;
+        if (summary !== null) {
+          summary[key] = value;
+        }
+      }
+    }
     if (pending.gatePayload) {
       for (const [key, value] of Object.entries(pending.gatePayload)) {
         const hasInPayload = Object.prototype.hasOwnProperty.call(payload, key);

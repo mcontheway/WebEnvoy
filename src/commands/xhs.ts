@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 import { CliError } from "../core/errors.js";
 import type { CommandDefinition, CommandExecutionResult, JsonObject, RuntimeContext } from "../core/types.js";
 import {
@@ -6,6 +8,8 @@ import {
 } from "../runtime/native-messaging/bridge.js";
 import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
+import { appendFingerprintContext, buildFingerprintContextForMeta } from "../runtime/fingerprint-runtime.js";
+import { ProfileStore } from "../runtime/profile-store.js";
 
 type AbilityLayer = "L3" | "L2" | "L1";
 type AbilityAction = "read" | "write" | "download";
@@ -37,6 +41,12 @@ const XHS_EXECUTION_MODES = new Set<XhsExecutionMode>([
   "live_read_high_risk",
   "live_write"
 ]);
+const XHS_LIVE_EXECUTION_MODES = new Set<XhsExecutionMode>([
+  "live_read_limited",
+  "live_read_high_risk",
+  "live_write"
+]);
+const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 
 const asObject = (value: unknown): JsonObject | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -330,12 +340,13 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
   const bridge = resolveRuntimeBridge();
 
   try {
-    const bridgeResult = await bridge.runCommand({
-      runId: context.run_id,
-      profile: context.profile,
-      cwd: context.cwd,
-      command: context.command,
-      params: {
+    const profileStore = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
+    const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
+    const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
+      requestedExecutionMode: gate.requestedExecutionMode
+    });
+    const commandParams = appendFingerprintContext(
+      {
         target_domain: gate.targetDomain,
         target_tab_id: gate.targetTabId,
         target_page: gate.targetPage,
@@ -343,7 +354,15 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
         ability: envelope.ability,
         input: parseSearchInput(envelope.input, envelope.ability.id),
         options: gate.options
-      }
+      },
+      fingerprintContext
+    );
+    const bridgeResult = await bridge.runCommand({
+      runId: context.run_id,
+      profile: context.profile,
+      cwd: context.cwd,
+      command: context.command,
+      params: commandParams
     });
 
     if (!bridgeResult.ok) {

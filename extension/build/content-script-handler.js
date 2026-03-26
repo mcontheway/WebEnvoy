@@ -1,7 +1,52 @@
 import { executeXhsSearch } from "./xhs-search.js";
+import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
+const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
+const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
+const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+const resolveRequestedExecutionMode = (message) => {
+    const topLevelMode = asString(asRecord(message.commandParams)?.requested_execution_mode);
+    if (topLevelMode) {
+        return topLevelMode;
+    }
+    const options = asRecord(message.commandParams.options);
+    return asString(options?.requested_execution_mode);
+};
+const resolveFingerprintContextFromMessage = (message) => {
+    const direct = ensureFingerprintRuntimeContext(message.fingerprintContext ?? null);
+    if (direct) {
+        return direct;
+    }
+    const fallback = ensureFingerprintRuntimeContext(asRecord(message.commandParams)?.fingerprint_context ?? null);
+    return fallback ?? null;
+};
+const resolveMissingRequiredFingerprintPatches = (fingerprintRuntime) => {
+    const injection = asRecord(fingerprintRuntime.injection);
+    const requiredPatches = asStringArray(injection?.required_patches);
+    const missingRequiredPatches = asStringArray(injection?.missing_required_patches);
+    if (missingRequiredPatches.length > 0) {
+        return missingRequiredPatches;
+    }
+    if (injection?.installed === true) {
+        return [];
+    }
+    return requiredPatches;
+};
+export const resolveFingerprintContextForContract = (message) => resolveFingerprintContextFromMessage({
+    kind: "forward",
+    id: "contract",
+    runId: "contract",
+    tabId: null,
+    profile: null,
+    cwd: "",
+    timeoutMs: 1_000,
+    command: "runtime.ping",
+    params: {},
+    commandParams: message.commandParams,
+    fingerprintContext: message.fingerprintContext
+});
 const extractFetchBody = async (response) => {
     const text = await response.text();
     if (text.length === 0) {
@@ -27,63 +72,314 @@ const encodeUtf8Base64 = (value) => {
     throw new Error("base64 encoder is unavailable");
 };
 export const encodeMainWorldPayload = (value) => encodeUtf8Base64(JSON.stringify(value));
+const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
+const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
+const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
+const MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
+const AUDIO_PATCH_EPSILON = 1e-12;
+let mainWorldEventChannel = null;
+let mainWorldResultListener = null;
+let mainWorldResultListenerEventName = null;
+const pendingMainWorldRequests = new Map();
+const hashMainWorldEventChannel = (value) => {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(36);
+};
+const normalizeMainWorldSecret = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+export const resolveMainWorldEventNamesForSecret = (secret) => {
+    const channel = hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|${secret}`);
+    return {
+        requestEvent: `${MAIN_WORLD_EVENT_REQUEST_PREFIX}${channel}`,
+        resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${channel}`
+    };
+};
+const createWindowEvent = (type, detail) => {
+    if (typeof CustomEvent === "function") {
+        return new CustomEvent(type, { detail });
+    }
+    return {
+        type,
+        detail
+    };
+};
+const onMainWorldResultEvent = (event) => {
+    const detail = asRecord(event.detail);
+    if (!detail || typeof detail.id !== "string") {
+        return;
+    }
+    const pending = pendingMainWorldRequests.get(detail.id);
+    if (!pending) {
+        return;
+    }
+    pendingMainWorldRequests.delete(detail.id);
+    clearTimeout(pending.timeout);
+    if (detail.ok === true) {
+        pending.resolve(detail.result);
+        return;
+    }
+    pending.reject(new Error(typeof detail.message === "string" ? detail.message : "main world call failed"));
+};
+const detachMainWorldResultListener = () => {
+    if (!mainWorldResultListener ||
+        !mainWorldResultListenerEventName ||
+        typeof window === "undefined" ||
+        typeof window.removeEventListener !== "function") {
+        mainWorldResultListener = null;
+        mainWorldResultListenerEventName = null;
+        return;
+    }
+    window.removeEventListener(mainWorldResultListenerEventName, mainWorldResultListener);
+    mainWorldResultListener = null;
+    mainWorldResultListenerEventName = null;
+};
+export const installMainWorldEventChannelSecret = (secret) => {
+    const normalizedSecret = normalizeMainWorldSecret(secret);
+    if (typeof window === "undefined" ||
+        typeof window.addEventListener !== "function" ||
+        typeof window.dispatchEvent !== "function") {
+        mainWorldEventChannel = null;
+        detachMainWorldResultListener();
+        return false;
+    }
+    if (!normalizedSecret) {
+        mainWorldEventChannel = null;
+        detachMainWorldResultListener();
+        return false;
+    }
+    const names = resolveMainWorldEventNamesForSecret(normalizedSecret);
+    if (mainWorldEventChannel &&
+        mainWorldEventChannel.secret === normalizedSecret &&
+        mainWorldResultListenerEventName === names.resultEvent) {
+        return true;
+    }
+    detachMainWorldResultListener();
+    window.addEventListener(names.resultEvent, onMainWorldResultEvent);
+    mainWorldResultListener = onMainWorldResultEvent;
+    mainWorldResultListenerEventName = names.resultEvent;
+    mainWorldEventChannel = {
+        secret: normalizedSecret,
+        requestEvent: names.requestEvent,
+        resultEvent: names.resultEvent
+    };
+    return true;
+};
+export const resetMainWorldEventChannelForContract = () => {
+    for (const pending of pendingMainWorldRequests.values()) {
+        clearTimeout(pending.timeout);
+        pending.reject(new Error("main world event channel reset"));
+    }
+    pendingMainWorldRequests.clear();
+    mainWorldEventChannel = null;
+    detachMainWorldResultListener();
+};
 const mainWorldCall = async (request) => {
-    const eventName = "__webenvoy_main_world_result__";
     const requestId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
         : `mw-${Date.now()}`;
     return await new Promise((resolve, reject) => {
-        const listener = (event) => {
-            const customEvent = event;
-            if (!customEvent.detail || customEvent.detail.id !== requestId) {
-                return;
-            }
-            window.removeEventListener(eventName, listener);
-            if (customEvent.detail.ok === true) {
-                resolve(customEvent.detail.result);
-                return;
-            }
-            reject(new Error(typeof customEvent.detail.message === "string"
-                ? customEvent.detail.message
-                : "main world call failed"));
-        };
-        window.addEventListener(eventName, listener);
-        const encodedRequest = encodeMainWorldPayload({
+        if (!mainWorldEventChannel ||
+            typeof window === "undefined" ||
+            typeof window.dispatchEvent !== "function") {
+            reject(new Error("main world event channel unavailable"));
+            return;
+        }
+        const timeout = setTimeout(() => {
+            pendingMainWorldRequests.delete(requestId);
+            reject(new Error("main world event channel response timeout"));
+        }, MAIN_WORLD_CALL_TIMEOUT_MS);
+        pendingMainWorldRequests.set(requestId, {
+            resolve: (value) => resolve(value),
+            reject,
+            timeout
+        });
+        const requestDetail = {
             id: requestId,
             ...request
-        });
-        const script = document.createElement("script");
-        script.textContent = `
-      (() => {
-        const decodeRequest = (encoded) => JSON.parse(decodeURIComponent(escape(atob(encoded))));
-        const request = decodeRequest(${JSON.stringify(encodedRequest)});
-        const emit = (detail) => {
-          window.dispatchEvent(new CustomEvent(${JSON.stringify(eventName)}, { detail }));
         };
         try {
-          if (request.type === "xhs-sign") {
-            const fn = window._webmsxyw;
-            if (typeof fn !== "function") {
-              emit({ id: request.id, ok: false, message: "window._webmsxyw is not available" });
-              return;
-            }
-            const result = fn(request.payload.uri, request.payload.body);
-            emit({ id: request.id, ok: true, result });
-            return;
-          }
-          emit({ id: request.id, ok: false, message: "unsupported main world call" });
-        } catch (error) {
-          emit({
-            id: request.id,
-            ok: false,
-            message: error instanceof Error ? error.message : String(error)
-          });
+            window.dispatchEvent(createWindowEvent(mainWorldEventChannel.requestEvent, requestDetail));
         }
-      })();
-    `;
-        (document.documentElement ?? document.head ?? document.body).appendChild(script);
-        script.remove();
+        catch (error) {
+            clearTimeout(timeout);
+            pendingMainWorldRequests.delete(requestId);
+            reject(error);
+        }
     });
+};
+export const installFingerprintRuntimeViaMainWorld = async (fingerprintRuntime) => await mainWorldCall({
+    type: "fingerprint-install",
+    payload: {
+        fingerprint_runtime: fingerprintRuntime
+    }
+});
+const requestXhsSignatureViaExtension = async (uri, body) => {
+    const runtime = globalThis.chrome?.runtime;
+    const sendMessage = runtime?.sendMessage;
+    if (!sendMessage) {
+        throw new Error("extension runtime.sendMessage is unavailable");
+    }
+    const request = {
+        kind: "xhs-sign-request",
+        uri,
+        body
+    };
+    const response = await new Promise((resolve, reject) => {
+        try {
+            const maybePromise = sendMessage(request, (message) => {
+                resolve(message ?? { ok: false, error: { message: "xhs-sign response missing" } });
+            });
+            if (maybePromise && typeof maybePromise.then === "function") {
+                void maybePromise
+                    .then((message) => {
+                    if (message) {
+                        resolve(message);
+                    }
+                })
+                    .catch((error) => {
+                    reject(error);
+                });
+            }
+        }
+        catch (error) {
+            reject(error);
+        }
+    });
+    if (!response.ok || !response.result) {
+        throw new Error(typeof response.error?.message === "string" ? response.error.message : "xhs-sign failed");
+    }
+    return response.result;
+};
+const resolveRequiredFingerprintPatches = (fingerprintRuntime) => asStringArray(asRecord(fingerprintRuntime.fingerprint_patch_manifest)?.required_patches);
+const probeAudioFirstSample = async () => {
+    const offlineAudioCtor = typeof window.OfflineAudioContext === "function"
+        ? window.OfflineAudioContext
+        : typeof window
+            .webkitOfflineAudioContext === "function"
+            ? window
+                .webkitOfflineAudioContext ?? null
+            : null;
+    if (!offlineAudioCtor) {
+        return null;
+    }
+    try {
+        const offlineAudioContext = new offlineAudioCtor(1, 256, 44_100);
+        const renderedBuffer = await offlineAudioContext.startRendering();
+        if (!renderedBuffer || typeof renderedBuffer.getChannelData !== "function") {
+            return null;
+        }
+        const channelData = renderedBuffer.getChannelData(0);
+        if (!channelData || typeof channelData.length !== "number" || channelData.length < 1) {
+            return null;
+        }
+        const firstSample = Number(channelData[0]);
+        return Number.isFinite(firstSample) ? firstSample : null;
+    }
+    catch {
+        return null;
+    }
+};
+const probeBatteryApi = async () => {
+    const getBattery = window.navigator
+        .getBattery;
+    if (typeof getBattery !== "function") {
+        return false;
+    }
+    try {
+        const battery = asRecord(await getBattery());
+        return typeof battery?.level === "number" && typeof battery?.charging === "boolean";
+    }
+    catch {
+        return false;
+    }
+};
+const probeNavigatorPlugins = () => {
+    const plugins = window.navigator.plugins;
+    return (typeof plugins === "object" &&
+        plugins !== null &&
+        typeof plugins.length === "number" &&
+        Number(plugins.length) > 0);
+};
+const probeNavigatorMimeTypes = () => {
+    const mimeTypes = window.navigator.mimeTypes;
+    return (typeof mimeTypes === "object" &&
+        mimeTypes !== null &&
+        typeof mimeTypes.length === "number" &&
+        Number(mimeTypes.length) > 0);
+};
+const verifyFingerprintInstallResult = async (input) => {
+    const requiredPatches = resolveRequiredFingerprintPatches(input.fingerprintRuntime);
+    const reportedAppliedPatches = asStringArray(input.installResult?.applied_patches);
+    const appliedPatches = [];
+    const missingRequiredPatches = [];
+    const probeDetails = {};
+    if (requiredPatches.includes("audio_context")) {
+        const postInstallAudioSample = await probeAudioFirstSample();
+        const audioPatched = postInstallAudioSample !== null &&
+            (input.preInstallAudioSample === null ||
+                Math.abs(postInstallAudioSample - input.preInstallAudioSample) > AUDIO_PATCH_EPSILON ||
+                reportedAppliedPatches.includes("audio_context"));
+        probeDetails.audio_context = {
+            pre_install_first_sample: input.preInstallAudioSample,
+            post_install_first_sample: postInstallAudioSample,
+            verified: audioPatched
+        };
+        if (audioPatched) {
+            appliedPatches.push("audio_context");
+        }
+        else {
+            missingRequiredPatches.push("audio_context");
+        }
+    }
+    if (requiredPatches.includes("battery")) {
+        const batteryPatched = await probeBatteryApi();
+        probeDetails.battery = { verified: batteryPatched };
+        if (batteryPatched) {
+            appliedPatches.push("battery");
+        }
+        else {
+            missingRequiredPatches.push("battery");
+        }
+    }
+    if (requiredPatches.includes("navigator_plugins")) {
+        const pluginsPatched = probeNavigatorPlugins();
+        probeDetails.navigator_plugins = { verified: pluginsPatched };
+        if (pluginsPatched) {
+            appliedPatches.push("navigator_plugins");
+        }
+        else {
+            missingRequiredPatches.push("navigator_plugins");
+        }
+    }
+    if (requiredPatches.includes("navigator_mime_types")) {
+        const mimeTypesPatched = probeNavigatorMimeTypes();
+        probeDetails.navigator_mime_types = { verified: mimeTypesPatched };
+        if (mimeTypesPatched) {
+            appliedPatches.push("navigator_mime_types");
+        }
+        else {
+            missingRequiredPatches.push("navigator_mime_types");
+        }
+    }
+    for (const patchName of requiredPatches) {
+        if (!appliedPatches.includes(patchName) && !missingRequiredPatches.includes(patchName)) {
+            missingRequiredPatches.push(patchName);
+        }
+    }
+    return {
+        ...(input.installResult ?? {}),
+        installed: missingRequiredPatches.length === 0,
+        required_patches: requiredPatches,
+        applied_patches: appliedPatches,
+        missing_required_patches: missingRequiredPatches,
+        verification: {
+            channel: "isolated_world_probes",
+            probes: probeDetails
+        }
+    };
 };
 const createBrowserEnvironment = () => ({
     now: () => Date.now(),
@@ -94,13 +390,7 @@ const createBrowserEnvironment = () => ({
     getDocumentTitle: () => document.title,
     getReadyState: () => document.readyState,
     getCookie: () => document.cookie,
-    callSignature: async (uri, payload) => await mainWorldCall({
-        type: "xhs-sign",
-        payload: {
-            uri,
-            body: payload
-        }
-    }),
+    callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
     fetchJson: async (input) => {
         const controller = new AbortController();
         const timer = setTimeout(() => {
@@ -168,6 +458,10 @@ export class ContentScriptHandler {
         if (message.commandParams.simulate_no_response === true) {
             return true;
         }
+        if (message.command === "runtime.ping") {
+            void this.#handleRuntimePing(message);
+            return true;
+        }
         if (message.command === "xhs.search") {
             void this.#handleXhsSearch(message);
             return true;
@@ -177,6 +471,55 @@ export class ContentScriptHandler {
             listener(result);
         }
         return true;
+    }
+    async #installFingerprintIfPresent(message) {
+        const fingerprintRuntime = resolveFingerprintContextFromMessage(message);
+        if (!fingerprintRuntime) {
+            return null;
+        }
+        try {
+            const requiredPatches = resolveRequiredFingerprintPatches(fingerprintRuntime);
+            const preInstallAudioSample = requiredPatches.includes("audio_context")
+                ? await probeAudioFirstSample()
+                : null;
+            const installResult = await installFingerprintRuntimeViaMainWorld(fingerprintRuntime);
+            const verifiedInjection = await verifyFingerprintInstallResult({
+                fingerprintRuntime,
+                installResult: asRecord(installResult),
+                preInstallAudioSample
+            });
+            return {
+                ...fingerprintRuntime,
+                injection: verifiedInjection
+            };
+        }
+        catch (error) {
+            const requiredPatches = asStringArray(asRecord(fingerprintRuntime.fingerprint_patch_manifest)?.required_patches);
+            return {
+                ...fingerprintRuntime,
+                injection: {
+                    installed: false,
+                    required_patches: requiredPatches,
+                    missing_required_patches: requiredPatches,
+                    error: error instanceof Error ? error.message : String(error)
+                }
+            };
+        }
+    }
+    async #handleRuntimePing(message) {
+        const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
+        this.#emit({
+            kind: "result",
+            id: message.id,
+            ok: true,
+            payload: {
+                message: "pong",
+                run_id: message.runId,
+                profile: message.profile,
+                cwd: message.cwd,
+                ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {})
+            }
+        });
     }
     #handleForward(message) {
         if (message.command !== "runtime.ping") {
@@ -203,6 +546,32 @@ export class ContentScriptHandler {
         };
     }
     async #handleXhsSearch(message) {
+        const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
+        const requestedExecutionMode = resolveRequestedExecutionMode(message);
+        const missingRequiredPatches = fingerprintRuntime !== null ? resolveMissingRequiredFingerprintPatches(fingerprintRuntime) : [];
+        if (requestedExecutionMode !== null &&
+            LIVE_EXECUTION_MODES.has(requestedExecutionMode) &&
+            missingRequiredPatches.length > 0) {
+            this.#emit({
+                kind: "result",
+                id: message.id,
+                ok: false,
+                error: {
+                    code: "ERR_EXECUTION_FAILED",
+                    message: "fingerprint required patches missing for live execution"
+                },
+                payload: {
+                    details: {
+                        stage: "execution",
+                        reason: "FINGERPRINT_REQUIRED_PATCH_MISSING",
+                        requested_execution_mode: requestedExecutionMode,
+                        missing_required_patches: missingRequiredPatches
+                    },
+                    ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {})
+                }
+            });
+            return;
+        }
         const ability = asRecord(message.commandParams.ability);
         const input = asRecord(message.commandParams.input);
         const options = asRecord(message.commandParams.options) ?? {};
@@ -222,7 +591,8 @@ export class ContentScriptHandler {
                     details: {
                         stage: "execution",
                         reason: "ABILITY_PAYLOAD_MISSING"
-                    }
+                    },
+                    ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {})
                 }
             });
             return;
@@ -267,8 +637,8 @@ export class ContentScriptHandler {
                     ...(typeof options.issue_scope === "string"
                         ? { issue_scope: options.issue_scope }
                         : {}),
-                    ...(typeof options.requested_execution_mode === "string"
-                        ? { requested_execution_mode: options.requested_execution_mode }
+                    ...(requestedExecutionMode !== null
+                        ? { requested_execution_mode: requestedExecutionMode }
                         : {}),
                     ...(typeof options.risk_state === "string" ? { risk_state: options.risk_state } : {}),
                     ...(asRecord(options.approval_record)
@@ -282,7 +652,7 @@ export class ContentScriptHandler {
                     profile: message.profile ?? "unknown"
                 }
             }, this.#xhsEnv);
-            this.#emit(this.#toContentMessage(message.id, result));
+            this.#emit(this.#toContentMessage(message.id, result, fingerprintRuntime));
         }
         catch (error) {
             this.#emit({
@@ -292,25 +662,32 @@ export class ContentScriptHandler {
                 error: {
                     code: "ERR_EXECUTION_FAILED",
                     message: error instanceof Error ? error.message : String(error)
-                }
+                },
+                payload: fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {}
             });
         }
     }
-    #toContentMessage(id, result) {
+    #toContentMessage(id, result, fingerprintRuntime) {
         if (!result.ok) {
             return {
                 kind: "result",
                 id,
                 ok: false,
                 error: result.error,
-                payload: result.payload
+                payload: {
+                    ...(result.payload ?? {}),
+                    ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {})
+                }
             };
         }
         return {
             kind: "result",
             id,
             ok: true,
-            payload: result.payload
+            payload: {
+                ...(result.payload ?? {}),
+                ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {})
+            }
         };
     }
     #emit(message) {

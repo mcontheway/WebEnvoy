@@ -1,9 +1,607 @@
 import { describe, expect, it } from "vitest";
 
-import { encodeMainWorldPayload } from "../extension/content-script-handler.js";
+import {
+  ContentScriptHandler,
+  encodeMainWorldPayload,
+  installMainWorldEventChannelSecret,
+  resetMainWorldEventChannelForContract,
+  resolveFingerprintContextForContract,
+  resolveMainWorldEventNamesForSecret
+} from "../extension/content-script-handler.js";
+
+interface MockEvent {
+  type: string;
+}
+
+interface MockCustomEvent<T = unknown> extends MockEvent {
+  detail: T;
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const createFingerprintContext = () => ({
+  profile: "profile-a",
+  source: "profile_meta" as const,
+  fingerprint_profile_bundle: {
+    ua: "Mozilla/5.0",
+    hardwareConcurrency: 8,
+    deviceMemory: 8,
+    screen: {
+      width: 1440,
+      height: 900,
+      colorDepth: 30,
+      pixelDepth: 30
+    },
+    battery: {
+      level: 0.75,
+      charging: false
+    },
+    timezone: "Asia/Shanghai",
+    audioNoiseSeed: 0.00012,
+    canvasNoiseSeed: 0.00034,
+    environment: {
+      os_family: "linux",
+      os_version: "6.8",
+      arch: "x64"
+    }
+  },
+  fingerprint_patch_manifest: {
+    profile: "profile-a",
+    manifest_version: "1",
+    required_patches: [
+      "audio_context",
+      "battery",
+      "navigator_plugins",
+      "navigator_mime_types"
+    ],
+    optional_patches: [],
+    field_dependencies: {
+      audio_context: ["audioNoiseSeed"],
+      battery: ["battery.level", "battery.charging"],
+      navigator_plugins: [],
+      navigator_mime_types: []
+    },
+    unsupported_reason_codes: []
+  },
+  fingerprint_consistency_check: {
+    profile: "profile-a",
+    expected_environment: {
+      os_family: "linux",
+      os_version: "6.8",
+      arch: "x64"
+    },
+    actual_environment: {
+      os_family: "linux",
+      os_version: "6.8",
+      arch: "x64"
+    },
+    decision: "match" as const,
+    reason_codes: []
+  },
+  execution: {
+    live_allowed: true,
+    live_decision: "allowed" as const,
+    allowed_execution_modes: ["dry_run", "recon", "live_read_limited"],
+    reason_codes: []
+  }
+});
+
+const createApprovedReadApprovalRecord = () => ({
+  approved: true,
+  approver: "qa-reviewer",
+  approved_at: "2026-03-23T10:00:00Z",
+  checks: {
+    target_domain_confirmed: true,
+    target_tab_confirmed: true,
+    target_page_confirmed: true,
+    risk_state_checked: true,
+    action_type_confirmed: true
+  }
+});
+
+const MAIN_WORLD_CHANNEL_SECRET = "contract-main-world-secret-001";
+
+const withMockMainWorld = async (
+  run: (context: {
+    mockWindow: Window & Record<string, unknown>;
+    mainWorldRequestEvent: string;
+    mainWorldResultEvent: string;
+  }) => Promise<void>
+): Promise<void> => {
+  const previousWindow = (globalThis as { window?: unknown }).window;
+  const previousDocument = (globalThis as { document?: unknown }).document;
+  const previousCustomEvent = (globalThis as { CustomEvent?: unknown }).CustomEvent;
+  const previousChrome = (globalThis as { chrome?: unknown }).chrome;
+  const { requestEvent: mainWorldRequestEvent, resultEvent: mainWorldResultEvent } =
+    resolveMainWorldEventNamesForSecret(MAIN_WORLD_CHANNEL_SECRET);
+
+  const listeners = new Map<string, Set<(event: MockEvent) => void>>();
+  const addListener = (type: string, listener: (event: MockEvent) => void) => {
+    const current = listeners.get(type) ?? new Set<(event: MockEvent) => void>();
+    current.add(listener);
+    listeners.set(type, current);
+  };
+  const removeListener = (type: string, listener: (event: MockEvent) => void) => {
+    listeners.get(type)?.delete(listener);
+  };
+  const dispatchToListeners = (event: MockEvent) => {
+    const current = listeners.get(event.type);
+    if (!current) {
+      return;
+    }
+    for (const listener of current) {
+      listener(event);
+    }
+  };
+
+  class MockCustomEventImpl<T> implements MockCustomEvent<T> {
+    readonly type: string;
+    readonly detail: T;
+
+    constructor(type: string, init: { detail: T }) {
+      this.type = type;
+      this.detail = init.detail;
+    }
+  }
+  const patchedAudioContextPrototypes = new WeakSet<object>();
+  const audioNoiseSeedByPrototype = new WeakMap<object, number>();
+
+  const mockWindow = {
+    location: {
+      href: "https://www.xiaohongshu.com/search_result?keyword=test"
+    },
+    navigator: {},
+    OfflineAudioContext: class MockOfflineAudioContext {
+      async startRendering() {
+        const channelData = new Float32Array(1);
+        channelData[0] = 1;
+        return {
+          getChannelData() {
+            return channelData;
+          }
+        };
+      }
+    },
+    addEventListener: addListener,
+    removeEventListener: removeListener,
+    dispatchEvent: (event: MockEvent) => {
+      dispatchToListeners(event);
+      const customEvent = event as MockCustomEvent<Record<string, unknown>>;
+      const detail = customEvent?.detail;
+      if (!detail || typeof detail !== "object") {
+        return;
+      }
+      if ("ok" in detail) {
+        return;
+      }
+      const requestId = detail.id;
+      const requestType = detail.type;
+      const requestPayload =
+        typeof detail.payload === "object" && detail.payload !== null
+          ? (detail.payload as Record<string, unknown>)
+          : null;
+      if (typeof requestId !== "string" || requestId.length === 0 || typeof requestType !== "string") {
+        return;
+      }
+
+      if (event.type !== mainWorldRequestEvent) {
+        return;
+      }
+      const emitResult = (result: Record<string, unknown>) => {
+        dispatchToListeners(new MockCustomEventImpl(mainWorldResultEvent, { detail: result }));
+      };
+
+      if (requestType === "xhs-sign") {
+        if ((mockWindow as Window & Record<string, unknown>).__disableMainWorldBridgeXhsSign__ === true) {
+          return;
+        }
+        const fn = (mockWindow as Window & { _webmsxyw?: unknown })._webmsxyw;
+        if (typeof fn !== "function") {
+          emitResult({ id: requestId, ok: false, message: "window._webmsxyw is not available" });
+          return;
+        }
+        try {
+          const uri = typeof requestPayload?.uri === "string" ? requestPayload.uri : "";
+          const body =
+            typeof requestPayload?.body === "object" && requestPayload.body !== null
+              ? requestPayload.body
+              : {};
+          const value = (fn as (uri: string, body: unknown) => Record<string, unknown>)(uri, body);
+          emitResult({ id: requestId, ok: true, result: value });
+        } catch (error) {
+          emitResult({
+            id: requestId,
+            ok: false,
+            message: error instanceof Error ? error.message : String(error)
+          });
+        }
+        return;
+      }
+
+      if (requestType !== "fingerprint-install") {
+        return;
+      }
+
+      if (
+        (mockWindow as Window & Record<string, unknown>)
+          .__disableMainWorldBridgeFingerprintInstall__ === true
+      ) {
+        return;
+      }
+
+      try {
+        const runtime =
+          typeof requestPayload?.fingerprint_runtime === "object" &&
+          requestPayload.fingerprint_runtime !== null
+            ? (requestPayload.fingerprint_runtime as Record<string, unknown>)
+            : null;
+        const bundle =
+          typeof runtime?.fingerprint_profile_bundle === "object" &&
+          runtime.fingerprint_profile_bundle !== null
+            ? (runtime.fingerprint_profile_bundle as Record<string, unknown>)
+            : null;
+        const requiredPatches = Array.isArray(runtime?.fingerprint_patch_manifest)
+          ? []
+          : Array.isArray(
+                (runtime?.fingerprint_patch_manifest as Record<string, unknown> | undefined)
+                  ?.required_patches
+              )
+            ? (((runtime?.fingerprint_patch_manifest as Record<string, unknown>).required_patches ??
+                []) as string[])
+            : [];
+        const patchNameSet = new Set(requiredPatches);
+        const appliedPatches: string[] = [];
+
+        if (patchNameSet.has("battery")) {
+          const battery =
+            typeof bundle?.battery === "object" && bundle.battery !== null
+              ? (bundle.battery as Record<string, unknown>)
+              : {};
+          const level = typeof battery.level === "number" ? battery.level : 1;
+          const charging = battery.charging === true;
+          Object.defineProperty(mockWindow.navigator, "getBattery", {
+            configurable: true,
+            value: async () => ({ level, charging })
+          });
+          appliedPatches.push("battery");
+        }
+
+        if (patchNameSet.has("navigator_plugins") || patchNameSet.has("navigator_mime_types")) {
+          const defineValue = (
+            target: object,
+            property: string | number | symbol,
+            value: unknown
+          ) => {
+            Object.defineProperty(target, property, {
+              configurable: true,
+              enumerable: false,
+              writable: false,
+              value
+            });
+          };
+          const defineMethod = (
+            target: object,
+            property: string | symbol,
+            fn: (...args: unknown[]) => unknown
+          ) => {
+            Object.defineProperty(target, property, {
+              configurable: true,
+              enumerable: false,
+              writable: true,
+              value: fn
+            });
+          };
+          const resolveIndex = (input: unknown): number | null => {
+            const numeric =
+              typeof input === "number"
+                ? input
+                : typeof input === "string" && input.length > 0
+                  ? Number.parseInt(input, 10)
+                  : NaN;
+            const index = Number.isFinite(numeric) ? Math.trunc(numeric) : NaN;
+            if (!Number.isFinite(index) || index < 0) {
+              return null;
+            }
+            return index;
+          };
+          const getIndexedValue = (collection: Record<string, unknown>, index: unknown) => {
+            const resolved = resolveIndex(index);
+            if (resolved === null) {
+              return null;
+            }
+            return collection[resolved] ?? null;
+          };
+
+          const pluginPrototype: Record<string | symbol, unknown> = {};
+          defineMethod(
+            pluginPrototype,
+            "item",
+            function (this: Record<string, unknown>, index: unknown) {
+              return getIndexedValue(this, index);
+            }
+          );
+          defineMethod(
+            pluginPrototype,
+            "namedItem",
+            function (this: Record<string, unknown>, name: unknown) {
+              return typeof name === "string" && name.length > 0 ? this[name] ?? null : null;
+            }
+          );
+          defineValue(pluginPrototype, Symbol.toStringTag, "Plugin");
+
+          const mimeTypePrototype: Record<string | symbol, unknown> = {};
+          defineValue(mimeTypePrototype, Symbol.toStringTag, "MimeType");
+
+          const pluginArrayPrototype: Record<string | symbol, unknown> = {};
+          defineMethod(
+            pluginArrayPrototype,
+            "item",
+            function (this: Record<string, unknown>, index: unknown) {
+              return getIndexedValue(this, index);
+            }
+          );
+          defineMethod(
+            pluginArrayPrototype,
+            "namedItem",
+            function (this: Record<string, unknown>, name: unknown) {
+              return typeof name === "string" && name.length > 0 ? this[name] ?? null : null;
+            }
+          );
+          defineMethod(pluginArrayPrototype, "refresh", () => undefined);
+          defineValue(pluginArrayPrototype, Symbol.toStringTag, "PluginArray");
+
+          const mimeTypeArrayPrototype: Record<string | symbol, unknown> = {};
+          defineMethod(
+            mimeTypeArrayPrototype,
+            "item",
+            function (this: Record<string, unknown>, index: unknown) {
+              return getIndexedValue(this, index);
+            }
+          );
+          defineMethod(
+            mimeTypeArrayPrototype,
+            "namedItem",
+            function (this: Record<string, unknown>, name: unknown) {
+              return typeof name === "string" && name.length > 0 ? this[name] ?? null : null;
+            }
+          );
+          defineValue(mimeTypeArrayPrototype, Symbol.toStringTag, "MimeTypeArray");
+
+          const plugin = Object.create(pluginPrototype) as Record<string, unknown>;
+          defineValue(plugin, "name", "Chrome PDF Viewer");
+          defineValue(plugin, "filename", "internal-pdf-viewer");
+          defineValue(plugin, "description", "Portable Document Format");
+
+          const secondPlugin = Object.create(pluginPrototype) as Record<string, unknown>;
+          defineValue(secondPlugin, "name", "Chromium PDF Viewer");
+          defineValue(secondPlugin, "filename", "internal-pdf-viewer");
+          defineValue(secondPlugin, "description", "Portable Document Format");
+
+          const mimeType = Object.create(mimeTypePrototype) as Record<string, unknown>;
+          defineValue(mimeType, "type", "application/pdf");
+          defineValue(mimeType, "suffixes", "pdf");
+          defineValue(mimeType, "description", "Portable Document Format");
+          defineValue(mimeType, "enabledPlugin", plugin);
+
+          const secondMimeType = Object.create(mimeTypePrototype) as Record<string, unknown>;
+          defineValue(secondMimeType, "type", "application/x-google-chrome-pdf");
+          defineValue(secondMimeType, "suffixes", "pdf");
+          defineValue(secondMimeType, "description", "Portable Document Format");
+          defineValue(secondMimeType, "enabledPlugin", plugin);
+
+          defineValue(plugin, 0, mimeType);
+          defineValue(plugin, "application/pdf", mimeType);
+          defineValue(plugin, 1, secondMimeType);
+          defineValue(plugin, "application/x-google-chrome-pdf", secondMimeType);
+          defineValue(plugin, "length", 2);
+          defineValue(secondPlugin, "length", 0);
+
+          const pluginArray = Object.create(pluginArrayPrototype) as Record<string, unknown>;
+          defineValue(pluginArray, 0, plugin);
+          defineValue(pluginArray, "Chrome PDF Viewer", plugin);
+          defineValue(pluginArray, 1, secondPlugin);
+          defineValue(pluginArray, "Chromium PDF Viewer", secondPlugin);
+          defineValue(pluginArray, "length", 2);
+
+          const mimeTypeArray = Object.create(mimeTypeArrayPrototype) as Record<string, unknown>;
+          defineValue(mimeTypeArray, 0, mimeType);
+          defineValue(mimeTypeArray, "application/pdf", mimeType);
+          defineValue(mimeTypeArray, 1, secondMimeType);
+          defineValue(
+            mimeTypeArray,
+            "application/x-google-chrome-pdf",
+            secondMimeType
+          );
+          defineValue(mimeTypeArray, "length", 2);
+
+          Object.defineProperty(mockWindow.navigator, "plugins", {
+            configurable: true,
+            get: () => pluginArray
+          });
+          Object.defineProperty(mockWindow.navigator, "mimeTypes", {
+            configurable: true,
+            get: () => mimeTypeArray
+          });
+          if (patchNameSet.has("navigator_plugins")) {
+            appliedPatches.push("navigator_plugins");
+          }
+          if (patchNameSet.has("navigator_mime_types")) {
+            appliedPatches.push("navigator_mime_types");
+          }
+        }
+
+        if (patchNameSet.has("audio_context")) {
+          const noiseSeed =
+            typeof bundle?.audioNoiseSeed === "number"
+              ? bundle.audioNoiseSeed
+              : 0.000001;
+          const BaseOfflineAudioContext = mockWindow.OfflineAudioContext;
+          const prototype =
+            BaseOfflineAudioContext && BaseOfflineAudioContext.prototype
+              ? (BaseOfflineAudioContext.prototype as {
+                  startRendering?: (...args: unknown[]) => Promise<{
+                    getChannelData(channel: number): Float32Array;
+                  }>;
+                })
+              : null;
+          const originalStartRendering = prototype?.startRendering;
+          if (prototype && typeof originalStartRendering === "function") {
+            audioNoiseSeedByPrototype.set(prototype, noiseSeed);
+            if (!patchedAudioContextPrototypes.has(prototype)) {
+              prototype.startRendering = async function (...args: unknown[]) {
+                const rendered = await originalStartRendering.apply(this, args);
+                const channelData = rendered.getChannelData(0);
+                const baseSeed = audioNoiseSeedByPrototype.get(prototype) ?? noiseSeed;
+                if (channelData.length > 0) {
+                  channelData[0] += baseSeed;
+                }
+                return rendered;
+              };
+              patchedAudioContextPrototypes.add(prototype);
+            }
+          }
+          appliedPatches.push("audio_context");
+        }
+
+        const missingRequiredPatches = requiredPatches.filter(
+          (patch) => !appliedPatches.includes(patch)
+        );
+        emitResult({
+          id: requestId,
+          ok: true,
+          result: {
+            installed: missingRequiredPatches.length === 0,
+            applied_patches: appliedPatches,
+            missing_required_patches: missingRequiredPatches,
+            required_patches: requiredPatches,
+            source: typeof runtime?.source === "string" ? runtime.source : null
+          }
+        });
+      } catch (error) {
+        emitResult({
+          id: requestId,
+          ok: false,
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+  } as unknown as Window & Record<string, unknown>;
+  const mockDocument = {
+    title: "contract-test",
+    readyState: "complete",
+    cookie: "",
+    createElement: () => ({
+      textContent: "",
+      remove: () => {}
+    }),
+    documentElement: {
+      appendChild: (node: unknown) => node
+    }
+  } as unknown as Document;
+
+  (globalThis as { window?: unknown }).window = mockWindow;
+  (globalThis as { document?: unknown }).document = mockDocument;
+  (globalThis as { CustomEvent?: unknown }).CustomEvent = MockCustomEventImpl;
+  installMainWorldEventChannelSecret(MAIN_WORLD_CHANNEL_SECRET);
+  (globalThis as {
+    chrome?: {
+      runtime?: {
+        sendMessage?: (
+          message: Record<string, unknown>,
+          callback?: (response?: Record<string, unknown>) => void
+        ) => Promise<Record<string, unknown> | undefined>;
+      };
+    };
+  }).chrome = {
+    runtime: {
+      sendMessage: async (
+        message: Record<string, unknown>,
+        callback?: (response?: Record<string, unknown>) => void
+      ) => {
+        let response: Record<string, unknown>;
+        if (message.kind !== "xhs-sign-request") {
+          response = {
+            ok: false,
+            error: {
+              code: "ERR_UNSUPPORTED_MESSAGE",
+              message: "unsupported message"
+            }
+          };
+        } else if (
+          (mockWindow as Window & Record<string, unknown>).__disableExtensionXhsSign__ === true
+        ) {
+          response = {
+            ok: false,
+            error: {
+              code: "ERR_XHS_SIGN_FAILED",
+              message: "xhs-sign request blocked"
+            }
+          };
+        } else {
+          const fn = (mockWindow as Window & { _webmsxyw?: unknown })._webmsxyw;
+          if (typeof fn !== "function") {
+            response = {
+              ok: false,
+              error: {
+                code: "ERR_XHS_SIGN_FAILED",
+                message: "window._webmsxyw is not available"
+              }
+            };
+          } else {
+            try {
+              const uri = typeof message.uri === "string" ? message.uri : "";
+              const body =
+                typeof message.body === "object" && message.body !== null ? message.body : {};
+              response = {
+                ok: true,
+                result: (fn as (uri: string, body: unknown) => Record<string, unknown>)(uri, body)
+              };
+            } catch (error) {
+              response = {
+                ok: false,
+                error: {
+                  code: "ERR_XHS_SIGN_FAILED",
+                  message: error instanceof Error ? error.message : String(error)
+                }
+              };
+            }
+          }
+        }
+        callback?.(response);
+        return response;
+      }
+    }
+  };
+
+  try {
+    await run({
+      mockWindow,
+      mainWorldRequestEvent,
+      mainWorldResultEvent
+    });
+  } finally {
+    resetMainWorldEventChannelForContract();
+    (globalThis as { window?: unknown }).window = previousWindow;
+    (globalThis as { document?: unknown }).document = previousDocument;
+    (globalThis as { CustomEvent?: unknown }).CustomEvent = previousCustomEvent;
+    (globalThis as { chrome?: unknown }).chrome = previousChrome;
+  }
+};
+
+const waitForResult = async (results: Array<Record<string, unknown>>): Promise<void> => {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (results.length > 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+};
 
 describe("content-script handler contract", () => {
-  it("encodes payload for inline main-world script without exposing raw input", () => {
+  it("encodes payload for main-world transport without exposing raw input", () => {
     const payload = {
       id: "req-001",
       type: "xhs-sign",
@@ -20,5 +618,502 @@ describe("content-script handler contract", () => {
     expect(encoded).not.toContain("alert('x')");
     const decoded = Buffer.from(encoded, "base64").toString("utf8");
     expect(JSON.parse(decoded)).toEqual(payload);
+  });
+
+  it("does not broadcast main-world channel names to page events", () => {
+    const previousWindow = (globalThis as { window?: unknown }).window;
+    const previousCustomEvent = (globalThis as { CustomEvent?: unknown }).CustomEvent;
+    const dispatchedTypes: string[] = [];
+    const addedEvents: string[] = [];
+
+    class MockCustomEventImpl<T> implements MockCustomEvent<T> {
+      readonly type: string;
+      readonly detail: T;
+
+      constructor(type: string, init: { detail: T }) {
+        this.type = type;
+        this.detail = init.detail;
+      }
+    }
+
+    const mockWindow = {
+      addEventListener: (type: string) => {
+        addedEvents.push(type);
+      },
+      removeEventListener: () => {},
+      dispatchEvent: (event: MockEvent) => {
+        dispatchedTypes.push(event.type);
+      }
+    };
+
+    (globalThis as { window?: unknown }).window = mockWindow;
+    (globalThis as { CustomEvent?: unknown }).CustomEvent = MockCustomEventImpl;
+    resetMainWorldEventChannelForContract();
+
+    try {
+      expect(installMainWorldEventChannelSecret(MAIN_WORLD_CHANNEL_SECRET)).toBe(true);
+      expect(addedEvents).toEqual(
+        expect.arrayContaining([resolveMainWorldEventNamesForSecret(MAIN_WORLD_CHANNEL_SECRET).resultEvent])
+      );
+      expect(dispatchedTypes).toEqual([]);
+    } finally {
+      resetMainWorldEventChannelForContract();
+      (globalThis as { window?: unknown }).window = previousWindow;
+      (globalThis as { CustomEvent?: unknown }).CustomEvent = previousCustomEvent;
+    }
+  });
+
+  it("normalizes fingerprint_context from command params", () => {
+    const fingerprintContext = createFingerprintContext();
+    const resolved = resolveFingerprintContextForContract({
+      commandParams: {
+        fingerprint_context: fingerprintContext
+      },
+      fingerprintContext: null
+    });
+    expect(resolved).toEqual(fingerprintContext);
+  });
+
+  it("returns fingerprint_runtime injection status for runtime.ping", async () => {
+    await withMockMainWorld(async ({ mockWindow }) => {
+      const handler = new ContentScriptHandler();
+      const results: Array<Record<string, unknown>> = [];
+      handler.onResult((message) => {
+        results.push(message as unknown as Record<string, unknown>);
+      });
+
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "run-ping-001",
+        runId: "run-ping-001",
+        tabId: 1,
+        profile: "profile-a",
+        cwd: "/workspace/WebEnvoy",
+        timeoutMs: 1_000,
+        command: "runtime.ping",
+        params: {},
+        commandParams: {},
+        fingerprintContext: createFingerprintContext()
+      });
+
+      await waitForResult(results);
+
+      const payload = results[0]?.payload as Record<string, unknown>;
+      const fingerprintRuntime = payload?.fingerprint_runtime as Record<string, unknown>;
+      const injection = fingerprintRuntime?.injection as Record<string, unknown>;
+      expect(injection?.installed).toBe(true);
+      expect(injection?.applied_patches).toEqual(
+        expect.arrayContaining([
+          "audio_context",
+          "battery",
+          "navigator_plugins",
+          "navigator_mime_types"
+        ])
+      );
+      expect(injection?.source).toBe("profile_meta");
+      const battery = await (mockWindow.navigator as Navigator & { getBattery?: () => Promise<{ level: number }> }).getBattery?.();
+      expect(battery?.level).toBe(0.75);
+      const plugins = (mockWindow.navigator as Navigator & { plugins?: Record<string, unknown>[] }).plugins;
+      const mimeTypes =
+        (mockWindow.navigator as Navigator & { mimeTypes?: Record<string, unknown>[] }).mimeTypes;
+      expect(plugins?.length).toBeGreaterThan(1);
+      expect(mimeTypes?.length).toBeGreaterThan(1);
+      expect(Array.isArray(plugins)).toBe(false);
+      expect(Array.isArray(mimeTypes)).toBe(false);
+      expect(Object.prototype.toString.call(plugins)).toBe("[object PluginArray]");
+      expect(Object.prototype.toString.call(mimeTypes)).toBe("[object MimeTypeArray]");
+      const pluginItemDescriptor = plugins
+        ? Object.getOwnPropertyDescriptor(plugins, "item")
+        : undefined;
+      const mimeTypeItemDescriptor = mimeTypes
+        ? Object.getOwnPropertyDescriptor(mimeTypes, "item")
+        : undefined;
+      expect(pluginItemDescriptor).toBeUndefined();
+      expect(mimeTypeItemDescriptor).toBeUndefined();
+      const chromePdfViewer = (plugins as unknown as { namedItem?: (name: string) => Record<string, unknown> | null })
+        ?.namedItem?.("Chrome PDF Viewer");
+      const applicationPdfMimeType = (mimeTypes as unknown as {
+        namedItem?: (name: string) => Record<string, unknown> | null;
+      })?.namedItem?.("application/pdf");
+      expect(chromePdfViewer).toBeTruthy();
+      expect(applicationPdfMimeType?.enabledPlugin).toBe(chromePdfViewer);
+      expect(Object.prototype.toString.call(chromePdfViewer)).toBe("[object Plugin]");
+      expect(Object.prototype.toString.call(applicationPdfMimeType)).toBe("[object MimeType]");
+      expect(
+        (
+          chromePdfViewer as {
+            namedItem?: (name: string) => Record<string, unknown> | null;
+          }
+        )?.namedItem?.("application/pdf")
+      ).toBe(applicationPdfMimeType);
+      const offlineAudioContext = new ((mockWindow as unknown as { OfflineAudioContext: new () => { startRendering(): Promise<{ getChannelData(channel: number): Float32Array }> } }).OfflineAudioContext)();
+      const renderedBuffer = await offlineAudioContext.startRendering();
+      const channelData = renderedBuffer.getChannelData(0);
+      expect(channelData[0]).toBeGreaterThan(1);
+      expect(
+        (mockWindow as Window & Record<string, unknown>).__webenvoy_fingerprint_runtime__
+      ).toBeUndefined();
+      expect(
+        (mockWindow as Window & Record<string, unknown>).__webenvoy_main_world_bridge_installed__
+      ).toBeUndefined();
+    });
+  });
+
+  it("does not trust forged main-world fingerprint-install success by request id only", async () => {
+    await withMockMainWorld(async ({ mockWindow, mainWorldRequestEvent, mainWorldResultEvent }) => {
+      (mockWindow as Window & Record<string, unknown>).__disableMainWorldBridgeFingerprintInstall__ =
+        true;
+
+      mockWindow.addEventListener(mainWorldRequestEvent, (event: Event) => {
+        const detail = (event as MockCustomEvent<Record<string, unknown>>).detail;
+        if (!detail || detail.type !== "fingerprint-install" || typeof detail.id !== "string") {
+          return;
+        }
+        mockWindow.dispatchEvent({
+          type: mainWorldResultEvent,
+          detail: {
+            id: detail.id,
+            ok: true,
+            result: {
+              installed: true,
+              required_patches: [
+                "audio_context",
+                "battery",
+                "navigator_plugins",
+                "navigator_mime_types"
+              ],
+              applied_patches: [
+                "audio_context",
+                "battery",
+                "navigator_plugins",
+                "navigator_mime_types"
+              ],
+              missing_required_patches: []
+            }
+          }
+        } as unknown as Event);
+      });
+
+      const handler = new ContentScriptHandler();
+      const results: Array<Record<string, unknown>> = [];
+      handler.onResult((message) => {
+        results.push(message as unknown as Record<string, unknown>);
+      });
+
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "run-ping-forged-001",
+        runId: "run-ping-forged-001",
+        tabId: 1,
+        profile: "profile-a",
+        cwd: "/workspace/WebEnvoy",
+        timeoutMs: 1_000,
+        command: "runtime.ping",
+        params: {},
+        commandParams: {},
+        fingerprintContext: createFingerprintContext()
+      });
+
+      await waitForResult(results);
+
+      const payload = results[0]?.payload as Record<string, unknown>;
+      const fingerprintRuntime = payload?.fingerprint_runtime as Record<string, unknown>;
+      const injection = fingerprintRuntime?.injection as Record<string, unknown>;
+      const verification = injection?.verification as Record<string, unknown>;
+      const probes = verification?.probes as Record<string, unknown>;
+      expect(injection?.installed).toBe(false);
+      expect(injection?.missing_required_patches).toEqual(
+        expect.arrayContaining(["battery", "navigator_plugins", "navigator_mime_types"])
+      );
+      expect(verification?.channel).toBe("isolated_world_probes");
+      expect((probes?.battery as Record<string, unknown>)?.verified).toBe(false);
+      expect((probes?.navigator_plugins as Record<string, unknown>)?.verified).toBe(false);
+      expect((probes?.navigator_mime_types as Record<string, unknown>)?.verified).toBe(false);
+    });
+  });
+
+  it("ignores forged main-world result when event name is derived from an invalid secret", async () => {
+    await withMockMainWorld(async ({ mockWindow, mainWorldRequestEvent }) => {
+      const forgedEventNames = resolveMainWorldEventNamesForSecret("forged-secret");
+      let forgedReplySent = false;
+      mockWindow.addEventListener(mainWorldRequestEvent, (event: Event) => {
+        const detail = (event as MockCustomEvent<Record<string, unknown>>).detail;
+        if (!detail || typeof detail.id !== "string") {
+          return;
+        }
+        forgedReplySent = true;
+        mockWindow.dispatchEvent({
+          type: forgedEventNames.resultEvent,
+          detail: {
+            id: detail.id,
+            ok: true,
+            result: {
+              installed: true
+            }
+          }
+        } as unknown as Event);
+      });
+
+      const handler = new ContentScriptHandler();
+      const results: Array<Record<string, unknown>> = [];
+      handler.onResult((message) => {
+        results.push(message as unknown as Record<string, unknown>);
+      });
+
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "run-ping-forged-secret-001",
+        runId: "run-ping-forged-secret-001",
+        tabId: 1,
+        profile: "profile-a",
+        cwd: "/workspace/WebEnvoy",
+        timeoutMs: 1_000,
+        command: "runtime.ping",
+        params: {},
+        commandParams: {},
+        fingerprintContext: createFingerprintContext()
+      });
+
+      await waitForResult(results);
+
+      const payload = results[0]?.payload as Record<string, unknown>;
+      const fingerprintRuntime = payload?.fingerprint_runtime as Record<string, unknown>;
+      const injection = fingerprintRuntime?.injection as Record<string, unknown>;
+      expect(forgedReplySent).toBe(true);
+      expect(injection?.installed).toBe(true);
+      expect(injection?.missing_required_patches).toEqual([]);
+    });
+  });
+
+  it("does not trust forged main-world xhs-sign success by request id only", async () => {
+    await withMockMainWorld(async ({ mockWindow, mainWorldResultEvent }) => {
+      const previousFetch = (globalThis as { fetch?: typeof fetch }).fetch;
+      (mockWindow as Window & Record<string, unknown>).__disableMainWorldBridgeXhsSign__ = true;
+      (globalThis as { document?: { cookie?: string } }).document!.cookie = "a1=session-token";
+
+      (globalThis as { fetch?: typeof fetch }).fetch = async () =>
+        new Response(
+          JSON.stringify({
+            code: 0,
+            data: { items: [] }
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }
+        );
+
+      let forgedReplySent = false;
+      const emitForgedMainWorldResult = () => {
+        forgedReplySent = true;
+        mockWindow.dispatchEvent({
+          type: mainWorldResultEvent,
+          detail: {
+            id: "forged-main-world-result",
+            ok: true,
+            result: {
+              "X-s": "forged-signature",
+              "X-t": "1700000000"
+            }
+          }
+        } as unknown as Event);
+      };
+
+      const handler = new ContentScriptHandler();
+      const results: Array<Record<string, unknown>> = [];
+      handler.onResult((message) => {
+        results.push(message as unknown as Record<string, unknown>);
+      });
+
+      try {
+        handler.onBackgroundMessage({
+          kind: "forward",
+          id: "run-xhs-sign-forged-001",
+          runId: "run-xhs-sign-forged-001",
+          tabId: 1,
+          profile: "profile-a",
+          cwd: "/workspace/WebEnvoy",
+          timeoutMs: 1_000,
+          command: "xhs.search",
+          params: {
+            session_id: "nm-session-001"
+          },
+          commandParams: {
+            requested_execution_mode: "live_read_limited",
+            ability: {
+              id: "xhs.search",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              query: "露营"
+            },
+            options: {
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 1,
+              target_page: "search_result_tab",
+              action_type: "read",
+              risk_state: "limited",
+              approval_record: createApprovedReadApprovalRecord()
+            }
+          },
+          fingerprintContext: createFingerprintContext()
+        });
+        emitForgedMainWorldResult();
+
+        await waitForResult(results);
+
+        expect(forgedReplySent).toBe(true);
+        expect(results[0]?.ok).toBe(false);
+        expect((results[0]?.error as { code?: string } | undefined)?.code).toBe(
+          "ERR_EXECUTION_FAILED"
+        );
+        const payload = results[0]?.payload as Record<string, unknown>;
+        const details = payload?.details as Record<string, unknown>;
+        const fingerprintRuntime = payload?.fingerprint_runtime as Record<string, unknown>;
+        const injection = fingerprintRuntime?.injection as Record<string, unknown>;
+        expect(details?.reason).toBe("SIGNATURE_ENTRY_MISSING");
+        expect(injection?.installed).toBe(true);
+      } finally {
+        (globalThis as { fetch?: typeof fetch }).fetch = previousFetch;
+      }
+    });
+  });
+
+  it("keeps audio noise stable across repeated runtime.ping fingerprint installs", async () => {
+    await withMockMainWorld(async ({ mockWindow }) => {
+      const handler = new ContentScriptHandler();
+      const results: Array<Record<string, unknown>> = [];
+      handler.onResult((message) => {
+        results.push(message as unknown as Record<string, unknown>);
+      });
+
+      const sendPing = (id: string): void => {
+        handler.onBackgroundMessage({
+          kind: "forward",
+          id,
+          runId: id,
+          tabId: 1,
+          profile: "profile-a",
+          cwd: "/workspace/WebEnvoy",
+          timeoutMs: 1_000,
+          command: "runtime.ping",
+          params: {},
+          commandParams: {},
+          fingerprintContext: createFingerprintContext()
+        });
+      };
+
+      sendPing("run-ping-idempotent-001");
+      await waitForResult(results);
+
+      const firstAudioContext = new ((mockWindow as unknown as { OfflineAudioContext: new () => { startRendering(): Promise<{ getChannelData(channel: number): Float32Array }> } }).OfflineAudioContext)();
+      const firstRenderedBuffer = await firstAudioContext.startRendering();
+      const firstValue = firstRenderedBuffer.getChannelData(0)[0];
+
+      sendPing("run-ping-idempotent-002");
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        if (results.length >= 2) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      const secondAudioContext = new ((mockWindow as unknown as { OfflineAudioContext: new () => { startRendering(): Promise<{ getChannelData(channel: number): Float32Array }> } }).OfflineAudioContext)();
+      const secondRenderedBuffer = await secondAudioContext.startRendering();
+      const secondValue = secondRenderedBuffer.getChannelData(0)[0];
+
+      expect(firstValue).toBeGreaterThan(1);
+      expect(secondValue).toBeCloseTo(firstValue, 12);
+      const secondPayload = results[1]?.payload as Record<string, unknown>;
+      const secondFingerprintRuntime = secondPayload?.fingerprint_runtime as Record<string, unknown>;
+      const secondInjection = secondFingerprintRuntime?.injection as Record<string, unknown>;
+      expect(secondInjection?.applied_patches).toContain("audio_context");
+    });
+  });
+
+  it("keeps fingerprint_runtime on xhs.search validation failures", async () => {
+    await withMockMainWorld(async () => {
+      const handler = new ContentScriptHandler();
+      const results: Array<Record<string, unknown>> = [];
+      handler.onResult((message) => {
+        results.push(message as unknown as Record<string, unknown>);
+      });
+
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "run-xhs-001",
+        runId: "run-xhs-001",
+        tabId: 1,
+        profile: "profile-a",
+        cwd: "/workspace/WebEnvoy",
+        timeoutMs: 1_000,
+        command: "xhs.search",
+        params: {},
+        commandParams: {},
+        fingerprintContext: createFingerprintContext()
+      });
+
+      await waitForResult(results);
+
+      const payload = results[0]?.payload as Record<string, unknown>;
+      const fingerprintRuntime = payload?.fingerprint_runtime as Record<string, unknown>;
+      const injection = fingerprintRuntime?.injection as Record<string, unknown>;
+      expect(results[0]?.ok).toBe(false);
+      expect(injection?.installed).toBe(true);
+      expect(injection?.source).toBe("profile_meta");
+    });
+  });
+
+  it("blocks live xhs.search when required fingerprint patches are missing (top-level requested_execution_mode)", async () => {
+    await withMockMainWorld(async () => {
+      const fingerprintContext = createFingerprintContext();
+      fingerprintContext.fingerprint_patch_manifest.required_patches.push("unknown_required_patch");
+
+      const handler = new ContentScriptHandler();
+      const results: Array<Record<string, unknown>> = [];
+      handler.onResult((message) => {
+        results.push(message as unknown as Record<string, unknown>);
+      });
+
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "run-xhs-live-block-001",
+        runId: "run-xhs-live-block-001",
+        tabId: 1,
+        profile: "profile-a",
+        cwd: "/workspace/WebEnvoy",
+        timeoutMs: 1_000,
+        command: "xhs.search",
+        params: {},
+        commandParams: {
+          requested_execution_mode: "live_read_limited",
+          ability: {
+            id: "xhs.search",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "test"
+          }
+        },
+        fingerprintContext
+      });
+
+      await waitForResult(results);
+
+      const payload = results[0]?.payload as Record<string, unknown>;
+      const details = payload?.details as Record<string, unknown>;
+      const fingerprintRuntime = payload?.fingerprint_runtime as Record<string, unknown>;
+      const injection = fingerprintRuntime?.injection as Record<string, unknown>;
+      expect(results[0]?.ok).toBe(false);
+      expect((results[0]?.error as { code?: string } | undefined)?.code).toBe("ERR_EXECUTION_FAILED");
+      expect(details?.reason).toBe("FINGERPRINT_REQUIRED_PATCH_MISSING");
+      expect(details?.requested_execution_mode).toBe("live_read_limited");
+      expect(details?.missing_required_patches).toContain("unknown_required_patch");
+      expect(injection?.installed).toBe(false);
+      expect(injection?.missing_required_patches).toContain("unknown_required_patch");
+    });
   });
 });

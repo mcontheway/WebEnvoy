@@ -1,7 +1,10 @@
+import { join } from "node:path";
 import { CliError } from "../core/errors.js";
 import { NativeMessagingBridge, NativeMessagingTransportError } from "../runtime/native-messaging/bridge.js";
 import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
+import { appendFingerprintContext, buildFingerprintContextForMeta } from "../runtime/fingerprint-runtime.js";
+import { ProfileStore } from "../runtime/profile-store.js";
 const ABILITY_LAYERS = new Set(["L3", "L2", "L1"]);
 const ABILITY_ACTIONS = new Set(["read", "write", "download"]);
 const XHS_EXECUTION_MODES = new Set([
@@ -11,6 +14,12 @@ const XHS_EXECUTION_MODES = new Set([
     "live_read_high_risk",
     "live_write"
 ]);
+const XHS_LIVE_EXECUTION_MODES = new Set([
+    "live_read_limited",
+    "live_read_high_risk",
+    "live_write"
+]);
+const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
@@ -238,20 +247,26 @@ const xhsSearch = async (context) => {
     }
     const bridge = resolveRuntimeBridge();
     try {
+        const profileStore = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
+        const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
+        const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
+            requestedExecutionMode: gate.requestedExecutionMode
+        });
+        const commandParams = appendFingerprintContext({
+            target_domain: gate.targetDomain,
+            target_tab_id: gate.targetTabId,
+            target_page: gate.targetPage,
+            requested_execution_mode: gate.requestedExecutionMode,
+            ability: envelope.ability,
+            input: parseSearchInput(envelope.input, envelope.ability.id),
+            options: gate.options
+        }, fingerprintContext);
         const bridgeResult = await bridge.runCommand({
             runId: context.run_id,
             profile: context.profile,
             cwd: context.cwd,
             command: context.command,
-            params: {
-                target_domain: gate.targetDomain,
-                target_tab_id: gate.targetTabId,
-                target_page: gate.targetPage,
-                requested_execution_mode: gate.requestedExecutionMode,
-                ability: envelope.ability,
-                input: parseSearchInput(envelope.input, envelope.ability.id),
-                options: gate.options
-            }
+            params: commandParams
         });
         if (!bridgeResult.ok) {
             throw toCliExecutionError(envelope.ability, bridgeResult.payload, bridgeResult.error.message);

@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 import { CliError } from "../core/errors.js";
 import type { CommandDefinition, RuntimeContext } from "../core/types.js";
 import {
@@ -12,6 +14,8 @@ import {
 import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
+import { buildFingerprintContextForMeta, appendFingerprintContext } from "../runtime/fingerprint-runtime.js";
+import { ProfileStore } from "../runtime/profile-store.js";
 import {
   buildUnifiedRiskStateOutput,
   resolveRiskState,
@@ -47,6 +51,7 @@ const resolveRuntimeBridge = (): NativeMessagingBridge => {
   });
 };
 const profileRuntime = new ProfileRuntimeService();
+const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 
 const deriveWriteActionDecisions = (
   auditRecord: Record<string, unknown>
@@ -145,12 +150,26 @@ const runtimePing = async (context: RuntimeContext) => {
   }
 
   try {
+    const requestedExecutionMode =
+      typeof context.params.requested_execution_mode === "string"
+        ? context.params.requested_execution_mode
+        : null;
+    const profileStore = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
+    const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
+    const bridgeParams = context.profile
+      ? appendFingerprintContext(
+          context.params,
+          buildFingerprintContextForMeta(context.profile, profileMeta, {
+            requestedExecutionMode
+          })
+        )
+      : context.params;
     const bridge = resolveRuntimeBridge();
     return await bridge.runtimePing({
       runId: context.run_id,
       profile: context.profile,
       cwd: context.cwd,
-      params: context.params
+      params: bridgeParams
     });
   } catch (error) {
     if (error instanceof NativeMessagingTransportError) {

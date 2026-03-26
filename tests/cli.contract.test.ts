@@ -73,6 +73,9 @@ const runCli = (
   });
 };
 
+const createNativeHostCommand = (scriptPath: string): string =>
+  `"${process.execPath}" "${scriptPath}"`;
+
 const runCliAsync = (
   args: string[],
   cwd: string = repoRoot,
@@ -1382,6 +1385,229 @@ describe("webenvoy cli contract", () => {
         }
       }
     });
+  });
+
+  it("sends live xhs.search directly without hidden runtime.ping prewarm on native transport", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const nativeHostPath = path.join(runtimeCwd, "native-host-live-prewarm.cjs");
+    const tracePath = path.join(runtimeCwd, "native-host-live-prewarm-trace.json");
+    await writeFile(
+      nativeHostPath,
+      `#!/usr/bin/env node
+const { writeFileSync } = require("node:fs");
+let buffer = Buffer.alloc(0);
+let opened = false;
+const forwards = [];
+const tracePath = process.env.WEBENVOY_TEST_TRACE_PATH || "";
+
+const emit = (message) => {
+  const payload = Buffer.from(JSON.stringify(message), "utf8");
+  const header = Buffer.alloc(4);
+  header.writeUInt32LE(payload.length, 0);
+  process.stdout.write(Buffer.concat([header, payload]));
+};
+
+const writeTrace = () => {
+  if (!tracePath) {
+    return;
+  }
+  writeFileSync(tracePath, JSON.stringify({ forwards }), "utf8");
+};
+
+const success = (request, payload = { message: "pong" }) => ({
+  id: request.id,
+  status: "success",
+  summary: {
+    session_id: String(request.params?.session_id ?? "nm-session-001"),
+    run_id: String(request.params?.run_id ?? request.id),
+    command: String(request.params?.command ?? "runtime.ping"),
+    relay_path: "host>background>content-script>background>host"
+  },
+  payload,
+  error: null
+});
+
+const onRequest = (request) => {
+  if (request.method === "bridge.open") {
+    opened = true;
+    emit({
+      id: request.id,
+      status: "success",
+      summary: {
+        protocol: "webenvoy.native-bridge.v1",
+        state: "ready",
+        session_id: "nm-session-001"
+      },
+      error: null
+    });
+    return;
+  }
+
+  if (request.method === "__ping__") {
+    emit({
+      id: request.id,
+      status: "success",
+      summary: { session_id: "nm-session-001" },
+      error: null
+    });
+    return;
+  }
+
+  if (request.method !== "bridge.forward" || !opened) {
+    emit({
+      id: request.id,
+      status: "error",
+      summary: {},
+      error: { code: "ERR_TRANSPORT_FORWARD_FAILED", message: "unexpected request" }
+    });
+    writeTrace();
+    process.exit(0);
+    return;
+  }
+
+  const command = String(request.params?.command ?? "");
+  const runId = String(request.params?.run_id ?? request.id);
+  const profile = String(request.profile ?? "");
+  forwards.push({
+    command,
+    run_id: runId,
+    profile
+  });
+
+  if (command === "xhs.search") {
+    const fingerprintContext = request.params?.command_params?.fingerprint_context ?? null;
+    if (!fingerprintContext) {
+      emit({
+        id: request.id,
+        status: "error",
+        summary: {},
+        error: {
+          code: "ERR_EXECUTION_FAILED",
+          message: "fingerprint_context missing on xhs.search"
+        },
+        payload: {
+          details: {
+            stage: "execution",
+            reason: "FINGERPRINT_CONTEXT_MISSING"
+          }
+        }
+      });
+      writeTrace();
+      process.exit(0);
+      return;
+    }
+    emit(
+      success(request, {
+        summary: {
+          capability_result: {
+            ability_id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read",
+            outcome: "success"
+          }
+        }
+      })
+    );
+    writeTrace();
+    process.exit(0);
+    return;
+  }
+
+  emit({
+    id: request.id,
+    status: "error",
+    summary: {},
+    error: { code: "ERR_TRANSPORT_FORWARD_FAILED", message: "unsupported command" }
+  });
+  writeTrace();
+  process.exit(0);
+};
+
+process.stdin.on("data", (chunk) => {
+  buffer = Buffer.concat([buffer, chunk]);
+  while (buffer.length >= 4) {
+    const frameLength = buffer.readUInt32LE(0);
+    const frameEnd = 4 + frameLength;
+    if (buffer.length < frameEnd) {
+      return;
+    }
+    const frame = buffer.subarray(4, frameEnd);
+    buffer = buffer.subarray(frameEnd);
+    const request = JSON.parse(frame.toString("utf8"));
+    onRequest(request);
+  }
+});
+`,
+      "utf8"
+    );
+
+    const runId = "run-contract-xhs-live-direct-001";
+    const profile = "xhs_account_001";
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      profile,
+      "--run-id",
+      runId,
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          ...scopedReadGateOptions,
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-25T12:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], runtimeCwd, {
+      WEBENVOY_NATIVE_TRANSPORT: "native",
+      WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostPath),
+      WEBENVOY_TEST_TRACE_PATH: tracePath
+    });
+
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "success",
+      summary: {
+        capability_result: {
+          ability_id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read",
+          outcome: "success"
+        }
+      }
+    });
+
+    const trace = JSON.parse(await readFile(tracePath, "utf8")) as {
+      forwards?: Array<{ command?: string; run_id?: string; profile?: string }>;
+    };
+    expect(trace.forwards).toEqual([
+      {
+        command: "xhs.search",
+        run_id: runId,
+        profile
+      }
+    ]);
   });
 
   it("accepts live_read_limited as approved live mode in limited risk state", () => {

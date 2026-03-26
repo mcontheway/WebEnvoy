@@ -1,10 +1,23 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 
+import {
+  buildFingerprintProfileBundle,
+  isFingerprintProfileBundle,
+  markFingerprintProfileBundleAsLegacyBackfilled,
+  type FingerprintProfileBundle
+} from "../../shared/fingerprint-profile.js";
+import { resolveBrowserVersionTruthSource } from "./browser-launcher.js";
+import { resolveCurrentFingerprintEnvironment } from "./fingerprint-runtime.js";
 import type { ProfileState } from "./profile-state.js";
 import type { ProxyBinding } from "./proxy-binding.js";
 
 export const PROFILE_META_FILENAME = "__webenvoy_meta.json";
+export type ReadMetaMode = "readonly" | "migrate";
+
+export interface ReadMetaOptions {
+  mode?: ReadMetaMode;
+}
 
 export interface FingerprintSeeds {
   audioNoiseSeed: string;
@@ -28,6 +41,7 @@ export interface ProfileMeta {
   profileState: ProfileState;
   proxyBinding: ProxyBinding | null;
   fingerprintSeeds: FingerprintSeeds;
+  fingerprintProfileBundle?: FingerprintProfileBundle;
   localStorageSnapshots: LocalStorageSnapshot[];
   createdAt: string;
   updatedAt: string;
@@ -62,6 +76,7 @@ const PROFILE_STATES: readonly ProfileState[] = [
   "stopped"
 ];
 const PROXY_BINDING_SOURCES = ["runtime.start", "runtime.login"] as const;
+const LINUX_KERNEL_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+._][0-9A-Za-z._+-]+)*$/u;
 
 const validateProfileName = (profileName: string, rootDir: string): void => {
   if (!PROFILE_NAME_PATTERN.test(profileName)) {
@@ -86,6 +101,73 @@ const isIsoTimestamp = (value: unknown): value is string =>
 
 const isOptionalIsoTimestamp = (value: unknown): value is string | null =>
   value === null || isIsoTimestamp(value);
+
+const resolveCurrentTimezone = (): string => {
+  try {
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof timezone === "string" && timezone.length > 0 ? timezone : "UTC";
+  } catch {
+    return "UTC";
+  }
+};
+
+const resolveBrowserVersionFromResolvedExecutable = async (): Promise<string | null> => {
+  try {
+    return (await resolveBrowserVersionTruthSource()).browserVersion;
+  } catch {
+    return null;
+  }
+};
+
+const resolveRequiredBrowserVersionFromResolvedExecutable = async (): Promise<string> => {
+  const browserVersion = await resolveBrowserVersionTruthSource();
+  if (typeof browserVersion.browserVersion !== "string" || browserVersion.browserVersion.length === 0) {
+    throw new Error("Browser version truth-source unavailable");
+  }
+  return browserVersion.browserVersion;
+};
+
+const withBrowserVersion = <T extends object>(input: T, browserVersion: string | null): T =>
+  ({ ...(input as Record<string, unknown>), browserVersion } as T);
+
+const isLegacyLinuxKernelVersion = (value: string): boolean =>
+  LINUX_KERNEL_VERSION_PATTERN.test(value);
+
+const migrateLegacyLinuxKernelBundleOsVersion = (meta: ProfileMeta): ProfileMeta | null => {
+  if (!meta.fingerprintProfileBundle) {
+    return null;
+  }
+
+  const expectedEnvironment = meta.fingerprintProfileBundle.environment;
+  if (expectedEnvironment.os_family !== "linux") {
+    return null;
+  }
+
+  const actualEnvironment = resolveCurrentFingerprintEnvironment();
+  if (actualEnvironment.os_family !== "linux") {
+    return null;
+  }
+  if (actualEnvironment.os_version === "unknown") {
+    return null;
+  }
+  if (expectedEnvironment.os_version === actualEnvironment.os_version) {
+    return null;
+  }
+  if (!isLegacyLinuxKernelVersion(expectedEnvironment.os_version)) {
+    return null;
+  }
+
+  return {
+    ...meta,
+    fingerprintProfileBundle: {
+      ...meta.fingerprintProfileBundle,
+      environment: {
+        ...expectedEnvironment,
+        os_version: actualEnvironment.os_version
+      }
+    }
+  };
+};
 
 function assertProfileMeta(value: unknown): asserts value is ProfileMeta {
   if (!isObjectRecord(value)) {
@@ -146,6 +228,12 @@ function assertProfileMeta(value: unknown): asserts value is ProfileMeta {
   ) {
     throw new Error("Invalid profile meta structure: fingerprintSeeds.*");
   }
+  if (
+    value.fingerprintProfileBundle !== undefined &&
+    !isFingerprintProfileBundle(value.fingerprintProfileBundle)
+  ) {
+    throw new Error("Invalid profile meta structure: fingerprintProfileBundle");
+  }
 
   if (!Array.isArray(value.localStorageSnapshots)) {
     throw new Error("Invalid profile meta structure: localStorageSnapshots");
@@ -182,6 +270,33 @@ const parseMeta = (raw: string): ProfileMeta => {
   return parsed;
 };
 
+const buildLegacyBundleMigration = async (input: {
+  meta: ProfileMeta;
+  browserVersion: string | null;
+  timezone: string;
+  intent: "transient_backfill" | "persistent_upgrade";
+}): Promise<FingerprintProfileBundle> => {
+  const browserVersion =
+    input.intent === "persistent_upgrade"
+      ? await resolveRequiredBrowserVersionFromResolvedExecutable()
+      : input.browserVersion;
+  return markFingerprintProfileBundleAsLegacyBackfilled(
+    withBrowserVersion(
+      {
+        profileName: input.meta.profileName,
+        fingerprintSeeds: input.meta.fingerprintSeeds,
+        timezone: input.timezone,
+        environment: resolveCurrentFingerprintEnvironment(),
+        migratedAt:
+          input.intent === "persistent_upgrade" ? new Date().toISOString() : input.meta.updatedAt,
+        sourceSchemaVersion: input.meta.schemaVersion,
+        reasonCodes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
+      },
+      browserVersion
+    )
+  );
+};
+
 export class ProfileStore {
   private readonly rootDir: string;
 
@@ -207,11 +322,37 @@ export class ProfileStore {
     return profileDir;
   }
 
-  async readMeta(profileName: string): Promise<ProfileMeta | null> {
+  async readMeta(profileName: string, options: ReadMetaOptions = {}): Promise<ProfileMeta | null> {
     const metaPath = this.getMetaPath(profileName);
     try {
       const raw = await this.fs.readFile(metaPath, "utf8");
-      return parseMeta(raw);
+      const parsed = parseMeta(raw);
+      if (parsed.fingerprintProfileBundle === undefined) {
+        const legacyBackfillMode = options.mode === "migrate" ? "migrate" : "readonly";
+        const browserVersion = await resolveBrowserVersionFromResolvedExecutable();
+        const migratedMeta: ProfileMeta = {
+          ...parsed,
+          fingerprintProfileBundle: await buildLegacyBundleMigration({
+            meta: parsed,
+            browserVersion,
+            timezone: legacyBackfillMode === "migrate" ? resolveCurrentTimezone() : "unknown",
+            intent:
+              legacyBackfillMode === "migrate" ? "persistent_upgrade" : "transient_backfill"
+          })
+        };
+        if (legacyBackfillMode === "migrate") {
+          await this.writeMeta(profileName, migratedMeta);
+        }
+        return migratedMeta;
+      }
+      const migratedLinuxMeta = migrateLegacyLinuxKernelBundleOsVersion(parsed);
+      if (migratedLinuxMeta) {
+        if (options.mode !== "readonly") {
+          await this.writeMeta(profileName, migratedLinuxMeta);
+        }
+        return migratedLinuxMeta;
+      }
+      return parsed;
     } catch (error) {
       const maybeNodeError = error as NodeJS.ErrnoException;
       if (maybeNodeError.code === "ENOENT") {
@@ -240,6 +381,8 @@ export class ProfileStore {
 
   async initializeMeta(profileName: string, nowIso: string): Promise<ProfileMeta> {
     const profileDir = await this.ensureProfileDir(profileName);
+    const browserVersion = await resolveRequiredBrowserVersionFromResolvedExecutable();
+    const timezone = resolveCurrentTimezone();
 
     const meta: ProfileMeta = {
       schemaVersion: 1,
@@ -251,6 +394,20 @@ export class ProfileStore {
         audioNoiseSeed: `${profileName}-audio-seed`,
         canvasNoiseSeed: `${profileName}-canvas-seed`
       },
+      fingerprintProfileBundle: buildFingerprintProfileBundle({
+        ...withBrowserVersion(
+          {
+            profileName,
+            fingerprintSeeds: {
+              audioNoiseSeed: `${profileName}-audio-seed`,
+              canvasNoiseSeed: `${profileName}-canvas-seed`
+            },
+            timezone,
+            environment: resolveCurrentFingerprintEnvironment()
+          },
+          browserVersion
+        )
+      }),
       localStorageSnapshots: [],
       createdAt: nowIso,
       updatedAt: nowIso,

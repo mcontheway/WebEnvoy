@@ -7,12 +7,32 @@
     "service_worker": "build/background.js",
     "type": "module"
   },
+  "host_permissions": [
+    "https://www.xiaohongshu.com/*",
+    "https://creator.xiaohongshu.com/*"
+  ],
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "https://www.xiaohongshu.com/*",
+        "https://creator.xiaohongshu.com/*",
+        "http://127.0.0.1/*",
+        "http://localhost/*"
+      ],
+      "js": ["build/main-world-bridge.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://www.xiaohongshu.com/*",
+        "https://creator.xiaohongshu.com/*",
+        "http://127.0.0.1/*",
+        "http://localhost/*"
+      ],
       "js": ["build/content-script.js"],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
   ],
-  "permissions": ["nativeMessaging", "storage"]
+  "permissions": ["nativeMessaging", "storage", "scripting"]
 }

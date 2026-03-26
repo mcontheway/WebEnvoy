@@ -31,8 +31,13 @@ const createMockPort = () => {
 const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
   let connectIndex = 0;
   const runtimeMessageListeners: Array<
-    (message: unknown, sender: { tab?: { id?: number } }) => void
+    (
+      message: unknown,
+      sender: { tab?: { id?: number; url?: string }; url?: string },
+      sendResponse?: (response: unknown) => void
+    ) => boolean | void
   > = [];
+  const executeScript = vi.fn(async () => [{ result: { "X-s": "signed", "X-t": "1700000000" } }]);
   const chromeApi = {
     runtime: {
       connectNative: vi.fn(() => {
@@ -41,7 +46,13 @@ const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
         return current.port;
       }),
       onMessage: {
-        addListener: (listener: (message: unknown, sender: { tab?: { id?: number } }) => void) => {
+        addListener: (
+          listener: (
+            message: unknown,
+            sender: { tab?: { id?: number; url?: string }; url?: string },
+            sendResponse: (response: unknown) => void
+          ) => boolean | void
+        ) => {
           runtimeMessageListeners.push(listener);
         }
       },
@@ -55,12 +66,16 @@ const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
     tabs: {
       query: vi.fn(async () => [{ id: 11 }]),
       sendMessage: vi.fn(async () => {})
+    },
+    scripting: {
+      executeScript
     }
   };
 
   return {
     chromeApi,
-    runtimeMessageListeners
+    runtimeMessageListeners,
+    executeScript
   };
 };
 
@@ -87,6 +102,49 @@ const respondHandshake = (
   });
 };
 
+const primeTrustedFingerprintContext = async (input: {
+  runtimeMessageListeners: Array<
+    (
+      message: unknown,
+      sender: { tab?: { id?: number; url?: string }; url?: string },
+      sendResponse?: (response: unknown) => void
+    ) => boolean | void
+  >;
+  runId: string;
+  profile: string;
+  fingerprintContext: Record<string, unknown>;
+  sessionId?: string;
+  tabId?: number;
+  tabUrl?: string;
+}) => {
+  input.runtimeMessageListeners[0]?.(
+    {
+      kind: "result",
+      id: `startup-fingerprint-trust:${input.runId}`,
+      ok: true,
+      payload: {
+        startup_fingerprint_trust: {
+          run_id: input.runId,
+          profile: input.profile,
+          session_id: input.sessionId ?? "nm-session-001",
+          fingerprint_runtime: input.fingerprintContext,
+          trust_source: "extension_bootstrap_context",
+          bootstrap_attested: true,
+          main_world_result_used_for_trust: false
+        }
+      }
+    },
+    {
+      tab: {
+        id: input.tabId ?? 32,
+        url: input.tabUrl ?? "https://www.xiaohongshu.com/search_result?keyword=露营"
+      }
+    }
+  );
+  await Promise.resolve();
+  await Promise.resolve();
+};
+
 const createXhsCommandParams = (overrides?: Record<string, unknown>) => ({
   issue_scope: "issue_209",
   target_domain: "www.xiaohongshu.com",
@@ -96,6 +154,80 @@ const createXhsCommandParams = (overrides?: Record<string, unknown>) => ({
   risk_state: "paused",
   requested_execution_mode: "dry_run",
   ...overrides
+});
+
+const createApprovedReadApprovalRecord = () => ({
+  approved: true,
+  approver: "qa-reviewer",
+  approved_at: "2026-03-23T10:00:00Z",
+  checks: {
+    target_domain_confirmed: true,
+    target_tab_confirmed: true,
+    target_page_confirmed: true,
+    risk_state_checked: true,
+    action_type_confirmed: true
+  }
+});
+
+const createFingerprintRuntimeContext = (executionOverrides?: Record<string, unknown>) => ({
+  profile: "profile-a",
+  source: "profile_meta",
+  fingerprint_profile_bundle: {
+    ua: "Mozilla/5.0",
+    hardwareConcurrency: 8,
+    deviceMemory: 8,
+    screen: {
+      width: 1440,
+      height: 900,
+      colorDepth: 24,
+      pixelDepth: 24
+    },
+    battery: {
+      level: 0.73,
+      charging: false
+    },
+    timezone: "Asia/Shanghai",
+    audioNoiseSeed: 0.000047231,
+    canvasNoiseSeed: 0.000083154,
+    environment: {
+      os_family: "macos",
+      os_version: "14.6",
+      arch: "arm64"
+    }
+  },
+  fingerprint_patch_manifest: {
+    profile: "profile-a",
+    manifest_version: "1",
+    required_patches: ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"],
+    optional_patches: [],
+    field_dependencies: {
+      audio_context: ["audioNoiseSeed"],
+      battery: ["battery.level", "battery.charging"]
+    },
+    unsupported_reason_codes: []
+  },
+  fingerprint_consistency_check: {
+    profile: "profile-a",
+    expected_environment: {
+      os_family: "macos",
+      os_version: "14.6",
+      arch: "arm64"
+    },
+    actual_environment: {
+      os_family: "macos",
+      os_version: "14.6",
+      arch: "arm64"
+    },
+    decision: "match",
+    reason_codes: []
+  },
+  execution: {
+    live_allowed: true,
+    live_decision: "allowed",
+    allowed_execution_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+    reason_codes: [],
+    ...(executionOverrides ?? {})
+  }
 });
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -212,6 +344,46 @@ describe("extension service worker recovery contract", () => {
       11,
       expect.objectContaining({
         id: "run-after-open-001"
+      })
+    );
+  });
+
+  it("forwards fingerprint_context without dropping fields", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const fingerprintContext = createFingerprintRuntimeContext({
+      allowed_execution_modes: ["dry_run", "recon", "live_read_limited"]
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-fingerprint-forward-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-fingerprint-forward-001",
+        command: "runtime.ping",
+        command_params: {
+          fingerprint_context: fingerprintContext
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      11,
+      expect.objectContaining({
+        id: "run-fingerprint-forward-001",
+        fingerprintContext: fingerprintContext
       })
     );
   });
@@ -712,7 +884,8 @@ describe("extension service worker recovery contract", () => {
         command: "xhs.search",
         command_params: createXhsCommandParams({
           requested_execution_mode: "live_read_high_risk",
-          risk_state: "allowed"
+          risk_state: "allowed",
+          fingerprint_context: createFingerprintRuntimeContext()
         }),
         cwd: "/workspace/WebEnvoy"
       },
@@ -849,7 +1022,8 @@ describe("extension service worker recovery contract", () => {
         command: "xhs.search",
         command_params: createXhsCommandParams({
           requested_execution_mode: "live_read_limited",
-          risk_state: "limited"
+          risk_state: "limited",
+          fingerprint_context: createFingerprintRuntimeContext()
         }),
         cwd: "/workspace/WebEnvoy"
       },
@@ -1001,6 +1175,7 @@ describe("extension service worker recovery contract", () => {
         command_params: createXhsCommandParams({
           requested_execution_mode: "live_read_high_risk",
           risk_state: "paused",
+          fingerprint_context: createFingerprintRuntimeContext(),
           approval_record: {
             approved: true,
             approver: "qa-reviewer",
@@ -1363,6 +1538,1233 @@ describe("extension service worker recovery contract", () => {
     }
   });
 
+  it("blocks live mode when fingerprint_context.execution.live_allowed=false", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    const fingerprintContext = createFingerprintRuntimeContext({
+      live_allowed: false,
+      live_decision: "dry_run_only",
+      allowed_execution_modes: ["dry_run", "recon"],
+      reason_codes: ["PROFILE_FIELD_MISSING"]
+    });
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-live-blocked-by-fingerprint-001",
+      profile: "profile-a",
+      fingerprintContext
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-blocked-by-fingerprint-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-blocked-by-fingerprint-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-live-blocked-by-fingerprint-001");
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const gateOutcome = asRecord(payload.gate_outcome);
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(gateOutcome?.effective_execution_mode).toBe("dry_run");
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["PROFILE_FIELD_MISSING"]);
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+  });
+
+  it("blocks live mode when fingerprint_context.execution.live_decision=dry_run_only", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    const fingerprintContext = createFingerprintRuntimeContext({
+      live_allowed: true,
+      live_decision: "dry_run_only",
+      allowed_execution_modes: ["dry_run", "recon"],
+      reason_codes: ["OS_FAMILY_MISMATCH"]
+    });
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-live-blocked-by-fingerprint-002",
+      profile: "profile-a",
+      fingerprintContext
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-blocked-by-fingerprint-002",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-blocked-by-fingerprint-002",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-live-blocked-by-fingerprint-002");
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const gateOutcome = asRecord(payload.gate_outcome);
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(gateOutcome?.effective_execution_mode).toBe("recon");
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["OS_FAMILY_MISMATCH"]);
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+  });
+
+  it("blocks live mode when fingerprint_context is missing", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-blocked-by-fingerprint-003",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-blocked-by-fingerprint-003",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord()
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-live-blocked-by-fingerprint-003");
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const gateOutcome = asRecord(payload.gate_outcome);
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(gateOutcome?.effective_execution_mode).toBe("dry_run");
+    expect(payload.fingerprint_execution).toBeNull();
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_MISSING"]);
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_CONTEXT_MISSING", "FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+  });
+
+  it("blocks live mode when fingerprint_context exists but is not trusted for run/profile", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-blocked-by-fingerprint-untrusted-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-blocked-by-fingerprint-untrusted-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: createFingerprintRuntimeContext()
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-live-blocked-by-fingerprint-untrusted-001");
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(payload.fingerprint_execution).toBeNull();
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_UNTRUSTED"]);
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_CONTEXT_UNTRUSTED", "FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+  });
+
+  it("rejects startup trust primed by non-allowlist sender tab", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const fingerprintContext = createFingerprintRuntimeContext();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-live-untrusted-startup-tab-001",
+      profile: "profile-a",
+      fingerprintContext,
+      tabId: 9,
+      tabUrl: "https://example.com/"
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-untrusted-startup-tab-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-untrusted-startup-tab-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-live-untrusted-startup-tab-001");
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_UNTRUSTED"]);
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_CONTEXT_UNTRUSTED", "FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+  });
+
+  it("reuses startup trust across different run_id within the same session", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const startupRunId = "run-xhs-live-trusted-by-runtime-start-001";
+    const liveRunId = "run-xhs-live-consume-startup-trust-002";
+    const profile = "profile-a";
+    const fingerprintContext = createFingerprintRuntimeContext({
+      live_allowed: true,
+      live_decision: "allowed",
+      allowed_execution_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+      reason_codes: []
+    });
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: `startup-fingerprint-trust:${startupRunId}`,
+        ok: true,
+        payload: {
+          startup_fingerprint_trust: {
+            run_id: startupRunId,
+            profile,
+            session_id: "nm-session-001",
+            fingerprint_runtime: fingerprintContext,
+            trust_source: "extension_bootstrap_context",
+            bootstrap_attested: true,
+            main_world_result_used_for_trust: false
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+    chromeApi.tabs.sendMessage.mockClear();
+
+    const liveRequestId = `${liveRunId}-live`;
+    firstPort.onMessageListeners[0]?.({
+      id: liveRequestId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: liveRunId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: liveRequestId,
+        command: "xhs.search"
+      })
+    );
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: liveRequestId,
+        ok: true,
+        payload: {
+          summary: {
+            capability_result: {
+              outcome: "success"
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const allowed = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === liveRequestId);
+    expect(allowed?.status).toBe("success");
+  });
+
+  it("does not establish trusted fingerprint context from runtime.ping", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const profile = "profile-a";
+    const pingRunId = "run-ping-no-trust-001";
+    const liveRunId = "run-ping-no-trust-live-002";
+    const fingerprintContext = createFingerprintRuntimeContext({
+      live_allowed: true,
+      live_decision: "allowed",
+      allowed_execution_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+      reason_codes: []
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: pingRunId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: pingRunId,
+        command: "runtime.ping",
+        command_params: {
+          fingerprint_context: fingerprintContext
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: pingRunId,
+        ok: true,
+        payload: {
+          fingerprint_runtime: fingerprintContext,
+          summary: {
+            capability_result: {
+              outcome: "success"
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onMessageListeners[0]?.({
+      id: liveRunId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: liveRunId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === liveRunId);
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_UNTRUSTED"]);
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_CONTEXT_UNTRUSTED", "FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+  });
+
+  it("invalidates trusted fingerprint context after disconnect/recovery with new session", async () => {
+    const firstPort = createMockPort();
+    const secondPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort, secondPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+
+    startChromeBackgroundBridge(chromeApi, {
+      heartbeatIntervalMs: 10_000,
+      recoveryRetryIntervalMs: 5,
+      recoveryWindowMs: 100
+    });
+    respondHandshake(firstPort, {
+      sessionId: "nm-session-001"
+    });
+    await Promise.resolve();
+
+    const fingerprintContext = createFingerprintRuntimeContext();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-live-recovery-untrusted-001",
+      profile: "profile-a",
+      fingerprintContext
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onDisconnectListeners[0]?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    respondHandshake(secondPort, {
+      sessionId: "nm-session-002"
+    });
+    await Promise.resolve();
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-live-recovery-untrusted-001",
+      profile: "profile-a",
+      fingerprintContext,
+      sessionId: "nm-session-001"
+    });
+
+    secondPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-recovery-untrusted-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-002",
+        run_id: "run-xhs-live-recovery-untrusted-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = secondPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-live-recovery-untrusted-001");
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_UNTRUSTED"]);
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_CONTEXT_UNTRUSTED", "FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+  });
+
+  it("requires re-attestation after disconnect/recovery even in the same session", async () => {
+    const firstPort = createMockPort();
+    const secondPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort, secondPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+
+    startChromeBackgroundBridge(chromeApi, {
+      heartbeatIntervalMs: 10_000,
+      recoveryRetryIntervalMs: 5,
+      recoveryWindowMs: 100
+    });
+    respondHandshake(firstPort, {
+      sessionId: "nm-session-001"
+    });
+    await Promise.resolve();
+
+    const profile = "profile-a";
+    const startupRunId = "run-xhs-live-recovery-keep-trust-startup-001";
+    const liveRunId = "run-xhs-live-recovery-keep-trust-live-002";
+    const fingerprintContext = createFingerprintRuntimeContext();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: startupRunId,
+      profile,
+      fingerprintContext,
+      sessionId: "nm-session-001"
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onDisconnectListeners[0]?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    respondHandshake(secondPort, {
+      sessionId: "nm-session-001"
+    });
+    await Promise.resolve();
+
+    const firstAttemptId = `${liveRunId}-blocked-before-reprime`;
+    secondPort.onMessageListeners[0]?.({
+      id: firstAttemptId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: liveRunId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const blockedDispatch = chromeApi.tabs.sendMessage.mock.calls.find(
+      (call) => (call[1] as { id?: string } | undefined)?.id === firstAttemptId
+    );
+    expect(blockedDispatch).toBeUndefined();
+
+    const blocked = secondPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === firstAttemptId);
+    expect(blocked?.status).toBe("error");
+    const blockedPayload = asRecord(blocked?.payload) ?? {};
+    const blockedConsumerGateResult = asRecord(blockedPayload.consumer_gate_result);
+    expect(blockedConsumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(blockedConsumerGateResult?.fingerprint_reason_codes).toEqual([
+      "FINGERPRINT_CONTEXT_UNTRUSTED"
+    ]);
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: `${startupRunId}-reprime`,
+      profile,
+      fingerprintContext,
+      sessionId: "nm-session-001"
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    secondPort.onMessageListeners[0]?.({
+      id: liveRunId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: liveRunId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const liveDispatch = chromeApi.tabs.sendMessage.mock.calls.find(
+      (call) => (call[1] as { id?: string } | undefined)?.id === liveRunId
+    );
+    expect(liveDispatch).toBeDefined();
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: liveRunId,
+        ok: true,
+        payload: {
+          summary: {
+            capability_result: {
+              outcome: "success"
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const allowed = secondPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string })
+      .find((message) => message.id === liveRunId);
+    expect(allowed?.status).toBe("success");
+  });
+
+  it("reuses startup trust across new run_id in the same session for live xhs.search", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort, {
+      sessionId: "nm-session-001"
+    });
+    await Promise.resolve();
+
+    const startupRunId = "run-startup-trust-001";
+    const liveRunId = "run-live-followup-002";
+    const profile = "profile-a";
+    const fingerprintContext = createFingerprintRuntimeContext();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: startupRunId,
+      profile,
+      fingerprintContext
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onMessageListeners[0]?.({
+      id: liveRunId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: liveRunId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const liveDispatch = chromeApi.tabs.sendMessage.mock.calls.find(
+      (call) => (call[1] as { id?: string } | undefined)?.id === liveRunId
+    );
+    expect(liveDispatch).toBeDefined();
+    expect((liveDispatch?.[1] as { command?: string } | undefined)?.command).toBe("xhs.search");
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: liveRunId,
+        ok: true,
+        payload: {
+          summary: {
+            query: "露营",
+            items: []
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; error?: { code?: string }; payload?: Record<string, unknown> })
+      .find(
+        (message) =>
+          message.id === liveRunId &&
+          message.status === "error" &&
+          message.error?.code === "FINGERPRINT_CONTEXT_UNTRUSTED"
+      );
+    expect(blocked).toBeUndefined();
+
+    const succeeded = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string })
+      .find((message) => message.id === liveRunId);
+    expect(succeeded?.status).toBe("success");
+  });
+
+  it("invalidates trusted fingerprint context after runtime.stop for same profile::session", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const runId = "run-xhs-live-stop-untrusted-001";
+    const profile = "profile-a";
+    const fingerprintContext = createFingerprintRuntimeContext();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId,
+      profile,
+      fingerprintContext
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    const stopRequestId = `${runId}-stop`;
+    firstPort.onMessageListeners[0]?.({
+      id: stopRequestId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "runtime.stop",
+        command_params: {},
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: stopRequestId,
+        ok: true,
+        payload: {
+          message: "stopped",
+          run_id: runId,
+          profile
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const stopDispatch = chromeApi.tabs.sendMessage.mock.calls.find(
+      (call) => (call[1] as { id?: string } | undefined)?.id === stopRequestId
+    );
+    expect(stopDispatch).toBeDefined();
+
+    const liveRequestId = `${runId}-live-after-stop`;
+    firstPort.onMessageListeners[0]?.({
+      id: liveRequestId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const liveDispatch = chromeApi.tabs.sendMessage.mock.calls.find(
+      (call) => (call[1] as { id?: string } | undefined)?.id === liveRequestId
+    );
+    expect(liveDispatch).toBeUndefined();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === liveRequestId);
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_UNTRUSTED"]);
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_CONTEXT_UNTRUSTED", "FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+  });
+
+  it("rotates trusted fingerprint context when startup trust overwrites same profile::session", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const runId = "run-xhs-live-trust-rotate-001";
+    const profile = "profile-a";
+    const trustedAllowed = createFingerprintRuntimeContext({
+      live_allowed: true,
+      live_decision: "allowed",
+      allowed_execution_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+      reason_codes: []
+    });
+    const trustedBlocked = createFingerprintRuntimeContext({
+      live_allowed: false,
+      live_decision: "dry_run_only",
+      allowed_execution_modes: ["dry_run", "recon"],
+      reason_codes: ["PROFILE_FIELD_MISSING"]
+    });
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId,
+      profile,
+      fingerprintContext: trustedAllowed
+    });
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId,
+      profile,
+      fingerprintContext: trustedBlocked
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onMessageListeners[0]?.({
+      id: runId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: trustedBlocked
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === runId);
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["PROFILE_FIELD_MISSING"]);
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+  });
+
+  it("invalidates trust when live request fingerprint_context changes without re-prime", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const runId = "run-xhs-live-context-drift-001";
+    const profile = "profile-a";
+    const trustedContext = createFingerprintRuntimeContext();
+    const driftedContext = createFingerprintRuntimeContext({
+      live_allowed: false,
+      live_decision: "dry_run_only",
+      allowed_execution_modes: ["dry_run", "recon"],
+      reason_codes: ["OS_FAMILY_MISMATCH"]
+    });
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId,
+      profile,
+      fingerprintContext: trustedContext
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onMessageListeners[0]?.({
+      id: `${runId}-drifted`,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: driftedContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const firstBlocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === `${runId}-drifted`);
+    const firstPayload = asRecord(firstBlocked?.payload) ?? {};
+    const firstConsumerGateResult = asRecord(firstPayload.consumer_gate_result);
+    expect(firstConsumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_UNTRUSTED"]);
+
+    firstPort.onMessageListeners[0]?.({
+      id: `${runId}-after-invalidation`,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: trustedContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const secondBlocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === `${runId}-after-invalidation`);
+    expect(secondBlocked?.status).toBe("error");
+    const secondPayload = asRecord(secondBlocked?.payload) ?? {};
+    const secondConsumerGateResult = asRecord(secondPayload.consumer_gate_result);
+    expect(secondConsumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_UNTRUSTED"]);
+    expect(secondConsumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_CONTEXT_UNTRUSTED", "FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+  });
+
+  it("forwards top-level requested_execution_mode live path and relays required-patch missing block", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const fingerprintContext = createFingerprintRuntimeContext();
+    fingerprintContext.fingerprint_patch_manifest.required_patches.push("unknown_required_patch");
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-live-top-level-patch-missing-001",
+      profile: "profile-a",
+      fingerprintContext
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-top-level-patch-missing-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-top-level-patch-missing-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "run-xhs-live-top-level-patch-missing-001",
+        command: "xhs.search",
+        commandParams: expect.objectContaining({
+          requested_execution_mode: "live_read_limited"
+        })
+      })
+    );
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-xhs-live-top-level-patch-missing-001",
+        ok: false,
+        error: {
+          code: "ERR_EXECUTION_FAILED",
+          message: "fingerprint required patches missing for live execution"
+        },
+        payload: {
+          details: {
+            stage: "execution",
+            reason: "FINGERPRINT_REQUIRED_PATCH_MISSING",
+            requested_execution_mode: "live_read_limited",
+            missing_required_patches: ["unknown_required_patch"]
+          },
+          gate_outcome: {
+            gate_decision: "allowed",
+            gate_reasons: ["LIVE_MODE_APPROVED"],
+            fingerprint_gate_decision: "allowed"
+          },
+          consumer_gate_result: {
+            gate_decision: "allowed",
+            gate_reasons: ["LIVE_MODE_APPROVED"],
+            fingerprint_gate_decision: "allowed",
+            fingerprint_reason_codes: []
+          },
+          fingerprint_execution: {
+            live_allowed: true,
+            live_decision: "allowed",
+            allowed_execution_modes: ["live_read_limited"],
+            reason_codes: []
+          },
+          audit_record: {
+            gate_decision: "allowed",
+            gate_reasons: ["LIVE_MODE_APPROVED"]
+          },
+          fingerprint_runtime: {
+            ...fingerprintContext,
+            injection: {
+              installed: false,
+              required_patches: fingerprintContext.fingerprint_patch_manifest.required_patches,
+              missing_required_patches: ["unknown_required_patch"]
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-live-top-level-patch-missing-001");
+    expect(blocked).toMatchObject({
+      id: "run-xhs-live-top-level-patch-missing-001",
+      status: "error",
+      payload: {
+        details: {
+          stage: "execution",
+          reason: "FINGERPRINT_REQUIRED_PATCH_MISSING",
+          requested_execution_mode: "live_read_limited"
+        },
+        fingerprint_runtime: {
+          injection: {
+            installed: false,
+            missing_required_patches: ["unknown_required_patch"]
+          }
+        }
+      }
+    });
+    const blockedPayload = asRecord(blocked?.payload) ?? {};
+    const gateOutcome = asRecord(blockedPayload.gate_outcome);
+    const consumerGateResult = asRecord(blockedPayload.consumer_gate_result);
+    const fingerprintExecution = asRecord(blockedPayload.fingerprint_execution);
+    const auditRecord = asRecord(blockedPayload.audit_record);
+    const gateOutcomeExecutionFailure = asRecord(gateOutcome?.execution_failure);
+    const consumerGateExecutionFailure = asRecord(consumerGateResult?.execution_failure);
+    const fingerprintExecutionFailure = asRecord(fingerprintExecution?.execution_failure);
+    const auditExecutionFailure = asRecord(auditRecord?.execution_failure);
+    expect(gateOutcome?.gate_decision).toBe("blocked");
+    expect(gateOutcome?.fingerprint_gate_decision).toBe("blocked");
+    expect(gateOutcome?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_REQUIRED_PATCH_MISSING"])
+    );
+    expect(gateOutcomeExecutionFailure).toMatchObject({
+      stage: "execution",
+      reason: "FINGERPRINT_REQUIRED_PATCH_MISSING",
+      requested_execution_mode: "live_read_limited",
+      missing_required_patches: ["unknown_required_patch"]
+    });
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(
+      expect.arrayContaining(["FINGERPRINT_REQUIRED_PATCH_MISSING"])
+    );
+    expect(consumerGateExecutionFailure).toMatchObject({
+      stage: "execution",
+      reason: "FINGERPRINT_REQUIRED_PATCH_MISSING",
+      requested_execution_mode: "live_read_limited",
+      missing_required_patches: ["unknown_required_patch"]
+    });
+    expect(fingerprintExecution?.live_allowed).toBe(false);
+    expect(fingerprintExecution?.live_decision).toBe("dry_run_only");
+    expect(fingerprintExecution?.allowed_execution_modes).toEqual(
+      expect.arrayContaining(["dry_run", "recon"])
+    );
+    expect(fingerprintExecution?.reason_codes).toEqual(
+      expect.arrayContaining(["FINGERPRINT_REQUIRED_PATCH_MISSING"])
+    );
+    expect(fingerprintExecution?.missing_required_patches).toEqual(["unknown_required_patch"]);
+    expect(fingerprintExecutionFailure).toMatchObject({
+      stage: "execution",
+      reason: "FINGERPRINT_REQUIRED_PATCH_MISSING",
+      requested_execution_mode: "live_read_limited",
+      missing_required_patches: ["unknown_required_patch"]
+    });
+    expect(auditRecord?.gate_decision).toBe("blocked");
+    expect(auditRecord?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_REQUIRED_PATCH_MISSING"])
+    );
+    expect(auditExecutionFailure).toMatchObject({
+      stage: "execution",
+      reason: "FINGERPRINT_REQUIRED_PATCH_MISSING",
+      requested_execution_mode: "live_read_limited",
+      missing_required_patches: ["unknown_required_patch"]
+    });
+  });
+
   it("keeps issue_208 gate-only approval on non-live effective mode even when request asks for live_write", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
@@ -1506,6 +2908,12 @@ describe("extension service worker recovery contract", () => {
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
     await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-live-limited-approved-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext()
+    });
 
     firstPort.onMessageListeners[0]?.({
       id: "run-xhs-live-limited-approved-001",
@@ -1518,6 +2926,7 @@ describe("extension service worker recovery contract", () => {
         command_params: createXhsCommandParams({
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
+          fingerprint_context: createFingerprintRuntimeContext(),
           approval_record: {
             approved: true,
             approver: "qa-reviewer",
@@ -1612,6 +3021,12 @@ describe("extension service worker recovery contract", () => {
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
     await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-live-mode-approved-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext()
+    });
 
     firstPort.onMessageListeners[0]?.({
       id: "run-xhs-live-mode-approved-001",
@@ -1624,6 +3039,7 @@ describe("extension service worker recovery contract", () => {
         command_params: createXhsCommandParams({
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
+          fingerprint_context: createFingerprintRuntimeContext(),
           approval_record: {
             approved: true,
             approver: "qa-reviewer",
@@ -2023,5 +3439,122 @@ describe("extension service worker recovery contract", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("executes xhs-sign in MAIN world through extension-private rpc", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+
+    startChromeBackgroundBridge(chromeApi);
+
+    let response: unknown;
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "xhs-sign-request",
+        uri: "/api/sns/web/v1/search/notes",
+        body: { keyword: "露营" }
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+        }
+      },
+      (message) => {
+        response = message;
+      }
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 32 },
+        world: "MAIN",
+        args: ["/api/sns/web/v1/search/notes", { keyword: "露营" }]
+      })
+    );
+    expect(response).toEqual({
+      ok: true,
+      result: {
+        "X-s": "signed",
+        "X-t": "1700000000"
+      }
+    });
+  });
+
+  it("rejects xhs-sign requests from non-allowlisted sender tabs", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+
+    startChromeBackgroundBridge(chromeApi);
+
+    let response: unknown;
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "xhs-sign-request",
+        uri: "/api/sns/web/v1/search/notes",
+        body: { keyword: "露营" }
+      },
+      {
+        tab: {
+          id: 44,
+          url: "https://example.com/"
+        }
+      },
+      (message) => {
+        response = message;
+      }
+    );
+
+    await Promise.resolve();
+
+    expect(executeScript).not.toHaveBeenCalled();
+    expect(response).toEqual({
+      ok: false,
+      error: {
+        code: "ERR_XHS_SIGN_FORBIDDEN",
+        message: "xhs-sign request is out of allowlist scope"
+      }
+    });
+  });
+
+  it("returns xhs-sign failure when MAIN world executeScript fails", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    executeScript.mockRejectedValueOnce(new Error("window._webmsxyw is not available"));
+
+    startChromeBackgroundBridge(chromeApi);
+
+    let response: unknown;
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "xhs-sign-request",
+        uri: "/api/sns/web/v1/search/notes",
+        body: { keyword: "露营" }
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+        }
+      },
+      (message) => {
+        response = message;
+      }
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(executeScript).toHaveBeenCalledTimes(1);
+    expect(response).toEqual({
+      ok: false,
+      error: {
+        code: "ERR_XHS_SIGN_FAILED",
+        message: "window._webmsxyw is not available"
+      }
+    });
   });
 });

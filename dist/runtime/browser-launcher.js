@@ -1,13 +1,14 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { access, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 const KNOWN_BROWSER_CANDIDATES = {
     darwin: [
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        "/Applications/Chromium.app/Contents/MacOS/Chromium"
+        "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     ],
     linux: [
         "/usr/bin/google-chrome-stable",
@@ -46,6 +47,9 @@ export class BrowserLaunchError extends Error {
 }
 export const BROWSER_STATE_FILENAME = "__webenvoy_browser_instance.json";
 export const BROWSER_CONTROL_FILENAME = "__webenvoy_browser_control.json";
+export const EXTENSION_STAGING_DIRNAME = "__webenvoy_extension_staging";
+export const EXTENSION_BOOTSTRAP_FILENAME = "__webenvoy_fingerprint_bootstrap.json";
+export const EXTENSION_BOOTSTRAP_SCRIPT_FILENAME = "__webenvoy_fingerprint_bootstrap.js";
 const READY_WAIT_MAX_ATTEMPTS = 20;
 const READY_WAIT_INTERVAL_MS = 150;
 const READY_MIN_UPTIME_MS = 600;
@@ -53,6 +57,39 @@ const READY_CONFIRM_DELAY_MS = 120;
 const SUPERVISOR_STATE_WAIT_ATTEMPTS = 40;
 const SUPERVISOR_STATE_WAIT_INTERVAL_MS = 80;
 const SUPERVISOR_SHUTDOWN_TIMEOUT_MS = 4_000;
+const EXTENSION_BOOTSTRAP_PARAMS_KEY = "extensionBootstrap";
+const CONTENT_SCRIPT_ENTRY_PATH = "build/content-script.js";
+const MAIN_WORLD_BRIDGE_ENTRY_PATH = "build/main-world-bridge.js";
+const EXTENSION_BOOTSTRAP_SCRIPT_PATH = `build/${EXTENSION_BOOTSTRAP_SCRIPT_FILENAME}`;
+const SHARED_FINGERPRINT_PROFILE_PATH = "fingerprint-profile.js";
+const SHARED_RISK_STATE_PATH = "risk-state.js";
+const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
+const BRIDGE_BOOTSTRAP_PAYLOAD_KEY = "bridge_bootstrap";
+const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
+const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
+const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
+const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value
+    : null;
+const hashMainWorldEventChannel = (value) => {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(36);
+};
+const resolveMainWorldEventNamesForSecret = (secret) => {
+    const channel = hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|${secret}`);
+    return {
+        requestEvent: `${MAIN_WORLD_EVENT_REQUEST_PREFIX}${channel}`,
+        resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${channel}`
+    };
+};
+const sanitizePathSegment = (value) => {
+    const normalized = value.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^_+|_+$/g, "");
+    return normalized.length > 0 ? normalized : "default";
+};
 const parseOptionalString = (value) => {
     if (value === undefined || value === null) {
         return null;
@@ -65,6 +102,13 @@ const parseOptionalString = (value) => {
         throw new BrowserLaunchError("BROWSER_INVALID_ARGUMENT", "浏览器启动参数不能为空字符串");
     }
     return normalized;
+};
+const readTrimmedEnvString = (value) => {
+    if (typeof value !== "string") {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
 };
 const parseStartUrl = (params) => {
     const raw = params.startUrl;
@@ -235,6 +279,73 @@ const resolveCommandFromPath = async (command) => {
     }
     return null;
 };
+const resolveExplicitBrowserPathFromEnv = async () => {
+    const explicitFromEnv = readTrimmedEnvString(process.env.WEBENVOY_BROWSER_PATH);
+    if (!explicitFromEnv) {
+        return null;
+    }
+    if (isAbsolute(explicitFromEnv) || hasPathSegment(explicitFromEnv)) {
+        return explicitFromEnv;
+    }
+    return resolveCommandFromPath(explicitFromEnv);
+};
+const readBrowserVersionOutput = async (executablePath) => {
+    return await new Promise((resolve) => {
+        const child = spawn(executablePath, ["--version"], {
+            stdio: ["ignore", "pipe", "pipe"],
+            env: process.env
+        });
+        let stdout = "";
+        let stderr = "";
+        let settled = false;
+        const finish = (value) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            resolve(value);
+        };
+        const timer = setTimeout(() => {
+            try {
+                child.kill("SIGKILL");
+            }
+            catch {
+                // ignore kill failures
+            }
+            finish(null);
+        }, 2_000);
+        child.stdout?.on("data", (chunk) => {
+            stdout += chunk.toString();
+        });
+        child.stderr?.on("data", (chunk) => {
+            stderr += chunk.toString();
+        });
+        child.on("error", () => {
+            clearTimeout(timer);
+            finish(null);
+        });
+        child.on("close", () => {
+            clearTimeout(timer);
+            const combined = `${stdout}\n${stderr}`.trim();
+            finish(combined.length > 0 ? combined : null);
+        });
+    });
+};
+const isUnsupportedBrandedChromeForExtensions = (versionOutput) => {
+    if (!versionOutput) {
+        return false;
+    }
+    const normalized = versionOutput.trim();
+    if (!/^Google Chrome\s/i.test(normalized) || /Google Chrome for Testing/i.test(normalized)) {
+        return false;
+    }
+    const match = normalized.match(/(\d+)\./);
+    if (!match) {
+        return false;
+    }
+    const major = Number.parseInt(match[1], 10);
+    return Number.isInteger(major) && major >= 137;
+};
 const resolveExecutablePath = async (params) => {
     const explicitFromParams = parseOptionalString(params.browserPath);
     if (explicitFromParams !== null) {
@@ -245,19 +356,53 @@ const resolveExecutablePath = async (params) => {
         explicitFromEnv,
         ...(KNOWN_BROWSER_CANDIDATES[process.platform] ?? [])
     ].filter((item) => item !== null);
+    let brandedChromeRejected = false;
     for (const candidate of candidates) {
+        let resolvedCandidate = null;
         if (isAbsolute(candidate) || hasPathSegment(candidate)) {
             if (await pathExists(candidate)) {
-                return candidate;
+                resolvedCandidate = candidate;
+            }
+        }
+        else {
+            resolvedCandidate = await resolveCommandFromPath(candidate);
+        }
+        if (resolvedCandidate === null) {
+            continue;
+        }
+        const versionOutput = await readBrowserVersionOutput(resolvedCandidate);
+        if (isUnsupportedBrandedChromeForExtensions(versionOutput)) {
+            brandedChromeRejected = true;
+            if (explicitFromEnv && candidate === explicitFromEnv) {
+                throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "Google Chrome 137+ 已禁用命令行 --load-extension；请改用 Chrome for Testing / Chromium，或通过 WEBENVOY_BROWSER_PATH 指向受支持浏览器");
             }
             continue;
         }
-        const resolved = await resolveCommandFromPath(candidate);
-        if (resolved !== null) {
-            return resolved;
-        }
+        return resolvedCandidate;
+    }
+    if (brandedChromeRejected) {
+        throw new BrowserLaunchError("BROWSER_NOT_FOUND", "未找到受支持的可加载扩展浏览器；Google Chrome 137+ 已禁用命令行 --load-extension，请安装 Chrome for Testing / Chromium，或通过 WEBENVOY_BROWSER_PATH 指向它们");
     }
     throw new BrowserLaunchError("BROWSER_NOT_FOUND", "未找到系统 Chrome/Chromium，可通过受信环境变量 WEBENVOY_BROWSER_PATH 显式指定");
+};
+export const resolveBrowserVersionOutputForFingerprint = async (executablePath) => {
+    if (executablePath) {
+        return readTrimmedEnvString(await readBrowserVersionOutput(executablePath));
+    }
+    try {
+        const truthSource = await resolveBrowserVersionTruthSource();
+        return truthSource.browserVersion;
+    }
+    catch {
+        return null;
+    }
+};
+export const resolveBrowserVersionTruthSource = async (params = {}) => {
+    const executablePath = await resolveExecutablePath(params);
+    return {
+        executablePath,
+        browserVersion: readTrimmedEnvString(await readBrowserVersionOutput(executablePath))
+    };
 };
 const resolveSupervisorScriptPath = async () => {
     const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -271,6 +416,405 @@ const resolveSupervisorScriptPath = async () => {
         }
     }
     throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "缺少浏览器控制进程脚本 browser-supervisor.js");
+};
+const resolveExtensionSourceDir = async () => {
+    const moduleDir = dirname(fileURLToPath(import.meta.url));
+    const candidates = [join(moduleDir, "..", "..", "extension"), join(process.cwd(), "extension")];
+    for (const candidate of candidates) {
+        const manifestPath = join(candidate, "manifest.json");
+        const backgroundPath = join(candidate, "build", "background.js");
+        const contentScriptPath = join(candidate, "build", "content-script.js");
+        if ((await pathExists(manifestPath)) &&
+            (await pathExists(backgroundPath)) &&
+            (await pathExists(contentScriptPath))) {
+            return candidate;
+        }
+    }
+    throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "缺少可加载 extension 构建产物，请先构建 extension");
+};
+const resolveSharedSourceDir = async (extensionSourceDir) => {
+    const moduleDir = dirname(fileURLToPath(import.meta.url));
+    const candidates = [
+        join(extensionSourceDir, "..", "shared"),
+        join(moduleDir, "..", "..", "shared"),
+        join(process.cwd(), "shared")
+    ];
+    for (const candidate of candidates) {
+        const fingerprintPath = join(candidate, SHARED_FINGERPRINT_PROFILE_PATH);
+        const riskStatePath = join(candidate, SHARED_RISK_STATE_PATH);
+        if ((await pathExists(fingerprintPath)) && (await pathExists(riskStatePath))) {
+            return candidate;
+        }
+    }
+    throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "缺少 shared 指纹/risk-state 构建产物，无法生成 staged content script bundle");
+};
+const resolveExtensionBootstrapPayload = (input) => {
+    if (input.extensionBootstrap) {
+        return { ...input.extensionBootstrap };
+    }
+    const fromParams = asRecord(input.params[EXTENSION_BOOTSTRAP_PARAMS_KEY]);
+    return fromParams ? { ...fromParams } : null;
+};
+const resolveBootstrapInstallRuntime = (extensionBootstrap) => {
+    const runtimeRecord = asRecord(extensionBootstrap?.fingerprint_runtime ?? extensionBootstrap);
+    if (!runtimeRecord) {
+        return null;
+    }
+    const patchManifest = asRecord(runtimeRecord.fingerprint_patch_manifest ?? null);
+    const bundle = asRecord(runtimeRecord.fingerprint_profile_bundle ?? null);
+    const batteryRecord = asRecord(bundle?.battery ?? null);
+    const batteryLevel = typeof batteryRecord?.level === "number" && Number.isFinite(batteryRecord.level)
+        ? batteryRecord.level
+        : null;
+    const batteryCharging = typeof batteryRecord?.charging === "boolean" ? batteryRecord.charging : null;
+    const audioNoiseSeed = typeof bundle?.audioNoiseSeed === "number" && Number.isFinite(bundle.audioNoiseSeed)
+        ? bundle.audioNoiseSeed
+        : null;
+    return {
+        fingerprint_patch_manifest: {
+            required_patches: Array.isArray(patchManifest?.required_patches)
+                ? patchManifest.required_patches.filter((entry) => typeof entry === "string")
+                : []
+        },
+        fingerprint_profile_bundle: {
+            ...(audioNoiseSeed === null ? {} : { audioNoiseSeed }),
+            ...(batteryLevel === null || batteryCharging === null
+                ? {}
+                : { battery: { level: batteryLevel, charging: batteryCharging } })
+        }
+    };
+};
+const buildBridgeBootstrapPayload = (input) => {
+    const payload = {
+        [BRIDGE_BOOTSTRAP_PAYLOAD_KEY]: input.bridgeSecret
+    };
+    const installRuntime = resolveBootstrapInstallRuntime(input.extensionBootstrap);
+    if (installRuntime) {
+        payload.fingerprint_runtime = installRuntime;
+    }
+    return payload;
+};
+const buildBootstrapScriptSource = (input) => [
+    "(() => {",
+    `  const payloadKey = ${JSON.stringify(FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY)};`,
+    `  const bootstrapPayload = ${JSON.stringify(input.payload)};`,
+    "  const host = typeof globalThis === \"object\" && globalThis !== null ? globalThis : null;",
+    "  if (!host) {",
+    "    return;",
+    "  }",
+    "  try {",
+    "    Object.defineProperty(host, payloadKey, {",
+    "      configurable: false,",
+    "      enumerable: false,",
+    "      writable: false,",
+    "      value: bootstrapPayload",
+    "    });",
+    "  } catch {",
+    "    try {",
+    "      host[payloadKey] = bootstrapPayload;",
+    "    } catch {",
+    "      // ignore assignment fallback failure",
+    "    }",
+    "  }",
+    "})();",
+    ""
+].join("\n");
+const replaceSourceToken = (input) => {
+    if (!input.source.includes(input.target)) {
+        throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", input.errorMessage);
+    }
+    return input.source.replace(input.target, input.replacement);
+};
+const rewriteStagedContentScriptSourceForBridge = (input) => {
+    let rewritten = input.source;
+    const startupTrustRuntime = asRecord(input.extensionBootstrap?.fingerprint_runtime ?? null);
+    const startupTrustRunId = typeof input.extensionBootstrap?.run_id === "string"
+        ? input.extensionBootstrap.run_id
+        : typeof input.extensionBootstrap?.runId === "string"
+            ? input.extensionBootstrap.runId
+            : null;
+    const startupTrustSessionId = typeof input.extensionBootstrap?.session_id === "string"
+        ? input.extensionBootstrap.session_id
+        : typeof input.extensionBootstrap?.sessionId === "string"
+            ? input.extensionBootstrap.sessionId
+            : null;
+    rewritten = replaceSourceToken({
+        source: rewritten,
+        target: "const STAGED_STARTUP_TRUST_RUN_ID = undefined;",
+        replacement: `const STAGED_STARTUP_TRUST_RUN_ID = ${JSON.stringify(startupTrustRunId)};`,
+        errorMessage: "staged content-script 缺少 startup trust run_id 锚点，无法注入同步 trust 常量"
+    });
+    rewritten = replaceSourceToken({
+        source: rewritten,
+        target: "const STAGED_STARTUP_TRUST_SESSION_ID = undefined;",
+        replacement: `const STAGED_STARTUP_TRUST_SESSION_ID = ${JSON.stringify(startupTrustSessionId)};`,
+        errorMessage: "staged content-script 缺少 startup trust session_id 锚点，无法注入同步 trust 常量"
+    });
+    rewritten = replaceSourceToken({
+        source: rewritten,
+        target: "const STAGED_STARTUP_TRUST_FINGERPRINT_RUNTIME = undefined;",
+        replacement: `const STAGED_STARTUP_TRUST_FINGERPRINT_RUNTIME = ${JSON.stringify(startupTrustRuntime)};`,
+        errorMessage: "staged content-script 缺少 startup trust fingerprint_runtime 锚点，无法注入同步 trust 常量"
+    });
+    rewritten = replaceSourceToken({
+        source: rewritten,
+        target: "  installMainWorldEventChannelSecret(bootstrapInput.mainWorldSecret);",
+        replacement: [
+            `  const bridgeBootstrapFallbackSecret = ${JSON.stringify(input.bridgeSecret)};`,
+            "  const bridgeBootstrapSecret =",
+            "    typeof bootstrapPayload === \"object\" &&",
+            "    bootstrapPayload !== null &&",
+            "    !Array.isArray(bootstrapPayload) &&",
+            `    typeof bootstrapPayload.${BRIDGE_BOOTSTRAP_PAYLOAD_KEY} === \"string\"`,
+            `      ? bootstrapPayload.${BRIDGE_BOOTSTRAP_PAYLOAD_KEY}`,
+            "      : bridgeBootstrapFallbackSecret;",
+            "  const bootstrapMainWorldSecret =",
+            "    typeof bootstrapInput.mainWorldSecret === \"string\" && bootstrapInput.mainWorldSecret.length > 0",
+            "      ? bootstrapInput.mainWorldSecret",
+            "      : bridgeBootstrapSecret;",
+            "  installMainWorldEventChannelSecret(bootstrapMainWorldSecret);"
+        ].join("\n"),
+        errorMessage: "staged content-script 缺少 main-world secret 安装锚点，无法注入 per-run secret channel"
+    });
+    rewritten = replaceSourceToken({
+        source: rewritten,
+        target: "      installMainWorldEventChannelSecret(resolvedBootstrap.mainWorldSecret);",
+        replacement: [
+            "      const resolvedMainWorldSecret =",
+            "        typeof resolvedBootstrap.mainWorldSecret === \"string\" &&",
+            "        resolvedBootstrap.mainWorldSecret.length > 0",
+            "          ? resolvedBootstrap.mainWorldSecret",
+            "          : bridgeBootstrapSecret;",
+            "      installMainWorldEventChannelSecret(resolvedMainWorldSecret);"
+        ].join("\n"),
+        errorMessage: "staged content-script 缺少 fallback main-world secret 安装锚点，无法注入 per-run secret channel"
+    });
+    return rewritten;
+};
+const rewriteStagedMainWorldBridgeSourceForBridge = (input) => {
+    const expectedEventNames = resolveMainWorldEventNamesForSecret(input.bridgeSecret);
+    let rewritten = input.source;
+    rewritten = replaceSourceToken({
+        source: rewritten,
+        target: 'const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";',
+        replacement: [
+            'const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";',
+            `const EXPECTED_MAIN_WORLD_REQUEST_EVENT = ${JSON.stringify(expectedEventNames.requestEvent)};`,
+            `const EXPECTED_MAIN_WORLD_RESULT_EVENT = ${JSON.stringify(expectedEventNames.resultEvent)};`
+        ].join("\n"),
+        errorMessage: "staged main-world-bridge 缺少 event 常量锚点，无法注入 secret-derived channel"
+    });
+    rewritten = replaceSourceToken({
+        source: rewritten,
+        target: "    if (!isValidChannelEventName(requestEvent, MAIN_WORLD_EVENT_REQUEST_PREFIX)) {",
+        replacement: [
+            "    if (",
+            "      requestEvent !== EXPECTED_MAIN_WORLD_REQUEST_EVENT ||",
+            "      resultEvent !== EXPECTED_MAIN_WORLD_RESULT_EVENT",
+            "    ) {",
+            "      return null;",
+            "    }",
+            "    if (!isValidChannelEventName(requestEvent, MAIN_WORLD_EVENT_REQUEST_PREFIX)) {"
+        ].join("\n"),
+        errorMessage: "staged main-world-bridge 缺少 channel 校验锚点，无法注入 secret-derived channel"
+    });
+    return rewritten;
+};
+const stripEsmSyntaxForClassicScript = (source) => {
+    let transformed = source;
+    transformed = transformed.replace(/^\s*import\s+[^;]+;\s*$/gm, "");
+    transformed = transformed.replace(/^\s*export\s*\{[^;]*\};\s*$/gm, "");
+    transformed = transformed.replace(/\bexport\s+const\s+/g, "const ");
+    transformed = transformed.replace(/\bexport\s+class\s+/g, "class ");
+    transformed = transformed.replace(/\bexport\s+function\s+/g, "function ");
+    transformed = transformed.replace(/\nexport\s*\{[\s\S]*?\};?\s*$/m, "\n");
+    return transformed.trim();
+};
+const renderClassicModule = (input) => [
+    `const ${input.moduleVar} = (() => {`,
+    input.prelude ?? "",
+    input.sourceBody,
+    `return { ${input.exports.join(", ")} };`,
+    "})();",
+    ""
+]
+    .filter((line) => line.length > 0)
+    .join("\n");
+const buildStagedContentScriptBundle = async (input) => {
+    const readSource = async (path) => stripEsmSyntaxForClassicScript(await readFile(path, "utf8"));
+    const fingerprintSource = await readSource(join(input.sharedSourceDir, SHARED_FINGERPRINT_PROFILE_PATH));
+    const riskStateSource = await readSource(join(input.sharedSourceDir, SHARED_RISK_STATE_PATH));
+    const xhsSearchSource = await readSource(join(input.extensionSourceDir, "build", "xhs-search.js"));
+    const handlerSource = await readSource(join(input.extensionSourceDir, "build", "content-script-handler.js"));
+    const contentScriptSource = await readSource(join(input.extensionSourceDir, CONTENT_SCRIPT_ENTRY_PATH));
+    const riskStateModule = renderClassicModule({
+        moduleVar: "__webenvoy_module_risk_state",
+        sourceBody: riskStateSource,
+        exports: [
+            "APPROVAL_CHECK_KEYS",
+            "EXECUTION_MODES",
+            "WRITE_INTERACTION_TIER",
+            "buildRiskTransitionAudit",
+            "buildUnifiedRiskStateOutput",
+            "getWriteActionMatrixDecisions",
+            "getIssueActionMatrixEntry",
+            "resolveIssueScope",
+            "resolveRiskState"
+        ]
+    });
+    const fingerprintModule = renderClassicModule({
+        moduleVar: "__webenvoy_module_fingerprint_profile",
+        sourceBody: fingerprintSource,
+        exports: [
+            "DEFAULT_MIME_TYPE_DESCRIPTORS",
+            "DEFAULT_PLUGIN_DESCRIPTORS",
+            "ensureFingerprintRuntimeContext"
+        ]
+    });
+    const xhsSearchModule = renderClassicModule({
+        moduleVar: "__webenvoy_module_xhs_search",
+        prelude: [
+            "const {",
+            "  APPROVAL_CHECK_KEYS,",
+            "  EXECUTION_MODES,",
+            "  WRITE_INTERACTION_TIER,",
+            "  buildRiskTransitionAudit,",
+            "  buildUnifiedRiskStateOutput,",
+            "  getWriteActionMatrixDecisions,",
+            "  getIssueActionMatrixEntry,",
+            "  resolveIssueScope: resolveSharedIssueScope,",
+            "  resolveRiskState: resolveSharedRiskState",
+            "} = __webenvoy_module_risk_state;"
+        ].join("\n"),
+        sourceBody: xhsSearchSource,
+        exports: ["executeXhsSearch"]
+    });
+    const handlerModule = renderClassicModule({
+        moduleVar: "__webenvoy_module_content_script_handler",
+        prelude: [
+            "const { executeXhsSearch } = __webenvoy_module_xhs_search;",
+            "const {",
+            "  DEFAULT_MIME_TYPE_DESCRIPTORS,",
+            "  DEFAULT_PLUGIN_DESCRIPTORS,",
+            "  ensureFingerprintRuntimeContext",
+            "} = __webenvoy_module_fingerprint_profile;"
+        ].join("\n"),
+        sourceBody: handlerSource,
+        exports: ["ContentScriptHandler", "encodeMainWorldPayload", "resolveFingerprintContextForContract"]
+    });
+    const contentScriptModule = renderClassicModule({
+        moduleVar: "__webenvoy_module_content_script",
+        prelude: [
+            "const { ContentScriptHandler } = __webenvoy_module_content_script_handler;",
+            "const { ensureFingerprintRuntimeContext } = __webenvoy_module_fingerprint_profile;"
+        ].join("\n"),
+        sourceBody: contentScriptSource,
+        exports: ["bootstrapContentScript"]
+    });
+    return [
+        "/* WebEnvoy staged content script bundle: generated at runtime for MV3 classic script compatibility. */",
+        "",
+        riskStateModule,
+        fingerprintModule,
+        xhsSearchModule,
+        handlerModule,
+        contentScriptModule
+    ].join("\n");
+};
+const rewriteStagedContentScriptForRuntime = async (input) => {
+    const sharedSourceDir = await resolveSharedSourceDir(input.extensionSourceDir);
+    const bundleSource = await buildStagedContentScriptBundle({
+        extensionSourceDir: input.extensionSourceDir,
+        sharedSourceDir
+    });
+    const rewrittenBundleSource = rewriteStagedContentScriptSourceForBridge({
+        source: bundleSource,
+        bridgeSecret: input.bridgeSecret,
+        extensionBootstrap: input.extensionBootstrap
+    });
+    await writeFile(join(input.stagedExtensionDir, CONTENT_SCRIPT_ENTRY_PATH), `${rewrittenBundleSource}\n`, "utf8");
+};
+const rewriteStagedMainWorldBridgeForRuntime = async (input) => {
+    const mainWorldBridgePath = join(input.stagedExtensionDir, MAIN_WORLD_BRIDGE_ENTRY_PATH);
+    const raw = await readFile(mainWorldBridgePath, "utf8");
+    const rewritten = rewriteStagedMainWorldBridgeSourceForBridge({
+        source: raw,
+        bridgeSecret: input.bridgeSecret
+    });
+    await writeFile(mainWorldBridgePath, rewritten, "utf8");
+};
+const injectBootstrapScriptIntoManifest = async (manifestPath) => {
+    const raw = await readFile(manifestPath, "utf8");
+    const parsed = JSON.parse(raw);
+    const contentScripts = parsed.content_scripts;
+    if (!Array.isArray(contentScripts)) {
+        throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "staged extension manifest 缺少 content_scripts，无法注入 bootstrap 脚本");
+    }
+    let injected = false;
+    for (const entry of contentScripts) {
+        const record = asRecord(entry);
+        if (!record) {
+            continue;
+        }
+        const jsEntries = record.js;
+        if (!Array.isArray(jsEntries)) {
+            continue;
+        }
+        const scripts = jsEntries.filter((item) => typeof item === "string");
+        const contentIndex = scripts.indexOf(CONTENT_SCRIPT_ENTRY_PATH);
+        if (contentIndex < 0) {
+            continue;
+        }
+        const deduped = scripts.filter((item) => item !== EXTENSION_BOOTSTRAP_SCRIPT_PATH);
+        const insertIndex = deduped.indexOf(CONTENT_SCRIPT_ENTRY_PATH);
+        deduped.splice(insertIndex, 0, EXTENSION_BOOTSTRAP_SCRIPT_PATH);
+        record.js = deduped;
+        injected = true;
+    }
+    if (!injected) {
+        throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "staged extension manifest 未包含 build/content-script.js，无法注入 bootstrap 脚本");
+    }
+    await writeFile(manifestPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+};
+const stageExtensionForRun = async (input) => {
+    const extensionSourceDir = await resolveExtensionSourceDir();
+    const stagedExtensionDir = join(input.profileDir, EXTENSION_STAGING_DIRNAME, sanitizePathSegment(input.runId));
+    const stagedExtensionParent = join(input.profileDir, EXTENSION_STAGING_DIRNAME);
+    await mkdir(stagedExtensionParent, { recursive: true });
+    await rm(stagedExtensionDir, { recursive: true, force: true });
+    await cp(extensionSourceDir, stagedExtensionDir, { recursive: true });
+    const bridgeSecret = randomUUID();
+    const bootstrapPath = join(stagedExtensionDir, EXTENSION_BOOTSTRAP_FILENAME);
+    const envelope = {
+        schemaVersion: 1,
+        runId: input.runId,
+        writtenAt: new Date().toISOString(),
+        extension_bootstrap: input.extensionBootstrap
+    };
+    await writeFile(bootstrapPath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
+    const bootstrapScriptPath = join(stagedExtensionDir, EXTENSION_BOOTSTRAP_SCRIPT_PATH);
+    const bootstrapScriptPayload = buildBridgeBootstrapPayload({
+        bridgeSecret,
+        extensionBootstrap: input.extensionBootstrap
+    });
+    await writeFile(bootstrapScriptPath, buildBootstrapScriptSource({
+        payload: bootstrapScriptPayload
+    }), "utf8");
+    await rewriteStagedContentScriptForRuntime({
+        stagedExtensionDir,
+        extensionSourceDir,
+        bridgeSecret,
+        extensionBootstrap: input.extensionBootstrap
+    });
+    await rewriteStagedMainWorldBridgeForRuntime({
+        stagedExtensionDir,
+        bridgeSecret
+    });
+    await injectBootstrapScriptIntoManifest(join(stagedExtensionDir, "manifest.json"));
+    return { stagedExtensionDir, bootstrapPath, bootstrapScriptPath };
+};
+const cleanupStagedExtensions = async (profileDir) => {
+    await rm(join(profileDir, EXTENSION_STAGING_DIRNAME), { recursive: true, force: true });
 };
 const shouldLaunchHeadless = (params) => params.headless !== false;
 const assertProcessAlive = (pid) => {
@@ -379,12 +923,21 @@ const launchProcess = async (supervisorScriptPath, executablePath, args, input) 
 export const launchBrowser = async (input) => {
     const executablePath = await resolveExecutablePath(input.params);
     const supervisorScriptPath = await resolveSupervisorScriptPath();
+    const startUrl = parseStartUrl(input.params);
+    const extensionBootstrap = resolveExtensionBootstrapPayload(input);
+    const extensionStaging = await stageExtensionForRun({
+        profileDir: input.profileDir,
+        runId: input.runId,
+        extensionBootstrap
+    });
     const launchArgs = [
         `--user-data-dir=${input.profileDir}`,
         "--profile-directory=Default",
         "--new-window",
         "--no-first-run",
-        "--no-default-browser-check"
+        "--no-default-browser-check",
+        `--disable-extensions-except=${extensionStaging.stagedExtensionDir}`,
+        `--load-extension=${extensionStaging.stagedExtensionDir}`
     ];
     if (input.proxyUrl !== null) {
         launchArgs.push(`--proxy-server=${input.proxyUrl}`);
@@ -393,11 +946,12 @@ export const launchBrowser = async (input) => {
     if (shouldHeadless) {
         launchArgs.push("--headless=new");
     }
-    launchArgs.push(parseStartUrl(input.params));
+    launchArgs.push(startUrl);
     const launchToken = randomUUID();
     const stateFilePath = getStateFilePath(input.profileDir);
     const controlFilePath = getControlFilePath(input.profileDir);
     let controllerPid = null;
+    let launchSucceeded = false;
     try {
         await mkdir(input.profileDir, { recursive: true });
         await deleteFileQuietly(stateFilePath);
@@ -416,6 +970,7 @@ export const launchBrowser = async (input) => {
             expectedControllerPid: launched.pid
         });
         await waitForBrowserReady(input.profileDir, state.browserPid, launched.launchedAtMs);
+        launchSucceeded = true;
         return {
             browserPath: executablePath,
             browserPid: state.browserPid,
@@ -440,6 +995,11 @@ export const launchBrowser = async (input) => {
             cause: error
         });
     }
+    finally {
+        if (!launchSucceeded) {
+            await cleanupStagedExtensions(input.profileDir);
+        }
+    }
 };
 export const shutdownBrowserSession = async (input) => {
     const timeoutMs = input.timeoutMs ?? SUPERVISOR_SHUTDOWN_TIMEOUT_MS;
@@ -458,6 +1018,7 @@ export const shutdownBrowserSession = async (input) => {
     if (!isProcessAlive(input.controllerPid)) {
         if (await terminateBrowserPid(state.browserPid, timeoutMs)) {
             await cleanupSupervisorArtifacts(input.profileDir);
+            await cleanupStagedExtensions(input.profileDir);
             return;
         }
         throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器控制进程已断开，且孤儿浏览器关闭超时");
@@ -473,6 +1034,7 @@ export const shutdownBrowserSession = async (input) => {
         const controllerAlive = isProcessAlive(input.controllerPid);
         const nextState = await readInstanceState(stateFilePath);
         if (!controllerAlive && nextState === null) {
+            await cleanupStagedExtensions(input.profileDir);
             return;
         }
         await sleep(100);
@@ -490,12 +1052,14 @@ export const shutdownBrowserSession = async (input) => {
         const controllerAlive = isProcessAlive(input.controllerPid);
         const nextState = await readInstanceState(stateFilePath);
         if (!controllerAlive && nextState === null) {
+            await cleanupStagedExtensions(input.profileDir);
             return;
         }
         await sleep(100);
     }
     if (await terminateBrowserPid(state.browserPid, 1_000)) {
         await cleanupSupervisorArtifacts(input.profileDir);
+        await cleanupStagedExtensions(input.profileDir);
         return;
     }
     throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器控制进程关闭超时");
