@@ -424,6 +424,68 @@ describe("browser-launcher", () => {
     });
   });
 
+  it("keeps startup trust run/session/runtime inside staged content script instead of page bootstrap", async () => {
+    const { scriptPath, logPath } = await createMockBrowserExecutable();
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-startup-trust-"));
+    tempDirs.push(profileDir);
+    process.env.WEBENVOY_BROWSER_PATH = scriptPath;
+    process.env.WEBENVOY_BROWSER_MOCK_LOG = logPath;
+    const extensionBootstrap = {
+      run_id: "run-launcher-startup-trust-001",
+      session_id: "nm-session-777",
+      fingerprint_runtime: {
+        profile: "profile-a",
+        source: "profile_meta",
+        fingerprint_patch_manifest: {
+          required_patches: ["audio_context"]
+        },
+        fingerprint_profile_bundle: {
+          ua: "unit-test-agent"
+        }
+      }
+    };
+
+    const launched = await launchBrowser({
+      command: "runtime.start",
+      profileDir,
+      proxyUrl: null,
+      runId: "run-launcher-startup-trust-001",
+      params: {},
+      extensionBootstrap
+    });
+
+    const launchArgs = parseLaunchArgs(await waitForLaunchLog(logPath));
+    const stagedExtensionPath = findArgValue(launchArgs, "--load-extension=");
+    expect(stagedExtensionPath).toBeTruthy();
+    const bootstrapScriptRaw = await readFile(
+      join(stagedExtensionPath as string, "build", EXTENSION_BOOTSTRAP_SCRIPT_FILENAME),
+      "utf8"
+    );
+    const bundledContentScriptRaw = await readFile(
+      join(stagedExtensionPath as string, "build", "content-script.js"),
+      "utf8"
+    );
+
+    expect(bootstrapScriptRaw).not.toContain('"session_id":"nm-session-777"');
+    expect(bootstrapScriptRaw).not.toContain('"run_id":"run-launcher-startup-trust-001"');
+    expect(bootstrapScriptRaw).not.toContain("unit-test-agent");
+    expect(bundledContentScriptRaw).toContain(
+      'const STAGED_STARTUP_TRUST_RUN_ID = "run-launcher-startup-trust-001";'
+    );
+    expect(bundledContentScriptRaw).toContain(
+      'const STAGED_STARTUP_TRUST_SESSION_ID = "nm-session-777";'
+    );
+    expect(bundledContentScriptRaw).toContain("const STAGED_STARTUP_TRUST_FINGERPRINT_RUNTIME = {");
+    expect(bundledContentScriptRaw).toContain('"profile":"profile-a"');
+    expect(bundledContentScriptRaw).toContain('"required_patches":["audio_context"]');
+
+    await shutdownBrowserSession({
+      profileDir,
+      controllerPid: launched.controllerPid,
+      runId: "run-launcher-startup-trust-001"
+    });
+  });
+
   it("generates unique bridge secret for each staged run", async () => {
     const { scriptPath: scriptPathA, logPath: logPathA } = await createMockBrowserExecutable();
     const { scriptPath: scriptPathB, logPath: logPathB } = await createMockBrowserExecutable();

@@ -1992,7 +1992,7 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("keeps trusted fingerprint context after disconnect/recovery in the same session", async () => {
+  it("requires re-attestation after disconnect/recovery even in the same session", async () => {
     const firstPort = createMockPort();
     const secondPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort, secondPort]);
@@ -2031,6 +2031,53 @@ describe("extension service worker recovery contract", () => {
       sessionId: "nm-session-001"
     });
     await Promise.resolve();
+
+    const firstAttemptId = `${liveRunId}-blocked-before-reprime`;
+    secondPort.onMessageListeners[0]?.({
+      id: firstAttemptId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: liveRunId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const blockedDispatch = chromeApi.tabs.sendMessage.mock.calls.find(
+      (call) => (call[1] as { id?: string } | undefined)?.id === firstAttemptId
+    );
+    expect(blockedDispatch).toBeUndefined();
+
+    const blocked = secondPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === firstAttemptId);
+    expect(blocked?.status).toBe("error");
+    const blockedPayload = asRecord(blocked?.payload) ?? {};
+    const blockedConsumerGateResult = asRecord(blockedPayload.consumer_gate_result);
+    expect(blockedConsumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(blockedConsumerGateResult?.fingerprint_reason_codes).toEqual([
+      "FINGERPRINT_CONTEXT_UNTRUSTED"
+    ]);
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: `${startupRunId}-reprime`,
+      profile,
+      fingerprintContext,
+      sessionId: "nm-session-001"
+    });
+    chromeApi.tabs.sendMessage.mockClear();
 
     secondPort.onMessageListeners[0]?.({
       id: liveRunId,

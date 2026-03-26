@@ -222,8 +222,8 @@ const buildTrustedFingerprintContextKey = (profile, sessionId) => `${profile}::$
 const serializeFingerprintRuntimeContext = (fingerprintRuntime) => JSON.stringify(fingerprintRuntime);
 const isFingerprintRuntimeContextEquivalent = (left, right) => serializeFingerprintRuntimeContext(left) === serializeFingerprintRuntimeContext(right);
 const TRUST_INVALIDATION_COMMANDS = new Set(["runtime.stop", "runtime.start", "runtime.login"]);
-// Trust must be primed by commands that actually traverse the extension bridge.
-const TRUST_PRIMING_COMMANDS = new Set(["runtime.start", "runtime.login", "runtime.status"]);
+// Only explicit runtime.ping may prime trust through the bridge; lifecycle commands are local.
+const TRUST_PRIMING_COMMANDS = new Set(["runtime.ping"]);
 export class BackgroundRelay {
     contentScript;
     #listeners = new Set();
@@ -523,6 +523,7 @@ class ChromeBackgroundBridge {
         this.#pendingHandshakeId = null;
         this.#pendingHeartbeatId = null;
         this.#missedHeartbeatCount = 0;
+        this.#clearTrustedFingerprintContexts();
         this.#failAllPending({
             code: "ERR_TRANSPORT_DISCONNECTED",
             message

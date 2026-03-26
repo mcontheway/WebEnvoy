@@ -684,8 +684,43 @@ const replaceSourceToken = (input: {
 const rewriteStagedContentScriptSourceForBridge = (input: {
   source: string;
   bridgeSecret: string;
+  extensionBootstrap: Record<string, unknown> | null;
 }): string => {
   let rewritten = input.source;
+  const startupTrustRuntime = asRecord(input.extensionBootstrap?.fingerprint_runtime ?? null);
+  const startupTrustRunId =
+    typeof input.extensionBootstrap?.run_id === "string"
+      ? input.extensionBootstrap.run_id
+      : typeof input.extensionBootstrap?.runId === "string"
+        ? input.extensionBootstrap.runId
+        : null;
+  const startupTrustSessionId =
+    typeof input.extensionBootstrap?.session_id === "string"
+      ? input.extensionBootstrap.session_id
+      : typeof input.extensionBootstrap?.sessionId === "string"
+        ? input.extensionBootstrap.sessionId
+        : null;
+  rewritten = replaceSourceToken({
+    source: rewritten,
+    target: "const STAGED_STARTUP_TRUST_RUN_ID = undefined;",
+    replacement: `const STAGED_STARTUP_TRUST_RUN_ID = ${JSON.stringify(startupTrustRunId)};`,
+    errorMessage:
+      "staged content-script 缺少 startup trust run_id 锚点，无法注入同步 trust 常量"
+  });
+  rewritten = replaceSourceToken({
+    source: rewritten,
+    target: "const STAGED_STARTUP_TRUST_SESSION_ID = undefined;",
+    replacement: `const STAGED_STARTUP_TRUST_SESSION_ID = ${JSON.stringify(startupTrustSessionId)};`,
+    errorMessage:
+      "staged content-script 缺少 startup trust session_id 锚点，无法注入同步 trust 常量"
+  });
+  rewritten = replaceSourceToken({
+    source: rewritten,
+    target: "const STAGED_STARTUP_TRUST_FINGERPRINT_RUNTIME = undefined;",
+    replacement: `const STAGED_STARTUP_TRUST_FINGERPRINT_RUNTIME = ${JSON.stringify(startupTrustRuntime)};`,
+    errorMessage:
+      "staged content-script 缺少 startup trust fingerprint_runtime 锚点，无法注入同步 trust 常量"
+  });
   rewritten = replaceSourceToken({
     source: rewritten,
     target: "  installMainWorldEventChannelSecret(bootstrapInput.mainWorldSecret);",
@@ -889,6 +924,7 @@ const rewriteStagedContentScriptForRuntime = async (input: {
   stagedExtensionDir: string;
   extensionSourceDir: string;
   bridgeSecret: string;
+  extensionBootstrap: Record<string, unknown> | null;
 }): Promise<void> => {
   const sharedSourceDir = await resolveSharedSourceDir(input.extensionSourceDir);
   const bundleSource = await buildStagedContentScriptBundle({
@@ -897,7 +933,8 @@ const rewriteStagedContentScriptForRuntime = async (input: {
   });
   const rewrittenBundleSource = rewriteStagedContentScriptSourceForBridge({
     source: bundleSource,
-    bridgeSecret: input.bridgeSecret
+    bridgeSecret: input.bridgeSecret,
+    extensionBootstrap: input.extensionBootstrap
   });
   await writeFile(
     join(input.stagedExtensionDir, CONTENT_SCRIPT_ENTRY_PATH),
@@ -1002,7 +1039,8 @@ const stageExtensionForRun = async (input: {
   await rewriteStagedContentScriptForRuntime({
     stagedExtensionDir,
     extensionSourceDir,
-    bridgeSecret
+    bridgeSecret,
+    extensionBootstrap: input.extensionBootstrap
   });
   await rewriteStagedMainWorldBridgeForRuntime({
     stagedExtensionDir,

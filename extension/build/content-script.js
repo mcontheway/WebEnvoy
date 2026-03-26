@@ -6,6 +6,9 @@ const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payl
 const EXTENSION_BOOTSTRAP_FILENAME = "__webenvoy_fingerprint_bootstrap.json";
 const STARTUP_TRUST_SOURCE = "extension_bootstrap_context";
 const MAIN_WORLD_SECRET_NAMESPACE = "webenvoy.main_world.secret.v1";
+const STAGED_STARTUP_TRUST_RUN_ID = undefined;
+const STAGED_STARTUP_TRUST_SESSION_ID = undefined;
+const STAGED_STARTUP_TRUST_FINGERPRINT_RUNTIME = undefined;
 const normalizeForwardMessage = (request) => ({
     kind: "forward",
     id: request.id,
@@ -102,8 +105,11 @@ const deriveMainWorldSecretFromBootstrapPayload = (value) => {
 const resolveBootstrapFingerprintContext = (value) => {
     const mainWorldSecret = deriveMainWorldSecretFromBootstrapPayload(value);
     const record = asRecord(value);
-    const runId = asNonEmptyString(record?.run_id ?? record?.runId);
-    const sessionId = asNonEmptyString(record?.session_id ?? record?.sessionId);
+    const stagedRunId = asNonEmptyString(STAGED_STARTUP_TRUST_RUN_ID);
+    const stagedSessionId = asNonEmptyString(STAGED_STARTUP_TRUST_SESSION_ID);
+    const stagedFingerprintRuntime = ensureFingerprintRuntimeContext(STAGED_STARTUP_TRUST_FINGERPRINT_RUNTIME);
+    const runId = asNonEmptyString(record?.run_id ?? record?.runId) ?? stagedRunId;
+    const sessionId = asNonEmptyString(record?.session_id ?? record?.sessionId) ?? stagedSessionId;
     const direct = ensureFingerprintRuntimeContext(value);
     if (direct) {
         return {
@@ -115,14 +121,14 @@ const resolveBootstrapFingerprintContext = (value) => {
     }
     if (!record) {
         return {
-            fingerprintRuntime: null,
-            runId: null,
-            sessionId: null,
+            fingerprintRuntime: stagedFingerprintRuntime,
+            runId,
+            sessionId,
             mainWorldSecret: null
         };
     }
     return {
-        fingerprintRuntime: ensureFingerprintRuntimeContext(record.fingerprint_runtime ?? null),
+        fingerprintRuntime: ensureFingerprintRuntimeContext(record.fingerprint_runtime ?? null) ?? stagedFingerprintRuntime,
         runId,
         sessionId,
         mainWorldSecret
