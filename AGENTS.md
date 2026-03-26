@@ -12,6 +12,7 @@
 - 当前集成策略：默认以 CLI 作为第一集成面；暂不把 SDK / API 作为当前主线交付
 - 架构红线：浏览器内执行是唯一 HTTP 出口；不缝合外部异构爬虫为核心运行时
 - 禁止直推主分支；提交必须用中文 Conventional Commits；主干只用 Squash Merge
+- 日常合并禁止直接使用 `gh pr merge`；统一通过 `bash scripts/merge-pr.sh <pr-number>`
 - fresh clone 或新 worktree 首次进入仓库后，先执行 `bash scripts/setup-git-hooks.sh` 启用本地提交钩子
 - 单测放同级 `__tests__/`，E2E/集成放根目录 `tests/`
 - 本地不保留 backlog / sprint 进度文件，GitHub Issues / Projects 是唯一进度真理
@@ -205,6 +206,15 @@ spec review 的执行约束：
 任何合并前必须先 review，不能因为测试通过就跳过判断。
 在进行代码审查时，请始终遵循 [code_review.md](./code_review.md) 中的标准。
 高风险改动、审查结论判定、合并门禁与本机 review / merge 流程，统一以 [code_review.md](./code_review.md) 为准。
+
+合并流程硬约束（适用于本仓库当前 private free 背景）：
+
+1. 禁止直接执行 `gh pr merge` 作为日常合并路径。
+2. 合并必须通过 `bash scripts/merge-pr.sh <pr-number>` 触发。
+3. merge 前必须同时满足：
+   - latest guardian verdict 为 `APPROVE`
+   - GitHub checks 全绿（不是只看 required checks）
+4. 在 private free repo 下，不得把 GitHub Required Checks 视为唯一硬门禁；必须同时执行本地脚本门禁。
 
 ## Review guidelines
 

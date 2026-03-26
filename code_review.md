@@ -180,6 +180,7 @@ Findings 的写法要求：
 - 合并门禁回答“当前 PR 是否满足实际合入条件”
 
 默认情况下，GitHub branch protection / ruleset 应承担硬门禁职责；补充脚本用于结构化判断与最终裁决，而不是替代 GitHub 原生门禁。
+在 private free repo 场景下，GitHub Required Checks 配置能力可能受限，不得把 `--required` 结果当作唯一硬门禁；必须同时执行本地 merge wrapper 门禁。
 
 合并前必须同时满足以下条件：
 
@@ -187,7 +188,9 @@ Findings 的写法要求：
 - review 已完成
 - 审查结论为 `APPROVE`
 - `safe_to_merge = true`
-- GitHub Required Checks 全绿
+- 禁止将 GitHub UI merge 或裸 `gh pr merge` 作为日常合并路径
+- 实际合并只能通过 `bash scripts/merge-pr.sh <pr-number>` 触发
+- GitHub checks 全绿（不只看 Required Checks）
 - 对普通或高风险 PR，已基于最新 head 成功执行本地 `scripts/pr-guardian.sh review <pr-number>`，且未出现新的阻断项
 - 若 PR head、目标基线或 Required Checks 状态发生变化，必须重新执行受影响的本地审查或验证
 - 目标分支允许按仓库策略合入
