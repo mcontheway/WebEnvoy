@@ -286,6 +286,36 @@ test_merge_if_safe_finds_head_review_across_paginated_reviews() {
   assert_file_contains "${MOCK_GH_CALLS_LOG}" "--paginate"
 }
 
+test_merge_if_safe_rejects_review_from_old_head() {
+  setup_merge_if_safe_fixture \
+    "merge-review-old-head" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "older-head-sha" \
+    "0"
+
+  local err_file="${TMP_DIR}/merge.err"
+  assert_fail merge_if_safe 274 0 2>"${err_file}"
+  assert_file_contains "${err_file}" "期望状态: APPROVED"
+  assert_file_empty "${MOCK_GH_MERGE_LOG}"
+}
+
+test_merge_if_safe_uses_latest_review_state_on_same_head() {
+  setup_merge_if_safe_fixture \
+    "merge-review-latest-state-same-head" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "head-sha-123" \
+    "0"
+
+  printf '%s\n' '[[{"id":22,"user":{"login":"review-bot"},"commit_id":"head-sha-123","state":"APPROVED","submitted_at":"2026-03-26T10:00:00Z"},{"id":11,"user":{"login":"review-bot"},"commit_id":"head-sha-123","state":"CHANGES_REQUESTED","submitted_at":"2026-03-26T09:00:00Z"}]]' > "${MOCK_GH_REVIEWS_JSON}"
+
+  assert_pass merge_if_safe 274 0
+  assert_file_contains "${MOCK_GH_MERGE_LOG}" "--match-head-commit head-sha-123"
+}
+
 test_post_review_fails_when_head_changes_after_review_snapshot() {
   setup_merge_if_safe_fixture \
     "post-review-head-drift" \
@@ -432,6 +462,24 @@ test_post_review_self_review_uses_review_event_and_merge_gate_uses_reviews_api()
   assert_file_contains "${MOCK_GH_MERGE_LOG}" "--match-head-commit head-sha-123"
 }
 
+test_merge_if_safe_rejects_comment_marker_without_formal_review() {
+  setup_merge_if_safe_fixture \
+    "merge-review-comment-marker-only" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "head-sha-123" \
+    "0"
+
+  printf '%s\n' '[]' > "${MOCK_GH_REVIEWS_JSON}"
+  printf '%s\n' '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]' > "${MOCK_GH_CHECKS_JSON}"
+
+  local err_file="${TMP_DIR}/merge.err"
+  assert_fail merge_if_safe 274 0 2>"${err_file}"
+  assert_file_contains "${err_file}" "缺少 review-bot 的已完成 GitHub review"
+  assert_file_empty "${MOCK_GH_MERGE_LOG}"
+}
+
 main() {
   setup_mock_gh
   load_guardian_without_main
@@ -444,12 +492,15 @@ main() {
   test_merge_if_safe_without_post_review_respects_comment_contract
   test_post_review_self_review_uses_review_event_and_merge_gate_uses_reviews_api
   test_merge_if_safe_finds_head_review_across_paginated_reviews
+  test_merge_if_safe_rejects_review_from_old_head
+  test_merge_if_safe_uses_latest_review_state_on_same_head
   test_post_review_fails_when_head_changes_after_review_snapshot
   test_merge_if_safe_fails_when_head_changes_after_review_snapshot
   test_merge_if_safe_treats_behind_as_retryable_wait_state
   test_merge_if_safe_treats_unknown_as_retryable_wait_state
   test_merge_if_safe_retries_until_review_state_is_visible
   test_merge_if_safe_rejects_when_latest_review_state_regresses_on_same_head
+  test_merge_if_safe_rejects_comment_marker_without_formal_review
 
   echo "pr-guardian merge-guard semantics test passed."
 }

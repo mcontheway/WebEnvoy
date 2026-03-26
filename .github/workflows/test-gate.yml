@@ -42,22 +42,28 @@ jobs:
           guardrail_only="yes"
           guardrail_changed="no"
           workflow_changed="no"
+          merge_guard_validation_required="no"
           if [ "${#changed_files[@]}" -eq 0 ]; then
             process_only="no"
             guardrail_only="no"
             guardrail_changed="no"
+            merge_guard_validation_required="no"
           else
             for file in "${changed_files[@]}"; do
               case "$file" in
                 .github/workflows/*)
                   workflow_changed="yes"
+                  process_only="no"
+                  guardrail_changed="yes"
+                  merge_guard_validation_required="yes"
                   ;;
               esac
 
               case "$file" in
                 "scripts/pr-guardian.sh"|\
                 "scripts/merge-pr.sh"|\
-                tests/pr-guardian*.test.sh)
+                "tests/pr-guardian.merge-guard.test.sh")
+                  merge_guard_validation_required="yes"
                   ;;
                 *)
                   process_only="no"
@@ -83,6 +89,7 @@ jobs:
             echo "guardrail_only=$guardrail_only"
             echo "guardrail_changed=$guardrail_changed"
             echo "workflow_changed=$workflow_changed"
+            echo "merge_guard_validation_required=$merge_guard_validation_required"
             echo "changed_count=${#changed_files[@]}"
           } >> "$GITHUB_OUTPUT"
 
@@ -91,10 +98,11 @@ jobs:
           echo "process_only=$process_only"
           echo "guardrail_only=$guardrail_only"
           echo "guardrail_changed=$guardrail_changed"
+          echo "merge_guard_validation_required=$merge_guard_validation_required"
 
       - name: Setup Go for Workflow Lint
         if: ${{ steps.change-scope.outputs.workflow_changed == 'yes' }}
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.22.5'
 
@@ -140,7 +148,7 @@ jobs:
           "$GOBIN/actionlint" -color "${unique_workflow_files[@]}"
 
       - name: Run Guardrail Fixed Validation
-        if: ${{ steps.change-scope.outputs.guardrail_changed == 'yes' }}
+        if: ${{ steps.change-scope.outputs.merge_guard_validation_required == 'yes' }}
         run: |
           set -euo pipefail
           echo "Guardrail-related change detected, running merge-guard checks."

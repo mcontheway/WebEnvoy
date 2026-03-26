@@ -239,12 +239,17 @@ head_has_expected_review_state() {
         .[][]
         | select((.user.login // "") == $reviewer)
         | select((.commit_id // "") == $head_sha)
-        | select((.state // "") | IN("APPROVED", "CHANGES_REQUESTED", "COMMENTED"))
+        | select((.state // "") | IN("APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"))
       ]
       | if length == 0 then
           false
         else
-          (last | (.state // "") == $expected_state)
+          (
+            to_entries
+            | sort_by([(.value.submitted_at // ""), (.value.id // 0), .key])
+            | last
+            | (.value.state // "")
+          ) == $expected_state
         end
     ' "${reviews_file}" >/dev/null 2>&1
 }
