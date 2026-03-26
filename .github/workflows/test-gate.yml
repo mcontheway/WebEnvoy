@@ -43,11 +43,13 @@ jobs:
           guardrail_changed="no"
           workflow_changed="no"
           merge_guard_validation_required="no"
+          governance_docs_only="yes"
           if [ "${#changed_files[@]}" -eq 0 ]; then
             process_only="no"
             guardrail_only="no"
             guardrail_changed="no"
             merge_guard_validation_required="no"
+            governance_docs_only="no"
           else
             for file in "${changed_files[@]}"; do
               case "$file" in
@@ -56,6 +58,7 @@ jobs:
                   process_only="no"
                   guardrail_changed="yes"
                   merge_guard_validation_required="yes"
+                  governance_docs_only="no"
                   ;;
               esac
 
@@ -64,6 +67,7 @@ jobs:
                 "scripts/merge-pr.sh"|\
                 "tests/pr-guardian.merge-guard.test.sh")
                   merge_guard_validation_required="yes"
+                  governance_docs_only="no"
                   ;;
                 *)
                   process_only="no"
@@ -81,6 +85,16 @@ jobs:
                   guardrail_only="no"
                   ;;
               esac
+
+              case "$file" in
+                "AGENTS.md"|\
+                "code_review.md"|\
+                "docs/dev/AGENTS.md")
+                  ;;
+                *)
+                  governance_docs_only="no"
+                  ;;
+              esac
             done
           fi
 
@@ -90,6 +104,7 @@ jobs:
             echo "guardrail_changed=$guardrail_changed"
             echo "workflow_changed=$workflow_changed"
             echo "merge_guard_validation_required=$merge_guard_validation_required"
+            echo "governance_docs_only=$governance_docs_only"
             echo "changed_count=${#changed_files[@]}"
           } >> "$GITHUB_OUTPUT"
 
@@ -99,6 +114,7 @@ jobs:
           echo "guardrail_only=$guardrail_only"
           echo "guardrail_changed=$guardrail_changed"
           echo "merge_guard_validation_required=$merge_guard_validation_required"
+          echo "governance_docs_only=$governance_docs_only"
 
       - name: Setup Go for Workflow Lint
         if: ${{ steps.change-scope.outputs.workflow_changed == 'yes' }}
@@ -164,13 +180,13 @@ jobs:
           bash scripts/merge-pr.sh --help >/dev/null
 
       - name: Setup Node.js
-        if: ${{ steps.change-scope.outputs.guardrail_only != 'yes' && hashFiles('package.json') != '' }}
+        if: ${{ steps.change-scope.outputs.guardrail_only != 'yes' && steps.change-scope.outputs.governance_docs_only != 'yes' && hashFiles('package.json') != '' }}
         uses: actions/setup-node@v4
         with:
           node-version: '23.9.0'
 
       - name: Install Dependencies
-        if: ${{ steps.change-scope.outputs.guardrail_only != 'yes' && hashFiles('package.json') != '' }}
+        if: ${{ steps.change-scope.outputs.guardrail_only != 'yes' && steps.change-scope.outputs.governance_docs_only != 'yes' && hashFiles('package.json') != '' }}
         run: |
           set -euo pipefail
           if [ -f package-lock.json ]; then
@@ -183,7 +199,7 @@ jobs:
 
       - name: Detect Test Plan
         id: detect-tests
-        if: ${{ steps.change-scope.outputs.guardrail_only != 'yes' }}
+        if: ${{ steps.change-scope.outputs.guardrail_only != 'yes' && steps.change-scope.outputs.governance_docs_only != 'yes' }}
         run: |
           set -euo pipefail
 
@@ -252,20 +268,25 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Run Unit Tests
-        if: ${{ steps.change-scope.outputs.guardrail_only != 'yes' && steps.detect-tests.outputs.unit_cmd != '' }}
+        if: ${{ steps.change-scope.outputs.guardrail_only != 'yes' && steps.change-scope.outputs.governance_docs_only != 'yes' && steps.detect-tests.outputs.unit_cmd != '' }}
         run: |
           set -euo pipefail
           echo "Running unit tests with: ${{ steps.detect-tests.outputs.unit_cmd }}"
           ${{ steps.detect-tests.outputs.unit_cmd }}
 
       - name: Run E2E/Integration Tests
-        if: ${{ steps.change-scope.outputs.guardrail_only != 'yes' && steps.detect-tests.outputs.integration_cmd != '' && steps.detect-tests.outputs.integration_cmd != steps.detect-tests.outputs.unit_cmd }}
+        if: ${{ steps.change-scope.outputs.guardrail_only != 'yes' && steps.change-scope.outputs.governance_docs_only != 'yes' && steps.detect-tests.outputs.integration_cmd != '' && steps.detect-tests.outputs.integration_cmd != steps.detect-tests.outputs.unit_cmd }}
         run: |
           set -euo pipefail
           echo "Running integration tests with: ${{ steps.detect-tests.outputs.integration_cmd }}"
           ${{ steps.detect-tests.outputs.integration_cmd }}
 
       - name: No Tests Declared
-        if: ${{ steps.change-scope.outputs.guardrail_only != 'yes' && (steps.detect-tests.outputs.has_package == 'no' || (steps.detect-tests.outputs.unit_dir == 'no' && steps.detect-tests.outputs.integration_dir == 'no')) }}
+        if: ${{ steps.change-scope.outputs.guardrail_only != 'yes' && steps.change-scope.outputs.governance_docs_only != 'yes' && (steps.detect-tests.outputs.has_package == 'no' || (steps.detect-tests.outputs.unit_dir == 'no' && steps.detect-tests.outputs.integration_dir == 'no')) }}
         run: |
           echo "No package-managed tests detected for this repository state."
+
+      - name: Skip Full Runtime Tests For Governance Docs
+        if: ${{ steps.change-scope.outputs.governance_docs_only == 'yes' }}
+        run: |
+          echo "Governance/process docs-only PR detected; runtime and integration tests are intentionally skipped."
