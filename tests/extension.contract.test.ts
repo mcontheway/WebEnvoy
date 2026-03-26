@@ -9,6 +9,8 @@ const manifestPath = path.join(extensionRoot, "manifest.json");
 const backgroundBuildPath = path.join(extensionRoot, "build", "background.js");
 const mainWorldBridgeBuildPath = path.join(extensionRoot, "build", "main-world-bridge.js");
 const contentScriptBuildPath = path.join(extensionRoot, "build", "content-script.js");
+const contentScriptHandlerBuildPath = path.join(extensionRoot, "build", "content-script-handler.js");
+const fingerprintProfileSharedPath = path.join(extensionRoot, "shared", "fingerprint-profile.js");
 const expectedMainWorldBridgeMatches = [
   "https://www.xiaohongshu.com/*",
   "https://creator.xiaohongshu.com/*",
@@ -51,6 +53,14 @@ describe("extension build contract", () => {
     expect(fs.existsSync(backgroundBuildPath)).toBe(true);
     expect(fs.existsSync(mainWorldBridgeBuildPath)).toBe(true);
     expect(fs.existsSync(contentScriptBuildPath)).toBe(true);
+    expect(fs.existsSync(contentScriptHandlerBuildPath)).toBe(true);
+    expect(fs.existsSync(fingerprintProfileSharedPath)).toBe(true);
+  });
+
+  it("keeps extension build entry imports resolvable in node module loading", async () => {
+    await expect(import(backgroundBuildPath)).resolves.toBeDefined();
+    await expect(import(contentScriptBuildPath)).resolves.toBeDefined();
+    await expect(import(contentScriptHandlerBuildPath)).resolves.toBeDefined();
   });
 
   it("keeps background build artifact aligned with xhs gate contract markers", () => {
