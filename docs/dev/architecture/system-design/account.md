@@ -138,7 +138,7 @@ profiles/
 ┌──────────────┐
 │   启动中     │  校验 profile 绑定的持久扩展身份，并等待 Extension Background 建立 Native Messaging 连接
 └──────┬───────┘
-       │ 连接建立成功 + 本次 runtime bootstrap 装载完成
+       │ 连接建立成功 + 收到本次 runtime bootstrap 成功确认
        ▼
 ┌──────────────┐          ┌──────────────┐
 │    就绪      │◄─────────│   执行完毕   │
@@ -165,7 +165,7 @@ profiles/
 | 触发来源 | 目标状态 |
 |---|---|
 | CLI 收到 `start` 命令 | 启动中 |
-| Native Messaging 握手成功，且 `runtime_bootstrap_envelope` 已绑定到当前 `(profile, session_id, run_id)` | 就绪 |
+| Native Messaging 握手成功，且 `runtime.bootstrap` 已对当前 `(profile, extension_id, session_id, run_id)` 返回成功确认 | 就绪 |
 | 收到任何操作命令 | 执行中 |
 | 操作完成（成功/失败） | 就绪 |
 | 平台返回 471/461 或弹出风控弹窗 | 已暂停 |
@@ -174,4 +174,4 @@ profiles/
 | 30s 内重连成功 | 就绪 |
 | 30s 超时未重连 | 通知 AI 人工介入 |
 
-> **心跳机制说明**：MV3 Service Worker 会在空闲约 30 秒后被 Chrome 强制休眠，导致 Native Messaging 静默断开。Extension Background 每 20 秒向 CLI 发送 `__ping__`，CLI 立即回复 `__pong__`。CLI 侧维护心跳计时器，超时（连续 2 次无响应）时主动触发断连流程，进入「异常断开」状态并尝试重连。心跳恢复的是已安装扩展与 Native Host 的连接活性；run/session 级 `runtime_bootstrap_envelope` 仍需按当前运行态单独校验。心跳协议详见 [communication.md](./communication.md)。
+> **心跳机制说明**：MV3 Service Worker 会在空闲约 30 秒后被 Chrome 强制休眠，导致 Native Messaging 静默断开。Extension Background 每 20 秒向 CLI 发送 `__ping__`，CLI 立即回复 `__pong__`。CLI 侧维护心跳计时器，超时（连续 2 次无响应）时主动触发断连流程，进入「异常断开」状态并尝试重连。心跳恢复的是已安装扩展与 Native Host 的连接活性；run/session 级 `runtime_bootstrap_envelope` 是否仍然有效，必须按 `runtime.bootstrap` 的成功确认重新判定。心跳协议详见 [communication.md](./communication.md)。
