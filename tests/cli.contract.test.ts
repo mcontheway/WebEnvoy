@@ -2772,6 +2772,60 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  it("keeps runtime.start/status/stop available when using shell mock browser fixture path", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const runtimeEnv = {
+      WEBENVOY_BROWSER_PATH: mockBrowserPath
+    };
+
+    const start = runCli(
+      ["runtime.start", "--profile", "fixture_version_profile", "--run-id", "run-contract-fixture-001"],
+      runtimeCwd,
+      runtimeEnv
+    );
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    expect(startBody).toMatchObject({
+      command: "runtime.start",
+      status: "success",
+      summary: {
+        profile: "fixture_version_profile",
+        browserState: "ready",
+        lockHeld: true
+      }
+    });
+
+    const status = runCli(["runtime.status", "--profile", "fixture_version_profile"], runtimeCwd, runtimeEnv);
+    expect(status.status).toBe(0);
+    const statusBody = parseSingleJsonLine(status.stdout);
+    expect(statusBody).toMatchObject({
+      command: "runtime.status",
+      status: "success",
+      summary: {
+        profile: "fixture_version_profile",
+        browserState: "ready",
+        lockHeld: true
+      }
+    });
+
+    const stop = runCli(
+      ["runtime.stop", "--profile", "fixture_version_profile", "--run-id", "run-contract-fixture-001"],
+      runtimeCwd,
+      runtimeEnv
+    );
+    expect(stop.status).toBe(0);
+    const stopBody = parseSingleJsonLine(stop.stdout);
+    expect(stopBody).toMatchObject({
+      command: "runtime.stop",
+      status: "success",
+      summary: {
+        profile: "fixture_version_profile",
+        browserState: "absent",
+        lockHeld: false
+      }
+    });
+  });
+
   it("keeps logging_in before confirmation and persists lastLoginAt after confirmation", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const login = runCli(
