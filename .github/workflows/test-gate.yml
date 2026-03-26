@@ -167,11 +167,13 @@ jobs:
           set -euo pipefail
 
           if [ ! -f package.json ]; then
-            echo "has_package=no" >> "$GITHUB_OUTPUT"
-            echo "unit_dir=no" >> "$GITHUB_OUTPUT"
-            echo "integration_dir=no" >> "$GITHUB_OUTPUT"
-            echo "unit_cmd=" >> "$GITHUB_OUTPUT"
-            echo "integration_cmd=" >> "$GITHUB_OUTPUT"
+            {
+              echo "has_package=no"
+              echo "unit_dir=no"
+              echo "integration_dir=no"
+              echo "unit_cmd="
+              echo "integration_cmd="
+            } >> "$GITHUB_OUTPUT"
             echo "No package.json found. Skipping test planning."
             exit 0
           fi
