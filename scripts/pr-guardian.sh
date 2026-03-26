@@ -417,8 +417,16 @@ merge_if_safe() {
   [[ "${verdict}" == "APPROVE" ]] || die "Codex 审查未批准，拒绝合并。"
   [[ "${safe_to_merge}" == "true" ]] || die "审查结果认为当前 PR 不安全，拒绝合并。"
   [[ "${mergeable}" == "MERGEABLE" ]] || die "GitHub 判定当前 PR 不可合并，状态为: ${mergeable}"
-  [[ "${merge_state_status}" == "CLEAN" || "${merge_state_status}" == "HAS_HOOKS" || "${merge_state_status}" == "UNSTABLE" ]] \
-    || die "GitHub mergeStateStatus 阻断合并，状态为: ${merge_state_status}"
+  case "${merge_state_status}" in
+    CLEAN|HAS_HOOKS|UNSTABLE)
+      ;;
+    BEHIND|UNKNOWN)
+      die "GitHub mergeStateStatus=${merge_state_status}，当前属于暂不可合并状态（可重跑/等待后重试），请稍后重跑 guardian。"
+      ;;
+    *)
+      die "GitHub mergeStateStatus 阻断合并，状态为: ${merge_state_status}"
+      ;;
+  esac
 
   if ! head_has_expected_review_state "${pr_number}" "${HEAD_SHA}" "${current_user}" "${expected_review_state}"; then
     die "当前 HEAD (${HEAD_SHA}) 缺少 ${current_user} 的已完成 GitHub review（期望状态: ${expected_review_state}），拒绝合并。"

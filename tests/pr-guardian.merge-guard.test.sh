@@ -277,6 +277,42 @@ test_merge_if_safe_fails_when_head_changes_after_review_snapshot() {
   assert_file_empty "${MOCK_GH_MERGE_LOG}"
 }
 
+test_merge_if_safe_treats_behind_as_retryable_wait_state() {
+  setup_merge_if_safe_fixture \
+    "merge-state-behind" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "head-sha-123" \
+    "0"
+
+  printf '%s\n' '{"baseRefName":"main","headRefOid":"head-sha-123","mergeable":"MERGEABLE","mergeStateStatus":"BEHIND","isDraft":false}' > "${MOCK_GH_PR_VIEW_JSON}"
+
+  local err_file="${TMP_DIR}/merge.err"
+  assert_fail merge_if_safe 274 0 2>"${err_file}"
+  assert_file_contains "${err_file}" "mergeStateStatus=BEHIND"
+  assert_file_contains "${err_file}" "可重跑/等待后重试"
+  assert_file_empty "${MOCK_GH_MERGE_LOG}"
+}
+
+test_merge_if_safe_treats_unknown_as_retryable_wait_state() {
+  setup_merge_if_safe_fixture \
+    "merge-state-unknown" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "head-sha-123" \
+    "0"
+
+  printf '%s\n' '{"baseRefName":"main","headRefOid":"head-sha-123","mergeable":"MERGEABLE","mergeStateStatus":"UNKNOWN","isDraft":false}' > "${MOCK_GH_PR_VIEW_JSON}"
+
+  local err_file="${TMP_DIR}/merge.err"
+  assert_fail merge_if_safe 274 0 2>"${err_file}"
+  assert_file_contains "${err_file}" "mergeStateStatus=UNKNOWN"
+  assert_file_contains "${err_file}" "可重跑/等待后重试"
+  assert_file_empty "${MOCK_GH_MERGE_LOG}"
+}
+
 main() {
   setup_mock_gh
   load_guardian_without_main
@@ -289,6 +325,8 @@ main() {
   test_merge_if_safe_finds_head_review_across_paginated_reviews
   test_post_review_fails_when_head_changes_after_review_snapshot
   test_merge_if_safe_fails_when_head_changes_after_review_snapshot
+  test_merge_if_safe_treats_behind_as_retryable_wait_state
+  test_merge_if_safe_treats_unknown_as_retryable_wait_state
 
   echo "pr-guardian merge-guard semantics test passed."
 }

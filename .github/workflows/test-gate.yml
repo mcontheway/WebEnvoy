@@ -22,7 +22,21 @@ jobs:
         run: |
           set -euo pipefail
 
-          mapfile -t changed_files < <(git diff --name-only --diff-filter=ACMR "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
+          mapfile -t changed_entries < <(git diff --name-status --find-renames=50% "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
+          changed_files=()
+
+          for entry in "${changed_entries[@]}"; do
+            IFS=$'\t' read -r status path_a path_b <<< "$entry"
+            case "$status" in
+              R*|C*)
+                # Keep both sides to correctly classify rename/copy between areas.
+                changed_files+=("$path_a" "$path_b")
+                ;;
+              *)
+                changed_files+=("$path_a")
+                ;;
+            esac
+          done
 
           process_only="yes"
           if [ "${#changed_files[@]}" -eq 0 ]; then
@@ -32,10 +46,9 @@ jobs:
               case "$file" in
                 "AGENTS.md"|\
                 "code_review.md"|\
-                "scripts/pr-guardian.sh"|\
-                "scripts/merge-pr.sh"|\
                 ".github/workflows/test-gate.yml"|\
-                "tests/pr-guardian.merge-guard.test.sh")
+                "scripts/"*|\
+                "tests/pr-guardian"*.test.sh)
                   ;;
                 *)
                   process_only="no"
@@ -58,11 +71,33 @@ jobs:
         if: ${{ steps.change-scope.outputs.process_only == 'yes' }}
         run: |
           set -euo pipefail
+          mapfile -t changed_entries < <(git diff --name-status --find-renames=50% "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
+
           echo "Process-only change detected, running merge-guard process tests."
           bash tests/pr-guardian.merge-guard.test.sh
           bash -n scripts/pr-guardian.sh
           bash -n scripts/merge-pr.sh
           bash scripts/merge-pr.sh --help >/dev/null
+
+          # Smoke check all touched shell scripts in scripts/ (including rename/delete cases).
+          for entry in "${changed_entries[@]}"; do
+            IFS=$'\t' read -r status path_a path_b <<< "$entry"
+            for candidate in "$path_a" "$path_b"; do
+              if [ -z "${candidate:-}" ]; then
+                continue
+              fi
+              case "$candidate" in
+                scripts/*.sh)
+                  if [ -f "$candidate" ]; then
+                    echo "Syntax check: $candidate"
+                    bash -n "$candidate"
+                  else
+                    echo "Touched script not found in HEAD (likely deleted/renamed): $candidate"
+                  fi
+                  ;;
+              esac
+            done
+          done
 
       - name: Setup Node.js
         if: ${{ steps.change-scope.outputs.process_only != 'yes' && hashFiles('package.json') != '' }}
