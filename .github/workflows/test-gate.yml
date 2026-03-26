@@ -140,7 +140,9 @@ jobs:
       - name: Workflow-Only Fixed Validation
         if: ${{ steps.change-scope.outputs.workflow_only == 'yes' }}
         run: |
-          echo "Workflow-only change detected. Fixed path: lint changed workflows with actionlint."
+          set -euo pipefail
+          echo "Workflow-only change detected, running merge-guard semantic validation."
+          bash tests/pr-guardian.merge-guard.test.sh
 
       - name: Setup Node.js
         if: ${{ steps.change-scope.outputs.process_only != 'yes' && steps.change-scope.outputs.workflow_only != 'yes' && hashFiles('package.json') != '' }}

@@ -397,7 +397,8 @@ all_required_checks_pass() {
 
   if ! gh pr checks "${pr_number}" --required --json name,bucket,state,link > "${checks_file}" 2>"${checks_error_file}"; then
     if grep -q "no required checks reported" "${checks_error_file}"; then
-      printf '[]\n' > "${checks_file}"
+      echo "GitHub 未配置 required checks（no required checks reported）。" >&2
+      return 1
     elif [[ -s "${checks_file}" ]] && jq empty "${checks_file}" >/dev/null 2>&1; then
       :
     else
@@ -407,7 +408,8 @@ all_required_checks_pass() {
   fi
 
   if [[ "$(jq 'length' "${checks_file}")" -eq 0 ]]; then
-    return 0
+    echo "GitHub required checks 列表为空，拒绝视为通过。" >&2
+    return 1
   fi
 
   jq -e 'all(.[]; .bucket == "pass")' "${checks_file}" >/dev/null 2>&1
