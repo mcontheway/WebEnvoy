@@ -167,6 +167,7 @@ validate_governance_changes() {
         bash -n "${abs_path}" >/dev/null 2>&1 || die "${file} shell 语法校验失败"
         ;;
       .github/workflows/spec-guard.yml)
+        grep -q "docs/dev/roadmap.md" "${abs_path}" || die "${file} 未覆盖 docs/dev/roadmap.md 触发路径"
         grep -q 'bash scripts/spec-guard.sh' "${abs_path}" || die "${file} 未调用 scripts/spec-guard.sh"
         grep -q "docs/dev/architecture/" "${abs_path}" || die "${file} 未覆盖 docs/dev/architecture/** 触发路径"
         grep -q "spec_review.md" "${abs_path}" || die "${file} 未覆盖 spec_review.md 触发路径"
