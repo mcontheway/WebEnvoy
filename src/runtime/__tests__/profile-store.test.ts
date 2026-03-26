@@ -103,7 +103,8 @@ describe("profile-store", () => {
   });
 
   it("does not persist fingerprint bundle when browser truth-source is unavailable during initialize", async () => {
-    delete process.env.WEBENVOY_BROWSER_PATH;
+    const unsupportedChromePath = await createMockBrowserExecutable("Google Chrome 137.0.0.0");
+    process.env.WEBENVOY_BROWSER_PATH = unsupportedChromePath;
     delete process.env.WEBENVOY_BROWSER_VERSION;
 
     const store = await createStore();
@@ -350,7 +351,8 @@ describe("profile-store", () => {
   });
 
   it("does not persist upgraded legacy bundle when browser truth-source is unavailable in migrate mode", async () => {
-    delete process.env.WEBENVOY_BROWSER_PATH;
+    const unsupportedChromePath = await createMockBrowserExecutable("Google Chrome 137.0.0.0");
+    process.env.WEBENVOY_BROWSER_PATH = unsupportedChromePath;
     delete process.env.WEBENVOY_BROWSER_VERSION;
 
     const store = await createStore();
