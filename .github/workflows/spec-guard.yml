@@ -5,6 +5,7 @@ on:
     branches:
       - main
     paths:
+      - 'docs/dev/roadmap.md'
       - 'docs/dev/specs/**'
       - 'docs/dev/architecture/**'
       - 'docs/dev/AGENTS.md'
