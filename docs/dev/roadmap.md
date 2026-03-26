@@ -132,6 +132,24 @@ WebEnvoy 当前主线专注于：
 - 出错时至少能判断是页面变化、请求失败还是执行中断
 - 首个平台已经承担了最小真实商业压力验证，不只是实验环境里“能跑通一次”
 
+### official Chrome 137+ runtime 架构冻结前置
+
+在 `#281` 进入 implementation-prep 或运行时迁移实现前，必须先完成 `#279` 的 architecture freeze，至少冻结以下正式边界：
+
+- official branded Google Chrome 137+ 主路径不再依赖 `--load-extension` 的 per-run staged extension
+- branded Chrome 主链默认建立在“profile 内持久安装扩展 + runtime bootstrap/context 解耦”之上
+- `runtime_bootstrap_envelope` 一类对象属于 run/session 级输入，不属于扩展静态资产，也不属于 profile 永久元数据
+- `stable extension_id + Native Messaging allowed_origins + profile 绑定关系` 必须先作为正式 identity 边界冻结
+- Chromium / Chrome for Testing 仅保留为开发、调试和验证 fallback，不得回写成 stealth 主路径
+- 安装/分发路径在本阶段只允许分级，不允许把 `developer mode / unpacked`、`External Extensions JSON`、Windows 外部安装/注册表或 Chrome Web Store 直接写成当前正式主方案
+
+对应归属固定如下：
+
+- `#280`：证据输入与 Go / No-Go 结论
+- `#279`：roadmap / architecture 正式冻结
+- `#281`：后续 runtime 架构迁移主线
+- `#239`：后续验证与基线评估归属
+
 ---
 
 ## Phase 1.x：风险门禁与最小反风控前置冲刺（Sprint 2 / Sprint 3）

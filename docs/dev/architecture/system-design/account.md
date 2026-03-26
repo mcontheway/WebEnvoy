@@ -26,6 +26,7 @@ profiles/
 - 平台标识与 Profile 名称
 - 指纹噪声种子（`audioNoiseSeed`、`canvasNoiseSeed` 等，详见 [`anti-detection.md`](../anti-detection.md) §2.3）
 - LocalStorage 快照（用于 SPA 前端鉴权恢复）
+- 持久扩展绑定信息（稳定 `extension_id`、安装渠道、扩展版本、Native Host 名称）
 - 可选的 **Proxy 绑定**（`proxyUrl` 字段，见下文）
 
 以下信息不属于当前主线基线：
@@ -33,6 +34,26 @@ profiles/
 - 行为人格（`BehaviorPersona`）
 - 冷却/封禁状态机
 - 跨账号调度信息
+
+同时明确：
+
+- `runtime_bootstrap_envelope` 及其承载的 `run_id`、`session_id`、`fingerprint_runtime`、`main_world_secret` 等对象属于 run/session 级输入
+- 上述 run/session 级对象不属于 profile 永久元数据，不应通过 per-run staged extension 文件注入
+
+#### Profile / Extension / Native Host 绑定边界
+
+对 official Chrome 持久扩展主路径，一个可执行 profile 必须先满足以下绑定关系：
+
+- 一个 profile 绑定一个稳定的 WebEnvoy `extension_id`
+- Native Messaging Host manifest 的 `allowed_origins` 必须显式包含该 `extension_id` 对应 origin
+- profile 内已安装扩展的身份边界，先于单次 run 的 bootstrap 输入存在
+
+因此运行时需要先区分两个问题：
+
+1. profile 是否已具备可复用的 extension / native host identity 绑定
+2. 本次 run 是否已成功下发 `runtime_bootstrap_envelope`
+
+前者属于持久身份边界，后者属于临时运行态；两者不能再被同一次启动过程里的 staged extension 偷懒耦合。
 
 #### Proxy 黏性绑定
 
@@ -100,6 +121,7 @@ profiles/
 - **LocalStorage 快照**：对于依赖 LocalStorage 做前端鉴权的 SPA，需在配置空间元数据中额外保存 localStorage 快照，防止重启后鉴权失效
 - **配置空间独占锁**：通过锁文件实现互斥，同一配置空间同时只能被一个 CLI 进程使用
 - **不引入账号健康运营逻辑**：当前仓库不在 Profile 元数据中内建健康评分、养号节律或矩阵调度信息
+- **official Chrome 主路径不再依赖 per-run staged extension**：profile 生命周期与扩展安装资产分离，run/session 输入改由运行时 bootstrap 通道承接
 
 ---
 
@@ -114,9 +136,9 @@ profiles/
        │ webenvoy start --profile <name>
        ▼
 ┌──────────────┐
-│   启动中     │  等待 Extension Background 建立 Native Messaging 连接
+│   启动中     │  校验 profile 绑定的持久扩展身份，并等待 Extension Background 建立 Native Messaging 连接
 └──────┬───────┘
-       │ 连接建立成功
+       │ 连接建立成功 + 本次 runtime bootstrap 装载完成
        ▼
 ┌──────────────┐          ┌──────────────┐
 │    就绪      │◄─────────│   执行完毕   │
@@ -143,7 +165,7 @@ profiles/
 | 触发来源 | 目标状态 |
 |---|---|
 | CLI 收到 `start` 命令 | 启动中 |
-| Native Messaging 握手成功 | 就绪 |
+| Native Messaging 握手成功，且 `runtime_bootstrap_envelope` 已绑定到当前 `(profile, session_id, run_id)` | 就绪 |
 | 收到任何操作命令 | 执行中 |
 | 操作完成（成功/失败） | 就绪 |
 | 平台返回 471/461 或弹出风控弹窗 | 已暂停 |
@@ -152,4 +174,4 @@ profiles/
 | 30s 内重连成功 | 就绪 |
 | 30s 超时未重连 | 通知 AI 人工介入 |
 
-> **心跳机制说明**：MV3 Service Worker 会在空闲约 30 秒后被 Chrome 强制休眠，导致 Native Messaging 静默断开。Extension Background 每 20 秒向 CLI 发送 `__ping__`，CLI 立即回复 `__pong__`。CLI 侧维护心跳计时器，超时（连续 2 次无响应）时主动触发断连流程，进入「异常断开」状态并尝试重连。心跳协议详见 [communication.md](./communication.md)。
+> **心跳机制说明**：MV3 Service Worker 会在空闲约 30 秒后被 Chrome 强制休眠，导致 Native Messaging 静默断开。Extension Background 每 20 秒向 CLI 发送 `__ping__`，CLI 立即回复 `__pong__`。CLI 侧维护心跳计时器，超时（连续 2 次无响应）时主动触发断连流程，进入「异常断开」状态并尝试重连。心跳恢复的是已安装扩展与 Native Host 的连接活性；run/session 级 `runtime_bootstrap_envelope` 仍需按当前运行态单独校验。心跳协议详见 [communication.md](./communication.md)。
