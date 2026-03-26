@@ -34,7 +34,8 @@ jobs:
                 "code_review.md"|\
                 "scripts/pr-guardian.sh"|\
                 "scripts/merge-pr.sh"|\
-                ".github/workflows/test-gate.yml")
+                ".github/workflows/test-gate.yml"|\
+                "tests/pr-guardian.merge-guard.test.sh")
                   ;;
                 *)
                   process_only="no"
@@ -57,7 +58,8 @@ jobs:
         if: ${{ steps.change-scope.outputs.process_only == 'yes' }}
         run: |
           set -euo pipefail
-          echo "Process-only change detected, running lightweight smoke checks."
+          echo "Process-only change detected, running merge-guard process tests."
+          bash tests/pr-guardian.merge-guard.test.sh
           bash -n scripts/pr-guardian.sh
           bash -n scripts/merge-pr.sh
           bash scripts/merge-pr.sh --help >/dev/null
