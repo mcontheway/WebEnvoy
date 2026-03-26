@@ -194,6 +194,30 @@ WebEnvoy 当前浏览器运行时主链，默认建立在“official Chrome + pe
 - 新主链可直接建立在 Chrome 原生持久 profile 语义之上。
 - profile 绑定的重点不再是“每次启动复制扩展进去”，而是“某个 profile 是否已经拥有 WebEnvoy 扩展、其 ID 是什么、其 host manifest 是否匹配”。
 
+### E9. 持久安装不等于“只能手工 Load unpacked”，但安装路径仍需分级
+
+结论：`candidate`
+
+从安装/分发角度，目前至少能看见三类方向：
+
+1. `developer mode + Load unpacked`
+   - 可作为当前过渡实验路径。
+   - 不能作为 #280 阶段的正式 stealth 主方案。
+2. `External Extensions JSON`、Windows 外部安装/注册表写入 + 用户确认启用
+   - 说明持久安装并不等于每次都手工去点 `Load unpacked`。
+   - 这类路径有机会降低安装摩擦，可作为后续持久安装候选路径。
+   - 但它们是否满足 WebEnvoy 的 stealth、升级、跨平台一致性与用户体验目标，当前证据仍不足。
+3. Chrome Web Store / 合规上架分发
+   - 这是“更产品化、更合规”的潜在长期方向。
+   - 它能帮助降低 developer mode 依赖，并改善用户安装心智。
+   - 但它不属于本次 #280 spike 的阻断判断，当前不进入正式主结论。
+
+对 WebEnvoy 的含义：
+
+- #280 阶段只需要冻结“必须走持久安装扩展 + runtime bootstrap 解耦”。
+- 至于最终选择 `External Extensions`、Windows 外部安装、Chrome 商店分发还是其他安装渠道，应在后续安装/分发专题中继续验证。
+- 因此这些路径目前都只能作为 `candidate` 或“后续方向”，不能替代当前主结论。
+
 ## 证据分级汇总
 
 | 结论 | 分级 | 说明 |
@@ -203,7 +227,9 @@ WebEnvoy 当前浏览器运行时主链，默认建立在“official Chrome + pe
 | 持久扩展需要稳定 extension ID | `primary` | 受 `manifest.key` 与 Native Messaging `allowed_origins` 约束 |
 | 当前 bootstrap 必须拆成“静态扩展资产”与“run 级上下文” | `primary` | 仓库代码已能定位真实耦合点 |
 | runtime bootstrap envelope 可作为正式解耦方向 | `admission_ready` | 与现有 background/session/trust 结构兼容 |
+| `External Extensions` / Windows 外部安装 + 用户确认 | `candidate` | 可作为持久安装候选路径，不是当前冻结主方案 |
 | developer mode / unpacked 可暂作过渡路径 | `candidate` | 证据不足以直接冻结为 stealth 最终主链 |
+| Chrome Web Store / 合规分发 | `candidate` | 值得继续评估，但不属于本次 spike 主结论 |
 | Chromium / Chrome for Testing 可继续支持命令行装载 | `fallback` | 可用于开发验证，不可作为 stealth 主路径答案 |
 
 ## Go / No-Go 判断
@@ -279,6 +305,11 @@ WebEnvoy 当前浏览器运行时主链，默认建立在“official Chrome + pe
 6. **developer mode 定位**
    - 只能作为 candidate / transition path
    - 不作为 stealth 正式终局承诺
+
+7. **安装/分发路径分级**
+   - `External Extensions`、Windows 外部安装/注册表 + 用户确认 可作为持久安装候选路径
+   - Chrome Web Store / 合规上架可作为后续产品化方向
+   - 上述路径均不替代本次必须先冻结的 runtime / identity / bootstrap 边界
 
 ## 对 #281 的输入
 
