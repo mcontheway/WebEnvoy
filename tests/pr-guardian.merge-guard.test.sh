@@ -42,14 +42,24 @@ pop_sequence_response_line() {
 }
 
 if [[ "${1:-}" == "pr" && "${2:-}" == "checks" ]]; then
-  if [[ "${MOCK_GH_CHECKS_EXIT_CODE:-0}" != "0" ]]; then
-    if [[ -n "${MOCK_GH_CHECKS_STDERR:-}" ]]; then
-      printf '%s\n' "${MOCK_GH_CHECKS_STDERR}" >&2
-    fi
-    exit "${MOCK_GH_CHECKS_EXIT_CODE}"
+  checks_payload_file="${MOCK_GH_CHECKS_JSON:?missing MOCK_GH_CHECKS_JSON}"
+  checks_exit_code="${MOCK_GH_CHECKS_EXIT_CODE:-0}"
+  checks_stderr="${MOCK_GH_CHECKS_STDERR:-}"
+
+  if [[ " $* " == *" --required "* ]]; then
+    checks_payload_file="${MOCK_GH_REQUIRED_CHECKS_JSON:-${checks_payload_file}}"
+    checks_exit_code="${MOCK_GH_REQUIRED_CHECKS_EXIT_CODE:-${checks_exit_code}}"
+    checks_stderr="${MOCK_GH_REQUIRED_CHECKS_STDERR:-${checks_stderr}}"
   fi
 
-  cat "${MOCK_GH_CHECKS_JSON:?missing MOCK_GH_CHECKS_JSON}"
+  if [[ "${checks_exit_code}" != "0" ]]; then
+    if [[ -n "${checks_stderr:-}" ]]; then
+      printf '%s\n' "${checks_stderr}" >&2
+    fi
+    exit "${checks_exit_code}"
+  fi
+
+  cat "${checks_payload_file}"
   exit 0
 fi
 
@@ -181,6 +191,9 @@ setup_case_dir() {
   unset MOCK_GH_REVIEWS_FIRST_PAGE_JSON || true
   unset MOCK_GH_PR_VIEW_SEQUENCE_FILE || true
   unset MOCK_GH_REVIEWS_SEQUENCE_FILE || true
+  unset MOCK_GH_REQUIRED_CHECKS_JSON || true
+  unset MOCK_GH_REQUIRED_CHECKS_EXIT_CODE || true
+  unset MOCK_GH_REQUIRED_CHECKS_STDERR || true
   export MOCK_GH_REVIEWS_REQUIRE_PAGINATE
 }
 
@@ -204,12 +217,16 @@ run_all_checks_pass_without_required_checks_reported() {
 
   MOCK_GH_CHECKS_JSON="${TMP_DIR}/mock-gh-checks.json"
   export MOCK_GH_CHECKS_JSON
-  printf '%s\n' '[]' > "${MOCK_GH_CHECKS_JSON}"
+  printf '%s\n' '[{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"},{"name":"Validate Docs And Scripts","bucket":"pass","state":"SUCCESS","link":"https://example.test/docs"}]' > "${MOCK_GH_CHECKS_JSON}"
 
-  MOCK_GH_CHECKS_EXIT_CODE=1
-  MOCK_GH_CHECKS_STDERR="no required checks reported"
-  export MOCK_GH_CHECKS_EXIT_CODE
-  export MOCK_GH_CHECKS_STDERR
+  MOCK_GH_REQUIRED_CHECKS_JSON="${TMP_DIR}/mock-gh-required-checks.json"
+  export MOCK_GH_REQUIRED_CHECKS_JSON
+  printf '%s\n' '[]' > "${MOCK_GH_REQUIRED_CHECKS_JSON}"
+
+  MOCK_GH_REQUIRED_CHECKS_EXIT_CODE=1
+  MOCK_GH_REQUIRED_CHECKS_STDERR="no required checks reported"
+  export MOCK_GH_REQUIRED_CHECKS_EXIT_CODE
+  export MOCK_GH_REQUIRED_CHECKS_STDERR
 
   all_required_checks_pass 123 >/dev/null 2>&1
 }
@@ -350,7 +367,7 @@ test_merge_if_safe_fails_when_head_changes_after_review_snapshot() {
   assert_file_empty "${MOCK_GH_MERGE_LOG}"
 }
 
-test_merge_if_safe_treats_behind_as_retryable_wait_state() {
+test_merge_if_safe_retries_until_merge_state_behind_recovers() {
   setup_merge_if_safe_fixture \
     "merge-state-behind" \
     "pr-author" \
@@ -359,16 +376,23 @@ test_merge_if_safe_treats_behind_as_retryable_wait_state() {
     "head-sha-123" \
     "0"
 
-  printf '%s\n' '{"baseRefName":"main","headRefOid":"head-sha-123","mergeable":"MERGEABLE","mergeStateStatus":"BEHIND","isDraft":false}' > "${MOCK_GH_PR_VIEW_JSON}"
+  MOCK_GH_PR_VIEW_SEQUENCE_FILE="${TEST_TMP_DIR}/merge-state-behind/mock/pr-view-seq.jsonl"
+  {
+    printf '%s\n' '{"baseRefName":"main","headRefOid":"head-sha-123","mergeable":"MERGEABLE","mergeStateStatus":"BEHIND","isDraft":false}'
+    printf '%s\n' '{"baseRefName":"main","headRefOid":"head-sha-123","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","isDraft":false}'
+  } > "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}"
+  export MOCK_GH_PR_VIEW_SEQUENCE_FILE
 
-  local err_file="${TMP_DIR}/merge.err"
-  assert_fail merge_if_safe 274 0 2>"${err_file}"
-  assert_file_contains "${err_file}" "mergeStateStatus=BEHIND"
-  assert_file_contains "${err_file}" "可重跑/等待后重试"
-  assert_file_empty "${MOCK_GH_MERGE_LOG}"
+  PR_GUARDIAN_MERGE_STATE_MAX_ATTEMPTS=2
+  PR_GUARDIAN_MERGE_STATE_RETRY_DELAY_SECONDS=0
+  export PR_GUARDIAN_MERGE_STATE_MAX_ATTEMPTS
+  export PR_GUARDIAN_MERGE_STATE_RETRY_DELAY_SECONDS
+
+  assert_pass merge_if_safe 274 0
+  assert_file_contains "${MOCK_GH_MERGE_LOG}" "--match-head-commit head-sha-123"
 }
 
-test_merge_if_safe_treats_unknown_as_retryable_wait_state() {
+test_merge_if_safe_fails_when_merge_state_unknown_never_recovers() {
   setup_merge_if_safe_fixture \
     "merge-state-unknown" \
     "pr-author" \
@@ -377,7 +401,17 @@ test_merge_if_safe_treats_unknown_as_retryable_wait_state() {
     "head-sha-123" \
     "0"
 
-  printf '%s\n' '{"baseRefName":"main","headRefOid":"head-sha-123","mergeable":"MERGEABLE","mergeStateStatus":"UNKNOWN","isDraft":false}' > "${MOCK_GH_PR_VIEW_JSON}"
+  MOCK_GH_PR_VIEW_SEQUENCE_FILE="${TEST_TMP_DIR}/merge-state-unknown/mock/pr-view-seq.jsonl"
+  {
+    printf '%s\n' '{"baseRefName":"main","headRefOid":"head-sha-123","mergeable":"MERGEABLE","mergeStateStatus":"UNKNOWN","isDraft":false}'
+    printf '%s\n' '{"baseRefName":"main","headRefOid":"head-sha-123","mergeable":"MERGEABLE","mergeStateStatus":"UNKNOWN","isDraft":false}'
+  } > "${MOCK_GH_PR_VIEW_SEQUENCE_FILE}"
+  export MOCK_GH_PR_VIEW_SEQUENCE_FILE
+
+  PR_GUARDIAN_MERGE_STATE_MAX_ATTEMPTS=2
+  PR_GUARDIAN_MERGE_STATE_RETRY_DELAY_SECONDS=0
+  export PR_GUARDIAN_MERGE_STATE_MAX_ATTEMPTS
+  export PR_GUARDIAN_MERGE_STATE_RETRY_DELAY_SECONDS
 
   local err_file="${TMP_DIR}/merge.err"
   assert_fail merge_if_safe 274 0 2>"${err_file}"
@@ -487,7 +521,7 @@ main() {
   assert_pass run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'
   assert_fail run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"fail","state":"FAILURE","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'
   assert_fail run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"fail","state":"FAILURE","link":"https://example.test/tests"}]'
-  assert_fail run_all_checks_pass_without_required_checks_reported
+  assert_pass run_all_checks_pass_without_required_checks_reported
 
   test_merge_if_safe_without_post_review_respects_comment_contract
   test_post_review_self_review_uses_review_event_and_merge_gate_uses_reviews_api
@@ -496,8 +530,8 @@ main() {
   test_merge_if_safe_uses_latest_review_state_on_same_head
   test_post_review_fails_when_head_changes_after_review_snapshot
   test_merge_if_safe_fails_when_head_changes_after_review_snapshot
-  test_merge_if_safe_treats_behind_as_retryable_wait_state
-  test_merge_if_safe_treats_unknown_as_retryable_wait_state
+  test_merge_if_safe_retries_until_merge_state_behind_recovers
+  test_merge_if_safe_fails_when_merge_state_unknown_never_recovers
   test_merge_if_safe_retries_until_review_state_is_visible
   test_merge_if_safe_rejects_when_latest_review_state_regresses_on_same_head
   test_merge_if_safe_rejects_comment_marker_without_formal_review

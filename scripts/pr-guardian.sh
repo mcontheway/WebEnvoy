@@ -399,11 +399,15 @@ all_required_checks_pass() {
   local pr_number="$1"
   local checks_file="${TMP_DIR}/checks.json"
   local checks_error_file="${TMP_DIR}/checks.err"
+  local using_required_checks="1"
 
   if ! gh pr checks "${pr_number}" --required --json name,bucket,state,link > "${checks_file}" 2>"${checks_error_file}"; then
     if grep -q "no required checks reported" "${checks_error_file}"; then
-      echo "GitHub 未配置 required checks（no required checks reported）。" >&2
-      return 1
+      if ! gh pr checks "${pr_number}" --json name,bucket,state,link > "${checks_file}" 2>"${checks_error_file}"; then
+        sed 's/^/  /' "${checks_error_file}" >&2 || true
+        return 1
+      fi
+      using_required_checks="0"
     elif [[ -s "${checks_file}" ]] && jq empty "${checks_file}" >/dev/null 2>&1; then
       :
     else
@@ -413,11 +417,54 @@ all_required_checks_pass() {
   fi
 
   if [[ "$(jq 'length' "${checks_file}")" -eq 0 ]]; then
-    echo "GitHub required checks 列表为空，拒绝视为通过。" >&2
+    if [[ "${using_required_checks}" == "1" ]]; then
+      echo "GitHub required checks 列表为空，拒绝视为通过。" >&2
+    else
+      echo "GitHub 未配置 required checks，且当前 checks 列表为空，拒绝视为通过。" >&2
+    fi
     return 1
   fi
 
   jq -e 'all(.[]; .bucket == "pass")' "${checks_file}" >/dev/null 2>&1
+}
+
+load_merge_gate_meta() {
+  local pr_number="$1"
+  local meta_file="$2"
+
+  gh pr view "${pr_number}" --json baseRefName,headRefOid,mergeable,mergeStateStatus,isDraft > "${meta_file}"
+}
+
+wait_for_merge_gate_ready() {
+  local pr_number="$1"
+  local meta_file="$2"
+  local max_attempts="${PR_GUARDIAN_MERGE_STATE_MAX_ATTEMPTS:-3}"
+  local retry_delay_seconds="${PR_GUARDIAN_MERGE_STATE_RETRY_DELAY_SECONDS:-2}"
+  local attempt=1
+  local merge_state_status
+
+  while (( attempt <= max_attempts )); do
+    load_merge_gate_meta "${pr_number}" "${meta_file}"
+    merge_state_status="$(jq -r '.mergeStateStatus' "${meta_file}")"
+
+    case "${merge_state_status}" in
+      CLEAN|HAS_HOOKS|UNSTABLE)
+        return 0
+        ;;
+      BEHIND|UNKNOWN)
+        if (( attempt < max_attempts )); then
+          sleep "${retry_delay_seconds}"
+        fi
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+
+    attempt=$((attempt + 1))
+  done
+
+  return 1
 }
 
 merge_if_safe() {
@@ -439,7 +486,7 @@ merge_if_safe() {
   current_user="$(gh api user --jq '.login')"
   current_meta_file="${TMP_DIR}/merge-meta.json"
 
-  gh pr view "${pr_number}" --json baseRefName,headRefOid,mergeable,mergeStateStatus,isDraft > "${current_meta_file}"
+  wait_for_merge_gate_ready "${pr_number}" "${current_meta_file}" || true
   current_base_ref="$(jq -r '.baseRefName' "${current_meta_file}")"
   current_head_sha="$(jq -r '.headRefOid' "${current_meta_file}")"
   mergeable="$(jq -r '.mergeable' "${current_meta_file}")"
