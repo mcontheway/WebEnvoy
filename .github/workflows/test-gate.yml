@@ -48,7 +48,7 @@ jobs:
                 "code_review.md"|\
                 ".github/workflows/test-gate.yml"|\
                 "scripts/"*|\
-                "tests/pr-guardian"*.test.sh)
+                tests/pr-guardian*.test.sh)
                   ;;
                 *)
                   process_only="no"
