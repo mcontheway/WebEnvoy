@@ -14,15 +14,163 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify Change Scope
+        id: change-scope
+        run: |
+          set -euo pipefail
+
+          mapfile -t changed_entries < <(git diff --name-status --find-renames=50% "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
+          changed_files=()
+
+          for entry in "${changed_entries[@]}"; do
+            IFS=$'\t' read -r status path_a path_b <<< "$entry"
+            case "$status" in
+              R*|C*)
+                # Keep both sides to correctly classify rename/copy between areas.
+                changed_files+=("$path_a" "$path_b")
+                ;;
+              *)
+                changed_files+=("$path_a")
+                ;;
+            esac
+          done
+
+          process_only="yes"
+          guardrail_only="yes"
+          guardrail_changed="no"
+          workflow_changed="no"
+          merge_guard_validation_required="no"
+          if [ "${#changed_files[@]}" -eq 0 ]; then
+            process_only="no"
+            guardrail_only="no"
+            guardrail_changed="no"
+            merge_guard_validation_required="no"
+          else
+            for file in "${changed_files[@]}"; do
+              case "$file" in
+                .github/workflows/*)
+                  workflow_changed="yes"
+                  process_only="no"
+                  guardrail_changed="yes"
+                  merge_guard_validation_required="yes"
+                  ;;
+              esac
+
+              case "$file" in
+                "scripts/pr-guardian.sh"|\
+                "scripts/merge-pr.sh"|\
+                "tests/pr-guardian.merge-guard.test.sh")
+                  merge_guard_validation_required="yes"
+                  ;;
+                *)
+                  process_only="no"
+                  ;;
+              esac
+
+              case "$file" in
+                ".github/workflows/"*|\
+                "scripts/pr-guardian.sh"|\
+                "scripts/merge-pr.sh"|\
+                tests/pr-guardian*.test.sh)
+                  guardrail_changed="yes"
+                  ;;
+                *)
+                  guardrail_only="no"
+                  ;;
+              esac
+            done
+          fi
+
+          {
+            echo "process_only=$process_only"
+            echo "guardrail_only=$guardrail_only"
+            echo "guardrail_changed=$guardrail_changed"
+            echo "workflow_changed=$workflow_changed"
+            echo "merge_guard_validation_required=$merge_guard_validation_required"
+            echo "changed_count=${#changed_files[@]}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Changed files (${#changed_files[@]}):"
+          printf '%s\n' "${changed_files[@]}"
+          echo "process_only=$process_only"
+          echo "guardrail_only=$guardrail_only"
+          echo "guardrail_changed=$guardrail_changed"
+          echo "merge_guard_validation_required=$merge_guard_validation_required"
+
+      - name: Setup Go for Workflow Lint
+        if: ${{ steps.change-scope.outputs.workflow_changed == 'yes' }}
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.22.5'
+
+      - name: Validate Changed Workflows
+        if: ${{ steps.change-scope.outputs.workflow_changed == 'yes' }}
+        run: |
+          set -euo pipefail
+
+          ACTIONLINT_VERSION="v1.7.8"
+          export GOBIN="$RUNNER_TEMP/bin"
+          export GOPROXY="https://proxy.golang.org,direct"
+          export GOSUMDB="sum.golang.org"
+          mkdir -p "$GOBIN"
+          go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
+
+          mapfile -t changed_entries < <(git diff --name-status --find-renames=50% "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
+          workflow_files=()
+          for entry in "${changed_entries[@]}"; do
+            IFS=$'\t' read -r _status path_a path_b <<< "$entry"
+            for candidate in "$path_a" "$path_b"; do
+              if [ -z "${candidate:-}" ]; then
+                continue
+              fi
+              case "$candidate" in
+                .github/workflows/*)
+                  if [ -f "$candidate" ]; then
+                    workflow_files+=("$candidate")
+                  fi
+                  ;;
+              esac
+            done
+          done
+
+          if [ "${#workflow_files[@]}" -eq 0 ]; then
+            echo "No workflow file exists in HEAD to lint (likely deletion-only change)."
+            exit 0
+          fi
+
+          mapfile -t unique_workflow_files < <(printf '%s\n' "${workflow_files[@]}" | awk '!seen[$0]++')
+          echo "Linting workflow files with actionlint:"
+          printf '%s\n' "${unique_workflow_files[@]}"
+
+          "$GOBIN/actionlint" -color "${unique_workflow_files[@]}"
+
+      - name: Run Guardrail Fixed Validation
+        if: ${{ steps.change-scope.outputs.merge_guard_validation_required == 'yes' }}
+        run: |
+          set -euo pipefail
+          echo "Guardrail-related change detected, running merge-guard checks."
+          bash tests/pr-guardian.merge-guard.test.sh
+
+          for script in scripts/pr-guardian.sh scripts/merge-pr.sh; do
+            if [ -f "$script" ]; then
+              echo "Syntax check: $script"
+              bash -n "$script"
+            fi
+          done
+
+          bash scripts/merge-pr.sh --help >/dev/null
 
       - name: Setup Node.js
-        if: ${{ hashFiles('package.json') != '' }}
+        if: ${{ steps.change-scope.outputs.guardrail_only != 'yes' && hashFiles('package.json') != '' }}
         uses: actions/setup-node@v4
         with:
           node-version: '23.9.0'
 
       - name: Install Dependencies
-        if: ${{ hashFiles('package.json') != '' }}
+        if: ${{ steps.change-scope.outputs.guardrail_only != 'yes' && hashFiles('package.json') != '' }}
         run: |
           set -euo pipefail
           if [ -f package-lock.json ]; then
@@ -35,15 +183,18 @@ jobs:
 
       - name: Detect Test Plan
         id: detect-tests
+        if: ${{ steps.change-scope.outputs.guardrail_only != 'yes' }}
         run: |
           set -euo pipefail
 
           if [ ! -f package.json ]; then
-            echo "has_package=no" >> "$GITHUB_OUTPUT"
-            echo "unit_dir=no" >> "$GITHUB_OUTPUT"
-            echo "integration_dir=no" >> "$GITHUB_OUTPUT"
-            echo "unit_cmd=" >> "$GITHUB_OUTPUT"
-            echo "integration_cmd=" >> "$GITHUB_OUTPUT"
+            {
+              echo "has_package=no"
+              echo "unit_dir=no"
+              echo "integration_dir=no"
+              echo "unit_cmd="
+              echo "integration_cmd="
+            } >> "$GITHUB_OUTPUT"
             echo "No package.json found. Skipping test planning."
             exit 0
           fi
@@ -101,20 +252,20 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Run Unit Tests
-        if: ${{ steps.detect-tests.outputs.unit_cmd != '' }}
+        if: ${{ steps.change-scope.outputs.guardrail_only != 'yes' && steps.detect-tests.outputs.unit_cmd != '' }}
         run: |
           set -euo pipefail
           echo "Running unit tests with: ${{ steps.detect-tests.outputs.unit_cmd }}"
           ${{ steps.detect-tests.outputs.unit_cmd }}
 
       - name: Run E2E/Integration Tests
-        if: ${{ steps.detect-tests.outputs.integration_cmd != '' && steps.detect-tests.outputs.integration_cmd != steps.detect-tests.outputs.unit_cmd }}
+        if: ${{ steps.change-scope.outputs.guardrail_only != 'yes' && steps.detect-tests.outputs.integration_cmd != '' && steps.detect-tests.outputs.integration_cmd != steps.detect-tests.outputs.unit_cmd }}
         run: |
           set -euo pipefail
           echo "Running integration tests with: ${{ steps.detect-tests.outputs.integration_cmd }}"
           ${{ steps.detect-tests.outputs.integration_cmd }}
 
       - name: No Tests Declared
-        if: ${{ steps.detect-tests.outputs.has_package == 'no' || (steps.detect-tests.outputs.unit_dir == 'no' && steps.detect-tests.outputs.integration_dir == 'no') }}
+        if: ${{ steps.change-scope.outputs.guardrail_only != 'yes' && (steps.detect-tests.outputs.has_package == 'no' || (steps.detect-tests.outputs.unit_dir == 'no' && steps.detect-tests.outputs.integration_dir == 'no')) }}
         run: |
           echo "No package-managed tests detected for this repository state."

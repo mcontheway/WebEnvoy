@@ -15,7 +15,7 @@ usage() {
 
 说明:
   review         本机执行 Codex 审查并打印结论
-  merge-if-safe  审查通过且必需检查通过时，执行 squash merge
+  merge-if-safe  自动回写 review（可兼容传 --post-review）；审查通过且必需检查通过时，执行 squash merge
 EOF
 }
 
@@ -188,18 +188,29 @@ run_codex_review() {
   build_markdown_review "${RESULT_FILE}" "${REVIEW_MD_FILE}"
 }
 
-post_review() {
+expected_review_state_for_verdict() {
+  local verdict="$1"
+  local reviewer="$2"
+
+  if [[ -n "${PR_AUTHOR:-}" ]] && [[ "${PR_AUTHOR}" == "${reviewer}" ]]; then
+    printf 'COMMENTED\n'
+    return
+  fi
+
+  if [[ "${verdict}" == "APPROVE" ]]; then
+    printf 'APPROVED\n'
+  else
+    printf 'CHANGES_REQUESTED\n'
+  fi
+}
+
+submit_review_event() {
   local pr_number="$1"
-  local verdict
-  local current_user
+  local verdict="$2"
+  local reviewer="$3"
 
-  verdict="$(jq -r '.verdict' "${RESULT_FILE}")"
-  current_user="$(gh api user --jq '.login')"
-
-  post_inline_comments "${pr_number}"
-
-  if [[ -n "${PR_AUTHOR:-}" ]] && [[ "${PR_AUTHOR}" == "${current_user}" ]]; then
-    gh pr comment "${pr_number}" --body-file "${REVIEW_MD_FILE}" >/dev/null
+  if [[ -n "${PR_AUTHOR:-}" ]] && [[ "${PR_AUTHOR}" == "${reviewer}" ]]; then
+    gh pr review "${pr_number}" --comment --body-file "${REVIEW_MD_FILE}" >/dev/null
     return
   fi
 
@@ -207,6 +218,91 @@ post_review() {
     gh pr review "${pr_number}" --approve --body-file "${REVIEW_MD_FILE}" >/dev/null
   else
     gh pr review "${pr_number}" --request-changes --body-file "${REVIEW_MD_FILE}" >/dev/null
+  fi
+}
+
+head_has_expected_review_state() {
+  local pr_number="$1"
+  local head_sha="$2"
+  local reviewer="$3"
+  local expected_state="$4"
+  local reviews_file="${TMP_DIR}/reviews.json"
+
+  gh api --paginate --slurp "repos/:owner/:repo/pulls/${pr_number}/reviews" > "${reviews_file}"
+
+  jq -e \
+    --arg reviewer "${reviewer}" \
+    --arg head_sha "${head_sha}" \
+    --arg expected_state "${expected_state}" \
+    '
+      [
+        .[][]
+        | select((.user.login // "") == $reviewer)
+        | select((.commit_id // "") == $head_sha)
+        | select((.state // "") | IN("APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"))
+      ]
+      | if length == 0 then
+          false
+        else
+          (
+            to_entries
+            | sort_by([(.value.submitted_at // ""), (.value.id // 0), .key])
+            | last
+            | (.value.state // "")
+          ) == $expected_state
+        end
+    ' "${reviews_file}" >/dev/null 2>&1
+}
+
+wait_for_expected_review_state() {
+  local pr_number="$1"
+  local head_sha="$2"
+  local reviewer="$3"
+  local expected_state="$4"
+  local max_attempts="${PR_GUARDIAN_REVIEW_STATE_MAX_ATTEMPTS:-3}"
+  local retry_delay_seconds="${PR_GUARDIAN_REVIEW_STATE_RETRY_DELAY_SECONDS:-1}"
+  local attempt=1
+
+  while (( attempt <= max_attempts )); do
+    if head_has_expected_review_state "${pr_number}" "${head_sha}" "${reviewer}" "${expected_state}"; then
+      return 0
+    fi
+
+    if (( attempt < max_attempts )); then
+      sleep "${retry_delay_seconds}"
+    fi
+
+    attempt=$((attempt + 1))
+  done
+
+  return 1
+}
+
+post_review() {
+  local pr_number="$1"
+  local verdict
+  local current_user
+
+  assert_pr_head_matches_snapshot "${pr_number}" "回写 review 前检测到 PR HEAD 已变化"
+
+  verdict="$(jq -r '.verdict' "${RESULT_FILE}")"
+  current_user="$(gh api user --jq '.login')"
+
+  post_inline_comments "${pr_number}"
+  submit_review_event "${pr_number}" "${verdict}" "${current_user}"
+}
+
+assert_pr_head_matches_snapshot() {
+  local pr_number="$1"
+  local reason="$2"
+  local current_head_sha
+  local head_meta_file="${TMP_DIR}/head-check.json"
+
+  gh pr view "${pr_number}" --json headRefOid > "${head_meta_file}"
+  current_head_sha="$(jq -r '.headRefOid' "${head_meta_file}")"
+
+  if [[ "${current_head_sha}" != "${HEAD_SHA}" ]]; then
+    die "${reason}：审查快照=${HEAD_SHA}，当前=${current_head_sha}。请重跑 guardian。"
   fi
 }
 
@@ -302,14 +398,73 @@ print_summary() {
 all_required_checks_pass() {
   local pr_number="$1"
   local checks_file="${TMP_DIR}/checks.json"
+  local checks_error_file="${TMP_DIR}/checks.err"
+  local using_required_checks="1"
 
-  gh pr checks "${pr_number}" --required --json name,bucket,state,link > "${checks_file}"
+  if ! gh pr checks "${pr_number}" --required --json name,bucket,state,link > "${checks_file}" 2>"${checks_error_file}"; then
+    if grep -q "no required checks reported" "${checks_error_file}"; then
+      if ! gh pr checks "${pr_number}" --json name,bucket,state,link > "${checks_file}" 2>"${checks_error_file}"; then
+        sed 's/^/  /' "${checks_error_file}" >&2 || true
+        return 1
+      fi
+      using_required_checks="0"
+    elif [[ -s "${checks_file}" ]] && jq empty "${checks_file}" >/dev/null 2>&1; then
+      :
+    else
+      sed 's/^/  /' "${checks_error_file}" >&2 || true
+      return 1
+    fi
+  fi
 
   if [[ "$(jq 'length' "${checks_file}")" -eq 0 ]]; then
-    return 0
+    if [[ "${using_required_checks}" == "1" ]]; then
+      echo "GitHub required checks 列表为空，拒绝视为通过。" >&2
+    else
+      echo "GitHub 未配置 required checks，且当前 checks 列表为空，拒绝视为通过。" >&2
+    fi
+    return 1
   fi
 
   jq -e 'all(.[]; .bucket == "pass")' "${checks_file}" >/dev/null 2>&1
+}
+
+load_merge_gate_meta() {
+  local pr_number="$1"
+  local meta_file="$2"
+
+  gh pr view "${pr_number}" --json baseRefName,headRefOid,mergeable,mergeStateStatus,isDraft > "${meta_file}"
+}
+
+wait_for_merge_gate_ready() {
+  local pr_number="$1"
+  local meta_file="$2"
+  local max_attempts="${PR_GUARDIAN_MERGE_STATE_MAX_ATTEMPTS:-3}"
+  local retry_delay_seconds="${PR_GUARDIAN_MERGE_STATE_RETRY_DELAY_SECONDS:-2}"
+  local attempt=1
+  local merge_state_status
+
+  while (( attempt <= max_attempts )); do
+    load_merge_gate_meta "${pr_number}" "${meta_file}"
+    merge_state_status="$(jq -r '.mergeStateStatus' "${meta_file}")"
+
+    case "${merge_state_status}" in
+      CLEAN|HAS_HOOKS|UNSTABLE)
+        return 0
+        ;;
+      BEHIND|UNKNOWN)
+        if (( attempt < max_attempts )); then
+          sleep "${retry_delay_seconds}"
+        fi
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+
+    attempt=$((attempt + 1))
+  done
+
+  return 1
 }
 
 merge_if_safe() {
@@ -318,20 +473,53 @@ merge_if_safe() {
   local safe_to_merge
   local verdict
   local mergeable
+  local merge_state_status
   local is_draft
+  local current_user
+  local expected_review_state
+  local current_head_sha
+  local current_base_ref
+  local current_meta_file
 
   verdict="$(jq -r '.verdict' "${RESULT_FILE}")"
   safe_to_merge="$(jq -r '.safe_to_merge' "${RESULT_FILE}")"
-  mergeable="$(jq -r '.mergeable' "${META_FILE}")"
-  is_draft="$(jq -r '.isDraft' "${META_FILE}")"
+  current_user="$(gh api user --jq '.login')"
+  current_meta_file="${TMP_DIR}/merge-meta.json"
 
+  wait_for_merge_gate_ready "${pr_number}" "${current_meta_file}" || true
+  current_base_ref="$(jq -r '.baseRefName' "${current_meta_file}")"
+  current_head_sha="$(jq -r '.headRefOid' "${current_meta_file}")"
+  mergeable="$(jq -r '.mergeable' "${current_meta_file}")"
+  merge_state_status="$(jq -r '.mergeStateStatus' "${current_meta_file}")"
+  is_draft="$(jq -r '.isDraft' "${current_meta_file}")"
+  expected_review_state="$(expected_review_state_for_verdict "${verdict}" "${current_user}")"
+
+  if [[ "${current_head_sha}" != "${HEAD_SHA}" ]]; then
+    die "合并前检测到 PR HEAD 已变化：审查快照=${HEAD_SHA}，当前=${current_head_sha}。请重跑 guardian。"
+  fi
+
+  [[ "${current_base_ref}" == "main" ]] || die "仅允许合并到 main，当前 base: ${current_base_ref}"
   [[ "${is_draft}" == "false" ]] || die "PR 仍是 Draft，拒绝合并。"
   [[ "${verdict}" == "APPROVE" ]] || die "Codex 审查未批准，拒绝合并。"
   [[ "${safe_to_merge}" == "true" ]] || die "审查结果认为当前 PR 不安全，拒绝合并。"
   [[ "${mergeable}" == "MERGEABLE" ]] || die "GitHub 判定当前 PR 不可合并，状态为: ${mergeable}"
+  case "${merge_state_status}" in
+    CLEAN|HAS_HOOKS|UNSTABLE)
+      ;;
+    BEHIND|UNKNOWN)
+      die "GitHub mergeStateStatus=${merge_state_status}，当前属于暂不可合并状态（可重跑/等待后重试），请稍后重跑 guardian。"
+      ;;
+    *)
+      die "GitHub mergeStateStatus 阻断合并，状态为: ${merge_state_status}"
+      ;;
+  esac
+
+  if ! wait_for_expected_review_state "${pr_number}" "${HEAD_SHA}" "${current_user}" "${expected_review_state}"; then
+    die "当前 HEAD (${HEAD_SHA}) 缺少 ${current_user} 的已完成 GitHub review（期望状态: ${expected_review_state}，已重试 ${PR_GUARDIAN_REVIEW_STATE_MAX_ATTEMPTS:-3} 次），拒绝合并。"
+  fi
 
   if ! all_required_checks_pass "${pr_number}"; then
-    die "必需状态检查尚未全部通过，拒绝合并。"
+    die "GitHub required checks 未全部通过，拒绝合并。"
   fi
 
   if [[ "${delete_branch}" == "1" ]]; then
@@ -354,6 +542,7 @@ main() {
   local mode="${1:-}"
   local pr_number="${2:-}"
   local post_review_flag=0
+  local should_post_review=0
   local delete_branch_flag=0
 
   [[ -n "${mode}" ]] || { usage; exit 1; }
@@ -389,7 +578,13 @@ main() {
   run_codex_review "${pr_number}"
   print_summary
 
-  if [[ "${post_review_flag}" == "1" ]]; then
+  if [[ "${mode}" == "merge-if-safe" ]]; then
+    should_post_review=1
+  else
+    should_post_review="${post_review_flag}"
+  fi
+
+  if [[ "${should_post_review}" == "1" ]]; then
     post_review "${pr_number}"
     echo "已回写 PR review。"
   fi
