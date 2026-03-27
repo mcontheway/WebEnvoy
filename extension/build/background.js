@@ -888,7 +888,7 @@ class ChromeBackgroundBridge {
         if (!signalRunId || bootstrap.runId !== signalRunId) {
             return;
         }
-        if (signalRuntimeContextId && bootstrap.runtimeContextId !== signalRuntimeContextId) {
+        if (!signalRuntimeContextId || bootstrap.runtimeContextId !== signalRuntimeContextId) {
             return;
         }
         if (bootstrap.serializedFingerprintRuntime !== serializeFingerprintRuntimeContext(fingerprintRuntime)) {

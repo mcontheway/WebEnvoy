@@ -24,6 +24,10 @@ die() {
   exit 1
 }
 
+warn() {
+  echo "警告: $*" >&2
+}
+
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "缺少依赖命令: $1"
 }
@@ -120,7 +124,6 @@ prepare_pr_workspace() {
 hydrate_worktree_dependencies() {
   local source_node_modules="${REPO_ROOT}/node_modules"
   local target_node_modules="${WORKTREE_DIR}/node_modules"
-  local target_lockfile="${WORKTREE_DIR}/package-lock.json"
 
   if [[ -d "${target_node_modules}" && ! -L "${target_node_modules}" ]]; then
     return
@@ -128,17 +131,14 @@ hydrate_worktree_dependencies() {
 
   rm -rf "${target_node_modules}"
 
-  if [[ -f "${target_lockfile}" ]]; then
-    (
-      cd "${WORKTREE_DIR}"
-      npm ci --silent --ignore-scripts >/dev/null
-    )
+  if [[ -d "${source_node_modules}" ]]; then
+    if ! ln -s "${source_node_modules}" "${target_node_modules}"; then
+      warn "依赖回退到仓库 node_modules 软链接失败，继续无依赖审查。"
+    fi
     return
   fi
 
-  if [[ -d "${source_node_modules}" ]]; then
-    ln -s "${source_node_modules}" "${target_node_modules}"
-  fi
+  warn "未检测到可复用的仓库 node_modules，继续无依赖审查。"
 }
 
 normalize_review_path() {

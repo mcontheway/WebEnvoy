@@ -731,7 +731,7 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
-  it("maps runtime.bootstrap transport timeout to recoverable readiness", async () => {
+  it("keeps transport failures distinct from bootstrap readiness during runtime.start", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-timeout-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
@@ -760,8 +760,43 @@ describe("profile-runtime identity preflight", () => {
 
     expect(started).toMatchObject({
       identityBindingState: "bound",
-      transportState: "ready",
-      bootstrapState: "pending",
+      transportState: "disconnected",
+      bootstrapState: "not_started",
+      runtimeReadiness: "recoverable"
+    });
+  });
+
+  it("maps runtime.bootstrap handshake failure to transport-not-connected readiness", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-handshake-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const service = createTestService({
+      bridgeFactory: () => ({
+        runCommand: async () => {
+          throw new NativeMessagingTransportError("ERR_TRANSPORT_HANDSHAKE_FAILED", "mock handshake failed");
+        }
+      })
+    });
+
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_handshake_failure_profile",
+      runId: "run-runtime-bootstrap-handshake-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(started).toMatchObject({
+      identityBindingState: "bound",
+      transportState: "not_connected",
+      bootstrapState: "not_started",
       runtimeReadiness: "recoverable"
     });
   });

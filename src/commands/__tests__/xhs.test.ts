@@ -132,10 +132,10 @@ describe("ensureOfficialChromeRuntimeReady", () => {
     ).rejects.toMatchObject({
       code: "ERR_RUNTIME_UNAVAILABLE",
       details: expect.objectContaining({
-        runtime_readiness: "unknown",
+        runtime_readiness: "recoverable",
         bootstrap_state: "ready",
         transport_state: "not_connected",
-        reason: "ERR_RUNTIME_NOT_READY"
+        reason: "ERR_RUNTIME_TRANSPORT_NOT_READY"
       })
     });
   });
@@ -245,6 +245,61 @@ describe("ensureOfficialChromeRuntimeReady", () => {
         profile_state: "ready",
         confirmation_required: true,
         reason: "ERR_RUNTIME_LOGIN_CONFIRMATION_REQUIRED"
+      })
+    });
+    expect(bridge.runCommand).not.toHaveBeenCalled();
+  });
+
+  it("keeps transport failures distinct from bootstrap-not-delivered in final readiness gate", async () => {
+    const readStatus = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      confirmationRequired: false,
+      runtimeReadiness: "recoverable",
+      identityBindingState: "bound",
+      bootstrapState: "not_started",
+      transportState: "not_connected"
+    }));
+    const bridge = {
+      runCommand: vi.fn()
+    };
+
+    await expect(
+      ensureOfficialChromeRuntimeReady(
+        {
+          cwd: "/tmp/webenvoy",
+          profile: "official_transport_not_connected_profile",
+          run_id: "run-xhs-transport-not-connected-001"
+        } as never,
+        {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        } as never,
+        "live_read_high_risk",
+        bridge as never,
+        {
+          fingerprint_profile_bundle: null
+        } as never,
+        {
+          targetDomain: "www.xiaohongshu.com",
+          targetTabId: 32,
+          targetPage: "search_result_tab",
+          options: {
+            requested_execution_mode: "live_read_high_risk"
+          }
+        } as never,
+        readStatus
+      )
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_UNAVAILABLE",
+      details: expect.objectContaining({
+        runtime_readiness: "recoverable",
+        bootstrap_state: "not_started",
+        transport_state: "not_connected",
+        reason: "ERR_RUNTIME_TRANSPORT_NOT_READY"
       })
     });
     expect(bridge.runCommand).not.toHaveBeenCalled();

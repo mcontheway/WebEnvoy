@@ -57,6 +57,13 @@ const asObject = (value: unknown): JsonObject | null =>
 
 type RuntimeStatusReader = () => Promise<JsonObject>;
 
+const isTransportFailureCode = (code: unknown): code is string =>
+  code === "ERR_TRANSPORT_HANDSHAKE_FAILED" ||
+  code === "ERR_TRANSPORT_TIMEOUT" ||
+  code === "ERR_TRANSPORT_DISCONNECTED" ||
+  code === "ERR_TRANSPORT_FORWARD_FAILED" ||
+  code === "ERR_TRANSPORT_NOT_READY";
+
 const buildOfficialChromeRuntimeReadiness = (input: {
   identityBindingState: string;
   transportState: string;
@@ -65,20 +72,23 @@ const buildOfficialChromeRuntimeReadiness = (input: {
   if (input.identityBindingState === "missing" || input.identityBindingState === "mismatch") {
     return "blocked";
   }
-  if (input.transportState === "disconnected") {
+  if (input.transportState === "disconnected" || input.transportState === "not_connected") {
     return "recoverable";
   }
   if (input.transportState === "ready" && input.bootstrapState === "ready") {
     return "ready";
   }
-  if (input.bootstrapState === "pending" || input.bootstrapState === "not_started") {
+  if (
+    input.transportState === "ready" &&
+    (input.bootstrapState === "pending" || input.bootstrapState === "not_started")
+  ) {
     return "pending";
   }
   if (input.bootstrapState === "failed") {
     return "recoverable";
   }
   if (input.bootstrapState === "stale") {
-    return "unknown";
+    return "blocked";
   }
   return "unknown";
 };
@@ -114,6 +124,16 @@ const readOfficialChromeRuntimeReadinessViaBridge = async (input: {
     )
   });
   if (!readinessResult.ok) {
+    if (isTransportFailureCode(readinessResult.error.code)) {
+      throw new CliError("ERR_RUNTIME_UNAVAILABLE", `通信链路不可用: ${readinessResult.error.code}`, {
+        retryable: true,
+        details: {
+          ability_id: input.abilityId,
+          stage: "execution",
+          reason: readinessResult.error.code
+        }
+      });
+    }
     throw new CliError(
       "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
       "official Chrome runtime readiness 未获得执行面确认",
@@ -454,6 +474,16 @@ export const ensureOfficialChromeRuntimeReady = async (
       )
     });
     if (!pingResult.ok) {
+      if (isTransportFailureCode(pingResult.error.code)) {
+        throw new CliError("ERR_RUNTIME_UNAVAILABLE", `通信链路不可用: ${pingResult.error.code}`, {
+          details: {
+            ability_id: ability.id,
+            stage: "execution",
+            reason: pingResult.error.code
+          },
+          retryable: true
+        });
+      }
       throw new CliError("ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED", "official Chrome runtime bootstrap 未获得执行面确认", {
         details: {
           ability_id: ability.id,
@@ -542,6 +572,15 @@ export const ensureOfficialChromeRuntimeReady = async (
       details: {
         ...buildBaseDetails(),
         reason: "ERR_RUNTIME_BOOTSTRAP_ACK_STALE"
+      },
+      retryable: true
+    });
+  }
+  if (transportState !== "ready") {
+    throw new CliError("ERR_RUNTIME_UNAVAILABLE", "official Chrome runtime 传输链路未就绪", {
+      details: {
+        ...buildBaseDetails(),
+        reason: "ERR_RUNTIME_TRANSPORT_NOT_READY"
       },
       retryable: true
     });

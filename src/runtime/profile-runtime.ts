@@ -439,18 +439,24 @@ const buildRuntimeReadiness = (input: {
 
 const mapTransportErrorToReadiness = (
   error: NativeMessagingTransportError
-): Pick<RuntimeReadinessSnapshot, "transportState" | "bootstrapState" | "runtimeReadiness"> => {
+): Pick<RuntimeReadinessSnapshot, "transportState" | "bootstrapState" | "runtimeReadiness" | "details"> => {
+  const details = {
+    code: error.code,
+    message: error.message
+  };
   if (error.code === "ERR_TRANSPORT_HANDSHAKE_FAILED") {
     return {
       transportState: "not_connected",
       bootstrapState: "not_started",
-      runtimeReadiness: "recoverable"
+      runtimeReadiness: "recoverable",
+      details
     };
   }
   return {
     transportState: "disconnected",
     bootstrapState: "not_started",
-    runtimeReadiness: "recoverable"
+    runtimeReadiness: "recoverable",
+    details
   };
 };
 
@@ -1553,7 +1559,10 @@ export class ProfileRuntimeService {
         return mapBootstrapCliErrorToReadiness(error);
       }
       if (error instanceof NativeMessagingTransportError) {
-        return mapBootstrapCliErrorToReadiness(this.#buildRuntimeBootstrapTransportError(error));
+        return {
+          identityBindingState: "bound",
+          ...mapTransportErrorToReadiness(error)
+        };
       }
       throw error;
     }
@@ -1680,25 +1689,6 @@ export class ProfileRuntimeService {
     }
     return new CliError("ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED", result.error.message, {
       retryable: true
-    });
-  }
-
-  #buildRuntimeBootstrapTransportError(error: NativeMessagingTransportError): CliError {
-    if (error.code === "ERR_TRANSPORT_TIMEOUT") {
-      return new CliError("ERR_RUNTIME_BOOTSTRAP_ACK_TIMEOUT", "runtime bootstrap ack 超时", {
-        retryable: true,
-        cause: error
-      });
-    }
-    if (error.code === "ERR_TRANSPORT_HANDSHAKE_FAILED") {
-      return new CliError("ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED", "runtime bootstrap 未能建立传输握手", {
-        retryable: true,
-        cause: error
-      });
-    }
-    return new CliError("ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED", "runtime bootstrap 未送达到扩展背景页", {
-      retryable: true,
-      cause: error
     });
   }
 

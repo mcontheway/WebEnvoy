@@ -426,6 +426,7 @@ describe("extension service worker recovery contract", () => {
     await primeTrustedFingerprintContext({
       runtimeMessageListeners,
       runId: "run-bootstrap-001",
+      runtimeContextId: "ctx-bootstrap-001",
       profile: "profile-a",
       fingerprintContext,
       tabId: 11
@@ -508,6 +509,7 @@ describe("extension service worker recovery contract", () => {
     await primeTrustedFingerprintContext({
       runtimeMessageListeners,
       runId: "run-bootstrap-generic-001",
+      runtimeContextId: "ctx-bootstrap-generic-001",
       profile: "profile-a",
       fingerprintContext,
       tabId: 77,
@@ -733,6 +735,86 @@ describe("extension service worker recovery contract", () => {
           bootstrap_state: "pending",
           run_id: "run-bootstrap-new-late-001",
           runtime_context_id: "ctx-bootstrap-new-late-001",
+          transport_state: "ready"
+        })
+      })
+    );
+  });
+
+  it("keeps bootstrap pending when late attestation has same run_id but stale or missing runtime_context_id", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-same-run-old-ctx-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-same-run-old-ctx-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-same-run-old-ctx-001",
+          runtime_context_id: "ctx-bootstrap-new-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-new-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-bootstrap-same-run-old-ctx-001",
+      runtimeContextId: "ctx-bootstrap-old-001",
+      profile: "profile-a",
+      fingerprintContext
+    });
+    await Promise.resolve();
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-bootstrap-same-run-old-ctx-001",
+      profile: "profile-a",
+      fingerprintContext
+    });
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-same-run-old-ctx-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-readiness-same-run-old-ctx-001",
+        command: "runtime.readiness",
+        command_params: {},
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-readiness-same-run-old-ctx-001",
+        status: "success",
+        payload: expect.objectContaining({
+          bootstrap_state: "pending",
+          run_id: "run-bootstrap-same-run-old-ctx-001",
+          runtime_context_id: "ctx-bootstrap-new-001",
           transport_state: "ready"
         })
       })

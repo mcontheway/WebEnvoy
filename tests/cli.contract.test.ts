@@ -2931,7 +2931,7 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
-  it("surfaces bound identity preflight via runtime.status after pending bootstrap start", async () => {
+  it("surfaces bound identity preflight via runtime.status after recoverable transport failure during runtime.start", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
@@ -2965,9 +2965,9 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         identityBindingState: "bound",
-        transportState: "ready",
-        bootstrapState: "pending",
-        runtimeReadiness: "pending"
+        transportState: "not_connected",
+        bootstrapState: "not_started",
+        runtimeReadiness: "recoverable"
       }
     });
 
@@ -3137,7 +3137,7 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
-  it("reuses persisted manifestPath after pending bootstrap start when runtime.status omits manifest_path", async () => {
+  it("reuses persisted manifestPath after recoverable transport failure when runtime.status omits manifest_path", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
@@ -3170,9 +3170,9 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         identityBindingState: "bound",
-        transportState: "ready",
-        bootstrapState: "pending",
-        runtimeReadiness: "pending"
+        transportState: "not_connected",
+        bootstrapState: "not_started",
+        runtimeReadiness: "recoverable"
       }
     });
 
