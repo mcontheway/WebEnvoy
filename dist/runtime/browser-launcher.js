@@ -6,9 +6,9 @@ import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 const KNOWN_BROWSER_CANDIDATES = {
     darwin: [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
         "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-        "/Applications/Chromium.app/Contents/MacOS/Chromium",
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        "/Applications/Chromium.app/Contents/MacOS/Chromium"
     ],
     linux: [
         "/usr/bin/google-chrome-stable",
@@ -37,6 +37,7 @@ const KNOWN_BROWSER_CANDIDATES = {
     cygwin: []
 };
 const hasPathSegment = (value) => /[\\/]/.test(value);
+export const resolvePreferredBrowserCandidates = (platform, explicitFromEnv) => [explicitFromEnv, ...(KNOWN_BROWSER_CANDIDATES[platform] ?? [])].filter((item) => item !== null);
 export class BrowserLaunchError extends Error {
     code;
     constructor(code, message, options) {
@@ -352,10 +353,7 @@ const resolveExecutablePath = async (params, options) => {
         throw new BrowserLaunchError("BROWSER_INVALID_ARGUMENT", "params.browserPath 不受支持，请使用受信环境变量 WEBENVOY_BROWSER_PATH");
     }
     const explicitFromEnv = parseOptionalString(process.env.WEBENVOY_BROWSER_PATH);
-    const candidates = [
-        explicitFromEnv,
-        ...(KNOWN_BROWSER_CANDIDATES[process.platform] ?? [])
-    ].filter((item) => item !== null);
+    const candidates = resolvePreferredBrowserCandidates(process.platform, explicitFromEnv);
     let brandedChromeRejected = false;
     for (const candidate of candidates) {
         let resolvedCandidate = null;
@@ -435,23 +433,27 @@ export const resolvePreferredBrowserVersionTruthSource = async (params = {}) => 
         explicitFromEnv,
         ...(KNOWN_BROWSER_CANDIDATES[process.platform] ?? [])
     ].filter((item) => item !== null);
-    let brandedChromeFallback = null;
+    let officialChromePreferred = null;
+    let fallbackCandidate = null;
     for (const candidate of candidates) {
         const resolved = await resolveExecutableCandidate(candidate);
         if (resolved === null) {
             continue;
         }
+        if (explicitFromEnv && candidate === explicitFromEnv) {
+            return resolved;
+        }
         if (isUnsupportedBrandedChromeForExtensions(resolved.browserVersion)) {
-            brandedChromeFallback ??= resolved;
-            if (explicitFromEnv && candidate === explicitFromEnv) {
-                return resolved;
-            }
+            officialChromePreferred ??= resolved;
             continue;
         }
-        return resolved;
+        fallbackCandidate ??= resolved;
     }
-    if (brandedChromeFallback) {
-        return brandedChromeFallback;
+    if (officialChromePreferred) {
+        return officialChromePreferred;
+    }
+    if (fallbackCandidate) {
+        return fallbackCandidate;
     }
     return resolveBrowserVersionTruthSource(params);
 };

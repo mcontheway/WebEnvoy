@@ -312,33 +312,89 @@ const toTransportCliError = (error: NativeMessagingTransportError, ability: Abil
 const ensureOfficialChromeRuntimeReady = async (
   context: RuntimeContext,
   ability: AbilityRef,
-  requestedExecutionMode: XhsExecutionMode
+  requestedExecutionMode: XhsExecutionMode,
+  bridge: NativeMessagingBridge,
+  fingerprintContext: ReturnType<typeof buildFingerprintContextForMeta>,
+  gate: ReturnType<typeof normalizeGateOptions>
 ): Promise<void> => {
-  const status = await profileRuntime.status({
-    cwd: context.cwd,
-    profile: context.profile ?? "",
-    runId: context.run_id,
-    params: {
-      requested_execution_mode: requestedExecutionMode
-    }
-  });
+  const readStatus = async () =>
+    await profileRuntime.status({
+      cwd: context.cwd,
+      profile: context.profile ?? "",
+      runId: context.run_id,
+      params: {
+        requested_execution_mode: requestedExecutionMode
+      }
+    });
+
+  let status = await readStatus();
   const identityPreflight = asObject(status.identityPreflight);
   if (identityPreflight?.mode !== "official_chrome_persistent_extension") {
     return;
   }
 
-  const runtimeReadiness =
+  const attemptExecutionBootstrap = async (): Promise<void> => {
+    const pingResult = await bridge.runCommand({
+      runId: context.run_id,
+      profile: context.profile,
+      cwd: context.cwd,
+      command: "runtime.ping",
+      params: appendFingerprintContext(
+        {
+          requested_execution_mode: requestedExecutionMode,
+          target_domain: gate.targetDomain,
+          target_tab_id: gate.targetTabId,
+          target_page: gate.targetPage,
+          options: gate.options
+        },
+        fingerprintContext
+      )
+    });
+    if (!pingResult.ok) {
+      throw new CliError("ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED", "official Chrome runtime bootstrap 未获得执行面确认", {
+        details: {
+          ability_id: ability.id,
+          stage: "execution",
+          reason: pingResult.error.code
+        },
+        retryable: true
+      });
+    }
+  };
+
+  let runtimeReadiness =
     typeof status.runtimeReadiness === "string" ? status.runtimeReadiness : "unknown";
   if (runtimeReadiness === "ready") {
     return;
   }
 
-  const identityBindingState =
+  let identityBindingState =
     typeof status.identityBindingState === "string" ? status.identityBindingState : "missing";
-  const bootstrapState =
+  let bootstrapState =
     typeof status.bootstrapState === "string" ? status.bootstrapState : "not_started";
-  const transportState =
+  let transportState =
     typeof status.transportState === "string" ? status.transportState : "not_connected";
+
+  if (
+    identityBindingState === "bound" &&
+    transportState === "ready" &&
+    (bootstrapState === "not_started" || bootstrapState === "pending")
+  ) {
+    await attemptExecutionBootstrap();
+    status = await readStatus();
+    runtimeReadiness =
+      typeof status.runtimeReadiness === "string" ? status.runtimeReadiness : "unknown";
+    identityBindingState =
+      typeof status.identityBindingState === "string" ? status.identityBindingState : "missing";
+    bootstrapState =
+      typeof status.bootstrapState === "string" ? status.bootstrapState : "not_started";
+    transportState =
+      typeof status.transportState === "string" ? status.transportState : "not_connected";
+    if (runtimeReadiness === "ready") {
+      return;
+    }
+  }
+
   const baseDetails = {
     ability_id: ability.id,
     stage: "execution" as const,
@@ -362,6 +418,15 @@ const ensureOfficialChromeRuntimeReady = async (
         ...baseDetails,
         reason: "ERR_RUNTIME_IDENTITY_MISMATCH"
       }
+    });
+  }
+  if (bootstrapState === "stale") {
+    throw new CliError("ERR_RUNTIME_BOOTSTRAP_ACK_STALE", "official Chrome runtime bootstrap 上下文已陈旧", {
+      details: {
+        ...baseDetails,
+        reason: "ERR_RUNTIME_BOOTSTRAP_ACK_STALE"
+      },
+      retryable: true
     });
   }
   if (bootstrapState === "not_started" || bootstrapState === "pending") {
@@ -414,14 +479,21 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
   }
 
   const bridge = resolveRuntimeBridge();
+  const profileStore = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
+  const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
+  const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
+    requestedExecutionMode: gate.requestedExecutionMode
+  });
 
   try {
-    await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode);
-    const profileStore = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
-    const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
-    const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
-      requestedExecutionMode: gate.requestedExecutionMode
-    });
+    await ensureOfficialChromeRuntimeReady(
+      context,
+      envelope.ability,
+      gate.requestedExecutionMode,
+      bridge,
+      fingerprintContext,
+      gate
+    );
     const commandParams = appendFingerprintContext(
       {
         target_domain: gate.targetDomain,

@@ -14,9 +14,9 @@ type BrowserLaunchErrorCode =
 
 const KNOWN_BROWSER_CANDIDATES: Record<NodeJS.Platform, string[]> = {
   darwin: [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    "/Applications/Chromium.app/Contents/MacOS/Chromium"
   ],
   linux: [
     "/usr/bin/google-chrome-stable",
@@ -46,6 +46,14 @@ const KNOWN_BROWSER_CANDIDATES: Record<NodeJS.Platform, string[]> = {
 };
 
 const hasPathSegment = (value: string): boolean => /[\\/]/.test(value);
+
+export const resolvePreferredBrowserCandidates = (
+  platform: NodeJS.Platform,
+  explicitFromEnv: string | null
+): string[] =>
+  [explicitFromEnv, ...(KNOWN_BROWSER_CANDIDATES[platform] ?? [])].filter(
+    (item): item is string => item !== null
+  );
 
 export class BrowserLaunchError extends Error {
   readonly code: BrowserLaunchErrorCode;
@@ -457,10 +465,7 @@ const resolveExecutablePath = async (
     );
   }
   const explicitFromEnv = parseOptionalString(process.env.WEBENVOY_BROWSER_PATH);
-  const candidates = [
-    explicitFromEnv,
-    ...(KNOWN_BROWSER_CANDIDATES[process.platform] ?? [])
-  ].filter((item): item is string => item !== null);
+  const candidates = resolvePreferredBrowserCandidates(process.platform, explicitFromEnv);
   let brandedChromeRejected = false;
 
   for (const candidate of candidates) {
@@ -577,7 +582,8 @@ export const resolvePreferredBrowserVersionTruthSource = async (
     explicitFromEnv,
     ...(KNOWN_BROWSER_CANDIDATES[process.platform] ?? [])
   ].filter((item): item is string => item !== null);
-  let brandedChromeFallback: ResolvedExecutableCandidate | null = null;
+  let officialChromePreferred: ResolvedExecutableCandidate | null = null;
+  let fallbackCandidate: ResolvedExecutableCandidate | null = null;
 
   for (const candidate of candidates) {
     const resolved = await resolveExecutableCandidate(candidate);
@@ -585,19 +591,24 @@ export const resolvePreferredBrowserVersionTruthSource = async (
       continue;
     }
 
+    if (explicitFromEnv && candidate === explicitFromEnv) {
+      return resolved;
+    }
+
     if (isUnsupportedBrandedChromeForExtensions(resolved.browserVersion)) {
-      brandedChromeFallback ??= resolved;
-      if (explicitFromEnv && candidate === explicitFromEnv) {
-        return resolved;
-      }
+      officialChromePreferred ??= resolved;
       continue;
     }
 
-    return resolved;
+    fallbackCandidate ??= resolved;
   }
 
-  if (brandedChromeFallback) {
-    return brandedChromeFallback;
+  if (officialChromePreferred) {
+    return officialChromePreferred;
+  }
+
+  if (fallbackCandidate) {
+    return fallbackCandidate;
   }
 
   return resolveBrowserVersionTruthSource(params);

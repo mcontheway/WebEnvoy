@@ -348,9 +348,10 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("acks runtime.bootstrap and exposes runtime.readiness from background state", async () => {
+  it("keeps runtime.readiness pending until bootstrap receives execution-surface trust", async () => {
     const firstPort = createMockPort();
-    const { chromeApi } = createChromeApi([firstPort]);
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
 
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
@@ -369,7 +370,7 @@ describe("extension service worker recovery contract", () => {
           run_id: "run-bootstrap-001",
           runtime_context_id: "ctx-bootstrap-001",
           profile: "profile-a",
-          fingerprint_runtime: createFingerprintRuntimeContext(),
+          fingerprint_runtime: fingerprintContext,
           fingerprint_patch_manifest: {
             required_patches: ["audio_context"]
           },
@@ -384,16 +385,10 @@ describe("extension service worker recovery contract", () => {
     expect(firstPort.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "run-bootstrap-001",
-        status: "success",
-        payload: {
-          method: "runtime.bootstrap.ack",
-          result: expect.objectContaining({
-            run_id: "run-bootstrap-001",
-            runtime_context_id: "ctx-bootstrap-001",
-            profile: "profile-a",
-            status: "ready"
-          })
-        }
+        status: "error",
+        error: expect.objectContaining({
+          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+        })
       })
     );
 
@@ -417,7 +412,7 @@ describe("extension service worker recovery contract", () => {
         id: "run-readiness-001",
         status: "success",
         payload: expect.objectContaining({
-          bootstrap_state: "ready",
+          bootstrap_state: "pending",
           run_id: "run-bootstrap-001",
           runtime_context_id: "ctx-bootstrap-001",
           transport_state: "ready"
@@ -425,6 +420,43 @@ describe("extension service worker recovery contract", () => {
       })
     );
     expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-bootstrap-001",
+      profile: "profile-a",
+      fingerprintContext,
+      tabId: 11
+    });
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-002",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-readiness-002",
+        command: "runtime.readiness",
+        command_params: {},
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-readiness-002",
+        status: "success",
+        payload: expect.objectContaining({
+          bootstrap_state: "ready",
+          run_id: "run-bootstrap-001",
+          runtime_context_id: "ctx-bootstrap-001",
+          transport_state: "ready"
+        })
+      })
+    );
   });
 
   it("forwards fingerprint_context without dropping fields", async () => {

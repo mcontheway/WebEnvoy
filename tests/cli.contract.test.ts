@@ -2929,7 +2929,7 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
-  it("surfaces bound identity preflight via runtime.status without bootstrap-pending contract", async () => {
+  it("surfaces bound identity preflight via runtime.status after pending bootstrap start", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
@@ -2956,13 +2956,16 @@ process.stdin.on("data", (chunk) => {
       }
     );
 
-    expect(start.status).toBe(5);
+    expect(start.status).toBe(0);
     const startBody = parseSingleJsonLine(start.stdout);
     expect(startBody).toMatchObject({
       command: "runtime.start",
-      status: "error",
-      error: {
-        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+      status: "success",
+      summary: {
+        identityBindingState: "bound",
+        transportState: "ready",
+        bootstrapState: "pending",
+        runtimeReadiness: "pending"
       }
     });
 
@@ -2993,7 +2996,7 @@ process.stdin.on("data", (chunk) => {
         identityBindingState: "bound",
         transportState: "not_connected",
         bootstrapState: "not_started",
-        runtimeReadiness: "blocked",
+        runtimeReadiness: "recoverable",
         identityPreflight: {
           mode: "official_chrome_persistent_extension",
           manifestPath,
@@ -3003,7 +3006,7 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
-  it("does not reuse manifestPath after launcher failure when runtime.status omits manifest_path", async () => {
+  it("reuses persisted manifestPath after pending bootstrap start when runtime.status omits manifest_path", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
@@ -3029,13 +3032,16 @@ process.stdin.on("data", (chunk) => {
         WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
       }
     );
-    expect(start.status).toBe(5);
+    expect(start.status).toBe(0);
     const startBody = parseSingleJsonLine(start.stdout);
     expect(startBody).toMatchObject({
       command: "runtime.start",
-      status: "error",
-      error: {
-        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+      status: "success",
+      summary: {
+        identityBindingState: "bound",
+        transportState: "ready",
+        bootstrapState: "pending",
+        runtimeReadiness: "pending"
       }
     });
 
@@ -3062,9 +3068,9 @@ process.stdin.on("data", (chunk) => {
       command: "runtime.status",
       status: "success",
       summary: {
-        identityBindingState: "mismatch",
+        identityBindingState: "bound",
         identityPreflight: {
-          failureReason: "IDENTITY_MANIFEST_MISSING"
+          failureReason: "IDENTITY_PREFLIGHT_PASSED"
         }
       }
     });

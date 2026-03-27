@@ -223,7 +223,7 @@ const serializeFingerprintRuntimeContext = (fingerprintRuntime) => JSON.stringif
 const isFingerprintRuntimeContextEquivalent = (left, right) => serializeFingerprintRuntimeContext(left) === serializeFingerprintRuntimeContext(right);
 const TRUST_INVALIDATION_COMMANDS = new Set(["runtime.stop", "runtime.start", "runtime.login"]);
 // Trust must come from startup trust bound to an allowlist page, not generic bridge commands.
-const TRUST_PRIMING_COMMANDS = new Set();
+const TRUST_PRIMING_COMMANDS = new Set(["runtime.ping"]);
 export class BackgroundRelay {
     contentScript;
     #listeners = new Set();
@@ -718,7 +718,21 @@ class ChromeBackgroundBridge {
             return;
         }
         const sessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
-        this.#upsertTrustedFingerprintContext(profile, sessionId, fingerprintRuntime);
+        const bootstrap = this.#runtimeBootstrapStates.get(profile);
+        const canPrimeFromBootstrap = command === "runtime.ping" &&
+            !!bootstrap &&
+            bootstrap.sessionId === sessionId &&
+            bootstrap.status === "pending" &&
+            bootstrap.serializedFingerprintRuntime === serializeFingerprintRuntimeContext(fingerprintRuntime);
+        if (!canPrimeFromBootstrap) {
+            return;
+        }
+        const sourceBinding = this.#resolveRequestTargetBinding(request);
+        this.#upsertTrustedFingerprintContext(profile, sessionId, fingerprintRuntime, {
+            sourceTabId: sourceBinding?.tabId ?? null,
+            sourceDomain: sourceBinding?.domain ?? null
+        });
+        this.#promoteRuntimeBootstrapStateFromExecutionSignal(profile, sessionId, fingerprintRuntime);
     }
     async #resolveStartupTrustSenderBinding(sender) {
         const tabId = asInteger(sender.tab?.id);
@@ -801,6 +815,7 @@ class ChromeBackgroundBridge {
             sourceTabId: senderBinding.tabId,
             sourceDomain: senderBinding.domain
         });
+        this.#promoteRuntimeBootstrapStateFromExecutionSignal(profile, explicitSessionId, fingerprintRuntime);
     }
     #normalizeTrustedFingerprintRuntime(fingerprintRuntime) {
         return {
@@ -845,6 +860,24 @@ class ChromeBackgroundBridge {
         if (typeof oldestKey === "string") {
             this.#trustedFingerprintContexts.delete(oldestKey);
         }
+    }
+    #promoteRuntimeBootstrapStateFromExecutionSignal(profile, sessionId, fingerprintRuntime) {
+        const bootstrap = this.#runtimeBootstrapStates.get(profile);
+        if (!bootstrap) {
+            return;
+        }
+        if (bootstrap.sessionId !== sessionId || bootstrap.status !== "pending") {
+            return;
+        }
+        if (bootstrap.serializedFingerprintRuntime !== serializeFingerprintRuntimeContext(fingerprintRuntime)) {
+            bootstrap.status = "failed";
+            bootstrap.updatedAt = new Date().toISOString();
+            this.#runtimeBootstrapStates.set(profile, bootstrap);
+            return;
+        }
+        bootstrap.status = "ready";
+        bootstrap.updatedAt = new Date().toISOString();
+        this.#runtimeBootstrapStates.set(profile, bootstrap);
     }
     #resolveTrustedFingerprintContext(request) {
         const profile = asNonEmptyString(request.profile);
@@ -971,10 +1004,20 @@ class ChromeBackgroundBridge {
         const runId = asNonEmptyString(commandParams.run_id);
         const runtimeContextId = asNonEmptyString(commandParams.runtime_context_id);
         const profile = asNonEmptyString(commandParams.profile);
+        const fingerprintRuntime = ensureFingerprintRuntimeContext(commandParams.fingerprint_runtime ?? null);
+        const fingerprintPatchManifest = asRecord(commandParams.fingerprint_patch_manifest);
         const mainWorldSecret = asNonEmptyString(commandParams.main_world_secret);
         const requestRunId = asNonEmptyString(request.params.run_id);
         const requestProfile = asNonEmptyString(request.profile);
-        if (!version || !runId || !runtimeContextId || !profile || !mainWorldSecret) {
+        const requestSessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
+        if (!version ||
+            version !== "v1" ||
+            !runId ||
+            !runtimeContextId ||
+            !profile ||
+            !fingerprintRuntime ||
+            !fingerprintPatchManifest ||
+            !mainWorldSecret) {
             this.#emit({
                 id: request.id,
                 status: "error",
@@ -1002,17 +1045,69 @@ class ChromeBackgroundBridge {
             });
             return;
         }
-        const status = requestRunId && requestRunId !== runId ? "stale" : "ready";
-        if (status === "ready") {
+        if (requestRunId && requestRunId !== runId) {
             this.#runtimeBootstrapStates.set(profile, {
                 version,
                 runId,
                 runtimeContextId,
                 profile,
-                sessionId: this.#sessionId,
-                status,
+                sessionId: requestSessionId,
+                status: "stale",
+                serializedFingerprintRuntime: serializeFingerprintRuntimeContext(fingerprintRuntime),
                 updatedAt: new Date().toISOString()
             });
+            this.#emit({
+                id: request.id,
+                status: "success",
+                summary: {
+                    session_id: this.#sessionId,
+                    run_id: requestRunId,
+                    command: "runtime.bootstrap",
+                    profile,
+                    relay_path: "host>background"
+                },
+                payload: {
+                    method: "runtime.bootstrap.ack",
+                    result: {
+                        version,
+                        run_id: runId,
+                        runtime_context_id: runtimeContextId,
+                        profile,
+                        status: "stale"
+                    }
+                },
+                error: null
+            });
+            return;
+        }
+        const trusted = this.#trustedFingerprintContexts.get(buildTrustedFingerprintContextKey(profile, requestSessionId));
+        const bootstrapReady = !!trusted &&
+            trusted.sessionId === requestSessionId &&
+            trusted.serializedFingerprintRuntime === serializeFingerprintRuntimeContext(fingerprintRuntime);
+        const status = bootstrapReady ? "ready" : "pending";
+        this.#runtimeBootstrapStates.set(profile, {
+            version,
+            runId,
+            runtimeContextId,
+            profile,
+            sessionId: requestSessionId,
+            status,
+            serializedFingerprintRuntime: serializeFingerprintRuntimeContext(fingerprintRuntime),
+            updatedAt: new Date().toISOString()
+        });
+        if (!bootstrapReady) {
+            this.#emit({
+                id: request.id,
+                status: "error",
+                summary: {
+                    relay_path: "host>background"
+                },
+                error: {
+                    code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+                    message: "runtime bootstrap 尚未获得执行面确认"
+                }
+            });
+            return;
         }
         this.#emit({
             id: request.id,
@@ -1031,7 +1126,7 @@ class ChromeBackgroundBridge {
                     run_id: runId,
                     runtime_context_id: runtimeContextId,
                     profile,
-                    status
+                    status: "ready"
                 }
             },
             error: null

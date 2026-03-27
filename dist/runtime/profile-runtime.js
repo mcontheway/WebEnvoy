@@ -238,6 +238,62 @@ const mapTransportErrorToReadiness = (error) => {
         runtimeReadiness: "recoverable"
     };
 };
+const mapBootstrapCliErrorToReadiness = (error, identityBindingState = "bound") => {
+    const details = {
+        code: error.code,
+        message: error.message
+    };
+    switch (error.code) {
+        case "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED":
+            return {
+                identityBindingState,
+                transportState: "ready",
+                bootstrapState: "pending",
+                runtimeReadiness: "pending",
+                details
+            };
+        case "ERR_RUNTIME_BOOTSTRAP_ACK_TIMEOUT":
+            return {
+                identityBindingState,
+                transportState: "ready",
+                bootstrapState: "pending",
+                runtimeReadiness: "recoverable",
+                details
+            };
+        case "ERR_RUNTIME_BOOTSTRAP_ACK_STALE":
+            return {
+                identityBindingState,
+                transportState: "ready",
+                bootstrapState: "stale",
+                runtimeReadiness: "unknown",
+                details
+            };
+        case "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH":
+            return {
+                identityBindingState: "mismatch",
+                transportState: "ready",
+                bootstrapState: "failed",
+                runtimeReadiness: "blocked",
+                details
+            };
+        case "ERR_RUNTIME_READY_SIGNAL_CONFLICT":
+            return {
+                identityBindingState,
+                transportState: "ready",
+                bootstrapState: "failed",
+                runtimeReadiness: "unknown",
+                details
+            };
+        default:
+            return {
+                identityBindingState,
+                transportState: "ready",
+                bootstrapState: "failed",
+                runtimeReadiness: "recoverable",
+                details
+            };
+    }
+};
 const asResultRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
@@ -1083,11 +1139,13 @@ export class ProfileRuntimeService {
             }
             const payload = asResultRecord(result.payload);
             const ackResult = asResultRecord(payload?.result);
+            const ackVersion = typeof ackResult?.version === "string" ? ackResult.version : null;
             const status = typeof ackResult?.status === "string" ? ackResult.status : null;
             const ackRunId = typeof ackResult?.run_id === "string" ? ackResult.run_id : null;
             const ackContextId = typeof ackResult?.runtime_context_id === "string" ? ackResult.runtime_context_id : null;
             const ackProfile = typeof ackResult?.profile === "string" ? ackResult.profile : null;
             if (status !== "ready" ||
+                ackVersion !== envelope.version ||
                 ackRunId !== envelope.run_id ||
                 ackContextId !== envelope.runtime_context_id ||
                 ackProfile !== envelope.profile) {
@@ -1109,10 +1167,10 @@ export class ProfileRuntimeService {
         }
         catch (error) {
             if (error instanceof CliError) {
-                throw error;
+                return mapBootstrapCliErrorToReadiness(error);
             }
             if (error instanceof NativeMessagingTransportError) {
-                throw this.#buildRuntimeBootstrapTransportError(error);
+                return mapBootstrapCliErrorToReadiness(this.#buildRuntimeBootstrapTransportError(error));
             }
             throw error;
         }
@@ -1170,6 +1228,11 @@ export class ProfileRuntimeService {
                 throw this.#buildRuntimeBootstrapCliError(result);
             }
             const payload = asResultRecord(result.payload);
+            const transportState = payload?.transport_state === "disconnected"
+                ? "disconnected"
+                : payload?.transport_state === "ready"
+                    ? "ready"
+                    : "ready";
             const bootstrapStateValue = payload?.bootstrap_state === "not_started" ||
                 payload?.bootstrap_state === "pending" ||
                 payload?.bootstrap_state === "ready" ||
@@ -1177,7 +1240,6 @@ export class ProfileRuntimeService {
                 payload?.bootstrap_state === "failed"
                 ? payload.bootstrap_state
                 : "not_started";
-            const transportState = "ready";
             return {
                 identityBindingState: baseIdentity,
                 transportState,
@@ -1199,16 +1261,7 @@ export class ProfileRuntimeService {
                 };
             }
             if (error instanceof CliError) {
-                return {
-                    identityBindingState: baseIdentity,
-                    transportState: "ready",
-                    bootstrapState: "failed",
-                    runtimeReadiness: "recoverable",
-                    details: {
-                        code: error.code,
-                        message: error.message
-                    }
-                };
+                return mapBootstrapCliErrorToReadiness(error, baseIdentity);
             }
             throw error;
         }

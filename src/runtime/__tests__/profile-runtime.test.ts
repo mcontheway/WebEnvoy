@@ -448,35 +448,29 @@ describe("profile-runtime identity preflight", () => {
     );
   });
 
-  it("delivers runtime bootstrap for bound official Chrome start and reports readiness", async () => {
-    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-ready-"));
+  it("keeps bound official Chrome start pending until bootstrap is attested by execution surface", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-pending-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
     const launchSpy = vi.fn();
-    const bridgeRunCommand = vi.fn(async ({ command, params, profile, runId }) => {
+    const bridgeRunCommand = vi.fn(async ({ command }) => {
       if (command === "runtime.bootstrap") {
         return {
-          ok: true as const,
-          payload: {
-            result: {
-              version: "v1",
-              run_id: runId,
-              runtime_context_id: String((params as { runtime_context_id?: unknown }).runtime_context_id),
-              profile,
-              status: "ready"
-            }
-          },
-          relay_path: "host>background"
+          ok: false as const,
+          error: {
+            code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+            message: "runtime bootstrap 尚未获得执行面确认"
+          }
         };
       }
       if (command === "runtime.readiness") {
         return {
           ok: true as const,
           payload: {
-            bootstrap_state: "ready"
+            bootstrap_state: "pending"
           },
           relay_path: "host>background"
         };
@@ -519,8 +513,8 @@ describe("profile-runtime identity preflight", () => {
       browserState: "ready",
       identityBindingState: "bound",
       transportState: "ready",
-      bootstrapState: "ready",
-      runtimeReadiness: "ready"
+      bootstrapState: "pending",
+      runtimeReadiness: "pending"
     });
     expect(launchSpy).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -534,6 +528,57 @@ describe("profile-runtime identity preflight", () => {
         profile: "identity_bound_ready_profile"
       })
     );
+  });
+
+  it("marks readiness unknown when runtime.bootstrap ack version conflicts with the request", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-version-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const service = createTestService({
+      browserLauncher: createMockBrowserLauncher(),
+      bridgeFactory: () => ({
+        runCommand: async ({ command, params, profile, runId }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v0",
+                  run_id: runId,
+                  runtime_context_id: String((params as { runtime_context_id?: unknown }).runtime_context_id),
+                  profile,
+                  status: "ready"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_version_conflict_profile",
+      runId: "run-runtime-bootstrap-version-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(started).toMatchObject({
+      identityBindingState: "bound",
+      transportState: "ready",
+      bootstrapState: "failed",
+      runtimeReadiness: "unknown"
+    });
   });
 
   it("blocks runtime.start when allowed_origins mismatches bound extension identity", async () => {
