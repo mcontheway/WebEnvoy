@@ -432,7 +432,7 @@ const buildRuntimeReadiness = (input: {
     return "recoverable";
   }
   if (input.bootstrapState === "stale") {
-    return "unknown";
+    return "blocked";
   }
   return "unknown";
 };
@@ -485,7 +485,7 @@ const mapBootstrapCliErrorToReadiness = (
         identityBindingState,
         transportState: "ready",
         bootstrapState: "stale",
-        runtimeReadiness: "unknown",
+        runtimeReadiness: "blocked",
         details
       };
     case "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH":

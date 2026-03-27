@@ -605,6 +605,81 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
+  it("marks runtime.status as blocked when runtime.readiness reports stale bootstrap", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-readiness-stale-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const service = createTestService({
+      browserLauncher: createMockBrowserLauncher(),
+      bridgeFactory: () => ({
+        runCommand: async ({ command, params, profile, runId }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: String((params as { runtime_context_id?: unknown }).runtime_context_id),
+                  profile,
+                  status: "ready"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          if (command === "runtime.readiness") {
+            return {
+              ok: true as const,
+              payload: {
+                bootstrap_state: "stale",
+                transport_state: "ready"
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_readiness_stale_profile",
+      runId: "run-runtime-readiness-stale-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "identity_bound_readiness_stale_profile",
+      runId: "run-runtime-readiness-stale-002",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(status).toMatchObject({
+      profileState: "ready",
+      lockHeld: true,
+      identityBindingState: "bound",
+      transportState: "ready",
+      bootstrapState: "stale",
+      runtimeReadiness: "blocked"
+    });
+  });
+
   it("marks readiness unknown when runtime.bootstrap ack version conflicts with the request", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-version-"));
     tempDirs.push(baseDir);
@@ -691,7 +766,7 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
-  it("maps stale runtime.bootstrap ack to stale bootstrap state", async () => {
+  it("maps stale runtime.bootstrap ack to blocked readiness", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-stale-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
@@ -737,7 +812,7 @@ describe("profile-runtime identity preflight", () => {
       identityBindingState: "bound",
       transportState: "ready",
       bootstrapState: "stale",
-      runtimeReadiness: "unknown"
+      runtimeReadiness: "blocked"
     });
   });
 
@@ -836,7 +911,7 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
-  it("marks readiness unknown when runtime.bootstrap returns a stale ack", async () => {
+  it("marks readiness blocked when runtime.bootstrap returns a stale ack", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-stale-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
@@ -883,7 +958,7 @@ describe("profile-runtime identity preflight", () => {
       identityBindingState: "bound",
       transportState: "ready",
       bootstrapState: "stale",
-      runtimeReadiness: "unknown"
+      runtimeReadiness: "blocked"
     });
   });
 

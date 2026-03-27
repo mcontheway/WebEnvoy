@@ -113,6 +113,7 @@ const primeTrustedFingerprintContext = async (input: {
   runId: string;
   profile: string;
   fingerprintContext: Record<string, unknown>;
+  runtimeContextId?: string;
   sessionId?: string;
   tabId?: number;
   tabUrl?: string;
@@ -125,6 +126,7 @@ const primeTrustedFingerprintContext = async (input: {
       payload: {
         startup_fingerprint_trust: {
           run_id: input.runId,
+          runtime_context_id: input.runtimeContextId,
           profile: input.profile,
           session_id: input.sessionId ?? "nm-session-001",
           fingerprint_runtime: input.fingerprintContext,
@@ -578,6 +580,160 @@ describe("extension service worker recovery contract", () => {
             run_id: "run-bootstrap-generic-001",
             runtime_context_id: "ctx-bootstrap-generic-001"
           })
+        })
+      })
+    );
+  });
+
+  it("does not reuse trusted fingerprint context from a previous run for new runtime.bootstrap context", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-old-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-old-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-old-001",
+          runtime_context_id: "ctx-bootstrap-old-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-old-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-bootstrap-old-001",
+      profile: "profile-a",
+      fingerprintContext,
+      tabId: 77,
+      tabUrl: "https://example.com/runtime-readiness"
+    });
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-new-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-new-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-new-001",
+          runtime_context_id: "ctx-bootstrap-new-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-new-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-bootstrap-new-001",
+        status: "error",
+        error: expect.objectContaining({
+          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+        })
+      })
+    );
+  });
+
+  it("keeps new runtime.bootstrap pending when a stale trusted context arrives later", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-new-late-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-new-late-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-new-late-001",
+          runtime_context_id: "ctx-bootstrap-new-late-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-new-late-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-bootstrap-old-late-001",
+      runtimeContextId: "ctx-bootstrap-old-late-001",
+      profile: "profile-a",
+      fingerprintContext,
+      tabId: 77,
+      tabUrl: "https://example.com/runtime-readiness"
+    });
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-after-stale-trust-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-readiness-after-stale-trust-001",
+        command: "runtime.readiness",
+        command_params: {},
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-readiness-after-stale-trust-001",
+        status: "success",
+        payload: expect.objectContaining({
+          bootstrap_state: "pending",
+          run_id: "run-bootstrap-new-late-001",
+          runtime_context_id: "ctx-bootstrap-new-late-001",
+          transport_state: "ready"
         })
       })
     );
