@@ -331,7 +331,7 @@ const readBrowserVersionOutput = async (executablePath) => {
         });
     });
 };
-const isUnsupportedBrandedChromeForExtensions = (versionOutput) => {
+export const isUnsupportedBrandedChromeForExtensions = (versionOutput) => {
     if (!versionOutput) {
         return false;
     }
@@ -346,7 +346,7 @@ const isUnsupportedBrandedChromeForExtensions = (versionOutput) => {
     const major = Number.parseInt(match[1], 10);
     return Number.isInteger(major) && major >= 137;
 };
-const resolveExecutablePath = async (params) => {
+const resolveExecutablePath = async (params, options) => {
     const explicitFromParams = parseOptionalString(params.browserPath);
     if (explicitFromParams !== null) {
         throw new BrowserLaunchError("BROWSER_INVALID_ARGUMENT", "params.browserPath 不受支持，请使用受信环境变量 WEBENVOY_BROWSER_PATH");
@@ -372,6 +372,9 @@ const resolveExecutablePath = async (params) => {
         }
         const versionOutput = await readBrowserVersionOutput(resolvedCandidate);
         if (isUnsupportedBrandedChromeForExtensions(versionOutput)) {
+            if (options?.allowUnsupportedExtensionBrowser) {
+                return resolvedCandidate;
+            }
             brandedChromeRejected = true;
             if (explicitFromEnv && candidate === explicitFromEnv) {
                 throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "Google Chrome 137+ 已禁用命令行 --load-extension；请改用 Chrome for Testing / Chromium，或通过 WEBENVOY_BROWSER_PATH 指向受支持浏览器");
@@ -397,8 +400,8 @@ export const resolveBrowserVersionOutputForFingerprint = async (executablePath) 
         return null;
     }
 };
-export const resolveBrowserVersionTruthSource = async (params = {}) => {
-    const executablePath = await resolveExecutablePath(params);
+export const resolveBrowserVersionTruthSource = async (params = {}, options) => {
+    const executablePath = await resolveExecutablePath(params, options);
     return {
         executablePath,
         browserVersion: readTrimmedEnvString(await readBrowserVersionOutput(executablePath))

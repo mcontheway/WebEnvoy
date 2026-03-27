@@ -427,7 +427,7 @@ const readBrowserVersionOutput = async (executablePath: string): Promise<string 
   });
 };
 
-const isUnsupportedBrandedChromeForExtensions = (versionOutput: string | null): boolean => {
+export const isUnsupportedBrandedChromeForExtensions = (versionOutput: string | null): boolean => {
   if (!versionOutput) {
     return false;
   }
@@ -443,7 +443,10 @@ const isUnsupportedBrandedChromeForExtensions = (versionOutput: string | null): 
   return Number.isInteger(major) && major >= 137;
 };
 
-const resolveExecutablePath = async (params: JsonObject): Promise<string> => {
+const resolveExecutablePath = async (
+  params: JsonObject,
+  options?: { allowUnsupportedExtensionBrowser?: boolean }
+): Promise<string> => {
   const explicitFromParams = parseOptionalString(params.browserPath);
   if (explicitFromParams !== null) {
     throw new BrowserLaunchError(
@@ -473,6 +476,9 @@ const resolveExecutablePath = async (params: JsonObject): Promise<string> => {
 
     const versionOutput = await readBrowserVersionOutput(resolvedCandidate);
     if (isUnsupportedBrandedChromeForExtensions(versionOutput)) {
+      if (options?.allowUnsupportedExtensionBrowser) {
+        return resolvedCandidate;
+      }
       brandedChromeRejected = true;
       if (explicitFromEnv && candidate === explicitFromEnv) {
         throw new BrowserLaunchError(
@@ -518,9 +524,10 @@ export interface BrowserVersionTruthSource {
 }
 
 export const resolveBrowserVersionTruthSource = async (
-  params: JsonObject = {}
+  params: JsonObject = {},
+  options?: { allowUnsupportedExtensionBrowser?: boolean }
 ): Promise<BrowserVersionTruthSource> => {
-  const executablePath = await resolveExecutablePath(params);
+  const executablePath = await resolveExecutablePath(params, options);
   return {
     executablePath,
     browserVersion: readTrimmedEnvString(await readBrowserVersionOutput(executablePath))

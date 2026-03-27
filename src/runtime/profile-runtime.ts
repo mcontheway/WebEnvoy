@@ -22,6 +22,11 @@ import {
   type LocalStorageSnapshot,
   type ProfileMeta
 } from "./profile-store.js";
+import {
+  buildIdentityPreflightError,
+  runIdentityPreflight,
+  type IdentityPreflightResult
+} from "./persistent-extension-identity.js";
 import type { ProfileState } from "./profile-state.js";
 import {
   buildFingerprintContextForMeta
@@ -433,6 +438,15 @@ export class ProfileRuntimeService {
       }
 
       let session = buildRuntimeSession(input.profile, recoveredMeta);
+      const identityPreflight = await this.#runIdentityPreflight({
+        input,
+        meta: recoveredMeta,
+        store,
+        profileDir
+      });
+      if (identityPreflight.mode === "official_chrome_persistent_extension") {
+        throw buildIdentityPreflightError(identityPreflight);
+      }
       const requestedExecutionMode = readRequestedExecutionMode(input.params);
       const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, recoveredMeta, {
         requestedExecutionMode
@@ -586,6 +600,15 @@ export class ProfileRuntimeService {
       }
 
       let session = buildRuntimeSession(input.profile, recoveredMeta);
+      const identityPreflight = await this.#runIdentityPreflight({
+        input,
+        meta: recoveredMeta,
+        store,
+        profileDir
+      });
+      if (identityPreflight.mode === "official_chrome_persistent_extension") {
+        throw buildIdentityPreflightError(identityPreflight);
+      }
       const requestedExecutionMode = readRequestedExecutionMode(input.params);
       const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, recoveredMeta, {
         requestedExecutionMode
@@ -710,6 +733,10 @@ export class ProfileRuntimeService {
     const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, meta, {
       requestedExecutionMode
     });
+    const identityPreflight = await runIdentityPreflight({
+      params: input.params,
+      meta
+    });
 
     return {
       profile: input.profile,
@@ -718,6 +745,18 @@ export class ProfileRuntimeService {
       profileDir,
       proxyUrl: meta?.proxyBinding?.url ?? null,
       lockHeld,
+      identityBindingState: identityPreflight.identityBindingState,
+      identityPreflight: {
+        mode: identityPreflight.mode,
+        binding: identityPreflight.binding,
+        manifestPath: identityPreflight.manifestPath,
+        expectedOrigin: identityPreflight.expectedOrigin,
+        allowedOrigins: identityPreflight.allowedOrigins,
+        browserPath: identityPreflight.browserPath,
+        browserVersion: identityPreflight.browserVersion,
+        blocking: identityPreflight.blocking,
+        failureReason: identityPreflight.failureReason
+      },
       lockOwnerPid: lock?.ownerPid ?? null,
       recoverableSession: buildRecoverableSessionSummary(meta),
       fingerprint_runtime: fingerprintRuntime,
@@ -1139,6 +1178,7 @@ export class ProfileRuntimeService {
       profileDir: string;
       profileState: ProfileState;
       proxyBinding: ProfileMeta["proxyBinding"];
+      persistentExtensionBinding?: ProfileMeta["persistentExtensionBinding"];
       fingerprintProfileBundle?: ProfileMeta["fingerprintProfileBundle"] | null;
       updatedAt: string;
       localStorageSnapshots?: ProfileMeta["localStorageSnapshots"];
@@ -1154,6 +1194,10 @@ export class ProfileRuntimeService {
       profileDir: patch.profileDir,
       profileState: patch.profileState,
       proxyBinding: patch.proxyBinding,
+      persistentExtensionBinding:
+        patch.persistentExtensionBinding === undefined
+          ? current.persistentExtensionBinding
+          : patch.persistentExtensionBinding,
       fingerprintProfileBundle:
         patch.fingerprintProfileBundle === null
           ? undefined
@@ -1165,5 +1209,44 @@ export class ProfileRuntimeService {
       lastStoppedAt: patch.lastStoppedAt ?? current.lastStoppedAt,
       lastDisconnectedAt: patch.lastDisconnectedAt ?? current.lastDisconnectedAt
     };
+  }
+
+  async #runIdentityPreflight(input: {
+    input: RuntimeActionInput;
+    meta: ProfileMeta;
+    store: ProfileStoreLike;
+    profileDir: string;
+  }): Promise<IdentityPreflightResult> {
+    const identityPreflight = await runIdentityPreflight({
+      params: input.input.params,
+      meta: input.meta
+    });
+
+    if (
+      identityPreflight.binding &&
+      (
+        input.meta.persistentExtensionBinding?.extensionId !== identityPreflight.binding.extensionId ||
+        input.meta.persistentExtensionBinding?.nativeHostName !==
+          identityPreflight.binding.nativeHostName ||
+        input.meta.persistentExtensionBinding?.browserChannel !==
+          identityPreflight.binding.browserChannel ||
+        input.meta.persistentExtensionBinding?.manifestPath !== identityPreflight.binding.manifestPath
+      )
+    ) {
+      await input.store.writeMeta(
+        input.input.profile,
+        this.#patchMeta(input.meta, {
+          profileName: input.input.profile,
+          profileDir: input.profileDir,
+          profileState: input.meta.profileState,
+          proxyBinding: input.meta.proxyBinding,
+          persistentExtensionBinding: identityPreflight.binding,
+          fingerprintProfileBundle: input.meta.fingerprintProfileBundle,
+          updatedAt: isoNow()
+        })
+      );
+    }
+
+    return identityPreflight;
   }
 }

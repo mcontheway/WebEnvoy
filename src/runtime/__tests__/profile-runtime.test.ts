@@ -46,6 +46,30 @@ const createMockBrowserLauncher = () => ({
   shutdown: async () => undefined
 });
 
+const createNativeHostManifest = async (input: {
+  nativeHostName?: string;
+  allowedOrigins: string[];
+}): Promise<string> => {
+  const dir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-manifest-"));
+  tempDirs.push(dir);
+  const manifestPath = join(dir, `${input.nativeHostName ?? "com.webenvoy.host"}.json`);
+  await writeFile(
+    manifestPath,
+    `${JSON.stringify(
+      {
+        name: input.nativeHostName ?? "com.webenvoy.host",
+        path: "/mock/webenvoy-host",
+        type: "stdio",
+        allowed_origins: input.allowedOrigins
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+  return manifestPath;
+};
+
 const createTestService = (
   options?: ConstructorParameters<typeof ProfileRuntimeService>[0]
 ): ProfileRuntimeService =>
@@ -243,6 +267,153 @@ describe("profile-runtime start rollback", () => {
     const lockPath = join(profileRootDir, "rollback_profile", "__webenvoy_lock.json");
     await expect(readFile(lockPath, "utf8")).rejects.toMatchObject({
       code: "ENOENT"
+    });
+  });
+});
+
+describe("profile-runtime identity preflight", () => {
+  it("reports missing identity binding in runtime.status for official Chrome persistent path", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-status-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const service = createTestService();
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "identity_missing_profile",
+      runId: "run-runtime-identity-status-001",
+      params: {}
+    });
+
+    expect(status).toMatchObject({
+      profileState: "uninitialized",
+      lockHeld: false,
+      identityBindingState: "missing",
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension",
+        blocking: true,
+        failureReason: "IDENTITY_BINDING_MISSING"
+      }
+    });
+  });
+
+  it("blocks runtime.start when allowed_origins mismatches bound extension identity", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-mismatch-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/"]
+    });
+    const launchSpy = vi.fn();
+    const service = createTestService({
+      browserLauncher: {
+        launch: async (input) => {
+          launchSpy(input);
+          return {
+            browserPath: "/mock/chrome",
+            browserPid: 999999,
+            controllerPid: 999998,
+            launchArgs: ["about:blank"],
+            launchedAt: new Date().toISOString()
+          };
+        },
+        shutdown: async () => undefined
+      }
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_mismatch_profile",
+        runId: "run-runtime-identity-mismatch-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_IDENTITY_MISMATCH"
+    });
+
+    expect(launchSpy).not.toHaveBeenCalled();
+    await expect(
+      readFile(
+        join(baseDir, ".webenvoy", "profiles", "identity_mismatch_profile", "__webenvoy_lock.json"),
+        "utf8"
+      )
+    ).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
+  it("persists bound identity and returns bootstrap pending before launcher for official Chrome", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-bound-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const launchSpy = vi.fn();
+    const service = createTestService({
+      browserLauncher: {
+        launch: async (input) => {
+          launchSpy(input);
+          return {
+            browserPath: "/mock/chrome",
+            browserPid: 999999,
+            controllerPid: 999998,
+            launchArgs: ["about:blank"],
+            launchedAt: new Date().toISOString()
+          };
+        },
+        shutdown: async () => undefined
+      }
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_bound_profile",
+        runId: "run-runtime-identity-bound-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_BOOTSTRAP_PENDING"
+    });
+
+    expect(launchSpy).not.toHaveBeenCalled();
+
+    const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    const meta = await profileStore.readMeta("identity_bound_profile");
+    expect(meta?.persistentExtensionBinding).toMatchObject({
+      extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      nativeHostName: "com.webenvoy.host",
+      browserChannel: "chrome",
+      manifestPath
+    });
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "identity_bound_profile",
+      runId: "run-runtime-identity-bound-002",
+      params: {}
+    });
+    expect(status).toMatchObject({
+      identityBindingState: "bound",
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension",
+        blocking: false,
+        failureReason: "BOOTSTRAP_PENDING",
+        manifestPath,
+        expectedOrigin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"
+      }
     });
   });
 });
