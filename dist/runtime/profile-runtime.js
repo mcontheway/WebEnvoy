@@ -924,7 +924,8 @@ export class ProfileRuntimeService {
             params: input.input.params,
             meta: input.meta
         });
-        if (identityPreflight.binding &&
+        if (!identityPreflight.blocking &&
+            identityPreflight.binding &&
             (input.meta?.persistentExtensionBinding?.extensionId !== identityPreflight.binding.extensionId ||
                 input.meta?.persistentExtensionBinding?.nativeHostName !==
                     identityPreflight.binding.nativeHostName ||

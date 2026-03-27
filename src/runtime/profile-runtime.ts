@@ -1226,6 +1226,7 @@ export class ProfileRuntimeService {
     });
 
     if (
+      !identityPreflight.blocking &&
       identityPreflight.binding &&
       (
         input.meta?.persistentExtensionBinding?.extensionId !== identityPreflight.binding.extensionId ||

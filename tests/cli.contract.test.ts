@@ -2904,6 +2904,65 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  it("keeps persisted manifestPath when later runtime.status omits manifest_path", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "identity_manifest_reuse_profile",
+        "--run-id",
+        "run-contract-identity-003",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+      }
+    );
+    expect(start.status).toBe(5);
+
+    const status = runCli(
+      [
+        "runtime.status",
+        "--profile",
+        "identity_manifest_reuse_profile",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+      }
+    );
+    expect(status.status).toBe(0);
+    const statusBody = parseSingleJsonLine(status.stdout);
+    expect(statusBody).toMatchObject({
+      command: "runtime.status",
+      status: "success",
+      summary: {
+        identityBindingState: "bound",
+        identityPreflight: {
+          manifestPath
+        }
+      }
+    });
+  });
+
   it("keeps runtime.start/status/stop available when using shell mock browser fixture path", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const runtimeEnv = {

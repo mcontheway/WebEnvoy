@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { CliError } from "../core/errors.js";
 import { isUnsupportedBrandedChromeForExtensions, resolveBrowserVersionTruthSource } from "./browser-launcher.js";
 const DEFAULT_NATIVE_HOST_NAME = "com.webenvoy.host";
@@ -67,10 +67,15 @@ const parsePersistentExtensionBindingFromParams = (params) => {
             }
         });
     }
-    const manifestPath = asNonEmptyString(raw.manifest_path) ??
+    const manifestPathRaw = asNonEmptyString(raw.manifest_path) ??
         asNonEmptyString(raw.manifestPath) ??
         asNonEmptyString(process.env.WEBENVOY_NATIVE_HOST_MANIFEST_PATH) ??
         null;
+    const manifestPath = manifestPathRaw === null
+        ? null
+        : isAbsolute(manifestPathRaw)
+            ? manifestPathRaw
+            : resolve(manifestPathRaw);
     return {
         extensionId,
         nativeHostName,
@@ -166,10 +171,17 @@ export const runIdentityPreflight = async (input) => {
     }
     const bindingFromParams = parsePersistentExtensionBindingFromParams(input.params);
     const bindingFromMeta = input.meta?.persistentExtensionBinding ?? null;
-    if (bindingFromParams && bindingFromMeta) {
-        const sameBinding = bindingFromParams.extensionId === bindingFromMeta.extensionId &&
-            bindingFromParams.nativeHostName === bindingFromMeta.nativeHostName &&
-            bindingFromParams.browserChannel === bindingFromMeta.browserChannel;
+    const mergedBindingFromParams = bindingFromParams === null
+        ? null
+        : {
+            ...bindingFromParams,
+            manifestPath: bindingFromParams.manifestPath ?? bindingFromMeta?.manifestPath ?? null
+        };
+    if (mergedBindingFromParams && bindingFromMeta) {
+        const sameBinding = mergedBindingFromParams.extensionId === bindingFromMeta.extensionId &&
+            mergedBindingFromParams.nativeHostName === bindingFromMeta.nativeHostName &&
+            mergedBindingFromParams.browserChannel === bindingFromMeta.browserChannel &&
+            mergedBindingFromParams.manifestPath === bindingFromMeta.manifestPath;
         if (!sameBinding) {
             return buildBlockingResult({
                 mode: "official_chrome_persistent_extension",
@@ -177,14 +189,14 @@ export const runIdentityPreflight = async (input) => {
                 browserVersion,
                 identityBindingState: "mismatch",
                 binding: bindingFromMeta,
-                manifestPath: bindingFromParams.manifestPath ?? bindingFromMeta.manifestPath ?? null,
+                manifestPath: mergedBindingFromParams.manifestPath ?? bindingFromMeta.manifestPath ?? null,
                 expectedOrigin: `chrome-extension://${bindingFromMeta.extensionId}/`,
                 allowedOrigins: [],
                 failureReason: "IDENTITY_BINDING_CONFLICT"
             });
         }
     }
-    const binding = bindingFromParams ?? bindingFromMeta;
+    const binding = mergedBindingFromParams ?? bindingFromMeta;
     if (!binding) {
         return buildBlockingResult({
             mode: "official_chrome_persistent_extension",

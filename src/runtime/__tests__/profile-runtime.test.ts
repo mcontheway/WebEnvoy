@@ -346,6 +346,14 @@ describe("profile-runtime identity preflight", () => {
     ).rejects.toMatchObject({
       code: "ENOENT"
     });
+    await expect(
+      readFile(
+        join(baseDir, ".webenvoy", "profiles", "identity_mismatch_profile", "__webenvoy_meta.json"),
+        "utf8"
+      )
+    ).rejects.toMatchObject({
+      code: "ENOENT"
+    });
   });
 
   it("persists bound identity and returns bootstrap pending before launcher for official Chrome", async () => {
@@ -413,6 +421,51 @@ describe("profile-runtime identity preflight", () => {
         failureReason: "BOOTSTRAP_PENDING",
         manifestPath,
         expectedOrigin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"
+      }
+    });
+  });
+
+  it("reuses persisted manifest path when later calls omit manifest_path", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-reuse-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const service = createTestService();
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_reuse_profile",
+        runId: "run-runtime-identity-reuse-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_BOOTSTRAP_PENDING"
+    });
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "identity_reuse_profile",
+      runId: "run-runtime-identity-reuse-002",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    });
+
+    expect(status).toMatchObject({
+      identityBindingState: "bound",
+      identityPreflight: {
+        manifestPath,
+        failureReason: "BOOTSTRAP_PENDING"
       }
     });
   });
