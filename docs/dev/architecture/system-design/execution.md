@@ -52,6 +52,7 @@ L1 AI 视觉漫游（VLM + 物理点击）
 - Chromium / Chrome for Testing 只保留为开发、调试和验证 fallback，不得描述成 official Chrome stealth 主路径
 - `developer mode / unpacked`、`External Extensions JSON`、Windows 外部安装/注册表、Chrome Web Store / 合规上架只属于安装/分发候选路径；它们不能替代本节冻结的 runtime / identity / bootstrap 正式边界
 - 本文档只冻结运行时边界，不设计最终安装器或分发实现
+- 首次 profile 安装、登录引导与候选分发路径选择属于后续事项；在这些前置已成立后，official Chrome 主路径才受本节运行时边界约束
 
 ---
 
