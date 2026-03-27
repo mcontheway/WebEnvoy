@@ -102,41 +102,41 @@
 
 ### 场景 1：持久 identity 已存在时，运行时在 bootstrap 前不会误报 ready
 
-Given 一个 profile 已具备稳定 `extension_id` 与 Native Messaging `allowed_origins` 绑定  
-And Native Messaging 链路已建立  
-When 本次 run 还未完成 `runtime_bootstrap_envelope` 下发与确认  
-Then 运行时不得宣称业务命令已可执行  
-And readiness 必须明确区分“identity ready”与“bootstrap pending”  
+Given 一个 profile 已具备稳定 `extension_id` 与 Native Messaging `allowed_origins` 绑定
+And Native Messaging 链路已建立
+When 本次 run 还未完成 `runtime_bootstrap_envelope` 下发与确认
+Then 运行时不得宣称业务命令已可执行
+And readiness 必须明确区分“identity ready”与“bootstrap pending”
 
 ### 场景 2：bootstrap 只属于单次运行上下文
 
-Given 一个已安装 WebEnvoy 扩展的 profile  
-When 系统为本次 run 构建 `runtime_bootstrap_envelope`  
-Then 该 envelope 只包含 run/session 级输入  
-And 不得被写回为 profile 永久身份元数据  
-And 不得通过 per-run staged extension 文件承载  
+Given 一个已安装 WebEnvoy 扩展的 profile
+When 系统为本次 run 构建 `runtime_bootstrap_envelope`
+Then 该 envelope 只包含 run/session 级输入
+And 不得被写回为 profile 永久身份元数据
+And 不得通过 per-run staged extension 文件承载
 
 ### 场景 3：FR-0002 link-layer 与 runtime bootstrap 保持分层
 
-Given Native Messaging link-layer handshake 已成功  
-When 运行时准备进入业务执行前阶段  
-Then 系统必须通过独立 bootstrap contract 下发 run/session 上下文  
-And 不得把 `run_id` 或等价 bootstrap 字段塞回 FR-0002 握手字段  
-And link-layer handshake 失败与 bootstrap 失败必须可区分  
+Given Native Messaging link-layer handshake 已成功
+When 运行时准备进入业务执行前阶段
+Then 系统必须通过独立 bootstrap contract 下发 run/session 上下文
+And 不得把 `run_id` 或等价 bootstrap 字段塞回 FR-0002 握手字段
+And link-layer handshake 失败与 bootstrap 失败必须可区分
 
 ### 场景 4：candidate 安装路径不会被误写成正式主方案
 
-Given implementation-prep 文档正在定义 official Chrome 主路径  
-When 文档提到 `developer mode / unpacked`、External Extensions JSON、Windows 外部安装/注册表或 Chrome Web Store  
-Then 它们只能被标记为 candidate / transition path 或后续产品化方向  
-And 不得替代当前正式 runtime / identity / bootstrap 边界  
+Given implementation-prep 文档正在定义 official Chrome 主路径
+When 文档提到 `developer mode / unpacked`、External Extensions JSON、Windows 外部安装/注册表或 Chrome Web Store
+Then 它们只能被标记为 candidate / transition path 或后续产品化方向
+And 不得替代当前正式 runtime / identity / bootstrap 边界
 
 ### 场景 5：#239 的验证体系不混入 #281 的 implementation-prep
 
-Given `#281` 的 formal spec 正在冻结 runtime migration 输入  
-When 文档定义后续测试与验证范围  
-Then 只允许描述实现 PR 最小验证矩阵  
-And 不得把 live / recon / dry_run 分层、baseline 框架或回归平台归入本 FR 的职责  
+Given `#281` 的 formal spec 正在冻结 runtime migration 输入
+When 文档定义后续测试与验证范围
+Then 只允许描述实现 PR 最小验证矩阵
+And 不得把 live / recon / dry_run 分层、baseline 框架或回归平台归入本 FR 的职责
 
 ## 异常与边界场景
 
