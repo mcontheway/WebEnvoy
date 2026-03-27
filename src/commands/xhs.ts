@@ -134,7 +134,7 @@ const readOfficialChromeRuntimeReadinessViaBridge = async (input: {
       ? "disconnected"
       : payload?.transport_state === "ready"
         ? "ready"
-        : "ready";
+        : "not_connected";
   const bootstrapState =
     payload?.bootstrap_state === "not_started" ||
     payload?.bootstrap_state === "pending" ||

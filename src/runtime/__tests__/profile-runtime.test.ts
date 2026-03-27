@@ -531,6 +531,80 @@ describe("profile-runtime identity preflight", () => {
     );
   });
 
+  it("keeps readiness conservative when runtime.readiness omits transport_state", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-readiness-transport-missing-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const service = createTestService({
+      browserLauncher: createMockBrowserLauncher(),
+      bridgeFactory: () => ({
+        runCommand: async ({ command, params, profile, runId }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: String((params as { runtime_context_id?: unknown }).runtime_context_id),
+                  profile,
+                  status: "ready"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          if (command === "runtime.readiness") {
+            return {
+              ok: true as const,
+              payload: {
+                bootstrap_state: "ready"
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_transport_missing_profile",
+      runId: "run-runtime-readiness-transport-missing-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "identity_bound_transport_missing_profile",
+      runId: "run-runtime-readiness-transport-missing-002",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(status).toMatchObject({
+      profileState: "ready",
+      lockHeld: true,
+      identityBindingState: "bound",
+      transportState: "not_connected",
+      bootstrapState: "ready",
+      runtimeReadiness: "unknown"
+    });
+  });
+
   it("marks readiness unknown when runtime.bootstrap ack version conflicts with the request", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-version-"));
     tempDirs.push(baseDir);

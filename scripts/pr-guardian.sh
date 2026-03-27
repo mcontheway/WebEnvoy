@@ -131,7 +131,7 @@ hydrate_worktree_dependencies() {
   if [[ -f "${target_lockfile}" ]]; then
     (
       cd "${WORKTREE_DIR}"
-      npm ci --silent >/dev/null
+      npm ci --silent --ignore-scripts >/dev/null
     )
     return
   fi

@@ -1627,7 +1627,7 @@ export class ProfileRuntimeService {
           ? "disconnected"
           : payload?.transport_state === "ready"
             ? "ready"
-            : "ready";
+            : "not_connected";
       const bootstrapStateValue =
         payload?.bootstrap_state === "not_started" ||
         payload?.bootstrap_state === "pending" ||

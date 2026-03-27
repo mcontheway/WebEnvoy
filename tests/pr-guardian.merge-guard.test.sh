@@ -207,6 +207,17 @@ set -euo pipefail
 echo "$*" >> "${MOCK_NPM_CALLS_LOG:?missing MOCK_NPM_CALLS_LOG}"
 
 if [[ "${1:-}" == "ci" ]]; then
+  has_ignore_scripts=0
+  for arg in "$@"; do
+    if [[ "${arg}" == "--ignore-scripts" ]]; then
+      has_ignore_scripts=1
+      break
+    fi
+  done
+  if [[ "${has_ignore_scripts}" != "1" ]]; then
+    echo "npm ci must include --ignore-scripts" >&2
+    exit 65
+  fi
   mkdir -p node_modules
   exit 0
 fi
@@ -342,7 +353,7 @@ test_hydrate_dependencies_runs_npm_ci_when_lockfile_exists() {
     echo "did not expect node_modules to remain symlink after npm ci" >&2
     exit 1
   fi
-  assert_file_contains "${MOCK_NPM_CALLS_LOG}" "ci --silent"
+  assert_file_contains "${MOCK_NPM_CALLS_LOG}" "ci --silent --ignore-scripts"
 }
 
 test_hydrate_dependencies_links_repo_node_modules_when_lockfile_missing() {
