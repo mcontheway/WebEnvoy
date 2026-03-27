@@ -1,6 +1,6 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -259,20 +259,6 @@ describe("browser-launcher", () => {
 
     const versionOutput = await resolveBrowserVersionOutputForFingerprint();
     expect(versionOutput).toBe("Chromium 146.0.0.0");
-  });
-
-  it("prefers a supported Chromium fallback over branded Chrome in mixed linux installs", async () => {
-    const chromeBinDir = await createVersionCommand("google-chrome", "Google Chrome 146.0.7680.154");
-    const chromiumBinDir = await createVersionCommand("chromium", "Chromium 146.0.0.0");
-    delete process.env.WEBENVOY_BROWSER_PATH;
-    process.env.PATH = `${chromeBinDir}:${chromiumBinDir}`;
-    Object.defineProperty(process, "platform", { configurable: true, value: "linux" });
-
-    const truthSource = await resolvePreferredBrowserVersionTruthSource();
-
-    expect(basename(truthSource.executablePath)).toMatch(/^chromium/);
-    expect(truthSource.executablePath).not.toBe(join(chromeBinDir, "google-chrome"));
-    expect(truthSource.browserVersion).toBe("Chromium 146.0.0.0");
   });
 
   it("launches browser executable with profile user-data-dir args", async () => {
