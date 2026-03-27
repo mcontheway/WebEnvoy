@@ -1666,4 +1666,67 @@ describe("profile-runtime fingerprint runtime contract", () => {
       }
     });
   });
+
+  it("does not persist transient legacy backfill bundle during official Chrome identity bootstrap", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-legacy-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const service = createTestService();
+
+    const store = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    await store.ensureProfileDir("legacy_identity_profile");
+    await writeFile(
+      store.getMetaPath("legacy_identity_profile"),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          profileName: "legacy_identity_profile",
+          profileDir: store.getProfileDir("legacy_identity_profile"),
+          profileState: "stopped",
+          proxyBinding: null,
+          fingerprintSeeds: {
+            audioNoiseSeed: "legacy-audio-seed",
+            canvasNoiseSeed: "legacy-canvas-seed"
+          },
+          localStorageSnapshots: [],
+          createdAt: "2026-03-19T10:00:00.000Z",
+          updatedAt: "2026-03-19T10:01:00.000Z",
+          lastStartedAt: null,
+          lastLoginAt: null,
+          lastStoppedAt: "2026-03-19T10:01:00.000Z",
+          lastDisconnectedAt: null
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "legacy_identity_profile",
+        runId: "run-runtime-test-fingerprint-legacy-identity",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_BOOTSTRAP_PENDING"
+    });
+
+    const storedMetaRaw = await readFile(store.getMetaPath("legacy_identity_profile"), "utf8");
+    const storedMeta = JSON.parse(storedMetaRaw) as ProfileMeta;
+    expect(storedMeta.persistentExtensionBinding).toMatchObject({
+      extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      manifestPath
+    });
+    expect(storedMeta.fingerprintProfileBundle).toBeUndefined();
+  });
 });

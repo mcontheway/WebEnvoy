@@ -289,31 +289,32 @@ const buildExtensionBootstrapInput = (
   fingerprint_runtime: fingerprintRuntime
 });
 
+const isTransientBackfilledFingerprintBundle = (bundle: unknown): boolean => {
+  if (typeof bundle !== "object" || bundle === null || Array.isArray(bundle)) {
+    return false;
+  }
+  const legacyMigration = (bundle as { legacy_migration?: { status?: unknown } }).legacy_migration;
+  return (
+    typeof legacyMigration === "object" &&
+    legacyMigration !== null &&
+    !Array.isArray(legacyMigration) &&
+    legacyMigration.status === "backfilled_from_legacy"
+  );
+};
+
 const shouldPersistFingerprintBundle = (
   currentMeta: ProfileMeta,
   fingerprintRuntime: ReturnType<typeof buildFingerprintContextForMeta>
 ): ProfileMeta["fingerprintProfileBundle"] | null => {
   const currentBundle = currentMeta.fingerprintProfileBundle;
   const nextBundle = fingerprintRuntime.fingerprint_profile_bundle;
-  const isLegacyBackfilledBundle = (bundle: unknown): boolean => {
-    if (typeof bundle !== "object" || bundle === null || Array.isArray(bundle)) {
-      return false;
-    }
-    const legacyMigration = (bundle as { legacy_migration?: { status?: unknown } }).legacy_migration;
-    return (
-      typeof legacyMigration === "object" &&
-      legacyMigration !== null &&
-      !Array.isArray(legacyMigration) &&
-      legacyMigration.status === "backfilled_from_legacy"
-    );
-  };
   if (!nextBundle) {
     return currentBundle ?? null;
   }
 
   const isTransientLegacyBackfill =
-    isLegacyBackfilledBundle(nextBundle) &&
-    (!currentBundle || isLegacyBackfilledBundle(currentBundle));
+    isTransientBackfilledFingerprintBundle(nextBundle) &&
+    (!currentBundle || isTransientBackfilledFingerprintBundle(currentBundle));
 
   if (isTransientLegacyBackfill) {
     return null;
@@ -1285,7 +1286,9 @@ export class ProfileRuntimeService {
       profileState: input.meta.profileState,
       proxyBinding: input.meta.proxyBinding,
       persistentExtensionBinding: input.binding,
-      fingerprintProfileBundle: input.meta.fingerprintProfileBundle,
+      fingerprintProfileBundle: isTransientBackfilledFingerprintBundle(input.meta.fingerprintProfileBundle)
+        ? null
+        : input.meta.fingerprintProfileBundle,
       updatedAt: input.nowIso
     });
     await input.store.writeMeta(input.profile, nextMeta);
