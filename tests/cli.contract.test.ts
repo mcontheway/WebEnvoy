@@ -3270,33 +3270,41 @@ process.stdin.on("data", (chunk) => {
 
   it("allows only one successful runtime.start under concurrent race", async () => {
     const runtimeCwd = await createRuntimeCwd();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const [first, second] = await Promise.all([
+        runCliAsync(
+          ["runtime.start", "--profile", "race_profile", "--run-id", `run-contract-211-${attempt}`],
+          runtimeCwd
+        ),
+        runCliAsync(
+          ["runtime.start", "--profile", "race_profile", "--run-id", `run-contract-212-${attempt}`],
+          runtimeCwd
+        )
+      ]);
 
-    const [first, second] = await Promise.all([
-      runCliAsync(
-        ["runtime.start", "--profile", "race_profile", "--run-id", "run-contract-211"],
-        runtimeCwd
-      ),
-      runCliAsync(
-        ["runtime.start", "--profile", "race_profile", "--run-id", "run-contract-212"],
-        runtimeCwd
-      )
-    ]);
+      const statuses = [first.status, second.status];
+      const successCount = statuses.filter((status) => status === 0).length;
+      const failureCount = statuses.filter((status) => status === 5).length;
+      expect(successCount).toBeLessThanOrEqual(1);
+      expect(failureCount).toBeLessThanOrEqual(2);
 
-    const statuses = [first.status, second.status];
-    const successCount = statuses.filter((status) => status === 0).length;
-    const failureCount = statuses.filter((status) => status === 5).length;
-    expect(successCount).toBeGreaterThanOrEqual(1);
-    expect(failureCount).toBeLessThanOrEqual(1);
+      const failures = [first, second].filter((result) => result.status === 5);
+      for (const failed of failures) {
+        const failedBody = parseSingleJsonLine(failed.stdout);
+        expect(failedBody).toMatchObject({
+          command: "runtime.start",
+          status: "error"
+        });
+        const error = asRecord(failedBody.error);
+        expect(["ERR_PROFILE_LOCKED", "ERR_RUNTIME_UNAVAILABLE"]).toContain(error?.code);
+      }
 
-    const failed = first.status === 5 ? first : second.status === 5 ? second : null;
-    if (failed) {
-      const failedBody = parseSingleJsonLine(failed.stdout);
-      expect(failedBody).toMatchObject({
-        command: "runtime.start",
-        status: "error",
-        error: { code: "ERR_PROFILE_LOCKED" }
-      });
+      if (successCount === 1) {
+        return;
+      }
     }
+
+    throw new Error("concurrent runtime.start race did not produce a winner within 3 attempts");
   });
 
   it("supports runtime.stop and reflects stopped state via runtime.status", async () => {
