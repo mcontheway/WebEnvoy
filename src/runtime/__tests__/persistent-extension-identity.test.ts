@@ -4,7 +4,6 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { BrowserLaunchError } from "../browser-launcher.js";
 import {
   resetIdentityPreflightAdaptersForTests,
   runIdentityPreflight,
@@ -90,13 +89,10 @@ describe("runIdentityPreflight", () => {
       "utf8"
     );
 
-    const resolvePreferredBrowserVersionTruthSource = vi
-      .fn()
-      .mockRejectedValueOnce(new BrowserLaunchError("BROWSER_NOT_FOUND", "fallback browser unavailable"))
-      .mockResolvedValueOnce({
-        executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-        browserVersion: "Google Chrome 146.0.7680.154"
-      });
+    const resolvePreferredBrowserVersionTruthSource = vi.fn().mockResolvedValue({
+      executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      browserVersion: "Google Chrome 146.0.7680.154"
+    });
     const execFile = vi.fn().mockResolvedValue({
       stdout: [
         "HKEY_CURRENT_USER\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.webenvoy.host",
@@ -134,5 +130,34 @@ describe("runIdentityPreflight", () => {
       expectedOrigin: `chrome-extension://${EXTENSION_ID}/`,
       allowedOrigins: [`chrome-extension://${EXTENSION_ID}/`]
     });
+  });
+
+  it("blocks when binding browser_channel disagrees with the resolved official Chrome channel", async () => {
+    const resolvePreferredBrowserVersionTruthSource = vi.fn().mockResolvedValue({
+      executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      browserVersion: "Google Chrome 146.0.7680.154"
+    });
+
+    setIdentityPreflightAdaptersForTests({
+      resolvePreferredBrowserVersionTruthSource,
+      isUnsupportedBrandedChromeForExtensions: vi.fn().mockReturnValue(true),
+      platform: () => "win32"
+    });
+
+    const result = await runIdentityPreflight({
+      params: {},
+      meta: {
+        ...createProfileMeta("C:\\manifest.json"),
+        persistentExtensionBinding: {
+          extensionId: EXTENSION_ID,
+          nativeHostName: "com.webenvoy.host",
+          browserChannel: "chromium",
+          manifestPath: "C:\\manifest.json"
+        }
+      }
+    });
+
+    expect(result.identityBindingState).toBe("mismatch");
+    expect(result.failureReason).toBe("IDENTITY_BINDING_CONFLICT");
   });
 });

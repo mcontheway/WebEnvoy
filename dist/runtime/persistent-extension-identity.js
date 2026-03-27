@@ -9,13 +9,30 @@ const DEFAULT_NATIVE_HOST_NAME = "com.webenvoy.host";
 const EXTENSION_ID_PATTERN = /^[a-p]{32}$/;
 const BROWSER_CHANNELS = ["chrome", "chrome_beta", "chromium", "brave", "edge"];
 const execFileAsync = promisify(execFile);
+const DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS = {
+    resolvePreferredBrowserVersionTruthSource,
+    isUnsupportedBrandedChromeForExtensions,
+    execFile: execFileAsync,
+    platform: () => process.platform
+};
+let identityPreflightAdapters = DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS;
+export const setIdentityPreflightAdaptersForTests = (overrides) => {
+    identityPreflightAdapters = {
+        ...DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS,
+        ...overrides
+    };
+};
+export const resetIdentityPreflightAdaptersForTests = () => {
+    identityPreflightAdapters = DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS;
+};
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
 const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const isBrowserChannel = (value) => BROWSER_CHANNELS.includes(value);
 const resolveManifestPathForChannel = (browserChannel, nativeHostName) => {
-    if (process.platform === "darwin") {
+    const platform = identityPreflightAdapters.platform();
+    if (platform === "darwin") {
         const baseByChannel = {
             chrome: join(homedir(), "Library", "Application Support", "Google", "Chrome"),
             chrome_beta: join(homedir(), "Library", "Application Support", "Google", "Chrome Beta"),
@@ -25,7 +42,7 @@ const resolveManifestPathForChannel = (browserChannel, nativeHostName) => {
         };
         return join(baseByChannel[browserChannel], "NativeMessagingHosts", `${nativeHostName}.json`);
     }
-    if (process.platform === "linux") {
+    if (platform === "linux") {
         const baseByChannel = {
             chrome: join(homedir(), ".config", "google-chrome"),
             chrome_beta: join(homedir(), ".config", "google-chrome-beta"),
@@ -35,14 +52,10 @@ const resolveManifestPathForChannel = (browserChannel, nativeHostName) => {
         };
         return join(baseByChannel[browserChannel], "NativeMessagingHosts", `${nativeHostName}.json`);
     }
-    if (process.platform === "win32") {
-        const localAppData = process.env.LOCALAPPDATA ?? process.env.APPDATA ?? homedir();
-        return join(localAppData, "WebEnvoy", `${nativeHostName}.json`);
-    }
     return join(homedir(), `${nativeHostName}.json`);
 };
 const resolveWindowsRegistryKeyForChannel = (browserChannel, nativeHostName) => {
-    if (process.platform !== "win32") {
+    if (identityPreflightAdapters.platform() !== "win32") {
         return null;
     }
     const keyByChannel = {
@@ -54,13 +67,34 @@ const resolveWindowsRegistryKeyForChannel = (browserChannel, nativeHostName) => 
     };
     return `${keyByChannel[browserChannel]}\\${nativeHostName}`;
 };
+const inferResolvedBrowserChannel = (input) => {
+    const normalizedVersion = input.browserVersion?.trim().toLowerCase() ?? "";
+    const normalizedPath = input.browserPath?.toLowerCase() ?? "";
+    if (normalizedVersion.includes("google chrome beta") || normalizedPath.includes("chrome beta")) {
+        return "chrome_beta";
+    }
+    if (normalizedVersion.includes("google chrome")) {
+        return "chrome";
+    }
+    if (normalizedVersion.includes("chromium") || normalizedPath.includes("chromium")) {
+        return "chromium";
+    }
+    if (normalizedVersion.includes("microsoft edge") || normalizedPath.includes("microsoft/edge")) {
+        return "edge";
+    }
+    if (normalizedVersion.includes("brave") || normalizedPath.includes("brave")) {
+        return "brave";
+    }
+    return null;
+};
 const expandWindowsEnvVariables = (value) => value.replace(/%([^%]+)%/g, (_match, name) => process.env[name] ?? `%${name}%`);
 const parseWindowsRegistryDefaultValue = (stdout) => {
     const lines = stdout.split(/\r?\n/);
     for (const line of lines) {
         const match = line.match(/^\s*\(Default\)\s+REG_\w+\s+(.+?)\s*$/);
         if (match) {
-            return expandWindowsEnvVariables(match[1].trim());
+            const expanded = expandWindowsEnvVariables(match[1].trim());
+            return isAbsolute(expanded) ? expanded : resolve(expanded);
         }
     }
     return null;
@@ -69,11 +103,11 @@ const resolveManifestPathForBinding = async (binding) => {
     if (binding.manifestPath) {
         return binding.manifestPath;
     }
-    if (process.platform === "win32") {
+    if (identityPreflightAdapters.platform() === "win32") {
         const registryKey = resolveWindowsRegistryKeyForChannel(binding.browserChannel, binding.nativeHostName);
         if (registryKey) {
             try {
-                const { stdout } = await execFileAsync("reg", ["query", registryKey, "/ve"], {
+                const { stdout } = await identityPreflightAdapters.execFile("reg", ["query", registryKey, "/ve"], {
                     encoding: "utf8"
                 });
                 const manifestPath = parseWindowsRegistryDefaultValue(stdout);
@@ -187,7 +221,7 @@ export const runIdentityPreflight = async (input) => {
     let browserPath = null;
     let browserVersion = null;
     try {
-        const truth = await resolvePreferredBrowserVersionTruthSource(input.params);
+        const truth = await identityPreflightAdapters.resolvePreferredBrowserVersionTruthSource(input.params);
         browserPath = truth.executablePath;
         browserVersion = truth.browserVersion;
     }
@@ -219,7 +253,7 @@ export const runIdentityPreflight = async (input) => {
             failureReason: "IDENTITY_PREFLIGHT_NOT_REQUIRED"
         };
     }
-    if (!isUnsupportedBrandedChromeForExtensions(browserVersion)) {
+    if (!identityPreflightAdapters.isUnsupportedBrandedChromeForExtensions(browserVersion)) {
         return {
             mode: "load_extension",
             browserPath,
@@ -274,6 +308,23 @@ export const runIdentityPreflight = async (input) => {
         });
     }
     const expectedOrigin = `chrome-extension://${binding.extensionId}/`;
+    const resolvedBrowserChannel = inferResolvedBrowserChannel({
+        browserPath,
+        browserVersion
+    });
+    if (resolvedBrowserChannel !== null && binding.browserChannel !== resolvedBrowserChannel) {
+        return buildBlockingResult({
+            mode: "official_chrome_persistent_extension",
+            browserPath,
+            browserVersion,
+            identityBindingState: "mismatch",
+            binding,
+            manifestPath: binding.manifestPath,
+            expectedOrigin,
+            allowedOrigins: [],
+            failureReason: "IDENTITY_BINDING_CONFLICT"
+        });
+    }
     const manifestPath = await resolveManifestPathForBinding(binding);
     if (manifestPath === null) {
         return buildBlockingResult({

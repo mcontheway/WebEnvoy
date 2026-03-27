@@ -142,6 +142,31 @@ const resolveWindowsRegistryKeyForChannel = (
   return `${keyByChannel[browserChannel]}\\${nativeHostName}`;
 };
 
+const inferResolvedBrowserChannel = (input: {
+  browserPath: string | null;
+  browserVersion: string | null;
+}): BrowserChannel | null => {
+  const normalizedVersion = input.browserVersion?.trim().toLowerCase() ?? "";
+  const normalizedPath = input.browserPath?.toLowerCase() ?? "";
+
+  if (normalizedVersion.includes("google chrome beta") || normalizedPath.includes("chrome beta")) {
+    return "chrome_beta";
+  }
+  if (normalizedVersion.includes("google chrome")) {
+    return "chrome";
+  }
+  if (normalizedVersion.includes("chromium") || normalizedPath.includes("chromium")) {
+    return "chromium";
+  }
+  if (normalizedVersion.includes("microsoft edge") || normalizedPath.includes("microsoft/edge")) {
+    return "edge";
+  }
+  if (normalizedVersion.includes("brave") || normalizedPath.includes("brave")) {
+    return "brave";
+  }
+  return null;
+};
+
 const expandWindowsEnvVariables = (value: string): string =>
   value.replace(/%([^%]+)%/g, (_match, name: string) => process.env[name] ?? `%${name}%`);
 
@@ -420,6 +445,23 @@ export const runIdentityPreflight = async (input: {
   }
 
   const expectedOrigin = `chrome-extension://${binding.extensionId}/`;
+  const resolvedBrowserChannel = inferResolvedBrowserChannel({
+    browserPath,
+    browserVersion
+  });
+  if (resolvedBrowserChannel !== null && binding.browserChannel !== resolvedBrowserChannel) {
+    return buildBlockingResult({
+      mode: "official_chrome_persistent_extension",
+      browserPath,
+      browserVersion,
+      identityBindingState: "mismatch",
+      binding,
+      manifestPath: binding.manifestPath,
+      expectedOrigin,
+      allowedOrigins: [],
+      failureReason: "IDENTITY_BINDING_CONFLICT"
+    });
+  }
   const manifestPath = await resolveManifestPathForBinding(binding);
   if (manifestPath === null) {
     return buildBlockingResult({
