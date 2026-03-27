@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CliError } from "../core/errors.js";
@@ -6,6 +7,9 @@ import { createProfileLock } from "./profile-lock.js";
 import { ProfileStore } from "./profile-store.js";
 import { buildIdentityPreflightError, runIdentityPreflight } from "./persistent-extension-identity.js";
 import { buildFingerprintContextForMeta } from "./fingerprint-runtime.js";
+import { NativeMessagingBridge, NativeMessagingTransportError } from "./native-messaging/bridge.js";
+import { NativeHostBridgeTransport } from "./native-messaging/host.js";
+import { createLoopbackNativeBridgeTransport } from "./native-messaging/loopback.js";
 import { applyProfileProxyBinding, beginLoginSession, beginStartSession, beginStopSession, buildRuntimeSession, markSessionReady, markSessionStopped } from "./runtime-session.js";
 const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
@@ -148,6 +152,27 @@ const buildExtensionBootstrapInput = (runId, sessionId, fingerprintRuntime) => (
     session_id: sessionId,
     fingerprint_runtime: fingerprintRuntime
 });
+const buildRuntimeBootstrapEnvelope = (input) => ({
+    version: "v1",
+    run_id: input.runId,
+    runtime_context_id: input.runtimeContextId,
+    profile: input.profile,
+    fingerprint_runtime: input.fingerprintRuntime,
+    fingerprint_patch_manifest: input.fingerprintRuntime.fingerprint_patch_manifest
+        ? input.fingerprintRuntime.fingerprint_patch_manifest
+        : {},
+    main_world_secret: input.mainWorldSecret
+});
+const resolveDefaultRuntimeBridge = () => {
+    if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
+        return new NativeMessagingBridge({
+            transport: createLoopbackNativeBridgeTransport()
+        });
+    }
+    return new NativeMessagingBridge({
+        transport: new NativeHostBridgeTransport()
+    });
+};
 const isTransientBackfilledFingerprintBundle = (bundle) => {
     if (typeof bundle !== "object" || bundle === null || Array.isArray(bundle)) {
         return false;
@@ -172,6 +197,50 @@ const shouldPersistFingerprintBundle = (currentMeta, fingerprintRuntime) => {
     }
     return nextBundle;
 };
+const buildRuntimeReadiness = (input) => {
+    if (input.identityBindingState === "mismatch" || input.identityBindingState === "missing") {
+        return "blocked";
+    }
+    if (!input.lockHeld) {
+        return input.transportState === "disconnected" ? "recoverable" : "blocked";
+    }
+    if (input.identityBindingState === "bound" &&
+        input.transportState === "ready" &&
+        input.bootstrapState === "ready") {
+        return "ready";
+    }
+    if (input.transportState === "disconnected") {
+        return "recoverable";
+    }
+    if (input.identityBindingState === "bound" &&
+        (input.bootstrapState === "pending" || input.bootstrapState === "not_started")) {
+        return "pending";
+    }
+    if (input.bootstrapState === "failed") {
+        return "recoverable";
+    }
+    if (input.bootstrapState === "stale") {
+        return "unknown";
+    }
+    return "unknown";
+};
+const mapTransportErrorToReadiness = (error) => {
+    if (error.code === "ERR_TRANSPORT_HANDSHAKE_FAILED") {
+        return {
+            transportState: "not_connected",
+            bootstrapState: "not_started",
+            runtimeReadiness: "recoverable"
+        };
+    }
+    return {
+        transportState: "disconnected",
+        bootstrapState: "not_started",
+        runtimeReadiness: "recoverable"
+    };
+};
+const asResultRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value
+    : null;
 const mapRuntimeError = (error) => {
     if (error instanceof CliError) {
         return error;
@@ -208,6 +277,7 @@ export class ProfileRuntimeService {
     #lockFileAdapter;
     #isProcessAlive;
     #browserLauncher;
+    #bridgeFactory;
     constructor(options) {
         this.#storeFactory =
             options?.storeFactory ??
@@ -233,6 +303,7 @@ export class ProfileRuntimeService {
             launch: launchBrowser,
             shutdown: shutdownBrowserSession
         };
+        this.#bridgeFactory = options?.bridgeFactory ?? (() => resolveDefaultRuntimeBridge());
     }
     async start(input) {
         const nowIso = isoNow();
@@ -309,11 +380,26 @@ export class ProfileRuntimeService {
                 proxyUrl: session.proxyBinding?.url ?? null,
                 runId: input.runId,
                 params: input.params,
-                extensionBootstrap: buildExtensionBootstrapInput(input.runId, readSessionId(input.params), fingerprintRuntime)
+                launchMode: identityPreflight.mode,
+                extensionBootstrap: identityPreflight.mode === "load_extension"
+                    ? buildExtensionBootstrapInput(input.runId, readSessionId(input.params), fingerprintRuntime)
+                    : null
             });
             launchedControllerPid = browserLaunch.controllerPid;
             await this.#updateLockOwnerPid(lockPath, input.runId, browserLaunch.controllerPid, nowIso);
             session = markSessionReady(session);
+            const readiness = identityPreflight.identityBindingState === "bound"
+                ? await this.#deliverRuntimeBootstrap({
+                    runtimeInput: input,
+                    profile: input.profile,
+                    fingerprintRuntime
+                })
+                : await this.#readRuntimeReadiness({
+                    runtimeInput: input,
+                    lockHeld: true,
+                    identityPreflight,
+                    profileState: session.profileState
+                });
             const nextMeta = this.#patchMeta(recoveredMeta, {
                 profileName: input.profile,
                 profileDir,
@@ -333,6 +419,10 @@ export class ProfileRuntimeService {
                 profileDir,
                 proxyUrl: session.proxyBinding?.url ?? null,
                 lockHeld: true,
+                identityBindingState: readiness.identityBindingState,
+                transportState: readiness.transportState,
+                bootstrapState: readiness.bootstrapState,
+                runtimeReadiness: readiness.runtimeReadiness,
                 browserPath: browserLaunch.browserPath,
                 browserPid: browserLaunch.browserPid,
                 controllerPid: browserLaunch.controllerPid,
@@ -449,7 +539,10 @@ export class ProfileRuntimeService {
                     proxyUrl: session.proxyBinding?.url ?? null,
                     runId: input.runId,
                     params: input.params,
-                    extensionBootstrap: buildExtensionBootstrapInput(input.runId, readSessionId(input.params), fingerprintRuntime)
+                    launchMode: identityPreflight.mode,
+                    extensionBootstrap: identityPreflight.mode === "load_extension"
+                        ? buildExtensionBootstrapInput(input.runId, readSessionId(input.params), fingerprintRuntime)
+                        : null
                 });
                 launchedControllerPid = browserLaunch.controllerPid;
                 await this.#updateLockOwnerPid(lockPath, input.runId, browserLaunch.controllerPid, nowIso);
@@ -464,6 +557,12 @@ export class ProfileRuntimeService {
                 updatedAt: nowIso
             }));
             if (!confirmLogin) {
+                const readiness = await this.#readRuntimeReadiness({
+                    runtimeInput: input,
+                    lockHeld: true,
+                    identityPreflight,
+                    profileState: session.profileState
+                });
                 loginSucceeded = true;
                 keepLockOnFailure = true;
                 return {
@@ -473,6 +572,10 @@ export class ProfileRuntimeService {
                     profileDir,
                     proxyUrl: session.proxyBinding?.url ?? null,
                     lockHeld: true,
+                    identityBindingState: readiness.identityBindingState,
+                    transportState: readiness.transportState,
+                    bootstrapState: readiness.bootstrapState,
+                    runtimeReadiness: readiness.runtimeReadiness,
                     recoverableSession: buildRecoverableSessionSummary(recoveredMeta),
                     fingerprint_runtime: fingerprintRuntime,
                     confirmationRequired: true,
@@ -481,6 +584,18 @@ export class ProfileRuntimeService {
             }
             const localStorageSnapshot = parseLocalStorageSnapshot(input.params);
             session = markSessionReady(session);
+            const readiness = identityPreflight.identityBindingState === "bound"
+                ? await this.#deliverRuntimeBootstrap({
+                    runtimeInput: input,
+                    profile: input.profile,
+                    fingerprintRuntime
+                })
+                : await this.#readRuntimeReadiness({
+                    runtimeInput: input,
+                    lockHeld: true,
+                    identityPreflight,
+                    profileState: session.profileState
+                });
             const nextMeta = this.#patchMeta(recoveredMeta, {
                 profileName: input.profile,
                 profileDir,
@@ -501,6 +616,10 @@ export class ProfileRuntimeService {
                 profileDir,
                 proxyUrl: session.proxyBinding?.url ?? null,
                 lockHeld: true,
+                identityBindingState: readiness.identityBindingState,
+                transportState: readiness.transportState,
+                bootstrapState: readiness.bootstrapState,
+                runtimeReadiness: readiness.runtimeReadiness,
                 recoverableSession: buildRecoverableSessionSummary(nextMeta),
                 fingerprint_runtime: fingerprintRuntime,
                 lastLoginAt: nowIso
@@ -538,6 +657,12 @@ export class ProfileRuntimeService {
             params: input.params,
             meta
         });
+        const readiness = await this.#readRuntimeReadiness({
+            runtimeInput: input,
+            lockHeld,
+            identityPreflight,
+            profileState
+        });
         return {
             profile: input.profile,
             profileState,
@@ -545,7 +670,10 @@ export class ProfileRuntimeService {
             profileDir,
             proxyUrl: meta?.proxyBinding?.url ?? null,
             lockHeld,
-            identityBindingState: identityPreflight.identityBindingState,
+            identityBindingState: readiness.identityBindingState,
+            transportState: readiness.transportState,
+            bootstrapState: readiness.bootstrapState,
+            runtimeReadiness: readiness.runtimeReadiness,
             identityPreflight: {
                 mode: identityPreflight.mode,
                 binding: identityPreflight.binding,
@@ -932,6 +1060,194 @@ export class ProfileRuntimeService {
             lastStoppedAt: patch.lastStoppedAt ?? current.lastStoppedAt,
             lastDisconnectedAt: patch.lastDisconnectedAt ?? current.lastDisconnectedAt
         };
+    }
+    async #deliverRuntimeBootstrap(input) {
+        const bridge = this.#bridgeFactory();
+        const envelope = buildRuntimeBootstrapEnvelope({
+            profile: input.profile,
+            runId: input.runtimeInput.runId,
+            runtimeContextId: randomUUID(),
+            fingerprintRuntime: input.fingerprintRuntime,
+            mainWorldSecret: randomUUID()
+        });
+        try {
+            const result = await bridge.runCommand({
+                runId: input.runtimeInput.runId,
+                profile: input.profile,
+                cwd: input.runtimeInput.cwd,
+                command: "runtime.bootstrap",
+                params: envelope
+            });
+            if (!result.ok) {
+                throw this.#buildRuntimeBootstrapCliError(result);
+            }
+            const payload = asResultRecord(result.payload);
+            const ackResult = asResultRecord(payload?.result);
+            const status = typeof ackResult?.status === "string" ? ackResult.status : null;
+            const ackRunId = typeof ackResult?.run_id === "string" ? ackResult.run_id : null;
+            const ackContextId = typeof ackResult?.runtime_context_id === "string" ? ackResult.runtime_context_id : null;
+            const ackProfile = typeof ackResult?.profile === "string" ? ackResult.profile : null;
+            if (status !== "ready" ||
+                ackRunId !== envelope.run_id ||
+                ackContextId !== envelope.runtime_context_id ||
+                ackProfile !== envelope.profile) {
+                throw new CliError(status === "stale"
+                    ? "ERR_RUNTIME_BOOTSTRAP_ACK_STALE"
+                    : "ERR_RUNTIME_READY_SIGNAL_CONFLICT", status === "stale"
+                    ? "runtime bootstrap 返回了陈旧 ack"
+                    : "runtime bootstrap ack 与当前运行上下文不一致");
+            }
+            return {
+                identityBindingState: "bound",
+                transportState: "ready",
+                bootstrapState: "ready",
+                runtimeReadiness: "ready",
+                details: {
+                    runtime_context_id: envelope.runtime_context_id
+                }
+            };
+        }
+        catch (error) {
+            if (error instanceof CliError) {
+                throw error;
+            }
+            if (error instanceof NativeMessagingTransportError) {
+                throw this.#buildRuntimeBootstrapTransportError(error);
+            }
+            throw error;
+        }
+    }
+    async #readRuntimeReadiness(input) {
+        const baseIdentity = input.identityPreflight.identityBindingState;
+        if (input.identityPreflight.mode !== "official_chrome_persistent_extension") {
+            const transportState = input.lockHeld && input.profileState === "ready" ? "ready" : "not_connected";
+            const bootstrapState = input.lockHeld && input.profileState === "ready" ? "ready" : "not_started";
+            return {
+                identityBindingState: baseIdentity,
+                transportState,
+                bootstrapState,
+                runtimeReadiness: input.lockHeld && input.profileState === "ready" ? "ready" : "unknown"
+            };
+        }
+        if (!input.lockHeld) {
+            const transportState = input.profileState === "disconnected" ? "disconnected" : "not_connected";
+            const bootstrapState = baseIdentity === "bound" && transportState === "disconnected" ? "pending" : "not_started";
+            return {
+                identityBindingState: baseIdentity,
+                transportState,
+                bootstrapState,
+                runtimeReadiness: buildRuntimeReadiness({
+                    lockHeld: false,
+                    identityBindingState: baseIdentity,
+                    transportState,
+                    bootstrapState
+                })
+            };
+        }
+        if (baseIdentity !== "bound") {
+            return {
+                identityBindingState: baseIdentity,
+                transportState: "not_connected",
+                bootstrapState: "not_started",
+                runtimeReadiness: buildRuntimeReadiness({
+                    lockHeld: input.lockHeld,
+                    identityBindingState: baseIdentity,
+                    transportState: "not_connected",
+                    bootstrapState: "not_started"
+                })
+            };
+        }
+        const bridge = this.#bridgeFactory();
+        try {
+            const result = await bridge.runCommand({
+                runId: input.runtimeInput.runId,
+                profile: input.runtimeInput.profile,
+                cwd: input.runtimeInput.cwd,
+                command: "runtime.readiness",
+                params: {}
+            });
+            if (!result.ok) {
+                throw this.#buildRuntimeBootstrapCliError(result);
+            }
+            const payload = asResultRecord(result.payload);
+            const bootstrapStateValue = payload?.bootstrap_state === "not_started" ||
+                payload?.bootstrap_state === "pending" ||
+                payload?.bootstrap_state === "ready" ||
+                payload?.bootstrap_state === "stale" ||
+                payload?.bootstrap_state === "failed"
+                ? payload.bootstrap_state
+                : "not_started";
+            const transportState = "ready";
+            return {
+                identityBindingState: baseIdentity,
+                transportState,
+                bootstrapState: bootstrapStateValue,
+                runtimeReadiness: buildRuntimeReadiness({
+                    lockHeld: input.lockHeld,
+                    identityBindingState: baseIdentity,
+                    transportState,
+                    bootstrapState: bootstrapStateValue
+                }),
+                details: payload ? payload : undefined
+            };
+        }
+        catch (error) {
+            if (error instanceof NativeMessagingTransportError) {
+                return {
+                    identityBindingState: baseIdentity,
+                    ...mapTransportErrorToReadiness(error)
+                };
+            }
+            if (error instanceof CliError) {
+                return {
+                    identityBindingState: baseIdentity,
+                    transportState: "ready",
+                    bootstrapState: "failed",
+                    runtimeReadiness: "recoverable",
+                    details: {
+                        code: error.code,
+                        message: error.message
+                    }
+                };
+            }
+            throw error;
+        }
+    }
+    #buildRuntimeBootstrapCliError(result) {
+        if (result.ok) {
+            return new CliError("ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED", "runtime bootstrap 未送达");
+        }
+        const code = result.error.code;
+        if (code === "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED" ||
+            code === "ERR_RUNTIME_BOOTSTRAP_ACK_TIMEOUT" ||
+            code === "ERR_RUNTIME_BOOTSTRAP_ACK_STALE" ||
+            code === "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH" ||
+            code === "ERR_RUNTIME_READY_SIGNAL_CONFLICT") {
+            return new CliError(code, result.error.message, {
+                retryable: code !== "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH"
+            });
+        }
+        return new CliError("ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED", result.error.message, {
+            retryable: true
+        });
+    }
+    #buildRuntimeBootstrapTransportError(error) {
+        if (error.code === "ERR_TRANSPORT_TIMEOUT") {
+            return new CliError("ERR_RUNTIME_BOOTSTRAP_ACK_TIMEOUT", "runtime bootstrap ack 超时", {
+                retryable: true,
+                cause: error
+            });
+        }
+        if (error.code === "ERR_TRANSPORT_HANDSHAKE_FAILED") {
+            return new CliError("ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED", "runtime bootstrap 未能建立传输握手", {
+                retryable: true,
+                cause: error
+            });
+        }
+        return new CliError("ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED", "runtime bootstrap 未送达到扩展背景页", {
+            retryable: true,
+            cause: error
+        });
     }
     async #runIdentityPreflight(input) {
         return runIdentityPreflight({

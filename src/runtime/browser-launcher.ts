@@ -62,6 +62,7 @@ export const BROWSER_CONTROL_FILENAME = "__webenvoy_browser_control.json";
 export const EXTENSION_STAGING_DIRNAME = "__webenvoy_extension_staging";
 export const EXTENSION_BOOTSTRAP_FILENAME = "__webenvoy_fingerprint_bootstrap.json";
 export const EXTENSION_BOOTSTRAP_SCRIPT_FILENAME = "__webenvoy_fingerprint_bootstrap.js";
+export type BrowserLaunchMode = "load_extension" | "official_chrome_persistent_extension";
 
 export interface BrowserLaunchInput {
   command: "runtime.start" | "runtime.login";
@@ -69,6 +70,7 @@ export interface BrowserLaunchInput {
   proxyUrl: string | null;
   runId: string;
   params: JsonObject;
+  launchMode?: BrowserLaunchMode;
   extensionBootstrap?: JsonObject | null;
 }
 
@@ -1271,24 +1273,31 @@ const launchProcess = async (
 };
 
 export const launchBrowser = async (input: BrowserLaunchInput): Promise<BrowserLaunchResult> => {
-  const executablePath = await resolveExecutablePath(input.params);
+  const launchMode = input.launchMode ?? "load_extension";
+  const executablePath = await resolveExecutablePath(input.params, {
+    allowUnsupportedExtensionBrowser: launchMode === "official_chrome_persistent_extension"
+  });
   const supervisorScriptPath = await resolveSupervisorScriptPath();
   const startUrl = parseStartUrl(input.params);
-  const extensionBootstrap = resolveExtensionBootstrapPayload(input);
-  const extensionStaging = await stageExtensionForRun({
-    profileDir: input.profileDir,
-    runId: input.runId,
-    extensionBootstrap
-  });
   const launchArgs = [
     `--user-data-dir=${input.profileDir}`,
     "--profile-directory=Default",
     "--new-window",
     "--no-first-run",
-    "--no-default-browser-check",
-    `--disable-extensions-except=${extensionStaging.stagedExtensionDir}`,
-    `--load-extension=${extensionStaging.stagedExtensionDir}`
+    "--no-default-browser-check"
   ];
+  if (launchMode === "load_extension") {
+    const extensionBootstrap = resolveExtensionBootstrapPayload(input);
+    const extensionStaging = await stageExtensionForRun({
+      profileDir: input.profileDir,
+      runId: input.runId,
+      extensionBootstrap
+    });
+    launchArgs.push(
+      `--disable-extensions-except=${extensionStaging.stagedExtensionDir}`,
+      `--load-extension=${extensionStaging.stagedExtensionDir}`
+    );
+  }
   if (input.proxyUrl !== null) {
     launchArgs.push(`--proxy-server=${input.proxyUrl}`);
   }
@@ -1345,7 +1354,7 @@ export const launchBrowser = async (input: BrowserLaunchInput): Promise<BrowserL
       cause: error
     });
   } finally {
-    if (!launchSucceeded) {
+    if (!launchSucceeded && launchMode === "load_extension") {
       await cleanupStagedExtensions(input.profileDir);
     }
   }

@@ -165,6 +165,16 @@ interface NativeHeartbeatMessage {
 }
 
 type NativeBridgeState = "connecting" | "ready" | "recovering" | "disconnected";
+type RuntimeBootstrapStatus = "ready" | "stale" | "failed";
+interface RuntimeBootstrapState {
+  version: string;
+  runId: string;
+  runtimeContextId: string;
+  profile: string;
+  sessionId: string;
+  status: RuntimeBootstrapStatus;
+  updatedAt: string;
+}
 type XhsActionType = ActionType;
 type XhsExecutionMode = ExecutionMode;
 type XhsRiskState = RiskState;
@@ -652,6 +662,7 @@ class ChromeBackgroundBridge {
   #port: ExtensionPort | null = null;
   #pending = new Map<string, PendingForward>();
   #trustedFingerprintContexts = new Map<string, TrustedFingerprintContextEntry>();
+  #runtimeBootstrapStates = new Map<string, RuntimeBootstrapState>();
   #recoveryQueue: QueuedForwardRequest[] = [];
   #heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   #heartbeatTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -800,6 +811,7 @@ class ChromeBackgroundBridge {
     this.#pendingHeartbeatId = null;
     this.#missedHeartbeatCount = 0;
     this.#clearTrustedFingerprintContexts();
+    this.#clearRuntimeBootstrapStates();
     this.#failAllPending({
       code: "ERR_TRANSPORT_DISCONNECTED",
       message
@@ -866,6 +878,7 @@ class ChromeBackgroundBridge {
     this.#sessionId = sessionId;
     if (sessionId !== prevSessionId) {
       this.#clearTrustedFingerprintContexts();
+      this.#clearRuntimeBootstrapStates();
     }
     this.#state = "ready";
     this.#recoveryDeadlineMs = null;
@@ -958,6 +971,13 @@ class ChromeBackgroundBridge {
       return;
     }
     this.#trustedFingerprintContexts.clear();
+  }
+
+  #clearRuntimeBootstrapStates(): void {
+    if (this.#runtimeBootstrapStates.size === 0) {
+      return;
+    }
+    this.#runtimeBootstrapStates.clear();
   }
 
   #clearTrustedFingerprintContextBySession(profile: string, sessionId: string): void {
@@ -1294,7 +1314,134 @@ class ChromeBackgroundBridge {
       return;
     }
 
+    if (this.#handleRuntimeInternalCommand(request)) {
+      return;
+    }
+
     await this.#dispatchForward(request);
+  }
+
+  #handleRuntimeInternalCommand(request: BridgeRequest): boolean {
+    const command = String(request.params.command ?? "");
+    if (command === "runtime.bootstrap") {
+      this.#handleRuntimeBootstrap(request);
+      return true;
+    }
+    if (command === "runtime.readiness") {
+      this.#handleRuntimeReadiness(request);
+      return true;
+    }
+    return false;
+  }
+
+  #handleRuntimeBootstrap(request: BridgeRequest): void {
+    const commandParams = asRecord(request.params.command_params) ?? {};
+    const version = asNonEmptyString(commandParams.version);
+    const runId = asNonEmptyString(commandParams.run_id);
+    const runtimeContextId = asNonEmptyString(commandParams.runtime_context_id);
+    const profile = asNonEmptyString(commandParams.profile);
+    const mainWorldSecret = asNonEmptyString(commandParams.main_world_secret);
+    const requestRunId = asNonEmptyString(request.params.run_id);
+    const requestProfile = asNonEmptyString(request.profile);
+
+    if (!version || !runId || !runtimeContextId || !profile || !mainWorldSecret) {
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background"
+        },
+        error: {
+          code: "ERR_RUNTIME_READY_SIGNAL_CONFLICT",
+          message: "invalid runtime bootstrap envelope"
+        }
+      });
+      return;
+    }
+
+    if (!requestProfile || requestProfile !== profile) {
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background"
+        },
+        error: {
+          code: "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH",
+          message: "runtime bootstrap profile 与当前请求 profile 不一致"
+        }
+      });
+      return;
+    }
+
+    const status: RuntimeBootstrapStatus =
+      requestRunId && requestRunId !== runId ? "stale" : "ready";
+    if (status === "ready") {
+      this.#runtimeBootstrapStates.set(profile, {
+        version,
+        runId,
+        runtimeContextId,
+        profile,
+        sessionId: this.#sessionId,
+        status,
+        updatedAt: new Date().toISOString()
+      });
+    }
+
+    this.#emit({
+      id: request.id,
+      status: "success",
+      summary: {
+        session_id: this.#sessionId,
+        run_id: requestRunId ?? request.id,
+        command: "runtime.bootstrap",
+        profile,
+        relay_path: "host>background"
+      },
+      payload: {
+        method: "runtime.bootstrap.ack",
+        result: {
+          version,
+          run_id: runId,
+          runtime_context_id: runtimeContextId,
+          profile,
+          status
+        }
+      },
+      error: null
+    });
+  }
+
+  #handleRuntimeReadiness(request: BridgeRequest): void {
+    const profile = asNonEmptyString(request.profile);
+    const bootstrap = profile ? this.#runtimeBootstrapStates.get(profile) ?? null : null;
+    const bootstrapState =
+      bootstrap === null
+        ? "not_started"
+        : bootstrap.sessionId === this.#sessionId
+          ? bootstrap.status
+          : "stale";
+
+    this.#emit({
+      id: request.id,
+      status: "success",
+      summary: {
+        session_id: this.#sessionId,
+        run_id: String(request.params.run_id ?? request.id),
+        command: "runtime.readiness",
+        profile,
+        relay_path: "host>background"
+      },
+      payload: {
+        profile,
+        bootstrap_state: bootstrapState,
+        run_id: bootstrap?.runId ?? null,
+        runtime_context_id: bootstrap?.runtimeContextId ?? null,
+        version: bootstrap?.version ?? null,
+        transport_state: "ready"
+      },
+      error: null
+    });
   }
 
   #isRecoveryWindowOpen(): boolean {

@@ -2851,14 +2851,18 @@ process.stdin.on("data", (chunk) => {
       runtimeCwd,
       runtimeEnv
     );
-    expect(start.status).toBe(5);
+    expect(start.status).toBe(0);
     const startBody = parseSingleJsonLine(start.stdout);
     expect(startBody).toMatchObject({
       run_id: "run-contract-identity-001a",
       command: "runtime.start",
-      status: "error",
-      error: {
-        code: "ERR_BROWSER_LAUNCH_FAILED"
+      status: "success",
+      summary: {
+        profile: "identity_not_bound_start_profile",
+        browserState: "ready",
+        identityBindingState: "missing",
+        bootstrapState: "not_started",
+        runtimeReadiness: "blocked"
       }
     });
 
@@ -2867,14 +2871,18 @@ process.stdin.on("data", (chunk) => {
       runtimeCwd,
       runtimeEnv
     );
-    expect(login.status).toBe(5);
+    expect(login.status).toBe(0);
     const loginBody = parseSingleJsonLine(login.stdout);
     expect(loginBody).toMatchObject({
       run_id: "run-contract-identity-001b",
       command: "runtime.login",
-      status: "error",
-      error: {
-        code: "ERR_BROWSER_LAUNCH_FAILED"
+      status: "success",
+      summary: {
+        profile: "identity_not_bound_login_profile",
+        browserState: "logging_in",
+        identityBindingState: "missing",
+        bootstrapState: "not_started",
+        runtimeReadiness: "blocked"
       }
     });
   });
@@ -2912,7 +2920,7 @@ process.stdin.on("data", (chunk) => {
       command: "runtime.start",
       status: "error",
       error: {
-        code: "ERR_BROWSER_LAUNCH_FAILED"
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
       }
     });
 
@@ -2941,6 +2949,9 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         identityBindingState: "bound",
+        transportState: "not_connected",
+        bootstrapState: "not_started",
+        runtimeReadiness: "blocked",
         identityPreflight: {
           mode: "official_chrome_persistent_extension",
           manifestPath,
@@ -2982,7 +2993,7 @@ process.stdin.on("data", (chunk) => {
       command: "runtime.start",
       status: "error",
       error: {
-        code: "ERR_BROWSER_LAUNCH_FAILED"
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
       }
     });
 

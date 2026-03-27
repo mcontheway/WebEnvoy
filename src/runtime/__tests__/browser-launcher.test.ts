@@ -311,6 +311,34 @@ describe("browser-launcher", () => {
     });
   });
 
+  it("launches official Chrome persistent mode without staged extension flags", async () => {
+    const { scriptPath, logPath } = await createMockBrowserExecutable();
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-official-persistent-"));
+    tempDirs.push(profileDir);
+    process.env.WEBENVOY_BROWSER_PATH = scriptPath;
+    process.env.WEBENVOY_BROWSER_MOCK_LOG = logPath;
+    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Google Chrome 146.0.7680.154";
+
+    const launched = await launchBrowser({
+      command: "runtime.start",
+      profileDir,
+      proxyUrl: null,
+      runId: "run-launcher-test-official-persistent-001",
+      params: {},
+      launchMode: "official_chrome_persistent_extension"
+    });
+
+    const launchArgs = parseLaunchArgs(await waitForLaunchLog(logPath));
+    expect(findArgValue(launchArgs, "--disable-extensions-except=")).toBeNull();
+    expect(findArgValue(launchArgs, "--load-extension=")).toBeNull();
+
+    await shutdownBrowserSession({
+      profileDir,
+      controllerPid: launched.controllerPid,
+      runId: "run-launcher-test-official-persistent-001"
+    });
+  });
+
   it("stages per-run extension payload and writes bootstrap file", async () => {
     const { scriptPath, logPath } = await createMockBrowserExecutable();
     const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-extension-stage-"));

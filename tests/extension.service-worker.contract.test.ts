@@ -348,6 +348,85 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
+  it("acks runtime.bootstrap and exposes runtime.readiness from background state", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-001",
+          runtime_context_id: "ctx-bootstrap-001",
+          profile: "profile-a",
+          fingerprint_runtime: createFingerprintRuntimeContext(),
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-bootstrap-001",
+        status: "success",
+        payload: {
+          method: "runtime.bootstrap.ack",
+          result: expect.objectContaining({
+            run_id: "run-bootstrap-001",
+            runtime_context_id: "ctx-bootstrap-001",
+            profile: "profile-a",
+            status: "ready"
+          })
+        }
+      })
+    );
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-readiness-001",
+        command: "runtime.readiness",
+        command_params: {},
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-readiness-001",
+        status: "success",
+        payload: expect.objectContaining({
+          bootstrap_state: "ready",
+          run_id: "run-bootstrap-001",
+          runtime_context_id: "ctx-bootstrap-001",
+          transport_state: "ready"
+        })
+      })
+    );
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
   it("forwards fingerprint_context without dropping fields", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);

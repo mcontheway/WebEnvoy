@@ -50,6 +50,47 @@ const createMockBrowserLauncher = () => ({
   shutdown: async () => undefined
 });
 
+const createReadyRuntimeBridge = () => ({
+  runCommand: async ({
+    command,
+    params,
+    profile,
+    runId
+  }: {
+    command: string;
+    params: Record<string, unknown>;
+    profile: string | null;
+    runId: string;
+  }) => {
+    if (command === "runtime.bootstrap") {
+      return {
+        ok: true as const,
+        payload: {
+          result: {
+            version: "v1",
+            run_id: runId,
+            runtime_context_id: String(params.runtime_context_id),
+            profile,
+            status: "ready"
+          }
+        },
+        relay_path: "host>background"
+      };
+    }
+    if (command === "runtime.readiness") {
+      return {
+        ok: true as const,
+        payload: {
+          bootstrap_state: "ready",
+          transport_state: "ready"
+        },
+        relay_path: "host>background"
+      };
+    }
+    throw new Error(`unexpected bridge command: ${command}`);
+  }
+});
+
 const createNativeHostManifest = async (input: {
   nativeHostName?: string;
   allowedOrigins: string[];
@@ -99,6 +140,7 @@ const createTestService = (
 ): ProfileRuntimeService =>
   new ProfileRuntimeService({
     ...options,
+    bridgeFactory: options?.bridgeFactory ?? (() => createReadyRuntimeBridge()),
     isProcessAlive:
       options?.isProcessAlive ??
       ((pid: number) => {
@@ -329,6 +371,9 @@ describe("profile-runtime identity preflight", () => {
       profileState: "uninitialized",
       lockHeld: false,
       identityBindingState: "missing",
+      transportState: "not_connected",
+      bootstrapState: "not_started",
+      runtimeReadiness: "blocked",
       identityPreflight: {
         mode: "official_chrome_persistent_extension",
         failureReason: "IDENTITY_BINDING_MISSING"
@@ -367,7 +412,8 @@ describe("profile-runtime identity preflight", () => {
     ).resolves.toMatchObject({
       profileState: "ready",
       browserState: "ready",
-      lockHeld: true
+      lockHeld: true,
+      runtimeReadiness: "blocked"
     });
 
     await expect(
@@ -381,10 +427,113 @@ describe("profile-runtime identity preflight", () => {
       profileState: "logging_in",
       browserState: "logging_in",
       lockHeld: true,
+      runtimeReadiness: "blocked",
       confirmationRequired: true
     });
 
     expect(launchSpy).toHaveBeenCalledTimes(2);
+    expect(launchSpy).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        launchMode: "official_chrome_persistent_extension",
+        extensionBootstrap: null
+      })
+    );
+    expect(launchSpy).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        launchMode: "official_chrome_persistent_extension",
+        extensionBootstrap: null
+      })
+    );
+  });
+
+  it("delivers runtime bootstrap for bound official Chrome start and reports readiness", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-ready-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const launchSpy = vi.fn();
+    const bridgeRunCommand = vi.fn(async ({ command, params, profile, runId }) => {
+      if (command === "runtime.bootstrap") {
+        return {
+          ok: true as const,
+          payload: {
+            result: {
+              version: "v1",
+              run_id: runId,
+              runtime_context_id: String((params as { runtime_context_id?: unknown }).runtime_context_id),
+              profile,
+              status: "ready"
+            }
+          },
+          relay_path: "host>background"
+        };
+      }
+      if (command === "runtime.readiness") {
+        return {
+          ok: true as const,
+          payload: {
+            bootstrap_state: "ready"
+          },
+          relay_path: "host>background"
+        };
+      }
+      throw new Error(`unexpected bridge command: ${command}`);
+    });
+    const service = createTestService({
+      browserLauncher: {
+        launch: async (input) => {
+          launchSpy(input);
+          return {
+            browserPath: "/mock/chrome",
+            browserPid: 999999,
+            controllerPid: 999998,
+            launchArgs: ["about:blank"],
+            launchedAt: new Date().toISOString()
+          };
+        },
+        shutdown: async () => undefined
+      },
+      bridgeFactory: () => ({
+        runCommand: bridgeRunCommand
+      })
+    });
+
+    const started = await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_ready_profile",
+      runId: "run-runtime-bootstrap-ready-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(started).toMatchObject({
+      profileState: "ready",
+      browserState: "ready",
+      identityBindingState: "bound",
+      transportState: "ready",
+      bootstrapState: "ready",
+      runtimeReadiness: "ready"
+    });
+    expect(launchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        launchMode: "official_chrome_persistent_extension",
+        extensionBootstrap: null
+      })
+    );
+    expect(bridgeRunCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "runtime.bootstrap",
+        profile: "identity_bound_ready_profile"
+      })
+    );
   });
 
   it("blocks runtime.start when allowed_origins mismatches bound extension identity", async () => {
@@ -1477,6 +1626,7 @@ describe("profile-runtime fingerprint runtime contract", () => {
     });
     const startLaunch = launchInputs[0];
     expect(startLaunch.command).toBe("runtime.start");
+    expect(startLaunch.launchMode).toBe("load_extension");
     expect(startLaunch.extensionBootstrap).toMatchObject({
       run_id: "run-runtime-test-fingerprint-bootstrap-001",
       session_id: "nm-session-001",
@@ -1494,6 +1644,7 @@ describe("profile-runtime fingerprint runtime contract", () => {
     });
     const loginLaunch = launchInputs[1];
     expect(loginLaunch.command).toBe("runtime.login");
+    expect(loginLaunch.launchMode).toBe("load_extension");
     expect(loginLaunch.extensionBootstrap).toMatchObject({
       run_id: "run-runtime-test-fingerprint-bootstrap-002",
       session_id: "nm-session-001",

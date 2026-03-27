@@ -33,6 +33,7 @@ export interface IdentityPreflightResult {
   blocking: boolean;
   failureReason:
     | "IDENTITY_PREFLIGHT_NOT_REQUIRED"
+    | "IDENTITY_PREFLIGHT_PASSED"
     | "IDENTITY_BINDING_MISSING"
     | "IDENTITY_BINDING_INVALID"
     | "IDENTITY_MANIFEST_MISSING"
@@ -541,6 +542,6 @@ export const runIdentityPreflight = async (input: {
     expectedOrigin,
     allowedOrigins: manifest.allowed_origins,
     blocking: false,
-    failureReason: "BOOTSTRAP_PENDING"
+    failureReason: "IDENTITY_PREFLIGHT_PASSED"
   };
 };

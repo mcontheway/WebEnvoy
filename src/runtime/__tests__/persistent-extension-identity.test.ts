@@ -125,7 +125,7 @@ describe("runIdentityPreflight", () => {
       browserVersion: "Google Chrome 146.0.7680.154",
       identityBindingState: "bound",
       blocking: false,
-      failureReason: "BOOTSTRAP_PENDING",
+      failureReason: "IDENTITY_PREFLIGHT_PASSED",
       manifestPath,
       expectedOrigin: `chrome-extension://${EXTENSION_ID}/`,
       allowedOrigins: [`chrome-extension://${EXTENSION_ID}/`]

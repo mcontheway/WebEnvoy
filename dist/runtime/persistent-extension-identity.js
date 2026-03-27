@@ -401,6 +401,6 @@ export const runIdentityPreflight = async (input) => {
         expectedOrigin,
         allowedOrigins: manifest.allowed_origins,
         blocking: false,
-        failureReason: "BOOTSTRAP_PENDING"
+        failureReason: "IDENTITY_PREFLIGHT_PASSED"
     };
 };
