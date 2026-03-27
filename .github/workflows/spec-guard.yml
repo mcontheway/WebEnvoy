@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'docs/dev/specs/**'
+      - 'docs/dev/roadmap.md'
       - 'docs/dev/architecture/**'
       - 'docs/dev/AGENTS.md'
       - 'docs/AGENTS.md'

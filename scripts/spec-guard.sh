@@ -19,7 +19,7 @@ warn() {
 }
 
 SPEC_SUITE_FILE_REGEX='^docs/dev/specs/FR-[0-9][0-9][0-9][0-9]-[^/]+/'
-GOVERNANCE_FILE_REGEX='^(docs/dev/architecture/|docs/dev/templates/|docs/dev/AGENTS\.md|docs/AGENTS\.md|docs/research/ref/AGENTS\.md|AGENTS\.md|vision\.md|code_review\.md|spec_review\.md|scripts/spec-guard\.sh|\.github/workflows/spec-guard\.yml|\.github/PULL_REQUEST_TEMPLATE\.md|\.githooks/)'
+GOVERNANCE_FILE_REGEX='^(docs/dev/roadmap\.md|docs/dev/architecture/|docs/dev/templates/|docs/dev/AGENTS\.md|docs/AGENTS\.md|docs/research/ref/AGENTS\.md|AGENTS\.md|vision\.md|code_review\.md|spec_review\.md|scripts/spec-guard\.sh|\.github/workflows/spec-guard\.yml|\.github/PULL_REQUEST_TEMPLATE\.md|\.githooks/)'
 
 resolve_base_ref() {
   if [[ -n "${SPEC_GUARD_BASE_REF:-}" ]]; then
@@ -148,7 +148,7 @@ validate_governance_changes() {
   local changed="$1"
   local disallowed
 
-  disallowed="$(grep -Ev "${GOVERNANCE_FILE_REGEX}|^docs/dev/roadmap\.md$" <<< "${changed}" || true)"
+  disallowed="$(grep -Ev "${GOVERNANCE_FILE_REGEX}" <<< "${changed}" || true)"
   if [[ -n "${disallowed}" ]]; then
     echo "[spec-guard] 以下变更将治理/架构规则文件与实现/非治理文件混在同一 PR 中：" >&2
     echo "${disallowed}" >&2
@@ -168,6 +168,7 @@ validate_governance_changes() {
         ;;
       .github/workflows/spec-guard.yml)
         grep -q 'bash scripts/spec-guard.sh' "${abs_path}" || die "${file} 未调用 scripts/spec-guard.sh"
+        grep -q "docs/dev/roadmap.md" "${abs_path}" || die "${file} 未覆盖 docs/dev/roadmap.md 触发路径"
         grep -q "docs/dev/architecture/" "${abs_path}" || die "${file} 未覆盖 docs/dev/architecture/** 触发路径"
         grep -q "spec_review.md" "${abs_path}" || die "${file} 未覆盖 spec_review.md 触发路径"
         ;;
