@@ -70,6 +70,7 @@
 ### 状态型 runtime 健康矩阵
 
 - `healthy`
+  - `lockHeld=true`
   - `identityBindingState=bound`
   - `transportState=ready`
   - `bootstrapState=ready`
@@ -78,6 +79,7 @@
   - transport 暂时断开或 bootstrap timeout
   - 允许同 run 幂等重试或显式 stop/start 恢复
 - `blocked`
+  - 锁被抢占或锁归属不可确认
   - identity mismatch
   - stale ack / ready marker
   - 任何不允许继续执行业务命令的 stop-ship 情况
@@ -92,6 +94,9 @@
 - 锁仍持有但控制链断开：
   - 必须先判定为 `recoverable` 或 `blocked`
   - 不得直接放行业务命令
+- 失锁或锁被抢占：
+  - 即使 transport / bootstrap 仍显示成功，也必须退出 `ready`
+  - 只能进入 `blocked` 或 `recoverable`
 - ready marker 陈旧：
   - 直接判为 `blocked`
   - 必须重新 bootstrap，不得复用旧 marker

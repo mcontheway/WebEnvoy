@@ -65,6 +65,7 @@
 - 缓解：
   - 明确同 run 重试与 stale ack 的拒绝规则
   - `runtime.status` 输出 readiness 分层，而不是单一 ready
+  - 独占锁必须进入 readiness 门禁，不允许失锁后继续维持 ready
 - 回滚：
   - 回到阻断态，要求显式 stop/start 或人工恢复，而不是自动乐观续跑
 
@@ -78,6 +79,7 @@
 
 ### blocked
 
+- 锁被抢占或锁归属不可确认
 - identity mismatch
 - bootstrap ack stale
 - stop-ship 范围漂移
@@ -101,6 +103,9 @@
 - 锁仍持有但控制链断开：
   - 先判 `recoverable` 或 `blocked`
   - 明确 stop/start 或人工恢复入口
+- 失锁或锁被抢占：
+  - 退出 `ready`
+  - 只能进入 `blocked` 或 `recoverable`
 - ready marker 陈旧：
   - 直接进入 `blocked`
   - 重新 bootstrap 后才可回到 `pending|ready`
