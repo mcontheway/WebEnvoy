@@ -42,7 +42,7 @@ profiles/
 
 #### Profile / Extension / Native Host 绑定边界
 
-对 official Chrome 持久扩展主路径，进入“已完成安装后的运行阶段”的 profile 必须先满足以下绑定关系：
+对 official Chrome 持久扩展主路径，以下绑定关系只约束“扩展已安装完成后”的正式运行阶段，不构成首个 profile 执行 `runtime.start` / `runtime.login` 前的安装前置：
 
 - 一个 profile 绑定一个稳定的 WebEnvoy `extension_id`
 - Native Messaging Host manifest 的 `allowed_origins` 必须显式包含该 `extension_id` 对应 origin
@@ -55,7 +55,7 @@ profiles/
 
 前者属于持久身份边界，后者属于临时运行态；两者不能再被同一次启动过程里的 staged extension 偷懒耦合。
 
-首次 profile 初始化、候选安装路径选择、用户确认与登录引导不在本次 architecture freeze 内定稿；本节只约束“扩展已进入 profile 且 Native Host 绑定已建立之后”的正式运行时边界。
+首次 profile 初始化、候选安装路径选择、用户确认与登录引导不在本次 architecture freeze 内定稿；这些入口仍属于后续 candidate / transition path 设计问题。本节只约束“扩展已进入 profile 且 Native Host 绑定已建立之后”的正式运行时边界。
 
 #### Proxy 黏性绑定
 

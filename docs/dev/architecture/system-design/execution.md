@@ -36,7 +36,7 @@ L1 AI 视觉漫游（VLM + 物理点击）
 
 ## official Chrome 137+ 主运行时基线
 
-对 official branded Google Chrome 137+，WebEnvoy 的正式主路径已不再建立在 `--load-extension` 的 per-run staged extension 上，而是建立在以下前提之上：
+对 official branded Google Chrome 137+，在 profile 已完成 WebEnvoy 扩展持久安装并进入正式运行阶段后，WebEnvoy 的主路径已不再建立在 `--load-extension` 的 per-run staged extension 上，而是建立在以下前提之上：
 
 - WebEnvoy 扩展作为 **profile 内持久安装资产** 存在
 - 浏览器启动只负责复用该 profile，并建立本次 run/session 所需的 runtime bootstrap
@@ -51,8 +51,8 @@ L1 AI 视觉漫游（VLM + 物理点击）
 
 - Chromium / Chrome for Testing 只保留为开发、调试和验证 fallback，不得描述成 official Chrome stealth 主路径
 - `developer mode / unpacked`、`External Extensions JSON`、Windows 外部安装/注册表、Chrome Web Store / 合规上架只属于安装/分发候选路径；它们不能替代本节冻结的 runtime / identity / bootstrap 正式边界
-- 本文档只冻结运行时边界，不设计最终安装器或分发实现
-- 首次 profile 安装、登录引导与候选分发路径选择属于后续事项；在这些前置已成立后，official Chrome 主路径才受本节运行时边界约束
+- 本文档只冻结安装完成后的运行时边界，不设计最终安装器或分发实现
+- 首次 profile 安装、首次登录引导与候选分发路径选择属于后续事项；它们不应被误解为 `runtime.start` / `runtime.login` 之前已经定稿的正式安装前置
 
 ---
 
