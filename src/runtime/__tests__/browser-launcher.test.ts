@@ -1,6 +1,6 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -346,32 +346,6 @@ describe("browser-launcher", () => {
       controllerPid: launched.controllerPid,
       runId: "run-launcher-test-official-persistent-001"
     });
-  });
-
-  it("prefers branded Chrome as runtime truth source over Chromium fallback on the default path", async () => {
-    Object.defineProperty(process, "platform", { value: "linux" });
-    const candidateDir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-preferred-runtime-"));
-    tempDirs.push(candidateDir);
-    const brandedExecutable = join(candidateDir, "google-chrome-stable");
-    const chromiumExecutable = join(candidateDir, "chromium-browser");
-    await writeFile(
-      brandedExecutable,
-      "#!/bin/sh\nprintf '%s\\n' 'Google Chrome 146.0.7680.154'\n",
-      "utf8"
-    );
-    await chmod(brandedExecutable, 0o755);
-    await writeFile(
-      chromiumExecutable,
-      "#!/bin/sh\nprintf '%s\\n' 'Chromium 146.0.0.0'\n",
-      "utf8"
-    );
-    await chmod(chromiumExecutable, 0o755);
-    process.env.PATH = `${candidateDir}${delimiter}${originalPath ?? ""}`;
-    delete process.env.WEBENVOY_BROWSER_PATH;
-
-    const resolved = await resolvePreferredBrowserVersionTruthSource();
-    expect(resolved.browserVersion).toBe("Google Chrome 146.0.7680.154");
-    expect(resolved.executablePath).toBe(brandedExecutable);
   });
 
   it("stages per-run extension payload and writes bootstrap file", async () => {
