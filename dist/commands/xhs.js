@@ -4,6 +4,7 @@ import { NativeMessagingBridge, NativeMessagingTransportError } from "../runtime
 import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
 import { appendFingerprintContext, buildFingerprintContextForMeta } from "../runtime/fingerprint-runtime.js";
+import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
 const ABILITY_LAYERS = new Set(["L3", "L2", "L1"]);
 const ABILITY_ACTIONS = new Set(["read", "write", "download"]);
@@ -20,6 +21,7 @@ const XHS_LIVE_EXECUTION_MODES = new Set([
     "live_write"
 ]);
 const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
+const profileRuntime = new ProfileRuntimeService();
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
@@ -220,6 +222,67 @@ const toTransportCliError = (error, ability) => new CliError("ERR_RUNTIME_UNAVAI
         reason: error.code
     }
 });
+const ensureOfficialChromeRuntimeReady = async (context, ability, requestedExecutionMode) => {
+    const status = await profileRuntime.status({
+        cwd: context.cwd,
+        profile: context.profile ?? "",
+        runId: context.run_id,
+        params: {
+            requested_execution_mode: requestedExecutionMode
+        }
+    });
+    const identityPreflight = asObject(status.identityPreflight);
+    if (identityPreflight?.mode !== "official_chrome_persistent_extension") {
+        return;
+    }
+    const runtimeReadiness = typeof status.runtimeReadiness === "string" ? status.runtimeReadiness : "unknown";
+    if (runtimeReadiness === "ready") {
+        return;
+    }
+    const identityBindingState = typeof status.identityBindingState === "string" ? status.identityBindingState : "missing";
+    const bootstrapState = typeof status.bootstrapState === "string" ? status.bootstrapState : "not_started";
+    const transportState = typeof status.transportState === "string" ? status.transportState : "not_connected";
+    const baseDetails = {
+        ability_id: ability.id,
+        stage: "execution",
+        runtime_readiness: runtimeReadiness,
+        identity_binding_state: identityBindingState,
+        bootstrap_state: bootstrapState,
+        transport_state: transportState
+    };
+    if (identityBindingState === "missing") {
+        throw new CliError("ERR_RUNTIME_IDENTITY_NOT_BOUND", "official Chrome runtime identity 未绑定", {
+            details: {
+                ...baseDetails,
+                reason: "ERR_RUNTIME_IDENTITY_NOT_BOUND"
+            }
+        });
+    }
+    if (identityBindingState === "mismatch") {
+        throw new CliError("ERR_RUNTIME_IDENTITY_MISMATCH", "official Chrome runtime identity 不一致", {
+            details: {
+                ...baseDetails,
+                reason: "ERR_RUNTIME_IDENTITY_MISMATCH"
+            }
+        });
+    }
+    if (bootstrapState === "not_started" || bootstrapState === "pending") {
+        throw new CliError("ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED", "official Chrome runtime bootstrap 未就绪", {
+            details: {
+                ...baseDetails,
+                reason: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+            },
+            retryable: true
+        });
+    }
+    throw new CliError("ERR_RUNTIME_UNAVAILABLE", "official Chrome runtime 未就绪", {
+        details: {
+            ...baseDetails,
+            reason: "ERR_RUNTIME_NOT_READY"
+        },
+        retryable: true
+    });
+};
 const xhsSearch = async (context) => {
     const envelope = parseAbilityEnvelope(context.params);
     const gate = normalizeGateOptions(envelope.options, envelope.ability.id);
@@ -247,6 +310,7 @@ const xhsSearch = async (context) => {
     }
     const bridge = resolveRuntimeBridge();
     try {
+        await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode);
         const profileStore = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
         const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
         const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {

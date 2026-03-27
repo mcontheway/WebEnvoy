@@ -453,6 +453,48 @@ describe("webenvoy cli contract", () => {
     ).toEqual(["DEFAULT_MODE_DRY_RUN"]);
   });
 
+  it("blocks xhs.search before execution when official Chrome runtime readiness is not ready", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_official_not_ready_profile",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          ...scopedXhsGateOptions,
+          action_type: "read",
+          simulate_result: "success"
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback",
+      WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+    });
+
+    expect(result.status).toBe(5);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "error",
+      error: {
+        code: "ERR_RUNTIME_IDENTITY_NOT_BOUND",
+        details: {
+          ability_id: "xhs.note.search.v1",
+          runtime_readiness: "blocked",
+          identity_binding_state: "missing"
+        }
+      }
+    });
+  });
+
   it("blocks live_read_high_risk when approval is missing", () => {
     const result = runCli([
       "xhs.search",
