@@ -13,7 +13,7 @@ describe("prepareOfficialChromeRuntime", () => {
           cwd: "/tmp/webenvoy",
           profile: "official_ready_profile",
           run_id: "run-runtime-ready-identity-001",
-          command: "runtime.prepare",
+          command: "xhs.search",
           params: {
             persistentExtensionIdentity: {
               extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -79,10 +79,10 @@ describe("prepareOfficialChromeRuntime", () => {
           cwd: "/tmp/webenvoy",
           profile: "official_ready_profile",
           run_id: "run-runtime-ready-001",
-          command: "runtime.prepare",
+          command: "xhs.search",
           params: {}
         } as never,
-        consumerId: "runtime.prepare",
+        consumerId: "xhs.search",
         requestedExecutionMode: "live_read_high_risk",
         bridge: bridge as never,
         fingerprintContext: {
@@ -167,10 +167,10 @@ describe("prepareOfficialChromeRuntime", () => {
           cwd: "/tmp/webenvoy",
           profile: "official_first_prepare_profile",
           run_id: "run-runtime-first-prepare-001",
-          command: "runtime.prepare",
+          command: "xhs.search",
           params: {}
         } as never,
-        consumerId: "runtime.prepare",
+        consumerId: "xhs.search",
         requestedExecutionMode: "live_read_high_risk",
         bridge: bridge as never,
         fingerprintContext: {
@@ -203,6 +203,84 @@ describe("prepareOfficialChromeRuntime", () => {
       })
     );
   });
+
+  it.each([
+    "ERR_RUNTIME_BOOTSTRAP_ACK_STALE",
+    "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH",
+    "ERR_RUNTIME_READY_SIGNAL_CONFLICT"
+  ] as const)(
+    "preserves bootstrap failure classification when the shared recovery contract receives %s",
+    async (bootstrapErrorCode) => {
+      const readStatus = vi
+        .fn()
+        .mockResolvedValueOnce({
+          identityPreflight: {
+            mode: "official_chrome_persistent_extension"
+          },
+          profileState: "ready",
+          runtimeReadiness: "pending",
+          identityBindingState: "bound",
+          bootstrapState: "pending",
+          transportState: "ready",
+          lockHeld: true
+        })
+        .mockResolvedValueOnce({
+          identityPreflight: {
+            mode: "official_chrome_persistent_extension"
+          },
+          profileState: "ready",
+          runtimeReadiness: "pending",
+          identityBindingState: "bound",
+          bootstrapState: "pending",
+          transportState: "ready",
+          lockHeld: true
+        });
+      const bridge = {
+        runCommand: vi.fn().mockResolvedValueOnce({
+          ok: false,
+          error: {
+            code: bootstrapErrorCode,
+            message: `runtime bootstrap failed: ${bootstrapErrorCode}`
+          }
+        })
+      };
+
+      await expect(
+        prepareOfficialChromeRuntime({
+          context: {
+            cwd: "/tmp/webenvoy",
+            profile: "official_runtime_prepare_profile",
+            run_id: "run-runtime-prepare-recovery-001",
+            command: "xhs.search",
+            params: {}
+          } as never,
+          consumerId: "xhs.search",
+          requestedExecutionMode: "live_read_high_risk",
+          bridge: bridge as never,
+          fingerprintContext: {
+            fingerprint_profile_bundle: null
+          } as never,
+          readStatus
+        })
+      ).rejects.toMatchObject({
+        code: bootstrapErrorCode,
+        message: `runtime bootstrap failed: ${bootstrapErrorCode}`,
+        retryable: bootstrapErrorCode !== "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH",
+        details: {
+          ability_id: "xhs.search",
+          stage: "execution",
+          reason: bootstrapErrorCode
+        }
+      });
+
+      expect(bridge.runCommand).toHaveBeenCalledTimes(1);
+      expect(bridge.runCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          command: "runtime.bootstrap"
+        })
+      );
+    }
+  );
 
   it("keeps runtime blocked when the profile lock is lost before final convergence", async () => {
     const readStatus = vi
@@ -251,10 +329,10 @@ describe("prepareOfficialChromeRuntime", () => {
           cwd: "/tmp/webenvoy",
           profile: "official_lock_lost_profile",
           run_id: "run-runtime-lock-lost-001",
-          command: "runtime.prepare",
+          command: "xhs.search",
           params: {}
         } as never,
-        consumerId: "runtime.prepare",
+        consumerId: "xhs.search",
         requestedExecutionMode: "live_read_high_risk",
         bridge: bridge as never,
         fingerprintContext: {

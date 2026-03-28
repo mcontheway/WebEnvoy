@@ -14,7 +14,6 @@ import {
 import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
 import {
-  prepareOfficialChromeRuntime
 } from "../runtime/official-chrome-runtime.js";
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { buildFingerprintContextForMeta, appendFingerprintContext } from "../runtime/fingerprint-runtime.js";
@@ -209,26 +208,6 @@ const runtimeStatus = async (context: RuntimeContext) =>
     params: context.params
   });
 
-const runtimePrepare = async (context: RuntimeContext) => {
-  const requestedExecutionMode =
-    typeof context.params.requested_execution_mode === "string"
-      ? context.params.requested_execution_mode
-      : "dry_run";
-  const profileStore = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
-  const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
-  const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
-    requestedExecutionMode
-  });
-  const bridge = resolveRuntimeBridge();
-  return await prepareOfficialChromeRuntime({
-    context,
-    consumerId: "runtime.prepare",
-    requestedExecutionMode,
-    bridge,
-    fingerprintContext
-  });
-};
-
 const runtimeStop = async (context: RuntimeContext) =>
   profileRuntime.stop({
     cwd: context.cwd,
@@ -340,7 +319,6 @@ const runtimeHelp = async () => ({
     "runtime.ping",
     "runtime.start",
     "runtime.login",
-    "runtime.prepare",
     "runtime.status",
     "runtime.stop",
     "runtime.audit",
@@ -371,12 +349,6 @@ export const runtimeCommands = (): CommandDefinition[] => [
     status: "implemented",
     requiresProfile: true,
     handler: runtimeLogin
-  },
-  {
-    name: "runtime.prepare",
-    status: "implemented",
-    requiresProfile: true,
-    handler: runtimePrepare
   },
   {
     name: "runtime.status",

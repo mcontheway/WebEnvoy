@@ -13,6 +13,11 @@ const isTransportFailureCode = (code) => code === "ERR_TRANSPORT_HANDSHAKE_FAILE
     code === "ERR_TRANSPORT_DISCONNECTED" ||
     code === "ERR_TRANSPORT_FORWARD_FAILED" ||
     code === "ERR_TRANSPORT_NOT_READY";
+const isRuntimeBootstrapPendingCode = (code) => code === "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED" ||
+    code === "ERR_RUNTIME_BOOTSTRAP_ACK_TIMEOUT";
+const isRuntimeBootstrapFailureCode = (code) => code === "ERR_RUNTIME_BOOTSTRAP_ACK_STALE" ||
+    code === "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH" ||
+    code === "ERR_RUNTIME_READY_SIGNAL_CONFLICT";
 const buildOfficialChromeRuntimeReadiness = (input) => {
     if (input.identityBindingState === "missing" || input.identityBindingState === "mismatch") {
         return "blocked";
@@ -197,9 +202,18 @@ export const prepareOfficialChromeRuntime = async (input) => {
                     retryable: true
                 });
             }
-            if (bootstrapResult.error.code === "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED" ||
-                bootstrapResult.error.code === "ERR_RUNTIME_BOOTSTRAP_ACK_TIMEOUT") {
+            if (isRuntimeBootstrapPendingCode(bootstrapResult.error.code)) {
                 return;
+            }
+            if (isRuntimeBootstrapFailureCode(bootstrapResult.error.code)) {
+                throw new CliError(bootstrapResult.error.code, bootstrapResult.error.message, {
+                    details: {
+                        ability_id: input.consumerId,
+                        stage: "execution",
+                        reason: bootstrapResult.error.code
+                    },
+                    retryable: bootstrapResult.error.code !== "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH"
+                });
             }
             throw new CliError("ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED", "official Chrome runtime bootstrap 未获得执行面确认", {
                 details: {
