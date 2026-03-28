@@ -410,7 +410,13 @@ class InMemoryContentScriptRuntime {
     }
     handleForward(message) {
         if (message.command === "runtime.ping") {
-            if (this.#bootstrapContext && message.runId === this.#bootstrapContext.runId) {
+            const commandParams = asRecord(message.commandParams) ?? {};
+            const runtimeContextId = asString(commandParams.runtime_context_id);
+            const profile = asString(commandParams.profile);
+            if (this.#bootstrapContext &&
+                message.runId === this.#bootstrapContext.runId &&
+                runtimeContextId === this.#bootstrapContext.runtimeContextId &&
+                profile === this.#bootstrapContext.profile) {
                 this.#bootstrapContext = {
                     ...this.#bootstrapContext,
                     attested: true

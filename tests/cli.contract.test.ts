@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { buildRuntimeBootstrapContextId } from "../src/runtime/runtime-bootstrap.js";
 import { resolveRuntimeStorePath } from "../src/runtime/store/sqlite-runtime-store.js";
 
 const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
@@ -1544,8 +1545,10 @@ const { existsSync, readFileSync, writeFileSync } = require("node:fs");
 let buffer = Buffer.alloc(0);
 let opened = false;
 let bootstrapPending = false;
-let readinessPollCount = 0;
+let bootstrapAttested = false;
+let attestationTimer = null;
 const forwards = [];
+const attestationEvents = [];
 const tracePath = process.env.WEBENVOY_TEST_TRACE_PATH || "";
 let idleTimer = null;
 
@@ -1562,11 +1565,18 @@ const writeTrace = () => {
   }
   const existing = existsSync(tracePath)
     ? JSON.parse(readFileSync(tracePath, "utf8"))
-    : { forwards: [] };
+    : { forwards: [], attestationEvents: [] };
   const mergedForwards = Array.isArray(existing.forwards)
     ? [...existing.forwards, ...forwards]
     : [...forwards];
-  writeFileSync(tracePath, JSON.stringify({ forwards: mergedForwards }), "utf8");
+  const mergedAttestations = Array.isArray(existing.attestationEvents)
+    ? [...existing.attestationEvents, ...attestationEvents]
+    : [...attestationEvents];
+  writeFileSync(
+    tracePath,
+    JSON.stringify({ forwards: mergedForwards, attestationEvents: mergedAttestations }),
+    "utf8"
+  );
 };
 
 const scheduleIdleExit = () => {
@@ -1642,8 +1652,22 @@ const onRequest = (request) => {
   });
 
   if (command === "runtime.bootstrap") {
+    const runtimeContextId = String(request.params?.command_params?.runtime_context_id ?? "");
     bootstrapPending = true;
-    readinessPollCount = 0;
+    bootstrapAttested = false;
+    if (attestationTimer) {
+      clearTimeout(attestationTimer);
+    }
+    attestationTimer = setTimeout(() => {
+      bootstrapPending = false;
+      bootstrapAttested = true;
+      attestationEvents.push({
+        source: "native-host-async-attestation",
+        run_id: runId,
+        profile,
+        runtime_context_id: runtimeContextId
+      });
+    }, 50);
     emit({
       id: request.id,
       status: "error",
@@ -1664,16 +1688,10 @@ const onRequest = (request) => {
   }
 
   if (command === "runtime.readiness") {
-    if (bootstrapPending) {
-      readinessPollCount += 1;
-      if (readinessPollCount >= 2) {
-        bootstrapPending = false;
-      }
-    }
     emit(
       success(request, {
         transport_state: "ready",
-        bootstrap_state: bootstrapPending ? "pending" : "ready"
+        bootstrap_state: bootstrapAttested ? "ready" : bootstrapPending ? "pending" : "not_started"
       })
     );
     scheduleIdleExit();
@@ -1809,6 +1827,12 @@ process.stdin.on("data", (chunk) => {
 
     const trace = JSON.parse(await readFile(tracePath, "utf8")) as {
       forwards?: Array<{ command?: string; run_id?: string; profile?: string }>;
+      attestationEvents?: Array<{
+        source?: string;
+        run_id?: string;
+        profile?: string;
+        runtime_context_id?: string;
+      }>;
     };
     expect(trace.forwards).toBeDefined();
     expect(trace.forwards).toEqual(
@@ -1826,6 +1850,16 @@ process.stdin.on("data", (chunk) => {
       ])
     );
     expect(trace.forwards?.some((forward) => forward.command === "runtime.ping")).toBe(false);
+    expect(trace.attestationEvents).toEqual(
+      expect.arrayContaining([
+        {
+          source: "native-host-async-attestation",
+          run_id: runId,
+          profile,
+          runtime_context_id: buildRuntimeBootstrapContextId(profile, runId)
+        }
+      ])
+    );
   });
 
   it.each([

@@ -75,7 +75,10 @@ describe("native messaging default loopback chain", () => {
       runId: "run-loopback-bootstrap-001",
       profile: "profile-a",
       cwd: "/tmp",
-      params: {}
+      params: {
+        runtime_context_id: "runtime-context-001",
+        profile: "profile-a"
+      }
     });
 
     expect(ping).toMatchObject({
@@ -157,7 +160,10 @@ describe("native messaging default loopback chain", () => {
       runId: "run-loopback-bootstrap-002",
       profile: "profile-a",
       cwd: "/tmp",
-      params: {}
+      params: {
+        runtime_context_id: "runtime-context-002",
+        profile: "profile-a"
+      }
     });
 
     const readiness = await bridge.runCommand({
@@ -176,6 +182,54 @@ describe("native messaging default loopback chain", () => {
       payload: {
         transport_state: "ready",
         bootstrap_state: "stale"
+      }
+    });
+  });
+
+  it("keeps bootstrap pending when runtime.ping omits the current bootstrap context", async () => {
+    const bridge = new NativeMessagingBridge({
+      transport: createLoopbackNativeBridgeTransport()
+    });
+
+    await bridge.runCommand({
+      runId: "run-loopback-bootstrap-004",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "runtime.bootstrap",
+      params: {
+        version: "v1",
+        run_id: "run-loopback-bootstrap-004",
+        runtime_context_id: "runtime-context-004",
+        profile: "profile-a",
+        fingerprint_runtime: {},
+        fingerprint_patch_manifest: {},
+        main_world_secret: "loopback-secret-004"
+      }
+    });
+
+    await bridge.runtimePing({
+      runId: "run-loopback-bootstrap-004",
+      profile: "profile-a",
+      cwd: "/tmp",
+      params: {}
+    });
+
+    const readiness = await bridge.runCommand({
+      runId: "run-loopback-bootstrap-004",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "runtime.readiness",
+      params: {
+        run_id: "run-loopback-bootstrap-004",
+        runtime_context_id: "runtime-context-004"
+      }
+    });
+
+    expect(readiness).toMatchObject({
+      ok: true,
+      payload: {
+        transport_state: "ready",
+        bootstrap_state: "pending"
       }
     });
   });
