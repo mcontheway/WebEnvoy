@@ -2312,6 +2312,88 @@ describe("profile-runtime stale lock reclaim", () => {
       killSpy.mockRestore();
     }
   });
+
+  it("rejects orphan recovery when browser state controller ownership no longer matches the lock", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-stop-orphan-mismatch-"));
+    tempDirs.push(baseDir);
+    const alivePids = new Set<number>([999998, 999999, 223355, 223356]);
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
+      if (signal === 0) {
+        return alivePids.has(pid);
+      }
+      alivePids.delete(pid);
+      return true;
+    }) as typeof process.kill);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid)
+    });
+
+    try {
+      await service.start({
+        cwd: baseDir,
+        profile: "orphan_stop_mismatch_profile",
+        runId: "run-runtime-test-721",
+        params: {}
+      });
+
+      const profileDir = join(baseDir, ".webenvoy", "profiles", "orphan_stop_mismatch_profile");
+      const lockPath = join(profileDir, "__webenvoy_lock.json");
+      const lockRaw = await readFile(lockPath, "utf8");
+      const lock = JSON.parse(lockRaw) as ProfileLock;
+      lock.ownerPid = 12345;
+      await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+      const browserStatePath = join(profileDir, BROWSER_STATE_FILENAME);
+      await writeFile(
+        browserStatePath,
+        `${JSON.stringify(
+          {
+            schemaVersion: 1,
+            launchToken: "state-token-721",
+            profileDir,
+            runId: "run-runtime-test-721",
+            browserPath: "/mock/chrome",
+            controllerPid: 223355,
+            browserPid: 223356,
+            launchedAt: new Date().toISOString()
+          },
+          null,
+          2
+        )}\n`,
+        "utf8"
+      );
+      alivePids.delete(999998);
+      alivePids.delete(999999);
+
+      const status = await service.status({
+        cwd: baseDir,
+        profile: "orphan_stop_mismatch_profile",
+        runId: "run-runtime-test-722",
+        params: {}
+      });
+      expect(status).toMatchObject({
+        profileState: "disconnected",
+        browserState: "disconnected",
+        lockHeld: true
+      });
+
+      await expect(
+        service.stop({
+          cwd: baseDir,
+          profile: "orphan_stop_mismatch_profile",
+          runId: "run-runtime-test-723",
+          params: {}
+        })
+      ).rejects.toMatchObject({
+        code: "ERR_PROFILE_OWNER_CONFLICT"
+      });
+      expect(alivePids.has(223356)).toBe(true);
+      const lockAfterReject = JSON.parse(await readFile(lockPath, "utf8")) as ProfileLock;
+      expect(lockAfterReject.ownerRunId).toBe("run-runtime-test-721");
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
 });
 
 describe("profile-runtime login", () => {

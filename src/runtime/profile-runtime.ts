@@ -15,7 +15,6 @@ import {
 } from "./browser-launcher.js";
 import {
   createProfileLock,
-  DEFAULT_LOCK_STALE_MS,
   type ProfileLock
 } from "./profile-lock.js";
 import {
@@ -115,7 +114,6 @@ interface ProfileLockInspection {
   controlConnected: boolean;
   browserPid: number | null;
   stateRunId: string | null;
-  lockHeartbeatFresh: boolean;
   orphanRecoverable: boolean;
 }
 
@@ -149,19 +147,6 @@ const DEFAULT_LOCK_FILE_ADAPTER: LockFileAdapter = {
     await writeFile(path, data, options);
   },
   unlink: async (path) => unlink(path)
-};
-
-const isFreshLockHeartbeat = (
-  lastHeartbeatAt: string,
-  nowIso: string,
-  staleAfterMs: number = DEFAULT_LOCK_STALE_MS
-): boolean => {
-  const lastHeartbeatMs = Date.parse(lastHeartbeatAt);
-  const nowMs = Date.parse(nowIso);
-  if (Number.isNaN(lastHeartbeatMs) || Number.isNaN(nowMs)) {
-    return false;
-  }
-  return nowMs - lastHeartbeatMs <= staleAfterMs;
 };
 
 const browserStateFromProfileState = (profileState: ProfileState, lockHeld: boolean): BrowserState => {
@@ -1113,6 +1098,7 @@ export class ProfileRuntimeService {
       if (
         !controllerAlive &&
         browserState &&
+        browserState.controllerPid === lock.ownerPid &&
         browserState.runId === stopOwnerRunId &&
         this.#isProcessAlive(browserState.browserPid)
       ) {
@@ -1439,24 +1425,21 @@ export class ProfileRuntimeService {
   async #inspectProfileLock(lock: ProfileLock, profileDir: string): Promise<ProfileLockInspection> {
     const lockOwnerAlive = this.#isProcessAlive(lock.ownerPid);
     const state = await this.#readBrowserInstanceState(profileDir);
-    const lockHeartbeatFresh = isFreshLockHeartbeat(lock.lastHeartbeatAt, isoNow());
+    const stateMatchesLockOwner = state !== null && state.controllerPid === lock.ownerPid;
     const controllerAlive =
       lockOwnerAlive ||
-      (state !== null &&
-        state.controllerPid === lock.ownerPid &&
-        this.#isProcessAlive(state.controllerPid));
+      (stateMatchesLockOwner && this.#isProcessAlive(state.controllerPid));
     const browserAlive = state !== null && this.#isProcessAlive(state.browserPid);
     const orphanRecoverable =
       !controllerAlive &&
-      state !== null &&
+      stateMatchesLockOwner &&
       state.runId === lock.ownerRunId &&
-      (browserAlive || !lockHeartbeatFresh);
+      browserAlive;
     return {
       blocksReuse: controllerAlive || browserAlive,
       controlConnected: controllerAlive,
       browserPid: browserAlive ? state?.browserPid ?? null : null,
       stateRunId: state?.runId ?? null,
-      lockHeartbeatFresh,
       orphanRecoverable
     };
   }

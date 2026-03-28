@@ -3,7 +3,7 @@ import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CliError } from "../core/errors.js";
 import { BROWSER_CONTROL_FILENAME, BROWSER_STATE_FILENAME, BrowserLaunchError, launchBrowser, shutdownBrowserSession } from "./browser-launcher.js";
-import { createProfileLock, DEFAULT_LOCK_STALE_MS } from "./profile-lock.js";
+import { createProfileLock } from "./profile-lock.js";
 import { ProfileStore } from "./profile-store.js";
 import { buildIdentityPreflightError, runIdentityPreflight } from "./persistent-extension-identity.js";
 import { buildFingerprintContextForMeta } from "./fingerprint-runtime.js";
@@ -27,14 +27,6 @@ const DEFAULT_LOCK_FILE_ADAPTER = {
         await writeFile(path, data, options);
     },
     unlink: async (path) => unlink(path)
-};
-const isFreshLockHeartbeat = (lastHeartbeatAt, nowIso, staleAfterMs = DEFAULT_LOCK_STALE_MS) => {
-    const lastHeartbeatMs = Date.parse(lastHeartbeatAt);
-    const nowMs = Date.parse(nowIso);
-    if (Number.isNaN(lastHeartbeatMs) || Number.isNaN(nowMs)) {
-        return false;
-    }
-    return nowMs - lastHeartbeatMs <= staleAfterMs;
 };
 const browserStateFromProfileState = (profileState, lockHeld) => {
     if (!lockHeld) {
@@ -801,6 +793,7 @@ export class ProfileRuntimeService {
             const controllerAlive = this.#isProcessAlive(lock.ownerPid);
             if (!controllerAlive &&
                 browserState &&
+                browserState.controllerPid === lock.ownerPid &&
                 browserState.runId === stopOwnerRunId &&
                 this.#isProcessAlive(browserState.browserPid)) {
                 await this.#terminateProcess(browserState.browserPid);
@@ -1079,22 +1072,19 @@ export class ProfileRuntimeService {
     async #inspectProfileLock(lock, profileDir) {
         const lockOwnerAlive = this.#isProcessAlive(lock.ownerPid);
         const state = await this.#readBrowserInstanceState(profileDir);
-        const lockHeartbeatFresh = isFreshLockHeartbeat(lock.lastHeartbeatAt, isoNow());
+        const stateMatchesLockOwner = state !== null && state.controllerPid === lock.ownerPid;
         const controllerAlive = lockOwnerAlive ||
-            (state !== null &&
-                state.controllerPid === lock.ownerPid &&
-                this.#isProcessAlive(state.controllerPid));
+            (stateMatchesLockOwner && this.#isProcessAlive(state.controllerPid));
         const browserAlive = state !== null && this.#isProcessAlive(state.browserPid);
         const orphanRecoverable = !controllerAlive &&
-            state !== null &&
+            stateMatchesLockOwner &&
             state.runId === lock.ownerRunId &&
-            (browserAlive || !lockHeartbeatFresh);
+            browserAlive;
         return {
             blocksReuse: controllerAlive || browserAlive,
             controlConnected: controllerAlive,
             browserPid: browserAlive ? state?.browserPid ?? null : null,
             stateRunId: state?.runId ?? null,
-            lockHeartbeatFresh,
             orphanRecoverable
         };
     }

@@ -3801,12 +3801,17 @@ process.stdin.on("data", (chunk) => {
     const summary = startBody.summary as Record<string, unknown>;
     const profileDir = String(summary.profileDir);
     const lockPath = path.join(profileDir, "__webenvoy_lock.json");
+    const browserStatePath = path.join(profileDir, BROWSER_STATE_FILENAME);
 
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as Record<string, unknown>;
     lock.ownerPid = 999999;
     lock.lastHeartbeatAt = new Date().toISOString();
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+    const browserStateRaw = await readFile(browserStatePath, "utf8");
+    const browserState = JSON.parse(browserStateRaw) as Record<string, unknown>;
+    browserState.controllerPid = 999999;
+    await writeFile(browserStatePath, `${JSON.stringify(browserState, null, 2)}\n`, "utf8");
 
     const status = runCli(
       ["runtime.status", "--profile", "recover_stop_profile", "--run-id", "run-contract-506"],
@@ -3862,12 +3867,17 @@ process.stdin.on("data", (chunk) => {
     const summary = startBody.summary as Record<string, unknown>;
     const profileDir = String(summary.profileDir);
     const lockPath = path.join(profileDir, "__webenvoy_lock.json");
+    const browserStatePath = path.join(profileDir, BROWSER_STATE_FILENAME);
 
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as Record<string, unknown>;
     lock.ownerPid = 999999;
     lock.lastHeartbeatAt = new Date().toISOString();
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+    const browserStateRaw = await readFile(browserStatePath, "utf8");
+    const browserState = JSON.parse(browserStateRaw) as Record<string, unknown>;
+    browserState.controllerPid = 999999;
+    await writeFile(browserStatePath, `${JSON.stringify(browserState, null, 2)}\n`, "utf8");
 
     const blockedStart = runCli(
       ["runtime.start", "--profile", "orphan_recover_profile", "--run-id", "run-contract-508"],
