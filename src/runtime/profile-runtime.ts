@@ -1000,7 +1000,11 @@ export class ProfileRuntimeService {
     const healthyLock = lockInspection?.blocksReuse ?? false;
     const profileState: ProfileState =
       activeState && !(lockInspection?.controlConnected ?? false) ? "disconnected" : storedProfileState;
-    const lockHeld = activeState && healthyLock;
+    const lockHeld = activeState && healthyLock && lock?.ownerRunId === input.runId;
+    const observedRunId =
+      activeState && healthyLock && typeof lock?.ownerRunId === "string"
+        ? lock.ownerRunId
+        : input.runId;
     const requestedExecutionMode = readRequestedExecutionMode(input.params);
     const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, meta, {
       requestedExecutionMode
@@ -1013,6 +1017,7 @@ export class ProfileRuntimeService {
     const readiness = await this.#readRuntimeReadiness({
       runtimeInput: input,
       lockHeld,
+      observedRunId,
       identityPreflight,
       profileState
     });
@@ -1575,6 +1580,7 @@ export class ProfileRuntimeService {
   async #readRuntimeReadiness(input: {
     runtimeInput: RuntimeActionInput;
     lockHeld: boolean;
+    observedRunId?: string;
     identityPreflight: IdentityPreflightResult;
     profileState: ProfileState;
   }): Promise<RuntimeReadinessSnapshot> {
@@ -1592,6 +1598,25 @@ export class ProfileRuntimeService {
       };
     }
     if (!input.lockHeld) {
+      if (baseIdentity === "bound" && input.profileState === "ready" && input.observedRunId) {
+        return await this.#readRuntimeReadiness({
+          ...input,
+          runtimeInput: {
+            ...input.runtimeInput,
+            runId: input.observedRunId
+          },
+          lockHeld: true,
+          observedRunId: undefined
+        }).then((readiness) => ({
+          ...readiness,
+          runtimeReadiness: buildRuntimeReadiness({
+            lockHeld: false,
+            identityBindingState: readiness.identityBindingState,
+            transportState: readiness.transportState,
+            bootstrapState: readiness.bootstrapState
+          })
+        }));
+      }
       const transportState: TransportState =
         input.profileState === "disconnected" ? "disconnected" : "not_connected";
       const bootstrapState: BootstrapState =

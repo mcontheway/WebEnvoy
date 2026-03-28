@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { buildRuntimeBootstrapContextId } from "../src/runtime/runtime-bootstrap.js";
 import { resolveRuntimeStorePath } from "../src/runtime/store/sqlite-runtime-store.js";
 
 const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
@@ -1489,6 +1490,7 @@ describe("webenvoy cli contract", () => {
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
     const profile = "xhs_official_bootstrap_recovery_profile";
+    const runId = "run-contract-xhs-bootstrap-recovery-001";
     await seedInstalledPersistentExtension({
       cwd: runtimeCwd,
       profile
@@ -1500,7 +1502,7 @@ describe("webenvoy cli contract", () => {
         "--profile",
         profile,
         "--run-id",
-        "run-contract-xhs-bootstrap-start-001",
+        runId,
         "--params",
         JSON.stringify({
           persistent_extension_identity: {
@@ -1542,8 +1544,11 @@ describe("webenvoy cli contract", () => {
 const { existsSync, readFileSync, writeFileSync } = require("node:fs");
 let buffer = Buffer.alloc(0);
 let opened = false;
-let bootstrapReady = false;
+let bootstrapPending = false;
+let bootstrapAttested = false;
+let attestationTimer = null;
 const forwards = [];
+const attestationEvents = [];
 const tracePath = process.env.WEBENVOY_TEST_TRACE_PATH || "";
 let idleTimer = null;
 
@@ -1560,11 +1565,18 @@ const writeTrace = () => {
   }
   const existing = existsSync(tracePath)
     ? JSON.parse(readFileSync(tracePath, "utf8"))
-    : { forwards: [] };
+    : { forwards: [], attestationEvents: [] };
   const mergedForwards = Array.isArray(existing.forwards)
     ? [...existing.forwards, ...forwards]
     : [...forwards];
-  writeFileSync(tracePath, JSON.stringify({ forwards: mergedForwards }), "utf8");
+  const mergedAttestations = Array.isArray(existing.attestationEvents)
+    ? [...existing.attestationEvents, ...attestationEvents]
+    : [...attestationEvents];
+  writeFileSync(
+    tracePath,
+    JSON.stringify({ forwards: mergedForwards, attestationEvents: mergedAttestations }),
+    "utf8"
+  );
 };
 
 const scheduleIdleExit = () => {
@@ -1640,19 +1652,37 @@ const onRequest = (request) => {
   });
 
   if (command === "runtime.bootstrap") {
-    const commandParams = request.params?.command_params ?? {};
-    bootstrapReady = true;
-    emit(
-      success(request, {
-        result: {
-          version: String(commandParams.version ?? "v1"),
-          run_id: String(commandParams.run_id ?? runId),
-          runtime_context_id: String(commandParams.runtime_context_id ?? "runtime-context-001"),
-          profile,
-          status: "ready"
-        }
-      })
-    );
+    const runtimeContextId = String(request.params?.command_params?.runtime_context_id ?? "");
+    bootstrapPending = true;
+    bootstrapAttested = false;
+    if (attestationTimer) {
+      clearTimeout(attestationTimer);
+    }
+    attestationTimer = setTimeout(() => {
+      bootstrapPending = false;
+      bootstrapAttested = true;
+      attestationEvents.push({
+        source: "native-host-async-attestation",
+        run_id: runId,
+        profile,
+        runtime_context_id: runtimeContextId
+      });
+    }, 50);
+    emit({
+      id: request.id,
+      status: "error",
+      summary: {
+        session_id: String(request.params?.session_id ?? "nm-session-001"),
+        run_id: runId,
+        command,
+        relay_path: "host>background>content-script>background>host"
+      },
+      payload: {},
+      error: {
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+        message: "runtime bootstrap 尚未获得执行面确认"
+      }
+    });
     scheduleIdleExit();
     return;
   }
@@ -1661,7 +1691,7 @@ const onRequest = (request) => {
     emit(
       success(request, {
         transport_state: "ready",
-        bootstrap_state: bootstrapReady ? "ready" : "pending"
+        bootstrap_state: bootstrapAttested ? "ready" : bootstrapPending ? "pending" : "not_started"
       })
     );
     scheduleIdleExit();
@@ -1735,7 +1765,6 @@ process.stdin.on("data", (chunk) => {
       "utf8"
     );
 
-    const runId = "run-contract-xhs-bootstrap-search-002";
     const result = runCli([
       "xhs.search",
       "--profile",
@@ -1798,6 +1827,12 @@ process.stdin.on("data", (chunk) => {
 
     const trace = JSON.parse(await readFile(tracePath, "utf8")) as {
       forwards?: Array<{ command?: string; run_id?: string; profile?: string }>;
+      attestationEvents?: Array<{
+        source?: string;
+        run_id?: string;
+        profile?: string;
+        runtime_context_id?: string;
+      }>;
     };
     expect(trace.forwards).toBeDefined();
     expect(trace.forwards).toEqual(
@@ -1808,19 +1843,35 @@ process.stdin.on("data", (chunk) => {
           profile
         },
         {
+          command: "runtime.readiness",
+          run_id: runId,
+          profile
+        },
+        {
           command: "xhs.search",
           run_id: runId,
           profile
         }
       ])
     );
-    expect(trace.forwards?.some((forward) => forward.command === "runtime.ping")).toBe(false);
     const bootstrapIndex =
       trace.forwards?.findIndex((forward) => forward.command === "runtime.bootstrap") ?? -1;
     const searchIndex =
       trace.forwards?.findIndex((forward) => forward.command === "xhs.search") ?? -1;
     expect(bootstrapIndex).toBeGreaterThanOrEqual(0);
-    expect(searchIndex).toBeGreaterThan(bootstrapIndex);
+    expect(searchIndex).toBeGreaterThanOrEqual(0);
+    expect(bootstrapIndex).toBeLessThan(searchIndex);
+    expect(trace.forwards?.some((forward) => forward.command === "runtime.ping")).toBe(false);
+    expect(trace.attestationEvents).toEqual(
+      expect.arrayContaining([
+        {
+          source: "native-host-async-attestation",
+          run_id: runId,
+          profile,
+          runtime_context_id: buildRuntimeBootstrapContextId(profile, runId)
+        }
+      ])
+    );
   });
 
   it.each([

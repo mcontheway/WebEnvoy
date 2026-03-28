@@ -554,11 +554,14 @@ const createPortPair = <TMessage>(): [InMemoryPort<TMessage>, InMemoryPort<TMess
 };
 
 class InMemoryContentScriptRuntime {
+  static readonly BOOTSTRAP_ATTEST_DELAY_MS = 10;
+
   #bootstrapContext: {
     runId: string;
     runtimeContextId: string;
     profile: string;
     version: string;
+    attested: boolean;
   } | null = null;
 
   constructor(private readonly port: InMemoryPort<ContentMessage>) {
@@ -578,7 +581,8 @@ class InMemoryContentScriptRuntime {
         id: message.id,
         ok: true,
         payload: {
-          message: "pong"
+          message: "pong",
+          runtime_bootstrap_attested: this.#bootstrapContext?.attested === true
         }
       };
     }
@@ -613,27 +617,62 @@ class InMemoryContentScriptRuntime {
         };
       }
 
+      const currentBootstrapContext = this.#bootstrapContext;
+      if (
+        currentBootstrapContext &&
+        currentBootstrapContext.attested &&
+        currentBootstrapContext.version === version &&
+        currentBootstrapContext.runId === runId &&
+        currentBootstrapContext.runtimeContextId === runtimeContextId &&
+        currentBootstrapContext.profile === profile
+      ) {
+        return {
+          kind: "result",
+          id: message.id,
+          ok: true,
+          payload: {
+            method: "runtime.bootstrap.ack",
+            result: {
+              version,
+              run_id: runId,
+              runtime_context_id: runtimeContextId,
+              profile,
+              status: "ready"
+            },
+            runtime_bootstrap_attested: true
+          }
+        };
+      }
+
       this.#bootstrapContext = {
         version,
         runId,
         runtimeContextId,
-        profile
+        profile,
+        attested: false
       };
+      setTimeout(() => {
+        const bootstrapContext = this.#bootstrapContext;
+        if (
+          bootstrapContext &&
+          bootstrapContext.runId === runId &&
+          bootstrapContext.runtimeContextId === runtimeContextId &&
+          bootstrapContext.profile === profile
+        ) {
+          this.#bootstrapContext = {
+            ...bootstrapContext,
+            attested: true
+          };
+        }
+      }, InMemoryContentScriptRuntime.BOOTSTRAP_ATTEST_DELAY_MS);
 
       return {
         kind: "result",
         id: message.id,
-        ok: true,
-        payload: {
-          method: "runtime.bootstrap.ack",
-          result: {
-            version,
-            run_id: runId,
-            runtime_context_id: runtimeContextId,
-            profile,
-            status: "ready"
-          },
-          runtime_bootstrap_attested: true
+        ok: false,
+        error: {
+          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+          message: "runtime bootstrap 尚未获得执行面确认"
         }
       };
     }
@@ -643,12 +682,12 @@ class InMemoryContentScriptRuntime {
       const runId = asString(commandParams.run_id);
       const runtimeContextId = asString(commandParams.runtime_context_id);
 
-      let bootstrapState: "not_started" | "ready" | "stale" = "not_started";
+      let bootstrapState: "not_started" | "pending" | "ready" | "stale" = "not_started";
       if (this.#bootstrapContext) {
         bootstrapState =
           runId === this.#bootstrapContext.runId &&
           runtimeContextId === this.#bootstrapContext.runtimeContextId
-            ? "ready"
+            ? (this.#bootstrapContext.attested ? "ready" : "pending")
             : "stale";
       }
 

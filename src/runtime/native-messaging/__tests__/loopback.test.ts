@@ -23,7 +23,7 @@ describe("native messaging default loopback chain", () => {
     expect(result.message).toBe("pong");
   });
 
-  it("supports runtime.bootstrap and runtime.readiness for the current run context", async () => {
+  it("converges pending bootstrap to ready without requiring runtime.ping", async () => {
     const bridge = new NativeMessagingBridge({
       transport: createLoopbackNativeBridgeTransport()
     });
@@ -45,16 +45,10 @@ describe("native messaging default loopback chain", () => {
     });
 
     expect(bootstrap).toMatchObject({
-      ok: true,
-      payload: {
-        method: "runtime.bootstrap.ack",
-        result: {
-          version: "v1",
-          run_id: "run-loopback-bootstrap-001",
-          runtime_context_id: "runtime-context-001",
-          profile: "profile-a",
-          status: "ready"
-        }
+      ok: false,
+      error: {
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+        message: "runtime bootstrap 尚未获得执行面确认"
       }
     });
 
@@ -70,6 +64,59 @@ describe("native messaging default loopback chain", () => {
     });
 
     expect(readiness).toMatchObject({
+      ok: true,
+      payload: {
+        transport_state: "ready",
+        bootstrap_state: "pending"
+      }
+    });
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+
+    const attestedBootstrap = await bridge.runCommand({
+      runId: "run-loopback-bootstrap-001",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "runtime.bootstrap",
+      params: {
+        version: "v1",
+        run_id: "run-loopback-bootstrap-001",
+        runtime_context_id: "runtime-context-001",
+        profile: "profile-a",
+        fingerprint_runtime: {},
+        fingerprint_patch_manifest: {},
+        main_world_secret: "loopback-secret-001"
+      }
+    });
+
+    expect(attestedBootstrap).toMatchObject({
+      ok: true,
+      payload: {
+        method: "runtime.bootstrap.ack",
+        result: {
+          version: "v1",
+          run_id: "run-loopback-bootstrap-001",
+          runtime_context_id: "runtime-context-001",
+          profile: "profile-a",
+          status: "ready"
+        }
+      }
+    });
+
+    const attestedReadiness = await bridge.runCommand({
+      runId: "run-loopback-bootstrap-001",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "runtime.readiness",
+      params: {
+        run_id: "run-loopback-bootstrap-001",
+        runtime_context_id: "runtime-context-001"
+      }
+    });
+
+    expect(attestedReadiness).toMatchObject({
       ok: true,
       payload: {
         transport_state: "ready",
@@ -99,6 +146,16 @@ describe("native messaging default loopback chain", () => {
       }
     });
 
+    await bridge.runtimePing({
+      runId: "run-loopback-bootstrap-002",
+      profile: "profile-a",
+      cwd: "/tmp",
+      params: {
+        runtime_context_id: "runtime-context-002",
+        profile: "profile-a"
+      }
+    });
+
     const readiness = await bridge.runCommand({
       runId: "run-loopback-bootstrap-003",
       profile: "profile-a",
@@ -115,6 +172,109 @@ describe("native messaging default loopback chain", () => {
       payload: {
         transport_state: "ready",
         bootstrap_state: "stale"
+      }
+    });
+  });
+
+  it("keeps bootstrap pending when runtime.ping omits the current bootstrap context", async () => {
+    const bridge = new NativeMessagingBridge({
+      transport: createLoopbackNativeBridgeTransport()
+    });
+
+    await bridge.runCommand({
+      runId: "run-loopback-bootstrap-004",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "runtime.bootstrap",
+      params: {
+        version: "v1",
+        run_id: "run-loopback-bootstrap-004",
+        runtime_context_id: "runtime-context-004",
+        profile: "profile-a",
+        fingerprint_runtime: {},
+        fingerprint_patch_manifest: {},
+        main_world_secret: "loopback-secret-004"
+      }
+    });
+
+    await bridge.runtimePing({
+      runId: "run-loopback-bootstrap-004",
+      profile: "profile-a",
+      cwd: "/tmp",
+      params: {}
+    });
+
+    const readiness = await bridge.runCommand({
+      runId: "run-loopback-bootstrap-004",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "runtime.readiness",
+      params: {
+        run_id: "run-loopback-bootstrap-004",
+        runtime_context_id: "runtime-context-004"
+      }
+    });
+
+    expect(readiness).toMatchObject({
+      ok: true,
+      payload: {
+        transport_state: "ready",
+        bootstrap_state: "pending"
+      }
+    });
+  });
+
+  it("does not let runtime.ping advance pending bootstrap to ready", async () => {
+    const bridge = new NativeMessagingBridge({
+      transport: createLoopbackNativeBridgeTransport()
+    });
+
+    await bridge.runCommand({
+      runId: "run-loopback-bootstrap-001a",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "runtime.bootstrap",
+      params: {
+        version: "v1",
+        run_id: "run-loopback-bootstrap-001a",
+        runtime_context_id: "runtime-context-001a",
+        profile: "profile-a",
+        fingerprint_runtime: {},
+        fingerprint_patch_manifest: {},
+        main_world_secret: "loopback-secret-001a"
+      }
+    });
+
+    const ping = await bridge.runtimePing({
+      runId: "run-loopback-bootstrap-001a",
+      profile: "profile-a",
+      cwd: "/tmp",
+      params: {
+        runtime_context_id: "runtime-context-001a",
+        profile: "profile-a"
+      }
+    });
+
+    expect(ping).toMatchObject({
+      message: "pong"
+    });
+
+    const readiness = await bridge.runCommand({
+      runId: "run-loopback-bootstrap-001a",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "runtime.readiness",
+      params: {
+        run_id: "run-loopback-bootstrap-001a",
+        runtime_context_id: "runtime-context-001a"
+      }
+    });
+
+    expect(readiness).toMatchObject({
+      ok: true,
+      payload: {
+        transport_state: "ready",
+        bootstrap_state: "pending"
       }
     });
   });
