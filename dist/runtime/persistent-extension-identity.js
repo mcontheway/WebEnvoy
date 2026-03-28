@@ -444,7 +444,7 @@ export const runIdentityPreflight = async (input) => {
             failureReason: "IDENTITY_ALLOWED_ORIGIN_MISSING"
         });
     }
-    const profileDir = asNonEmptyString(input.meta?.profileDir);
+    const profileDir = asNonEmptyString(input.meta?.profileDir) ?? asNonEmptyString(input.profileDir);
     if (profileDir) {
         const extensionState = await resolveProfileExtensionState(profileDir, binding.extensionId);
         if (extensionState !== "enabled") {

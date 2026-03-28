@@ -395,7 +395,8 @@ export class ProfileRuntimeService {
             const hadExistingMeta = existingMeta !== null;
             const identityPreflight = await this.#runIdentityPreflight({
                 input,
-                meta: existingMeta
+                meta: existingMeta,
+                profileDir
             });
             const usesPersistentIdentityMode = identityPreflight.mode === "official_chrome_persistent_extension";
             if (shouldBlockSessionEntryOnIdentityPreflight(identityPreflight)) {
@@ -549,7 +550,8 @@ export class ProfileRuntimeService {
             const hadExistingMeta = existingMeta !== null;
             const identityPreflight = await this.#runIdentityPreflight({
                 input,
-                meta: existingMeta
+                meta: existingMeta,
+                profileDir
             });
             const usesPersistentIdentityMode = identityPreflight.mode === "official_chrome_persistent_extension";
             if (shouldBlockSessionEntryOnIdentityPreflight(identityPreflight)) {
@@ -751,7 +753,8 @@ export class ProfileRuntimeService {
         });
         const identityPreflight = await runIdentityPreflight({
             params: input.params,
-            meta
+            meta,
+            profileDir
         });
         const readiness = await this.#readRuntimeReadiness({
             runtimeInput: input,
@@ -1330,7 +1333,8 @@ export class ProfileRuntimeService {
     async #runIdentityPreflight(input) {
         return runIdentityPreflight({
             params: input.input.params,
-            meta: input.meta
+            meta: input.meta,
+            profileDir: input.profileDir
         });
     }
     #buildMinimalProfileMeta(input) {

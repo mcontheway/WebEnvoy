@@ -3167,6 +3167,10 @@ process.stdin.on("data", (chunk) => {
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile: "identity_bootstrap_timeout_profile"
+    });
 
     const start = runCli(
       [
@@ -3210,6 +3214,10 @@ process.stdin.on("data", (chunk) => {
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile: "identity_bootstrap_stale_profile"
+    });
 
     const start = runCli(
       [
@@ -3252,6 +3260,10 @@ process.stdin.on("data", (chunk) => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile: "identity_bootstrap_conflict_profile"
     });
 
     const start = runCli(

@@ -114,6 +114,150 @@ describe("ensureOfficialChromeRuntimeReady", () => {
     expect(bootstrapCommand.params.main_world_secret).toEqual(expect.any(String));
   });
 
+  it("reuses the same runtime_context_id across same-run bootstrap retries", async () => {
+    const readStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        runtimeReadiness: "pending",
+        identityBindingState: "bound",
+        bootstrapState: "pending",
+        transportState: "ready",
+        lockHeld: true
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        runtimeReadiness: "pending",
+        identityBindingState: "bound",
+        bootstrapState: "pending",
+        transportState: "ready",
+        lockHeld: true
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        runtimeReadiness: "pending",
+        identityBindingState: "bound",
+        bootstrapState: "pending",
+        transportState: "ready",
+        lockHeld: true
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        runtimeReadiness: "pending",
+        identityBindingState: "bound",
+        bootstrapState: "pending",
+        transportState: "ready",
+        lockHeld: true
+      });
+    const bridge = {
+      runCommand: vi.fn(async (request: { command: string; params: { runtime_context_id: string } }) => {
+        if (request.command === "runtime.bootstrap") {
+          return {
+            ok: true,
+            payload: {
+              result: {
+                version: "v1",
+                run_id: "run-xhs-retry-001",
+                runtime_context_id: request.params.runtime_context_id,
+                profile: "official_retry_profile",
+                status: "ready"
+              }
+            },
+            error: null
+          };
+        }
+        if (request.command === "runtime.readiness") {
+          return {
+            ok: true,
+            payload: {
+              transport_state: "ready",
+              bootstrap_state: "pending"
+            },
+            error: null
+          };
+        }
+        throw new Error(`unexpected command: ${request.command}`);
+      })
+    };
+
+    await expect(
+      ensureOfficialChromeRuntimeReady(
+        {
+          cwd: "/tmp/webenvoy",
+          profile: "official_retry_profile",
+          run_id: "run-xhs-retry-001"
+        } as never,
+        {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        } as never,
+        "live_read_high_risk",
+        bridge as never,
+        {
+          fingerprint_profile_bundle: null
+        } as never,
+        {
+          targetDomain: "www.xiaohongshu.com",
+          targetTabId: 32,
+          targetPage: "search_result_tab",
+          options: {
+            requested_execution_mode: "live_read_high_risk"
+          }
+        } as never,
+        readStatus
+      )
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+    });
+
+    await expect(
+      ensureOfficialChromeRuntimeReady(
+        {
+          cwd: "/tmp/webenvoy",
+          profile: "official_retry_profile",
+          run_id: "run-xhs-retry-001"
+        } as never,
+        {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        } as never,
+        "live_read_high_risk",
+        bridge as never,
+        {
+          fingerprint_profile_bundle: null
+        } as never,
+        {
+          targetDomain: "www.xiaohongshu.com",
+          targetTabId: 32,
+          targetPage: "search_result_tab",
+          options: {
+            requested_execution_mode: "live_read_high_risk"
+          }
+        } as never,
+        readStatus
+      )
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+    });
+
+    const bootstrapContexts = bridge.runCommand.mock.calls
+      .filter(([request]) => request.command === "runtime.bootstrap")
+      .map(([request]) => request.params.runtime_context_id);
+
+    expect(bootstrapContexts).toHaveLength(2);
+    expect(bootstrapContexts[0]).toBe(bootstrapContexts[1]);
+  });
+
   it("keeps runtime gated when lock is lost before the final official Chrome gate", async () => {
     const readStatus = vi
       .fn()

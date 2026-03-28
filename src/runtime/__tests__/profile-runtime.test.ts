@@ -413,6 +413,42 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
+  it("reports missing identity binding in runtime.status for a fresh profile when params provide binding but the extension is absent", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-status-fresh-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const service = createTestService();
+
+    const status = await service.status({
+      cwd: baseDir,
+      profile: "identity_missing_fresh_status_profile",
+      runId: "run-runtime-identity-status-fresh-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    expect(status).toMatchObject({
+      profileState: "uninitialized",
+      lockHeld: false,
+      identityBindingState: "missing",
+      transportState: "not_connected",
+      bootstrapState: "not_started",
+      runtimeReadiness: "blocked",
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension",
+        failureReason: "IDENTITY_BINDING_MISSING",
+        manifestPath
+      }
+    });
+  });
+
   it("keeps first runtime.start/login available when official Chrome identity is still missing", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-entry-"));
     tempDirs.push(baseDir);
@@ -459,6 +495,88 @@ describe("profile-runtime identity preflight", () => {
       profileState: "logging_in",
       browserState: "logging_in",
       lockHeld: true,
+      runtimeReadiness: "blocked",
+      confirmationRequired: true
+    });
+
+    expect(launchSpy).toHaveBeenCalledTimes(2);
+    expect(launchSpy).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        launchMode: "official_chrome_persistent_extension",
+        extensionBootstrap: null
+      })
+    );
+    expect(launchSpy).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        launchMode: "official_chrome_persistent_extension",
+        extensionBootstrap: null
+      })
+    );
+  });
+
+  it("keeps fresh runtime.start/login blocked-from-ready when params provide binding but the extension is absent", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-entry-fresh-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const launchSpy = vi.fn();
+    const service = createTestService({
+      browserLauncher: {
+        launch: async (input) => {
+          launchSpy(input);
+          return {
+            browserPath: "/mock/chrome",
+            browserPid: 999999,
+            controllerPid: 999998,
+            launchArgs: ["about:blank"],
+            launchedAt: new Date().toISOString()
+          };
+        },
+        shutdown: async () => undefined
+      }
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "identity_missing_bound_start_profile",
+        runId: "run-runtime-identity-entry-fresh-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      browserState: "ready",
+      lockHeld: true,
+      identityBindingState: "missing",
+      runtimeReadiness: "blocked"
+    });
+
+    await expect(
+      service.login({
+        cwd: baseDir,
+        profile: "identity_missing_bound_login_profile",
+        runId: "run-runtime-identity-entry-fresh-002",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "logging_in",
+      browserState: "logging_in",
+      lockHeld: true,
+      identityBindingState: "missing",
       runtimeReadiness: "blocked",
       confirmationRequired: true
     });

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import { CliError } from "../core/errors.js";
@@ -111,7 +111,10 @@ const buildRuntimeBootstrapEnvelope = (input: {
 } => ({
   version: "v1",
   run_id: input.runId,
-  runtime_context_id: randomUUID(),
+  runtime_context_id: `runtime-context-${createHash("sha256")
+    .update(`${input.profile}:${input.runId}`)
+    .digest("hex")
+    .slice(0, 16)}`,
   profile: input.profile,
   fingerprint_runtime: input.fingerprintRuntime,
   fingerprint_patch_manifest: asObject(input.fingerprintRuntime.fingerprint_patch_manifest) ?? {},

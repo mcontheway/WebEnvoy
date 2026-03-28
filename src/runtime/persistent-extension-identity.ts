@@ -418,6 +418,7 @@ export const buildIdentityPreflightError = (
 export const runIdentityPreflight = async (input: {
   params: JsonObject;
   meta: ProfileMeta | null;
+  profileDir?: string | null;
 }): Promise<IdentityPreflightResult> => {
   let browserPath: string | null = null;
   let browserVersion: string | null = null;
@@ -598,7 +599,8 @@ export const runIdentityPreflight = async (input: {
     });
   }
 
-  const profileDir = asNonEmptyString(input.meta?.profileDir);
+  const profileDir =
+    asNonEmptyString(input.meta?.profileDir) ?? asNonEmptyString(input.profileDir);
   if (profileDir) {
     const extensionState = await resolveProfileExtensionState(profileDir, binding.extensionId);
     if (extensionState !== "enabled") {

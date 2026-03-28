@@ -290,4 +290,46 @@ describe("runIdentityPreflight", () => {
     expect(result.failureReason).toBe("IDENTITY_BINDING_MISSING");
     expect(result.blocking).toBe(true);
   });
+
+  it("returns missing for a fresh profile when params provide binding but the extension is not installed", async () => {
+    const manifestDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-manifest-fresh-"));
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-profile-fresh-"));
+    const manifestPath = join(manifestDir, "com.webenvoy.host.json");
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          allowed_origins: [`chrome-extension://${EXTENSION_ID}/`]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    setIdentityPreflightAdaptersForTests({
+      resolvePreferredBrowserVersionTruthSource: vi.fn().mockResolvedValue({
+        executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        browserVersion: "Google Chrome 146.0.7680.154"
+      }),
+      isUnsupportedBrandedChromeForExtensions: vi.fn().mockReturnValue(true),
+      platform: () => "darwin"
+    });
+
+    const result = await runIdentityPreflight({
+      params: {
+        persistent_extension_identity: {
+          extension_id: EXTENSION_ID,
+          manifest_path: manifestPath
+        }
+      },
+      meta: null,
+      profileDir
+    });
+
+    expect(result.identityBindingState).toBe("missing");
+    expect(result.failureReason).toBe("IDENTITY_BINDING_MISSING");
+    expect(result.blocking).toBe(true);
+  });
 });
