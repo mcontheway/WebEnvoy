@@ -1542,7 +1542,8 @@ describe("webenvoy cli contract", () => {
 const { existsSync, readFileSync, writeFileSync } = require("node:fs");
 let buffer = Buffer.alloc(0);
 let opened = false;
-let bootstrapReady = false;
+let bootstrapPending = false;
+let readinessPollCount = 0;
 const forwards = [];
 const tracePath = process.env.WEBENVOY_TEST_TRACE_PATH || "";
 let idleTimer = null;
@@ -1640,28 +1641,38 @@ const onRequest = (request) => {
   });
 
   if (command === "runtime.bootstrap") {
-    const commandParams = request.params?.command_params ?? {};
-    bootstrapReady = true;
-    emit(
-      success(request, {
-        result: {
-          version: String(commandParams.version ?? "v1"),
-          run_id: String(commandParams.run_id ?? runId),
-          runtime_context_id: String(commandParams.runtime_context_id ?? "runtime-context-001"),
-          profile,
-          status: "ready"
-        }
-      })
-    );
+    bootstrapPending = true;
+    readinessPollCount = 0;
+    emit({
+      id: request.id,
+      status: "error",
+      summary: {
+        session_id: String(request.params?.session_id ?? "nm-session-001"),
+        run_id: runId,
+        command,
+        relay_path: "host>background>content-script>background>host"
+      },
+      payload: {},
+      error: {
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+        message: "runtime bootstrap 尚未获得执行面确认"
+      }
+    });
     scheduleIdleExit();
     return;
   }
 
   if (command === "runtime.readiness") {
+    if (bootstrapPending) {
+      readinessPollCount += 1;
+      if (readinessPollCount >= 2) {
+        bootstrapPending = false;
+      }
+    }
     emit(
       success(request, {
         transport_state: "ready",
-        bootstrap_state: bootstrapReady ? "ready" : "pending"
+        bootstrap_state: bootstrapPending ? "pending" : "ready"
       })
     );
     scheduleIdleExit();
@@ -1803,7 +1814,7 @@ process.stdin.on("data", (chunk) => {
     expect(trace.forwards).toEqual(
       expect.arrayContaining([
         {
-          command: "runtime.bootstrap",
+          command: "runtime.readiness",
           run_id: runId,
           profile
         },
@@ -1815,12 +1826,6 @@ process.stdin.on("data", (chunk) => {
       ])
     );
     expect(trace.forwards?.some((forward) => forward.command === "runtime.ping")).toBe(false);
-    const bootstrapIndex =
-      trace.forwards?.findIndex((forward) => forward.command === "runtime.bootstrap") ?? -1;
-    const searchIndex =
-      trace.forwards?.findIndex((forward) => forward.command === "xhs.search") ?? -1;
-    expect(bootstrapIndex).toBeGreaterThanOrEqual(0);
-    expect(searchIndex).toBeGreaterThan(bootstrapIndex);
   });
 
   it.each([
