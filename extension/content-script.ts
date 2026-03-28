@@ -60,6 +60,7 @@ type FingerprintRuntimeContext = NonNullable<
 type BootstrapFingerprintContext = {
   fingerprintRuntime: FingerprintRuntimeContext | null;
   runId: string | null;
+  runtimeContextId: string | null;
   sessionId: string | null;
   mainWorldSecret: string | null;
 };
@@ -187,12 +188,14 @@ const resolveBootstrapFingerprintContext = (value: unknown): BootstrapFingerprin
   const stagedSessionId = asNonEmptyString(STAGED_STARTUP_TRUST_SESSION_ID);
   const stagedFingerprintRuntime = ensureFingerprintRuntimeContext(STAGED_STARTUP_TRUST_FINGERPRINT_RUNTIME);
   const runId = asNonEmptyString(record?.run_id ?? record?.runId) ?? stagedRunId;
+  const runtimeContextId = asNonEmptyString(record?.runtime_context_id ?? record?.runtimeContextId);
   const sessionId = asNonEmptyString(record?.session_id ?? record?.sessionId) ?? stagedSessionId;
   const direct = ensureFingerprintRuntimeContext(value);
   if (direct) {
     return {
       fingerprintRuntime: direct,
       runId,
+      runtimeContextId,
       sessionId,
       mainWorldSecret
     };
@@ -201,6 +204,7 @@ const resolveBootstrapFingerprintContext = (value: unknown): BootstrapFingerprin
     return {
       fingerprintRuntime: stagedFingerprintRuntime,
       runId,
+      runtimeContextId,
       sessionId,
       mainWorldSecret: null
     };
@@ -209,6 +213,7 @@ const resolveBootstrapFingerprintContext = (value: unknown): BootstrapFingerprin
     fingerprintRuntime:
       ensureFingerprintRuntimeContext(record.fingerprint_runtime ?? null) ?? stagedFingerprintRuntime,
     runId,
+    runtimeContextId,
     sessionId,
     mainWorldSecret
   };
@@ -311,6 +316,7 @@ const loadBootstrapFingerprintContextFromExtension = async (
     return {
       fingerprintRuntime: null,
       runId: null,
+      runtimeContextId: null,
       sessionId: null,
       mainWorldSecret: null
     };
@@ -322,6 +328,7 @@ const loadBootstrapFingerprintContextFromExtension = async (
       return {
         fingerprintRuntime: null,
         runId: null,
+        runtimeContextId: null,
         sessionId: null,
         mainWorldSecret: null
       };
@@ -331,6 +338,9 @@ const loadBootstrapFingerprintContextFromExtension = async (
     return {
       fingerprintRuntime: resolved.fingerprintRuntime,
       runId: resolved.runId ?? asNonEmptyString(envelope?.run_id ?? envelope?.runId),
+      runtimeContextId:
+        resolved.runtimeContextId ??
+        asNonEmptyString(envelope?.runtime_context_id ?? envelope?.runtimeContextId),
       sessionId: resolved.sessionId ?? asNonEmptyString(envelope?.session_id ?? envelope?.sessionId),
       mainWorldSecret: resolved.mainWorldSecret
     };
@@ -338,6 +348,7 @@ const loadBootstrapFingerprintContextFromExtension = async (
     return {
       fingerprintRuntime: null,
       runId: null,
+      runtimeContextId: null,
       sessionId: null,
       mainWorldSecret: null
     };
@@ -354,11 +365,12 @@ const emitStartupFingerprintTrust = (
   runtime: ContentScriptRuntime,
   input: {
     runId: string | null;
+    runtimeContextId: string | null;
     sessionId: string | null;
     fingerprintRuntime: FingerprintRuntimeContext;
   }
 ): void => {
-  if (!input.runId || !input.sessionId) {
+  if (!input.runId || !input.runtimeContextId || !input.sessionId) {
     return;
   }
   runtime.sendMessage?.({
@@ -368,6 +380,7 @@ const emitStartupFingerprintTrust = (
     payload: {
       startup_fingerprint_trust: {
         run_id: input.runId,
+        runtime_context_id: input.runtimeContextId,
         profile: input.fingerprintRuntime.profile,
         session_id: input.sessionId,
         fingerprint_runtime: input.fingerprintRuntime,
@@ -394,16 +407,22 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
     installStartupFingerprintPatch(bootstrapContext);
     emitStartupFingerprintTrust(runtime, {
       runId: bootstrapInput.runId,
+      runtimeContextId: bootstrapInput.runtimeContextId,
       sessionId: bootstrapInput.sessionId,
       fingerprintRuntime: bootstrapContext
     });
-    if (!bootstrapInput.runId || !bootstrapInput.sessionId) {
+    if (!bootstrapInput.runId || !bootstrapInput.runtimeContextId || !bootstrapInput.sessionId) {
       void loadBootstrapFingerprintContextFromExtension(runtime).then((resolvedBootstrap) => {
-        if (!resolvedBootstrap.runId || !resolvedBootstrap.sessionId) {
+        if (
+          !resolvedBootstrap.runId ||
+          !resolvedBootstrap.runtimeContextId ||
+          !resolvedBootstrap.sessionId
+        ) {
           return;
         }
         emitStartupFingerprintTrust(runtime, {
           runId: resolvedBootstrap.runId,
+          runtimeContextId: resolvedBootstrap.runtimeContextId,
           sessionId: resolvedBootstrap.sessionId,
           fingerprintRuntime: bootstrapContext
         });
@@ -422,6 +441,7 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
       installStartupFingerprintPatch(resolvedBootstrap.fingerprintRuntime);
       emitStartupFingerprintTrust(runtime, {
         runId: resolvedBootstrap.runId,
+        runtimeContextId: resolvedBootstrap.runtimeContextId,
         sessionId: resolvedBootstrap.sessionId,
         fingerprintRuntime: resolvedBootstrap.fingerprintRuntime
       });

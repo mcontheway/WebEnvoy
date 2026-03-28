@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -20,6 +20,8 @@ interface NativeHostManifest {
   name: string;
   allowed_origins: string[];
 }
+
+type ProfileExtensionState = "enabled" | "disabled" | "missing";
 
 export interface IdentityPreflightResult {
   mode: RuntimeIdentityMode;
@@ -297,6 +299,73 @@ const readNativeHostManifest = async (manifestPath: string): Promise<NativeHostM
   }
 };
 
+const readProfileExtensionStateFromPreferences = (
+  input: Record<string, unknown>,
+  extensionId: string
+): ProfileExtensionState => {
+  const extensions = asRecord(input.extensions);
+  const settings = asRecord(extensions?.settings);
+  const extensionEntry = asRecord(settings?.[extensionId]);
+  if (!extensionEntry) {
+    return "missing";
+  }
+
+  const state = extensionEntry.state;
+  if (state === 1 || state === true) {
+    return "enabled";
+  }
+  if (typeof state === "number" || typeof state === "boolean") {
+    return "disabled";
+  }
+  return "enabled";
+};
+
+const resolveProfileExtensionState = async (
+  profileDir: string,
+  extensionId: string
+): Promise<ProfileExtensionState> => {
+  const preferenceCandidates = [
+    join(profileDir, "Default", "Preferences"),
+    join(profileDir, "Default", "Secure Preferences"),
+    join(profileDir, "Secure Preferences")
+  ];
+
+  let foundDisabled = false;
+  let enabledInPreferences = false;
+
+  for (const preferencePath of preferenceCandidates) {
+    try {
+      const raw = await readFile(preferencePath, "utf8");
+      const parsed = JSON.parse(raw);
+      const record = asRecord(parsed);
+      if (!record) {
+        continue;
+      }
+      const state = readProfileExtensionStateFromPreferences(record, extensionId);
+      if (state === "enabled") {
+        enabledInPreferences = true;
+        continue;
+      }
+      if (state === "disabled") {
+        foundDisabled = true;
+      }
+    } catch {
+      // ignore preference file read/parse failures and continue probing
+    }
+  }
+
+  if (!enabledInPreferences) {
+    return foundDisabled ? "disabled" : "missing";
+  }
+
+  try {
+    const installedVersions = await readdir(join(profileDir, "Default", "Extensions", extensionId));
+    return installedVersions.length > 0 ? "enabled" : "missing";
+  } catch {
+    return "missing";
+  }
+};
+
 const buildBlockingResult = (
   input: Omit<IdentityPreflightResult, "blocking">
 ): IdentityPreflightResult => ({
@@ -527,6 +596,27 @@ export const runIdentityPreflight = async (input: {
       allowedOrigins: manifest.allowed_origins,
       failureReason: "IDENTITY_ALLOWED_ORIGIN_MISSING"
     });
+  }
+
+  const profileDir = asNonEmptyString(input.meta?.profileDir);
+  if (profileDir) {
+    const extensionState = await resolveProfileExtensionState(profileDir, binding.extensionId);
+    if (extensionState !== "enabled") {
+      return buildBlockingResult({
+        mode: "official_chrome_persistent_extension",
+        browserPath,
+        browserVersion,
+        identityBindingState: "missing",
+        binding: {
+          ...binding,
+          manifestPath
+        },
+        manifestPath,
+        expectedOrigin,
+        allowedOrigins: manifest.allowed_origins,
+        failureReason: "IDENTITY_BINDING_MISSING"
+      });
+    }
   }
 
   return {

@@ -18,6 +18,7 @@ const originalPath = process.env.PATH;
 const originalLocalAppData = process.env.LOCALAPPDATA;
 const originalAppData = process.env.APPDATA;
 const originalPlatform = process.platform;
+const PERSISTENT_EXTENSION_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 const createMockBrowserExecutable = async (
   versionOutput: string = "Chromium 146.0.0.0"
@@ -114,6 +115,36 @@ const createNativeHostManifest = async (input: {
     "utf8"
   );
   return manifestPath;
+};
+
+const seedInstalledPersistentExtension = async (input: {
+  baseDir: string;
+  profile: string;
+  extensionId?: string;
+  enabled?: boolean;
+}): Promise<void> => {
+  const extensionId = input.extensionId ?? PERSISTENT_EXTENSION_ID;
+  const profileDir = join(input.baseDir, ".webenvoy", "profiles", input.profile, "Default");
+  const extensionDir = join(profileDir, "Extensions", extensionId, "1.0.0");
+  await mkdir(extensionDir, { recursive: true });
+  await writeFile(join(extensionDir, "manifest.json"), "{\n  \"manifest_version\": 3\n}\n", "utf8");
+  await writeFile(
+    join(profileDir, "Preferences"),
+    `${JSON.stringify(
+      {
+        extensions: {
+          settings: {
+            [extensionId]: {
+              state: input.enabled === false ? 0 : 1
+            }
+          }
+        }
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
 };
 
 const createMockRegExecutable = async (manifestPath: string): Promise<string> => {
@@ -456,6 +487,10 @@ describe("profile-runtime identity preflight", () => {
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_ready_profile"
+    });
     const launchSpy = vi.fn();
     const bridgeRunCommand = vi.fn(async ({ command }) => {
       if (command === "runtime.bootstrap") {
@@ -538,6 +573,10 @@ describe("profile-runtime identity preflight", () => {
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_transport_missing_profile"
+    });
     const service = createTestService({
       browserLauncher: createMockBrowserLauncher(),
       bridgeFactory: () => ({
@@ -611,6 +650,10 @@ describe("profile-runtime identity preflight", () => {
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_readiness_stale_profile"
     });
     const service = createTestService({
       browserLauncher: createMockBrowserLauncher(),
@@ -687,6 +730,10 @@ describe("profile-runtime identity preflight", () => {
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_version_conflict_profile"
+    });
     const service = createTestService({
       browserLauncher: createMockBrowserLauncher(),
       bridgeFactory: () => ({
@@ -738,6 +785,10 @@ describe("profile-runtime identity preflight", () => {
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_ack_timeout_profile"
+    });
     const service = createTestService({
       bridgeFactory: () => ({
         runCommand: async () => {
@@ -773,6 +824,10 @@ describe("profile-runtime identity preflight", () => {
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_handshake_failure_profile"
+    });
     const service = createTestService({
       bridgeFactory: () => ({
         runCommand: async () => {
@@ -807,6 +862,10 @@ describe("profile-runtime identity preflight", () => {
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_ack_stale_profile"
     });
     const service = createTestService({
       bridgeFactory: () => ({
@@ -858,6 +917,10 @@ describe("profile-runtime identity preflight", () => {
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_ready_signal_conflict_profile"
+    });
     const service = createTestService({
       bridgeFactory: () => ({
         runCommand: async ({ command, profile, runId }) => {
@@ -908,6 +971,10 @@ describe("profile-runtime identity preflight", () => {
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_timeout_profile"
+    });
     const service = createTestService({
       browserLauncher: createMockBrowserLauncher(),
       bridgeFactory: () => ({
@@ -952,6 +1019,10 @@ describe("profile-runtime identity preflight", () => {
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_stale_profile"
     });
     const service = createTestService({
       browserLauncher: createMockBrowserLauncher(),
@@ -1003,6 +1074,10 @@ describe("profile-runtime identity preflight", () => {
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_mismatch_profile"
     });
     const launchSpy = vi.fn();
     const service = createTestService({
@@ -1062,6 +1137,10 @@ describe("profile-runtime identity preflight", () => {
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_profile"
     });
     const launchSpy = vi.fn();
     const service = createTestService({
@@ -1134,6 +1213,10 @@ describe("profile-runtime identity preflight", () => {
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_live_profile"
+    });
     const launchSpy = vi.fn();
     const service = createTestService({
       browserLauncher: {
@@ -1181,6 +1264,10 @@ describe("profile-runtime identity preflight", () => {
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_login_profile"
     });
     const launchSpy = vi.fn();
     const service = createTestService({
@@ -1239,6 +1326,10 @@ describe("profile-runtime identity preflight", () => {
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_reuse_profile"
+    });
     const service = createTestService();
 
     await expect(
@@ -1285,6 +1376,10 @@ describe("profile-runtime identity preflight", () => {
     });
     const relocatedManifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_relocated_profile"
     });
     const service = createTestService();
 
@@ -1349,6 +1444,10 @@ describe("profile-runtime identity preflight", () => {
     process.env.LOCALAPPDATA = join(baseDir, "local-app-data");
     Object.defineProperty(process, "platform", { value: "win32" });
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_win32_profile"
+    });
     const service = createTestService();
 
     await expect(
@@ -1391,6 +1490,10 @@ describe("profile-runtime identity preflight", () => {
     });
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
     const service = createTestService();
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_gate_profile"
+    });
 
     await expect(
       service.start({
@@ -2476,6 +2579,10 @@ describe("profile-runtime fingerprint runtime contract", () => {
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "legacy_identity_profile"
     });
     const service = createTestService();
 

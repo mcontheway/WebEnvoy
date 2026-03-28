@@ -462,6 +462,120 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
+  it("promotes pending runtime.bootstrap to ready from content-script startup trust payload shape", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-startup-trust-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-startup-trust-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-startup-trust-001",
+          runtime_context_id: "ctx-bootstrap-startup-trust-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-startup-trust-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-bootstrap-startup-trust-001",
+        status: "error",
+        error: expect.objectContaining({
+          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+        })
+      })
+    );
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "startup-fingerprint-trust:run-bootstrap-startup-trust-001",
+        ok: true,
+        payload: {
+          startup_fingerprint_trust: {
+            run_id: "run-bootstrap-startup-trust-001",
+            runtime_context_id: "ctx-bootstrap-startup-trust-001",
+            profile: "profile-a",
+            session_id: "nm-session-001",
+            fingerprint_runtime: fingerprintContext,
+            trust_source: "extension_bootstrap_context",
+            bootstrap_attested: true,
+            main_world_result_used_for_trust: false
+          }
+        }
+      },
+      {
+        tab: {
+          id: 11,
+          url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+        }
+      }
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-startup-trust-002",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-startup-trust-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-startup-trust-001",
+          runtime_context_id: "ctx-bootstrap-startup-trust-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-startup-trust-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-bootstrap-startup-trust-002",
+        status: "success",
+        payload: expect.objectContaining({
+          method: "runtime.bootstrap.ack",
+          result: expect.objectContaining({
+            status: "ready",
+            profile: "profile-a",
+            run_id: "run-bootstrap-startup-trust-001",
+            runtime_context_id: "ctx-bootstrap-startup-trust-001"
+          })
+        })
+      })
+    );
+  });
+
   it("allows runtime bootstrap readiness promotion without xhs-specific target binding", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);

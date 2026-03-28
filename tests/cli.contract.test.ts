@@ -72,6 +72,35 @@ const createNativeHostManifest = async (input: {
   return manifestPath;
 };
 
+const seedInstalledPersistentExtension = async (input: {
+  cwd: string;
+  profile: string;
+  extensionId?: string;
+  enabled?: boolean;
+}): Promise<void> => {
+  const extensionId = input.extensionId ?? "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const profileDir = path.join(input.cwd, ".webenvoy", "profiles", input.profile, "Default");
+  const extensionDir = path.join(profileDir, "Extensions", extensionId, "1.0.0");
+  await mkdir(extensionDir, { recursive: true });
+  await writeFile(path.join(extensionDir, "manifest.json"), "{\n  \"manifest_version\": 3\n}\n");
+  await writeFile(
+    path.join(profileDir, "Preferences"),
+    `${JSON.stringify(
+      {
+        extensions: {
+          settings: {
+            [extensionId]: {
+              state: input.enabled === false ? 0 : 1
+            }
+          }
+        }
+      },
+      null,
+      2
+    )}\n`
+  );
+};
+
 
 const defaultRuntimeEnv = (cwd: string): Record<string, string> => ({
   NODE_ENV: "test",
@@ -2936,6 +2965,10 @@ process.stdin.on("data", (chunk) => {
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile: "identity_bound_profile"
+    });
 
     const start = runCli(
       [
@@ -2969,6 +3002,10 @@ process.stdin.on("data", (chunk) => {
         bootstrapState: "not_started",
         runtimeReadiness: "recoverable"
       }
+    });
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile: "identity_bound_profile"
     });
 
     const status = runCli(
@@ -3142,6 +3179,10 @@ process.stdin.on("data", (chunk) => {
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile: "identity_manifest_reuse_profile"
+    });
 
     const start = runCli(
       [
@@ -3174,6 +3215,10 @@ process.stdin.on("data", (chunk) => {
         bootstrapState: "not_started",
         runtimeReadiness: "recoverable"
       }
+    });
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile: "identity_manifest_reuse_profile"
     });
 
     const status = runCli(

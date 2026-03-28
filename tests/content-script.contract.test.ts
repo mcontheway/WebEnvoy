@@ -291,6 +291,7 @@ describe("content-script bootstrap contract", () => {
     const context = createFingerprintContext();
     (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = {
       run_id: "run-bootstrap-001",
+      runtime_context_id: "ctx-bootstrap-001",
       session_id: "nm-session-001",
       fingerprint_runtime: context,
       startup_fingerprint_trust: {
@@ -345,6 +346,7 @@ describe("content-script bootstrap contract", () => {
         payload: {
           startup_fingerprint_trust: expect.objectContaining({
             run_id: "run-bootstrap-001",
+            runtime_context_id: "ctx-bootstrap-001",
             session_id: "nm-session-001",
             profile: "profile-a",
             trust_source: "extension_bootstrap_context",
