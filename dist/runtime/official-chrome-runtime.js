@@ -25,14 +25,13 @@ const buildOfficialChromeRuntimeReadiness = (input) => {
     if (!input.lockHeld) {
         return input.transportState === "disconnected" ? "recoverable" : "blocked";
     }
-    if (input.transportState === "disconnected" || input.transportState === "not_connected") {
+    if (input.transportState === "disconnected") {
         return "recoverable";
     }
     if (input.transportState === "ready" && input.bootstrapState === "ready") {
         return "ready";
     }
-    if (input.transportState === "ready" &&
-        (input.bootstrapState === "pending" || input.bootstrapState === "not_started")) {
+    if (input.identityBindingState === "bound" && (input.bootstrapState === "pending" || input.bootstrapState === "not_started")) {
         return "pending";
     }
     if (input.bootstrapState === "failed") {

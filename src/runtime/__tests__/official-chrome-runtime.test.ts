@@ -204,6 +204,80 @@ describe("prepareOfficialChromeRuntime", () => {
     );
   });
 
+  it("keeps readiness pending when bridge reports not_connected before bootstrap confirmation", async () => {
+    const readStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "pending",
+        identityBindingState: "bound",
+        bootstrapState: "pending",
+        transportState: "ready",
+        lockHeld: true
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "pending",
+        identityBindingState: "bound",
+        bootstrapState: "pending",
+        transportState: "ready",
+        lockHeld: true
+      });
+    const bridge = {
+      runCommand: vi.fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          error: {
+            code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+            message: "runtime bootstrap 尚未获得执行面确认"
+          }
+        })
+        .mockResolvedValue({
+          ok: true,
+          payload: {
+            transport_state: "not_connected",
+            bootstrap_state: "not_started"
+          },
+          error: null
+        })
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_transport_not_connected_profile",
+          run_id: "run-runtime-transport-not-connected-001",
+          command: "xhs.search",
+          params: {}
+        } as never,
+        consumerId: "xhs.search",
+        requestedExecutionMode: "live_read_high_risk",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        readStatus
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_UNAVAILABLE",
+      details: {
+        ability_id: "xhs.search",
+        runtime_readiness: "pending",
+        identity_binding_state: "bound",
+        bootstrap_state: "not_started",
+        transport_state: "not_connected",
+        reason: "ERR_RUNTIME_TRANSPORT_NOT_READY"
+      }
+    });
+  });
+
   it.each([
     "ERR_RUNTIME_BOOTSTRAP_ACK_STALE",
     "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH",

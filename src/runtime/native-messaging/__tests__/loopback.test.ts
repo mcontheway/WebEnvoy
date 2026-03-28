@@ -37,7 +37,10 @@ describe("native messaging default loopback chain", () => {
         version: "v1",
         run_id: "run-loopback-bootstrap-001",
         runtime_context_id: "runtime-context-001",
-        profile: "profile-a"
+        profile: "profile-a",
+        fingerprint_runtime: {},
+        fingerprint_patch_manifest: {},
+        main_world_secret: "loopback-secret-001"
       }
     });
 
@@ -89,7 +92,10 @@ describe("native messaging default loopback chain", () => {
         version: "v1",
         run_id: "run-loopback-bootstrap-002",
         runtime_context_id: "runtime-context-002",
-        profile: "profile-a"
+        profile: "profile-a",
+        fingerprint_runtime: {},
+        fingerprint_patch_manifest: {},
+        main_world_secret: "loopback-secret-002"
       }
     });
 
@@ -109,6 +115,33 @@ describe("native messaging default loopback chain", () => {
       payload: {
         transport_state: "ready",
         bootstrap_state: "stale"
+      }
+    });
+  });
+
+  it("rejects malformed runtime.bootstrap envelopes that omit required trust fields", async () => {
+    const bridge = new NativeMessagingBridge({
+      transport: createLoopbackNativeBridgeTransport()
+    });
+
+    const bootstrap = await bridge.runCommand({
+      runId: "run-loopback-bootstrap-invalid-001",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "runtime.bootstrap",
+      params: {
+        version: "v1",
+        run_id: "run-loopback-bootstrap-invalid-001",
+        runtime_context_id: "runtime-context-invalid-001",
+        profile: "profile-a"
+      }
+    });
+
+    expect(bootstrap).toMatchObject({
+      ok: false,
+      error: {
+        code: "ERR_RUNTIME_READY_SIGNAL_CONFLICT",
+        message: "invalid runtime bootstrap envelope"
       }
     });
   });

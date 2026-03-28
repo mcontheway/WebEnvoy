@@ -425,7 +425,16 @@ class InMemoryContentScriptRuntime {
             const runId = asString(commandParams.run_id);
             const runtimeContextId = asString(commandParams.runtime_context_id);
             const profile = asString(commandParams.profile);
-            if (!version || !runId || !runtimeContextId || !profile) {
+            const fingerprintRuntime = asRecord(commandParams.fingerprint_runtime);
+            const fingerprintPatchManifest = asRecord(commandParams.fingerprint_patch_manifest);
+            const mainWorldSecret = asString(commandParams.main_world_secret);
+            if (!version ||
+                !runId ||
+                !runtimeContextId ||
+                !profile ||
+                !fingerprintRuntime ||
+                !fingerprintPatchManifest ||
+                !mainWorldSecret) {
                 return {
                     kind: "result",
                     id: message.id,
