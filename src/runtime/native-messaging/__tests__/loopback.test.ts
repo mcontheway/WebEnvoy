@@ -224,7 +224,7 @@ describe("native messaging default loopback chain", () => {
     });
   });
 
-  it("allows matching runtime.ping to accelerate loopback attestation", async () => {
+  it("does not let runtime.ping advance pending bootstrap to ready", async () => {
     const bridge = new NativeMessagingBridge({
       transport: createLoopbackNativeBridgeTransport()
     });
@@ -274,7 +274,7 @@ describe("native messaging default loopback chain", () => {
       ok: true,
       payload: {
         transport_state: "ready",
-        bootstrap_state: "ready"
+        bootstrap_state: "pending"
       }
     });
   });
