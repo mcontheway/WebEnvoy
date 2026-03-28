@@ -3801,12 +3801,17 @@ process.stdin.on("data", (chunk) => {
     const summary = startBody.summary as Record<string, unknown>;
     const profileDir = String(summary.profileDir);
     const lockPath = path.join(profileDir, "__webenvoy_lock.json");
+    const browserStatePath = path.join(profileDir, BROWSER_STATE_FILENAME);
 
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as Record<string, unknown>;
     lock.ownerPid = 999999;
     lock.lastHeartbeatAt = new Date().toISOString();
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+    const browserStateRaw = await readFile(browserStatePath, "utf8");
+    const browserState = JSON.parse(browserStateRaw) as Record<string, unknown>;
+    browserState.controllerPid = 999999;
+    await writeFile(browserStatePath, `${JSON.stringify(browserState, null, 2)}\n`, "utf8");
 
     const status = runCli(
       ["runtime.status", "--profile", "recover_stop_profile", "--run-id", "run-contract-506"],
@@ -3837,7 +3842,8 @@ process.stdin.on("data", (chunk) => {
       summary: {
         profile: "recover_stop_profile",
         profileState: "stopped",
-        lockHeld: false
+        lockHeld: false,
+        orphanRecovered: false
       }
     });
 
@@ -3848,6 +3854,73 @@ process.stdin.on("data", (chunk) => {
     await expect(readFile(path.join(profileDir, BROWSER_CONTROL_FILENAME), "utf8")).rejects.toMatchObject({
       code: "ENOENT"
     });
+  });
+
+  it("allows explicit runtime.stop orphan recovery from a new run_id after controller ownership is lost", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const start = runCli(
+      ["runtime.start", "--profile", "orphan_recover_profile", "--run-id", "run-contract-507"],
+      runtimeCwd
+    );
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    const summary = startBody.summary as Record<string, unknown>;
+    const profileDir = String(summary.profileDir);
+    const lockPath = path.join(profileDir, "__webenvoy_lock.json");
+    const browserStatePath = path.join(profileDir, BROWSER_STATE_FILENAME);
+
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as Record<string, unknown>;
+    lock.ownerPid = 999999;
+    lock.lastHeartbeatAt = new Date().toISOString();
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+    const browserStateRaw = await readFile(browserStatePath, "utf8");
+    const browserState = JSON.parse(browserStateRaw) as Record<string, unknown>;
+    browserState.controllerPid = 999999;
+    await writeFile(browserStatePath, `${JSON.stringify(browserState, null, 2)}\n`, "utf8");
+
+    const blockedStart = runCli(
+      ["runtime.start", "--profile", "orphan_recover_profile", "--run-id", "run-contract-508"],
+      runtimeCwd
+    );
+    expect(blockedStart.status).toBe(5);
+    const blockedStartBody = parseSingleJsonLine(blockedStart.stdout);
+    expect(blockedStartBody).toMatchObject({
+      command: "runtime.start",
+      status: "error",
+      error: { code: "ERR_PROFILE_LOCKED" }
+    });
+
+    const stop = runCli(
+      ["runtime.stop", "--profile", "orphan_recover_profile", "--run-id", "run-contract-509"],
+      runtimeCwd
+    );
+    expect(stop.status).toBe(0);
+    const stopBody = parseSingleJsonLine(stop.stdout);
+    expect(stopBody).toMatchObject({
+      command: "runtime.stop",
+      status: "success",
+      summary: {
+        profile: "orphan_recover_profile",
+        profileState: "stopped",
+        lockHeld: false,
+        orphanRecovered: true
+      }
+    });
+
+    await assertLockMissing(profileDir);
+    await expect(readFile(path.join(profileDir, BROWSER_STATE_FILENAME), "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(readFile(path.join(profileDir, BROWSER_CONTROL_FILENAME), "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+
+    const restarted = runCli(
+      ["runtime.start", "--profile", "orphan_recover_profile", "--run-id", "run-contract-510"],
+      runtimeCwd
+    );
+    expect(restarted.status).toBe(0);
   });
 
   it("keeps active state in runtime.status when lock owner process is alive", async () => {
