@@ -554,6 +554,13 @@ const createPortPair = <TMessage>(): [InMemoryPort<TMessage>, InMemoryPort<TMess
 };
 
 class InMemoryContentScriptRuntime {
+  #bootstrapContext: {
+    runId: string;
+    runtimeContextId: string;
+    profile: string;
+    version: string;
+  } | null = null;
+
   constructor(private readonly port: InMemoryPort<ContentMessage>) {
     this.port.onMessage((message) => {
       if (message.kind !== "forward") {
@@ -572,6 +579,86 @@ class InMemoryContentScriptRuntime {
         ok: true,
         payload: {
           message: "pong"
+        }
+      };
+    }
+
+    if (message.command === "runtime.bootstrap") {
+      const commandParams = asRecord(message.commandParams) ?? {};
+      const version = asString(commandParams.version);
+      const runId = asString(commandParams.run_id);
+      const runtimeContextId = asString(commandParams.runtime_context_id);
+      const profile = asString(commandParams.profile);
+      const fingerprintRuntime = asRecord(commandParams.fingerprint_runtime);
+      const fingerprintPatchManifest = asRecord(commandParams.fingerprint_patch_manifest);
+      const mainWorldSecret = asString(commandParams.main_world_secret);
+
+      if (
+        !version ||
+        !runId ||
+        !runtimeContextId ||
+        !profile ||
+        !fingerprintRuntime ||
+        !fingerprintPatchManifest ||
+        !mainWorldSecret
+      ) {
+        return {
+          kind: "result",
+          id: message.id,
+          ok: false,
+          error: {
+            code: "ERR_RUNTIME_READY_SIGNAL_CONFLICT",
+            message: "invalid runtime bootstrap envelope"
+          }
+        };
+      }
+
+      this.#bootstrapContext = {
+        version,
+        runId,
+        runtimeContextId,
+        profile
+      };
+
+      return {
+        kind: "result",
+        id: message.id,
+        ok: true,
+        payload: {
+          method: "runtime.bootstrap.ack",
+          result: {
+            version,
+            run_id: runId,
+            runtime_context_id: runtimeContextId,
+            profile,
+            status: "ready"
+          },
+          runtime_bootstrap_attested: true
+        }
+      };
+    }
+
+    if (message.command === "runtime.readiness") {
+      const commandParams = asRecord(message.commandParams) ?? {};
+      const runId = asString(commandParams.run_id);
+      const runtimeContextId = asString(commandParams.runtime_context_id);
+
+      let bootstrapState: "not_started" | "ready" | "stale" = "not_started";
+      if (this.#bootstrapContext) {
+        bootstrapState =
+          runId === this.#bootstrapContext.runId &&
+          runtimeContextId === this.#bootstrapContext.runtimeContextId
+            ? "ready"
+            : "stale";
+      }
+
+      return {
+        kind: "result",
+        id: message.id,
+        ok: true,
+        payload: {
+          transport_state: "ready",
+          bootstrap_state: bootstrapState
         }
       };
     }
