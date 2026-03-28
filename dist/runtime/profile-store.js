@@ -137,25 +137,6 @@ function assertProfileMeta(value) {
             throw new Error("Invalid profile meta structure: proxyBinding.source");
         }
     }
-    if (value.persistentExtensionBinding !== undefined) {
-        if (!isObjectRecord(value.persistentExtensionBinding)) {
-            throw new Error("Invalid profile meta structure: persistentExtensionBinding");
-        }
-        if (typeof value.persistentExtensionBinding.extensionId !== "string") {
-            throw new Error("Invalid profile meta structure: persistentExtensionBinding.extensionId");
-        }
-        if (typeof value.persistentExtensionBinding.nativeHostName !== "string") {
-            throw new Error("Invalid profile meta structure: persistentExtensionBinding.nativeHostName");
-        }
-        if (typeof value.persistentExtensionBinding.browserChannel !== "string" ||
-            !["chrome", "chrome_beta", "chromium", "brave", "edge"].includes(value.persistentExtensionBinding.browserChannel)) {
-            throw new Error("Invalid profile meta structure: persistentExtensionBinding.browserChannel");
-        }
-        if (value.persistentExtensionBinding.manifestPath !== null &&
-            typeof value.persistentExtensionBinding.manifestPath !== "string") {
-            throw new Error("Invalid profile meta structure: persistentExtensionBinding.manifestPath");
-        }
-    }
     if (!isObjectRecord(value.fingerprintSeeds)) {
         throw new Error("Invalid profile meta structure: fingerprintSeeds");
     }
@@ -199,7 +180,9 @@ const parseMeta = (raw) => {
         throw new Error("Invalid profile meta structure: invalid JSON");
     }
     assertProfileMeta(parsed);
-    return parsed;
+    const normalized = { ...parsed };
+    delete normalized.persistentExtensionBinding;
+    return normalized;
 };
 const buildLegacyBundleMigration = async (input) => {
     const browserVersion = input.intent === "persistent_upgrade"

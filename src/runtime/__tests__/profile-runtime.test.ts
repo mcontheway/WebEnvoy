@@ -1131,7 +1131,7 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
-  it("persists bound identity and continues runtime.start for official Chrome", async () => {
+  it("continues runtime.start for official Chrome without persisting identity binding", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-bound-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
@@ -1182,12 +1182,7 @@ describe("profile-runtime identity preflight", () => {
 
     const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
     const meta = await profileStore.readMeta("identity_bound_profile");
-    expect(meta?.persistentExtensionBinding).toMatchObject({
-      extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      nativeHostName: "com.webenvoy.host",
-      browserChannel: "chrome",
-      manifestPath
-    });
+    expect(meta?.persistentExtensionBinding).toBeUndefined();
 
     const status = await service.status({
       cwd: baseDir,
@@ -1196,12 +1191,12 @@ describe("profile-runtime identity preflight", () => {
       params: {}
     });
     expect(status).toMatchObject({
-      identityBindingState: "bound",
+      identityBindingState: "missing",
       identityPreflight: {
         mode: "official_chrome_persistent_extension",
-        blocking: false,
-        manifestPath,
-        expectedOrigin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"
+        blocking: true,
+        manifestPath: null,
+        expectedOrigin: null
       }
     });
   });
@@ -1258,7 +1253,7 @@ describe("profile-runtime identity preflight", () => {
     expect(meta?.persistentExtensionBinding).toBeUndefined();
   });
 
-  it("persists bound identity and continues runtime.login for official Chrome", async () => {
+  it("continues runtime.login for official Chrome without persisting identity binding", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-login-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
@@ -1310,25 +1305,22 @@ describe("profile-runtime identity preflight", () => {
 
     const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
     const meta = await profileStore.readMeta("identity_login_profile");
-    expect(meta?.persistentExtensionBinding).toMatchObject({
-      extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      nativeHostName: "com.webenvoy.host",
-      browserChannel: "chrome",
-      manifestPath
-    });
+    expect(meta?.persistentExtensionBinding).toBeUndefined();
     expect(meta?.profileState).toBe("logging_in");
   });
 
-  it("reuses persisted manifest path when later calls omit manifest_path", async () => {
+  it("does not reuse manifest path when later calls omit manifest_path", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-reuse-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
     const manifestPath = await createNativeHostManifest({
-      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+      allowedOrigins: ["chrome-extension://cccccccccccccccccccccccccccccccc/"]
     });
+    const extensionId = "cccccccccccccccccccccccccccccccc";
     await seedInstalledPersistentExtension({
       baseDir,
-      profile: "identity_reuse_profile"
+      profile: "identity_reuse_profile",
+      extensionId
     });
     const service = createTestService();
 
@@ -1339,7 +1331,7 @@ describe("profile-runtime identity preflight", () => {
         runId: "run-runtime-identity-reuse-001",
         params: {
           persistent_extension_identity: {
-            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            extension_id: extensionId,
             manifest_path: manifestPath
           }
         }
@@ -1354,16 +1346,14 @@ describe("profile-runtime identity preflight", () => {
       runId: "run-runtime-identity-reuse-002",
       params: {
         persistent_extension_identity: {
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          extension_id: extensionId
         }
       }
     });
 
-    expect(status).toMatchObject({
-      identityBindingState: "bound",
-      identityPreflight: {
-        manifestPath
-      }
+    expect(status.identityBindingState).not.toBe("bound");
+    expect(status.identityPreflight).toMatchObject({
+      expectedOrigin: "chrome-extension://cccccccccccccccccccccccccccccccc/"
     });
   });
 
@@ -1429,7 +1419,7 @@ describe("profile-runtime identity preflight", () => {
 
     const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
     const meta = await profileStore.readMeta("identity_relocated_profile");
-    expect(meta?.persistentExtensionBinding?.manifestPath).toBe(relocatedManifestPath);
+    expect(meta?.persistentExtensionBinding).toBeUndefined();
   });
 
   it("resolves win32 native host manifest path from registry before local app data fallback", async () => {
@@ -1467,7 +1457,7 @@ describe("profile-runtime identity preflight", () => {
 
     const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
     const meta = await profileStore.readMeta("identity_win32_profile");
-    expect(meta?.persistentExtensionBinding?.manifestPath).toBe(manifestPath);
+    expect(meta?.persistentExtensionBinding).toBeUndefined();
   });
 
   it("does not persist identity binding when later runtime.start gates reject the profile", async () => {
@@ -2636,10 +2626,7 @@ describe("profile-runtime fingerprint runtime contract", () => {
 
     const storedMetaRaw = await readFile(store.getMetaPath("legacy_identity_profile"), "utf8");
     const storedMeta = JSON.parse(storedMetaRaw) as ProfileMeta;
-    expect(storedMeta.persistentExtensionBinding).toMatchObject({
-      extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      manifestPath
-    });
+    expect(storedMeta.persistentExtensionBinding).toBeUndefined();
     expect(storedMeta.fingerprintProfileBundle).toBeUndefined();
   });
 });

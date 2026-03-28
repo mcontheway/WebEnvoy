@@ -646,7 +646,6 @@ export class ProfileRuntimeService {
               profileDir,
               profileState: "disconnected",
               proxyBinding: existingMeta.proxyBinding,
-              persistentExtensionBinding: existingMeta.persistentExtensionBinding,
               fingerprintProfileBundle: existingMeta.fingerprintProfileBundle,
               updatedAt: nowIso,
               lastDisconnectedAt: nowIso
@@ -711,8 +710,6 @@ export class ProfileRuntimeService {
         profileDir,
         profileState: session.profileState,
         proxyBinding: session.proxyBinding,
-        persistentExtensionBinding:
-          identityPreflight.binding ?? recoveredMeta.persistentExtensionBinding,
         fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
         updatedAt: nowIso,
         lastStartedAt: nowIso
@@ -803,7 +800,6 @@ export class ProfileRuntimeService {
             profileDir,
             profileState: "disconnected",
             proxyBinding: existingMeta.proxyBinding,
-            persistentExtensionBinding: existingMeta.persistentExtensionBinding,
             fingerprintProfileBundle: existingMeta.fingerprintProfileBundle,
             updatedAt: nowIso,
             lastDisconnectedAt: nowIso
@@ -894,8 +890,6 @@ export class ProfileRuntimeService {
           profileDir,
           profileState: session.profileState,
           proxyBinding: session.proxyBinding,
-          persistentExtensionBinding:
-            identityPreflight.binding ?? recoveredMeta.persistentExtensionBinding,
           fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
           updatedAt: nowIso
         })
@@ -947,8 +941,6 @@ export class ProfileRuntimeService {
         profileDir,
         profileState: session.profileState,
         proxyBinding: session.proxyBinding,
-        persistentExtensionBinding:
-          identityPreflight.binding ?? recoveredMeta.persistentExtensionBinding,
         fingerprintProfileBundle: shouldPersistFingerprintBundle(recoveredMeta, fingerprintRuntime),
         updatedAt: nowIso,
         lastLoginAt: nowIso,
@@ -1463,7 +1455,6 @@ export class ProfileRuntimeService {
       profileDir: string;
       profileState: ProfileState;
       proxyBinding: ProfileMeta["proxyBinding"];
-      persistentExtensionBinding?: ProfileMeta["persistentExtensionBinding"];
       fingerprintProfileBundle?: ProfileMeta["fingerprintProfileBundle"] | null;
       updatedAt: string;
       localStorageSnapshots?: ProfileMeta["localStorageSnapshots"];
@@ -1479,10 +1470,6 @@ export class ProfileRuntimeService {
       profileDir: patch.profileDir,
       profileState: patch.profileState,
       proxyBinding: patch.proxyBinding,
-      persistentExtensionBinding:
-        patch.persistentExtensionBinding === undefined
-          ? current.persistentExtensionBinding
-          : patch.persistentExtensionBinding,
       fingerprintProfileBundle:
         patch.fingerprintProfileBundle === null
           ? undefined

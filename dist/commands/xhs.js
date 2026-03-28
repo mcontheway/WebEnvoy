@@ -120,6 +120,17 @@ const resolveRuntimeBridge = () => {
         transport: new NativeHostBridgeTransport()
     });
 };
+export const buildOfficialChromeRuntimeStatusParams = (context, requestedExecutionMode) => {
+    const params = {
+        requested_execution_mode: requestedExecutionMode
+    };
+    const persistentExtensionIdentity = asObject(context.params.persistent_extension_identity) ??
+        asObject(context.params.persistentExtensionIdentity);
+    if (persistentExtensionIdentity) {
+        params.persistent_extension_identity = persistentExtensionIdentity;
+    }
+    return params;
+};
 const invalidAbilityInput = (reason, abilityId = "unknown") => new CliError("ERR_CLI_INVALID_ARGS", "能力输入不合法", {
     details: {
         ability_id: abilityId,
@@ -311,9 +322,7 @@ export const ensureOfficialChromeRuntimeReady = async (context, ability, request
     cwd: context.cwd,
     profile: context.profile ?? "",
     runId: context.run_id,
-    params: {
-        requested_execution_mode: requestedExecutionMode
-    }
+    params: buildOfficialChromeRuntimeStatusParams(context, requestedExecutionMode)
 })) => {
     let status = await readStatus();
     const identityPreflight = asObject(status.identityPreflight);

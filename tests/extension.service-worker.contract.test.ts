@@ -701,6 +701,120 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
+  it("promotes pending bootstrap to ready through runtime.ping then runtime.readiness", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-ping-promote-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-ping-promote-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-ping-promote-001",
+          runtime_context_id: "ctx-bootstrap-ping-promote-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-ping-promote-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-bootstrap-ping-promote-001",
+        status: "error",
+        error: expect.objectContaining({
+          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+        })
+      })
+    );
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-ping-promote-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-ping-promote-001",
+        command: "runtime.ping",
+        command_params: {
+          fingerprint_context: fingerprintContext
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-ping-promote-001",
+        ok: true,
+        payload: {
+          fingerprint_runtime: fingerprintContext,
+          summary: {
+            capability_result: {
+              outcome: "success"
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 77
+        }
+      }
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-ping-promote-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-readiness-ping-promote-001",
+        command: "runtime.readiness",
+        command_params: {},
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-readiness-ping-promote-001",
+        status: "success",
+        payload: expect.objectContaining({
+          bootstrap_state: "ready",
+          run_id: "run-bootstrap-ping-promote-001",
+          runtime_context_id: "ctx-bootstrap-ping-promote-001",
+          transport_state: "ready"
+        })
+      })
+    );
+  });
+
   it("does not reuse trusted fingerprint context from a previous run for new runtime.bootstrap context", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);

@@ -1062,8 +1062,8 @@ class ChromeBackgroundBridge {
       profile,
       sessionId,
       fingerprintRuntime,
-      asNonEmptyString(request.params.run_id),
-      null
+      asNonEmptyString(request.params.run_id) ?? bootstrap?.runId ?? null,
+      bootstrap?.runtimeContextId ?? null
     );
 
     const sourceBinding = this.#resolveRequestTargetBinding(request);

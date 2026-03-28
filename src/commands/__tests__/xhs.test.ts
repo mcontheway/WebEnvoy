@@ -1,8 +1,34 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ensureOfficialChromeRuntimeReady } from "../xhs.js";
+import { buildOfficialChromeRuntimeStatusParams, ensureOfficialChromeRuntimeReady } from "../xhs.js";
 
 describe("ensureOfficialChromeRuntimeReady", () => {
+  it("forwards persistent extension identity into runtime.status params", () => {
+    expect(
+      buildOfficialChromeRuntimeStatusParams(
+        {
+          cwd: "/tmp/webenvoy",
+          profile: "official_ready_profile",
+          run_id: "run-xhs-ready-identity-001",
+          command: "xhs.search",
+          params: {
+            persistentExtensionIdentity: {
+              extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              manifestPath: "/tmp/native-host-manifest.json"
+            }
+          }
+        },
+        "live_read_high_risk"
+      )
+    ).toMatchObject({
+      requested_execution_mode: "live_read_high_risk",
+      persistent_extension_identity: {
+        extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        manifestPath: "/tmp/native-host-manifest.json"
+      }
+    });
+  });
+
   it("reuses the execution bridge session when official Chrome runtime transitions to ready", async () => {
     const readStatus = vi.fn(async () => ({
       identityPreflight: {

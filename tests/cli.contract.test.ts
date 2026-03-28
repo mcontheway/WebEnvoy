@@ -3174,7 +3174,7 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
-  it("reuses persisted manifestPath after recoverable transport failure when runtime.status omits manifest_path", async () => {
+  it("does not reuse persisted identity binding after recoverable transport failure when runtime.status omits identity input", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
@@ -3225,13 +3225,7 @@ process.stdin.on("data", (chunk) => {
       [
         "runtime.status",
         "--profile",
-        "identity_manifest_reuse_profile",
-        "--params",
-        JSON.stringify({
-          persistent_extension_identity: {
-            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-          }
-        })
+        "identity_manifest_reuse_profile"
       ],
       runtimeCwd,
       {
@@ -3244,9 +3238,11 @@ process.stdin.on("data", (chunk) => {
       command: "runtime.status",
       status: "success",
       summary: {
-        identityBindingState: "bound",
+        identityBindingState: "missing",
+        runtimeReadiness: "blocked",
         identityPreflight: {
-          failureReason: "IDENTITY_PREFLIGHT_PASSED"
+          manifestPath: null,
+          failureReason: "IDENTITY_BINDING_MISSING"
         }
       }
     });

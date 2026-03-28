@@ -188,6 +188,22 @@ const resolveRuntimeBridge = (): NativeMessagingBridge => {
   });
 };
 
+export const buildOfficialChromeRuntimeStatusParams = (
+  context: RuntimeContext,
+  requestedExecutionMode: XhsExecutionMode
+): JsonObject => {
+  const params: JsonObject = {
+    requested_execution_mode: requestedExecutionMode
+  };
+  const persistentExtensionIdentity =
+    asObject(context.params.persistent_extension_identity) ??
+    asObject(context.params.persistentExtensionIdentity);
+  if (persistentExtensionIdentity) {
+    params.persistent_extension_identity = persistentExtensionIdentity;
+  }
+  return params;
+};
+
 const invalidAbilityInput = (
   reason: string,
   abilityId = "unknown"
@@ -442,9 +458,7 @@ export const ensureOfficialChromeRuntimeReady = async (
       cwd: context.cwd,
       profile: context.profile ?? "",
       runId: context.run_id,
-      params: {
-        requested_execution_mode: requestedExecutionMode
-      }
+      params: buildOfficialChromeRuntimeStatusParams(context, requestedExecutionMode)
     })
 ): Promise<void> => {
   let status = await readStatus();

@@ -729,7 +729,7 @@ class ChromeBackgroundBridge {
         }
         // Runtime bootstrap readiness should be promoted by execution-surface attestation,
         // regardless of whether an XHS-specific target binding is present.
-        this.#promoteRuntimeBootstrapStateFromExecutionSignal(profile, sessionId, fingerprintRuntime, asNonEmptyString(request.params.run_id), null);
+        this.#promoteRuntimeBootstrapStateFromExecutionSignal(profile, sessionId, fingerprintRuntime, asNonEmptyString(request.params.run_id) ?? bootstrap?.runId ?? null, bootstrap?.runtimeContextId ?? null);
         const sourceBinding = this.#resolveRequestTargetBinding(request);
         if (!sourceBinding) {
             return;
