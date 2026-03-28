@@ -1266,7 +1266,7 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
-  it("keeps profile lock visible to later run_id in runtime.status after runtime.start", async () => {
+  it("keeps later run_id blocked in runtime.status after runtime.start", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-bound-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
@@ -1366,10 +1366,10 @@ describe("profile-runtime identity preflight", () => {
       }
     });
     expect(status).toMatchObject({
-      lockHeld: true,
+      lockHeld: false,
       identityBindingState: "bound",
-      transportState: "ready",
-      bootstrapState: "stale",
+      transportState: "not_connected",
+      bootstrapState: "not_started",
       runtimeReadiness: "blocked",
       identityPreflight: {
         mode: "official_chrome_persistent_extension",
@@ -1536,6 +1536,59 @@ describe("profile-runtime identity preflight", () => {
     expect(status.identityPreflight).toMatchObject({
       manifestPath,
       expectedOrigin: "chrome-extension://cccccccccccccccccccccccccccccccc/"
+    });
+  });
+
+  it("does not report lockHeld or ready runtimeReadiness for a non-owner status query", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-status-non-owner-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "status_non_owner_profile"
+    });
+    const service = createTestService();
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "status_non_owner_profile",
+        runId: "run-runtime-status-owner-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: true,
+      runtimeReadiness: "ready"
+    });
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile: "status_non_owner_profile",
+        runId: "run-runtime-status-other-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: false,
+      identityBindingState: "bound",
+      transportState: "not_connected",
+      bootstrapState: "not_started",
+      runtimeReadiness: "blocked"
     });
   });
 
@@ -2112,7 +2165,7 @@ describe("profile-runtime stale lock reclaim", () => {
       profile: "reclaim_controller_dead_profile",
       profileState: "disconnected",
       browserState: "disconnected",
-      lockHeld: true
+      lockHeld: false
     });
 
     await expect(
@@ -2206,7 +2259,7 @@ describe("profile-runtime stale lock reclaim", () => {
       expect(status).toMatchObject({
         profileState: "disconnected",
         browserState: "disconnected",
-        lockHeld: true
+        lockHeld: false
       });
 
       const stopped = await service.stop({
@@ -2289,7 +2342,7 @@ describe("profile-runtime stale lock reclaim", () => {
       expect(status).toMatchObject({
         profileState: "disconnected",
         browserState: "disconnected",
-        lockHeld: true
+        lockHeld: false
       });
 
       const stopped = await service.stop({
@@ -2374,7 +2427,7 @@ describe("profile-runtime stale lock reclaim", () => {
       expect(status).toMatchObject({
         profileState: "disconnected",
         browserState: "disconnected",
-        lockHeld: true
+        lockHeld: false
       });
 
       await expect(

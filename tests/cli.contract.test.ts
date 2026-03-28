@@ -1489,6 +1489,7 @@ describe("webenvoy cli contract", () => {
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
     const profile = "xhs_official_bootstrap_recovery_profile";
+    const runId = "run-contract-xhs-bootstrap-recovery-001";
     await seedInstalledPersistentExtension({
       cwd: runtimeCwd,
       profile
@@ -1500,7 +1501,7 @@ describe("webenvoy cli contract", () => {
         "--profile",
         profile,
         "--run-id",
-        "run-contract-xhs-bootstrap-start-001",
+        runId,
         "--params",
         JSON.stringify({
           persistent_extension_identity: {
@@ -1746,7 +1747,6 @@ process.stdin.on("data", (chunk) => {
       "utf8"
     );
 
-    const runId = "run-contract-xhs-bootstrap-search-002";
     const result = runCli([
       "xhs.search",
       "--profile",

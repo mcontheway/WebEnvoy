@@ -708,7 +708,7 @@ export class ProfileRuntimeService {
         const lockInspection = lock !== null ? await this.#inspectProfileLock(lock, profileDir) : null;
         const healthyLock = lockInspection?.blocksReuse ?? false;
         const profileState = activeState && !(lockInspection?.controlConnected ?? false) ? "disconnected" : storedProfileState;
-        const lockHeld = activeState && healthyLock;
+        const lockHeld = activeState && healthyLock && lock?.ownerRunId === input.runId;
         const requestedExecutionMode = readRequestedExecutionMode(input.params);
         const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, meta, {
             requestedExecutionMode
