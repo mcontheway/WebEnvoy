@@ -3,29 +3,17 @@
 > GitHub Issue / PR / Project 是进度真相源。
 > 本文件只保留 FR-0015 formal blocker、实现前条件和实现停点，不承载 `#281` 的本地 closeout 状态账本。
 
-## 评审阻断项
+## Formal 边界
 
-- [x] 明确写清 `#281` 当前只收口 implementation-prep，不承诺完整实现闭环
-- [x] 明确 `#279/PR #283` 是唯一上位冻结输入，`FR-0015` 只能承接不能重定义
-- [x] 明确 `runtime_bootstrap_envelope` 不回流为 staged extension 文件或 profile 永久元数据
-- [x] 明确 `stable extension_id + allowed_origins + profile` 是持久 identity 边界，不等于单次 run 的 bootstrap ready
-- [x] 明确 `runtime.status` 已通过 formal contract 冻结 `identityBindingState / transportState / bootstrapState / runtimeReadiness`，并写清与 FR-0003 `profileState / browserState` 的兼容关系
-- [x] 明确 candidate 安装/分发路径、最终安装器、CWS 合规与 `#239` 验证体系均不属于本 FR
-- [x] 明确 `risks.md` 已覆盖 identity mismatch、stale bootstrap ack、多信号冲突、陈旧 ready marker 与幂等恢复边界
+- `#281` 在 FR-0015 范围内只承接 implementation-prep 输入，不承诺完整实现闭环。
+- `#279/PR #283` 是唯一上位冻结输入，FR-0015 只能承接，不能重定义。
+- `runtime_bootstrap_envelope` 不回流为 staged extension 文件或 profile 永久元数据。
+- `stable extension_id + allowed_origins + profile` 是持久 identity 边界，不等于单次 run 的 bootstrap ready。
+- `runtime.status` 的 `identityBindingState / transportState / bootstrapState / runtimeReadiness` 共享语义，以 formal contract 为准，并与 FR-0003 `profileState / browserState` 兼容。
+- candidate 安装/分发路径、最终安装器、CWS 合规与 `#239` 验证体系不属于本 FR。
+- identity mismatch、stale bootstrap ack、多信号冲突、陈旧 ready marker 与幂等恢复边界，以 `risks.md` 为准。
 
-## 进入实现前必须完成的动作
+## 恢复入口
 
-- [x] FR-0015 spec review 通过并形成明确结论
-- [x] 后续实现 PR 明确使用 `Refs #281`、`Refs #233`，不提前关闭 `#281`
-- [x] 后续实现 PR 预先声明第一刀只覆盖 identity preflight、bootstrap contract、runtime readiness 状态收口
-- [x] 后续实现 PR 的测试计划覆盖 identity preflight、bootstrap ack、断连恢复、stale ack 与 status 回读
-- [x] 后续实现未把新的 persistent identity 事实写入持久层；未触发额外字段级 spec review 前置
-
-## 后续实施清单
-
-- [x] 为 persistent extension 主路径建立 identity preflight 入口
-- [x] 建立 `runtime_bootstrap_envelope` 的正式下发、确认与错误分类链路
-- [x] 为 `runtime.status` 增加 identity / bootstrap readiness 读模型
-- [x] 明确 bootstrap 失败后的 stop / retry / recover 边界
-- [x] 为 bootstrap 幂等、stale ready marker、多信号冲突补充失败注入测试
-- [x] 将安装器产品化、candidate 分发路径产品化与 `#239` 验证体系保留到各自后续事项
+- implementation-prep 阶段的 formal 输入、健康矩阵、恢复路径与 stop-ship 规则，分别以 `spec.md`、`plan.md`、`implementation-prep.md`、`contracts/`、`risks.md` 为准。
+- `#281` 的实现、验证和关闭状态，以 GitHub issue、PR、review 与 checks 为准；本文件不回写完成进度。
