@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -3576,6 +3576,87 @@ process.stdin.on("data", (chunk) => {
         code: "ERR_CLI_INVALID_ARGS",
         details: {
           reason: "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT",
+          field: "launcher_path"
+        }
+      }
+    });
+  });
+
+  it("rejects runtime.install when parent chain under controlled root contains symlink", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const channelRoot = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome");
+    const safeLauncherRoot = path.join(channelRoot, "bin");
+    const symlinkedManifestRoot = path.join(channelRoot, "manifests");
+    const externalManifestDir = await mkdtemp(path.join(tmpdir(), "webenvoy-install-symlink-"));
+    tempDirs.push(externalManifestDir);
+    await mkdir(channelRoot, { recursive: true });
+    await mkdir(safeLauncherRoot, { recursive: true });
+    await symlink(externalManifestDir, symlinkedManifestRoot);
+
+    const install = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-symlink-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          manifest_dir: path.join(symlinkedManifestRoot, "nested"),
+          launcher_path: path.join(safeLauncherRoot, "webenvoy-native-host")
+        })
+      ],
+      runtimeCwd
+    );
+    expect(install.status).toBe(2);
+    expect(parseSingleJsonLine(install.stdout)).toMatchObject({
+      command: "runtime.install",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "INSTALL_PATH_PARENT_SYMBOLIC_LINK",
+          field: "manifest_dir"
+        }
+      }
+    });
+  });
+
+  it("rejects runtime.uninstall when parent chain under controlled root contains symlink", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const channelRoot = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome");
+    const safeManifestRoot = path.join(channelRoot, "manifests");
+    const symlinkedLauncherRoot = path.join(channelRoot, "bin");
+    const externalLauncherDir = await mkdtemp(path.join(tmpdir(), "webenvoy-uninstall-symlink-"));
+    tempDirs.push(externalLauncherDir);
+    await mkdir(channelRoot, { recursive: true });
+    await mkdir(safeManifestRoot, { recursive: true });
+    await symlink(externalLauncherDir, symlinkedLauncherRoot);
+
+    const uninstall = runCli(
+      [
+        "runtime.uninstall",
+        "--run-id",
+        "run-contract-uninstall-symlink-001",
+        "--params",
+        JSON.stringify({
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          manifest_dir: safeManifestRoot,
+          launcher_path: path.join(symlinkedLauncherRoot, "webenvoy-native-host")
+        })
+      ],
+      runtimeCwd
+    );
+    expect(uninstall.status).toBe(2);
+    expect(parseSingleJsonLine(uninstall.stdout)).toMatchObject({
+      command: "runtime.uninstall",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "INSTALL_PATH_PARENT_SYMBOLIC_LINK",
           field: "launcher_path"
         }
       }

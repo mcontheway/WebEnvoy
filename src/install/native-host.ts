@@ -1,6 +1,6 @@
 import { access, chmod, lstat, mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { CliError } from "../core/errors.js";
@@ -63,6 +63,60 @@ const assertNotSymlink = async (
     field,
     received_path: targetPath
   });
+};
+
+const assertNoSymlinkAncestorBetween = async (input: {
+  command: "runtime.install" | "runtime.uninstall";
+  field: "manifest_dir" | "launcher_path";
+  fromDir: string;
+  targetDir: string;
+}): Promise<void> => {
+  const normalizedFrom = normalizePathForBoundaryCheck(input.fromDir);
+  const normalizedTarget = normalizePathForBoundaryCheck(input.targetDir);
+  const rel = relative(normalizedFrom, normalizedTarget);
+  const isInside = rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  if (!isInside) {
+    return;
+  }
+  const segments =
+    rel === "" ? [] : rel.split(sep).filter((segment) => segment.length > 0 && segment !== ".");
+  let current = normalizedFrom;
+
+  try {
+    const stat = await lstat(current);
+    if (stat.isSymbolicLink()) {
+      throw nativeHostPathError(input.command, "INSTALL_PATH_PARENT_SYMBOLIC_LINK", {
+        field: input.field,
+        received_path: current
+      });
+    }
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  for (const segment of segments) {
+    current = join(current, segment);
+    try {
+      const stat = await lstat(current);
+      if (!stat.isSymbolicLink()) {
+        continue;
+      }
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException;
+      if (nodeError.code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
+
+    throw nativeHostPathError(input.command, "INSTALL_PATH_PARENT_SYMBOLIC_LINK", {
+      field: input.field,
+      received_path: current
+    });
+  }
 };
 
 const quoteShellToken = (value: string): string => JSON.stringify(value);
@@ -183,7 +237,9 @@ const resolveInstallPaths = (input: ResolveInstallPathsInput) => {
   return {
     manifestDir,
     manifestPath,
-    launcherPath
+    launcherPath,
+    hasCustomManifestDir,
+    hasCustomLauncherPath
   };
 };
 
@@ -219,7 +275,22 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
     typeof input.hostCommand === "string" && input.hostCommand.trim().length > 0
       ? input.hostCommand.trim()
       : resolveRepoOwnedNativeHostCommand();
-
+  if (resolvedPaths.hasCustomManifestDir) {
+    await assertNoSymlinkAncestorBetween({
+      command: "runtime.install",
+      field: "manifest_dir",
+      fromDir: input.cwd,
+      targetDir: resolvedPaths.manifestDir
+    });
+  }
+  if (resolvedPaths.hasCustomLauncherPath) {
+    await assertNoSymlinkAncestorBetween({
+      command: "runtime.install",
+      field: "launcher_path",
+      fromDir: input.cwd,
+      targetDir: dirname(resolvedPaths.launcherPath)
+    });
+  }
   await mkdir(resolvedPaths.manifestDir, { recursive: true });
   await mkdir(dirname(resolvedPaths.launcherPath), { recursive: true });
   await assertNotSymlink("runtime.install", "launcher_path", resolvedPaths.launcherPath);
@@ -261,6 +332,22 @@ export const uninstallNativeHost = async (input: UninstallNativeHostInput) => {
     manifestDir: input.manifestDir,
     launcherPath: input.launcherPath
   });
+  if (resolvedPaths.hasCustomManifestDir) {
+    await assertNoSymlinkAncestorBetween({
+      command: "runtime.uninstall",
+      field: "manifest_dir",
+      fromDir: input.cwd,
+      targetDir: resolvedPaths.manifestDir
+    });
+  }
+  if (resolvedPaths.hasCustomLauncherPath) {
+    await assertNoSymlinkAncestorBetween({
+      command: "runtime.uninstall",
+      field: "launcher_path",
+      fromDir: input.cwd,
+      targetDir: dirname(resolvedPaths.launcherPath)
+    });
+  }
   await assertNotSymlink("runtime.uninstall", "manifest_path", resolvedPaths.manifestPath);
   await assertNotSymlink("runtime.uninstall", "launcher_path", resolvedPaths.launcherPath);
   const manifestExisted = await pathExists(resolvedPaths.manifestPath);
