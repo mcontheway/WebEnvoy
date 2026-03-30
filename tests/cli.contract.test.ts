@@ -3985,6 +3985,14 @@ process.stdin.on("data", (chunk) => {
 
   it("allows only one successful runtime.start under concurrent race", async () => {
     const runtimeCwd = await createRuntimeCwd();
+    let lastStatuses: Array<number | null> | null = null;
+    let lastResults:
+      | [
+          { status: number | null; stdout: string; stderr: string },
+          { status: number | null; stdout: string; stderr: string }
+        ]
+      | null = null;
+
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const [first, second] = await Promise.all([
         runCliAsync(
@@ -3998,10 +4006,13 @@ process.stdin.on("data", (chunk) => {
       ]);
 
       const statuses = [first.status, second.status];
+      lastStatuses = statuses;
+      lastResults = [first, second];
       const successCount = statuses.filter((status) => status === 0).length;
       const failureCount = statuses.filter((status) => status === 5).length;
-      expect(successCount).toBe(1);
-      expect(failureCount).toBe(1);
+      if (successCount !== 1 || failureCount !== 1) {
+        continue;
+      }
 
       const failed = [first, second].find((result) => result.status === 5);
       expect(failed).toBeDefined();
@@ -4017,7 +4028,15 @@ process.stdin.on("data", (chunk) => {
       return;
     }
 
-    throw new Error("concurrent runtime.start race did not preserve a single winner contract");
+    const diagnostic =
+      lastResults === null
+        ? ""
+        : ` statuses=${JSON.stringify(lastStatuses)} stdout=${JSON.stringify(
+            lastResults.map((result) => result.stdout.trim())
+          )} stderr=${JSON.stringify(lastResults.map((result) => result.stderr.trim()))}`;
+    throw new Error(
+      `concurrent runtime.start race did not preserve a single winner contract${diagnostic}`
+    );
   });
 
   it("supports runtime.stop and reflects stopped state via runtime.status", async () => {

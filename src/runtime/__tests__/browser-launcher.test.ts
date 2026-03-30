@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   BROWSER_CONTROL_FILENAME,
@@ -19,15 +19,14 @@ import {
 } from "../browser-launcher.js";
 
 const tempDirs: string[] = [];
-
-const originalBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
-const originalBrowserMockLog = process.env.WEBENVOY_BROWSER_MOCK_LOG;
-const originalBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
-const originalRealChromeBin = process.env.WEBENVOY_REAL_CHROME_BIN;
-const originalRealBrowserPath = process.env.WEBENVOY_REAL_BROWSER_PATH;
-const originalBrowserVersion = process.env.WEBENVOY_BROWSER_VERSION;
-const originalPath = process.env.PATH;
-const originalPlatform = process.platform;
+let browserPathBeforeTest: string | undefined;
+let browserMockLogBeforeTest: string | undefined;
+let browserMockVersionBeforeTest: string | undefined;
+let realChromeBinBeforeTest: string | undefined;
+let realBrowserPathBeforeTest: string | undefined;
+let browserVersionBeforeTest: string | undefined;
+let pathBeforeTest: string | undefined;
+let platformBeforeTest: NodeJS.Platform;
 const restoreEnv = (
   key:
     | "WEBENVOY_BROWSER_PATH"
@@ -228,19 +227,30 @@ const waitForExit = async (pid: number): Promise<void> => {
   throw new Error(`process ${pid} did not exit in time`);
 };
 
+beforeEach(() => {
+  browserPathBeforeTest = process.env.WEBENVOY_BROWSER_PATH;
+  browserMockLogBeforeTest = process.env.WEBENVOY_BROWSER_MOCK_LOG;
+  browserMockVersionBeforeTest = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+  realChromeBinBeforeTest = process.env.WEBENVOY_REAL_CHROME_BIN;
+  realBrowserPathBeforeTest = process.env.WEBENVOY_REAL_BROWSER_PATH;
+  browserVersionBeforeTest = process.env.WEBENVOY_BROWSER_VERSION;
+  pathBeforeTest = process.env.PATH;
+  platformBeforeTest = process.platform;
+});
+
 afterEach(async () => {
-  restoreEnv("WEBENVOY_BROWSER_PATH", originalBrowserPath);
-  restoreEnv("WEBENVOY_BROWSER_MOCK_LOG", originalBrowserMockLog);
-  restoreEnv("WEBENVOY_BROWSER_MOCK_VERSION", originalBrowserMockVersion);
-  restoreEnv("WEBENVOY_REAL_CHROME_BIN", originalRealChromeBin);
-  restoreEnv("WEBENVOY_REAL_BROWSER_PATH", originalRealBrowserPath);
-  restoreEnv("WEBENVOY_BROWSER_VERSION", originalBrowserVersion);
-  if (originalPath === undefined) {
+  restoreEnv("WEBENVOY_BROWSER_PATH", browserPathBeforeTest);
+  restoreEnv("WEBENVOY_BROWSER_MOCK_LOG", browserMockLogBeforeTest);
+  restoreEnv("WEBENVOY_BROWSER_MOCK_VERSION", browserMockVersionBeforeTest);
+  restoreEnv("WEBENVOY_REAL_CHROME_BIN", realChromeBinBeforeTest);
+  restoreEnv("WEBENVOY_REAL_BROWSER_PATH", realBrowserPathBeforeTest);
+  restoreEnv("WEBENVOY_BROWSER_VERSION", browserVersionBeforeTest);
+  if (pathBeforeTest === undefined) {
     delete process.env.PATH;
   } else {
-    process.env.PATH = originalPath;
+    process.env.PATH = pathBeforeTest;
   }
-  Object.defineProperty(process, "platform", { value: originalPlatform });
+  Object.defineProperty(process, "platform", { value: platformBeforeTest });
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
     if (dir) {

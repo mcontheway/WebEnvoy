@@ -2,7 +2,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ProfileStore, PROFILE_META_FILENAME } from "../profile-store.js";
 import {
@@ -11,8 +11,8 @@ import {
 } from "../../../shared/fingerprint-profile.js";
 
 const tempDirs: string[] = [];
-const originalBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
-const originalBrowserVersion = process.env.WEBENVOY_BROWSER_VERSION;
+let browserPathBeforeTest: string | undefined;
+let browserVersionBeforeTest: string | undefined;
 
 const resolveCurrentTimezone = (): string => {
   try {
@@ -22,16 +22,21 @@ const resolveCurrentTimezone = (): string => {
   }
 };
 
+beforeEach(() => {
+  browserPathBeforeTest = process.env.WEBENVOY_BROWSER_PATH;
+  browserVersionBeforeTest = process.env.WEBENVOY_BROWSER_VERSION;
+});
+
 afterEach(async () => {
-  if (originalBrowserPath === undefined) {
+  if (browserPathBeforeTest === undefined) {
     delete process.env.WEBENVOY_BROWSER_PATH;
   } else {
-    process.env.WEBENVOY_BROWSER_PATH = originalBrowserPath;
+    process.env.WEBENVOY_BROWSER_PATH = browserPathBeforeTest;
   }
-  if (originalBrowserVersion === undefined) {
+  if (browserVersionBeforeTest === undefined) {
     delete process.env.WEBENVOY_BROWSER_VERSION;
   } else {
-    process.env.WEBENVOY_BROWSER_VERSION = originalBrowserVersion;
+    process.env.WEBENVOY_BROWSER_VERSION = browserVersionBeforeTest;
   }
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
