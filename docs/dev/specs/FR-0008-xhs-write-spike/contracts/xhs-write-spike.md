@@ -10,6 +10,7 @@
 - FR-0002 Native Messaging 通信协议
 - FR-0003 会话状态机
 - 具体 `publish` / `interact` / 上传实现代码
+- `editor_input` / `interact` 的正式命令接口
 
 ## 输出对象
 
@@ -169,6 +170,8 @@ Spike 输出必须包含以下四个对象：
 
 1. `handoff_status=recommended_input` 不等于 `#208` 已完成，只表示当前更适合作为其正式验证候选。
 2. 任何候选动作若依赖多步骤发布、上传后提交或不可逆写入，默认不应被推荐给 `#208`。
+3. `action_id=editor_input` 仅表示最小页面交互候选动作，不等于已冻结 `xhs.editor_input` 或 `xhs.interact` 的正式 machine contract。
+4. `interact` 当前未在本 Spike 中被冻结为正式候选动作；后续若需要正式机器接口，必须通过独立 contract 规约定义。
 
 ## gate_status
 

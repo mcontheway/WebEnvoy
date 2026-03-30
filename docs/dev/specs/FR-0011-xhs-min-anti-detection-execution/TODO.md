@@ -12,11 +12,14 @@
 - [x] 明确状态变更审计字段与“审计缺失即回退 `paused`”规则
 - [x] 明确 `live_read_limited` 的正式公开模式语义、审批前置与审计要求
 - [x] 明确 `gate_decision=blocked` 时 `effective_execution_mode` 只表示真实未继续 live 的降级模式，不对外暴露未实际执行的 `live_*`
+- [x] 明确 `#208` 的 gate-only `page_state` / `key_requests=[]` / `failure_site` 最小语义
+- [x] 明确 `editor_input` 只是 `#208` 验证候选动作，不等于已冻结的正式命令接口
 
 ## 进入实现前必须完成
 
 - [ ] FR-0011 spec review 通过并形成明确结论
 - [ ] `#208` 与 `#209` issue 明确引用 FR-0011 作为进入 live 的前置
+- [ ] `#208` issue / PR 关闭语义回写为“验证前置已冻结，不等于正式验证已完成”
 - [ ] Sprint 治理重排（`#216`）中对应 sprint 编排与里程碑调整完成
 
 ## spec 通过后的实施清单（非本 PR）
@@ -28,6 +31,8 @@
 - [ ] 实现 `#208/#209` 三态差异化阻断矩阵（统一判定入口）
 - [ ] 实现 session 节律/冷却/恢复最小约束
 - [ ] 实现状态变更审计落盘与缺失审计回退 `paused` 逻辑
+- [ ] 为 `#208` gate-only success / blocked 场景补齐 `page_state` 契约测试
+- [ ] 如需正式引入 `xhs.editor_input` 或 `xhs.interact`，先单独起 command contract 规约 PR
 - [ ] 补齐对应契约测试与状态迁移测试
 
 ## 关联
