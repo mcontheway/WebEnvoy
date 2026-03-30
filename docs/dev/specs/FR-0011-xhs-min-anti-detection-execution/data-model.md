@@ -77,8 +77,10 @@
 - `conditional_actions.requires` 只允许引用已在 `ReadExecutionPolicy.live_entry_requirements` 中冻结的机器条件名。
 - 所有 `IssueActionMatrix` entry 都必须显式包含 `conditional_actions`；当不存在附加前置动作时，取空数组。
 - `paused` 的 `blocked_actions` 必须显式覆盖所有 live 动作，不得依赖实现推断补全。
-- `issue_208` 在 `limited|allowed` 下当前只允许 `dry_run|recon` 与 gate-only 观测结果；不得通过 `allowed_actions` 或 `conditional_actions` 放行真实 `reversible_interaction_with_approval`。
-- `issue_208` 在 `limited|allowed` 下的 `blocked_actions` 必须显式覆盖 `reversible_interaction_with_approval`、`live_write`、`irreversible_write` 与一切 live 读扩面动作。
+- `issue_208` 在 `limited` 下当前只允许 `dry_run|recon` 与 gate-only 观测结果，不得通过 `allowed_actions` 或 `conditional_actions` 放行真实 `reversible_interaction_with_approval`。
+- `issue_208` 在 `allowed` 下只允许通过 `conditional_actions` 放行 `reversible_interaction_with_approval`，且其范围固定为 `editor_input` 单动作真实验证。
+- `issue_208` 在 `allowed` 下的上述条件放行，必须继续复用 `FR-0010` 冻结字段表达为：`action_type=write`、`requested_execution_mode=live_write`、`effective_execution_mode=live_write`、`gate_decision=allowed`；不得为该路径新增私有 execution mode。
+- `issue_208` 的 `blocked_actions` 必须显式覆盖 `irreversible_write`、`upload_submit_publish_chain` 与一切 live 读扩面动作；`live_write` 在 `FR-0010` 中仅作为门禁承载字段，不得被解释为“完整写链路默认开放”。
 - `blocked_actions` 不得为空，必须与 `allowed_actions`、`conditional_actions` 一起定义完整边界。
 - live 读模式若需要审批证据，不得直接出现在 `allowed_actions` 中，必须落入 `conditional_actions`。
 - `issue_209` 在 `limited` 下只允许把 `live_read_limited` 放入 `conditional_actions`，不得把 `live_read_high_risk` 视为可放行动作。
@@ -97,7 +99,25 @@
 - gate blocked 时，`failure_site` 必须继续继承 `FR-0004.observability.failure_site` 的最小字段集合：`stage`、`component`、`target`、`summary`；其中 `component` 必须为 `gate`。
 - 两类 gate-only 场景都不得返回真实 `interaction_result`，也不得触发真实编辑器写入。
 
-## 实体 8：RiskTransitionAuditRecord
+## 实体 8：Issue208ValidationResultSupplement
+
+- `interaction_result.validation_action` ENUM NOT NULL（当前固定为 `editor_input`）
+- `interaction_result.target_page` TEXT NOT NULL（当前固定为 `creator.xiaohongshu.com/publish`）
+- `interaction_result.success_signals` ARRAY NOT NULL
+- `interaction_result.failure_signals` ARRAY NOT NULL
+- `interaction_result.minimum_replay` ARRAY NOT NULL
+- `interaction_result.out_of_scope_actions` ARRAY NOT NULL
+
+约束：
+- 本实体不是并行结果对象；它只是追加在 `FR-0010.ConsumerGateResult` 之上的 `interaction_result` 补充字段。
+- 仅当 `issue_scope=issue_208`、`risk_state=allowed`、`action_type=write`、`requested_execution_mode=live_write`、`effective_execution_mode=live_write`、`gate_decision=allowed` 且 `IssueActionMatrix` 放行 `reversible_interaction_with_approval` 时，才允许出现。
+- `validation_action` 当前只能为 `editor_input`，且不得被解释为已冻结 `xhs.editor_input` 正式命令名。
+- `success_signals` 至少覆盖聚焦成功、文本可见、最小失焦或重新观测后仍保留。
+- `failure_signals` 至少覆盖焦点丢失、文本回退、风险提示、DOM 漂移。
+- `minimum_replay` 只承载最小复现实验步骤，不得被外推为完整上传、提交或发布链路。
+- `out_of_scope_actions` 必须显式覆盖 `upload_submit_publish_chain` 所代表的上传、提交、发布确认等超范围动作。
+
+## 实体 9：RiskTransitionAuditRecord
 
 - `run_id` TEXT NOT NULL
 - `session_id` TEXT NOT NULL
@@ -124,6 +144,8 @@
   - `gate_decision=allowed` 且 `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 或 `live_read_high_risk` 时，审批证据必须继续落在 `FR-0010.ApprovalRecord` 与 `FR-0010.AuditRecord` 中。
   - `consumer_gate_result` 是下游消费的唯一结果投影承载对象；`#208/#209` 与后续实现事项不得派生并行私有结果对象或私有字段投影。
   - `#208` gate-only 观测结果继续继承 `FR-0004` 的 `page_state` 与 `failure_site` 最小字段集合；FR-0011 只补充 gate-only success / blocked 的使用边界，不创建平行 observability 形状。
+  - `#208` 的 `editor_input` 真实验证仍复用 `FR-0010` 的冻结门禁字段表达为 `action_type=write` + `requested_execution_mode=live_write` + `effective_execution_mode=live_write` + `gate_decision=allowed`；`IssueActionMatrix.issue_scope` 只负责补充 issue 级边界，不替代 `FR-0010` 核心字段。
+  - 当 `#208` 命中上述真实验证场景时，只允许在 `consumer_gate_result` 上追加受限 `interaction_result` 补充字段，不得新建并行 result object 或私有 mode。
 
 ## 生命周期
 

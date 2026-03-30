@@ -16,7 +16,7 @@
 ### 阶段 A：门禁责任与对象冻结
 
 - 输出：`spec.md` 门禁边界、`contracts/anti-detection-execution.md` 稳定对象。
-- 重点：插件层责任划分、状态机字段冻结、读写动作等级框架、`#208` gate-only 可观测性边界。
+- 重点：插件层责任划分、状态机字段冻结、读写动作等级框架、`#208` 从 gate-only 前置进入 `editor_input` 单动作真实验证的最小正式边界。
 
 ### 阶段 B：证据与差距收敛
 
@@ -35,8 +35,9 @@
 3. 不把高阶 Layer 4 行为模型扩张到本 Sprint 的最小实现范围。
 4. 不把完整写闭环纳入本 FR。
 5. `live_read_limited` 一旦被定义为正式公开模式，其审批前置、审计字段与阻断语义必须先在本 FR 冻结，再进入任何实现 PR。
-6. `editor_input` 在本 FR 中只能作为 `#208` 的验证候选动作出现，不得被升级为已冻结的正式命令接口。
+6. `editor_input` 在本 FR 中是 `#208` 唯一正式验证动作，但不得被升级为已冻结的正式命令接口。
 7. 后续若需要 `xhs.editor_input` 或 `xhs.interact` 稳定机器接口，必须走独立 command contract，不得在当前实现 PR 里隐式扩口。
+8. `#208` 的真实验证路径必须继续映射回 `FR-0010` 已冻结字段，不得为该单动作验证新增私有 execution mode 或私有门禁字段。
 
 ## 测试与验证策略
 
@@ -50,6 +51,7 @@
   - `#208/#209` 是否可直接消费统一状态机前置
   - “统一阻断策略”是否已被对象化而非口头描述
   - `#208` gate-only success / blocked 的最小 `page_state` 语义是否可被 reviewer 直接判定
+  - `#208` 的 `editor_input` 真实验证是否已和 `FR-0010` 冻结字段形成单一映射
   - 是否已明确区分“治理动作类别”和“正式命令接口”
 
 ## TDD 范围
@@ -83,4 +85,6 @@
 6. `#208/#209` 三态差异化阻断矩阵与状态变更审计字段已冻结。
 7. `live_read_limited` 的公开模式语义、审批证据要求与 `blocked` 时的 `effective_execution_mode` 语义已冻结，可作为后续实现事项的正式准入前置。
 8. `#208` 的 gate-only `page_state` / `key_requests=[]` / `failure_site` 语义已冻结。
-9. `editor_input` 仅被定义为验证候选动作，尚未被定义为正式命令接口。
+9. `#208` 的 `editor_input` 单动作真实验证边界、成功/失败信号、最小 replay 与证据要求已冻结。
+10. `#208` 的真实验证路径已明确回落到 `FR-0010` 冻结门禁字段，不依赖私有 mode、私有审批字段或平行 gate result。
+11. `editor_input` 尚未被定义为正式命令接口；如需稳定命令名，必须另起 command contract。

@@ -53,9 +53,9 @@
 - 必须明确上传注入相关路径（`DataTransfer` 等）在本阶段默认不放行为 live。
 - 必须明确 `issue_208` 当前冻结的是治理动作类别 `reversible_interaction_with_approval`，而不是正式命令名。
 - 必须明确在本次 formal contract freeze 中，`issue_208` 冻结的是“进入真实最小可逆交互验证的前置条件与边界”，而不是正式稳定命令接口。
-- 必须明确 `issue_208` 当前唯一正式验证候选动作是 `editor_input`：仅限 `creator.xiaohongshu.com/publish` 页面上的“聚焦并输入少量文本”。
+- 必须明确 `issue_208` 当前唯一正式验证动作是 `editor_input`：仅限 `creator.xiaohongshu.com/publish` 页面上的“聚焦并输入少量文本”。
 - 必须明确 `reversible_interaction_with_approval` 在 `issue_208` 上只允许作为单动作正式验证的受控 live 范围，不得扩张到上传、提交、发布确认或完整写链路。
-- 必须明确 `FR-0008` 中 `editor_input` 只是正式验证候选动作，不得被实现 PR 视为已冻结 command/API contract。
+- 必须明确 `FR-0008` 中 `editor_input` 只是上游推荐输入，不得被实现 PR 视为已冻结 command/API contract。
 - 必须明确后续若要引入 `xhs.editor_input` 或 `xhs.interact`，必须通过独立正式 command contract 冻结命令名、输入、输出、错误码、observability 与 gate-only 语义。
 
 ### 4. `#208` gate-only 前置与真实验证最小边界

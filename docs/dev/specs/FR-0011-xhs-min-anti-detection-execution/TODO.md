@@ -13,7 +13,8 @@
 - [x] 明确 `live_read_limited` 的正式公开模式语义、审批前置与审计要求
 - [x] 明确 `gate_decision=blocked` 时 `effective_execution_mode` 只表示真实未继续 live 的降级模式，不对外暴露未实际执行的 `live_*`
 - [x] 明确 `#208` 的 gate-only `page_state` / `key_requests=[]` / `failure_site` 最小语义
-- [x] 明确 `editor_input` 只是 `#208` 验证候选动作，不等于已冻结的正式命令接口
+- [x] 明确 `editor_input` 是 `#208` 唯一正式验证动作，但不等于已冻结的正式命令接口
+- [x] 明确 `#208` 的 `editor_input` 真实验证继续复用 `FR-0010` 的 `action_type=write` / `requested_execution_mode=live_write` / `effective_execution_mode=live_write`
 
 ## 进入实现前必须完成
 
