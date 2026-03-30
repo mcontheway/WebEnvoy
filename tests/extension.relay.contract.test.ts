@@ -1717,6 +1717,72 @@ describe("extension background relay contract", () => {
     ).toEqual(expect.arrayContaining(["TARGET_SCOPE_NOT_EXPLICIT"]));
   });
 
+  it("downgrades missing target scope xhs.interact live_write to dry_run in blocked gate payload", async () => {
+    const contentScript = new ContentScriptHandler();
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-editor-input-missing-target-live-write-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-editor-input-missing-target-live-write-001",
+        command: "xhs.interact",
+        command_params: {
+          ability: {
+            id: "xhs.interact.editor-input.v1",
+            layer: "L3",
+            action: "write"
+          },
+          input: {
+            action_id: "editor_input",
+            text: "最小正式验证"
+          },
+          options: {
+            issue_scope: "issue_208",
+            action_type: "write",
+            requested_execution_mode: "live_write",
+            risk_state: "allowed",
+            approval_record: {
+              approved: true,
+              approver: "qa-reviewer",
+              approved_at: "2026-03-23T10:00:00Z",
+              checks: {
+                target_domain_confirmed: false,
+                target_tab_confirmed: false,
+                target_page_confirmed: false,
+                risk_state_checked: true,
+                action_type_confirmed: true
+              }
+            }
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    const response = await responsePromise;
+    expect(response.status).toBe("error");
+    const payload = asRecord(response.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    const gateOutcome = asRecord(payload.gate_outcome);
+    expect(consumerGateResult).toMatchObject({
+      requested_execution_mode: "live_write",
+      effective_execution_mode: "dry_run",
+      gate_decision: "blocked"
+    });
+    expect(gateOutcome).toMatchObject({
+      effective_execution_mode: "dry_run",
+      gate_decision: "blocked"
+    });
+    expect(
+      (consumerGateResult?.gate_reasons as string[] | undefined) ?? []
+    ).toEqual(expect.arrayContaining(["TARGET_SCOPE_NOT_EXPLICIT"]));
+  });
+
   it("blocks xhs.interact disguised as read without forwarding to the editor", async () => {
     const originalDocument = (globalThis as { document?: unknown }).document;
     const editor = {

@@ -957,29 +957,61 @@ export class BackgroundRelay {
     const gateReasons = [writeTierReason];
     if (!targetDomain || targetTabId === null || !targetPage) {
       gateReasons.push("TARGET_SCOPE_NOT_EXPLICIT");
+      const effectiveExecutionMode: XhsExecutionMode =
+        requestedExecutionMode === "recon" ? "recon" : "dry_run";
+      const consumerGateResult = {
+        risk_state: riskState,
+        issue_scope: issueScope,
+        target_domain: targetDomain,
+        target_tab_id: targetTabId,
+        target_page: targetPage,
+        action_type: actionType,
+        requested_execution_mode: requestedExecutionMode,
+        effective_execution_mode: effectiveExecutionMode,
+        gate_decision: "blocked",
+        gate_reasons: gateReasons,
+        fingerprint_gate_decision: "allowed",
+        fingerprint_reason_codes: [],
+        write_interaction_tier: "reversible_interaction"
+      };
+      const gatePayload = createRelayXhsGatePayload({
+        request,
+        issueScope,
+        riskState,
+        targetDomain,
+        targetTabId,
+        targetPage,
+        actionType,
+        requestedExecutionMode,
+        effectiveExecutionMode,
+        gateDecision: "blocked",
+        gateReasons,
+        requiresManualConfirmation:
+          requestedExecutionMode === "live_write" ||
+          writeMatrixDecision.decision === "conditional" ||
+          writeActionMatrixDecisions.write_interaction_tier === "reversible_interaction",
+        approvalRecord,
+        consumerGateResult,
+        writeActionMatrixDecisions,
+        writeGateOnlyDecision: {
+          issue_scope: issueScope,
+          state: riskState,
+          write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier,
+          matrix_decision: writeMatrixDecision.decision,
+          matrix_actions: writeActionMatrixDecisions.matrix_actions,
+          required_approval: [],
+          approval_satisfied: false,
+          approval_missing_requirements: [],
+          execution_enabled: false
+        }
+      });
       return {
         id: request.id,
         status: "error",
         summary: {
           relay_path: "host>background"
         },
-        payload: {
-          consumer_gate_result: {
-            risk_state: riskState,
-            issue_scope: issueScope,
-            target_domain: targetDomain,
-            target_tab_id: targetTabId,
-            target_page: targetPage,
-            action_type: actionType,
-            requested_execution_mode: requestedExecutionMode,
-            effective_execution_mode: requestedExecutionMode,
-            gate_decision: "blocked",
-            gate_reasons: gateReasons,
-            fingerprint_gate_decision: "allowed",
-            fingerprint_reason_codes: [],
-            write_interaction_tier: "reversible_interaction"
-          }
-        },
+        payload: gatePayload,
         error: {
           code: "ERR_TRANSPORT_FORWARD_FAILED",
           message: "xhs target scope is incomplete"
