@@ -536,17 +536,14 @@ const resolveXhsInteractInput = (
 
 const createXhsInteractInputErrorPayload = (
   ability: Record<string, unknown>,
-  consumerGateResult: Record<string, unknown>,
-  writeActionMatrixDecisions: XhsWriteActionMatrixDecisionsOutput
+  gatePayload: Record<string, unknown>
 ): Record<string, unknown> => ({
   details: {
     ability_id: String(ability.id ?? "xhs.interact.editor-input.v1"),
     stage: "input_validation",
     reason: "INTERACTION_INPUT_INVALID"
   },
-  consumer_gate_result: consumerGateResult,
-  write_interaction_tier: WRITE_INTERACTION_TIER,
-  write_action_matrix_decisions: writeActionMatrixDecisions
+  ...gatePayload
 });
 
 const createBridgeXhsGateOnlyPayload = (
@@ -597,6 +594,91 @@ const createBridgeXhsGateOnlyPayload = (
       page_state: null,
       key_requests: [],
       failure_site: null
+    }
+  };
+};
+
+const createRelayXhsGatePayload = (input: {
+  request: BridgeRequest;
+  issueScope: IssueScope | null;
+  riskState: XhsRiskState;
+  targetDomain: string | null;
+  targetTabId: number | null;
+  targetPage: string | null;
+  actionType: XhsActionType;
+  requestedExecutionMode: XhsExecutionMode | null;
+  effectiveExecutionMode: XhsExecutionMode;
+  gateDecision: "allowed" | "blocked";
+  gateReasons: string[];
+  requiresManualConfirmation: boolean;
+  approvalRecord: XhsApprovalRecord;
+  consumerGateResult: Record<string, unknown>;
+  writeActionMatrixDecisions: XhsWriteActionMatrixDecisionsOutput;
+  writeGateOnlyDecision?: Record<string, unknown>;
+}): Record<string, unknown> => {
+  const recordedAt = new Date().toISOString();
+  const runId = String(input.request.params.run_id ?? input.request.id);
+  const sessionId = String(input.request.params.session_id ?? "nm-session-001");
+  const profile = typeof input.request.profile === "string" ? input.request.profile : null;
+
+  return {
+    plugin_gate_ownership: XHS_PLUGIN_GATE_OWNERSHIP,
+    scope_context: XHS_SCOPE_CONTEXT,
+    read_execution_policy: XHS_READ_EXECUTION_POLICY,
+    gate_input: {
+      run_id: runId,
+      session_id: sessionId,
+      profile,
+      issue_scope: input.issueScope,
+      target_domain: input.targetDomain,
+      target_tab_id: input.targetTabId,
+      target_page: input.targetPage,
+      action_type: input.actionType,
+      requested_execution_mode: input.requestedExecutionMode,
+      risk_state: input.riskState,
+      fingerprint_gate_decision: "allowed"
+    },
+    gate_outcome: {
+      effective_execution_mode: input.effectiveExecutionMode,
+      gate_decision: input.gateDecision,
+      gate_reasons: input.gateReasons,
+      requires_manual_confirmation: input.requiresManualConfirmation,
+      fingerprint_gate_decision: "allowed"
+    },
+    consumer_gate_result: input.consumerGateResult,
+    approval_record: input.approvalRecord,
+    issue_action_matrix:
+      input.issueScope !== null
+        ? resolveIssueActionMatrixEntry(input.issueScope, input.riskState)
+        : null,
+    write_interaction_tier: WRITE_INTERACTION_TIER,
+    write_action_matrix_decisions: input.writeActionMatrixDecisions,
+    ...(input.writeGateOnlyDecision
+      ? { write_gate_only_decision: input.writeGateOnlyDecision }
+      : {}),
+    audit_record: {
+      event_id: `relay_gate_${input.request.id}`,
+      run_id: runId,
+      session_id: sessionId,
+      profile,
+      issue_scope: input.issueScope,
+      risk_state: input.riskState,
+      target_domain: input.targetDomain,
+      target_tab_id: input.targetTabId,
+      target_page: input.targetPage,
+      action_type: input.actionType,
+      requested_execution_mode: input.requestedExecutionMode,
+      effective_execution_mode: input.effectiveExecutionMode,
+      gate_decision: input.gateDecision,
+      gate_reasons: input.gateReasons,
+      approver: input.approvalRecord.approver,
+      approved_at: input.approvalRecord.approved_at,
+      recorded_at: recordedAt,
+      risk_signal: input.riskState !== "allowed",
+      recovery_signal: false,
+      session_rhythm_state: "normal",
+      cooldown_until: null,
+      recovery_started_at: null
     }
   };
 };
@@ -941,6 +1023,8 @@ export class BackgroundRelay {
     }
     const blockingReasons = gateReasons.filter((reason) => reason !== writeTierReason);
     const allowed = blockingReasons.length === 0;
+    const effectiveExecutionMode: XhsExecutionMode =
+      requestedExecutionMode === "recon" ? "recon" : "dry_run";
     if (allowed) {
       gateReasons.push(
         requestedExecutionMode === "recon" ? "DEFAULT_MODE_RECON" : "DEFAULT_MODE_DRY_RUN",
@@ -955,14 +1039,45 @@ export class BackgroundRelay {
       target_page: targetPage,
       action_type: actionType,
       requested_execution_mode: requestedExecutionMode,
-      effective_execution_mode:
-        requestedExecutionMode === "recon" ? "recon" : "dry_run",
+      effective_execution_mode: effectiveExecutionMode,
       gate_decision: allowed ? "allowed" : "blocked",
       gate_reasons: gateReasons,
       fingerprint_gate_decision: "allowed",
       fingerprint_reason_codes: [],
       write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier
     };
+    const writeGateOnlyDecision = {
+      issue_scope: issueScope,
+      state: riskState,
+      write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier,
+      matrix_decision: writeMatrixDecision.decision,
+      matrix_actions: writeActionMatrixDecisions.matrix_actions,
+      required_approval: writeApprovalRequirements,
+      approval_satisfied: approvalRequirementGaps.length === 0,
+      approval_missing_requirements: approvalRequirementGaps,
+      execution_enabled: false
+    };
+    const gatePayload = createRelayXhsGatePayload({
+      request,
+      issueScope,
+      riskState,
+      targetDomain,
+      targetTabId,
+      targetPage,
+      actionType,
+      requestedExecutionMode,
+      effectiveExecutionMode,
+      gateDecision: allowed ? "allowed" : "blocked",
+      gateReasons,
+      requiresManualConfirmation:
+        requestedExecutionMode === "live_write" ||
+        writeMatrixDecision.decision === "conditional" ||
+        writeActionMatrixDecisions.write_interaction_tier === "reversible_interaction",
+      approvalRecord,
+      consumerGateResult,
+      writeActionMatrixDecisions,
+      writeGateOnlyDecision
+    });
     if (!allowed) {
       return {
         id: request.id,
@@ -970,22 +1085,7 @@ export class BackgroundRelay {
         summary: {
           relay_path: "host>background"
         },
-        payload: {
-          consumer_gate_result: consumerGateResult,
-          write_interaction_tier: WRITE_INTERACTION_TIER,
-          write_action_matrix_decisions: writeActionMatrixDecisions,
-          write_gate_only_decision: {
-            issue_scope: issueScope,
-            state: riskState,
-            write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier,
-            matrix_decision: writeMatrixDecision.decision,
-            matrix_actions: writeActionMatrixDecisions.matrix_actions,
-            required_approval: writeApprovalRequirements,
-            approval_satisfied: approvalRequirementGaps.length === 0,
-            approval_missing_requirements: approvalRequirementGaps,
-            execution_enabled: false
-          }
-        },
+        payload: gatePayload,
         error: {
           code: "ERR_TRANSPORT_FORWARD_FAILED",
           message: xhsGateReasonMessage(blockingReasons[0] ?? "ISSUE_ACTION_MATRIX_BLOCKED")
@@ -1000,11 +1100,7 @@ export class BackgroundRelay {
         summary: {
           relay_path: "host>background"
         },
-        payload: createXhsInteractInputErrorPayload(
-          resolvedAbility,
-          consumerGateResult,
-          writeActionMatrixDecisions
-        ),
+        payload: createXhsInteractInputErrorPayload(resolvedAbility, gatePayload),
         error: {
           code: "ERR_EXECUTION_FAILED",
           message: "xhs.interact requires action_id=editor_input and non-empty text"
@@ -1023,30 +1119,7 @@ export class BackgroundRelay {
         tab_id: null,
         relay_path: "host>background"
       },
-      payload: {
-        summary: {
-          capability_result: {
-            ability_id: String(resolvedAbility.id ?? "xhs.interact.editor-input.v1"),
-            layer: String(resolvedAbility.layer ?? "L3"),
-            action: actionType,
-            outcome: "partial",
-            data_ref: {
-              action_id: actionId
-            },
-            metrics: {
-              count: 0
-            }
-          },
-          consumer_gate_result: consumerGateResult,
-          write_interaction_tier: WRITE_INTERACTION_TIER,
-          write_action_matrix_decisions: writeActionMatrixDecisions
-        },
-        observability: {
-          page_state: null,
-          key_requests: [],
-          failure_site: null
-        }
-      },
+      payload: createBridgeXhsGateOnlyPayload(request, gatePayload),
       error: null
     };
   }
@@ -2321,8 +2394,7 @@ class ChromeBackgroundBridge {
               },
               payload: createXhsInteractInputErrorPayload(
                 ability,
-                asRecord(gateResult.gatePayload?.consumer_gate_result) ?? {},
-                gateResult.gatePayload?.write_action_matrix_decisions as XhsWriteActionMatrixDecisionsOutput
+                gateResult.gatePayload ?? {}
               ),
               error: {
                 code: "ERR_EXECUTION_FAILED",

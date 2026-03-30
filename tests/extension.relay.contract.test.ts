@@ -1881,6 +1881,10 @@ describe("extension background relay contract", () => {
       const payload = asRecord(response.payload) ?? {};
       const summary = asRecord(payload.summary) ?? {};
       const consumerGateResult = asRecord(summary.consumer_gate_result);
+      const gateInput = asRecord(summary.gate_input);
+      const gateOutcome = asRecord(summary.gate_outcome);
+      const approvalRecord = asRecord(summary.approval_record);
+      const auditRecord = asRecord(summary.audit_record);
       expect(consumerGateResult).toMatchObject({
         issue_scope: "issue_208",
         action_type: "write",
@@ -1888,6 +1892,46 @@ describe("extension background relay contract", () => {
         effective_execution_mode: "dry_run",
         gate_decision: "allowed"
       });
+      expect(asRecord(summary.scope_context)).toMatchObject({
+        platform: "xhs",
+        read_domain: "www.xiaohongshu.com",
+        write_domain: "creator.xiaohongshu.com",
+        domain_mixing_forbidden: true
+      });
+      expect(gateInput).toMatchObject({
+        run_id: "run-xhs-editor-input-live-write-gate-only-001",
+        session_id: "nm-session-001",
+        profile: "profile-a",
+        issue_scope: "issue_208",
+        target_domain: "creator.xiaohongshu.com",
+        target_tab_id: 32,
+        target_page: "creator_publish_tab",
+        action_type: "write",
+        requested_execution_mode: "live_write",
+        risk_state: "allowed"
+      });
+      expect(gateOutcome).toMatchObject({
+        effective_execution_mode: "dry_run",
+        gate_decision: "allowed",
+        requires_manual_confirmation: true
+      });
+      expect(approvalRecord).toMatchObject({
+        approved: true,
+        approver: "qa-reviewer",
+        approved_at: "2026-03-23T10:00:00Z"
+      });
+      expect(auditRecord).toMatchObject({
+        run_id: "run-xhs-editor-input-live-write-gate-only-001",
+        session_id: "nm-session-001",
+        profile: "profile-a",
+        issue_scope: "issue_208",
+        action_type: "write",
+        requested_execution_mode: "live_write",
+        effective_execution_mode: "dry_run",
+        gate_decision: "allowed"
+      });
+      expect(typeof auditRecord?.event_id).toBe("string");
+      expect(typeof auditRecord?.recorded_at).toBe("string");
       expect(
         (consumerGateResult?.gate_reasons as string[] | undefined) ?? []
       ).toEqual(expect.arrayContaining(["WRITE_EXECUTION_GATE_ONLY"]));
