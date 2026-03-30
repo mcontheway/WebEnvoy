@@ -1373,7 +1373,7 @@ describe("extension background relay contract", () => {
     }
   });
 
-  it("returns interaction_result for xhs.editor_input on creator publish page", async () => {
+  it("keeps xhs.editor_input gate-only under dry_run and skips real editor write", async () => {
     const originalDocument = (globalThis as { document?: unknown }).document;
     const editor = {
       isContentEditable: true,
@@ -1460,21 +1460,135 @@ describe("extension background relay contract", () => {
       const payload = asRecord(response.payload) ?? {};
       const summary = asRecord(payload.summary) ?? {};
       const interactionResult = asRecord(summary.interaction_result);
+      const consumerGateResult = asRecord(summary.consumer_gate_result);
       const observability = asRecord(payload.observability);
       const pageState = asRecord(observability?.page_state);
       expect(summary.capability_result).toMatchObject({
         ability_id: "xhs.interact.editor-input.v1",
         action: "write",
-        outcome: "success"
+        outcome: "partial"
       });
-      expect(interactionResult).toMatchObject({
-        action_id: "editor_input",
-        text: "最小正式验证"
+      expect(interactionResult).toBeNull();
+      expect(consumerGateResult).toMatchObject({
+        issue_scope: "issue_208",
+        action_type: "write",
+        requested_execution_mode: "dry_run",
+        effective_execution_mode: "dry_run",
+        gate_decision: "allowed"
       });
-      expect((interactionResult?.final_text as string) || "").toContain("最小正式验证");
-      expect(pageState).toMatchObject({
-        page_kind: "creator_publish_tab"
+      expect(
+        (consumerGateResult?.gate_reasons as string[] | undefined) ?? []
+      ).toEqual(expect.arrayContaining(["WRITE_EXECUTION_GATE_ONLY"]));
+      expect(pageState).toBeNull();
+      expect(editor.textContent).toBe("");
+    } finally {
+      if (originalDocument === undefined) {
+        delete (globalThis as { document?: unknown }).document;
+      } else {
+        (globalThis as { document?: unknown }).document = originalDocument;
+      }
+    }
+  });
+
+  it("keeps xhs.editor_input gate-only under recon and does not mutate editor content", async () => {
+    const originalDocument = (globalThis as { document?: unknown }).document;
+    const editor = {
+      isContentEditable: true,
+      textContent: "",
+      focus: () => undefined,
+      dispatchEvent: () => true,
+      getAttribute: (name: string) => (name === "contenteditable" ? "true" : null)
+    };
+    (globalThis as { document?: unknown }).document = {
+      activeElement: editor,
+      title: "Creator Publish",
+      readyState: "complete",
+      querySelector: () => editor,
+      querySelectorAll: () => [editor]
+    };
+    const contentScript = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_000,
+        randomId: () => "relay-editor-input-recon-id",
+        getLocationHref: () => "https://creator.xiaohongshu.com/publish/publish",
+        getDocumentTitle: () => "Creator Publish",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=valid;",
+        callSignature: async () => ({
+          "X-s": "signed",
+          "X-t": "1"
+        }),
+        fetchJson: async () => {
+          throw new Error("editor_input should not hit fetch under recon gate-only");
+        }
+      }
+    });
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-editor-input-recon-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-editor-input-recon-001",
+        command: "xhs.interact",
+        command_params: {
+          ability: {
+            id: "xhs.interact.editor-input.v1",
+            layer: "L3",
+            action: "write"
+          },
+          input: {
+            action_id: "editor_input",
+            text: "最小正式验证 recon"
+          },
+          options: {
+            target_domain: "creator.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "creator_publish_tab",
+            issue_scope: "issue_208",
+            action_type: "write",
+            requested_execution_mode: "recon",
+            risk_state: "allowed",
+            approval_record: {
+              approved: true,
+              approver: "qa-reviewer",
+              approved_at: "2026-03-23T10:00:00Z",
+              checks: {
+                target_domain_confirmed: true,
+                target_tab_confirmed: true,
+                target_page_confirmed: true,
+                risk_state_checked: true,
+                action_type_confirmed: true
+              }
+            }
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    try {
+      const response = await responsePromise;
+      expect(response.status).toBe("success");
+      const payload = asRecord(response.payload) ?? {};
+      const summary = asRecord(payload.summary) ?? {};
+      const consumerGateResult = asRecord(summary.consumer_gate_result);
+      expect(asRecord(summary.interaction_result)).toBeNull();
+      expect(consumerGateResult).toMatchObject({
+        issue_scope: "issue_208",
+        action_type: "write",
+        requested_execution_mode: "recon",
+        effective_execution_mode: "recon",
+        gate_decision: "allowed"
       });
+      expect(
+        (consumerGateResult?.gate_reasons as string[] | undefined) ?? []
+      ).toEqual(expect.arrayContaining(["WRITE_EXECUTION_GATE_ONLY"]));
+      expect(editor.textContent).toBe("");
     } finally {
       if (originalDocument === undefined) {
         delete (globalThis as { document?: unknown }).document;
