@@ -326,7 +326,7 @@
 
 补充约束：
 1. gate-only success 必须返回最小 `observability.page_state`；`failure_site` 必须为 `null`；`key_requests` 必须为空数组。
-2. gate blocked 允许返回最小 `observability.page_state`；`key_requests` 仍必须为空数组；`failure_site.component` 必须为 `gate`。
+2. gate blocked 允许返回最小 `observability.page_state`；`key_requests` 仍必须为空数组；`failure_site` 必须继续继承 `FR-0004.observability.failure_site` 的最小字段集合（`stage`、`component`、`target`、`summary`），其中 `component` 必须为 `gate`。
 3. 上述两类场景都不得返回真实页面写入完成信号，不得返回真实 `interaction_result`，也不得触发真实编辑器写入。
 4. `page_state` 最小字段继续复用 `FR-0004` 的正式定义；本 FR 只补充 `#208` gate-only 场景下“必须返回/允许返回”的使用边界，不重定义字段本身。
 

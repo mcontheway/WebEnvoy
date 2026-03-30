@@ -77,12 +77,27 @@
 - `conditional_actions.requires` 只允许引用已在 `ReadExecutionPolicy.live_entry_requirements` 中冻结的机器条件名。
 - 所有 `IssueActionMatrix` entry 都必须显式包含 `conditional_actions`；当不存在附加前置动作时，取空数组。
 - `paused` 的 `blocked_actions` 必须显式覆盖所有 live 动作，不得依赖实现推断补全。
-- `issue_208` 在 `limited` 下不得出现不可逆写动作。
+- `issue_208` 在 `limited|allowed` 下当前只允许 `dry_run|recon` 与 gate-only 观测结果；不得通过 `allowed_actions` 或 `conditional_actions` 放行真实 `reversible_interaction_with_approval`。
+- `issue_208` 在 `limited|allowed` 下的 `blocked_actions` 必须显式覆盖 `reversible_interaction_with_approval`、`live_write`、`irreversible_write` 与一切 live 读扩面动作。
 - `blocked_actions` 不得为空，必须与 `allowed_actions`、`conditional_actions` 一起定义完整边界。
 - live 读模式若需要审批证据，不得直接出现在 `allowed_actions` 中，必须落入 `conditional_actions`。
 - `issue_209` 在 `limited` 下只允许把 `live_read_limited` 放入 `conditional_actions`，不得把 `live_read_high_risk` 视为可放行动作。
 
-## 实体 7：RiskTransitionAuditRecord
+## 实体 7：Issue208GateOnlyObservability
+
+- `page_state.page_kind` ENUM NOT NULL（沿用 `FR-0004`：`compose` | `login` | `unknown` 等既有语义）
+- `page_state.url` TEXT NOT NULL
+- `page_state.title` TEXT NOT NULL
+- `page_state.ready_state` ENUM NOT NULL（`loading` | `interactive` | `complete`）
+- `key_requests` ARRAY NOT NULL（固定为空数组）
+- `failure_site` OBJECT NULL
+
+约束：
+- gate-only success 时，`failure_site` 必须为 `null`。
+- gate blocked 时，`failure_site` 必须继续继承 `FR-0004.observability.failure_site` 的最小字段集合：`stage`、`component`、`target`、`summary`；其中 `component` 必须为 `gate`。
+- 两类 gate-only 场景都不得返回真实 `interaction_result`，也不得触发真实编辑器写入。
+
+## 实体 8：RiskTransitionAuditRecord
 
 - `run_id` TEXT NOT NULL
 - `session_id` TEXT NOT NULL
@@ -108,6 +123,7 @@
   - `gate_decision=blocked` 时，`effective_execution_mode` 只能表达真实未继续 live 的降级模式。
   - `gate_decision=allowed` 且 `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 或 `live_read_high_risk` 时，审批证据必须继续落在 `FR-0010.ApprovalRecord` 与 `FR-0010.AuditRecord` 中。
   - `consumer_gate_result` 是下游消费的唯一结果投影承载对象；`#208/#209` 与后续实现事项不得派生并行私有结果对象或私有字段投影。
+  - `#208` gate-only 观测结果继续继承 `FR-0004` 的 `page_state` 与 `failure_site` 最小字段集合；FR-0011 只补充 gate-only success / blocked 的使用边界，不创建平行 observability 形状。
 
 ## 生命周期
 
