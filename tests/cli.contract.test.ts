@@ -3307,7 +3307,8 @@ process.stdin.on("data", (chunk) => {
     const launcherRaw = await readFile(launcherPath, "utf8");
     expect(launcherRaw).toContain("#!/usr/bin/env bash");
     expect(launcherRaw).toContain("set -euo pipefail");
-    expect(launcherRaw).toContain(`exec ${hostCommand} "$@"`);
+    expect(launcherRaw).toContain('exec ');
+    expect(launcherRaw).toContain(' "$@"');
     const launcherMode = (await stat(launcherPath)).mode & 0o777;
     expect(launcherMode).toBe(0o755);
   });
@@ -3364,7 +3365,66 @@ process.stdin.on("data", (chunk) => {
     });
 
     const launcherRaw = await readFile(launcherPath, "utf8");
-    expect(launcherRaw).toContain(`exec ${defaultHostCommand} "$@"`);
+    expect(launcherRaw).toContain('exec ');
+    expect(launcherRaw).toContain(' "$@"');
+  });
+
+  it("keeps launcher execution shell-safe when host_command contains dollar-like characters", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
+    const launcherPath = path.join(
+      runtimeCwd,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "bin",
+      "webenvoy-native-host-shell-safe"
+    );
+    const markerPath = path.join(runtimeCwd, "marker-created-by-shell");
+    const argvCapturePath = path.join(runtimeCwd, "launcher-argv.json");
+    const hostileEntryPath = path.join(
+      runtimeCwd,
+      "native host $(touch marker-created-by-shell) $HOME.mjs"
+    );
+    await writeFile(
+      hostileEntryPath,
+      `import { writeFileSync } from "node:fs";\nwriteFileSync(process.env.WEBENVOY_ARGV_CAPTURE_PATH, JSON.stringify(process.argv.slice(2)) + "\\n", "utf8");\n`,
+      "utf8"
+    );
+    const hostCommand = createNativeHostCommand(hostileEntryPath);
+
+    const install = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-shell-safe-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          manifest_dir: manifestDir,
+          launcher_path: launcherPath,
+          host_command: hostCommand
+        })
+      ],
+      runtimeCwd
+    );
+    expect(install.status).toBe(0);
+
+    const launch = spawnSync(launcherPath, ["--ping"], {
+      cwd: runtimeCwd,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        WEBENVOY_ARGV_CAPTURE_PATH: argvCapturePath
+      }
+    });
+    expect(launch.status).toBe(0);
+    await expect(readFile(markerPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    expect(JSON.parse(await readFile(argvCapturePath, "utf8"))).toEqual(["--ping"]);
   });
 
   it("removes native host manifest and launcher through runtime.uninstall and keeps idempotency", async () => {

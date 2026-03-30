@@ -121,6 +121,97 @@ const assertNoSymlinkAncestorBetween = async (input: {
 
 const quoteShellToken = (value: string): string => JSON.stringify(value);
 
+const quoteShellArgForScript = (value: string): string => `'${value.replace(/'/g, `'\"'\"'`)}'`;
+
+const tokenizeHostCommand = (
+  command: "runtime.install" | "runtime.uninstall",
+  hostCommand: string
+): string[] => {
+  const tokens: string[] = [];
+  let current = "";
+  let index = 0;
+  let quote: "'" | '"' | null = null;
+
+  const pushCurrent = () => {
+    if (current.length === 0) {
+      return;
+    }
+    tokens.push(current);
+    current = "";
+  };
+
+  while (index < hostCommand.length) {
+    const char = hostCommand[index];
+
+    if (quote === null) {
+      if (/\s/.test(char)) {
+        pushCurrent();
+        index += 1;
+        continue;
+      }
+      if (char === "'" || char === '"') {
+        quote = char;
+        index += 1;
+        continue;
+      }
+      if (char === "\\") {
+        const next = hostCommand[index + 1];
+        if (typeof next !== "string") {
+          throw nativeHostPathError(command, "HOST_COMMAND_INVALID", {
+            field: "host_command"
+          });
+        }
+        current += next;
+        index += 2;
+        continue;
+      }
+      if ("|&;<>$`()\n\r".includes(char)) {
+        throw nativeHostPathError(command, "HOST_COMMAND_INVALID", {
+          field: "host_command"
+        });
+      }
+      current += char;
+      index += 1;
+      continue;
+    }
+
+    if (char === quote) {
+      quote = null;
+      index += 1;
+      continue;
+    }
+
+    if (quote === '"' && char === "\\") {
+      const next = hostCommand[index + 1];
+      if (typeof next !== "string") {
+        throw nativeHostPathError(command, "HOST_COMMAND_INVALID", {
+          field: "host_command"
+        });
+      }
+      current += next;
+      index += 2;
+      continue;
+    }
+
+    current += char;
+    index += 1;
+  }
+
+  if (quote !== null) {
+    throw nativeHostPathError(command, "HOST_COMMAND_INVALID", {
+      field: "host_command"
+    });
+  }
+
+  pushCurrent();
+  if (tokens.length === 0) {
+    throw nativeHostPathError(command, "HOST_COMMAND_INVALID", {
+      field: "host_command"
+    });
+  }
+  return tokens;
+};
+
 export const resolveRepoOwnedNativeHostEntryPath = (): string =>
   fileURLToPath(new URL("../runtime/native-messaging/native-host-entry.js", import.meta.url));
 
@@ -169,11 +260,19 @@ const resolveDefaultManifestDirectory = (browserChannel: BrowserChannel): string
   });
 };
 
-const buildLauncherScript = (hostCommand: string): string =>
-  `#!/usr/bin/env bash
+const buildLauncherScript = (input: {
+  command: "runtime.install" | "runtime.uninstall";
+  hostCommand: string;
+}): string => {
+  const argv = tokenizeHostCommand(input.command, input.hostCommand)
+    .map((token) => quoteShellArgForScript(token))
+    .join(" ");
+
+  return `#!/usr/bin/env bash
 set -euo pipefail
-exec ${hostCommand} "$@"
+exec ${argv} "$@"
 `;
+};
 
 const resolveControlledInstallRoots = (cwd: string, browserChannel: BrowserChannel) => {
   const channelRoot = resolve(cwd, ".webenvoy", "native-host-install", browserChannel);
@@ -295,7 +394,14 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
   await mkdir(dirname(resolvedPaths.launcherPath), { recursive: true });
   await assertNotSymlink("runtime.install", "launcher_path", resolvedPaths.launcherPath);
   await assertNotSymlink("runtime.install", "manifest_path", resolvedPaths.manifestPath);
-  await writeFile(resolvedPaths.launcherPath, buildLauncherScript(hostCommand), "utf8");
+  await writeFile(
+    resolvedPaths.launcherPath,
+    buildLauncherScript({
+      command: "runtime.install",
+      hostCommand
+    }),
+    "utf8"
+  );
   await chmod(resolvedPaths.launcherPath, 0o755);
 
   const manifest = {
