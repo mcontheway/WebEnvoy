@@ -46,7 +46,8 @@
 - `run_id` 与 `runtime_context_id` 只属于单次 run/session。
 - `profile` 必须与当前持久 identity binding 指向同一 profile。
 - `main_world_secret` 只用于当前 run 的信任链，不进入持久元数据。
-- 本契约不要求当前阶段扩展字段级持久化 schema。
+- 本契约不负责冻结新的 bootstrap payload 持久化 schema。
+- `persistentExtensionBinding` 的最小持久化子集已在 FR-0015 `spec.md` / `data-model.md` 中单独冻结；它属于 identity preflight 的持久 binding 边界，而不是 `runtime_bootstrap_envelope` 的输入字段。
 
 ## 最小 request / ack 形状
 

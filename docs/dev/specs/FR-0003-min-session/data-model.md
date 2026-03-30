@@ -33,7 +33,7 @@ ProfileDirectory 是浏览器 UserDataDir 对应的物理目录。
 
 `ProfileMeta` 对应 `__webenvoy_meta.json`。
 
-### 最小字段
+### FR-0003 基线最小字段
 
 ```json
 {
@@ -77,6 +77,8 @@ ProfileDirectory 是浏览器 UserDataDir 对应的物理目录。
 - `updatedAt` 必须在每次状态变更或绑定变更后刷新。
 - `fingerprintSeeds` 与 `localStorageSnapshots` 仅承载最小会话摘要 / 恢复输入，不得膨胀为账号资产总表。
 - 不允许把账号健康、矩阵调度、风控分数写入该文件。
+- 后续 FR 只能以“加性可选字段”方式扩展 `ProfileMeta`；新增字段必须在对应 formal spec / data-model 中冻结字段边界、生命周期、非法值处理与回滚策略，且不得改写 FR-0003 基线字段语义。
+- 在当前已冻结的后续 FR 中，`FR-0015` 允许以受控加项形式新增 `persistentExtensionBinding`；该字段不属于 FR-0003 原生基线字段，只在 FR-0015 formal 边界内有效。
 
 ### `localStorageSnapshots` 语义约束
 
@@ -143,3 +145,4 @@ ProxyBinding 表示 Profile 级代理黏性绑定。
 - WebEnvoy 只负责 `__webenvoy_meta.json` 和 ProfileLock 的最小管理。
 - 不要求把浏览器内部会话细节再次导入 SQLite。
 - 不要求把平台账号信息复制到独立的持久化仓库。
+- `__webenvoy_meta.json` 的默认白名单以 FR-0003 基线字段为准；后续 FR 仅可通过 formal spec review 新增受控加性字段。
