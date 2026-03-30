@@ -53,15 +53,11 @@ const ISSUE_ACTION_MATRIX = [
     issue_scope: "issue_208",
     state: "limited",
     allowed_actions: ["dry_run", "recon"],
-    conditional_actions: [
-      {
-        action: "reversible_interaction_with_approval",
-        requires: [...APPROVAL_EVIDENCE_REQUIREMENTS]
-      }
-    ],
+    conditional_actions: [],
     blocked_actions: [
       "live_read_limited",
       "live_read_high_risk",
+      "reversible_interaction_with_approval",
       "irreversible_write",
       "live_write",
       "expand_new_live_surface_without_gate"
@@ -71,15 +67,11 @@ const ISSUE_ACTION_MATRIX = [
     issue_scope: "issue_208",
     state: "allowed",
     allowed_actions: ["dry_run", "recon"],
-    conditional_actions: [
-      {
-        action: "reversible_interaction_with_approval",
-        requires: [...APPROVAL_EVIDENCE_REQUIREMENTS]
-      }
-    ],
+    conditional_actions: [],
     blocked_actions: [
       "live_read_limited",
       "live_read_high_risk",
+      "reversible_interaction_with_approval",
       "irreversible_write",
       "live_write",
       "expand_new_live_surface_without_gate"
@@ -276,9 +268,6 @@ const resolveMatrixActionDecision = (entry, actions) => {
   const conditional = entry.conditional_actions.find((item) => actions.includes(item.action)) ?? null;
   if (conditional) {
     return { decision: "conditional", requires: [...conditional.requires] };
-  }
-  if (actions.includes("reversible_interaction_with_approval")) {
-    return { decision: "conditional", requires: [...APPROVAL_EVIDENCE_REQUIREMENTS] };
   }
   if (actions.every((action) => entry.allowed_actions.includes(action))) {
     return { decision: "allowed", requires: [] };

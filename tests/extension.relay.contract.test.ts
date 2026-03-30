@@ -1228,7 +1228,7 @@ describe("extension background relay contract", () => {
     expect(fetchCalled).toBe(false);
   });
 
-  it("allows issue_208 reversible_interaction_with_approval only when approval is complete", async () => {
+  it("keeps issue_208 dry_run write blocked even when approval is complete", async () => {
     const states: Array<"limited" | "allowed"> = ["limited", "allowed"];
     for (const state of states) {
       const blockedContentScript = new ContentScriptHandler({
@@ -1364,12 +1364,11 @@ describe("extension background relay contract", () => {
         timeout_ms: 200
       });
       const approvedResponse = await approvedResponsePromise;
-      expect(approvedResponse.status).toBe("success");
+      expect(approvedResponse.status).toBe("error");
       const approvedPayload = asRecord(approvedResponse.payload) ?? {};
-      const summary = asRecord(approvedPayload.summary) ?? {};
-      const approvedConsumerGateResult = asRecord(summary.consumer_gate_result);
-      expect(approvedConsumerGateResult?.gate_decision).toBe("allowed");
-      expect(resolveWriteInteractionTier(summary)).toBe("reversible_interaction");
+      const approvedConsumerGateResult = asRecord(approvedPayload.consumer_gate_result);
+      expect(approvedConsumerGateResult?.gate_decision).toBe("blocked");
+      expect(resolveWriteInteractionTier(approvedPayload)).toBe("reversible_interaction");
     }
   });
 
@@ -1479,7 +1478,10 @@ describe("extension background relay contract", () => {
       expect(
         (consumerGateResult?.gate_reasons as string[] | undefined) ?? []
       ).toEqual(expect.arrayContaining(["WRITE_EXECUTION_GATE_ONLY"]));
-      expect(pageState).toBeNull();
+      expect(pageState).toMatchObject({
+        page_kind: "compose",
+        url: "https://creator.xiaohongshu.com/publish/publish"
+      });
       expect(editor.textContent).toBe("");
     } finally {
       if (originalDocument === undefined) {
@@ -1875,7 +1877,7 @@ describe("extension background relay contract", () => {
     }
   });
 
-  it("keeps xhs.interact live_write gate-only when issue_208 approval downgrades execution", async () => {
+  it("blocks xhs.interact live_write when issue_208 requests exceed gate-only freeze", async () => {
     const originalDocument = (globalThis as { document?: unknown }).document;
     const editor = {
       textContent: "",
@@ -1943,22 +1945,21 @@ describe("extension background relay contract", () => {
 
     try {
       const response = await responsePromise;
-      expect(response.status).toBe("success");
+      expect(response.status).toBe("error");
       const payload = asRecord(response.payload) ?? {};
-      const summary = asRecord(payload.summary) ?? {};
-      const consumerGateResult = asRecord(summary.consumer_gate_result);
-      const gateInput = asRecord(summary.gate_input);
-      const gateOutcome = asRecord(summary.gate_outcome);
-      const approvalRecord = asRecord(summary.approval_record);
-      const auditRecord = asRecord(summary.audit_record);
+      const consumerGateResult = asRecord(payload.consumer_gate_result);
+      const gateInput = asRecord(payload.gate_input);
+      const gateOutcome = asRecord(payload.gate_outcome);
+      const approvalRecord = asRecord(payload.approval_record);
+      const auditRecord = asRecord(payload.audit_record);
       expect(consumerGateResult).toMatchObject({
         issue_scope: "issue_208",
         action_type: "write",
         requested_execution_mode: "live_write",
         effective_execution_mode: "dry_run",
-        gate_decision: "allowed"
+        gate_decision: "blocked"
       });
-      expect(asRecord(summary.scope_context)).toMatchObject({
+      expect(asRecord(payload.scope_context)).toMatchObject({
         platform: "xhs",
         read_domain: "www.xiaohongshu.com",
         write_domain: "creator.xiaohongshu.com",
@@ -1978,8 +1979,8 @@ describe("extension background relay contract", () => {
       });
       expect(gateOutcome).toMatchObject({
         effective_execution_mode: "dry_run",
-        gate_decision: "allowed",
-        requires_manual_confirmation: true
+        gate_decision: "blocked",
+        requires_manual_confirmation: false
       });
       expect(approvalRecord).toMatchObject({
         approved: true,
@@ -1994,14 +1995,13 @@ describe("extension background relay contract", () => {
         action_type: "write",
         requested_execution_mode: "live_write",
         effective_execution_mode: "dry_run",
-        gate_decision: "allowed"
+        gate_decision: "blocked"
       });
       expect(typeof auditRecord?.event_id).toBe("string");
       expect(typeof auditRecord?.recorded_at).toBe("string");
       expect(
         (consumerGateResult?.gate_reasons as string[] | undefined) ?? []
-      ).toEqual(expect.arrayContaining(["WRITE_EXECUTION_GATE_ONLY"]));
-      expect(asRecord(summary.interaction_result)).toBeNull();
+      ).toEqual(expect.arrayContaining(["EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"]));
       expect(editor.textContent).toBe("");
     } finally {
       if (originalDocument === undefined) {

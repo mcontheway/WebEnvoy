@@ -273,6 +273,45 @@ const createXhsInteractInputErrorPayload = (ability, gatePayload) => ({
     },
     ...gatePayload
 });
+const resolveGateOnlyPageState = (gateInput, scopeContext) => {
+    const targetPage = asNonEmptyString(gateInput.target_page);
+    const targetDomain = asNonEmptyString(gateInput.target_domain) ??
+        asNonEmptyString(scopeContext.write_domain) ??
+        asNonEmptyString(scopeContext.read_domain);
+    if (!targetPage || !targetDomain) {
+        return null;
+    }
+    return {
+        page_kind: targetPage === "creator_publish_tab" ? "compose" : targetPage,
+        url: targetPage === "creator_publish_tab"
+            ? `https://${targetDomain}/publish/publish`
+            : targetPage === "search_result_tab"
+                ? `https://${targetDomain}/search_result`
+                : `https://${targetDomain}/`,
+        title: targetPage === "creator_publish_tab" ? "Creator Publish" : "Search Result",
+        ready_state: "complete"
+    };
+};
+const buildGateOnlyObservability = (gatePayload) => {
+    const gateInput = asRecord(gatePayload.gate_input) ?? {};
+    const gateOutcome = asRecord(gatePayload.gate_outcome) ?? {};
+    const scopeContext = asRecord(gatePayload.scope_context) ?? {};
+    const gateReasons = asStringArray(gateOutcome.gate_reasons);
+    return {
+        page_state: resolveGateOnlyPageState(gateInput, scopeContext),
+        key_requests: [],
+        failure_site: gateOutcome.gate_decision === "blocked"
+            ? {
+                stage: "execution",
+                component: "gate",
+                target: asNonEmptyString(gateInput.target_page) ??
+                    asNonEmptyString(gateInput.target_domain) ??
+                    "issue_208_gate_only",
+                summary: gateReasons[0] ?? "gate blocked"
+            }
+            : null
+    };
+};
 const createBridgeXhsGateOnlyPayload = (request, gatePayload) => {
     const command = String(request.params.command ?? "");
     const commandParams = asRecord(request.params.command_params) ?? {};
@@ -311,11 +350,7 @@ const createBridgeXhsGateOnlyPayload = (request, gatePayload) => {
             capability_result: capabilityResult,
             ...gatePayload
         },
-        observability: {
-            page_state: null,
-            key_requests: [],
-            failure_site: null
-        }
+        observability: buildGateOnlyObservability(gatePayload)
     };
 };
 const createRelayXhsGatePayload = (input) => {
@@ -357,6 +392,17 @@ const createRelayXhsGatePayload = (input) => {
         ...(input.writeGateOnlyDecision
             ? { write_gate_only_decision: input.writeGateOnlyDecision }
             : {}),
+        observability: buildGateOnlyObservability({
+            gate_input: {
+                target_domain: input.targetDomain,
+                target_page: input.targetPage
+            },
+            gate_outcome: {
+                gate_decision: input.gateDecision,
+                gate_reasons: input.gateReasons
+            },
+            scope_context: XHS_SCOPE_CONTEXT
+        }),
         audit_record: {
             event_id: `relay_gate_${input.request.id}`,
             run_id: runId,
@@ -645,9 +691,7 @@ export class BackgroundRelay {
                 effectiveExecutionMode,
                 gateDecision: "blocked",
                 gateReasons,
-                requiresManualConfirmation: requestedExecutionMode === "live_write" ||
-                    writeMatrixDecision.decision === "conditional" ||
-                    writeActionMatrixDecisions.write_interaction_tier === "reversible_interaction",
+                requiresManualConfirmation: false,
                 approvalRecord,
                 consumerGateResult,
                 writeActionMatrixDecisions,
@@ -655,7 +699,7 @@ export class BackgroundRelay {
                     issue_scope: issueScope,
                     state: riskState,
                     write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier,
-                    matrix_decision: writeMatrixDecision.decision,
+                    matrix_decision: "blocked",
                     matrix_actions: writeActionMatrixDecisions.matrix_actions,
                     required_approval: [],
                     approval_satisfied: false,
@@ -680,35 +724,15 @@ export class BackgroundRelay {
             gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
         }
         if (requestedExecutionMode !== "dry_run" && requestedExecutionMode !== "recon") {
-            if (requestedExecutionMode !== "live_write") {
-                gateReasons.push("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
-            }
+            gateReasons.push("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
         }
-        const writeApprovalRequirements = writeMatrixDecision.requires.length > 0
-            ? writeMatrixDecision.requires
-            : writeActionMatrixDecisions.write_interaction_tier === "reversible_interaction"
-                ? [...XHS_WRITE_APPROVAL_REQUIREMENTS]
-                : [];
-        const approvalRequirementGaps = resolveApprovalRequirementGaps(writeApprovalRequirements, approvalRecord);
-        if (writeMatrixDecision.decision === "blocked" ||
-            writeMatrixDecision.decision === "not_applicable") {
-            gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`, "ISSUE_ACTION_MATRIX_BLOCKED");
-        }
-        else {
-            if (approvalRequirementGaps.includes("approval_record_approved_true") ||
-                approvalRequirementGaps.includes("approval_record_approver_present") ||
-                approvalRequirementGaps.includes("approval_record_approved_at_present")) {
-                gateReasons.push("MANUAL_CONFIRMATION_MISSING");
-            }
-            if (approvalRequirementGaps.includes("approval_record_checks_all_true")) {
-                gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
-            }
-        }
+        const writeApprovalRequirements = [];
+        const approvalRequirementGaps = [];
         const blockingReasons = gateReasons.filter((reason) => reason !== writeTierReason);
         const allowed = blockingReasons.length === 0;
         const effectiveExecutionMode = requestedExecutionMode === "recon" ? "recon" : "dry_run";
         if (allowed) {
-            gateReasons.push(requestedExecutionMode === "recon" ? "DEFAULT_MODE_RECON" : "DEFAULT_MODE_DRY_RUN", "WRITE_EXECUTION_GATE_ONLY");
+            gateReasons.push(requestedExecutionMode === "recon" ? "DEFAULT_MODE_RECON" : "DEFAULT_MODE_DRY_RUN", "WRITE_EXECUTION_GATE_ONLY", "ISSUE_208_GATE_ONLY_FREEZE");
         }
         const consumerGateResult = {
             risk_state: riskState,
@@ -729,10 +753,10 @@ export class BackgroundRelay {
             issue_scope: issueScope,
             state: riskState,
             write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier,
-            matrix_decision: writeMatrixDecision.decision,
+            matrix_decision: "blocked",
             matrix_actions: writeActionMatrixDecisions.matrix_actions,
             required_approval: writeApprovalRequirements,
-            approval_satisfied: approvalRequirementGaps.length === 0,
+            approval_satisfied: false,
             approval_missing_requirements: approvalRequirementGaps,
             execution_enabled: false
         };
@@ -748,9 +772,7 @@ export class BackgroundRelay {
             effectiveExecutionMode,
             gateDecision: allowed ? "allowed" : "blocked",
             gateReasons,
-            requiresManualConfirmation: requestedExecutionMode === "live_write" ||
-                writeMatrixDecision.decision === "conditional" ||
-                writeActionMatrixDecisions.write_interaction_tier === "reversible_interaction",
+            requiresManualConfirmation: false,
             approvalRecord,
             consumerGateResult,
             writeActionMatrixDecisions,
@@ -2131,6 +2153,8 @@ class ChromeBackgroundBridge {
         const issue208WriteGateOnly = issueScope === "issue_208" &&
             actionType !== null &&
             writeActionMatrixDecisions.write_interaction_tier !== "observe_only";
+        const issue208GateOnlyProbeCommand = String(request.params.command ?? "") === "xhs.interact" &&
+            (requestedExecutionMode === "dry_run" || requestedExecutionMode === "recon");
         const requestedLiveMode = requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
         let fingerprintContextMissing = false;
         let fingerprintContextUntrusted = false;
@@ -2203,38 +2227,20 @@ class ChromeBackgroundBridge {
             }
         }
         if (issue208WriteGateOnly) {
-            const writeApprovalRequirements = writeMatrixDecision.requires.length > 0
-                ? writeMatrixDecision.requires
-                : writeActionMatrixDecisions.write_interaction_tier === "reversible_interaction"
-                    ? [...XHS_WRITE_APPROVAL_REQUIREMENTS]
-                    : [];
-            const approvalRequirementGaps = resolveApprovalRequirementGaps(writeApprovalRequirements, approvalRecord);
-            const approvalSatisfied = approvalRequirementGaps.length === 0;
-            if (writeMatrixDecision.decision === "blocked" ||
-                writeMatrixDecision.decision === "not_applicable") {
-                pushReason("ISSUE_ACTION_MATRIX_BLOCKED");
-            }
-            else if ((writeMatrixDecision.decision === "conditional" ||
-                writeMatrixDecision.decision === "allowed") &&
-                !approvalSatisfied) {
-                if (approvalRequirementGaps.includes("approval_record_approved_true") ||
-                    approvalRequirementGaps.includes("approval_record_approver_present") ||
-                    approvalRequirementGaps.includes("approval_record_approved_at_present")) {
-                    pushReason("MANUAL_CONFIRMATION_MISSING");
-                }
-                if (approvalRequirementGaps.includes("approval_record_checks_all_true")) {
-                    pushReason("APPROVAL_CHECKS_INCOMPLETE");
-                }
-            }
-            else if (writeMatrixDecision.decision === "allowed" ||
-                (writeMatrixDecision.decision === "conditional" && approvalSatisfied)) {
+            const writeApprovalRequirements = [];
+            const approvalRequirementGaps = [];
+            const approvalSatisfied = false;
+            if (issue208GateOnlyProbeCommand) {
                 writeGateOnlyEligible = true;
+            }
+            else {
+                pushReason("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
             }
             writeGateOnlyApprovalDecision = {
                 issue_scope: issueScope,
                 state: riskState,
                 write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier,
-                matrix_decision: writeMatrixDecision.decision,
+                matrix_decision: "blocked",
                 matrix_actions: writeActionMatrixDecisions.matrix_actions,
                 required_approval: writeApprovalRequirements,
                 approval_satisfied: approvalSatisfied,
@@ -2318,12 +2324,10 @@ class ChromeBackgroundBridge {
         const blockingReasons = gateReasons.filter((reason) => reason !== writeTierReason);
         const allowed = blockingReasons.length === 0;
         const gateDecision = allowed ? "allowed" : "blocked";
-        const requiresManualConfirmation = requestedExecutionMode === "live_read_limited" ||
-            requestedExecutionMode === "live_read_high_risk" ||
-            requestedExecutionMode === "live_write" ||
-            (issue208WriteGateOnly &&
-                (writeMatrixDecision.decision === "conditional" ||
-                    writeActionMatrixDecisions.write_interaction_tier === "reversible_interaction"));
+        const requiresManualConfirmation = !issue208WriteGateOnly &&
+            (requestedExecutionMode === "live_read_limited" ||
+                requestedExecutionMode === "live_read_high_risk" ||
+                requestedExecutionMode === "live_write");
         const gateOnlyEffectiveExecutionMode = requestedExecutionMode === "recon" ? "recon" : "dry_run";
         const effectiveExecutionMode = allowed
             ? issue208WriteGateOnly
@@ -2342,7 +2346,7 @@ class ChromeBackgroundBridge {
             gateReasons.push("LIVE_MODE_APPROVED");
         }
         if (allowed && issue208WriteGateOnly && writeGateOnlyEligible) {
-            gateReasons.push("WRITE_EXECUTION_GATE_ONLY");
+            gateReasons.push("WRITE_EXECUTION_GATE_ONLY", "ISSUE_208_GATE_ONLY_FREEZE");
         }
         const consumerGateResult = {
             risk_state: riskState,

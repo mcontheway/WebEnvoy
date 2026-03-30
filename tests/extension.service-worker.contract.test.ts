@@ -2508,7 +2508,7 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("allows issue_208 reversible_interaction_with_approval in limited/allowed only with complete approval", async () => {
+  it("keeps issue_208 dry_run write blocked in limited/allowed even with complete approval", async () => {
     const states: Array<"limited" | "allowed"> = ["limited", "allowed"];
 
     for (const state of states) {
@@ -2571,13 +2571,7 @@ describe("extension service worker recovery contract", () => {
       expect(blockedConsumerGateResult?.gate_decision).toBe("blocked");
       expect(blockedPayload.write_action_matrix).toBeUndefined();
       expect(blockedWriteMatrixDecisions).not.toBeNull();
-      expect(blockedConditionalActions).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            action: "reversible_interaction_with_approval"
-          })
-        ])
-      );
+      expect(blockedConditionalActions).toEqual([]);
       expect(resolveWriteInteractionTier(blockedPayload)).toBe("reversible_interaction");
 
       const approvedPort = createMockPort();
@@ -2630,30 +2624,21 @@ describe("extension service worker recovery contract", () => {
       const approved = approvedPort.postMessage.mock.calls
         .map((call) => call[0] as { id?: string; status?: string; payload?: { summary?: Record<string, unknown> } })
         .find((message) => message.id === `run-xhs-issue-208-${state}-approved-001`);
-      expect(approved?.status).toBe("success");
-      const summary = asRecord(approved?.payload?.summary) ?? {};
-      const capabilityResult = asRecord(summary.capability_result);
-      const approvedConsumerGateResult = asRecord(summary.consumer_gate_result);
-      const approvedIssueActionMatrix = asRecord(summary.issue_action_matrix);
+      expect(approved?.status).toBe("error");
+      const payload = asRecord(approved?.payload) ?? {};
+      const approvedConsumerGateResult = asRecord(payload.consumer_gate_result);
+      const approvedIssueActionMatrix = asRecord(payload.issue_action_matrix);
       const approvedConditionalActions = Array.isArray(approvedIssueActionMatrix?.conditional_actions)
         ? approvedIssueActionMatrix.conditional_actions
         : [];
-      const approvedWriteMatrixDecisions = asRecord(summary.write_action_matrix_decisions);
-      const writeGateOnlyDecision = asRecord(summary.write_gate_only_decision);
-      expect(capabilityResult?.outcome).toBe("partial");
-      expect(capabilityResult?.action).toBe("write");
-      expect(approvedConsumerGateResult?.gate_decision).toBe("allowed");
-      expect(summary.write_action_matrix).toBeUndefined();
+      const approvedWriteMatrixDecisions = asRecord(payload.write_action_matrix_decisions);
+      const writeGateOnlyDecision = asRecord(payload.write_gate_only_decision);
+      expect(approvedConsumerGateResult?.gate_decision).toBe("blocked");
+      expect(payload.write_action_matrix).toBeUndefined();
       expect(approvedWriteMatrixDecisions).not.toBeNull();
-      expect(approvedConditionalActions).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            action: "reversible_interaction_with_approval"
-          })
-        ])
-      );
+      expect(approvedConditionalActions).toEqual([]);
       expect(writeGateOnlyDecision?.execution_enabled).toBe(false);
-      expect(resolveWriteInteractionTier(summary)).toBe("reversible_interaction");
+      expect(resolveWriteInteractionTier(payload)).toBe("reversible_interaction");
     }
   });
 
@@ -3884,7 +3869,7 @@ describe("extension service worker recovery contract", () => {
     });
   });
 
-  it("keeps issue_208 gate-only approval on non-live effective mode even when request asks for live_write", async () => {
+  it("blocks issue_208 live_write on non-live fallback even when approval is complete", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -3933,25 +3918,25 @@ describe("extension service worker recovery contract", () => {
     const approved = firstPort.postMessage.mock.calls
       .map((call) => call[0] as { id?: string; status?: string; payload?: { summary?: Record<string, unknown> } })
       .find((message) => message.id === "run-xhs-issue-208-live-write-gate-only-001");
-    expect(approved?.status).toBe("success");
-    const summary = asRecord(approved?.payload?.summary) ?? {};
-    const gateInput = asRecord(summary.gate_input);
-    const gateOutcome = asRecord(summary.gate_outcome);
-    const consumerGateResult = asRecord(summary.consumer_gate_result);
-    const auditRecord = asRecord(summary.audit_record);
+    expect(approved?.status).toBe("error");
+    const payload = asRecord(approved?.payload) ?? {};
+    const gateInput = asRecord(payload.gate_input);
+    const gateOutcome = asRecord(payload.gate_outcome);
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    const auditRecord = asRecord(payload.audit_record);
     expect(gateInput?.requested_execution_mode).toBe("live_write");
     expect(gateOutcome?.effective_execution_mode).toBe("dry_run");
     expect(consumerGateResult?.requested_execution_mode).toBe("live_write");
     expect(consumerGateResult?.effective_execution_mode).toBe("dry_run");
     expect(consumerGateResult?.gate_reasons).toEqual(
       expect.arrayContaining([
-        "WRITE_EXECUTION_GATE_ONLY",
+        "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND",
         "WRITE_INTERACTION_TIER_REVERSIBLE_INTERACTION"
       ])
     );
     expect(auditRecord?.requested_execution_mode).toBe("live_write");
     expect(auditRecord?.effective_execution_mode).toBe("dry_run");
-    expect(summary.write_interaction_tier).toMatchObject({
+    expect(payload.write_interaction_tier).toMatchObject({
       tiers: [
         { name: "observe_only", live_allowed: false },
         { name: "reversible_interaction", live_allowed: "limited" },
@@ -3962,14 +3947,15 @@ describe("extension service worker recovery contract", () => {
     });
   });
 
-  it("blocks issue_208 xhs.interact gate-only when risk_state is paused or approval is incomplete", async () => {
+  it("keeps issue_208 xhs.interact on allowed gate-only under dry_run/recon even when paused or approval is incomplete", async () => {
     const cases = [
       {
         runId: "run-xhs-interact-issue-208-paused-001",
         commandParams: createXhsInteractCommandParams({
           risk_state: "paused"
         }),
-        expectedGateReasons: ["ISSUE_ACTION_MATRIX_BLOCKED"]
+        expectedGateReasons: ["WRITE_EXECUTION_GATE_ONLY", "ISSUE_208_GATE_ONLY_FREEZE"],
+        expectedMode: "dry_run"
       },
       {
         runId: "run-xhs-interact-issue-208-missing-approval-001",
@@ -3987,7 +3973,8 @@ describe("extension service worker recovery contract", () => {
             }
           }
         }),
-        expectedGateReasons: ["MANUAL_CONFIRMATION_MISSING", "APPROVAL_CHECKS_INCOMPLETE"]
+        expectedGateReasons: ["WRITE_EXECUTION_GATE_ONLY", "ISSUE_208_GATE_ONLY_FREEZE"],
+        expectedMode: "dry_run"
       }
     ] as const;
 
@@ -4028,10 +4015,12 @@ describe("extension service worker recovery contract", () => {
             }
         )
         .find((message) => message.id === testCase.runId);
-      expect(blocked?.status).toBe("error");
+      expect(blocked?.status).toBe("success");
       const payload = asRecord(blocked?.payload) ?? {};
-      const consumerGateResult = asRecord(payload.consumer_gate_result);
-      expect(consumerGateResult?.gate_decision).toBe("blocked");
+      const summary = asRecord(payload.summary) ?? {};
+      const consumerGateResult = asRecord(summary.consumer_gate_result);
+      expect(consumerGateResult?.gate_decision).toBe("allowed");
+      expect(consumerGateResult?.effective_execution_mode).toBe(testCase.expectedMode);
       expect(Array.isArray(consumerGateResult?.gate_reasons)).toBe(true);
       const gateReasons = (consumerGateResult?.gate_reasons as string[]) ?? [];
       for (const expectedGateReason of testCase.expectedGateReasons) {

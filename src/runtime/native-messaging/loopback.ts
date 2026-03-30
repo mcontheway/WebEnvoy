@@ -185,7 +185,8 @@ const resolveLoopbackFallbackMode = (
 
 const buildLoopbackGate = (
   options: Record<string, unknown>,
-  abilityAction: string | null
+  abilityAction: string | null,
+  allowIssue208InteractProbe = false
 ): {
   scopeContext: Record<string, unknown>;
   issueScope: LoopbackIssueScope;
@@ -272,38 +273,20 @@ const buildLoopbackGate = (
     actionType &&
     requestedExecutionMode !== null
   ) {
-    gateDecision = "blocked";
     effectiveExecutionMode = resolveLoopbackFallbackMode(requestedExecutionMode, riskState);
-
     if (
-      writeMatrixDecision.decision === "blocked" ||
-      writeMatrixDecision.decision === "not_applicable"
+      allowIssue208InteractProbe &&
+      (requestedExecutionMode === "dry_run" || requestedExecutionMode === "recon")
     ) {
-      gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
-      gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
-    } else if (writeMatrixDecision.decision === "conditional") {
-      const approvalRequirementGaps = resolveApprovalRequirementGaps(
-        writeMatrixDecision.requires,
-        approvalRecord,
-        approvalChecks
-      );
-      if (
-        approvalRequirementGaps.includes("approval_record_approved_true") ||
-        approvalRequirementGaps.includes("approval_record_approver_present") ||
-        approvalRequirementGaps.includes("approval_record_approved_at_present")
-      ) {
-        gateReasons.push("MANUAL_CONFIRMATION_MISSING");
-      }
-      if (approvalRequirementGaps.includes("approval_record_checks_all_true")) {
-        gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
-      }
-      if (approvalRequirementGaps.length === 0) {
-        gateDecision = "allowed";
-        gateReasons.push("WRITE_INTERACTION_APPROVED");
-      }
-    } else {
       gateDecision = "allowed";
-      gateReasons.push("WRITE_INTERACTION_ALLOWED");
+      gateReasons.push(
+        requestedExecutionMode === "recon" ? "DEFAULT_MODE_RECON" : "DEFAULT_MODE_DRY_RUN",
+        "WRITE_EXECUTION_GATE_ONLY",
+        "ISSUE_208_GATE_ONLY_FREEZE"
+      );
+    } else {
+      gateDecision = "blocked";
+      gateReasons.push("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
     }
   } else if (actionType && actionType !== "read") {
     gateDecision = "blocked";
@@ -505,6 +488,7 @@ const buildLoopbackGatePayload = (input: {
     issue_action_matrix: resolvedIssueActionMatrix,
     write_interaction_tier: input.gate.writeInteractionTier,
     write_action_matrix_decisions: input.gate.writeActionMatrixDecisions,
+    observability: buildLoopbackGateObservability(input.gate),
     read_execution_policy: LOOPBACK_READ_EXECUTION_POLICY,
     risk_state_output: buildUnifiedRiskStateOutput(
       resolvedRiskState,
@@ -515,6 +499,44 @@ const buildLoopbackGatePayload = (input: {
     ),
     audit_record: persistedAuditRecord,
     risk_transition_audit: riskTransitionAudit
+  };
+};
+
+const buildLoopbackGateObservability = (
+  gate: ReturnType<typeof buildLoopbackGate>
+): Record<string, unknown> => {
+  const targetPage = asString(gate.gateInput.target_page);
+  const targetDomain = asString(gate.gateInput.target_domain);
+
+  return {
+    page_state:
+      targetPage && targetDomain
+        ? {
+            page_kind: targetPage === "creator_publish_tab" ? "compose" : targetPage,
+            url:
+              targetPage === "creator_publish_tab"
+                ? `https://${targetDomain}/publish/publish`
+                : targetPage === "search_result_tab"
+                  ? `https://${targetDomain}/search_result`
+                  : `https://${targetDomain}/`,
+            title: targetPage === "creator_publish_tab" ? "Creator Publish" : "Search Result",
+            ready_state: "complete"
+          }
+        : null,
+    key_requests: [],
+    failure_site:
+      gate.consumerGateResult.gate_decision === "blocked"
+        ? {
+            stage: "execution",
+            component: "gate",
+            target: targetPage ?? targetDomain ?? "issue_208_gate_only",
+            summary:
+              Array.isArray(gate.consumerGateResult.gate_reasons) &&
+              typeof gate.consumerGateResult.gate_reasons[0] === "string"
+                ? gate.consumerGateResult.gate_reasons[0]
+                : "gate blocked"
+          }
+        : null
   };
 };
 
@@ -947,7 +969,7 @@ class InMemoryContentScriptRuntime {
           ? input.action_id.trim()
           : "editor_input";
       const text = typeof input.text === "string" ? input.text : "";
-      const gate = buildLoopbackGate(options, asString(ability.action));
+      const gate = buildLoopbackGate(options, asString(ability.action), true);
       const consumerGateResult = gate.consumerGateResult;
       const auditRecord = buildLoopbackAuditRecord({
         runId: message.runId,
@@ -1024,11 +1046,7 @@ class InMemoryContentScriptRuntime {
               },
               ...gateBundle
             },
-            observability: {
-              page_state: null,
-              key_requests: [],
-              failure_site: null
-            }
+            observability: buildLoopbackGateObservability(gate)
           }
         };
       }
@@ -1042,28 +1060,18 @@ class InMemoryContentScriptRuntime {
             capability_result: {
               ability_id: String(ability.id ?? "xhs.interact.editor-input.v1"),
               layer: String(ability.layer ?? "L3"),
-              action: String(ability.action ?? "write"),
-              outcome: "success"
+              action: String(consumerGateResult.action_type ?? ability.action ?? "write"),
+              outcome: "partial",
+              data_ref: {
+                action_id: actionId
+              },
+              metrics: {
+                count: 0
+              }
             },
-            ...gateBundle,
-            interaction_result: {
-              action_id: "editor_input",
-              text,
-              text_length: text.length,
-              target_kind: "contenteditable",
-              final_text: text
-            }
+            ...gateBundle
           },
-          observability: {
-            page_state: {
-              page_kind: "creator_publish_tab",
-              url: "https://creator.xiaohongshu.com/publish/publish",
-              title: "Publish",
-              ready_state: "complete"
-            },
-            key_requests: [],
-            failure_site: null
-          }
+          observability: buildLoopbackGateObservability(gate)
         }
       };
     }

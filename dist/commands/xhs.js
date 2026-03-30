@@ -110,24 +110,6 @@ const parseSearchInput = (input, abilityId) => {
     }
     return normalized;
 };
-const parseEditorInput = (input, abilityId) => {
-    const rawText = typeof input.text === "string" ? input.text : "";
-    if (rawText.trim().length === 0) {
-        throw invalidAbilityInput("EDITOR_TEXT_MISSING", abilityId);
-    }
-    const actionId = input.action_id === undefined
-        ? "editor_input"
-        : typeof input.action_id === "string" && input.action_id.trim().length > 0
-            ? input.action_id.trim()
-            : null;
-    if (actionId !== "editor_input") {
-        throw invalidAbilityInput("EDITOR_ACTION_INVALID", abilityId);
-    }
-    return {
-        action_id: "editor_input",
-        text: rawText
-    };
-};
 const normalizeGateOptions = (options, abilityId) => {
     const targetDomain = typeof options.target_domain === "string" && options.target_domain.trim().length > 0
         ? options.target_domain.trim()
@@ -165,32 +147,6 @@ const normalizeGateOptions = (options, abilityId) => {
             target_tab_id: targetTabId,
             target_page: targetPage,
             requested_execution_mode: requestedExecutionMode
-        }
-    };
-};
-const normalizeEditorInputGate = (envelope, gate) => {
-    if (envelope.ability.action !== "write") {
-        throw invalidAbilityInput("EDITOR_ABILITY_ACTION_INVALID", envelope.ability.id);
-    }
-    if (gate.requestedExecutionMode === "live_read_limited" ||
-        gate.requestedExecutionMode === "live_read_high_risk") {
-        throw invalidAbilityInput("EDITOR_EXECUTION_MODE_INVALID", envelope.ability.id);
-    }
-    const rawActionType = gate.options.action_type;
-    if (rawActionType !== undefined && rawActionType !== "write") {
-        throw invalidAbilityInput("EDITOR_ACTION_TYPE_INVALID", envelope.ability.id);
-    }
-    if (gate.targetDomain !== "creator.xiaohongshu.com") {
-        throw invalidAbilityInput("EDITOR_TARGET_DOMAIN_INVALID", envelope.ability.id);
-    }
-    if (gate.targetPage !== "creator_publish_tab") {
-        throw invalidAbilityInput("EDITOR_TARGET_PAGE_INVALID", envelope.ability.id);
-    }
-    return {
-        ...gate,
-        options: {
-            ...gate.options,
-            action_type: "write"
         }
     };
 };
@@ -360,79 +316,11 @@ const xhsSearch = async (context) => {
         throw error;
     }
 };
-const xhsEditorInput = async (context) => {
-    const envelope = parseAbilityEnvelope(context.params);
-    const gate = normalizeEditorInputGate(envelope, normalizeGateOptions(envelope.options, envelope.ability.id));
-    const parsedInput = parseEditorInput(envelope.input, envelope.ability.id);
-    const bridge = resolveRuntimeBridge();
-    const profileStore = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
-    const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
-    const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
-        requestedExecutionMode: gate.requestedExecutionMode
-    });
-    try {
-        await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, gate);
-        const commandParams = appendFingerprintContext({
-            target_domain: gate.targetDomain,
-            target_tab_id: gate.targetTabId,
-            target_page: gate.targetPage,
-            requested_execution_mode: gate.requestedExecutionMode,
-            action_type: "write",
-            ability: {
-                ...envelope.ability,
-                action: "write"
-            },
-            input: parsedInput,
-            options: gate.options
-        }, fingerprintContext);
-        const bridgeResult = await bridge.runCommand({
-            runId: context.run_id,
-            profile: context.profile,
-            cwd: context.cwd,
-            command: "xhs.interact",
-            params: commandParams
-        });
-        if (!bridgeResult.ok) {
-            throw toCliExecutionError(envelope.ability, bridgeResult.payload, bridgeResult.error.message);
-        }
-        const summary = asObject(bridgeResult.payload.summary);
-        if (!summary) {
-            throw new CliError("ERR_EXECUTION_FAILED", "能力输出映射失败", {
-                details: {
-                    ability_id: envelope.ability.id,
-                    stage: "output_mapping",
-                    reason: "CAPABILITY_RESULT_MISSING"
-                }
-            });
-        }
-        return {
-            summary: {
-                ...summary,
-                ...(asObject(bridgeResult.payload.consumer_gate_result)
-                    ? { consumer_gate_result: asObject(bridgeResult.payload.consumer_gate_result) }
-                    : {})
-            },
-            observability: asObservabilityInput(bridgeResult.payload.observability)
-        };
-    }
-    catch (error) {
-        if (error instanceof NativeMessagingTransportError) {
-            throw toTransportCliError(error, envelope.ability);
-        }
-        throw error;
-    }
-};
 export const xhsCommands = () => [
     {
         name: "xhs.search",
         status: "implemented",
         requiresProfile: true,
         handler: xhsSearch
-    },
-    {
-        name: "xhs.editor_input",
-        status: "implemented",
-        requiresProfile: true,
-        handler: xhsEditorInput
     }
 ];

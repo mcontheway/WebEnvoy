@@ -9,7 +9,7 @@
 
 `#208` 的职责不是补完整写能力，而是把 Phase 1 剩余的“至少一种最小页面交互动作可进入正式验证”收成一个最小、可审查、可继续推进的治理闭环。
 
-截至 2026-03-30，Sprint 2 / Sprint 3 已把风险门禁、统一状态机、交互分级、session 节律与审计链路接入主干。本次链路在此基础上补齐了 `editor_input` 的命令、relay 与 gate-only 契约前置，但尚未构成 `#208` 的正式 live 验证完成证据。
+截至 2026-03-30，Sprint 2 / Sprint 3 已把风险门禁、统一状态机、交互分级、session 节律与审计链路接入主干。结合已合并的 spec PR `#296`，本次链路只收口 `editor_input` 作为最小验证候选动作的 gate-only 前置，不把 `xhs.editor_input` / `xhs.interact` 写成已冻结正式命令接口，也不构成 `#208` 的正式 live 验证完成证据。
 
 ## 目标
 
@@ -41,8 +41,9 @@
 - 不选 `submit/publish`
   - 原因：属于不可逆写动作，超出 Phase 1 与 `#208` 的边界。
 - 本次补齐的是进入正式验证前所需的最小实现前置，而不是直接宣布正式验证完成
-  - `xhs.editor_input` CLI 命令已接通到 `xhs.interact` / `editor_input`
+  - `editor_input` 当前仅作为 `#208` 的最小验证候选动作，不等于已冻结正式命令接口
   - `xhs.interact` 在 `gateOnly=true` 或 `effective_execution_mode=dry_run|recon` 下必须短路，不得真实写页面
+  - gate-only success / blocked 只允许返回最小 `observability.page_state`、`key_requests=[]` 与符合 freeze 的 `failure_site`
   - loopback、CLI contract、extension relay contract 已补齐对应验证证据
 
 ## 影响面与风险
@@ -58,9 +59,9 @@
   - `#217` 已关闭
   - `#208` 仍打开；当前 PR 不能直接关闭它
 - 代码与测试核对：
-  - `xhs.editor_input` 已接通命令与 relay 契约
-  - `consumer_gate_result` 与 `observability.page_state` 已在成功或 gate-only 路径保留
-  - `xhs.interact` 已补回 gate-only 回归约束：`dry_run/recon` 不得执行真实编辑器输入
+  - `xhs.interact` gate-only 路径已收敛到 `issue_208` 的 `dry_run|recon`
+  - `consumer_gate_result` 与最小 `observability.page_state` 已在 gate-only success / blocked 路径保留
+  - `xhs.interact` 已补回 gate-only 回归约束：`dry_run/recon` 不得执行真实编辑器输入，也不得返回真实 `interaction_result`
   - 已通过：
     - `pnpm build`
     - `pnpm exec vitest run src/commands/__tests__/xhs.test.ts tests/cli.contract.test.ts tests/extension.relay.contract.test.ts`
@@ -85,7 +86,7 @@
 ## 当前结论
 
 - `#208` 的最小页面交互动作已收敛为 `editor_input`。
-- 当前分支已补齐正式验证前置所需的最小实现与测试约束。
+- 当前分支已按 `#296` freeze 收紧到 gate-only 最小实现与测试约束。
 - `#208` 仍未达到可关闭状态。
 - 当前剩余 blocker：
   - 缺可复核的 live 正式验证证据

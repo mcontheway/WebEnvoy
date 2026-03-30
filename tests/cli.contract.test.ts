@@ -1003,7 +1003,7 @@ describe("webenvoy cli contract", () => {
     expect(resolveWriteInteractionTier(gateEnvelope)).toBe("reversible_interaction");
   });
 
-  it("allows reversible_interaction_with_approval for issue_208 only when approval is complete", () => {
+  it("keeps issue_208 dry_run write requests blocked regardless of approval completeness", () => {
     const states: Array<"limited" | "allowed"> = ["limited", "allowed"];
     for (const state of states) {
       const blocked = runCli([
@@ -1052,52 +1052,11 @@ describe("webenvoy cli contract", () => {
       expect(blockedConsumerGateResult?.gate_decision).toBe("blocked");
       expect(resolveWriteInteractionTier(blockedEnvelope)).toBe("reversible_interaction");
 
-      const approved = runCli([
-        "xhs.search",
-        "--profile",
-        "xhs_account_001",
-        "--params",
-        JSON.stringify({
-          ability: {
-            id: "xhs.note.search.v1",
-            layer: "L3",
-            action: "write"
-          },
-          input: {
-            query: "露营装备"
-          },
-          options: {
-            simulate_result: "success",
-            target_domain: "creator.xiaohongshu.com",
-            target_tab_id: 32,
-            target_page: "creator_publish_tab",
-            issue_scope: "issue_208",
-            action_type: "write",
-            requested_execution_mode: "dry_run",
-            risk_state: state,
-            approval_record: {
-              approved: true,
-              approver: "qa-reviewer",
-              approved_at: "2026-03-23T10:00:00Z",
-              checks: {
-                target_domain_confirmed: true,
-                target_tab_confirmed: true,
-                target_page_confirmed: true,
-                risk_state_checked: true,
-                action_type_confirmed: true
-              }
-            }
-          }
-        })
-      ], repoRoot, {
-        WEBENVOY_NATIVE_TRANSPORT: "loopback"
-      });
-      expect(approved.status).toBe(0);
-      const approvedBody = parseSingleJsonLine(approved.stdout);
-      const approvedEnvelope = resolveCliGateEnvelope(approvedBody);
-      const approvedConsumerGateResult = asRecord(approvedEnvelope.consumer_gate_result);
-      expect(approvedConsumerGateResult?.gate_decision).toBe("allowed");
-      expect(resolveWriteInteractionTier(approvedEnvelope)).toBe("reversible_interaction");
+      expect(
+        ((blockedConsumerGateResult?.gate_reasons as string[] | undefined) ?? []).includes(
+          "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"
+        )
+      ).toBe(true);
     }
   });
 
@@ -1191,7 +1150,7 @@ describe("webenvoy cli contract", () => {
       WEBENVOY_NATIVE_TRANSPORT: "loopback"
     });
 
-    expect(result.status).toBe(0);
+    expect(result.status).toBe(6);
     const body = parseSingleJsonLine(result.stdout);
     const gateEnvelope = resolveCliGateEnvelope(body);
     const consumerGateResult = asRecord(gateEnvelope.consumer_gate_result);
@@ -1202,240 +1161,13 @@ describe("webenvoy cli contract", () => {
     expect(gateOutcome?.effective_execution_mode).toBe("dry_run");
     expect(consumerGateResult?.requested_execution_mode).toBe("live_write");
     expect(consumerGateResult?.effective_execution_mode).toBe("dry_run");
-    expect(consumerGateResult?.gate_decision).toBe("allowed");
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
     expect(consumerGateResult?.gate_reasons).toEqual(
-      expect.arrayContaining(["WRITE_INTERACTION_APPROVED"])
+      expect.arrayContaining(["EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"])
     );
     expect(auditRecord?.requested_execution_mode).toBe("live_write");
     expect(auditRecord?.effective_execution_mode).toBe("dry_run");
     expect(resolveWriteInteractionTier(gateEnvelope)).toBe("reversible_interaction");
-  });
-
-  it("keeps xhs.editor_input gate-only under issue_208 approval", () => {
-    const result = runCli([
-      "xhs.editor_input",
-      "--profile",
-      "xhs_account_001",
-      "--params",
-      JSON.stringify({
-        ability: {
-          id: "xhs.interact.editor-input.v1",
-          layer: "L3",
-          action: "write"
-        },
-        input: {
-          action_id: "editor_input",
-          text: "最小正式验证"
-        },
-        options: {
-          target_domain: "creator.xiaohongshu.com",
-          target_tab_id: 32,
-          target_page: "creator_publish_tab",
-          issue_scope: "issue_208",
-          action_type: "write",
-          requested_execution_mode: "dry_run",
-          risk_state: "allowed",
-          approval_record: {
-            approved: true,
-            approver: "qa-reviewer",
-            approved_at: "2026-03-23T10:00:00Z",
-            checks: {
-              target_domain_confirmed: true,
-              target_tab_confirmed: true,
-              target_page_confirmed: true,
-              risk_state_checked: true,
-              action_type_confirmed: true
-            }
-          }
-        }
-      })
-    ], repoRoot, {
-      WEBENVOY_NATIVE_TRANSPORT: "loopback"
-    });
-
-    expect(result.status).toBe(0);
-    const body = parseSingleJsonLine(result.stdout);
-    const summary = asRecord(body.summary) ?? {};
-    const interactionResult = asRecord(summary.interaction_result);
-    const consumerGateResult = asRecord(summary.consumer_gate_result);
-    const observability = asRecord(body.observability);
-    const pageState = asRecord(observability?.page_state);
-    expect(summary.capability_result).toMatchObject({
-      ability_id: "xhs.interact.editor-input.v1",
-      action: "write",
-      outcome: "partial"
-    });
-    expect(interactionResult).toBeNull();
-    expect(consumerGateResult).toMatchObject({
-      issue_scope: "issue_208",
-      action_type: "write",
-      gate_decision: "allowed",
-      effective_execution_mode: "dry_run"
-    });
-    expect(pageState).toBeNull();
-  });
-
-  it("rejects disguised read-style xhs.editor_input requests before they reach the bridge", () => {
-    const cases = [
-      {
-        label: "ability.action=read",
-        ability: {
-          id: "xhs.interact.editor-input.v1",
-          layer: "L3",
-          action: "read"
-        },
-        options: {
-          target_domain: "creator.xiaohongshu.com",
-          target_tab_id: 32,
-          target_page: "creator_publish_tab",
-          issue_scope: "issue_208",
-          action_type: "write",
-          requested_execution_mode: "dry_run"
-        },
-        reason: "EDITOR_ABILITY_ACTION_INVALID"
-      },
-      {
-        label: "options.action_type=read",
-        ability: {
-          id: "xhs.interact.editor-input.v1",
-          layer: "L3",
-          action: "write"
-        },
-        options: {
-          target_domain: "creator.xiaohongshu.com",
-          target_tab_id: 32,
-          target_page: "creator_publish_tab",
-          issue_scope: "issue_208",
-          action_type: "read",
-          requested_execution_mode: "dry_run"
-        },
-        reason: "EDITOR_ACTION_TYPE_INVALID"
-      },
-      {
-        label: "requested_execution_mode=live_read_limited",
-        ability: {
-          id: "xhs.interact.editor-input.v1",
-          layer: "L3",
-          action: "write"
-        },
-        options: {
-          target_domain: "creator.xiaohongshu.com",
-          target_tab_id: 32,
-          target_page: "creator_publish_tab",
-          issue_scope: "issue_208",
-          action_type: "write",
-          requested_execution_mode: "live_read_limited"
-        },
-        reason: "EDITOR_EXECUTION_MODE_INVALID"
-      },
-      {
-        label: "target_domain=www.xiaohongshu.com",
-        ability: {
-          id: "xhs.interact.editor-input.v1",
-          layer: "L3",
-          action: "write"
-        },
-        options: {
-          target_domain: "www.xiaohongshu.com",
-          target_tab_id: 32,
-          target_page: "search_result_tab",
-          issue_scope: "issue_208",
-          action_type: "write",
-          requested_execution_mode: "dry_run"
-        },
-        reason: "EDITOR_TARGET_DOMAIN_INVALID"
-      }
-    ] as const;
-
-    for (const testCase of cases) {
-      const result = runCli([
-        "xhs.editor_input",
-        "--profile",
-        "xhs_account_001",
-        "--params",
-        JSON.stringify({
-          ability: testCase.ability,
-          input: {
-            action_id: "editor_input",
-            text: "最小正式验证"
-          },
-          options: testCase.options
-        })
-      ], repoRoot, {
-        WEBENVOY_NATIVE_TRANSPORT: "loopback"
-      });
-
-      expect(result.status, testCase.label).toBe(2);
-      const body = parseSingleJsonLine(result.stdout);
-      expect(body).toMatchObject({
-        command: "xhs.editor_input",
-        status: "error",
-        error: {
-          code: "ERR_CLI_INVALID_ARGS",
-          details: {
-            ability_id: "xhs.interact.editor-input.v1",
-            stage: "input_validation",
-            reason: testCase.reason
-          }
-        }
-      });
-    }
-  });
-
-  it("keeps consumer_gate_result on blocked xhs.editor_input requests", () => {
-    const result = runCli([
-      "xhs.editor_input",
-      "--profile",
-      "xhs_account_001",
-      "--params",
-      JSON.stringify({
-        ability: {
-          id: "xhs.interact.editor-input.v1",
-          layer: "L3",
-          action: "write"
-        },
-        input: {
-          action_id: "editor_input",
-          text: "最小正式验证"
-        },
-        options: {
-          target_domain: "creator.xiaohongshu.com",
-          target_tab_id: 32,
-          target_page: "creator_publish_tab",
-          issue_scope: "issue_208",
-          action_type: "write",
-          requested_execution_mode: "dry_run",
-          risk_state: "paused",
-          approval_record: {
-            approved: true,
-            approver: "qa-reviewer",
-            approved_at: "2026-03-23T10:00:00Z",
-            checks: {
-              target_domain_confirmed: true,
-              target_tab_confirmed: true,
-              target_page_confirmed: true,
-              risk_state_checked: true,
-              action_type_confirmed: true
-            }
-          }
-        }
-      })
-    ], repoRoot, {
-      WEBENVOY_NATIVE_TRANSPORT: "loopback"
-    });
-
-    expect(result.status).toBe(6);
-    const body = parseSingleJsonLine(result.stdout);
-    const gateEnvelope = resolveCliGateEnvelope(body);
-    const consumerGateResult = asRecord(gateEnvelope.consumer_gate_result);
-    expect(consumerGateResult).toMatchObject({
-      issue_scope: "issue_208",
-      action_type: "write",
-      gate_decision: "blocked"
-    });
-    expect(consumerGateResult?.gate_reasons).toEqual(
-      expect.arrayContaining(["RISK_STATE_PAUSED", "ISSUE_ACTION_MATRIX_BLOCKED"])
-    );
   });
 
   it("blocks issue_209 write dry_run even with complete approval to keep gate-only scoped to issue_208", () => {
@@ -2607,11 +2339,7 @@ process.stdin.on("data", (chunk) => {
             {
               issue_scope: "issue_208",
               state: "allowed",
-              conditional_actions: [
-                {
-                  action: "reversible_interaction_with_approval"
-                }
-              ]
+              conditional_actions: []
             },
             {
               issue_scope: "issue_209",
@@ -2725,11 +2453,7 @@ process.stdin.on("data", (chunk) => {
             {
               issue_scope: "issue_208",
               state: "limited",
-              conditional_actions: [
-                {
-                  action: "reversible_interaction_with_approval"
-                }
-              ]
+              conditional_actions: []
             },
             {
               issue_scope: "issue_209",
