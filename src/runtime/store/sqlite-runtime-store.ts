@@ -179,7 +179,7 @@ export class RuntimeStoreError extends Error {
 const SCHEMA_VERSION = 5;
 const SUMMARY_MAX_CHARS = 512;
 const SQLITE_BUSY_MESSAGE = /SQLITE_BUSY|database is locked/i;
-const SQLITE_OPEN_RETRY_LIMIT = 3;
+const SQLITE_OPEN_RETRY_LIMIT = 8;
 type DatabaseSyncConstructor = new (path: string) => DatabaseSync;
 let databaseSyncCtorCache: DatabaseSyncConstructor | null | undefined;
 const GATE_ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
@@ -220,6 +220,9 @@ const sanitizeSummary = (summary: string | null): string | null => {
 
 const isIsoLike = (value: string): boolean =>
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value);
+
+const isSqliteBusyError = (error: unknown): error is Error =>
+  error instanceof Error && SQLITE_BUSY_MESSAGE.test(error.message);
 
 const parseJsonObject = <T extends Record<string, unknown>>(
   value: unknown,
@@ -292,6 +295,7 @@ export class SQLiteRuntimeStore {
       for (let attempt = 0; attempt <= SQLITE_OPEN_RETRY_LIMIT; attempt += 1) {
         try {
           this.#db = new DatabaseSyncCtor(dbPath);
+          this.#db.exec("PRAGMA busy_timeout=2000;");
           this.#initialize();
           return;
         } catch (error) {
@@ -306,7 +310,7 @@ export class SQLiteRuntimeStore {
           ) {
             throw error;
           }
-          if (error instanceof Error && SQLITE_BUSY_MESSAGE.test(error.message) && attempt < SQLITE_OPEN_RETRY_LIMIT) {
+          if (isSqliteBusyError(error) && attempt < SQLITE_OPEN_RETRY_LIMIT) {
             sleepSync(25 * (attempt + 1));
             lastError = error;
             continue;
@@ -329,7 +333,6 @@ export class SQLiteRuntimeStore {
 
   #initialize(): void {
     this.#db.exec("PRAGMA journal_mode=WAL;");
-    this.#db.exec("PRAGMA busy_timeout=2000;");
     this.#db.exec(`
       CREATE TABLE IF NOT EXISTS runtime_store_meta (
         key TEXT PRIMARY KEY,
@@ -570,7 +573,7 @@ export class SQLiteRuntimeStore {
     if (error instanceof RuntimeStoreError) {
       return error;
     }
-    if (error instanceof Error && SQLITE_BUSY_MESSAGE.test(error.message)) {
+    if (isSqliteBusyError(error)) {
       return new RuntimeStoreError("ERR_RUNTIME_STORE_CONFLICT", "runtime store write conflict", {
         cause: error
       });

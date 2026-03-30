@@ -3985,39 +3985,33 @@ process.stdin.on("data", (chunk) => {
 
   it("allows only one successful runtime.start under concurrent race", async () => {
     const runtimeCwd = await createRuntimeCwd();
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const [first, second] = await Promise.all([
-        runCliAsync(
-          ["runtime.start", "--profile", "race_profile", "--run-id", `run-contract-211-${attempt}`],
-          runtimeCwd
-        ),
-        runCliAsync(
-          ["runtime.start", "--profile", "race_profile", "--run-id", `run-contract-212-${attempt}`],
-          runtimeCwd
-        )
-      ]);
+    const [first, second] = await Promise.all([
+      runCliAsync(
+        ["runtime.start", "--profile", "race_profile", "--run-id", "run-contract-211"],
+        runtimeCwd
+      ),
+      runCliAsync(
+        ["runtime.start", "--profile", "race_profile", "--run-id", "run-contract-212"],
+        runtimeCwd
+      )
+    ]);
 
-      const statuses = [first.status, second.status];
-      const successCount = statuses.filter((status) => status === 0).length;
-      const failureCount = statuses.filter((status) => status === 5).length;
-      expect(successCount).toBe(1);
-      expect(failureCount).toBe(1);
+    const statuses = [first.status, second.status];
+    const successCount = statuses.filter((status) => status === 0).length;
+    const failureCount = statuses.filter((status) => status === 5).length;
+    expect(successCount).toBe(1);
+    expect(failureCount).toBe(1);
 
-      const failed = [first, second].find((result) => result.status === 5);
-      expect(failed).toBeDefined();
-      const failedBody = parseSingleJsonLine(failed!.stdout);
-      expect(failedBody).toMatchObject({
-        command: "runtime.start",
-        status: "error",
-        error: {
-          code: "ERR_PROFILE_LOCKED"
-        }
-      });
-
-      return;
-    }
-
-    throw new Error("concurrent runtime.start race did not preserve a single winner contract");
+    const failed = [first, second].find((result) => result.status === 5);
+    expect(failed).toBeDefined();
+    const failedBody = parseSingleJsonLine(failed!.stdout);
+    expect(failedBody).toMatchObject({
+      command: "runtime.start",
+      status: "error",
+      error: {
+        code: "ERR_PROFILE_LOCKED"
+      }
+    });
   });
 
   it("supports runtime.stop and reflects stopped state via runtime.status", async () => {
