@@ -507,6 +507,100 @@ const resolveBlockedFallbackMode = (
         ? "recon"
         : "dry_run";
 
+const readXhsGateParam = (
+  commandParams: Record<string, unknown>,
+  key: string
+): unknown => {
+  if (Object.prototype.hasOwnProperty.call(commandParams, key)) {
+    return commandParams[key];
+  }
+  return asRecord(commandParams.options)?.[key];
+};
+
+const resolveXhsInteractInput = (
+  commandParams: Record<string, unknown>
+): { ability: Record<string, unknown>; actionId: string; text: string } => {
+  const ability = asRecord(commandParams.ability) ?? {};
+  const input = asRecord(commandParams.input) ?? {};
+  const actionId =
+    typeof input.action_id === "string" && input.action_id.trim().length > 0
+      ? input.action_id.trim()
+      : "editor_input";
+  const text = typeof input.text === "string" ? input.text.trim() : "";
+  return {
+    ability,
+    actionId,
+    text
+  };
+};
+
+const createXhsInteractInputErrorPayload = (
+  ability: Record<string, unknown>,
+  consumerGateResult: Record<string, unknown>,
+  writeActionMatrixDecisions: XhsWriteActionMatrixDecisionsOutput
+): Record<string, unknown> => ({
+  details: {
+    ability_id: String(ability.id ?? "xhs.interact.editor-input.v1"),
+    stage: "input_validation",
+    reason: "INTERACTION_INPUT_INVALID"
+  },
+  consumer_gate_result: consumerGateResult,
+  write_interaction_tier: WRITE_INTERACTION_TIER,
+  write_action_matrix_decisions: writeActionMatrixDecisions
+});
+
+const createBridgeXhsGateOnlyPayload = (
+  request: BridgeRequest,
+  gatePayload: Record<string, unknown>
+): Record<string, unknown> => {
+  const command = String(request.params.command ?? "");
+  const commandParams = asRecord(request.params.command_params) ?? {};
+  const ability = asRecord(commandParams.ability) ?? {};
+  const input = asRecord(commandParams.input) ?? {};
+  const consumerGateResult = asRecord(gatePayload.consumer_gate_result) ?? {};
+  const capabilityResult =
+    command === "xhs.interact"
+      ? {
+          ability_id: String(ability.id ?? "xhs.interact.editor-input.v1"),
+          layer: String(ability.layer ?? "L3"),
+          action: String(consumerGateResult.action_type ?? ability.action ?? "write"),
+          outcome: "partial",
+          data_ref: {
+            action_id:
+              typeof input.action_id === "string" && input.action_id.trim().length > 0
+                ? input.action_id.trim()
+                : "editor_input"
+          },
+          metrics: {
+            count: 0
+          }
+        }
+      : {
+          ability_id: String(ability.id ?? "xhs.note.search.v1"),
+          layer: String(ability.layer ?? "L3"),
+          action: String(consumerGateResult.action_type ?? "read"),
+          outcome: "partial",
+          data_ref: {
+            query: String(input.query ?? "")
+          },
+          metrics: {
+            count: 0
+          }
+        };
+
+  return {
+    summary: {
+      capability_result: capabilityResult,
+      ...gatePayload
+    },
+    observability: {
+      page_state: null,
+      key_requests: [],
+      failure_site: null
+    }
+  };
+};
+
 const buildTrustedFingerprintContextKey = (profile: string, sessionId: string): string =>
   `${profile}::${sessionId}`;
 
@@ -710,26 +804,34 @@ export class BackgroundRelay {
       return null;
     }
     const commandParams = asRecord(request.params.command_params) ?? {};
-    const optionParams = asRecord(commandParams.options);
-    const readGateParam = (key: string): unknown => {
-      if (Object.prototype.hasOwnProperty.call(commandParams, key)) {
-        return commandParams[key];
-      }
-      return optionParams?.[key];
-    };
-    const requestedExecutionMode = parseRequestedExecutionMode(readGateParam("requested_execution_mode"));
+    const requestedExecutionMode = parseRequestedExecutionMode(
+      readXhsGateParam(commandParams, "requested_execution_mode")
+    );
     if (requestedExecutionMode !== "dry_run" && requestedExecutionMode !== "recon") {
       return null;
     }
-    const actionType = parseActionType(readGateParam("action_type"));
-    const issueScope = resolveIssueScope(readGateParam("issue_scope"));
+    const actionType = parseActionType(readXhsGateParam(commandParams, "action_type"));
+    const issueScope = resolveIssueScope(readXhsGateParam(commandParams, "issue_scope"));
     if (issueScope !== "issue_208" || actionType === null) {
       return null;
     }
-    const targetDomain = asNonEmptyString(readGateParam("target_domain"));
-    const targetTabId = asInteger(readGateParam("target_tab_id"));
-    const targetPage = asNonEmptyString(readGateParam("target_page"));
+    const targetDomain = asNonEmptyString(readXhsGateParam(commandParams, "target_domain"));
+    const targetTabId = asInteger(readXhsGateParam(commandParams, "target_tab_id"));
+    const targetPage = asNonEmptyString(readXhsGateParam(commandParams, "target_page"));
+    const riskState = resolveRiskState(readXhsGateParam(commandParams, "risk_state"));
+    const approvalRecord = normalizeApprovalRecord(
+      readXhsGateParam(commandParams, "approval_record") ?? readXhsGateParam(commandParams, "approval")
+    );
+    const writeActionMatrixDecisions = getWriteActionMatrixDecisions(
+      issueScope,
+      actionType,
+      requestedExecutionMode
+    );
+    const writeMatrixDecision = resolveWriteMatrixDecision(writeActionMatrixDecisions, riskState);
+    const writeTierReason = `WRITE_INTERACTION_TIER_${writeActionMatrixDecisions.write_interaction_tier.toUpperCase()}`;
+    const gateReasons = [writeTierReason];
     if (!targetDomain || targetTabId === null || !targetPage) {
+      gateReasons.push("TARGET_SCOPE_NOT_EXPLICIT");
       return {
         id: request.id,
         status: "error",
@@ -738,7 +840,7 @@ export class BackgroundRelay {
         },
         payload: {
           consumer_gate_result: {
-            risk_state: resolveRiskState(readGateParam("risk_state")),
+            risk_state: riskState,
             issue_scope: issueScope,
             target_domain: targetDomain,
             target_tab_id: targetTabId,
@@ -747,7 +849,7 @@ export class BackgroundRelay {
             requested_execution_mode: requestedExecutionMode,
             effective_execution_mode: requestedExecutionMode,
             gate_decision: "blocked",
-            gate_reasons: ["TARGET_SCOPE_NOT_EXPLICIT"],
+            gate_reasons: gateReasons,
             fingerprint_gate_decision: "allowed",
             fingerprint_reason_codes: [],
             write_interaction_tier: "reversible_interaction"
@@ -759,22 +861,45 @@ export class BackgroundRelay {
         }
       };
     }
-    const writeActionMatrixDecisions = getWriteActionMatrixDecisions(
-      issueScope,
-      actionType,
-      requestedExecutionMode
-    );
     if (writeActionMatrixDecisions.write_interaction_tier === "observe_only") {
       return null;
     }
-    const riskState = resolveRiskState(readGateParam("risk_state"));
-    const writeTierReason = `WRITE_INTERACTION_TIER_${writeActionMatrixDecisions.write_interaction_tier.toUpperCase()}`;
-    const gateReasons = [
-      writeTierReason,
-      requestedExecutionMode === "recon" ? "DEFAULT_MODE_RECON" : "DEFAULT_MODE_DRY_RUN",
-      "WRITE_EXECUTION_GATE_ONLY"
-    ];
-    const consumerGateResult = {
+    const writeApprovalRequirements =
+      writeMatrixDecision.requires.length > 0
+        ? writeMatrixDecision.requires
+        : writeActionMatrixDecisions.write_interaction_tier === "reversible_interaction"
+          ? [...XHS_WRITE_APPROVAL_REQUIREMENTS]
+          : [];
+    const approvalRequirementGaps = resolveApprovalRequirementGaps(
+      writeApprovalRequirements,
+      approvalRecord
+    );
+    if (
+      writeMatrixDecision.decision === "blocked" ||
+      writeMatrixDecision.decision === "not_applicable"
+    ) {
+      gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`, "ISSUE_ACTION_MATRIX_BLOCKED");
+    } else {
+      if (
+        approvalRequirementGaps.includes("approval_record_approved_true") ||
+        approvalRequirementGaps.includes("approval_record_approver_present") ||
+        approvalRequirementGaps.includes("approval_record_approved_at_present")
+      ) {
+        gateReasons.push("MANUAL_CONFIRMATION_MISSING");
+      }
+      if (approvalRequirementGaps.includes("approval_record_checks_all_true")) {
+        gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
+      }
+    }
+    const blockingReasons = gateReasons.filter((reason) => reason !== writeTierReason);
+    const allowed = blockingReasons.length === 0;
+    if (allowed) {
+      gateReasons.push(
+        requestedExecutionMode === "recon" ? "DEFAULT_MODE_RECON" : "DEFAULT_MODE_DRY_RUN",
+        "WRITE_EXECUTION_GATE_ONLY"
+      );
+    }
+    const consumerGateResult: Record<string, unknown> = {
       risk_state: riskState,
       issue_scope: issueScope,
       target_domain: targetDomain,
@@ -783,20 +908,13 @@ export class BackgroundRelay {
       action_type: actionType,
       requested_execution_mode: requestedExecutionMode,
       effective_execution_mode: requestedExecutionMode,
-      gate_decision: "allowed",
+      gate_decision: allowed ? "allowed" : "blocked",
       gate_reasons: gateReasons,
       fingerprint_gate_decision: "allowed",
       fingerprint_reason_codes: [],
       write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier
     };
-    const ability = asRecord(commandParams.ability) ?? {};
-    const input = asRecord(commandParams.input) ?? {};
-    const actionId =
-      typeof input.action_id === "string" && input.action_id.trim().length > 0
-        ? input.action_id.trim()
-        : "editor_input";
-    const text = typeof input.text === "string" ? input.text.trim() : "";
-    if (actionId !== "editor_input" || text.length === 0) {
+    if (!allowed) {
       return {
         id: request.id,
         status: "error",
@@ -804,15 +922,40 @@ export class BackgroundRelay {
           relay_path: "host>background"
         },
         payload: {
-          details: {
-            ability_id: String(ability.id ?? "xhs.interact.editor-input.v1"),
-            stage: "input_validation",
-            reason: "INTERACTION_INPUT_INVALID"
-          },
           consumer_gate_result: consumerGateResult,
           write_interaction_tier: WRITE_INTERACTION_TIER,
-          write_action_matrix_decisions: writeActionMatrixDecisions
+          write_action_matrix_decisions: writeActionMatrixDecisions,
+          write_gate_only_decision: {
+            issue_scope: issueScope,
+            state: riskState,
+            write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier,
+            matrix_decision: writeMatrixDecision.decision,
+            matrix_actions: writeActionMatrixDecisions.matrix_actions,
+            required_approval: writeApprovalRequirements,
+            approval_satisfied: approvalRequirementGaps.length === 0,
+            approval_missing_requirements: approvalRequirementGaps,
+            execution_enabled: false
+          }
         },
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: xhsGateReasonMessage(blockingReasons[0] ?? "ISSUE_ACTION_MATRIX_BLOCKED")
+        }
+      };
+    }
+    const { ability, actionId, text } = resolveXhsInteractInput(commandParams);
+    if (actionId !== "editor_input" || text.length === 0) {
+      return {
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background"
+        },
+        payload: createXhsInteractInputErrorPayload(
+          ability,
+          consumerGateResult,
+          writeActionMatrixDecisions
+        ),
         error: {
           code: "ERR_EXECUTION_FAILED",
           message: "xhs.interact requires action_id=editor_input and non-empty text"
@@ -2118,6 +2261,28 @@ class ChromeBackgroundBridge {
         command === "xhs.interact" &&
         (gateResult.gateOnly || effectiveExecutionMode === "dry_run" || effectiveExecutionMode === "recon");
       if ((gateResult.gateOnly && command === "xhs.search") || interactGateOnly) {
+        if (command === "xhs.interact") {
+          const { ability, actionId, text } = resolveXhsInteractInput(commandParams);
+          if (actionId !== "editor_input" || text.length === 0) {
+            this.#emit({
+              id: request.id,
+              status: "error",
+              summary: {
+                relay_path: "host>background"
+              },
+              payload: createXhsInteractInputErrorPayload(
+                ability,
+                asRecord(gateResult.gatePayload?.consumer_gate_result) ?? {},
+                gateResult.gatePayload?.write_action_matrix_decisions as XhsWriteActionMatrixDecisionsOutput
+              ),
+              error: {
+                code: "ERR_EXECUTION_FAILED",
+                message: "xhs.interact requires action_id=editor_input and non-empty text"
+              }
+            });
+            return;
+          }
+        }
         this.#emit({
           id: request.id,
           status: "success",
@@ -2130,7 +2295,7 @@ class ChromeBackgroundBridge {
             tab_id: null,
             relay_path: "host>background"
           },
-          payload: this.#createXhsGateOnlyPayload(request, gateResult.gatePayload),
+          payload: createBridgeXhsGateOnlyPayload(request, gateResult.gatePayload),
           error: null
         });
         return;
@@ -2216,39 +2381,6 @@ class ChromeBackgroundBridge {
         message: "content script dispatch failed"
       });
     }
-  }
-
-  #createXhsGateOnlyPayload(
-    request: BridgeRequest,
-    gatePayload: Record<string, unknown>
-  ): Record<string, unknown> {
-    const commandParams = asRecord(request.params.command_params) ?? {};
-    const ability = asRecord(commandParams.ability) ?? {};
-    const input = asRecord(commandParams.input) ?? {};
-    const consumerGateResult = asRecord(gatePayload.consumer_gate_result) ?? {};
-
-    return {
-      summary: {
-        capability_result: {
-          ability_id: String(ability.id ?? "xhs.note.search.v1"),
-          layer: String(ability.layer ?? "L3"),
-          action: String(consumerGateResult.action_type ?? "read"),
-          outcome: "partial",
-          data_ref: {
-            query: String(input.query ?? "")
-          },
-          metrics: {
-            count: 0
-          }
-        },
-        ...gatePayload
-      },
-      observability: {
-        page_state: null,
-        key_requests: [],
-        failure_site: null
-      }
-    };
   }
 
   #appendGateReason(target: Record<string, unknown>, reason: string): void {
