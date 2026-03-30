@@ -1598,6 +1598,125 @@ describe("extension background relay contract", () => {
     }
   });
 
+  it("rejects unsupported xhs.interact action ids even under gate-only dry_run", async () => {
+    const contentScript = new ContentScriptHandler();
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-editor-input-invalid-action-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-editor-input-invalid-action-001",
+        command: "xhs.interact",
+        command_params: {
+          ability: {
+            id: "xhs.interact.editor-input.v1",
+            layer: "L3",
+            action: "write"
+          },
+          input: {
+            action_id: "image_attach",
+            text: "最小正式验证"
+          },
+          options: {
+            target_domain: "creator.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "creator_publish_tab",
+            issue_scope: "issue_208",
+            action_type: "write",
+            requested_execution_mode: "dry_run",
+            risk_state: "allowed",
+            approval_record: {
+              approved: true,
+              approver: "qa-reviewer",
+              approved_at: "2026-03-23T10:00:00Z",
+              checks: {
+                target_domain_confirmed: true,
+                target_tab_confirmed: true,
+                target_page_confirmed: true,
+                risk_state_checked: true,
+                action_type_confirmed: true
+              }
+            }
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    const response = await responsePromise;
+    expect(response.status).toBe("error");
+    expect(response.error?.code).toBe("ERR_EXECUTION_FAILED");
+    const payload = asRecord(response.payload) ?? {};
+    expect(asRecord(payload.details)).toMatchObject({
+      reason: "INTERACTION_INPUT_INVALID"
+    });
+  });
+
+  it("rejects gate-only xhs.interact when target scope is incomplete", async () => {
+    const contentScript = new ContentScriptHandler();
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-editor-input-missing-target-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-editor-input-missing-target-001",
+        command: "xhs.interact",
+        command_params: {
+          ability: {
+            id: "xhs.interact.editor-input.v1",
+            layer: "L3",
+            action: "write"
+          },
+          input: {
+            action_id: "editor_input",
+            text: "最小正式验证"
+          },
+          options: {
+            issue_scope: "issue_208",
+            action_type: "write",
+            requested_execution_mode: "dry_run",
+            risk_state: "allowed",
+            approval_record: {
+              approved: true,
+              approver: "qa-reviewer",
+              approved_at: "2026-03-23T10:00:00Z",
+              checks: {
+                target_domain_confirmed: false,
+                target_tab_confirmed: false,
+                target_page_confirmed: false,
+                risk_state_checked: true,
+                action_type_confirmed: true
+              }
+            }
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    const response = await responsePromise;
+    expect(response.status).toBe("error");
+    expect(response.error?.code).toBe("ERR_TRANSPORT_FORWARD_FAILED");
+    const payload = asRecord(response.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult).toMatchObject({
+      gate_decision: "blocked"
+    });
+    expect(
+      (consumerGateResult?.gate_reasons as string[] | undefined) ?? []
+    ).toEqual(expect.arrayContaining(["TARGET_SCOPE_NOT_EXPLICIT"]));
+  });
+
   it("keeps issue_208 irreversible_write blocked and returns irreversible write tier", async () => {
     const contentScript = new ContentScriptHandler({
       xhsEnv: {

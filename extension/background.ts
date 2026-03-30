@@ -726,6 +726,39 @@ export class BackgroundRelay {
     if (issueScope !== "issue_208" || actionType === null) {
       return null;
     }
+    const targetDomain = asNonEmptyString(readGateParam("target_domain"));
+    const targetTabId = asInteger(readGateParam("target_tab_id"));
+    const targetPage = asNonEmptyString(readGateParam("target_page"));
+    if (!targetDomain || targetTabId === null || !targetPage) {
+      return {
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background"
+        },
+        payload: {
+          consumer_gate_result: {
+            risk_state: resolveRiskState(readGateParam("risk_state")),
+            issue_scope: issueScope,
+            target_domain: targetDomain,
+            target_tab_id: targetTabId,
+            target_page: targetPage,
+            action_type: actionType,
+            requested_execution_mode: requestedExecutionMode,
+            effective_execution_mode: requestedExecutionMode,
+            gate_decision: "blocked",
+            gate_reasons: ["TARGET_SCOPE_NOT_EXPLICIT"],
+            fingerprint_gate_decision: "allowed",
+            fingerprint_reason_codes: [],
+            write_interaction_tier: "reversible_interaction"
+          }
+        },
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: "xhs target scope is incomplete"
+        }
+      };
+    }
     const writeActionMatrixDecisions = getWriteActionMatrixDecisions(
       issueScope,
       actionType,
@@ -744,9 +777,9 @@ export class BackgroundRelay {
     const consumerGateResult = {
       risk_state: riskState,
       issue_scope: issueScope,
-      target_domain: asNonEmptyString(readGateParam("target_domain")),
-      target_tab_id: asInteger(readGateParam("target_tab_id")),
-      target_page: asNonEmptyString(readGateParam("target_page")),
+      target_domain: targetDomain,
+      target_tab_id: targetTabId,
+      target_page: targetPage,
       action_type: actionType,
       requested_execution_mode: requestedExecutionMode,
       effective_execution_mode: requestedExecutionMode,
@@ -758,6 +791,34 @@ export class BackgroundRelay {
     };
     const ability = asRecord(commandParams.ability) ?? {};
     const input = asRecord(commandParams.input) ?? {};
+    const actionId =
+      typeof input.action_id === "string" && input.action_id.trim().length > 0
+        ? input.action_id.trim()
+        : "editor_input";
+    const text = typeof input.text === "string" ? input.text.trim() : "";
+    if (actionId !== "editor_input" || text.length === 0) {
+      return {
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background"
+        },
+        payload: {
+          details: {
+            ability_id: String(ability.id ?? "xhs.interact.editor-input.v1"),
+            stage: "input_validation",
+            reason: "INTERACTION_INPUT_INVALID"
+          },
+          consumer_gate_result: consumerGateResult,
+          write_interaction_tier: WRITE_INTERACTION_TIER,
+          write_action_matrix_decisions: writeActionMatrixDecisions
+        },
+        error: {
+          code: "ERR_EXECUTION_FAILED",
+          message: "xhs.interact requires action_id=editor_input and non-empty text"
+        }
+      };
+    }
     return {
       id: request.id,
       status: "success",
@@ -778,7 +839,7 @@ export class BackgroundRelay {
             action: actionType,
             outcome: "partial",
             data_ref: {
-              action_id: String(input.action_id ?? "")
+              action_id: actionId
             },
             metrics: {
               count: 0
