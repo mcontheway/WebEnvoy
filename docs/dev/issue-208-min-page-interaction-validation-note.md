@@ -7,15 +7,16 @@
 
 ## 背景
 
-`#208` 的职责不是补完整写能力，而是把 Phase 1 剩余的“至少一种最小页面交互动作已可验证”收成一个最小、可审查、可关闭的正式闭环。
+`#208` 的职责不是补完整写能力，而是把 Phase 1 剩余的“至少一种最小页面交互动作可进入正式验证”收成一个最小、可审查、可继续推进的治理闭环。
 
-截至 2026-03-30，Sprint 2 / Sprint 3 已把风险门禁、统一状态机、交互分级、session 节律与审计链路接入主干。本次链路在此基础上补齐了 `editor_input` 的真实执行闭环与正式验证证据。
+截至 2026-03-30，Sprint 2 / Sprint 3 已把风险门禁、统一状态机、交互分级、session 节律与审计链路接入主干。本次链路在此基础上补齐了 `editor_input` 的命令、relay 与 gate-only 契约前置，但尚未构成 `#208` 的正式 live 验证完成证据。
 
 ## 目标
 
 - 冻结 `#208` 的唯一正式候选动作。
 - 明确该动作的范围、非范围、前置条件与成功/失败判定边界。
-- 明确本次实现为什么已足以把 `#208` 推进到可收口状态。
+- 明确 `#208` 的最小正式候选动作为什么收敛为 `editor_input`。
+- 明确当前实现只解决哪些前置，哪些内容仍不能宣告为 `#208` 已完成。
 
 ## 非目标
 
@@ -39,15 +40,15 @@
   - 原因：上传路径在 FR-0008 中仍是 candidate/fallback 输入，且 FR-0011 明确把上传注入默认设为阻断。
 - 不选 `submit/publish`
   - 原因：属于不可逆写动作，超出 Phase 1 与 `#208` 的边界。
-- 本次补齐的是真实动作闭环，而不是继续停留在 gate-only
+- 本次补齐的是进入正式验证前所需的最小实现前置，而不是直接宣布正式验证完成
   - `xhs.editor_input` CLI 命令已接通到 `xhs.interact` / `editor_input`
-  - content-script 已在发布页执行真实“聚焦并输入少量文本”交互
+  - `xhs.interact` 在 `gateOnly=true` 或 `effective_execution_mode=dry_run|recon` 下必须短路，不得真实写页面
   - loopback、CLI contract、extension relay contract 已补齐对应验证证据
 
 ## 影响面与风险
 
-- 该说明不会修改上位架构、正式 FR 套件或共享契约，只用于冻结 `#208` 的收口边界。
-- 当前最大风险不再是“没真实动作”，而是发布页 DOM 漂移会导致编辑器定位变化。
+- 该说明不会修改上位架构、正式 FR 套件或共享契约，只用于冻结 `#208` 的收口边界与当前阻断项。
+- 当前最大风险不是实现缺口，而是正式 live 验证证据尚未进入可复核治理链路。
 - 若后续实现扩张到上传、提交、完整写链路或 L2/L1，应立即停止在 `#208` 中推进并拆到新分支。
 
 ## 验证方式
@@ -55,13 +56,14 @@
 - GitHub 真相源核对：
   - `#218/#219/#221/#223/#224/#225/#226/#227` 已关闭
   - `#217` 已关闭
-  - `#208` 仍打开，等待实现 PR 合并后再关闭
+  - `#208` 仍打开；当前 PR 不能直接关闭它
 - 代码与测试核对：
-  - `xhs.editor_input` 已返回结构化 `interaction_result`
-  - `consumer_gate_result` 与 `observability.page_state` 已在成功路径保留
+  - `xhs.editor_input` 已接通命令与 relay 契约
+  - `consumer_gate_result` 与 `observability.page_state` 已在成功或 gate-only 路径保留
+  - `xhs.interact` 已补回 gate-only 回归约束：`dry_run/recon` 不得执行真实编辑器输入
   - 已通过：
     - `pnpm build`
-    - `pnpm exec vitest run src/commands/__tests__/xhs.test.ts tests/cli.contract.test.ts tests/extension.relay.contract.test.ts --testNamePattern='xhs.editor_input|editor_input|issue_208'`
+    - `pnpm exec vitest run src/commands/__tests__/xhs.test.ts tests/cli.contract.test.ts tests/extension.relay.contract.test.ts`
     - `pnpm test`
 - 本地命令：
   - `pnpm install`
@@ -76,6 +78,15 @@
 出现以下情况时，应停止按当前说明继续扩写并升级为正式 FR 或新分支：
 
 - 需要引入稳定机器接口或新的共享 payload
-- 需要落地真实编辑器输入实现并修改 background/content-script/CLI 共享行为
+- 需要基于正式审批链路落地真实 `editor_input` live 验证
 - 需要把上传、提交、发布确认纳入同一链路
 - 需要修改 FR-0008/0009/0010/0011 的正式契约表达
+
+## 当前结论
+
+- `#208` 的最小页面交互动作已收敛为 `editor_input`。
+- 当前分支已补齐正式验证前置所需的最小实现与测试约束。
+- `#208` 仍未达到可关闭状态。
+- 当前剩余 blocker：
+  - 缺可复核的 live 正式验证证据
+  - 缺承载该证据的正式治理闭环

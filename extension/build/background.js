@@ -307,6 +307,11 @@ export class BackgroundRelay {
             return;
         }
         const timeoutMs = readTimeoutMs(request.timeout_ms) ?? this.#forwardTimeoutMs;
+        const gateOnlyResponse = this.#resolveInteractGateOnlyResponse(request);
+        if (gateOnlyResponse) {
+            this.#emit(gateOnlyResponse);
+            return;
+        }
         const timeout = setTimeout(() => {
             this.#failPending(request.id, {
                 code: "ERR_TRANSPORT_TIMEOUT",
@@ -411,6 +416,95 @@ export class BackgroundRelay {
         for (const listener of this.#listeners) {
             listener(message);
         }
+    }
+    #resolveInteractGateOnlyResponse(request) {
+        const command = String(request.params.command ?? "");
+        if (command !== "xhs.interact") {
+            return null;
+        }
+        const commandParams = asRecord(request.params.command_params) ?? {};
+        const optionParams = asRecord(commandParams.options);
+        const readGateParam = (key) => {
+            if (Object.prototype.hasOwnProperty.call(commandParams, key)) {
+                return commandParams[key];
+            }
+            return optionParams?.[key];
+        };
+        const requestedExecutionMode = parseRequestedExecutionMode(readGateParam("requested_execution_mode"));
+        if (requestedExecutionMode !== "dry_run" && requestedExecutionMode !== "recon") {
+            return null;
+        }
+        const actionType = parseActionType(readGateParam("action_type"));
+        const issueScope = resolveIssueScope(readGateParam("issue_scope"));
+        if (issueScope !== "issue_208" || actionType === null) {
+            return null;
+        }
+        const writeActionMatrixDecisions = getWriteActionMatrixDecisions(issueScope, actionType, requestedExecutionMode);
+        if (writeActionMatrixDecisions.write_interaction_tier === "observe_only") {
+            return null;
+        }
+        const riskState = resolveRiskState(readGateParam("risk_state"));
+        const writeTierReason = `WRITE_INTERACTION_TIER_${writeActionMatrixDecisions.write_interaction_tier.toUpperCase()}`;
+        const gateReasons = [
+            writeTierReason,
+            requestedExecutionMode === "recon" ? "DEFAULT_MODE_RECON" : "DEFAULT_MODE_DRY_RUN",
+            "WRITE_EXECUTION_GATE_ONLY"
+        ];
+        const consumerGateResult = {
+            risk_state: riskState,
+            issue_scope: issueScope,
+            target_domain: asNonEmptyString(readGateParam("target_domain")),
+            target_tab_id: asInteger(readGateParam("target_tab_id")),
+            target_page: asNonEmptyString(readGateParam("target_page")),
+            action_type: actionType,
+            requested_execution_mode: requestedExecutionMode,
+            effective_execution_mode: requestedExecutionMode,
+            gate_decision: "allowed",
+            gate_reasons: gateReasons,
+            fingerprint_gate_decision: "allowed",
+            fingerprint_reason_codes: [],
+            write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier
+        };
+        const ability = asRecord(commandParams.ability) ?? {};
+        const input = asRecord(commandParams.input) ?? {};
+        return {
+            id: request.id,
+            status: "success",
+            summary: {
+                session_id: String(request.params.session_id ?? this.#sessionId),
+                run_id: String(request.params.run_id ?? request.id),
+                command,
+                profile: typeof request.profile === "string" ? request.profile : null,
+                cwd: String(request.params.cwd ?? ""),
+                tab_id: null,
+                relay_path: "host>background"
+            },
+            payload: {
+                summary: {
+                    capability_result: {
+                        ability_id: String(ability.id ?? "xhs.interact.editor-input.v1"),
+                        layer: String(ability.layer ?? "L3"),
+                        action: actionType,
+                        outcome: "partial",
+                        data_ref: {
+                            action_id: String(input.action_id ?? "")
+                        },
+                        metrics: {
+                            count: 0
+                        }
+                    },
+                    consumer_gate_result: consumerGateResult,
+                    write_interaction_tier: WRITE_INTERACTION_TIER,
+                    write_action_matrix_decisions: writeActionMatrixDecisions
+                },
+                observability: {
+                    page_state: null,
+                    key_requests: [],
+                    failure_site: null
+                }
+            },
+            error: null
+        };
     }
 }
 class ChromeBackgroundBridge {
@@ -1501,14 +1595,17 @@ class ChromeBackgroundBridge {
                 });
                 return;
             }
-            if (gateResult.gateOnly && command === "xhs.search") {
+            const effectiveExecutionMode = gateResult.consumerGateResult?.effective_execution_mode ?? null;
+            const interactGateOnly = command === "xhs.interact" &&
+                (gateResult.gateOnly || effectiveExecutionMode === "dry_run" || effectiveExecutionMode === "recon");
+            if ((gateResult.gateOnly && command === "xhs.search") || interactGateOnly) {
                 this.#emit({
                     id: request.id,
                     status: "success",
                     summary: {
                         session_id: String(request.params.session_id ?? "nm-session-001"),
                         run_id: String(request.params.run_id ?? request.id),
-                        command: String(request.params.command ?? "xhs.search"),
+                        command: command.length > 0 ? command : "xhs.search",
                         profile: typeof request.profile === "string" ? request.profile : null,
                         cwd: String(request.params.cwd ?? ""),
                         tab_id: null,
