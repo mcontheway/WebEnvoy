@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 
 import { CliError } from "../core/errors.js";
 import type { JsonObject } from "../core/types.js";
+import { isValidNativeHostName } from "../install/native-host.js";
 import {
   BrowserLaunchError,
   isUnsupportedBrandedChromeForExtensions,
@@ -90,6 +91,22 @@ const asNonEmptyString = (value: unknown): string | null =>
 
 const isBrowserChannel = (value: string): value is BrowserChannel =>
   BROWSER_CHANNELS.includes(value as BrowserChannel);
+
+const ensureValidNativeHostName = (nativeHostName: string): void => {
+  if (!isValidNativeHostName(nativeHostName)) {
+    throw new CliError(
+      "ERR_PROFILE_INVALID",
+      "persistent_extension_identity.native_host_name 格式非法，必须满足 Chrome Native Messaging host 命名规则",
+      {
+        details: {
+          ability_id: "runtime.identity_preflight",
+          stage: "input_validation",
+          reason: "IDENTITY_BINDING_INVALID_NATIVE_HOST_NAME"
+        }
+      }
+    );
+  }
+};
 
 const resolveManifestPathForChannel = (
   browserChannel: BrowserChannel,
@@ -243,6 +260,7 @@ const parsePersistentExtensionBindingFromParams = (
     asNonEmptyString(raw.native_host_name) ??
     asNonEmptyString(raw.nativeHostName) ??
     DEFAULT_NATIVE_HOST_NAME;
+  ensureValidNativeHostName(nativeHostName);
   const browserChannelRaw =
     asNonEmptyString(raw.browser_channel) ?? asNonEmptyString(raw.browserChannel) ?? "chrome";
   if (!isBrowserChannel(browserChannelRaw)) {
@@ -289,19 +307,37 @@ const parsePersistentExtensionBindingFromMeta = (
   if (
     typeof raw.extensionId !== "string" ||
     !EXTENSION_ID_PATTERN.test(raw.extensionId) ||
-    typeof raw.nativeHostName !== "string" ||
-    raw.nativeHostName.trim().length === 0 ||
     typeof raw.browserChannel !== "string" ||
     !isBrowserChannel(raw.browserChannel)
   ) {
     return null;
+  }
+  if (typeof raw.nativeHostName !== "string") {
+    return null;
+  }
+  const nativeHostName = raw.nativeHostName.trim();
+  if (nativeHostName.length === 0) {
+    return null;
+  }
+  if (!isValidNativeHostName(nativeHostName)) {
+    throw new CliError(
+      "ERR_PROFILE_INVALID",
+      "profile meta 中的 persistentExtensionBinding.nativeHostName 格式非法",
+      {
+        details: {
+          ability_id: "runtime.identity_preflight",
+          stage: "input_validation",
+          reason: "IDENTITY_BINDING_INVALID_NATIVE_HOST_NAME"
+        }
+      }
+    );
   }
   if (raw.manifestPath !== null && typeof raw.manifestPath !== "string") {
     return null;
   }
   return {
     extensionId: raw.extensionId,
-    nativeHostName: raw.nativeHostName,
+    nativeHostName,
     browserChannel: raw.browserChannel,
     manifestPath:
       raw.manifestPath === null

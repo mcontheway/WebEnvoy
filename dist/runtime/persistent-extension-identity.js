@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { CliError } from "../core/errors.js";
+import { isValidNativeHostName } from "../install/native-host.js";
 import { BrowserLaunchError, isUnsupportedBrandedChromeForExtensions, resolvePreferredBrowserVersionTruthSource } from "./browser-launcher.js";
 const DEFAULT_NATIVE_HOST_NAME = "com.webenvoy.host";
 const EXTENSION_ID_PATTERN = /^[a-p]{32}$/;
@@ -30,6 +31,17 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     : null;
 const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const isBrowserChannel = (value) => BROWSER_CHANNELS.includes(value);
+const ensureValidNativeHostName = (nativeHostName) => {
+    if (!isValidNativeHostName(nativeHostName)) {
+        throw new CliError("ERR_PROFILE_INVALID", "persistent_extension_identity.native_host_name 格式非法，必须满足 Chrome Native Messaging host 命名规则", {
+            details: {
+                ability_id: "runtime.identity_preflight",
+                stage: "input_validation",
+                reason: "IDENTITY_BINDING_INVALID_NATIVE_HOST_NAME"
+            }
+        });
+    }
+};
 const resolveManifestPathForChannel = (browserChannel, nativeHostName) => {
     const platform = identityPreflightAdapters.platform();
     if (platform === "darwin") {
@@ -143,6 +155,7 @@ const parsePersistentExtensionBindingFromParams = (params) => {
     const nativeHostName = asNonEmptyString(raw.native_host_name) ??
         asNonEmptyString(raw.nativeHostName) ??
         DEFAULT_NATIVE_HOST_NAME;
+    ensureValidNativeHostName(nativeHostName);
     const browserChannelRaw = asNonEmptyString(raw.browser_channel) ?? asNonEmptyString(raw.browserChannel) ?? "chrome";
     if (!isBrowserChannel(browserChannelRaw)) {
         throw new CliError("ERR_PROFILE_INVALID", "persistent_extension_identity.browser_channel 不受支持", {
@@ -176,18 +189,32 @@ const parsePersistentExtensionBindingFromMeta = (meta) => {
     }
     if (typeof raw.extensionId !== "string" ||
         !EXTENSION_ID_PATTERN.test(raw.extensionId) ||
-        typeof raw.nativeHostName !== "string" ||
-        raw.nativeHostName.trim().length === 0 ||
         typeof raw.browserChannel !== "string" ||
         !isBrowserChannel(raw.browserChannel)) {
         return null;
+    }
+    if (typeof raw.nativeHostName !== "string") {
+        return null;
+    }
+    const nativeHostName = raw.nativeHostName.trim();
+    if (nativeHostName.length === 0) {
+        return null;
+    }
+    if (!isValidNativeHostName(nativeHostName)) {
+        throw new CliError("ERR_PROFILE_INVALID", "profile meta 中的 persistentExtensionBinding.nativeHostName 格式非法", {
+            details: {
+                ability_id: "runtime.identity_preflight",
+                stage: "input_validation",
+                reason: "IDENTITY_BINDING_INVALID_NATIVE_HOST_NAME"
+            }
+        });
     }
     if (raw.manifestPath !== null && typeof raw.manifestPath !== "string") {
         return null;
     }
     return {
         extensionId: raw.extensionId,
-        nativeHostName: raw.nativeHostName,
+        nativeHostName,
         browserChannel: raw.browserChannel,
         manifestPath: raw.manifestPath === null
             ? null

@@ -454,6 +454,7 @@ describe("profile-runtime identity preflight", () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-entry-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    process.env.WEBENVOY_BROWSER_VERSION = "Google Chrome 146.0.7680.154";
     const launchSpy = vi.fn();
     const service = createTestService({
       browserLauncher: {
@@ -1291,6 +1292,7 @@ describe("profile-runtime identity preflight", () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-stale-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    process.env.WEBENVOY_BROWSER_VERSION = "Google Chrome 146.0.7680.154";
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
@@ -1575,6 +1577,68 @@ describe("profile-runtime identity preflight", () => {
     const meta = await profileStore.readMeta("identity_live_profile");
     expect(meta).toBeNull();
 
+  });
+
+  it("rejects invalid persistent identity binding from stored meta on default runtime paths", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-invalid-binding-"));
+    tempDirs.push(baseDir);
+    const service = createTestService();
+    const store = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    await store.ensureProfileDir("invalid_binding_profile");
+    await writeFile(
+      store.getMetaPath("invalid_binding_profile"),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          profileName: "invalid_binding_profile",
+          profileDir: store.getProfileDir("invalid_binding_profile"),
+          profileState: "stopped",
+          proxyBinding: null,
+          persistentExtensionBinding: {
+            extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            nativeHostName: "com..invalid",
+            browserChannel: "chrome",
+            manifestPath: "/tmp/native-host.json"
+          },
+          fingerprintSeeds: {
+            audioNoiseSeed: "seed-a-001",
+            canvasNoiseSeed: "seed-c-001"
+          },
+          localStorageSnapshots: [],
+          createdAt: "2026-03-19T10:00:00.000Z",
+          updatedAt: "2026-03-19T10:01:00.000Z",
+          lastStartedAt: null,
+          lastLoginAt: null,
+          lastStoppedAt: "2026-03-19T10:01:00.000Z",
+          lastDisconnectedAt: null
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile: "invalid_binding_profile",
+        runId: "run-runtime-invalid-binding-status",
+        params: {}
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_META_CORRUPT"
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "invalid_binding_profile",
+        runId: "run-runtime-invalid-binding-start",
+        params: {}
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_META_CORRUPT"
+    });
   });
 
   it("keeps runtime.login available and persists identity binding into profile meta", async () => {

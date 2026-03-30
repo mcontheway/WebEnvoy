@@ -7,6 +7,7 @@ import {
   markFingerprintProfileBundleAsLegacyBackfilled,
   type FingerprintProfileBundle
 } from "../../shared/fingerprint-profile.js";
+import { isValidNativeHostName } from "../install/native-host.js";
 import { resolveBrowserVersionTruthSource } from "./browser-launcher.js";
 import { resolveCurrentFingerprintEnvironment } from "./fingerprint-runtime.js";
 import type { ProfileState } from "./profile-state.js";
@@ -236,7 +237,11 @@ function assertProfileMeta(value: unknown): asserts value is ProfileMeta {
     if (typeof binding.extensionId !== "string" || !EXTENSION_ID_PATTERN.test(binding.extensionId)) {
       throw new Error("Invalid profile meta structure: persistentExtensionBinding.extensionId");
     }
-    if (typeof binding.nativeHostName !== "string" || binding.nativeHostName.trim().length === 0) {
+    if (
+      typeof binding.nativeHostName !== "string" ||
+      binding.nativeHostName.trim().length === 0 ||
+      !isValidNativeHostName(binding.nativeHostName.trim())
+    ) {
       throw new Error("Invalid profile meta structure: persistentExtensionBinding.nativeHostName");
     }
     if (

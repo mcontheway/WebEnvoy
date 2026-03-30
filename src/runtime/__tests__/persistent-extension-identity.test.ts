@@ -207,6 +207,35 @@ describe("runIdentityPreflight", () => {
     expect(result.failureReason).toBe("IDENTITY_BINDING_CONFLICT");
   });
 
+  it("rejects invalid native_host_name from params", async () => {
+    setIdentityPreflightAdaptersForTests({
+      resolvePreferredBrowserVersionTruthSource: vi.fn().mockResolvedValue({
+        executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        browserVersion: "Google Chrome 146.0.7680.154"
+      }),
+      isUnsupportedBrandedChromeForExtensions: vi.fn().mockReturnValue(true),
+      platform: () => "darwin"
+    });
+
+    await expect(
+      runIdentityPreflight({
+        params: {
+          persistent_extension_identity: {
+            extension_id: EXTENSION_ID,
+            native_host_name: "Com.WebEnvoy.Host"
+          }
+        },
+        meta: null
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_INVALID",
+      details: {
+        stage: "input_validation",
+        reason: "IDENTITY_BINDING_INVALID_NATIVE_HOST_NAME"
+      }
+    });
+  });
+
   it("returns missing when manifest is valid but profile extension files are absent", async () => {
     const manifestDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-manifest-absent-"));
     const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-profile-absent-"));
@@ -407,6 +436,39 @@ describe("runIdentityPreflight", () => {
       manifestPath,
       failureReason: "IDENTITY_PREFLIGHT_PASSED",
       blocking: false
+    });
+  });
+
+  it("rejects invalid nativeHostName when reading binding from profile meta", async () => {
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-profile-invalid-meta-"));
+    setIdentityPreflightAdaptersForTests({
+      resolvePreferredBrowserVersionTruthSource: vi.fn().mockResolvedValue({
+        executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        browserVersion: "Google Chrome 146.0.7680.154"
+      }),
+      isUnsupportedBrandedChromeForExtensions: vi.fn().mockReturnValue(true),
+      platform: () => "darwin"
+    });
+
+    await expect(
+      runIdentityPreflight({
+        params: {},
+        meta: createProfileMeta(profileDir, {
+          persistentExtensionBinding: {
+            extensionId: EXTENSION_ID,
+            nativeHostName: "com..invalid",
+            browserChannel: "chrome",
+            manifestPath: "/tmp/native-host.json"
+          }
+        }),
+        profileDir
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_INVALID",
+      details: {
+        stage: "input_validation",
+        reason: "IDENTITY_BINDING_INVALID_NATIVE_HOST_NAME"
+      }
     });
   });
 });

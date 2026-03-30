@@ -3900,6 +3900,92 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  it("rejects invalid persisted nativeHostName on runtime.status/runtime.start/runtime.login default paths", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "invalid_identity_binding_profile",
+        "--run-id",
+        "run-contract-invalid-binding-001"
+      ],
+      runtimeCwd
+    );
+    expect(start.status).toBe(0);
+    const startBody = parseSingleJsonLine(start.stdout);
+    const startSummary = startBody.summary as Record<string, unknown>;
+    const profileDir = String(startSummary.profileDir);
+
+    const stop = runCli(
+      [
+        "runtime.stop",
+        "--profile",
+        "invalid_identity_binding_profile",
+        "--run-id",
+        "run-contract-invalid-binding-001"
+      ],
+      runtimeCwd
+    );
+    expect(stop.status).toBe(0);
+
+    const metaPath = path.join(profileDir, "__webenvoy_meta.json");
+    const metaRaw = await readFile(metaPath, "utf8");
+    const meta = JSON.parse(metaRaw) as Record<string, unknown>;
+    meta.persistentExtensionBinding = {
+      extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      nativeHostName: "com..invalid",
+      browserChannel: "chrome",
+      manifestPath: "/tmp/native-host.json"
+    };
+    await writeFile(metaPath, `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+
+    const status = runCli(
+      ["runtime.status", "--profile", "invalid_identity_binding_profile"],
+      runtimeCwd
+    );
+    expect(status.status).toBe(5);
+    expect(parseSingleJsonLine(status.stdout)).toMatchObject({
+      command: "runtime.status",
+      status: "error",
+      error: { code: "ERR_PROFILE_META_CORRUPT" }
+    });
+
+    const restart = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        "invalid_identity_binding_profile",
+        "--run-id",
+        "run-contract-invalid-binding-002"
+      ],
+      runtimeCwd
+    );
+    expect(restart.status).toBe(5);
+    expect(parseSingleJsonLine(restart.stdout)).toMatchObject({
+      command: "runtime.start",
+      status: "error",
+      error: { code: "ERR_PROFILE_META_CORRUPT" }
+    });
+
+    const login = runCli(
+      [
+        "runtime.login",
+        "--profile",
+        "invalid_identity_binding_profile",
+        "--run-id",
+        "run-contract-invalid-binding-003"
+      ],
+      runtimeCwd
+    );
+    expect(login.status).toBe(5);
+    expect(parseSingleJsonLine(login.stdout)).toMatchObject({
+      command: "runtime.login",
+      status: "error",
+      error: { code: "ERR_PROFILE_META_CORRUPT" }
+    });
+  });
+
   it("keeps runtime.start/status/stop available when using shell mock browser fixture path", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const runtimeEnv = {
