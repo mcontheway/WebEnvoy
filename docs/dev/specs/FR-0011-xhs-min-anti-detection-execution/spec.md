@@ -66,6 +66,7 @@
 - 必须明确 gate-only 结果可返回页面观测信息，但不得发起真实写请求或返回真实 `interaction_result`。
 - 必须明确当 `issue_208` 已满足 `allowed + approval + audit` 前置时，可进入 `editor_input` 单动作真实验证。
 - 必须明确真实验证场景至少记录 `success_signals`、`failure_signals`、`minimum_replay` 与受限的 `interaction_result`，但这些验证态结果不等于正式稳定命令输出壳。
+- 必须明确上述真实验证继续复用 `FR-0010` 已冻结的 `action_type=write` 与 `requested_execution_mode|effective_execution_mode=live_write` 作为唯一门禁机器承载，不得为 `#208` 新增私有 mode 或平行 gate result。
 
 #### 4.1 唯一正式验证动作
 
@@ -147,7 +148,7 @@
 - 必须定义 `#208/#209` 在三态下的差异化阻断边界：
   - `paused`：`#208` 与 `#209` 均只允许 `dry_run|recon`，禁止任何 live。
   - `limited`：`#209` 仅允许受控读 live；`#208` 仍只允许 `dry_run|recon` 与 gate-only 观测返回，不得放行真实可逆交互。
-  - `allowed`：`#209` 可进入已审批范围；`#208` 可在已审批范围内进入单一 `editor_input` 真实验证，但不因此获得稳定命令接口或完整写链路放行。
+  - `allowed`：`#209` 可进入已审批范围；`#208` 可在已审批范围内进入单一 `editor_input` 真实验证，该路径在门禁字段上仍表现为 `action_type=write` + `requested_execution_mode|effective_execution_mode=live_write`，但不因此获得稳定命令接口或完整写链路放行。
 - 必须定义状态变更审计与回滚动作，至少包含变更前后状态、触发原因、run/session 关联；任何依赖人工审批或扩大 live 范围的迁移还必须包含审批人。
 
 ## GWT 验收场景
