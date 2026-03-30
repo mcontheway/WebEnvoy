@@ -63,6 +63,8 @@ FR-0002 / FR-0003 已冻结以下基线：
 - 只允许 `extensionId`、`nativeHostName`、`browserChannel`、`manifestPath`
 - `allowedOrigins`、`bindingState` 与 bootstrap/readiness 事实继续在运行时推导
 - 非法或冲突的持久字段必须阻断执行，不得作为“自动修复”的输入
+- 当前 formal 只冻结“identity 输入缺省时允许回读最小持久 binding”的行为，不把任何临时命令参数名升级为正式 machine contract
+- `manifestPath` 只作为定位提示使用；实现必须先把它归一化为绝对路径，再基于 manifest 内容重新校验 `nativeHostName/allowed_origins/extensionId`，缺失、不可读、内容不匹配或无法证明当前 identity 时一律阻断
 
 若 identity preflight 失败：
 

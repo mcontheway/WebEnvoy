@@ -195,7 +195,7 @@ disconnected -> starting
 
 ## 持久化边界
 
-`__webenvoy_meta.json` 只允许保存最小必要字段：
+`__webenvoy_meta.json` 在 FR-0003 基线下只允许保存最小必要字段：
 
 - `schemaVersion`
 - `profileName`
@@ -222,6 +222,14 @@ disconnected -> starting
 - `canvasNoiseSeed`
 
 其中 `localStorageSnapshots` 用于保存最小的 SPA 鉴权快照，不要求导出全部浏览器会话细节；在 FR-0003 中它只作为最小会话摘要 / 恢复输入，不要求自动回写到后续浏览器会话。
+
+后续 FR 如需增加新的可选字段，必须满足以下条件：
+
+- 只能作为加性可选字段，不得改写上述基线字段的既有语义
+- 必须在对应 formal spec / data-model 中明确字段边界、生命周期、非法值处理与回滚策略
+- 未被后续 formal spec 冻结前，不得把新的 profile meta 字段写成默认允许项
+
+在当前已冻结的后续 FR 中，`FR-0015` 允许以受控加项形式新增 `__webenvoy_meta.json.persistentExtensionBinding`，但仅限其 formal 文档定义的最小子集与回读边界，不得外推为更宽的安装/运行时状态仓库。
 
 ## 兼容策略
 
