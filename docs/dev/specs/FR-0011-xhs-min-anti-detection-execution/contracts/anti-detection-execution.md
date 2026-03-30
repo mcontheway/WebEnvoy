@@ -17,7 +17,7 @@
 
 补充约束：
 - `FR-0008.minimal_action_candidates.action_id=editor_input` 只表示“当前推荐作为 `#208` 正式验证对象的最小页面交互动作”，不等于已冻结 `xhs.editor_input` 命令。
-- 当前 FR 允许实现侧围绕 `issue_208` 暴露 gate-only 验证结果，但不允许借此宣称 `xhs.editor_input` 或 `xhs.interact` 已拥有正式稳定的命令名、输入 schema、输出 schema、错误码或 live 写结果契约。
+- 当前 FR 允许实现侧围绕 `issue_208` 暴露 gate-only 验证结果，并在 `allowed + approval + audit` 前置满足时暴露 `editor_input` 的单动作真实验证结果；但不允许借此宣称 `xhs.editor_input` 或 `xhs.interact` 已拥有正式稳定的命令名、输入 schema、输出 schema、错误码或 live 写结果契约。
 - 若后续需要新增 `xhs.editor_input` 或 `xhs.interact`，必须先通过独立正式 contract 冻结命令边界，再进入实现合并。
 
 ## 输出对象
@@ -98,7 +98,7 @@
   "write_interaction_tier": {
     "tiers": [
       { "name": "observe_only", "live_allowed": false },
-      { "name": "reversible_interaction", "live_allowed": "limited" },
+      { "name": "reversible_interaction", "live_allowed": "allowed" },
       { "name": "irreversible_write", "live_allowed": false }
     ],
     "synthetic_event_default": "blocked",
@@ -177,11 +177,20 @@
         "issue_scope": "issue_208",
         "state": "allowed",
         "allowed_actions": ["dry_run", "recon"],
-        "conditional_actions": [],
+        "conditional_actions": [
+          {
+            "action": "reversible_interaction_with_approval",
+            "requires": [
+              "approval_record_approved_true",
+              "approval_record_approver_present",
+              "approval_record_approved_at_present",
+              "approval_record_checks_all_true"
+            ]
+          }
+        ],
         "blocked_actions": [
           "live_read_limited",
           "live_read_high_risk",
-          "reversible_interaction_with_approval",
           "irreversible_write",
           "live_write",
           "expand_new_live_surface_without_gate"
@@ -264,7 +273,7 @@
 - `issue_208` 与 `issue_209` 必须共享同一状态集合（`paused/limited/allowed`）。
 - `paused` 下两者都不得包含任何 live 写或高风险 live 读动作。
 - `limited` 下 `issue_208` 不得包含不可逆写动作。
-- 在当前 formal contract freeze 中，`issue_208` 在 `limited|allowed` 下也不得通过 `allowed_actions` 或 `conditional_actions` 放行真实 `reversible_interaction_with_approval`；当前仅允许 `dry_run|recon` 与 gate-only 观测结果。
+- 在当前 formal contract freeze 中，`issue_208` 只允许在 `allowed` 下通过 `conditional_actions` 放行 `reversible_interaction_with_approval`，且该动作仅限 `editor_input` 单动作正式验证，不得扩张到上传、提交、发布确认或完整写链路。
 - 每个 `(issue_scope, state)` 都必须同时定义 `allowed_actions` 与 `blocked_actions`；若存在需附加审批/审计前置的动作，还必须定义 `conditional_actions`，不得把条件放行集合留给实现阶段猜测。
 - `conditional_actions` 在所有 entry 中都必须显式出现；无条件动作场景下使用空数组，不得靠字段缺失表达“无条件动作”。
 - `allowed_actions` 仅表示无需额外审批前置即可执行的动作；`conditional_actions` 表示命中当前 `(issue_scope, state)` 后仍需满足 `requires` 中附加审批/审计条件的动作。
@@ -329,6 +338,31 @@
 2. gate blocked 允许返回最小 `observability.page_state`；`key_requests` 仍必须为空数组；`failure_site` 必须继续继承 `FR-0004.observability.failure_site` 的最小字段集合（`stage`、`component`、`target`、`summary`），其中 `component` 必须为 `gate`。
 3. 上述两类场景都不得返回真实页面写入完成信号，不得返回真实 `interaction_result`，也不得触发真实编辑器写入。
 4. `page_state` 最小字段继续复用 `FR-0004` 的正式定义；本 FR 只补充 `#208` gate-only 场景下“必须返回/允许返回”的使用边界，不重定义字段本身。
+
+## `#208` 真实验证结果补充
+
+当 `issue_scope=issue_208`、`risk_state=allowed` 且 `reversible_interaction_with_approval` 满足附加审批/审计前置时，返回对象允许携带 `editor_input` 单动作真实验证结果。
+
+```json
+{
+  "interaction_result": {
+    "validation_action": "editor_input",
+    "target_page": "creator.xiaohongshu.com/publish",
+    "success_signals": ["editor_focused", "text_visible", "text_persisted_after_blur"],
+    "failure_signals": ["focus_lost", "text_reverted", "risk_prompt", "dom_variant"],
+    "minimum_replay": ["focus_editor", "type_short_text", "blur_or_reobserve"],
+    "out_of_scope_actions": ["image_upload", "submit", "publish_confirm"]
+  }
+}
+```
+
+补充约束：
+1. `interaction_result` 只允许出现在 `issue_208` 的真实验证场景，不得复用为通用写命令输出壳。
+2. `validation_action` 当前只能为 `editor_input`，且目标页固定为 `creator.xiaohongshu.com/publish`。
+3. `success_signals` 必须至少覆盖“聚焦成功、文本可见、最小失焦或重新观测后仍保留”三类信号。
+4. `failure_signals` 必须至少覆盖“焦点丢失、文本回退、风险提示、DOM 漂移”四类信号。
+5. `minimum_replay` 只定义最小复现实验步骤，不等于稳定 API/CLI contract。
+6. `out_of_scope_actions` 必须显式排除上传、提交、发布确认等超范围动作。
 
 ## 公开模式与阻断语义补充
 

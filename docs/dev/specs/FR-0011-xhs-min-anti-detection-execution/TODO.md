@@ -19,7 +19,7 @@
 
 - [ ] FR-0011 spec review 通过并形成明确结论
 - [ ] `#208` 与 `#209` issue 明确引用 FR-0011 作为进入 live 的前置
-- [ ] `#208` issue / PR 关闭语义回写为“验证前置已冻结，不等于正式验证已完成”
+- [ ] `#208` issue / PR 关闭语义回写为“验证前置已冻结，不等于正式验证已完成”，并与 `docs/dev/issue-208-min-page-interaction-validation-note.md` 保持一致
 - [ ] Sprint 治理重排（`#216`）中对应 sprint 编排与里程碑调整完成
 
 ## spec 通过后的实施清单（非本 PR）
@@ -32,6 +32,7 @@
 - [ ] 实现 session 节律/冷却/恢复最小约束
 - [ ] 实现状态变更审计落盘与缺失审计回退 `paused` 逻辑
 - [ ] 为 `#208` gate-only success / blocked 场景补齐 `page_state` 契约测试
+- [ ] 以 `docs/dev/issue-208-min-page-interaction-validation-note.md` 为准，为 `#208` 的 `editor_input` 单动作真实验证补齐最小 replay 与证据回传
 - [ ] 如需正式引入 `xhs.editor_input` 或 `xhs.interact`，先单独起 command contract 规约 PR
 - [ ] 补齐对应契约测试与状态迁移测试
 

@@ -172,6 +172,8 @@ Spike 输出必须包含以下四个对象：
 2. 任何候选动作若依赖多步骤发布、上传后提交或不可逆写入，默认不应被推荐给 `#208`。
 3. `action_id=editor_input` 仅表示最小页面交互候选动作，不等于已冻结 `xhs.editor_input` 或 `xhs.interact` 的正式 machine contract。
 4. `interact` 当前未在本 Spike 中被冻结为正式候选动作；后续若需要正式机器接口，必须通过独立 contract 规约定义。
+5. 一旦 `#208` 的正式验证说明冻结唯一正式验证对象为 `editor_input`，其他候选动作必须降为 `candidate_input` 或 `blocked`，不得继续与其并列为 `recommended_input`。
+6. 当 `action_id=editor_input` 被 `#208` 选为唯一正式验证对象时，其验证边界固定为 `creator.xiaohongshu.com/publish` 页面上的“聚焦并输入少量文本”的可逆交互，不得扩张到上传、提交或发布确认。
 
 ## gate_status
 
