@@ -162,11 +162,12 @@
       {
         "issue_scope": "issue_208",
         "state": "limited",
-        "allowed_actions": ["dry_run", "recon", "reversible_interaction_with_approval"],
+        "allowed_actions": ["dry_run", "recon"],
         "conditional_actions": [],
         "blocked_actions": [
           "live_read_limited",
           "live_read_high_risk",
+          "reversible_interaction_with_approval",
           "irreversible_write",
           "live_write",
           "expand_new_live_surface_without_gate"
@@ -175,11 +176,12 @@
       {
         "issue_scope": "issue_208",
         "state": "allowed",
-        "allowed_actions": ["dry_run", "recon", "reversible_interaction_with_approval"],
+        "allowed_actions": ["dry_run", "recon"],
         "conditional_actions": [],
         "blocked_actions": [
           "live_read_limited",
           "live_read_high_risk",
+          "reversible_interaction_with_approval",
           "irreversible_write",
           "live_write",
           "expand_new_live_surface_without_gate"
@@ -262,6 +264,7 @@
 - `issue_208` 与 `issue_209` 必须共享同一状态集合（`paused/limited/allowed`）。
 - `paused` 下两者都不得包含任何 live 写或高风险 live 读动作。
 - `limited` 下 `issue_208` 不得包含不可逆写动作。
+- 在当前 formal contract freeze 中，`issue_208` 在 `limited|allowed` 下也不得通过 `allowed_actions` 或 `conditional_actions` 放行真实 `reversible_interaction_with_approval`；当前仅允许 `dry_run|recon` 与 gate-only 观测结果。
 - 每个 `(issue_scope, state)` 都必须同时定义 `allowed_actions` 与 `blocked_actions`；若存在需附加审批/审计前置的动作，还必须定义 `conditional_actions`，不得把条件放行集合留给实现阶段猜测。
 - `conditional_actions` 在所有 entry 中都必须显式出现；无条件动作场景下使用空数组，不得靠字段缺失表达“无条件动作”。
 - `allowed_actions` 仅表示无需额外审批前置即可执行的动作；`conditional_actions` 表示命中当前 `(issue_scope, state)` 后仍需满足 `requires` 中附加审批/审计条件的动作。
@@ -310,7 +313,7 @@
 {
   "observability": {
     "page_state": {
-      "page_kind": "publish|login|unknown",
+      "page_kind": "compose|login|unknown",
       "url": "normalized_url",
       "title": "document title",
       "ready_state": "loading|interactive|complete"

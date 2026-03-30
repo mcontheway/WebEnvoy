@@ -52,6 +52,7 @@
 - 必须明确“真实交互优先”与“合成事件回退”的使用边界。
 - 必须明确上传注入相关路径（`DataTransfer` 等）在本阶段默认不放行为 live。
 - 必须明确 `issue_208` 当前冻结的是治理动作类别 `reversible_interaction_with_approval`，而不是正式命令名。
+- 必须明确在本次 formal contract freeze 中，`issue_208` 仍只冻结 gate-only 前置与最小可观测性边界；`reversible_interaction_with_approval` 不得在当前 FR 中被放行为真实页面交互。
 - 必须明确 `FR-0008` 中 `editor_input` 只是正式验证候选动作，不得被实现 PR 视为已冻结 command/API contract。
 - 必须明确后续若要引入 `xhs.editor_input` 或 `xhs.interact`，必须通过独立正式 command contract 冻结命令名、输入、输出、错误码、observability 与 gate-only 语义。
 
@@ -80,8 +81,8 @@
 - 必须定义状态输出契约，供 `#208/#209` 直接消费。
 - 必须定义 `#208/#209` 在三态下的差异化阻断边界：
   - `paused`：`#208` 与 `#209` 均只允许 `dry_run|recon`，禁止任何 live。
-  - `limited`：`#209` 仅允许受控读 live，`#208` 仅允许可逆交互，禁止不可逆写。
-  - `allowed`：两者可进入已审批范围，但仍受目标域/目标页、动作分级、审计留痕约束。
+  - `limited`：`#209` 仅允许受控读 live；`#208` 仍只允许 `dry_run|recon` 与 gate-only 观测返回，不得放行真实可逆交互。
+  - `allowed`：`#209` 可进入已审批范围；`#208` 在当前 FR 中仍只冻结 gate-only 前置与可观测性边界，是否放行真实交互留待后续独立 command contract 与实现评审决定。
 - 必须定义状态变更审计与回滚动作，至少包含变更前后状态、触发原因、run/session 关联；任何依赖人工审批或扩大 live 范围的迁移还必须包含审批人。
 
 ## GWT 验收场景
