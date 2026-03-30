@@ -14,9 +14,9 @@
 
 ## 目标
 
-- 冻结当前已确认的 official Chrome runtime blocker
-- 明确它为什么阻断 `#208` 的真实验证关闭条件
-- 明确一个独立前置 PR 应承接的最小实现范围
+- 记录当前仓库现场下已观察到的 official Chrome runtime blocker
+- 说明为什么它不应继续塞进 `#300`
+- 为后续独立 issue/PR 留下可复核的审计证据
 - 列出除主 blocker 外仍需二次核查的 close-readiness 风险点
 
 ## 非目标
@@ -53,11 +53,11 @@
   - `#300` 的目标是 `editor_input` 最小真实交互验证，不应承接 official Chrome runtime 主路径缺口。
   - 即使人工把 unpacked extension 装进 official Chrome，也仍无法形成满足 `FR-0011` 的 `CLI <-> host <-> background <-> content-script` 真实正式闭环。
   - 该缺口属于 runtime 前置能力，应由独立前置 issue/PR 承接。
-- 推荐的独立前置 PR 最小交付：
-  - 提供可注册到 Chrome 的正式 Native Messaging host/broker 入口
-  - 明确 host manifest 的生成/注册方式
-  - 打通 `identity -> transport -> bootstrap readiness` 最小闭环
-  - 不在同一 PR 混入 `editor_input` live evidence、本地登录态迁移或最终安装器产品化
+- 后续独立实现 PR 的候选检查维度：
+  - 是否补上可注册到 Chrome 的正式 Native Messaging host/broker 入口
+  - 是否定义清楚 host manifest 的生成/注册方式
+  - 是否打通 `identity -> transport -> bootstrap readiness` 最小闭环
+  - 是否仍把 `editor_input` live evidence、本地登录态迁移、最终安装器产品化留在独立后续事项
 
 ## 主 blocker 证据
 
@@ -69,6 +69,26 @@
   - `src/runtime/native-messaging/bridge.ts`
 - 仓库里现成的 host server 形态仅存在于测试 mock：
   - `tests/fixtures/native-host-mock.mjs`
+
+## 证据快照
+
+- 代码路径核查结果：
+  - `rg -n "WEBENVOY_NATIVE_HOST_CMD|connectNative|bridge\\.open|bridge\\.forward" src extension tests`
+  - 结果显示 `WEBENVOY_NATIVE_HOST_CMD` 仅出现在 `src/runtime/native-messaging/host.ts` 和测试夹具用法里；`bridge.open` / `bridge.forward` 的大量命中主要分布于 extension 与合同测试。
+- `src/runtime/native-messaging/host.ts` 现场结论：
+  - 该文件读取 `WEBENVOY_NATIVE_HOST_CMD`。
+  - 解析命令后通过 `spawn(...)` 启动外部进程，并以 stdio/native messaging frame 进行通信。
+  - 文件内没有“被 Chrome 直接调用并处理 stdin/stdout 协议循环”的 host server 主入口。
+- `tests/fixtures/native-host-mock.mjs` 现场结论：
+  - 该脚本直接消费 stdin、写回 framed stdout，并处理 `bridge.open` / `bridge.forward` / `__ping__`。
+  - 它具备 host server 形态，但位于测试夹具目录，不能作为 production host 入口。
+- 本机 official Chrome 现场结论：
+  - `find "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts" -maxdepth 1 -type f -name 'com.webenvoy*.json' -print`
+  - 当前无输出，说明本机用户级 Chrome Native Messaging manifest 尚未注册 WebEnvoy host。
+- `#208` 探针现场结论：
+  - `./bin/webenvoy runtime.status --profile xhs_208_probe --run-id issue208-status-now`
+  - 当前返回 `identityBindingState=missing`、`transportState=not_connected`、`bootstrapState=not_started`、`runtimeReadiness=blocked`，且 `identityPreflight.manifestPath=null`。
+  - 这只能证明 live 现场未 ready；它不单独构成正式关闭条件变更。
 
 ## 除主 blocker 外仍需二次核查的潜在 blocker
 
@@ -99,9 +119,9 @@
 
 - 这是高于 `#208 editor_input` 的运行时前置缺口；如果不先拆出，会让 `#300` 越界。
 - 它已经触及 runtime、Native Messaging、official Chrome persistent extension 边界，因此后续实现应按正式前置事项处理，而不是继续以“只差登录/安装”描述。
-- 本说明本身只冻结问题与边界，不改变正式契约或运行时代码，因此当前 PR 仍可保持文档级收口。
+- 本说明本身只记录当前审计证据，不改变正式契约、issue 关闭条件或运行时代码；后续依赖关系仍以对应 Issue / PR / FR 为准。
 
-## 验证方式
+## 复核方式
 
 - 代码路径核查：
   - `rg "WEBENVOY_NATIVE_HOST_CMD|connectNative|bridge.open|bridge.forward" src extension tests`
