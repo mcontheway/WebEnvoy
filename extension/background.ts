@@ -517,35 +517,6 @@ const readXhsGateParam = (
   return asRecord(commandParams.options)?.[key];
 };
 
-const resolveXhsInteractInput = (
-  commandParams: Record<string, unknown>
-): { ability: Record<string, unknown>; actionId: string; text: string } => {
-  const ability = asRecord(commandParams.ability) ?? {};
-  const input = asRecord(commandParams.input) ?? {};
-  const actionId =
-    typeof input.action_id === "string" && input.action_id.trim().length > 0
-      ? input.action_id.trim()
-      : "editor_input";
-  const text = typeof input.text === "string" ? input.text.trim() : "";
-  return {
-    ability,
-    actionId,
-    text
-  };
-};
-
-const createXhsInteractInputErrorPayload = (
-  ability: Record<string, unknown>,
-  gatePayload: Record<string, unknown>
-): Record<string, unknown> => ({
-  details: {
-    ability_id: String(ability.id ?? "xhs.interact.editor-input.v1"),
-    stage: "input_validation",
-    reason: "INTERACTION_INPUT_INVALID"
-  },
-  ...gatePayload
-});
-
 const resolveGateOnlyPageState = (
   gateInput: Record<string, unknown>,
   scopeContext: Record<string, unknown>
@@ -602,40 +573,22 @@ const createBridgeXhsGateOnlyPayload = (
   request: BridgeRequest,
   gatePayload: Record<string, unknown>
 ): Record<string, unknown> => {
-  const command = String(request.params.command ?? "");
   const commandParams = asRecord(request.params.command_params) ?? {};
   const ability = asRecord(commandParams.ability) ?? {};
   const input = asRecord(commandParams.input) ?? {};
   const consumerGateResult = asRecord(gatePayload.consumer_gate_result) ?? {};
-  const capabilityResult =
-    command === "xhs.interact"
-      ? {
-          ability_id: String(ability.id ?? "xhs.interact.editor-input.v1"),
-          layer: String(ability.layer ?? "L3"),
-          action: String(consumerGateResult.action_type ?? ability.action ?? "write"),
-          outcome: "partial",
-          data_ref: {
-            action_id:
-              typeof input.action_id === "string" && input.action_id.trim().length > 0
-                ? input.action_id.trim()
-                : "editor_input"
-          },
-          metrics: {
-            count: 0
-          }
-        }
-      : {
-          ability_id: String(ability.id ?? "xhs.note.search.v1"),
-          layer: String(ability.layer ?? "L3"),
-          action: String(consumerGateResult.action_type ?? "read"),
-          outcome: "partial",
-          data_ref: {
-            query: String(input.query ?? "")
-          },
-          metrics: {
-            count: 0
-          }
-        };
+  const capabilityResult = {
+    ability_id: String(ability.id ?? "xhs.note.search.v1"),
+    layer: String(ability.layer ?? "L3"),
+    action: String(consumerGateResult.action_type ?? "read"),
+    outcome: "partial",
+    data_ref: {
+      query: String(input.query ?? "")
+    },
+    metrics: {
+      count: 0
+    }
+  };
 
   return {
     summary: {
@@ -820,9 +773,17 @@ export class BackgroundRelay {
     }
 
     const timeoutMs = readTimeoutMs(request.timeout_ms) ?? this.#forwardTimeoutMs;
-    const gateOnlyResponse = this.#resolveInteractGateOnlyResponse(request);
-    if (gateOnlyResponse) {
-      this.#emit(gateOnlyResponse);
+    const command = String(request.params.command ?? "");
+    if (command === "xhs.interact") {
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {},
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: "unsupported command"
+        }
+      });
       return;
     }
     const timeout = setTimeout(() => {
@@ -939,249 +900,6 @@ export class BackgroundRelay {
     }
   }
 
-  #resolveInteractGateOnlyResponse(request: BridgeRequest): BridgeResponse | null {
-    const command = String(request.params.command ?? "");
-    if (command !== "xhs.interact") {
-      return null;
-    }
-    const commandParams = asRecord(request.params.command_params) ?? {};
-    const ability = asRecord(commandParams.ability) ?? {};
-    const requestedExecutionMode = parseRequestedExecutionMode(
-      readXhsGateParam(commandParams, "requested_execution_mode")
-    );
-    const requestedActionType = parseActionType(readXhsGateParam(commandParams, "action_type"));
-    const abilityActionType = parseActionType(ability.action);
-    const actionType = requestedActionType ?? abilityActionType;
-    const issueScope = resolveIssueScope(readXhsGateParam(commandParams, "issue_scope"));
-    if (issueScope !== "issue_208" || actionType === null) {
-      const fallbackActionType = actionType ?? "write";
-      const writeActionMatrixDecisions = getWriteActionMatrixDecisions(
-        issueScope,
-        fallbackActionType,
-        requestedExecutionMode
-      );
-      const gateReasons = [
-        actionType === null ? "ACTION_TYPE_NOT_EXPLICIT" : "ISSUE_ACTION_MATRIX_BLOCKED"
-      ];
-      const blockedActionType = actionType ?? fallbackActionType;
-      return {
-        id: request.id,
-        status: "error",
-        summary: {
-          relay_path: "host>background"
-        },
-        payload: {
-          consumer_gate_result: {
-            risk_state: resolveRiskState(readXhsGateParam(commandParams, "risk_state")),
-            issue_scope: issueScope,
-            target_domain: asNonEmptyString(readXhsGateParam(commandParams, "target_domain")),
-            target_tab_id: asInteger(readXhsGateParam(commandParams, "target_tab_id")),
-            target_page: asNonEmptyString(readXhsGateParam(commandParams, "target_page")),
-            action_type: blockedActionType,
-            requested_execution_mode: requestedExecutionMode,
-            effective_execution_mode:
-              requestedExecutionMode === "recon" ? "recon" : "dry_run",
-            gate_decision: "blocked",
-            gate_reasons: gateReasons,
-            fingerprint_gate_decision: "allowed",
-            fingerprint_reason_codes: [],
-            write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier
-          },
-          write_interaction_tier: WRITE_INTERACTION_TIER,
-          write_action_matrix_decisions: writeActionMatrixDecisions
-        },
-        error: {
-          code: "ERR_TRANSPORT_FORWARD_FAILED",
-          message:
-            actionType === null
-              ? "xhs.interact action_type must stay on the write path"
-              : xhsGateReasonMessage("ISSUE_ACTION_MATRIX_BLOCKED")
-        }
-      };
-    }
-    const targetDomain = asNonEmptyString(readXhsGateParam(commandParams, "target_domain"));
-    const targetTabId = asInteger(readXhsGateParam(commandParams, "target_tab_id"));
-    const targetPage = asNonEmptyString(readXhsGateParam(commandParams, "target_page"));
-    const riskState = resolveRiskState(readXhsGateParam(commandParams, "risk_state"));
-    const approvalRecord = normalizeApprovalRecord(
-      readXhsGateParam(commandParams, "approval_record") ?? readXhsGateParam(commandParams, "approval")
-    );
-    const writeActionMatrixDecisions = getWriteActionMatrixDecisions(
-      issueScope,
-      actionType,
-      requestedExecutionMode
-    );
-    const writeMatrixDecision = resolveWriteMatrixDecision(writeActionMatrixDecisions, riskState);
-    const writeTierReason = `WRITE_INTERACTION_TIER_${writeActionMatrixDecisions.write_interaction_tier.toUpperCase()}`;
-    const gateReasons = [writeTierReason];
-    if (!targetDomain || targetTabId === null || !targetPage) {
-      gateReasons.push("TARGET_SCOPE_NOT_EXPLICIT");
-      const effectiveExecutionMode: XhsExecutionMode =
-        requestedExecutionMode === "recon" ? "recon" : "dry_run";
-      const consumerGateResult = {
-        risk_state: riskState,
-        issue_scope: issueScope,
-        target_domain: targetDomain,
-        target_tab_id: targetTabId,
-        target_page: targetPage,
-        action_type: actionType,
-        requested_execution_mode: requestedExecutionMode,
-        effective_execution_mode: effectiveExecutionMode,
-        gate_decision: "blocked",
-        gate_reasons: gateReasons,
-        fingerprint_gate_decision: "allowed",
-        fingerprint_reason_codes: [],
-        write_interaction_tier: "reversible_interaction"
-      };
-      const gatePayload = createRelayXhsGatePayload({
-        request,
-        issueScope,
-        riskState,
-        targetDomain,
-        targetTabId,
-        targetPage,
-        actionType,
-        requestedExecutionMode,
-        effectiveExecutionMode,
-        gateDecision: "blocked",
-        gateReasons,
-        requiresManualConfirmation: false,
-        approvalRecord,
-        consumerGateResult,
-        writeActionMatrixDecisions,
-        writeGateOnlyDecision: {
-          issue_scope: issueScope,
-          state: riskState,
-          write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier,
-          matrix_decision: "blocked",
-          matrix_actions: writeActionMatrixDecisions.matrix_actions,
-          required_approval: [],
-          approval_satisfied: false,
-          approval_missing_requirements: [],
-          execution_enabled: false
-        }
-      });
-      return {
-        id: request.id,
-        status: "error",
-        summary: {
-          relay_path: "host>background"
-        },
-        payload: gatePayload,
-        error: {
-          code: "ERR_TRANSPORT_FORWARD_FAILED",
-          message: "xhs target scope is incomplete"
-        }
-      };
-    }
-    if (actionType !== "write") {
-      gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
-    }
-    if (requestedExecutionMode !== "dry_run" && requestedExecutionMode !== "recon") {
-      gateReasons.push("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
-    }
-    const writeApprovalRequirements: string[] = [];
-    const approvalRequirementGaps: string[] = [];
-    const blockingReasons = gateReasons.filter((reason) => reason !== writeTierReason);
-    const allowed = blockingReasons.length === 0;
-    const effectiveExecutionMode: XhsExecutionMode =
-      requestedExecutionMode === "recon" ? "recon" : "dry_run";
-    if (allowed) {
-      gateReasons.push(
-        requestedExecutionMode === "recon" ? "DEFAULT_MODE_RECON" : "DEFAULT_MODE_DRY_RUN",
-        "WRITE_EXECUTION_GATE_ONLY",
-        "ISSUE_208_GATE_ONLY_FREEZE"
-      );
-    }
-    const consumerGateResult: Record<string, unknown> = {
-      risk_state: riskState,
-      issue_scope: issueScope,
-      target_domain: targetDomain,
-      target_tab_id: targetTabId,
-      target_page: targetPage,
-      action_type: actionType,
-      requested_execution_mode: requestedExecutionMode,
-      effective_execution_mode: effectiveExecutionMode,
-      gate_decision: allowed ? "allowed" : "blocked",
-      gate_reasons: gateReasons,
-      fingerprint_gate_decision: "allowed",
-      fingerprint_reason_codes: [],
-      write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier
-    };
-    const writeGateOnlyDecision = {
-      issue_scope: issueScope,
-      state: riskState,
-      write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier,
-      matrix_decision: "blocked",
-      matrix_actions: writeActionMatrixDecisions.matrix_actions,
-      required_approval: writeApprovalRequirements,
-      approval_satisfied: false,
-      approval_missing_requirements: approvalRequirementGaps,
-      execution_enabled: false
-    };
-    const gatePayload = createRelayXhsGatePayload({
-      request,
-      issueScope,
-      riskState,
-      targetDomain,
-      targetTabId,
-      targetPage,
-      actionType,
-      requestedExecutionMode,
-      effectiveExecutionMode,
-      gateDecision: allowed ? "allowed" : "blocked",
-      gateReasons,
-      requiresManualConfirmation: false,
-      approvalRecord,
-      consumerGateResult,
-      writeActionMatrixDecisions,
-      writeGateOnlyDecision
-    });
-    if (!allowed) {
-      return {
-        id: request.id,
-        status: "error",
-        summary: {
-          relay_path: "host>background"
-        },
-        payload: gatePayload,
-        error: {
-          code: "ERR_TRANSPORT_FORWARD_FAILED",
-          message: xhsGateReasonMessage(blockingReasons[0] ?? "ISSUE_ACTION_MATRIX_BLOCKED")
-        }
-      };
-    }
-    const { ability: resolvedAbility, actionId, text } = resolveXhsInteractInput(commandParams);
-    if (actionId !== "editor_input" || text.length === 0) {
-      return {
-        id: request.id,
-        status: "error",
-        summary: {
-          relay_path: "host>background"
-        },
-        payload: createXhsInteractInputErrorPayload(resolvedAbility, gatePayload),
-        error: {
-          code: "ERR_EXECUTION_FAILED",
-          message: "xhs.interact requires action_id=editor_input and non-empty text"
-        }
-      };
-    }
-    return {
-      id: request.id,
-      status: "success",
-      summary: {
-        session_id: String(request.params.session_id ?? this.#sessionId),
-        run_id: String(request.params.run_id ?? request.id),
-        command,
-        profile: typeof request.profile === "string" ? request.profile : null,
-        cwd: String(request.params.cwd ?? ""),
-        tab_id: null,
-        relay_path: "host>background"
-      },
-      payload: createBridgeXhsGateOnlyPayload(request, gatePayload),
-      error: null
-    };
-  }
 }
 
 class ChromeBackgroundBridge {
@@ -2396,6 +2114,18 @@ class ChromeBackgroundBridge {
     const requestDeadlineMs = deadlineMs ?? Date.now() + this.#resolveForwardTimeoutMs(request);
     const suppressHostResponse = options?.suppressHostResponse === true;
     const command = String(request.params.command ?? "");
+    if (command === "xhs.interact") {
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {},
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: "unsupported command"
+        }
+      });
+      return;
+    }
     this.#invalidateTrustedFingerprintContextForCommand(request, command);
     const commandParams =
       typeof request.params.command_params === "object" && request.params.command_params !== null
@@ -2411,14 +2141,14 @@ class ChromeBackgroundBridge {
       requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
     const requestedFingerprintContext = resolveFingerprintContext(commandParams);
     const trustedFingerprintContext =
-      (command === "xhs.search" || command === "xhs.interact") && requestedLiveMode
+      command === "xhs.search" && requestedLiveMode
         ? this.#resolveValidatedTrustedFingerprintContext(request, requestedFingerprintContext)
         : null;
     const forwardFingerprintContext = trustedFingerprintContext ?? requestedFingerprintContext;
     let tabId: number | null;
     let consumerGateResult: XhsTargetGateResult["consumerGateResult"] | undefined;
     let gatePayload: XhsTargetGateResult["gatePayload"] | undefined;
-    if (command === "xhs.search" || command === "xhs.interact") {
+    if (command === "xhs.search") {
       const gateResult = await this.#evaluateXhsTargetGate(request);
       consumerGateResult = gateResult.consumerGateResult;
       gatePayload = gateResult.gatePayload;
@@ -2437,39 +2167,14 @@ class ChromeBackgroundBridge {
         });
         return;
       }
-      const effectiveExecutionMode = gateResult.consumerGateResult?.effective_execution_mode ?? null;
-      const interactGateOnly =
-        command === "xhs.interact" &&
-        (gateResult.gateOnly || effectiveExecutionMode === "dry_run" || effectiveExecutionMode === "recon");
-      if ((gateResult.gateOnly && command === "xhs.search") || interactGateOnly) {
-        if (command === "xhs.interact") {
-          const { ability, actionId, text } = resolveXhsInteractInput(commandParams);
-          if (actionId !== "editor_input" || text.length === 0) {
-            this.#emit({
-              id: request.id,
-              status: "error",
-              summary: {
-                relay_path: "host>background"
-              },
-              payload: createXhsInteractInputErrorPayload(
-                ability,
-                gateResult.gatePayload ?? {}
-              ),
-              error: {
-                code: "ERR_EXECUTION_FAILED",
-                message: "xhs.interact requires action_id=editor_input and non-empty text"
-              }
-            });
-            return;
-          }
-        }
+      if (gateResult.gateOnly) {
         this.#emit({
           id: request.id,
           status: "success",
           summary: {
             session_id: String(request.params.session_id ?? "nm-session-001"),
             run_id: String(request.params.run_id ?? request.id),
-            command: command.length > 0 ? command : "xhs.search",
+            command: "xhs.search",
             profile: typeof request.profile === "string" ? request.profile : null,
             cwd: String(request.params.cwd ?? ""),
             tab_id: null,
@@ -2702,9 +2407,7 @@ class ChromeBackgroundBridge {
       issueScope === "issue_208" &&
       actionType !== null &&
       writeActionMatrixDecisions.write_interaction_tier !== "observe_only";
-    const issue208GateOnlyProbeCommand =
-      String(request.params.command ?? "") === "xhs.interact" &&
-      (requestedExecutionMode === "dry_run" || requestedExecutionMode === "recon");
+    const issue208GateOnlyProbeCommand = false;
     const requestedLiveMode =
       requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
     let fingerprintContextMissing = false;
@@ -3269,7 +2972,7 @@ class ChromeBackgroundBridge {
     }
 
     const command = String(request.params.command ?? "");
-    if (command === "xhs.search" || command === "xhs.interact") {
+    if (command === "xhs.search") {
       const xhsUrlPatterns = ["*://www.xiaohongshu.com/*", "*://edith.xiaohongshu.com/*", "*://*.xiaohongshu.com/*"];
       const xhsTabs = await this.chromeApi.tabs.query({
         currentWindow: true,

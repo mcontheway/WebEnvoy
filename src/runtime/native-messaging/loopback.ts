@@ -951,131 +951,6 @@ class InMemoryContentScriptRuntime {
       };
     }
 
-    if (message.command === "xhs.interact") {
-      const ability =
-        typeof message.commandParams.ability === "object" && message.commandParams.ability !== null
-          ? (message.commandParams.ability as Record<string, unknown>)
-          : {};
-      const input =
-        typeof message.commandParams.input === "object" && message.commandParams.input !== null
-          ? (message.commandParams.input as Record<string, unknown>)
-          : {};
-      const options =
-        typeof message.commandParams.options === "object" && message.commandParams.options !== null
-          ? (message.commandParams.options as Record<string, unknown>)
-          : {};
-      const actionId =
-        typeof input.action_id === "string" && input.action_id.trim().length > 0
-          ? input.action_id.trim()
-          : "editor_input";
-      const text = typeof input.text === "string" ? input.text : "";
-      const gate = buildLoopbackGate(options, asString(ability.action), true);
-      const consumerGateResult = gate.consumerGateResult;
-      const auditRecord = buildLoopbackAuditRecord({
-        runId: message.runId,
-        sessionId: message.sessionId,
-        profile: "loopback_profile",
-        gate
-      });
-      const gateBundle = buildLoopbackGatePayload({
-        runId: message.runId,
-        sessionId: message.sessionId,
-        profile: "loopback_profile",
-        gate,
-        auditRecord
-      });
-      if (actionId !== "editor_input" || text.trim().length === 0) {
-        return {
-          kind: "result",
-          id: message.id,
-          ok: false,
-          error: {
-            code: "ERR_EXECUTION_FAILED",
-            message: "xhs.interact requires action_id=editor_input and non-empty text"
-          },
-          payload: {
-            details: {
-              ability_id: String(ability.id ?? "xhs.interact.editor-input.v1"),
-              stage: "input_validation",
-              reason: "INTERACTION_INPUT_INVALID"
-            },
-            ...gateBundle
-          }
-        };
-      }
-      if (consumerGateResult.gate_decision === "blocked") {
-        return {
-          kind: "result",
-          id: message.id,
-          ok: false,
-          error: {
-            code: "ERR_EXECUTION_FAILED",
-            message: "执行模式门禁阻断了当前 xhs.interact 请求"
-          },
-          payload: {
-            details: {
-              ability_id: String(ability.id ?? "xhs.interact.editor-input.v1"),
-              stage: "execution",
-              reason: "EXECUTION_MODE_GATE_BLOCKED"
-            },
-            ...gateBundle
-          }
-        };
-      }
-      if (
-        consumerGateResult.effective_execution_mode === "dry_run" ||
-        consumerGateResult.effective_execution_mode === "recon"
-      ) {
-        return {
-          kind: "result",
-          id: message.id,
-          ok: true,
-          payload: {
-            summary: {
-              capability_result: {
-                ability_id: String(ability.id ?? "xhs.interact.editor-input.v1"),
-                layer: String(ability.layer ?? "L3"),
-                action: String(consumerGateResult.action_type ?? ability.action ?? "write"),
-                outcome: "partial",
-                data_ref: {
-                  action_id: actionId
-                },
-                metrics: {
-                  count: 0
-                }
-              },
-              ...gateBundle
-            },
-            observability: buildLoopbackGateObservability(gate)
-          }
-        };
-      }
-
-      return {
-        kind: "result",
-        id: message.id,
-        ok: true,
-        payload: {
-          summary: {
-            capability_result: {
-              ability_id: String(ability.id ?? "xhs.interact.editor-input.v1"),
-              layer: String(ability.layer ?? "L3"),
-              action: String(consumerGateResult.action_type ?? ability.action ?? "write"),
-              outcome: "partial",
-              data_ref: {
-                action_id: actionId
-              },
-              metrics: {
-                count: 0
-              }
-            },
-            ...gateBundle
-          },
-          observability: buildLoopbackGateObservability(gate)
-        }
-      };
-    }
-
     return {
       kind: "result",
       id: message.id,
@@ -1165,7 +1040,7 @@ class InMemoryBackgroundRelay {
       const sessionId = String(request.params.session_id ?? this.#sessionId);
       let gatePayload: Record<string, unknown> | undefined;
 
-      if (command === "xhs.search" || command === "xhs.interact") {
+      if (command === "xhs.search") {
         const ability =
           typeof commandParams.ability === "object" && commandParams.ability !== null
             ? (commandParams.ability as Record<string, unknown>)
@@ -1201,10 +1076,7 @@ class InMemoryBackgroundRelay {
               payload: {
                 details: {
                   ability_id: String(
-                    ability.id ??
-                      (command === "xhs.interact"
-                        ? "xhs.interact.editor-input.v1"
-                        : "xhs.note.search.v1")
+                    ability.id ?? "xhs.note.search.v1"
                   ),
                   stage: "execution",
                   reason: "EXECUTION_MODE_GATE_BLOCKED"
@@ -1219,6 +1091,22 @@ class InMemoryBackgroundRelay {
           });
           return;
         }
+      }
+
+      if (command === "xhs.interact") {
+        this.hostPort.postMessage({
+          kind: "response",
+          envelope: {
+            id: request.id,
+            status: "error",
+            summary: {},
+            error: {
+              code: "ERR_TRANSPORT_FORWARD_FAILED",
+              message: "unsupported command"
+            }
+          }
+        });
+        return;
       }
 
       this.#pendingForward.set(request.id, { request, gatePayload });

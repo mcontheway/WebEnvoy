@@ -3947,158 +3947,7 @@ describe("extension service worker recovery contract", () => {
     });
   });
 
-  it("keeps issue_208 xhs.interact on allowed gate-only under dry_run/recon even when paused or approval is incomplete", async () => {
-    const cases = [
-      {
-        runId: "run-xhs-interact-issue-208-paused-001",
-        commandParams: createXhsInteractCommandParams({
-          risk_state: "paused"
-        }),
-        expectedGateReasons: ["WRITE_EXECUTION_GATE_ONLY", "ISSUE_208_GATE_ONLY_FREEZE"],
-        expectedMode: "dry_run"
-      },
-      {
-        runId: "run-xhs-interact-issue-208-missing-approval-001",
-        commandParams: createXhsInteractCommandParams({
-          approval_record: {
-            approved: false,
-            approver: null,
-            approved_at: null,
-            checks: {
-              target_domain_confirmed: false,
-              target_tab_confirmed: false,
-              target_page_confirmed: false,
-              risk_state_checked: false,
-              action_type_confirmed: false
-            }
-          }
-        }),
-        expectedGateReasons: ["WRITE_EXECUTION_GATE_ONLY", "ISSUE_208_GATE_ONLY_FREEZE"],
-        expectedMode: "dry_run"
-      }
-    ] as const;
-
-    for (const testCase of cases) {
-      const firstPort = createMockPort();
-      const { chromeApi } = createChromeApi([firstPort]);
-      chromeApi.tabs.query.mockImplementation(async () => [
-        { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
-      ]);
-      startChromeBackgroundBridge(chromeApi);
-      respondHandshake(firstPort);
-      await Promise.resolve();
-
-      firstPort.onMessageListeners[0]?.({
-        id: testCase.runId,
-        method: "bridge.forward",
-        profile: "profile-a",
-        params: {
-          session_id: "nm-session-001",
-          run_id: testCase.runId,
-          command: "xhs.interact",
-          command_params: testCase.commandParams,
-          cwd: "/workspace/WebEnvoy"
-        },
-        timeout_ms: 100
-      });
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
-      const blocked = firstPort.postMessage.mock.calls
-        .map(
-          (call) =>
-            call[0] as {
-              id?: string;
-              status?: string;
-              payload?: Record<string, unknown>;
-            }
-        )
-        .find((message) => message.id === testCase.runId);
-      expect(blocked?.status).toBe("success");
-      const payload = asRecord(blocked?.payload) ?? {};
-      const summary = asRecord(payload.summary) ?? {};
-      const consumerGateResult = asRecord(summary.consumer_gate_result);
-      expect(consumerGateResult?.gate_decision).toBe("allowed");
-      expect(consumerGateResult?.effective_execution_mode).toBe(testCase.expectedMode);
-      expect(Array.isArray(consumerGateResult?.gate_reasons)).toBe(true);
-      const gateReasons = (consumerGateResult?.gate_reasons as string[]) ?? [];
-      for (const expectedGateReason of testCase.expectedGateReasons) {
-        expect(gateReasons).toContain(expectedGateReason);
-      }
-    }
-  });
-
-  it("fails xhs.interact gate-only when action_id is not editor_input or text is empty", async () => {
-    const cases = [
-      {
-        runId: "run-xhs-interact-invalid-action-id-001",
-        input: {
-          action_id: "paste_input",
-          text: "测试发布文案"
-        }
-      },
-      {
-        runId: "run-xhs-interact-empty-text-001",
-        input: {
-          action_id: "editor_input",
-          text: "   "
-        }
-      }
-    ] as const;
-
-    for (const testCase of cases) {
-      const firstPort = createMockPort();
-      const { chromeApi } = createChromeApi([firstPort]);
-      chromeApi.tabs.query.mockImplementation(async () => [
-        { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
-      ]);
-      startChromeBackgroundBridge(chromeApi);
-      respondHandshake(firstPort);
-      await Promise.resolve();
-
-      firstPort.onMessageListeners[0]?.({
-        id: testCase.runId,
-        method: "bridge.forward",
-        profile: "profile-a",
-        params: {
-          session_id: "nm-session-001",
-          run_id: testCase.runId,
-          command: "xhs.interact",
-          command_params: createXhsInteractCommandParams({
-            input: testCase.input
-          }),
-          cwd: "/workspace/WebEnvoy"
-        },
-        timeout_ms: 100
-      });
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
-      const failed = firstPort.postMessage.mock.calls
-        .map(
-          (call) =>
-            call[0] as {
-              id?: string;
-              status?: string;
-              error?: { code?: string; message?: string };
-              payload?: Record<string, unknown>;
-            }
-        )
-        .find((message) => message.id === testCase.runId);
-      expect(failed?.status).toBe("error");
-      expect(failed?.error?.code).toBe("ERR_EXECUTION_FAILED");
-      expect(failed?.error?.message).toBe(
-        "xhs.interact requires action_id=editor_input and non-empty text"
-      );
-      const payload = asRecord(failed?.payload) ?? {};
-      const details = asRecord(payload.details);
-      expect(details?.reason).toBe("INTERACTION_INPUT_INVALID");
-    }
-  });
-
-  it("returns editor_input-shaped capability data_ref for successful xhs.interact gate-only response", async () => {
+  it("rejects xhs.interact because the command contract is not frozen", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -4125,22 +3974,19 @@ describe("extension service worker recovery contract", () => {
     await Promise.resolve();
 
     expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
-    const success = firstPort.postMessage.mock.calls
+    const failed = firstPort.postMessage.mock.calls
       .map(
         (call) =>
           call[0] as {
             id?: string;
             status?: string;
-            payload?: { summary?: Record<string, unknown> };
+            error?: { code?: string; message?: string };
           }
       )
       .find((message) => message.id === "run-xhs-interact-editor-input-success-001");
-    expect(success?.status).toBe("success");
-    const summary = asRecord(success?.payload?.summary) ?? {};
-    const capabilityResult = asRecord(summary.capability_result);
-    const dataRef = asRecord(capabilityResult?.data_ref);
-    expect(dataRef?.action_id).toBe("editor_input");
-    expect(dataRef?.query).toBeUndefined();
+    expect(failed?.status).toBe("error");
+    expect(failed?.error?.code).toBe("ERR_TRANSPORT_FORWARD_FAILED");
+    expect(failed?.error?.message).toBe("unsupported command");
   });
 
   it("keeps issue_208 irreversible_write blocked and exposes irreversible write tier", async () => {

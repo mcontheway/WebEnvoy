@@ -614,25 +614,6 @@ const resolveTargetPageFromHref = (href: string): string | null => {
   }
 };
 
-interface XhsInteractInput {
-  actionId: string;
-  text: string;
-};
-
-const parseInteractInput = (message: BackgroundToContentMessage): XhsInteractInput => {
-  const commandInput = asRecord(message.commandParams.input) ?? {};
-  const actionId = asString(commandInput.action_id) ?? "editor_input";
-  const text = asString(commandInput.text);
-  if (actionId !== "editor_input" || !text) {
-    throw new Error("xhs.interact requires action_id=editor_input and non-empty text");
-  }
-
-  return {
-    actionId,
-    text
-  };
-};
-
 export class ContentScriptHandler {
   #listeners = new Set<ContentMessageListener>();
   #reachable = true;
@@ -672,11 +653,6 @@ export class ContentScriptHandler {
 
     if (message.command === "xhs.search") {
       void this.#handleXhsSearch(message);
-      return true;
-    }
-
-    if (message.command === "xhs.interact") {
-      void this.#handleXhsInteract(message);
       return true;
     }
 
@@ -866,19 +842,6 @@ export class ContentScriptHandler {
     }
   }
 
-  #buildInteractPageState(): Record<string, unknown> {
-    const href = this.#safeXhsEnvValue(() => this.#xhsEnv.getLocationHref(), "about:blank");
-    const title = this.#safeXhsEnvValue(() => this.#xhsEnv.getDocumentTitle(), "unknown");
-    const readyState = this.#safeXhsEnvValue(() => this.#xhsEnv.getReadyState(), "unknown");
-    const resolvedTargetPage = resolveTargetPageFromHref(href);
-    return {
-      page_kind: resolvedTargetPage === "creator_publish_tab" ? "compose" : resolvedTargetPage ?? "unknown",
-      url: href,
-      title,
-      ready_state: readyState
-    };
-  }
-
   async #handleXhsSearch(message: BackgroundToContentMessage): Promise<void> {
     const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
     const requestedExecutionMode = resolveRequestedExecutionMode(message);
@@ -1009,65 +972,6 @@ export class ContentScriptHandler {
     }
   }
 
-  async #handleXhsInteract(message: BackgroundToContentMessage): Promise<void> {
-    try {
-      const input = parseInteractInput(message);
-      const pageState = this.#buildInteractPageState();
-      this.#emit({
-        kind: "result",
-        id: message.id,
-        ok: true,
-        payload: {
-          summary: {
-            capability_result: {
-              ability_id: String(asRecord(message.commandParams.ability)?.id ?? "xhs.interact.editor-input.v1"),
-              layer: String(asRecord(message.commandParams.ability)?.layer ?? "L3"),
-              action: String(asRecord(message.commandParams.ability)?.action ?? "write"),
-              outcome: "partial",
-              data_ref: {
-                action_id: input.actionId
-              },
-              metrics: {
-                count: 0
-              }
-            }
-          },
-          observability: {
-            page_state: pageState,
-            key_requests: [],
-            failure_site: null
-          }
-        }
-      });
-    } catch (error) {
-      const pageState = this.#buildInteractPageState();
-      this.#emit({
-        kind: "result",
-        id: message.id,
-        ok: false,
-        error: {
-          code: "ERR_EXECUTION_FAILED",
-          message: error instanceof Error ? error.message : String(error)
-        },
-        payload: {
-          details: {
-            stage: "execution",
-            reason: "EDITOR_INPUT_FAILED"
-          },
-          observability: {
-            page_state: pageState,
-            key_requests: [],
-            failure_site: {
-              stage: "execution",
-              component: "gate",
-              target: "editor_input",
-              summary: error instanceof Error ? error.message : String(error)
-            }
-          }
-        }
-      });
-    }
-  }
 
   #toContentMessage(
     id: string,
