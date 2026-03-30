@@ -12,7 +12,7 @@
 
 ## 进入实现前条件
 
-- [ ] 如后续实现需要新增 persistent identity 字段、bootstrap 持久事实或新的 profile 元数据，先补实现级 spec review、字段约束与回滚说明。
+- [x] 若后续实现需要新增最小 persistent identity 持久字段，必须先补实现级 spec review、字段约束与回滚说明；当前已冻结 `__webenvoy_meta.json.persistentExtensionBinding` 的最小字段、生命周期与回滚边界。
 - [ ] 如后续实现继续改 `runtime.status` 或 `runtime_bootstrap_envelope`，先核对 `contracts/` 中已冻结的状态语义与错误分类，避免通过 TODO 临时改口径。
 - [ ] 如进入实现阶段需要推进恢复链路、健康矩阵或 stop-ship 规则，先确认对应验证入口、失败回退与证据产物已在 formal 文档中冻结，而不是通过 `TODO.md` 临时补约束。
 - [ ] 开始第一刀前，先明确 stop-ship 触发条件：identity mismatch、stale bootstrap ack、多信号冲突、陈旧 ready marker、bootstrap 非幂等恢复失败；触发后必须阻断 `runtime.start` 成功路径并产出可复核状态。
