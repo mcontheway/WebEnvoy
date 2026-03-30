@@ -135,7 +135,22 @@ const parseAbilityEnvelope = (params: JsonObject): AbilityEnvelope => {
   };
 };
 
-const parseSearchInput = (input: JsonObject, abilityId: string): JsonObject => {
+const parseSearchInput = (
+  input: JsonObject,
+  abilityId: string,
+  options: JsonObject,
+  abilityAction: AbilityAction
+): JsonObject => {
+  const issue208EditorInputValidation =
+    abilityAction === "write" &&
+    options.issue_scope === "issue_208" &&
+    options.action_type === "write" &&
+    options.requested_execution_mode === "live_write" &&
+    options.validation_action === "editor_input";
+  if (issue208EditorInputValidation) {
+    return {};
+  }
+
   const query =
     typeof input.query === "string" && input.query.trim().length > 0 ? input.query.trim() : null;
   if (!query) {
@@ -392,7 +407,12 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
         target_page: gate.targetPage,
         requested_execution_mode: gate.requestedExecutionMode,
         ability: envelope.ability,
-        input: parseSearchInput(envelope.input, envelope.ability.id),
+        input: parseSearchInput(
+          envelope.input,
+          envelope.ability.id,
+          gate.options,
+          envelope.ability.action
+        ),
         options: gate.options
       },
       fingerprintContext

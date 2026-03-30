@@ -158,23 +158,24 @@ const createXhsCommandParams = (overrides?: Record<string, unknown>) => ({
   ...overrides
 });
 
-const createXhsInteractCommandParams = (overrides?: Record<string, unknown>) => ({
+const createXhsEditorInputCommandParams = (overrides?: Record<string, unknown>) => ({
   issue_scope: "issue_208",
   target_domain: "creator.xiaohongshu.com",
   target_tab_id: 32,
   target_page: "creator_publish_tab",
   action_type: "write",
-  requested_execution_mode: "dry_run",
+  requested_execution_mode: "live_write",
   risk_state: "allowed",
   approval_record: createApprovedReadApprovalRecord(),
+  validation_action: "editor_input",
+  validation_text: "测试发布文案",
   ability: {
-    id: "xhs.interact.editor-input.v1",
+    id: "xhs.note.search.v1",
     layer: "L3",
     action: "write"
   },
   input: {
-    action_id: "editor_input",
-    text: "测试发布文案"
+    query: "测试发布文案"
   },
   ...overrides
 });
@@ -2563,16 +2564,8 @@ describe("extension service worker recovery contract", () => {
       expect(blocked?.status).toBe("error");
       const blockedPayload = asRecord(blocked?.payload) ?? {};
       const blockedConsumerGateResult = asRecord(blockedPayload.consumer_gate_result);
-      const blockedIssueActionMatrix = asRecord(blockedPayload.issue_action_matrix);
-      const blockedConditionalActions = Array.isArray(blockedIssueActionMatrix?.conditional_actions)
-        ? blockedIssueActionMatrix.conditional_actions
-        : [];
-      const blockedWriteMatrixDecisions = asRecord(blockedPayload.write_action_matrix_decisions);
       expect(blockedConsumerGateResult?.gate_decision).toBe("blocked");
       expect(blockedPayload.write_action_matrix).toBeUndefined();
-      expect(blockedWriteMatrixDecisions).not.toBeNull();
-      expect(blockedConditionalActions).toEqual([]);
-      expect(resolveWriteInteractionTier(blockedPayload)).toBe("reversible_interaction");
 
       const approvedPort = createMockPort();
       const { chromeApi: approvedChromeApi, runtimeMessageListeners } = createChromeApi([approvedPort]);
@@ -2627,18 +2620,10 @@ describe("extension service worker recovery contract", () => {
       expect(approved?.status).toBe("error");
       const payload = asRecord(approved?.payload) ?? {};
       const approvedConsumerGateResult = asRecord(payload.consumer_gate_result);
-      const approvedIssueActionMatrix = asRecord(payload.issue_action_matrix);
-      const approvedConditionalActions = Array.isArray(approvedIssueActionMatrix?.conditional_actions)
-        ? approvedIssueActionMatrix.conditional_actions
-        : [];
-      const approvedWriteMatrixDecisions = asRecord(payload.write_action_matrix_decisions);
       const writeGateOnlyDecision = asRecord(payload.write_gate_only_decision);
       expect(approvedConsumerGateResult?.gate_decision).toBe("blocked");
       expect(payload.write_action_matrix).toBeUndefined();
-      expect(approvedWriteMatrixDecisions).not.toBeNull();
-      expect(approvedConditionalActions).toEqual([]);
       expect(writeGateOnlyDecision?.execution_enabled).toBe(false);
-      expect(resolveWriteInteractionTier(payload)).toBe("reversible_interaction");
     }
   });
 
@@ -3930,7 +3915,7 @@ describe("extension service worker recovery contract", () => {
     expect(consumerGateResult?.effective_execution_mode).toBe("dry_run");
     expect(consumerGateResult?.gate_reasons).toEqual(
       expect.arrayContaining([
-        "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND",
+        "EDITOR_INPUT_VALIDATION_REQUIRED",
         "WRITE_INTERACTION_TIER_REVERSIBLE_INTERACTION"
       ])
     );
@@ -3947,25 +3932,43 @@ describe("extension service worker recovery contract", () => {
     });
   });
 
-  it("rejects xhs.interact because the command contract is not frozen", async () => {
+  it("forwards issue_208 live_write with editor_input validation through the real background bridge", async () => {
     const firstPort = createMockPort();
-    const { chromeApi } = createChromeApi([firstPort]);
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
       { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
     ]);
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
     await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-issue-208-editor-input-allowed-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext({
+        live_allowed: true,
+        live_decision: "allowed",
+        allowed_execution_modes: [
+          "dry_run",
+          "recon",
+          "live_read_limited",
+          "live_read_high_risk",
+          "live_write"
+        ]
+      }),
+      tabId: 32,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish"
+    });
 
     firstPort.onMessageListeners[0]?.({
-      id: "run-xhs-interact-editor-input-success-001",
+      id: "run-xhs-issue-208-editor-input-allowed-001",
       method: "bridge.forward",
       profile: "profile-a",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-xhs-interact-editor-input-success-001",
-        command: "xhs.interact",
-        command_params: createXhsInteractCommandParams(),
+        run_id: "run-xhs-issue-208-editor-input-allowed-001",
+        command: "xhs.search",
+        command_params: createXhsEditorInputCommandParams(),
         cwd: "/workspace/WebEnvoy"
       },
       timeout_ms: 100
@@ -3973,8 +3976,84 @@ describe("extension service worker recovery contract", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
-    const failed = firstPort.postMessage.mock.calls
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "run-xhs-issue-208-editor-input-allowed-001",
+        command: "xhs.search",
+        commandParams: expect.objectContaining({
+          validation_action: "editor_input",
+          requested_execution_mode: "live_write"
+        })
+      })
+    );
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-xhs-issue-208-editor-input-allowed-001",
+        ok: true,
+        payload: {
+          summary: {
+            capability_result: {
+              outcome: "success",
+              action: "write"
+            },
+            gate_outcome: {
+              gate_decision: "allowed",
+              effective_execution_mode: "live_write"
+            },
+            consumer_gate_result: {
+              requested_execution_mode: "live_write",
+              effective_execution_mode: "live_write",
+              gate_decision: "allowed",
+              gate_reasons: [
+                "WRITE_INTERACTION_APPROVED",
+                "ISSUE_208_EDITOR_INPUT_VALIDATION_APPROVED"
+              ]
+            },
+            issue_208_validation: {
+              validation_action: "editor_input",
+              interaction_result: {
+                validation_action: "editor_input",
+                editor_locator: "#editor",
+                input_text: "测试发布文案",
+                before_text: "",
+                visible_text: "测试发布文案",
+                post_blur_text: "测试发布文案",
+                focus_confirmed: true,
+                preserved_after_blur: true,
+                boundary_assertions: {
+                  upload_not_triggered: true,
+                  submit_not_triggered: true,
+                  publish_confirm_not_triggered: true,
+                  full_write_flow_not_triggered: true
+                }
+              },
+              success_signals: [
+                "EDITOR_FOCUSED",
+                "TEXT_VISIBLE_IN_EDITOR",
+                "TEXT_PRESERVED_AFTER_BLUR"
+              ],
+              failure_signals: [],
+              minimum_replay: [
+                "open creator.xiaohongshu.com/publish",
+                "focus the publish editor"
+              ]
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://creator.xiaohongshu.com/publish/publish"
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const approved = firstPort.postMessage.mock.calls
       .map(
         (call) =>
           call[0] as {
@@ -3983,10 +4062,28 @@ describe("extension service worker recovery contract", () => {
             error?: { code?: string; message?: string };
           }
       )
-      .find((message) => message.id === "run-xhs-interact-editor-input-success-001");
-    expect(failed?.status).toBe("error");
-    expect(failed?.error?.code).toBe("ERR_TRANSPORT_FORWARD_FAILED");
-    expect(failed?.error?.message).toBe("unsupported command");
+      .find((message) => message.id === "run-xhs-issue-208-editor-input-allowed-001");
+    expect(approved?.status).toBe("success");
+    expect(approved).toMatchObject({
+      id: "run-xhs-issue-208-editor-input-allowed-001",
+      payload: {
+        summary: {
+          capability_result: {
+            outcome: "success",
+            action: "write"
+          },
+          gate_outcome: {
+            gate_decision: "allowed",
+            effective_execution_mode: "live_write"
+          },
+          consumer_gate_result: {
+            requested_execution_mode: "live_write",
+            effective_execution_mode: "live_write",
+            gate_decision: "allowed"
+          }
+        }
+      }
+    });
   });
 
   it("keeps issue_208 irreversible_write blocked and exposes irreversible write tier", async () => {

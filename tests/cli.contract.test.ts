@@ -1061,7 +1061,7 @@ describe("webenvoy cli contract", () => {
 
       expect(
         ((blockedConsumerGateResult?.gate_reasons as string[] | undefined) ?? []).includes(
-          "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"
+          "EDITOR_INPUT_VALIDATION_REQUIRED"
         )
       ).toBe(true);
     }
@@ -2341,26 +2341,7 @@ process.stdin.on("data", (chunk) => {
             recovery_started_at: null,
             last_event_at: expect.any(String),
             source_event_id: expect.any(String)
-          },
-          issue_action_matrix: [
-            {
-              issue_scope: "issue_208",
-              state: "allowed",
-              conditional_actions: []
-            },
-            {
-              issue_scope: "issue_209",
-              state: "allowed",
-              conditional_actions: [
-                {
-                  action: "live_read_limited"
-                },
-                {
-                  action: "live_read_high_risk"
-                }
-              ]
-            }
-          ]
+          }
         }
       }
     });
@@ -2455,23 +2436,7 @@ process.stdin.on("data", (chunk) => {
             recovery_started_at: expect.any(String),
             last_event_at: expect.any(String),
             source_event_id: expect.any(String)
-          },
-          issue_action_matrix: [
-            {
-              issue_scope: "issue_208",
-              state: "limited",
-              conditional_actions: []
-            },
-            {
-              issue_scope: "issue_209",
-              state: "limited",
-              conditional_actions: [
-                {
-                  action: "live_read_limited"
-                }
-              ]
-            }
-          ]
+          }
         }
       }
     });

@@ -1,4 +1,5 @@
 import { executeXhsSearch, type SearchExecutionResult, type XhsSearchEnvironment } from "./xhs-search.js";
+import { performEditorInputValidation } from "./xhs-editor-input.js";
 import {
   ensureFingerprintRuntimeContext,
   type FingerprintRuntimeContext
@@ -588,7 +589,8 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
     } finally {
       clearTimeout(timer);
     }
-  }
+  },
+  performEditorInputValidation: async (input) => await performEditorInputValidation(input)
 });
 
 const resolveTargetDomainFromHref = (href: string): string | null => {
@@ -944,6 +946,12 @@ export class ContentScriptHandler {
               ? { requested_execution_mode: requestedExecutionMode }
               : {}),
             ...(typeof options.risk_state === "string" ? { risk_state: options.risk_state } : {}),
+            ...(typeof options.validation_action === "string"
+              ? { validation_action: options.validation_action }
+              : {}),
+            ...(typeof options.validation_text === "string"
+              ? { validation_text: options.validation_text }
+              : {}),
             ...(asRecord(options.approval_record)
               ? { approval_record: asRecord(options.approval_record) ?? {} }
               : {}),

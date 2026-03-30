@@ -49,6 +49,46 @@ const resolveWriteInteractionTier = (payload: Record<string, unknown>): string |
   return null;
 };
 
+const completeIssue208ApprovalRecord = {
+  approved: true,
+  approver: "qa-reviewer",
+  approved_at: "2026-03-23T10:00:00Z",
+  checks: {
+    target_domain_confirmed: true,
+    target_tab_confirmed: true,
+    target_page_confirmed: true,
+    risk_state_checked: true,
+    action_type_confirmed: true
+  }
+} as const;
+
+const createEditorInputValidationResult = (text: string) => ({
+  ok: true,
+  mode: "dom_editor_input_validation" as const,
+  editor_locator: "#editor",
+  input_text: text,
+  before_text: "",
+  visible_text: text,
+  post_blur_text: text,
+  focus_confirmed: true,
+  preserved_after_blur: true,
+  success_signals: ["EDITOR_FOCUSED", "TEXT_VISIBLE_IN_EDITOR", "TEXT_PRESERVED_AFTER_BLUR"],
+  failure_signals: [] as string[],
+  minimum_replay: [
+    "open creator.xiaohongshu.com/publish",
+    "focus the publish editor",
+    "input a short validation text",
+    "blur once and re-read visible text",
+    "confirm upload/submit/publish were not triggered"
+  ],
+  boundary_assertions: {
+    upload_not_triggered: true,
+    submit_not_triggered: true,
+    publish_confirm_not_triggered: true,
+    full_write_flow_not_triggered: true
+  }
+});
+
 describe("extension background relay contract", () => {
   const approvedLiveOptions = {
     target_domain: "www.xiaohongshu.com",
@@ -1372,36 +1412,62 @@ describe("extension background relay contract", () => {
     }
   });
 
-  it("rejects xhs.interact because the command contract is not frozen", async () => {
-    const contentScript = new ContentScriptHandler();
+  it("allows issue_208 live_write when editor_input validation is complete", async () => {
+    let fetchCalled = false;
+    let validationCalled = false;
+    const validationText = "最小正式验证";
+    const contentScript = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_000,
+        randomId: () => "relay-editor-input-id",
+        getLocationHref: () => "https://creator.xiaohongshu.com/publish/publish",
+        getDocumentTitle: () => "Creator Publish",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=valid;",
+        callSignature: async () => {
+          throw new Error("editor_input validation should not reach signature fetch");
+        },
+        fetchJson: async () => {
+          fetchCalled = true;
+          throw new Error("editor_input validation should not reach live fetch");
+        },
+        performEditorInputValidation: async (input) => {
+          validationCalled = true;
+          expect(input.text).toBe(validationText);
+          return createEditorInputValidationResult(input.text);
+        }
+      }
+    });
     const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
 
     const responsePromise = waitForResponse(relay);
     relay.onNativeRequest({
-      id: "forward-xhs-interact-unsupported-001",
+      id: "forward-xhs-issue-208-editor-input-allowed-001",
       method: "bridge.forward",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-xhs-interact-unsupported-001",
-        command: "xhs.interact",
+        run_id: "run-xhs-issue-208-editor-input-allowed-001",
+        command: "xhs.search",
         command_params: {
           ability: {
-            id: "xhs.interact.editor-input.v1",
+            id: "xhs.note.search.v1",
             layer: "L3",
             action: "write"
           },
           input: {
-            action_id: "editor_input",
-            text: "最小正式验证"
+            query: validationText
           },
           options: {
+            issue_scope: "issue_208",
             target_domain: "creator.xiaohongshu.com",
             target_tab_id: 32,
             target_page: "creator_publish_tab",
-            issue_scope: "issue_208",
             action_type: "write",
-            requested_execution_mode: "dry_run",
-            risk_state: "allowed"
+            requested_execution_mode: "live_write",
+            risk_state: "allowed",
+            validation_action: "editor_input",
+            validation_text: validationText,
+            approval_record: completeIssue208ApprovalRecord
           }
         },
         cwd: "/workspace/WebEnvoy"
@@ -1411,9 +1477,142 @@ describe("extension background relay contract", () => {
     });
 
     const response = await responsePromise;
+    expect(response.status).toBe("success");
+    expect(validationCalled).toBe(true);
+    expect(fetchCalled).toBe(false);
+      expect(response.payload).toMatchObject({
+      summary: {
+        capability_result: {
+          ability_id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write",
+          outcome: "success"
+        },
+        gate_outcome: {
+          gate_decision: "allowed",
+          effective_execution_mode: "live_write"
+        },
+        consumer_gate_result: {
+          requested_execution_mode: "live_write",
+          effective_execution_mode: "live_write",
+          gate_decision: "allowed",
+          gate_reasons: expect.arrayContaining([
+            "WRITE_INTERACTION_APPROVED",
+            "ISSUE_208_EDITOR_INPUT_VALIDATION_APPROVED"
+          ])
+        },
+        issue_208_validation: {
+          validation_action: "editor_input",
+          interaction_result: {
+            validation_action: "editor_input",
+            input_text: validationText,
+            focus_confirmed: true,
+            preserved_after_blur: true
+          }
+        }
+      }
+    });
+  });
+
+  it.each([
+    {
+      label: "missing editor_input validation",
+      id: "forward-xhs-issue-208-editor-input-missing-001",
+      runId: "run-xhs-issue-208-editor-input-missing-001",
+      options: {
+        issue_scope: "issue_208",
+        target_domain: "creator.xiaohongshu.com",
+        target_tab_id: 32,
+        target_page: "creator_publish_tab",
+        action_type: "write",
+        requested_execution_mode: "live_write",
+        risk_state: "allowed",
+        approval_record: completeIssue208ApprovalRecord
+      },
+      expectedReason: "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"
+    },
+    {
+      label: "out-of-bounds write against the read domain",
+      id: "forward-xhs-issue-208-editor-input-oob-001",
+      runId: "run-xhs-issue-208-editor-input-oob-001",
+      options: {
+        issue_scope: "issue_208",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 32,
+        target_page: "search_result_tab",
+        action_type: "write",
+        requested_execution_mode: "live_write",
+        risk_state: "allowed",
+        validation_action: "editor_input",
+        validation_text: "最小正式验证",
+        approval_record: completeIssue208ApprovalRecord
+      },
+      expectedReason: "ACTION_DOMAIN_MISMATCH"
+    }
+  ] as const)("blocks issue_208 live_write when $label", async ({ id, runId, options, expectedReason }) => {
+    let validationCalled = false;
+    let fetchCalled = false;
+    const contentScript = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_000,
+        randomId: () => "relay-editor-input-blocked-id",
+        getLocationHref: () => "https://creator.xiaohongshu.com/publish/publish",
+        getDocumentTitle: () => "Creator Publish",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=valid;",
+        callSignature: async () => {
+          throw new Error("blocked editor_input case should not reach signature fetch");
+        },
+        fetchJson: async () => {
+          fetchCalled = true;
+          throw new Error("blocked editor_input case should not reach live fetch");
+        },
+        performEditorInputValidation: async () => {
+          validationCalled = true;
+          return createEditorInputValidationResult("最小正式验证");
+        }
+      }
+    });
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id,
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: {
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "write"
+          },
+          input: {
+            query: "最小正式验证"
+          },
+          options
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    const response = await responsePromise;
     expect(response.status).toBe("error");
-    expect(response.error?.code).toBe("ERR_TRANSPORT_FORWARD_FAILED");
-    expect(response.error?.message).toBe("unsupported command");
+    expect(response.error?.code).toBe("ERR_EXECUTION_FAILED");
+    expect(validationCalled).toBe(false);
+    expect(fetchCalled).toBe(false);
+    const payload = asRecord(response.payload) ?? {};
+    const details = asRecord(payload.details);
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(details?.reason).toBe("EXECUTION_MODE_GATE_BLOCKED");
+    expect(consumerGateResult).toMatchObject({
+      gate_decision: "blocked"
+    });
+    expect(consumerGateResult?.gate_reasons).toEqual(expect.arrayContaining([expectedReason]));
   });
 
   it("keeps issue_208 irreversible_write blocked and returns irreversible write tier", async () => {

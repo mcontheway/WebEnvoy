@@ -15,6 +15,7 @@ import {
   type WriteActionMatrixDecisionsOutput,
   type WriteInteractionTier
 } from "../shared/risk-state.js";
+import type { EditorInputValidationResult } from "./xhs-editor-input.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -44,6 +45,8 @@ export interface XhsSearchOptions {
   risk_state?: string;
   approval?: Record<string, unknown>;
   approval_record?: Record<string, unknown>;
+  validation_action?: string;
+  validation_text?: string;
 }
 
 interface SignatureResult {
@@ -71,6 +74,9 @@ export interface XhsSearchEnvironment {
     body: string;
     timeoutMs: number;
   }): Promise<FetchResult>;
+  performEditorInputValidation?(
+    input: { text: string }
+  ): Promise<EditorInputValidationResult>;
 }
 
 interface SearchExecutionSuccess {
@@ -245,6 +251,17 @@ const resolveRiskState = (value: unknown): RiskState => resolveSharedRiskState(v
 
 const resolveIssueScope = (value: unknown): IssueScope => resolveSharedIssueScope(value);
 
+const isIssue208EditorInputValidation = (options: XhsSearchOptions): boolean =>
+  options.issue_scope === "issue_208" &&
+  options.action_type === "write" &&
+  options.requested_execution_mode === "live_write" &&
+  options.validation_action === "editor_input";
+
+const resolveEditorValidationText = (options: XhsSearchOptions): string =>
+  typeof options.validation_text === "string" && options.validation_text.trim().length > 0
+    ? options.validation_text.trim()
+    : "WebEnvoy editor_input validation";
+
 const resolveIssueActionMatrix = (
   issueScope: IssueScope,
   state: RiskState
@@ -297,6 +314,7 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
   const requestedExecutionMode = resolveRequestedExecutionMode(options.requested_execution_mode);
   const issueScope = resolveIssueScope(options.issue_scope);
   const riskState = resolveRiskState(options.risk_state);
+  const issue208EditorInputValidation = isIssue208EditorInputValidation(options);
   const readExecutionPolicy = resolveReadExecutionPolicy();
   const issueActionMatrix = resolveIssueActionMatrix(issueScope, riskState);
   const writeActionMatrixDecisions = resolveWriteActionMatrix(
@@ -354,7 +372,7 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
   if (requestedExecutionMode === "live_write" && actionType === "irreversible_write") {
     gateReasons.push("IRREVERSIBLE_WRITE_NOT_ALLOWED");
   }
-  if (requestedExecutionMode === "live_write") {
+  if (requestedExecutionMode === "live_write" && !issue208EditorInputValidation) {
     gateReasons.push("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
   }
   if (targetDomain === XHS_WRITE_DOMAIN && actionType === "read") {
@@ -380,13 +398,12 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
     requestedExecutionMode !== null &&
     currentWriteActionDecision
   ) {
-    effectiveExecutionMode = fallbackMode;
-    gateDecision = "blocked";
-
     if (
       currentWriteActionDecision.decision === "blocked" ||
       currentWriteActionDecision.decision === "not_applicable"
     ) {
+      effectiveExecutionMode = fallbackMode;
+      gateDecision = "blocked";
       gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
       gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
     } else if (currentWriteActionDecision.decision === "conditional") {
@@ -397,12 +414,21 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
       if (missingChecks.length > 0) {
         gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
       }
+      if (!issue208EditorInputValidation) {
+        gateReasons.push("EDITOR_INPUT_VALIDATION_REQUIRED");
+      }
       if (gateReasons.length === 0) {
         gateDecision = "allowed";
+        effectiveExecutionMode = requestedExecutionMode;
         gateReasons.push("WRITE_INTERACTION_APPROVED");
+        gateReasons.push("ISSUE_208_EDITOR_INPUT_VALIDATION_APPROVED");
+      } else {
+        effectiveExecutionMode = fallbackMode;
+        gateDecision = "blocked";
       }
     } else {
       gateDecision = "allowed";
+      effectiveExecutionMode = requestedExecutionMode;
       gateReasons.push("WRITE_INTERACTION_ALLOWED");
     }
   } else if (actionType && actionType !== "read") {
@@ -594,6 +620,9 @@ const classifyPageKind = (href: string): string => {
   if (href.includes("/login")) {
     return "login";
   }
+  if (href.includes("creator.xiaohongshu.com/publish")) {
+    return "compose";
+  }
   if (href.includes("/search_result")) {
     return "search";
   }
@@ -696,6 +725,25 @@ const createFailure = (
         }
       : {})
   }
+});
+
+const buildEditorInputEvidence = (result: EditorInputValidationResult): JsonRecord => ({
+  validation_action: "editor_input",
+  interaction_mode: result.mode,
+  interaction_result: {
+    validation_action: "editor_input",
+    editor_locator: result.editor_locator,
+    input_text: result.input_text,
+    before_text: result.before_text,
+    visible_text: result.visible_text,
+    post_blur_text: result.post_blur_text,
+    focus_confirmed: result.focus_confirmed,
+    preserved_after_blur: result.preserved_after_blur,
+    boundary_assertions: result.boundary_assertions
+  },
+  success_signals: result.success_signals,
+  failure_signals: result.failure_signals,
+  minimum_replay: result.minimum_replay
 });
 
 const createAuditRecord = (
@@ -1008,6 +1056,118 @@ export const executeXhsSearch = async (
     gate.consumer_gate_result.effective_execution_mode === "recon"
   ) {
     return createGateOnlySuccess(input, gate, auditRecord, env);
+  }
+
+  if (isIssue208EditorInputValidation(input.options)) {
+    const startedAt = env.now();
+    const validationText = resolveEditorValidationText(input.options);
+    const validationResult = env.performEditorInputValidation
+      ? await env.performEditorInputValidation({
+          text: validationText
+        })
+      : {
+          ok: false,
+          mode: "dom_editor_input_validation" as const,
+          editor_locator: null,
+          input_text: validationText,
+          before_text: "",
+          visible_text: "",
+          post_blur_text: "",
+          focus_confirmed: false,
+          preserved_after_blur: false,
+          success_signals: [],
+          failure_signals: ["EDITOR_INPUT_VALIDATOR_UNAVAILABLE"],
+          minimum_replay: [],
+          boundary_assertions: {
+            upload_not_triggered: true,
+            submit_not_triggered: true,
+            publish_confirm_not_triggered: true,
+            full_write_flow_not_triggered: true
+          }
+        };
+
+    if (!validationResult.ok) {
+      return createFailure(
+        "ERR_EXECUTION_FAILED",
+        "editor_input 真实验证失败",
+        {
+          ability_id: input.abilityId,
+          stage: "execution",
+          reason: "EDITOR_INPUT_VALIDATION_FAILED",
+          ...buildEditorInputEvidence(validationResult)
+        },
+        {
+          page_state: {
+            page_kind: classifyPageKind(env.getLocationHref()),
+            url: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            ready_state: env.getReadyState()
+          },
+          key_requests: [],
+          failure_site: {
+            stage: "execution",
+            component: "page",
+            target: validationResult.editor_locator ?? "editor_input",
+            summary:
+              validationResult.failure_signals[0] ?? "editor_input validation failed"
+          }
+        },
+        {
+          category: "page_changed",
+          reason: "EDITOR_INPUT_VALIDATION_FAILED",
+          summary: validationResult.failure_signals[0] ?? "editor_input validation failed"
+        },
+        gate,
+        auditRecord
+      );
+    }
+
+    return {
+      ok: true,
+      payload: {
+        summary: {
+          capability_result: {
+            ability_id: input.abilityId,
+            layer: input.abilityLayer,
+            action: gate.consumer_gate_result.action_type ?? input.abilityAction,
+            outcome: "success",
+            data_ref: {
+              validation_action: "editor_input"
+            },
+            metrics: {
+              duration_ms: Math.max(0, env.now() - startedAt)
+            }
+          },
+          scope_context: gate.scope_context,
+          gate_input: {
+            run_id: auditRecord.run_id,
+            session_id: auditRecord.session_id,
+            profile: auditRecord.profile,
+            ...gate.gate_input
+          },
+          gate_outcome: gate.gate_outcome,
+          read_execution_policy: gate.read_execution_policy,
+          issue_action_matrix: gate.issue_action_matrix,
+          write_interaction_tier: gate.write_interaction_tier,
+          write_action_matrix_decisions: gate.write_action_matrix_decisions,
+          consumer_gate_result: gate.consumer_gate_result,
+          approval_record: gate.approval_record,
+          risk_state_output: resolveRiskStateOutput(gate, auditRecord),
+          audit_record: auditRecord,
+          issue_208_validation: buildEditorInputEvidence(validationResult)
+        },
+        observability: {
+          page_state: {
+            page_kind: classifyPageKind(env.getLocationHref()),
+            url: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            ready_state: env.getReadyState()
+          },
+          key_requests: [],
+          failure_site: null
+        }
+      }
+    };
   }
 
   const simulated = resolveSimulatedResult(input.options.simulate_result, input.params, input.options, env);

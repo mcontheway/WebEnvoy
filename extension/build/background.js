@@ -166,6 +166,7 @@ const xhsGateReasonMessage = (reason) => {
         TARGET_PAGE_NOT_EXPLICIT: "target page is not explicit",
         ACTION_DOMAIN_MISMATCH: "read action cannot target write domain",
         EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND: "execution mode is unsupported for xhs.search",
+        EDITOR_INPUT_VALIDATION_REQUIRED: "issue_208 live_write requires editor_input validation scope",
         WRITE_EXECUTION_GATE_ONLY: "write gate approved but execution remains gate-only",
         RISK_STATE_PAUSED: "risk state paused blocks live read",
         RISK_STATE_LIMITED: "risk state limited blocks high-risk live read",
@@ -1873,6 +1874,7 @@ class ChromeBackgroundBridge {
         const rawAbilityActionType = abilityParams?.action;
         const rawIssueScope = readGateParam("issue_scope");
         const rawRiskState = readGateParam("risk_state");
+        const rawValidationAction = readGateParam("validation_action");
         const rawApprovalRecord = readGateParam("approval_record") ?? readGateParam("approval");
         const requestedFingerprintContext = resolveFingerprintContext(commandParams);
         let fingerprintExecution = requestedFingerprintContext?.execution ?? null;
@@ -1886,13 +1888,16 @@ class ChromeBackgroundBridge {
         const abilityActionType = parseActionType(rawAbilityActionType);
         const requestedExecutionMode = parseRequestedExecutionMode(rawRequestedExecutionMode);
         const approvalRecord = normalizeApprovalRecord(rawApprovalRecord);
+        const validationAction = asNonEmptyString(rawValidationAction);
         const issueActionMatrixEntry = resolveIssueActionMatrixEntry(issueScope, riskState);
         const writeActionMatrixDecisions = getWriteActionMatrixDecisions(issueScope, actionType ?? "read", requestedExecutionMode);
         const writeMatrixDecision = resolveWriteMatrixDecision(writeActionMatrixDecisions, riskState);
         const issue208WriteGateOnly = issueScope === "issue_208" &&
             actionType !== null &&
             writeActionMatrixDecisions.write_interaction_tier !== "observe_only";
-        const issue208GateOnlyProbeCommand = false;
+        const issue208EditorInputValidation = issue208WriteGateOnly &&
+            requestedExecutionMode === "live_write" &&
+            validationAction === "editor_input";
         const requestedLiveMode = requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
         let fingerprintContextMissing = false;
         let fingerprintContextUntrusted = false;
@@ -1967,23 +1972,42 @@ class ChromeBackgroundBridge {
         if (issue208WriteGateOnly) {
             const writeApprovalRequirements = [];
             const approvalRequirementGaps = [];
-            const approvalSatisfied = false;
-            if (issue208GateOnlyProbeCommand) {
+            const approvalSatisfied = approvalRecord.approved === true &&
+                approvalRecord.approver !== null &&
+                approvalRecord.approved_at !== null &&
+                XHS_REQUIRED_APPROVAL_CHECKS.every((key) => approvalRecord.checks[key] === true);
+            if (issue208EditorInputValidation && riskState === "allowed" && approvalSatisfied) {
                 writeGateOnlyEligible = true;
+                writeApprovalRequirements.push(...XHS_WRITE_APPROVAL_REQUIREMENTS);
             }
             else {
-                pushReason("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
+                if (!issue208EditorInputValidation) {
+                    pushReason("EDITOR_INPUT_VALIDATION_REQUIRED");
+                }
+                if (riskState !== "allowed") {
+                    pushReason(`RISK_STATE_${riskState.toUpperCase()}`);
+                    pushReason("ISSUE_ACTION_MATRIX_BLOCKED");
+                }
+                if (!approvalSatisfied) {
+                    if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
+                        pushReason("MANUAL_CONFIRMATION_MISSING");
+                    }
+                    const missingChecks = XHS_REQUIRED_APPROVAL_CHECKS.filter((key) => !approvalRecord.checks[key]);
+                    if (missingChecks.length > 0) {
+                        pushReason("APPROVAL_CHECKS_INCOMPLETE");
+                    }
+                }
             }
             writeGateOnlyApprovalDecision = {
                 issue_scope: issueScope,
                 state: riskState,
                 write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier,
-                matrix_decision: "blocked",
+                matrix_decision: writeGateOnlyEligible ? "conditional" : "blocked",
                 matrix_actions: writeActionMatrixDecisions.matrix_actions,
                 required_approval: writeApprovalRequirements,
                 approval_satisfied: approvalSatisfied,
                 approval_missing_requirements: approvalRequirementGaps,
-                execution_enabled: false
+                execution_enabled: writeGateOnlyEligible
             };
         }
         else if (issueScope !== "issue_208" &&
@@ -2020,7 +2044,9 @@ class ChromeBackgroundBridge {
                 }
             }
         }
-        const shouldEvaluateTrustedFingerprintGate = requestedLiveMode && !issue208WriteGateOnly && gateReasons.length === 0;
+        const shouldEvaluateTrustedFingerprintGate = requestedLiveMode &&
+            (!issue208WriteGateOnly || writeGateOnlyEligible) &&
+            gateReasons.length === 0;
         if (shouldEvaluateTrustedFingerprintGate) {
             const trustedFingerprintContext = this.#resolveValidatedTrustedFingerprintContext(request, requestedFingerprintContext);
             fingerprintExecution = trustedFingerprintContext?.execution ?? null;
@@ -2069,7 +2095,9 @@ class ChromeBackgroundBridge {
         const gateOnlyEffectiveExecutionMode = requestedExecutionMode === "recon" ? "recon" : "dry_run";
         const effectiveExecutionMode = allowed
             ? issue208WriteGateOnly
-                ? gateOnlyEffectiveExecutionMode
+                ? writeGateOnlyEligible
+                    ? (requestedExecutionMode ?? "dry_run")
+                    : gateOnlyEffectiveExecutionMode
                 : requestedExecutionMode ?? "dry_run"
             : resolveBlockedFallbackMode(requestedExecutionMode, riskState);
         if (allowed && requestedExecutionMode === "dry_run") {
@@ -2084,7 +2112,7 @@ class ChromeBackgroundBridge {
             gateReasons.push("LIVE_MODE_APPROVED");
         }
         if (allowed && issue208WriteGateOnly && writeGateOnlyEligible) {
-            gateReasons.push("WRITE_EXECUTION_GATE_ONLY", "ISSUE_208_GATE_ONLY_FREEZE");
+            gateReasons.push("WRITE_INTERACTION_APPROVED", "ISSUE_208_EDITOR_INPUT_VALIDATION_APPROVED");
         }
         const consumerGateResult = {
             risk_state: riskState,
@@ -2186,7 +2214,7 @@ class ChromeBackgroundBridge {
             allowed,
             targetTabId: allowed ? targetTabId : null,
             errorMessage: allowed ? "" : xhsGateReasonMessage(gateReasons[0] ?? "TARGET_TAB_NOT_EXPLICIT"),
-            gateOnly: allowed && issue208WriteGateOnly,
+            gateOnly: allowed && issue208WriteGateOnly && !writeGateOnlyEligible,
             consumerGateResult,
             gatePayload
         };
