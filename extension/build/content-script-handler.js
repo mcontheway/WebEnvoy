@@ -643,6 +643,14 @@ export class ContentScriptHandler {
             }
         };
     }
+    #safeXhsEnvValue(resolver, fallback) {
+        try {
+            return resolver();
+        }
+        catch {
+            return fallback;
+        }
+    }
     async #handleXhsSearch(message) {
         const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
         const requestedExecutionMode = resolveRequestedExecutionMode(message);

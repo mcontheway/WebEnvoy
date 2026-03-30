@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import { join } from "node:path";
 
 import { buildOfficialChromeRuntimeStatusParams, ensureOfficialChromeRuntimeReady } from "../xhs.js";
+import { executeCommand } from "../../core/router.js";
+import { createCommandRegistry } from "../index.js";
+import type { RuntimeContext } from "../../core/types.js";
 
 describe("ensureOfficialChromeRuntimeReady", () => {
   it("forwards persistent extension identity into runtime.status params", () => {

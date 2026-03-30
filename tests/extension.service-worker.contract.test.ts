@@ -158,6 +158,27 @@ const createXhsCommandParams = (overrides?: Record<string, unknown>) => ({
   ...overrides
 });
 
+const createXhsInteractCommandParams = (overrides?: Record<string, unknown>) => ({
+  issue_scope: "issue_208",
+  target_domain: "creator.xiaohongshu.com",
+  target_tab_id: 32,
+  target_page: "creator_publish_tab",
+  action_type: "write",
+  requested_execution_mode: "dry_run",
+  risk_state: "allowed",
+  approval_record: createApprovedReadApprovalRecord(),
+  ability: {
+    id: "xhs.interact.editor-input.v1",
+    layer: "L3",
+    action: "write"
+  },
+  input: {
+    action_id: "editor_input",
+    text: "测试发布文案"
+  },
+  ...overrides
+});
+
 const createApprovedReadApprovalRecord = () => ({
   approved: true,
   approver: "qa-reviewer",
@@ -2487,7 +2508,7 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("allows issue_208 reversible_interaction_with_approval in limited/allowed only with complete approval", async () => {
+  it("keeps issue_208 dry_run write blocked in limited/allowed even with complete approval", async () => {
     const states: Array<"limited" | "allowed"> = ["limited", "allowed"];
 
     for (const state of states) {
@@ -2550,13 +2571,7 @@ describe("extension service worker recovery contract", () => {
       expect(blockedConsumerGateResult?.gate_decision).toBe("blocked");
       expect(blockedPayload.write_action_matrix).toBeUndefined();
       expect(blockedWriteMatrixDecisions).not.toBeNull();
-      expect(blockedConditionalActions).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            action: "reversible_interaction_with_approval"
-          })
-        ])
-      );
+      expect(blockedConditionalActions).toEqual([]);
       expect(resolveWriteInteractionTier(blockedPayload)).toBe("reversible_interaction");
 
       const approvedPort = createMockPort();
@@ -2609,30 +2624,21 @@ describe("extension service worker recovery contract", () => {
       const approved = approvedPort.postMessage.mock.calls
         .map((call) => call[0] as { id?: string; status?: string; payload?: { summary?: Record<string, unknown> } })
         .find((message) => message.id === `run-xhs-issue-208-${state}-approved-001`);
-      expect(approved?.status).toBe("success");
-      const summary = asRecord(approved?.payload?.summary) ?? {};
-      const capabilityResult = asRecord(summary.capability_result);
-      const approvedConsumerGateResult = asRecord(summary.consumer_gate_result);
-      const approvedIssueActionMatrix = asRecord(summary.issue_action_matrix);
+      expect(approved?.status).toBe("error");
+      const payload = asRecord(approved?.payload) ?? {};
+      const approvedConsumerGateResult = asRecord(payload.consumer_gate_result);
+      const approvedIssueActionMatrix = asRecord(payload.issue_action_matrix);
       const approvedConditionalActions = Array.isArray(approvedIssueActionMatrix?.conditional_actions)
         ? approvedIssueActionMatrix.conditional_actions
         : [];
-      const approvedWriteMatrixDecisions = asRecord(summary.write_action_matrix_decisions);
-      const writeGateOnlyDecision = asRecord(summary.write_gate_only_decision);
-      expect(capabilityResult?.outcome).toBe("partial");
-      expect(capabilityResult?.action).toBe("write");
-      expect(approvedConsumerGateResult?.gate_decision).toBe("allowed");
-      expect(summary.write_action_matrix).toBeUndefined();
+      const approvedWriteMatrixDecisions = asRecord(payload.write_action_matrix_decisions);
+      const writeGateOnlyDecision = asRecord(payload.write_gate_only_decision);
+      expect(approvedConsumerGateResult?.gate_decision).toBe("blocked");
+      expect(payload.write_action_matrix).toBeUndefined();
       expect(approvedWriteMatrixDecisions).not.toBeNull();
-      expect(approvedConditionalActions).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            action: "reversible_interaction_with_approval"
-          })
-        ])
-      );
+      expect(approvedConditionalActions).toEqual([]);
       expect(writeGateOnlyDecision?.execution_enabled).toBe(false);
-      expect(resolveWriteInteractionTier(summary)).toBe("reversible_interaction");
+      expect(resolveWriteInteractionTier(payload)).toBe("reversible_interaction");
     }
   });
 
@@ -3863,7 +3869,7 @@ describe("extension service worker recovery contract", () => {
     });
   });
 
-  it("keeps issue_208 gate-only approval on non-live effective mode even when request asks for live_write", async () => {
+  it("blocks issue_208 live_write on non-live fallback even when approval is complete", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -3912,25 +3918,25 @@ describe("extension service worker recovery contract", () => {
     const approved = firstPort.postMessage.mock.calls
       .map((call) => call[0] as { id?: string; status?: string; payload?: { summary?: Record<string, unknown> } })
       .find((message) => message.id === "run-xhs-issue-208-live-write-gate-only-001");
-    expect(approved?.status).toBe("success");
-    const summary = asRecord(approved?.payload?.summary) ?? {};
-    const gateInput = asRecord(summary.gate_input);
-    const gateOutcome = asRecord(summary.gate_outcome);
-    const consumerGateResult = asRecord(summary.consumer_gate_result);
-    const auditRecord = asRecord(summary.audit_record);
+    expect(approved?.status).toBe("error");
+    const payload = asRecord(approved?.payload) ?? {};
+    const gateInput = asRecord(payload.gate_input);
+    const gateOutcome = asRecord(payload.gate_outcome);
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    const auditRecord = asRecord(payload.audit_record);
     expect(gateInput?.requested_execution_mode).toBe("live_write");
     expect(gateOutcome?.effective_execution_mode).toBe("dry_run");
     expect(consumerGateResult?.requested_execution_mode).toBe("live_write");
     expect(consumerGateResult?.effective_execution_mode).toBe("dry_run");
     expect(consumerGateResult?.gate_reasons).toEqual(
       expect.arrayContaining([
-        "WRITE_EXECUTION_GATE_ONLY",
+        "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND",
         "WRITE_INTERACTION_TIER_REVERSIBLE_INTERACTION"
       ])
     );
     expect(auditRecord?.requested_execution_mode).toBe("live_write");
     expect(auditRecord?.effective_execution_mode).toBe("dry_run");
-    expect(summary.write_interaction_tier).toMatchObject({
+    expect(payload.write_interaction_tier).toMatchObject({
       tiers: [
         { name: "observe_only", live_allowed: false },
         { name: "reversible_interaction", live_allowed: "limited" },
@@ -3939,6 +3945,48 @@ describe("extension service worker recovery contract", () => {
       synthetic_event_default: "blocked",
       upload_injection_default: "blocked"
     });
+  });
+
+  it("rejects xhs.interact because the command contract is not frozen", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-interact-editor-input-success-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-interact-editor-input-success-001",
+        command: "xhs.interact",
+        command_params: createXhsInteractCommandParams(),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const failed = firstPort.postMessage.mock.calls
+      .map(
+        (call) =>
+          call[0] as {
+            id?: string;
+            status?: string;
+            error?: { code?: string; message?: string };
+          }
+      )
+      .find((message) => message.id === "run-xhs-interact-editor-input-success-001");
+    expect(failed?.status).toBe("error");
+    expect(failed?.error?.code).toBe("ERR_TRANSPORT_FORWARD_FAILED");
+    expect(failed?.error?.message).toBe("unsupported command");
   });
 
   it("keeps issue_208 irreversible_write blocked and exposes irreversible write tier", async () => {

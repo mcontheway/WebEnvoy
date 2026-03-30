@@ -1003,7 +1003,7 @@ describe("webenvoy cli contract", () => {
     expect(resolveWriteInteractionTier(gateEnvelope)).toBe("reversible_interaction");
   });
 
-  it("allows reversible_interaction_with_approval for issue_208 only when approval is complete", () => {
+  it("keeps issue_208 dry_run write requests blocked regardless of approval completeness", () => {
     const states: Array<"limited" | "allowed"> = ["limited", "allowed"];
     for (const state of states) {
       const blocked = runCli([
@@ -1052,52 +1052,11 @@ describe("webenvoy cli contract", () => {
       expect(blockedConsumerGateResult?.gate_decision).toBe("blocked");
       expect(resolveWriteInteractionTier(blockedEnvelope)).toBe("reversible_interaction");
 
-      const approved = runCli([
-        "xhs.search",
-        "--profile",
-        "xhs_account_001",
-        "--params",
-        JSON.stringify({
-          ability: {
-            id: "xhs.note.search.v1",
-            layer: "L3",
-            action: "write"
-          },
-          input: {
-            query: "露营装备"
-          },
-          options: {
-            simulate_result: "success",
-            target_domain: "creator.xiaohongshu.com",
-            target_tab_id: 32,
-            target_page: "creator_publish_tab",
-            issue_scope: "issue_208",
-            action_type: "write",
-            requested_execution_mode: "dry_run",
-            risk_state: state,
-            approval_record: {
-              approved: true,
-              approver: "qa-reviewer",
-              approved_at: "2026-03-23T10:00:00Z",
-              checks: {
-                target_domain_confirmed: true,
-                target_tab_confirmed: true,
-                target_page_confirmed: true,
-                risk_state_checked: true,
-                action_type_confirmed: true
-              }
-            }
-          }
-        })
-      ], repoRoot, {
-        WEBENVOY_NATIVE_TRANSPORT: "loopback"
-      });
-      expect(approved.status).toBe(0);
-      const approvedBody = parseSingleJsonLine(approved.stdout);
-      const approvedEnvelope = resolveCliGateEnvelope(approvedBody);
-      const approvedConsumerGateResult = asRecord(approvedEnvelope.consumer_gate_result);
-      expect(approvedConsumerGateResult?.gate_decision).toBe("allowed");
-      expect(resolveWriteInteractionTier(approvedEnvelope)).toBe("reversible_interaction");
+      expect(
+        ((blockedConsumerGateResult?.gate_reasons as string[] | undefined) ?? []).includes(
+          "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"
+        )
+      ).toBe(true);
     }
   });
 
@@ -1191,7 +1150,7 @@ describe("webenvoy cli contract", () => {
       WEBENVOY_NATIVE_TRANSPORT: "loopback"
     });
 
-    expect(result.status).toBe(0);
+    expect(result.status).toBe(6);
     const body = parseSingleJsonLine(result.stdout);
     const gateEnvelope = resolveCliGateEnvelope(body);
     const consumerGateResult = asRecord(gateEnvelope.consumer_gate_result);
@@ -1202,9 +1161,9 @@ describe("webenvoy cli contract", () => {
     expect(gateOutcome?.effective_execution_mode).toBe("dry_run");
     expect(consumerGateResult?.requested_execution_mode).toBe("live_write");
     expect(consumerGateResult?.effective_execution_mode).toBe("dry_run");
-    expect(consumerGateResult?.gate_decision).toBe("allowed");
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
     expect(consumerGateResult?.gate_reasons).toEqual(
-      expect.arrayContaining(["WRITE_INTERACTION_APPROVED"])
+      expect.arrayContaining(["EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"])
     );
     expect(auditRecord?.requested_execution_mode).toBe("live_write");
     expect(auditRecord?.effective_execution_mode).toBe("dry_run");
@@ -2380,11 +2339,7 @@ process.stdin.on("data", (chunk) => {
             {
               issue_scope: "issue_208",
               state: "allowed",
-              conditional_actions: [
-                {
-                  action: "reversible_interaction_with_approval"
-                }
-              ]
+              conditional_actions: []
             },
             {
               issue_scope: "issue_209",
@@ -2498,11 +2453,7 @@ process.stdin.on("data", (chunk) => {
             {
               issue_scope: "issue_208",
               state: "limited",
-              conditional_actions: [
-                {
-                  action: "reversible_interaction_with_approval"
-                }
-              ]
+              conditional_actions: []
             },
             {
               issue_scope: "issue_209",

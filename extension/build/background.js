@@ -246,6 +246,152 @@ const resolveBlockedFallbackMode = (requestedExecutionMode, riskState) => reques
         : riskState === "limited"
             ? "recon"
             : "dry_run";
+const readXhsGateParam = (commandParams, key) => {
+    if (Object.prototype.hasOwnProperty.call(commandParams, key)) {
+        return commandParams[key];
+    }
+    return asRecord(commandParams.options)?.[key];
+};
+const resolveGateOnlyPageState = (gateInput, scopeContext) => {
+    const targetPage = asNonEmptyString(gateInput.target_page);
+    const targetDomain = asNonEmptyString(gateInput.target_domain) ??
+        asNonEmptyString(scopeContext.write_domain) ??
+        asNonEmptyString(scopeContext.read_domain);
+    if (!targetPage || !targetDomain) {
+        return null;
+    }
+    return {
+        page_kind: targetPage === "creator_publish_tab" ? "compose" : targetPage,
+        url: targetPage === "creator_publish_tab"
+            ? `https://${targetDomain}/publish/publish`
+            : targetPage === "search_result_tab"
+                ? `https://${targetDomain}/search_result`
+                : `https://${targetDomain}/`,
+        title: targetPage === "creator_publish_tab" ? "Creator Publish" : "Search Result",
+        ready_state: "complete"
+    };
+};
+const buildGateOnlyObservability = (gatePayload) => {
+    const gateInput = asRecord(gatePayload.gate_input) ?? {};
+    const gateOutcome = asRecord(gatePayload.gate_outcome) ?? {};
+    const scopeContext = asRecord(gatePayload.scope_context) ?? {};
+    const gateReasons = asStringArray(gateOutcome.gate_reasons);
+    return {
+        page_state: resolveGateOnlyPageState(gateInput, scopeContext),
+        key_requests: [],
+        failure_site: gateOutcome.gate_decision === "blocked"
+            ? {
+                stage: "execution",
+                component: "gate",
+                target: asNonEmptyString(gateInput.target_page) ??
+                    asNonEmptyString(gateInput.target_domain) ??
+                    "issue_208_gate_only",
+                summary: gateReasons[0] ?? "gate blocked"
+            }
+            : null
+    };
+};
+const createBridgeXhsGateOnlyPayload = (request, gatePayload) => {
+    const commandParams = asRecord(request.params.command_params) ?? {};
+    const ability = asRecord(commandParams.ability) ?? {};
+    const input = asRecord(commandParams.input) ?? {};
+    const consumerGateResult = asRecord(gatePayload.consumer_gate_result) ?? {};
+    const capabilityResult = {
+        ability_id: String(ability.id ?? "xhs.note.search.v1"),
+        layer: String(ability.layer ?? "L3"),
+        action: String(consumerGateResult.action_type ?? "read"),
+        outcome: "partial",
+        data_ref: {
+            query: String(input.query ?? "")
+        },
+        metrics: {
+            count: 0
+        }
+    };
+    return {
+        summary: {
+            capability_result: capabilityResult,
+            ...gatePayload
+        },
+        observability: buildGateOnlyObservability(gatePayload)
+    };
+};
+const createRelayXhsGatePayload = (input) => {
+    const recordedAt = new Date().toISOString();
+    const runId = String(input.request.params.run_id ?? input.request.id);
+    const sessionId = String(input.request.params.session_id ?? "nm-session-001");
+    const profile = typeof input.request.profile === "string" ? input.request.profile : null;
+    return {
+        plugin_gate_ownership: XHS_PLUGIN_GATE_OWNERSHIP,
+        scope_context: XHS_SCOPE_CONTEXT,
+        read_execution_policy: XHS_READ_EXECUTION_POLICY,
+        gate_input: {
+            run_id: runId,
+            session_id: sessionId,
+            profile,
+            issue_scope: input.issueScope,
+            target_domain: input.targetDomain,
+            target_tab_id: input.targetTabId,
+            target_page: input.targetPage,
+            action_type: input.actionType,
+            requested_execution_mode: input.requestedExecutionMode,
+            risk_state: input.riskState,
+            fingerprint_gate_decision: "allowed"
+        },
+        gate_outcome: {
+            effective_execution_mode: input.effectiveExecutionMode,
+            gate_decision: input.gateDecision,
+            gate_reasons: input.gateReasons,
+            requires_manual_confirmation: input.requiresManualConfirmation,
+            fingerprint_gate_decision: "allowed"
+        },
+        consumer_gate_result: input.consumerGateResult,
+        approval_record: input.approvalRecord,
+        issue_action_matrix: input.issueScope !== null
+            ? resolveIssueActionMatrixEntry(input.issueScope, input.riskState)
+            : null,
+        write_interaction_tier: WRITE_INTERACTION_TIER,
+        write_action_matrix_decisions: input.writeActionMatrixDecisions,
+        ...(input.writeGateOnlyDecision
+            ? { write_gate_only_decision: input.writeGateOnlyDecision }
+            : {}),
+        observability: buildGateOnlyObservability({
+            gate_input: {
+                target_domain: input.targetDomain,
+                target_page: input.targetPage
+            },
+            gate_outcome: {
+                gate_decision: input.gateDecision,
+                gate_reasons: input.gateReasons
+            },
+            scope_context: XHS_SCOPE_CONTEXT
+        }),
+        audit_record: {
+            event_id: `relay_gate_${input.request.id}`,
+            run_id: runId,
+            session_id: sessionId,
+            profile,
+            issue_scope: input.issueScope,
+            risk_state: input.riskState,
+            target_domain: input.targetDomain,
+            target_tab_id: input.targetTabId,
+            target_page: input.targetPage,
+            action_type: input.actionType,
+            requested_execution_mode: input.requestedExecutionMode,
+            effective_execution_mode: input.effectiveExecutionMode,
+            gate_decision: input.gateDecision,
+            gate_reasons: input.gateReasons,
+            approver: input.approvalRecord.approver,
+            approved_at: input.approvalRecord.approved_at,
+            recorded_at: recordedAt,
+            risk_signal: input.riskState !== "allowed",
+            recovery_signal: false,
+            session_rhythm_state: "normal",
+            cooldown_until: null,
+            recovery_started_at: null
+        }
+    };
+};
 const buildTrustedFingerprintContextKey = (profile, sessionId) => `${profile}::${sessionId}`;
 const serializeFingerprintRuntimeContext = (fingerprintRuntime) => JSON.stringify(fingerprintRuntime);
 const isFingerprintRuntimeContextEquivalent = (left, right) => serializeFingerprintRuntimeContext(left) === serializeFingerprintRuntimeContext(right);
@@ -307,6 +453,19 @@ export class BackgroundRelay {
             return;
         }
         const timeoutMs = readTimeoutMs(request.timeout_ms) ?? this.#forwardTimeoutMs;
+        const command = String(request.params.command ?? "");
+        if (command === "xhs.interact") {
+            this.#emit({
+                id: request.id,
+                status: "error",
+                summary: {},
+                error: {
+                    code: "ERR_TRANSPORT_FORWARD_FAILED",
+                    message: "unsupported command"
+                }
+            });
+            return;
+        }
         const timeout = setTimeout(() => {
             this.#failPending(request.id, {
                 code: "ERR_TRANSPORT_TIMEOUT",
@@ -1465,6 +1624,18 @@ class ChromeBackgroundBridge {
         const requestDeadlineMs = deadlineMs ?? Date.now() + this.#resolveForwardTimeoutMs(request);
         const suppressHostResponse = options?.suppressHostResponse === true;
         const command = String(request.params.command ?? "");
+        if (command === "xhs.interact") {
+            this.#emit({
+                id: request.id,
+                status: "error",
+                summary: {},
+                error: {
+                    code: "ERR_TRANSPORT_FORWARD_FAILED",
+                    message: "unsupported command"
+                }
+            });
+            return;
+        }
         this.#invalidateTrustedFingerprintContextForCommand(request, command);
         const commandParams = typeof request.params.command_params === "object" && request.params.command_params !== null
             ? request.params.command_params
@@ -1508,13 +1679,13 @@ class ChromeBackgroundBridge {
                     summary: {
                         session_id: String(request.params.session_id ?? "nm-session-001"),
                         run_id: String(request.params.run_id ?? request.id),
-                        command: String(request.params.command ?? "xhs.search"),
+                        command: "xhs.search",
                         profile: typeof request.profile === "string" ? request.profile : null,
                         cwd: String(request.params.cwd ?? ""),
                         tab_id: null,
                         relay_path: "host>background"
                     },
-                    payload: this.#createXhsGateOnlyPayload(request, gateResult.gatePayload),
+                    payload: createBridgeXhsGateOnlyPayload(request, gateResult.gatePayload),
                     error: null
                 });
                 return;
@@ -1597,34 +1768,6 @@ class ChromeBackgroundBridge {
                 message: "content script dispatch failed"
             });
         }
-    }
-    #createXhsGateOnlyPayload(request, gatePayload) {
-        const commandParams = asRecord(request.params.command_params) ?? {};
-        const ability = asRecord(commandParams.ability) ?? {};
-        const input = asRecord(commandParams.input) ?? {};
-        const consumerGateResult = asRecord(gatePayload.consumer_gate_result) ?? {};
-        return {
-            summary: {
-                capability_result: {
-                    ability_id: String(ability.id ?? "xhs.note.search.v1"),
-                    layer: String(ability.layer ?? "L3"),
-                    action: String(consumerGateResult.action_type ?? "read"),
-                    outcome: "partial",
-                    data_ref: {
-                        query: String(input.query ?? "")
-                    },
-                    metrics: {
-                        count: 0
-                    }
-                },
-                ...gatePayload
-            },
-            observability: {
-                page_state: null,
-                key_requests: [],
-                failure_site: null
-            }
-        };
     }
     #appendGateReason(target, reason) {
         const gateReasons = asStringArray(target.gate_reasons);
@@ -1749,6 +1892,7 @@ class ChromeBackgroundBridge {
         const issue208WriteGateOnly = issueScope === "issue_208" &&
             actionType !== null &&
             writeActionMatrixDecisions.write_interaction_tier !== "observe_only";
+        const issue208GateOnlyProbeCommand = false;
         const requestedLiveMode = requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
         let fingerprintContextMissing = false;
         let fingerprintContextUntrusted = false;
@@ -1821,38 +1965,20 @@ class ChromeBackgroundBridge {
             }
         }
         if (issue208WriteGateOnly) {
-            const writeApprovalRequirements = writeMatrixDecision.requires.length > 0
-                ? writeMatrixDecision.requires
-                : writeActionMatrixDecisions.write_interaction_tier === "reversible_interaction"
-                    ? [...XHS_WRITE_APPROVAL_REQUIREMENTS]
-                    : [];
-            const approvalRequirementGaps = resolveApprovalRequirementGaps(writeApprovalRequirements, approvalRecord);
-            const approvalSatisfied = approvalRequirementGaps.length === 0;
-            if (writeMatrixDecision.decision === "blocked" ||
-                writeMatrixDecision.decision === "not_applicable") {
-                pushReason("ISSUE_ACTION_MATRIX_BLOCKED");
-            }
-            else if ((writeMatrixDecision.decision === "conditional" ||
-                writeMatrixDecision.decision === "allowed") &&
-                !approvalSatisfied) {
-                if (approvalRequirementGaps.includes("approval_record_approved_true") ||
-                    approvalRequirementGaps.includes("approval_record_approver_present") ||
-                    approvalRequirementGaps.includes("approval_record_approved_at_present")) {
-                    pushReason("MANUAL_CONFIRMATION_MISSING");
-                }
-                if (approvalRequirementGaps.includes("approval_record_checks_all_true")) {
-                    pushReason("APPROVAL_CHECKS_INCOMPLETE");
-                }
-            }
-            else if (writeMatrixDecision.decision === "allowed" ||
-                (writeMatrixDecision.decision === "conditional" && approvalSatisfied)) {
+            const writeApprovalRequirements = [];
+            const approvalRequirementGaps = [];
+            const approvalSatisfied = false;
+            if (issue208GateOnlyProbeCommand) {
                 writeGateOnlyEligible = true;
+            }
+            else {
+                pushReason("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
             }
             writeGateOnlyApprovalDecision = {
                 issue_scope: issueScope,
                 state: riskState,
                 write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier,
-                matrix_decision: writeMatrixDecision.decision,
+                matrix_decision: "blocked",
                 matrix_actions: writeActionMatrixDecisions.matrix_actions,
                 required_approval: writeApprovalRequirements,
                 approval_satisfied: approvalSatisfied,
@@ -1936,12 +2062,10 @@ class ChromeBackgroundBridge {
         const blockingReasons = gateReasons.filter((reason) => reason !== writeTierReason);
         const allowed = blockingReasons.length === 0;
         const gateDecision = allowed ? "allowed" : "blocked";
-        const requiresManualConfirmation = requestedExecutionMode === "live_read_limited" ||
-            requestedExecutionMode === "live_read_high_risk" ||
-            requestedExecutionMode === "live_write" ||
-            (issue208WriteGateOnly &&
-                (writeMatrixDecision.decision === "conditional" ||
-                    writeActionMatrixDecisions.write_interaction_tier === "reversible_interaction"));
+        const requiresManualConfirmation = !issue208WriteGateOnly &&
+            (requestedExecutionMode === "live_read_limited" ||
+                requestedExecutionMode === "live_read_high_risk" ||
+                requestedExecutionMode === "live_write");
         const gateOnlyEffectiveExecutionMode = requestedExecutionMode === "recon" ? "recon" : "dry_run";
         const effectiveExecutionMode = allowed
             ? issue208WriteGateOnly
@@ -1960,7 +2084,7 @@ class ChromeBackgroundBridge {
             gateReasons.push("LIVE_MODE_APPROVED");
         }
         if (allowed && issue208WriteGateOnly && writeGateOnlyEligible) {
-            gateReasons.push("WRITE_EXECUTION_GATE_ONLY");
+            gateReasons.push("WRITE_EXECUTION_GATE_ONLY", "ISSUE_208_GATE_ONLY_FREEZE");
         }
         const consumerGateResult = {
             risk_state: riskState,

@@ -1108,9 +1108,8 @@ describe("extension background relay contract", () => {
             target_tab_id: 32,
             target_page: "creator_publish_tab",
             issue_scope: "issue_208",
-            action_type: "write",
             requested_execution_mode: "dry_run",
-            risk_state: "paused",
+            risk_state: "allowed",
             approval_record: {
               approved: true,
               approver: "qa-reviewer",
@@ -1137,7 +1136,6 @@ describe("extension background relay contract", () => {
     const payload = asRecord(response.payload) ?? {};
     const consumerGateResult = asRecord(payload.consumer_gate_result);
     expect(consumerGateResult?.gate_decision).toBe("blocked");
-    expect(resolveWriteInteractionTier(payload)).toBe("reversible_interaction");
     expect(fetchCalled).toBe(false);
   });
 
@@ -1230,7 +1228,7 @@ describe("extension background relay contract", () => {
     expect(fetchCalled).toBe(false);
   });
 
-  it("allows issue_208 reversible_interaction_with_approval only when approval is complete", async () => {
+  it("keeps issue_208 dry_run write blocked even when approval is complete", async () => {
     const states: Array<"limited" | "allowed"> = ["limited", "allowed"];
     for (const state of states) {
       const blockedContentScript = new ContentScriptHandler({
@@ -1366,13 +1364,56 @@ describe("extension background relay contract", () => {
         timeout_ms: 200
       });
       const approvedResponse = await approvedResponsePromise;
-      expect(approvedResponse.status).toBe("success");
+      expect(approvedResponse.status).toBe("error");
       const approvedPayload = asRecord(approvedResponse.payload) ?? {};
-      const summary = asRecord(approvedPayload.summary) ?? {};
-      const approvedConsumerGateResult = asRecord(summary.consumer_gate_result);
-      expect(approvedConsumerGateResult?.gate_decision).toBe("allowed");
-      expect(resolveWriteInteractionTier(summary)).toBe("reversible_interaction");
+      const approvedConsumerGateResult = asRecord(approvedPayload.consumer_gate_result);
+      expect(approvedConsumerGateResult?.gate_decision).toBe("blocked");
+      expect(resolveWriteInteractionTier(approvedPayload)).toBe("reversible_interaction");
     }
+  });
+
+  it("rejects xhs.interact because the command contract is not frozen", async () => {
+    const contentScript = new ContentScriptHandler();
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-interact-unsupported-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-interact-unsupported-001",
+        command: "xhs.interact",
+        command_params: {
+          ability: {
+            id: "xhs.interact.editor-input.v1",
+            layer: "L3",
+            action: "write"
+          },
+          input: {
+            action_id: "editor_input",
+            text: "最小正式验证"
+          },
+          options: {
+            target_domain: "creator.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "creator_publish_tab",
+            issue_scope: "issue_208",
+            action_type: "write",
+            requested_execution_mode: "dry_run",
+            risk_state: "allowed"
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    const response = await responsePromise;
+    expect(response.status).toBe("error");
+    expect(response.error?.code).toBe("ERR_TRANSPORT_FORWARD_FAILED");
+    expect(response.error?.message).toBe("unsupported command");
   });
 
   it("keeps issue_208 irreversible_write blocked and returns irreversible write tier", async () => {

@@ -834,6 +834,14 @@ export class ContentScriptHandler {
     };
   }
 
+  #safeXhsEnvValue<T>(resolver: () => T, fallback: T): T {
+    try {
+      return resolver();
+    } catch {
+      return fallback;
+    }
+  }
+
   async #handleXhsSearch(message: BackgroundToContentMessage): Promise<void> {
     const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
     const requestedExecutionMode = resolveRequestedExecutionMode(message);
@@ -963,6 +971,7 @@ export class ContentScriptHandler {
       });
     }
   }
+
 
   #toContentMessage(
     id: string,
