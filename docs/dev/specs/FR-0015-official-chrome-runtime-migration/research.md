@@ -48,7 +48,7 @@
 
 - runtime bootstrap 的正式 message/ack contract 仍未写成可实现共享契约
 - runtime readiness 多信号冲突时的收敛状态仍未正式冻结
-- 后续若需要持久化 identity/install state，还未达到直接增改 schema 的证据充分度
+- `persistentExtensionBinding` 的最小持久化子集现已在 FR-0015 formal 文档中冻结，但更宽的 identity/install state 持久化范围仍未达到直接增改 schema 的证据充分度
 
 ## 对本 FR 的影响
 
