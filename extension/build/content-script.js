@@ -2215,6 +2215,37 @@ const readElementText = (element) => {
     }
     return element.textContent?.trim() ?? "";
 };
+const createBubbledEvent = (type) => new Event(type, { bubbles: true });
+const createBubbledInputEvent = (type, text) => {
+    if (typeof InputEvent === "function") {
+        try {
+            return new InputEvent(type, { bubbles: true, data: text, inputType: "insertText" });
+        }
+        catch {
+            // Fall back to a generic Event in test environments without a full InputEvent implementation.
+        }
+    }
+    return createBubbledEvent(type);
+};
+const createBubbledCompositionEvent = (type, text) => {
+    if (typeof CompositionEvent === "function") {
+        try {
+            return new CompositionEvent(type, { bubbles: true, data: text });
+        }
+        catch {
+            // Fall back to a generic Event in test environments without a full CompositionEvent implementation.
+        }
+    }
+    return createBubbledEvent(type);
+};
+const dispatchSyntheticTextInputSequence = (element, text) => {
+    element.dispatchEvent(createBubbledCompositionEvent("compositionstart", text));
+    element.dispatchEvent(createBubbledCompositionEvent("compositionupdate", text));
+    element.dispatchEvent(createBubbledInputEvent("beforeinput", text));
+    element.dispatchEvent(createBubbledCompositionEvent("compositionend", text));
+    element.dispatchEvent(createBubbledInputEvent("input", text));
+    element.dispatchEvent(createBubbledEvent("change"));
+};
 const focusElement = (element) => {
     if (typeof element.click === "function") {
         element.click();
@@ -2228,10 +2259,9 @@ const appendTextToEditable = (element, text) => {
     const current = readElementText(element);
     const next = current.length > 0 ? `${current} ${text}` : text;
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+        dispatchSyntheticTextInputSequence(element, text);
         element.value = next;
-        element.dispatchEvent(new InputEvent("input", { bubbles: true, data: text }));
-        element.dispatchEvent(new Event("change", { bubbles: true }));
-        return;
+        return readElementText(element).includes(text);
     }
     const selection = window.getSelection();
     if (selection) {
@@ -2250,10 +2280,11 @@ const appendTextToEditable = (element, text) => {
             inserted = false;
         }
     }
+    dispatchSyntheticTextInputSequence(element, text);
     if (!inserted) {
-        element.textContent = next;
+        return false;
     }
-    element.dispatchEvent(new InputEvent("input", { bubbles: true, data: text }));
+    return readElementText(element).includes(text);
 };
 const findVisibleButtonByLabels = (scope, labels) => {
     const buttons = [...scope.querySelectorAll("button, [role='button']")]
@@ -2338,7 +2369,7 @@ const performEditorInputValidation = async (input) => {
     for (const editor of editors) {
         const beforeText = readElementText(editor);
         const focusConfirmed = focusElement(editor);
-        appendTextToEditable(editor, input.text);
+        const textInserted = appendTextToEditable(editor, input.text);
         await Promise.resolve();
         const visibleText = readElementText(editor);
         if (typeof editor.blur === "function") {
@@ -2355,7 +2386,7 @@ const performEditorInputValidation = async (input) => {
         else {
             failureSignals.push("focus_lost");
         }
-        if (visibleText.includes(input.text)) {
+        if (textInserted && visibleText.includes(input.text)) {
             successSignals.push("text_visible");
         }
         else {

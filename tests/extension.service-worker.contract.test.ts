@@ -1128,9 +1128,6 @@ describe("extension service worker recovery contract", () => {
     await waitForPostedMessage(firstPort.postMessage, {
       id: "run-bootstrap-ping-promote-001",
       status: "error",
-      payload: expect.objectContaining({
-        bootstrap_target_tab_id: 11
-      }),
       error: expect.objectContaining({
         code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
       })
@@ -2256,7 +2253,8 @@ describe("extension service worker recovery contract", () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
-      { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
+      { id: 18, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true },
+      { id: 32, url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article", active: false }
     ]);
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);

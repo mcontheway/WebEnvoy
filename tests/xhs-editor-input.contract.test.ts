@@ -66,6 +66,12 @@ class MockHTMLTextAreaElement extends MockHTMLElement {
   }
 }
 
+class MockContentEditableElement extends MockHTMLElement {
+  constructor(ownerDocument: MockDocument) {
+    super(ownerDocument, "div");
+  }
+}
+
 class MockButtonElement extends MockHTMLElement {
   onClick?: () => void;
 
@@ -116,7 +122,10 @@ class MockDocument {
       selector === '[contenteditable="true"][data-lexical-editor="true"]' ||
       selector === '[contenteditable="true"]'
     ) {
-      return [];
+      return this.editors.filter(
+        (entry) =>
+          !(entry instanceof MockHTMLTextAreaElement) && !(entry instanceof MockHTMLInputElement)
+      ) as unknown as Element[];
     }
     if (selector === "textarea") {
       return this.editors.filter((entry) => entry instanceof MockHTMLTextAreaElement) as unknown as Element[];
@@ -143,6 +152,7 @@ describe("xhs editor input contract", () => {
     delete (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement;
     delete (globalThis as { HTMLTextAreaElement?: unknown }).HTMLTextAreaElement;
     delete (globalThis as { InputEvent?: unknown }).InputEvent;
+    delete (globalThis as { CompositionEvent?: unknown }).CompositionEvent;
   });
 
   it("enters article editable state via 新的创作 before validating editor input", async () => {
@@ -166,6 +176,7 @@ describe("xhs editor input contract", () => {
     (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement = MockHTMLInputElement;
     (globalThis as { HTMLTextAreaElement?: unknown }).HTMLTextAreaElement = MockHTMLTextAreaElement;
     (globalThis as { InputEvent?: unknown }).InputEvent = Event;
+    (globalThis as { CompositionEvent?: unknown }).CompositionEvent = Event;
 
     const result = await performEditorInputValidation({ text: "测试发布文案" });
 
@@ -198,6 +209,7 @@ describe("xhs editor input contract", () => {
     (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement = MockHTMLInputElement;
     (globalThis as { HTMLTextAreaElement?: unknown }).HTMLTextAreaElement = MockHTMLTextAreaElement;
     (globalThis as { InputEvent?: unknown }).InputEvent = Event;
+    (globalThis as { CompositionEvent?: unknown }).CompositionEvent = Event;
 
     const result = await performEditorInputValidation({ text: "测试发布文案" });
 
@@ -205,5 +217,35 @@ describe("xhs editor input contract", () => {
     expect(result.ok).toBe(false);
     expect(result.editor_locator).toBeNull();
     expect(result.failure_signals).toEqual(["editable_state_entry_missing", "dom_variant"]);
+  });
+
+  it("does not treat contenteditable DOM mutation fallback as a successful live input", async () => {
+    const document = new MockDocument("创作者平台");
+    const editor = new MockContentEditableElement(document);
+    document.editors = [editor];
+
+    (globalThis as { document?: unknown }).document = document;
+    (globalThis as { window?: unknown }).window = {
+      location: {
+        href: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
+      },
+      getComputedStyle: () => ({ visibility: "visible", display: "block" }),
+      getSelection: () => ({
+        removeAllRanges: () => {},
+        addRange: () => {}
+      })
+    };
+    (globalThis as { HTMLElement?: unknown }).HTMLElement = MockHTMLElement;
+    (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement = MockHTMLInputElement;
+    (globalThis as { HTMLTextAreaElement?: unknown }).HTMLTextAreaElement = MockHTMLTextAreaElement;
+    (globalThis as { InputEvent?: unknown }).InputEvent = Event;
+    (globalThis as { CompositionEvent?: unknown }).CompositionEvent = Event;
+
+    const result = await performEditorInputValidation({ text: "测试发布文案" });
+
+    expect(result.ok).toBe(false);
+    expect(result.editor_locator).toBe("div");
+    expect(result.failure_signals).toContain("dom_variant");
+    expect(result.success_signals).not.toContain("text_visible");
   });
 });
