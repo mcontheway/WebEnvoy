@@ -88,6 +88,7 @@ export class NativeHostBridgeTransport {
     #child = null;
     #stdoutBuffer = Buffer.alloc(0);
     #pending = new Map();
+    #closePromise = null;
     constructor(hostCommand = readNativeHostCommand() ?? resolveRepoOwnedNativeHostCommand(), options) {
         this.#hostCommand = hostCommand;
         this.#hostSpec = parseNativeHostCommand(hostCommand);
@@ -101,6 +102,42 @@ export class NativeHostBridgeTransport {
     }
     heartbeat(request) {
         return this.#send("heartbeat", request);
+    }
+    close() {
+        if (this.#closePromise) {
+            return this.#closePromise;
+        }
+        const child = this.#child;
+        this.#child = null;
+        this.#stdoutBuffer = Buffer.alloc(0);
+        this.#drainPending(withTransportCode(new Error("native host process closed"), "ERR_TRANSPORT_DISCONNECTED"));
+        if (!child) {
+            return Promise.resolve();
+        }
+        this.#closePromise = new Promise((resolve) => {
+            let settled = false;
+            const settle = () => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                this.#closePromise = null;
+                resolve();
+            };
+            const forceKillTimer = setTimeout(() => {
+                if (!child.killed) {
+                    child.kill("SIGTERM");
+                }
+                settle();
+            }, 350);
+            forceKillTimer.unref?.();
+            child.once("exit", () => {
+                clearTimeout(forceKillTimer);
+                settle();
+            });
+            child.stdin.end();
+        });
+        return this.#closePromise;
     }
     #send(phase, request) {
         ensureBridgeRequestEnvelope(request);
@@ -229,7 +266,10 @@ export class NativeHostBridgeTransport {
         });
     }
     #ensureChild() {
-        if (this.#child && !this.#child.killed) {
+        if (this.#child &&
+            !this.#child.killed &&
+            this.#child.exitCode === null &&
+            !this.#child.stdin.destroyed) {
             return;
         }
         if (!this.#hostSpec) {

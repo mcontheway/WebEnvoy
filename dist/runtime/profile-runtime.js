@@ -1218,6 +1218,9 @@ export class ProfileRuntimeService {
             }
             throw error;
         }
+        finally {
+            await bridge.close?.();
+        }
     }
     async #readRuntimeReadiness(input) {
         const baseIdentity = input.identityPreflight.identityBindingState;
@@ -1334,6 +1337,9 @@ export class ProfileRuntimeService {
                 return mapBootstrapCliErrorToReadiness(error, baseIdentity);
             }
             throw error;
+        }
+        finally {
+            await bridge.close?.();
         }
     }
     #buildRuntimeBootstrapCliError(result) {

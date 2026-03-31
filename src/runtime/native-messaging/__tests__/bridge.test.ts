@@ -50,6 +50,22 @@ describe("native messaging bridge", () => {
     });
   });
 
+  it("closes the underlying transport when the bridge is disposed", async () => {
+    let closeCount = 0;
+    const bridge = new NativeMessagingBridge({
+      transport: {
+        ...createFakeNativeBridgeTransport(),
+        close() {
+          closeCount += 1;
+        }
+      }
+    });
+
+    await bridge.close();
+
+    expect(closeCount).toBe(1);
+  });
+
   it("uses one shared timeout budget across open heartbeat and forward", async () => {
     let nowMs = 0;
     const now = (): number => {

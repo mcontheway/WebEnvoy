@@ -134,6 +134,7 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
   #child: ChildProcessWithoutNullStreams | null = null;
   #stdoutBuffer = Buffer.alloc(0);
   #pending = new Map<string, PendingMessage>();
+  #closePromise: Promise<void> | null = null;
 
   constructor(
     hostCommand: string | null = readNativeHostCommand() ?? resolveRepoOwnedNativeHostCommand(),
@@ -154,6 +155,52 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
 
   heartbeat(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
     return this.#send("heartbeat", request);
+  }
+
+  close(): Promise<void> {
+    if (this.#closePromise) {
+      return this.#closePromise;
+    }
+
+    const child = this.#child;
+    this.#child = null;
+    this.#stdoutBuffer = Buffer.alloc(0);
+    this.#drainPending(
+      withTransportCode(new Error("native host process closed"), "ERR_TRANSPORT_DISCONNECTED")
+    );
+
+    if (!child) {
+      return Promise.resolve();
+    }
+
+    this.#closePromise = new Promise((resolve) => {
+      let settled = false;
+      const settle = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        this.#closePromise = null;
+        resolve();
+      };
+
+      const forceKillTimer = setTimeout(() => {
+        if (!child.killed) {
+          child.kill("SIGTERM");
+        }
+        settle();
+      }, 350);
+      forceKillTimer.unref?.();
+
+      child.once("exit", () => {
+        clearTimeout(forceKillTimer);
+        settle();
+      });
+
+      child.stdin.end();
+    });
+
+    return this.#closePromise;
   }
 
   #send(phase: TransportPhase, request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
@@ -311,7 +358,12 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
   }
 
   #ensureChild(): void {
-    if (this.#child && !this.#child.killed) {
+    if (
+      this.#child &&
+      !this.#child.killed &&
+      this.#child.exitCode === null &&
+      !this.#child.stdin.destroyed
+    ) {
       return;
     }
 

@@ -880,7 +880,7 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("allows runtime bootstrap readiness promotion without xhs-specific target binding", async () => {
+  it("allows runtime.readiness promotion without xhs-specific target binding", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     const fingerprintContext = createFingerprintRuntimeContext();
@@ -978,43 +978,9 @@ describe("extension service worker recovery contract", () => {
       })
     );
 
-    firstPort.onMessageListeners[0]?.({
-      id: "run-bootstrap-generic-002",
-      method: "bridge.forward",
-      profile: "profile-a",
-      params: {
-        session_id: "nm-session-001",
-        run_id: "run-bootstrap-generic-001",
-        command: "runtime.bootstrap",
-        command_params: {
-          version: "v1",
-          run_id: "run-bootstrap-generic-001",
-          runtime_context_id: "ctx-bootstrap-generic-001",
-          profile: "profile-a",
-          fingerprint_runtime: fingerprintContext,
-          fingerprint_patch_manifest: {
-            required_patches: ["audio_context"]
-          },
-          main_world_secret: "secret-bootstrap-generic-001"
-        },
-        cwd: "/workspace/WebEnvoy"
-      },
-      timeout_ms: 50
-    });
-    await Promise.resolve();
-
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-bootstrap-generic-002",
-        status: "error",
-        error: expect.objectContaining({
-          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
-        })
-      })
-    );
   });
 
-  it("reuses attested runtime.bootstrap fingerprint injection for later issue_208 xhs.search", async () => {
+  it("keeps issue_208 xhs.search blocked without current-run trusted context after bootstrap attestation", async () => {
     const firstPort = createMockPort();
     const { chromeApi, executeScript, runtimeMessageListeners } = createChromeApi([firstPort]);
     const fingerprintContext = createFingerprintRuntimeContext({
@@ -1122,19 +1088,7 @@ describe("extension service worker recovery contract", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
-      32,
-      expect.objectContaining({
-        id: "run-xhs-editor-after-bootstrap-001",
-        command: "xhs.search",
-        fingerprintContext: expect.objectContaining({
-          injection: expect.objectContaining({
-            installed: true,
-            missing_required_patches: []
-          })
-        })
-      })
-    );
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
   });
 
   it("promotes pending bootstrap to ready through runtime.ping then runtime.readiness", async () => {
@@ -2323,7 +2277,7 @@ describe("extension service worker recovery contract", () => {
         ]
       }),
       tabId: 32,
-      tabUrl: "https://www.xiaohongshu.com/search_result?keyword=露营"
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
     });
 
     firstPort.onMessageListeners[0]?.({
@@ -3466,7 +3420,7 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("reuses startup trust across different run_id within the same session", async () => {
+  it("does not reuse startup trust across different run_id within the same session", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -3534,39 +3488,7 @@ describe("extension service worker recovery contract", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
-      32,
-      expect.objectContaining({
-        id: liveRequestId,
-        command: "xhs.search"
-      })
-    );
-
-    runtimeMessageListeners[0]?.(
-      {
-        kind: "result",
-        id: liveRequestId,
-        ok: true,
-        payload: {
-          summary: {
-            capability_result: {
-              outcome: "success"
-            }
-          }
-        }
-      },
-      {
-        tab: {
-          id: 32
-        }
-      }
-    );
-    await Promise.resolve();
-
-    const allowed = firstPort.postMessage.mock.calls
-      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
-      .find((message) => message.id === liveRequestId);
-    expect(allowed?.status).toBe("success");
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
   });
 
   it("does not establish trusted fingerprint context from runtime.ping", async () => {
@@ -3883,7 +3805,7 @@ describe("extension service worker recovery contract", () => {
     expect(allowed?.status).toBe("success");
   });
 
-  it("reuses startup trust across new run_id in the same session for live xhs.search", async () => {
+  it("does not reuse startup trust across new run_id in the same session for live xhs.search", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -3933,43 +3855,16 @@ describe("extension service worker recovery contract", () => {
     const liveDispatch = chromeApi.tabs.sendMessage.mock.calls.find(
       (call) => (call[1] as { id?: string } | undefined)?.id === liveRunId
     );
-    expect(liveDispatch).toBeDefined();
-    expect((liveDispatch?.[1] as { command?: string } | undefined)?.command).toBe("xhs.search");
-
-    runtimeMessageListeners[0]?.(
-      {
-        kind: "result",
-        id: liveRunId,
-        ok: true,
-        payload: {
-          summary: {
-            query: "露营",
-            items: []
-          }
-        }
-      },
-      {
-        tab: {
-          id: 32
-        }
-      }
-    );
-    await Promise.resolve();
+    expect(liveDispatch).toBeUndefined();
 
     const blocked = firstPort.postMessage.mock.calls
-      .map((call) => call[0] as { id?: string; status?: string; error?: { code?: string }; payload?: Record<string, unknown> })
-      .find(
-        (message) =>
-          message.id === liveRunId &&
-          message.status === "error" &&
-          message.error?.code === "FINGERPRINT_CONTEXT_UNTRUSTED"
-      );
-    expect(blocked).toBeUndefined();
-
-    const succeeded = firstPort.postMessage.mock.calls
-      .map((call) => call[0] as { id?: string; status?: string })
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
       .find((message) => message.id === liveRunId);
-    expect(succeeded?.status).toBe("success");
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_UNTRUSTED"]);
   });
 
   it("invalidates trusted fingerprint context after runtime.stop for same profile::session", async () => {

@@ -149,6 +149,9 @@ export class NativeMessagingBridge {
             options?.recoveryPollIntervalMs ?? defaultRecoveryPollIntervalMs;
         this.#heartbeatTimeoutMs = options?.heartbeatTimeoutMs ?? defaultHeartbeatTimeoutMs;
     }
+    async close() {
+        await this.#transport.close?.();
+    }
     async runtimePing(input) {
         const timeoutMs = readTimeoutMs(input.params.timeout_ms) ?? DEFAULT_TRANSPORT_TIMEOUT_MS;
         const budget = createTimeoutBudget(timeoutMs, this.#now);
@@ -277,7 +280,34 @@ export class NativeMessagingBridge {
             return response;
         }
         catch (error) {
-            throw this.#normalizeForwardFailure(error);
+            const normalized = this.#normalizeForwardFailure(error);
+            const shouldRetry = normalized.code === "ERR_TRANSPORT_DISCONNECTED" ||
+                normalized.code === "ERR_TRANSPORT_FORWARD_FAILED";
+            if (!shouldRetry) {
+                throw normalized;
+            }
+            this.#session.observeDisconnect("forward_retry", this.#now());
+            await this.#recoverIfDisconnected(input.profile, budget);
+            await this.#ensureReady(input.profile, budget);
+            await this.#pulseHeartbeat(budget);
+            const retryTimeoutMs = budget.remainingMs();
+            const retryRequest = createBridgeForwardRequest({
+                id: this.#nextId("run"),
+                profile: input.profile,
+                sessionId: this.#session.sessionIdOrThrow(),
+                runId: input.runId,
+                command: input.command,
+                commandParams: input.params,
+                cwd: input.cwd,
+                timeoutMs: retryTimeoutMs
+            });
+            try {
+                const response = await runWithTimeout(this.#transport.forward(retryRequest), retryTimeoutMs);
+                return response;
+            }
+            catch (retryError) {
+                throw this.#normalizeForwardFailure(retryError);
+            }
         }
         finally {
             this.#session.completeForward();

@@ -339,6 +339,9 @@ const xhsSearch = async (context) => {
         }
         throw error;
     }
+    finally {
+        await bridge.close();
+    }
 };
 export const xhsCommands = () => [
     {

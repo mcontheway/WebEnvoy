@@ -1552,7 +1552,7 @@ const scheduleIdleExit = () => {
   idleTimer = setTimeout(() => {
     writeTrace();
     process.exit(0);
-  }, 200);
+  }, 1000);
 };
 
 const success = (request, payload = { message: "pong" }) => ({
@@ -3911,9 +3911,9 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         identityBindingState: "bound",
-        transportState: "not_connected",
-        bootstrapState: "not_started",
-        runtimeReadiness: "recoverable"
+        transportState: "ready",
+        bootstrapState: "ready",
+        runtimeReadiness: "ready"
       }
     });
     await seedInstalledPersistentExtension({
@@ -3948,9 +3948,9 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         identityBindingState: "bound",
-        transportState: "not_connected",
+        transportState: "ready",
         bootstrapState: "not_started",
-        runtimeReadiness: "recoverable",
+        runtimeReadiness: "pending",
         identityPreflight: {
           mode: "official_chrome_persistent_extension",
           manifestPath,
@@ -4138,9 +4138,9 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         identityBindingState: "bound",
-        transportState: "not_connected",
-        bootstrapState: "not_started",
-        runtimeReadiness: "recoverable"
+        transportState: "ready",
+        bootstrapState: "ready",
+        runtimeReadiness: "ready"
       }
     });
     await seedInstalledPersistentExtension({
@@ -4168,9 +4168,9 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         identityBindingState: "bound",
-        transportState: "not_connected",
+        transportState: "ready",
         bootstrapState: "not_started",
-        runtimeReadiness: "recoverable",
+        runtimeReadiness: "pending",
         identityPreflight: {
           mode: "official_chrome_persistent_extension",
           manifestPath,

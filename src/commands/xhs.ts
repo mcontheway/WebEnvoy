@@ -468,6 +468,8 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
       throw toTransportCliError(error, envelope.ability);
     }
     throw error;
+  } finally {
+    await bridge.close();
   }
 };
 

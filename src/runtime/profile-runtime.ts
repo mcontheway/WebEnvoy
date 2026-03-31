@@ -127,6 +127,7 @@ interface RuntimeBridgeLike {
     command: string;
     params: JsonObject;
   }): Promise<BridgeCommandResult>;
+  close?(): Promise<void> | void;
 }
 
 interface RuntimeReadinessSnapshot {
@@ -1609,6 +1610,8 @@ export class ProfileRuntimeService {
         };
       }
       throw error;
+    } finally {
+      await bridge.close?.();
     }
   }
 
@@ -1742,6 +1745,8 @@ export class ProfileRuntimeService {
         return mapBootstrapCliErrorToReadiness(error, baseIdentity);
       }
       throw error;
+    } finally {
+      await bridge.close?.();
     }
   }
 
