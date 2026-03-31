@@ -142,16 +142,7 @@ export class NativeHostBridgeTransport {
     #send(phase, request) {
         ensureBridgeRequestEnvelope(request);
         if (this.#socketPath) {
-            return this.#sendViaSocket(phase, request).catch((error) => {
-                const message = error instanceof Error ? error.message : String(error);
-                const socketUnavailable = /socket is unavailable/i.test(message) ||
-                    /ENOENT/i.test(message) ||
-                    /ECONNREFUSED/i.test(message);
-                if (socketUnavailable && this.#hostCommand && this.#hostSpec) {
-                    return this.#sendViaSpawn(phase, request);
-                }
-                throw error;
-            });
+            return this.#sendViaSocket(phase, request);
         }
         return this.#sendViaSpawn(phase, request);
     }

@@ -88,4 +88,26 @@ describe("native host bridge transport classification", () => {
       }
     }
   });
+
+  it("does not fall back to spawned host when profile socket is unavailable", async () => {
+    const mockNativeHostPath = path.resolve(
+      path.join(import.meta.dirname, "../../../../tests/fixtures/native-host-mock.mjs")
+    );
+    const hostCommand = `"${process.execPath}" "${mockNativeHostPath}"`;
+    const transport = new NativeHostBridgeTransport(hostCommand, {
+      socketPath: `/tmp/webenvoy-missing-socket-${Date.now()}.sock`
+    });
+
+    await expect(
+      transport.open(
+        createBridgeOpenRequest({
+          id: "open-socket-required-001",
+          profile: "xhs_208_probe",
+          timeoutMs: 80
+        })
+      )
+    ).rejects.toMatchObject({
+      transportCode: "ERR_TRANSPORT_HANDSHAKE_FAILED"
+    });
+  });
 });

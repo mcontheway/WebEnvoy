@@ -2403,14 +2403,6 @@ class ChromeBackgroundBridge {
 
     if (
       command === "xhs.search" &&
-      issueScope === "issue_208" &&
-      validationAction === "editor_input"
-    ) {
-      await this.#ensureContentScriptInjected(tabId);
-    }
-
-    if (
-      command === "xhs.search" &&
       requestedLiveMode &&
       forwardFingerprintContext &&
       !hasInstalledFingerprintInjection(forwardFingerprintContext)

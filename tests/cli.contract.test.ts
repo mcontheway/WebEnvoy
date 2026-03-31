@@ -1139,6 +1139,8 @@ describe("webenvoy cli contract", () => {
           action_type: "write",
           requested_execution_mode: "live_write",
           risk_state: "allowed",
+          validation_action: "editor_input",
+          validation_text: "最小正式验证",
           approval_record: {
             approved: true,
             approver: "qa-reviewer",
@@ -1175,6 +1177,58 @@ describe("webenvoy cli contract", () => {
     expect(auditRecord?.requested_execution_mode).toBe("live_write");
     expect(auditRecord?.effective_execution_mode).toBe("dry_run");
     expect(resolveWriteInteractionTier(gateEnvelope)).toBe("reversible_interaction");
+  });
+
+  it("keeps issue_208 editor_input blocked on loopback because it lacks controlled execution attestation", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          issue_scope: "issue_208",
+          action_type: "write",
+          validation_action: "editor_input",
+          requested_execution_mode: "live_write",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED"
+      }
+    });
   });
 
   it("blocks issue_209 write dry_run even with complete approval to keep gate-only scoped to issue_208", () => {
@@ -1492,8 +1546,8 @@ describe("webenvoy cli contract", () => {
       summary: {
         profile,
         identityBindingState: "bound",
-        transportState: "ready",
-        bootstrapState: "pending",
+        transportState: "not_connected",
+        bootstrapState: "not_started",
         runtimeReadiness: "recoverable"
       }
     });
@@ -1776,90 +1830,40 @@ process.stdin.on("data", (chunk) => {
       WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
     });
 
-    expect(result.status).toBe(0);
+    expect(result.status).toBe(5);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
       command: "xhs.search",
-      status: "success",
-      summary: {
-        capability_result: {
+      status: "error",
+      error: {
+        code: "ERR_RUNTIME_UNAVAILABLE",
+        retryable: true,
+        details: {
           ability_id: "xhs.note.search.v1",
-          layer: "L3",
-          action: "read",
-          outcome: "success"
+          stage: "execution",
+          reason: "ERR_RUNTIME_TRANSPORT_NOT_READY"
         }
       }
     });
-
-    const trace = JSON.parse(await readFile(tracePath, "utf8")) as {
-      forwards?: Array<{ command?: string; run_id?: string; profile?: string }>;
-      attestationEvents?: Array<{
-        source?: string;
-        run_id?: string;
-        profile?: string;
-        runtime_context_id?: string;
-      }>;
-    };
-    expect(trace.forwards).toBeDefined();
-    expect(trace.forwards).toEqual(
-      expect.arrayContaining([
-        {
-          command: "runtime.bootstrap",
-          run_id: runId,
-          profile
-        },
-        {
-          command: "runtime.readiness",
-          run_id: runId,
-          profile
-        },
-        {
-          command: "xhs.search",
-          run_id: runId,
-          profile
-        }
-      ])
-    );
-    const bootstrapIndex =
-      trace.forwards?.findIndex((forward) => forward.command === "runtime.bootstrap") ?? -1;
-    const searchIndex =
-      trace.forwards?.findIndex((forward) => forward.command === "xhs.search") ?? -1;
-    expect(bootstrapIndex).toBeGreaterThanOrEqual(0);
-    expect(searchIndex).toBeGreaterThanOrEqual(0);
-    expect(bootstrapIndex).toBeLessThan(searchIndex);
-    expect(trace.forwards?.some((forward) => forward.command === "runtime.ping")).toBe(false);
-    expect(trace.attestationEvents).toEqual(
-      expect.arrayContaining([
-        {
-          source: "native-host-async-attestation",
-          run_id: runId,
-          profile,
-          runtime_context_id: buildRuntimeBootstrapContextId(profile, runId)
-        }
-      ])
-    );
+    await expect(stat(tracePath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it.each([
     {
       label: "stale bootstrap ack",
-      mode: "stale",
-      expectedCode: "ERR_RUNTIME_BOOTSTRAP_ACK_STALE",
-      expectedRetryable: true
+      mode: "stale"
     },
     {
       label: "bootstrap identity mismatch",
-      mode: "identity-mismatch",
-      expectedCode: "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH",
-      expectedRetryable: false
+      mode: "identity-mismatch"
     },
     {
       label: "bootstrap ready-signal conflict",
-      mode: "ready-signal-conflict",
-      expectedCode: "ERR_RUNTIME_READY_SIGNAL_CONFLICT",
-      expectedRetryable: true
+      mode: "ready-signal-conflict"
     }
-  ] as const)("surfaces %s through xhs.search CLI contract", async ({ label, mode, expectedCode, expectedRetryable }) => {
+  ] as const)(
+    "keeps %s behind runtime transport readiness when profile socket is unavailable",
+    async ({ label, mode }) => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestPath = await createNativeHostManifest({
       allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
@@ -1990,7 +1994,8 @@ const onRequest = (request) => {
     command,
     run_id: runId,
     profile
-  });
+    }
+  );
 
   if (command === "runtime.bootstrap") {
     if (bootstrapMode === "identity-mismatch") {
@@ -2112,29 +2117,17 @@ process.stdin.on("data", (chunk) => {
       command: "xhs.search",
       status: "error",
       error: {
-        code: expectedCode,
-        retryable: expectedRetryable,
+        code: "ERR_RUNTIME_UNAVAILABLE",
+        retryable: true,
         details: {
           ability_id: "xhs.note.search.v1",
           stage: "execution",
-          reason: expectedCode
+          reason: "ERR_RUNTIME_TRANSPORT_NOT_READY"
         }
       }
     });
 
-    const trace = JSON.parse(await readFile(tracePath, "utf8")) as {
-      forwards?: Array<{ command?: string; run_id?: string; profile?: string }>;
-    };
-    expect(trace.forwards).toEqual(
-      expect.arrayContaining([
-        {
-          command: "runtime.bootstrap",
-          run_id: runId,
-          profile
-        }
-      ])
-    );
-    expect(trace.forwards?.some((forward) => forward.command === "xhs.search")).toBe(false);
+    await expect(stat(tracePath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("accepts live_read_limited as approved live mode in limited risk state", () => {
@@ -3911,9 +3904,9 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         identityBindingState: "bound",
-        transportState: "ready",
-        bootstrapState: "ready",
-        runtimeReadiness: "ready"
+        transportState: "not_connected",
+        bootstrapState: "not_started",
+        runtimeReadiness: "recoverable"
       }
     });
     await seedInstalledPersistentExtension({
@@ -3948,9 +3941,9 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         identityBindingState: "bound",
-        transportState: "ready",
+        transportState: "not_connected",
         bootstrapState: "not_started",
-        runtimeReadiness: "pending",
+        runtimeReadiness: "recoverable",
         identityPreflight: {
           mode: "official_chrome_persistent_extension",
           manifestPath,
@@ -4000,8 +3993,8 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         identityBindingState: "bound",
-        transportState: "ready",
-        bootstrapState: "pending",
+        transportState: "not_connected",
+        bootstrapState: "not_started",
         runtimeReadiness: "recoverable"
       }
     });
@@ -4047,9 +4040,9 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         identityBindingState: "bound",
-        transportState: "ready",
-        bootstrapState: "stale",
-        runtimeReadiness: "blocked"
+        transportState: "not_connected",
+        bootstrapState: "not_started",
+        runtimeReadiness: "recoverable"
       }
     });
   });
@@ -4094,9 +4087,9 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         identityBindingState: "bound",
-        transportState: "ready",
-        bootstrapState: "failed",
-        runtimeReadiness: "unknown"
+        transportState: "not_connected",
+        bootstrapState: "not_started",
+        runtimeReadiness: "recoverable"
       }
     });
   });
@@ -4138,9 +4131,9 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         identityBindingState: "bound",
-        transportState: "ready",
-        bootstrapState: "ready",
-        runtimeReadiness: "ready"
+        transportState: "not_connected",
+        bootstrapState: "not_started",
+        runtimeReadiness: "recoverable"
       }
     });
     await seedInstalledPersistentExtension({
@@ -4168,9 +4161,9 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         identityBindingState: "bound",
-        transportState: "ready",
+        transportState: "not_connected",
         bootstrapState: "not_started",
-        runtimeReadiness: "pending",
+        runtimeReadiness: "recoverable",
         identityPreflight: {
           mode: "official_chrome_persistent_extension",
           manifestPath,

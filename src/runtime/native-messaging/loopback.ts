@@ -296,9 +296,9 @@ const buildLoopbackGate = (
       riskState === "allowed" &&
       approvalRequirementGaps.length === 0
     ) {
-      gateDecision = "allowed";
-      effectiveExecutionMode = requestedExecutionMode;
-      gateReasons.push("WRITE_INTERACTION_APPROVED", "ISSUE_208_EDITOR_INPUT_VALIDATION_APPROVED");
+      gateDecision = "blocked";
+      effectiveExecutionMode = resolveLoopbackFallbackMode(requestedExecutionMode, riskState);
+      gateReasons.push("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
     } else {
       effectiveExecutionMode = resolveLoopbackFallbackMode(requestedExecutionMode, riskState);
       gateDecision = "blocked";
@@ -864,14 +864,14 @@ class InMemoryContentScriptRuntime {
         return {
           kind: "result",
           id: message.id,
-          ok: true,
+          ok: false,
           payload: {
             summary: {
               capability_result: {
                 ability_id: String(ability.id ?? "xhs.issue208.editor_input"),
                 layer: String(ability.layer ?? "L3"),
                 action: String(consumerGateResult.action_type ?? ability.action ?? "write"),
-                outcome: "success",
+                outcome: "blocked",
                 data_ref: {
                   validation_action: "editor_input"
                 },
@@ -883,12 +883,8 @@ class InMemoryContentScriptRuntime {
               interaction_result: {
                 validation_action: "editor_input",
                 target_page: "creator.xiaohongshu.com/publish",
-                success_signals: [
-                  "editor_focused",
-                  "text_visible",
-                  "text_persisted_after_blur"
-                ],
-                failure_signals: [],
+                success_signals: [],
+                failure_signals: ["EDITOR_INPUT_VALIDATION_REQUIRED"],
                 minimum_replay: ["focus_editor", "type_short_text", "blur_or_reobserve"],
                 out_of_scope_actions: ["image_upload", "submit", "publish_confirm"]
               }
@@ -901,8 +897,17 @@ class InMemoryContentScriptRuntime {
                 ready_state: "complete"
               },
               key_requests: [],
-              failure_site: null
+              failure_site: {
+                stage: "execution",
+                component: "page",
+                target: "editor_input",
+                summary: "loopback transport cannot attest controlled editor_input validation"
+              }
             }
+          },
+          error: {
+            code: "ERR_EXECUTION_FAILED",
+            message: `editor_input validation requires a controlled execution surface: ${validationText}`
           }
         };
       }

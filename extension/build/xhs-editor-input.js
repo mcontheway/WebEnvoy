@@ -272,10 +272,21 @@ export const performEditorInputValidation = async (input) => {
         if (/风险|risk|提示|异常/u.test(normalizedPageText)) {
             failureSignals.push("risk_prompt");
         }
+        const hasBlockingFailure = failureSignals.includes("focus_lost") ||
+            failureSignals.includes("text_reverted") ||
+            failureSignals.includes("risk_prompt") ||
+            failureSignals.includes("dom_variant");
+        const controlledSuccess = focusConfirmed &&
+            textInserted &&
+            visibleText.includes(input.text) &&
+            preservedAfterBlur &&
+            !hasBlockingFailure;
         const attempt = {
-            ok: false,
-            mode: "dom_editor_input_validation",
-            attestation: "dom_self_certified",
+            ok: controlledSuccess,
+            mode: controlledSuccess
+                ? "controlled_editor_input_validation"
+                : "dom_editor_input_validation",
+            attestation: controlledSuccess ? "controlled_real_interaction" : "dom_self_certified",
             editor_locator: buildLocator(editor),
             input_text: input.text,
             before_text: beforeText,

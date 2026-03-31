@@ -105,6 +105,20 @@ const runWithTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promis
   }
 };
 
+const asObject = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const isNonIdempotentForward = (input: BridgeCommandInput): boolean => {
+  const requestedExecutionMode = input.params.requested_execution_mode;
+  if (requestedExecutionMode === "live_write") {
+    return true;
+  }
+  const options = asObject(input.params.options);
+  return options?.validation_action === "editor_input";
+};
+
 export const createFakeNativeBridgeTransport = (
   options?: FakeTransportOptions
 ): NativeBridgeTransport => {
@@ -440,6 +454,9 @@ export class NativeMessagingBridge {
       return response;
     } catch (error) {
       const normalized = this.#normalizeForwardFailure(error);
+      if (isNonIdempotentForward(input)) {
+        throw normalized;
+      }
       const shouldRetry =
         normalized.code === "ERR_TRANSPORT_DISCONNECTED" ||
         normalized.code === "ERR_TRANSPORT_FORWARD_FAILED";

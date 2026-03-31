@@ -980,7 +980,7 @@ describe("extension service worker recovery contract", () => {
 
   });
 
-  it("keeps issue_208 xhs.search blocked without current-run trusted context after bootstrap attestation", async () => {
+  it("forwards issue_208 xhs.search after current-run trusted context is primed following bootstrap attestation", async () => {
     const firstPort = createMockPort();
     const { chromeApi, executeScript, runtimeMessageListeners } = createChromeApi([firstPort]);
     const fingerprintContext = createFingerprintRuntimeContext({
@@ -1088,14 +1088,14 @@ describe("extension service worker recovery contract", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledTimes(1);
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledTimes(2);
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       32,
       expect.objectContaining({
         command: "runtime.bootstrap"
       })
     );
-    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalledWith(
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       32,
       expect.objectContaining({
         command: "xhs.search"
@@ -2263,7 +2263,7 @@ describe("extension service worker recovery contract", () => {
 
   it("auto-resolves missing target_tab_id for issue_208 editor_input forward", async () => {
     const firstPort = createMockPort();
-    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
       { id: 18, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true },
       { id: 32, url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article", active: false }
@@ -2308,6 +2308,13 @@ describe("extension service worker recovery contract", () => {
     await Promise.resolve();
     await Promise.resolve();
     await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const proactiveContentScriptInject = executeScript.mock.calls.find(
+      (call) =>
+        (call[0] as { world?: string; files?: string[] }).world === "ISOLATED" &&
+        ((call[0] as { files?: string[] }).files ?? []).includes("build/content-script.js")
+    );
+    expect(proactiveContentScriptInject).toBeUndefined();
 
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       32,
@@ -4407,7 +4414,7 @@ describe("extension service worker recovery contract", () => {
 
   it("forwards issue_208 live_write with editor_input validation through the real background bridge", async () => {
     const firstPort = createMockPort();
-    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
       { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
     ]);
@@ -4447,6 +4454,13 @@ describe("extension service worker recovery contract", () => {
       timeout_ms: 100
     });
     await waitForBridgeTurn();
+
+    const proactiveContentScriptInject = executeScript.mock.calls.find(
+      (call) =>
+        (call[0] as { world?: string; files?: string[] }).world === "ISOLATED" &&
+        ((call[0] as { files?: string[] }).files ?? []).includes("build/content-script.js")
+    );
+    expect(proactiveContentScriptInject).toBeUndefined();
 
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       32,

@@ -410,4 +410,134 @@ describe("native messaging bridge", () => {
     expect(result.transport.state).toBe("ready");
     expect(openCall).toBeGreaterThanOrEqual(4);
   });
+
+  it("does not replay non-idempotent live_write editor_input commands after forward disconnect", async () => {
+    let forwardCall = 0;
+    const transport = {
+      async open(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            protocol: "webenvoy.native-bridge.v1",
+            session_id: "nm-session-001",
+            state: "ready"
+          },
+          error: null
+        };
+      },
+      async forward(): Promise<BridgeResponseEnvelope> {
+        forwardCall += 1;
+        throw new NativeMessagingTransportError(
+          "ERR_TRANSPORT_DISCONNECTED",
+          "forward disconnected"
+        );
+      },
+      async heartbeat(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            session_id: "nm-session-001"
+          },
+          error: null
+        };
+      }
+    };
+
+    const bridge = new NativeMessagingBridge({
+      transport
+    });
+
+    await expect(
+      bridge.runCommand({
+        runId: "run-no-replay-001",
+        profile: "profile-a",
+        cwd: "/tmp",
+        command: "xhs.search",
+        params: {
+          requested_execution_mode: "live_write",
+          options: {
+            validation_action: "editor_input"
+          }
+        }
+      })
+    ).rejects.toMatchObject<Partial<NativeMessagingTransportError>>({
+      code: "ERR_TRANSPORT_DISCONNECTED"
+    });
+    expect(forwardCall).toBe(1);
+  });
+
+  it("retries idempotent runCommand after recoverable forward disconnect", async () => {
+    let forwardCall = 0;
+    const transport = {
+      async open(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            protocol: "webenvoy.native-bridge.v1",
+            session_id: "nm-session-001",
+            state: "ready"
+          },
+          error: null
+        };
+      },
+      async forward(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        forwardCall += 1;
+        if (forwardCall === 1) {
+          throw new NativeMessagingTransportError(
+            "ERR_TRANSPORT_DISCONNECTED",
+            "forward disconnected"
+          );
+        }
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            relay_path: "host>background>content-script>background>host"
+          },
+          payload: {
+            summary: {
+              capability_result: {
+                outcome: "success"
+              }
+            }
+          },
+          error: null
+        };
+      },
+      async heartbeat(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            session_id: "nm-session-001"
+          },
+          error: null
+        };
+      }
+    };
+
+    const bridge = new NativeMessagingBridge({
+      transport,
+      recoveryPollIntervalMs: 1
+    });
+
+    const result = await bridge.runCommand({
+      runId: "run-replay-idempotent-001",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "xhs.search",
+      params: {
+        requested_execution_mode: "live_read_limited",
+        options: {}
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: true
+    });
+    expect(forwardCall).toBe(2);
+  });
 });

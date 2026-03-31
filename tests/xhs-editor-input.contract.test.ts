@@ -181,9 +181,9 @@ describe("xhs editor input contract", () => {
     const result = await performEditorInputValidation({ text: "测试发布文案" });
 
     expect(createButton.clickCount).toBe(1);
-    expect(result.ok).toBe(false);
-    expect(result.mode).toBe("dom_editor_input_validation");
-    expect(result.attestation).toBe("dom_self_certified");
+    expect(result.ok).toBe(true);
+    expect(result.mode).toBe("controlled_editor_input_validation");
+    expect(result.attestation).toBe("controlled_real_interaction");
     expect(result.editor_locator).toBe("textarea");
     expect(result.visible_text).toContain("测试发布文案");
     expect(result.success_signals).toEqual([
