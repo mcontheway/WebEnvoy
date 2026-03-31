@@ -4514,6 +4514,104 @@ describe("extension service worker recovery contract", () => {
     });
   });
 
+  it("attests the active editor target when multiple editor candidates match", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    let probeCall = 0;
+    executeScript.mockImplementation(
+      async (
+        input:
+          | { world?: "MAIN" | "ISOLATED"; files?: string[] }
+          | { world?: "MAIN" | "ISOLATED"; func?: (...args: unknown[]) => unknown; args?: unknown[] }
+      ) => {
+        if (input.world === "ISOLATED" && "func" in input && typeof input.func === "function") {
+          probeCall += 1;
+          return [
+            {
+              result: {
+                entryButton: {
+                  locator: "button.新的创作",
+                  targetKey: "body > button:nth-of-type(1)",
+                  centerX: 100,
+                  centerY: 100
+                },
+                editor: {
+                  locator: "div.tiptap.ProseMirror",
+                  targetKey: "body > div:nth-of-type(2)",
+                  centerX: 360,
+                  centerY: 220
+                },
+                editorFocused: probeCall >= 2
+              }
+            }
+          ];
+        }
+        return [{ result: { "X-s": "signed", "X-t": "1700000000" } }];
+      }
+    );
+    chromeApi.tabs.query.mockImplementation(async () => [
+      {
+        id: 32,
+        url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article",
+        active: true
+      }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-issue-208-editor-input-multi-editor-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext({
+        live_allowed: true,
+        live_decision: "allowed",
+        allowed_execution_modes: [
+          "dry_run",
+          "recon",
+          "live_read_limited",
+          "live_read_high_risk",
+          "live_write"
+        ]
+      }),
+      tabId: 32,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-issue-208-editor-input-multi-editor-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-issue-208-editor-input-multi-editor-001",
+        command: "xhs.search",
+        command_params: createXhsEditorInputCommandParams(),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    await vi.waitFor(() => {
+      expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+        32,
+        expect.objectContaining({
+          commandParams: expect.objectContaining({
+            options: expect.objectContaining({
+              editor_focus_attestation: expect.objectContaining({
+                source: "chrome_debugger",
+                editor_locator: "div.tiptap.ProseMirror",
+                editor_target_key: "body > div:nth-of-type(2)",
+                focus_confirmed: true
+              })
+            })
+          })
+        })
+      );
+    });
+  });
+
   it("annotates editor_input forward with debugger attach failure attestation", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners, debuggerAttach } = createChromeApi([firstPort]);

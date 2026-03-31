@@ -4,7 +4,6 @@ import { WRITE_INTERACTION_TIER, getWriteActionMatrixDecisions, isIssueScope } f
 import { NativeMessagingBridge, NativeMessagingTransportError } from "../runtime/native-messaging/bridge.js";
 import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
-import { resolveProfileScopedNativeBridgeSocketPath } from "../install/native-host.js";
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { buildFingerprintContextForMeta, appendFingerprintContext } from "../runtime/fingerprint-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
@@ -17,18 +16,14 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
-export const shouldUseProfileSocketBridge = (status) => asObject(status?.identityPreflight)?.mode === "official_chrome_persistent_extension";
-const resolveRuntimeBridge = (context) => {
+const resolveRuntimeBridge = () => {
     if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
         return new NativeMessagingBridge({
             transport: createLoopbackNativeBridgeTransport()
         });
     }
-    const socketPath = context?.requireProfileSocket && context.cwd && context.profile
-        ? resolveProfileScopedNativeBridgeSocketPath(join(context.cwd, ...PROFILE_ROOT_SEGMENTS, context.profile))
-        : null;
     return new NativeMessagingBridge({
-        transport: new NativeHostBridgeTransport(undefined, { socketPath })
+        transport: new NativeHostBridgeTransport()
     });
 };
 const profileRuntime = new ProfileRuntimeService();
@@ -110,19 +105,6 @@ const runtimePing = async (context) => {
     if (asBoolean(context.params.force_fail)) {
         throw new Error("forced execution failure");
     }
-    const runtimeStatus = context.profile
-        ? await profileRuntime.status({
-            cwd: context.cwd,
-            profile: context.profile,
-            runId: context.run_id,
-            params: context.params
-        })
-        : null;
-    const bridge = resolveRuntimeBridge({
-        cwd: context.cwd,
-        profile: context.profile,
-        requireProfileSocket: shouldUseProfileSocketBridge(runtimeStatus)
-    });
     try {
         const requestedExecutionMode = typeof context.params.requested_execution_mode === "string"
             ? context.params.requested_execution_mode
@@ -134,6 +116,7 @@ const runtimePing = async (context) => {
                 requestedExecutionMode
             }))
             : context.params;
+        const bridge = resolveRuntimeBridge();
         return await bridge.runtimePing({
             runId: context.run_id,
             profile: context.profile,
@@ -149,9 +132,6 @@ const runtimePing = async (context) => {
             });
         }
         throw error;
-    }
-    finally {
-        await bridge.close();
     }
 };
 const runtimeStart = async (context) => profileRuntime.start({

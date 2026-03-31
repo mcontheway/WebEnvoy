@@ -1,5 +1,5 @@
-import { access, chmod, lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { access, chmod, lstat, mkdir, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -218,26 +218,6 @@ export const resolveRepoOwnedNativeHostEntryPath = (): string =>
 export const resolveRepoOwnedNativeHostCommand = (): string =>
   `${quoteShellToken(process.execPath)} ${quoteShellToken(resolveRepoOwnedNativeHostEntryPath())}`;
 
-const PROFILE_SOCKET_FILENAME = "__webenvoy_native_bridge.sock";
-const MAX_UNIX_SOCKET_PATH_LENGTH = 96;
-
-const hashSocketPathSeed = (value: string): string => {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
-};
-
-export const resolveProfileScopedNativeBridgeSocketPath = (profileDir: string): string => {
-  const directPath = join(profileDir, PROFILE_SOCKET_FILENAME);
-  if (directPath.length <= MAX_UNIX_SOCKET_PATH_LENGTH) {
-    return directPath;
-  }
-  return join(tmpdir(), "webenvoy-native-bridge", `${hashSocketPathSeed(profileDir)}.sock`);
-};
-
 export const isBrowserChannel = (value: string): value is BrowserChannel =>
   BROWSER_CHANNELS.includes(value as BrowserChannel);
 
@@ -283,66 +263,24 @@ const resolveDefaultManifestDirectory = (browserChannel: BrowserChannel): string
 const buildLauncherScript = (input: {
   command: "runtime.install" | "runtime.uninstall";
   hostCommand: string;
-  profileDir?: string;
 }): string => {
   const argv = tokenizeHostCommand(input.command, input.hostCommand)
     .map((token) => quoteShellArgForScript(token))
     .join(" ");
-  const profileDirExport =
-    typeof input.profileDir === "string" && input.profileDir.length > 0
-      ? `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR=${quoteShellArgForScript(input.profileDir)}\n`
-      : "";
 
   return `#!/usr/bin/env bash
 set -euo pipefail
-${profileDirExport}exec ${argv} "$@"
+exec ${argv} "$@"
 `;
 };
 
 const resolveControlledInstallRoots = (cwd: string, browserChannel: BrowserChannel) => {
   const channelRoot = resolve(cwd, ".webenvoy", "native-host-install", browserChannel);
-  const profileRoot = resolve(cwd, ".webenvoy", "profiles");
   return {
     channelRoot,
-    profileRoot,
     manifestRoot: join(channelRoot, "manifests"),
     launcherRoot: join(channelRoot, "bin")
   };
-};
-
-const resolveProfileDirForLauncher = (cwd: string, manifestDir: string): string | undefined => {
-  const { profileRoot } = resolveControlledInstallRoots(cwd, DEFAULT_BROWSER_CHANNEL);
-  const normalizedProfileRoot = normalizePathForBoundaryCheck(profileRoot);
-  const normalizedManifestDir = normalizePathForBoundaryCheck(manifestDir);
-  const rel = relative(normalizedProfileRoot, normalizedManifestDir);
-  const isInside = rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
-  if (!isInside) {
-    return undefined;
-  }
-
-  const segments = rel.split(sep).filter((segment) => segment.length > 0 && segment !== ".");
-  if (segments.length !== 2 || segments[1] !== "NativeMessagingHosts") {
-    return undefined;
-  }
-
-  return join(normalizedProfileRoot, segments[0]);
-};
-
-const resolveExplicitProfileDir = (cwd: string, profile: string | undefined): string | undefined => {
-  if (typeof profile !== "string" || profile.trim().length === 0) {
-    return undefined;
-  }
-  return resolve(cwd, ".webenvoy", "profiles", profile.trim());
-};
-
-const extractLauncherProfileDir = (launcherRaw: string): string | null => {
-  const match = launcherRaw.match(
-    /^export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR=(?:"([^"]+)"|'([^']+)')$/m
-  );
-  if (!match) {
-    return null;
-  }
-  return match[1] ?? match[2] ?? null;
 };
 
 const normalizePathForBoundaryCheck = (input: string): string => {
@@ -373,11 +311,7 @@ const resolveInstallPaths = (input: ResolveInstallPathsInput) => {
       ? asAbsolutePath(input.cwd, input.manifestDir)
       : resolveDefaultManifestDirectory(input.browserChannel);
   const hasCustomManifestDir = typeof input.manifestDir === "string" && input.manifestDir.length > 0;
-  if (
-    hasCustomManifestDir &&
-    !isPathInside(roots.manifestRoot, manifestDir) &&
-    !isPathInside(roots.profileRoot, manifestDir)
-  ) {
+  if (hasCustomManifestDir && !isPathInside(roots.manifestRoot, manifestDir)) {
     throw nativeHostPathError(input.command, "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT", {
       field: "manifest_dir",
       allowed_root: roots.manifestRoot,
@@ -391,11 +325,7 @@ const resolveInstallPaths = (input: ResolveInstallPathsInput) => {
       ? asAbsolutePath(input.cwd, input.launcherPath)
       : join(manifestDir, `${input.nativeHostName}-launcher`);
   const hasCustomLauncherPath = typeof input.launcherPath === "string" && input.launcherPath.length > 0;
-  if (
-    hasCustomLauncherPath &&
-    !isPathInside(roots.launcherRoot, launcherPath) &&
-    !isPathInside(roots.profileRoot, launcherPath)
-  ) {
+  if (hasCustomLauncherPath && !isPathInside(roots.launcherRoot, launcherPath)) {
     throw nativeHostPathError(input.command, "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT", {
       field: "launcher_path",
       allowed_root: roots.launcherRoot,
@@ -417,7 +347,6 @@ export interface InstallNativeHostInput {
   extensionId: string;
   nativeHostName: string;
   browserChannel: BrowserChannel;
-  profile?: string;
   hostCommand?: string;
   manifestDir?: string;
   launcherPath?: string;
@@ -465,34 +394,11 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
   await mkdir(dirname(resolvedPaths.launcherPath), { recursive: true });
   await assertNotSymlink("runtime.install", "launcher_path", resolvedPaths.launcherPath);
   await assertNotSymlink("runtime.install", "manifest_path", resolvedPaths.manifestPath);
-  const profileDirForLauncher =
-    resolveExplicitProfileDir(input.cwd, input.profile) ??
-    resolveProfileDirForLauncher(input.cwd, resolvedPaths.manifestDir);
-  if (profileDirForLauncher && !resolvedPaths.hasCustomLauncherPath) {
-    try {
-      const existingLauncher = await readFile(resolvedPaths.launcherPath, "utf8");
-      const existingProfileDir = extractLauncherProfileDir(existingLauncher);
-      if (existingProfileDir && existingProfileDir !== profileDirForLauncher) {
-        throw nativeHostPathError("runtime.install", "BROWSER_LEVEL_PROFILE_CONFLICT", {
-          field: "launcher_path",
-          received_path: resolvedPaths.launcherPath,
-          requested_profile_dir: profileDirForLauncher,
-          existing_profile_dir: existingProfileDir
-        });
-      }
-    } catch (error) {
-      const nodeError = error as NodeJS.ErrnoException;
-      if (nodeError.code !== "ENOENT") {
-        throw error;
-      }
-    }
-  }
   await writeFile(
     resolvedPaths.launcherPath,
     buildLauncherScript({
       command: "runtime.install",
-      hostCommand,
-      profileDir: profileDirForLauncher
+      hostCommand
     }),
     "utf8"
   );

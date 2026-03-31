@@ -414,7 +414,7 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
-  it("reports missing identity binding in runtime.status for a fresh profile when params provide binding but the extension is absent", async () => {
+  it("ignores transient persistent extension identity hints in runtime.status for a fresh profile", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-status-fresh-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
@@ -444,51 +444,10 @@ describe("profile-runtime identity preflight", () => {
       runtimeReadiness: "blocked",
       identityPreflight: {
         mode: "official_chrome_persistent_extension",
-        failureReason: "IDENTITY_BINDING_MISSING",
-        manifestPath
+        failureReason: "IDENTITY_BINDING_MISSING"
       }
     });
-  });
-
-  it("enables profile socket bridge only after official identity mode is confirmed", async () => {
-    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-socket-"));
-    tempDirs.push(baseDir);
-    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
-    const profile = "identity_socket_profile";
-    const manifestPath = await createNativeHostManifest({
-      allowedOrigins: [`chrome-extension://${PERSISTENT_EXTENSION_ID}/`]
-    });
-    await seedInstalledPersistentExtension({
-      baseDir,
-      profile,
-      extensionId: PERSISTENT_EXTENSION_ID
-    });
-    const bridgeFactoryInputs: Array<Record<string, unknown> | undefined> = [];
-    const service = createTestService({
-      bridgeFactory: (input) => {
-        bridgeFactoryInputs.push(input as Record<string, unknown> | undefined);
-        return createReadyRuntimeBridge();
-      }
-    });
-
-    const started = await service.start({
-      cwd: baseDir,
-      profile,
-      runId: "run-runtime-identity-socket-001",
-      params: {
-        persistent_extension_identity: {
-          extension_id: PERSISTENT_EXTENSION_ID,
-          manifest_path: manifestPath
-        }
-      }
-    });
-
-    expect(started.identityBindingState).toBe("bound");
-    expect(bridgeFactoryInputs).toContainEqual({
-      cwd: baseDir,
-      profile,
-      requireProfileSocket: true
-    });
+    expect(status.identityPreflight).not.toHaveProperty("manifestPath", manifestPath);
   });
 
   it("keeps first runtime.start/login available when official Chrome identity is still missing", async () => {

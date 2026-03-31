@@ -11,11 +11,8 @@ import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging
 import { appendFingerprintContext, buildFingerprintContextForMeta } from "../runtime/fingerprint-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
 import {
-  buildOfficialChromeRuntimeStatusParams,
   prepareOfficialChromeRuntime
 } from "../runtime/official-chrome-runtime.js";
-import { resolveProfileScopedNativeBridgeSocketPath } from "../install/native-host.js";
-import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 
 export { buildOfficialChromeRuntimeStatusParams } from "../runtime/official-chrome-runtime.js";
 
@@ -55,15 +52,11 @@ const XHS_LIVE_EXECUTION_MODES = new Set<XhsExecutionMode>([
   "live_write"
 ]);
 const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
-const profileRuntime = new ProfileRuntimeService();
 
 const asObject = (value: unknown): JsonObject | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as JsonObject)
     : null;
-
-export const shouldUseProfileSocketBridge = (status: Record<string, unknown> | null): boolean =>
-  asObject(status?.identityPreflight)?.mode === "official_chrome_persistent_extension";
 
 const isTransportFailureCode = (code: unknown): code is string =>
   code === "ERR_TRANSPORT_HANDSHAKE_FAILED" ||
@@ -73,25 +66,15 @@ const isTransportFailureCode = (code: unknown): code is string =>
   code === "ERR_TRANSPORT_NOT_READY";
 
 
-const resolveRuntimeBridge = (context?: {
-  cwd: string;
-  profile?: string | null;
-  requireProfileSocket?: boolean;
-}): NativeMessagingBridge => {
+const resolveRuntimeBridge = (): NativeMessagingBridge => {
   if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
     return new NativeMessagingBridge({
       transport: createLoopbackNativeBridgeTransport()
     });
   }
-  const socketPath =
-    context?.requireProfileSocket && context.cwd && context.profile
-      ? resolveProfileScopedNativeBridgeSocketPath(
-          join(context.cwd, ...PROFILE_ROOT_SEGMENTS, context.profile)
-        )
-      : null;
 
   return new NativeMessagingBridge({
-    transport: new NativeHostBridgeTransport(undefined, { socketPath })
+    transport: new NativeHostBridgeTransport()
   });
 };
 
@@ -152,7 +135,22 @@ const parseAbilityEnvelope = (params: JsonObject): AbilityEnvelope => {
   };
 };
 
-const parseSearchInput = (input: JsonObject, abilityId: string): JsonObject => {
+const parseSearchInput = (
+  input: JsonObject,
+  abilityId: string,
+  options: JsonObject,
+  abilityAction: AbilityAction
+): JsonObject => {
+  const issue208EditorInputValidation =
+    abilityAction === "write" &&
+    options.issue_scope === "issue_208" &&
+    options.action_type === "write" &&
+    options.requested_execution_mode === "live_write" &&
+    options.validation_action === "editor_input";
+  if (issue208EditorInputValidation) {
+    return {};
+  }
+
   const query =
     typeof input.query === "string" && input.query.trim().length > 0 ? input.query.trim() : null;
   if (!query) {
@@ -218,7 +216,6 @@ const normalizeGateOptions = (
   if (!targetPage) {
     throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
   }
-
   const issueScope =
     typeof options.issue_scope === "string" && options.issue_scope.trim().length > 0
       ? options.issue_scope.trim()
@@ -252,9 +249,9 @@ const normalizeGateOptions = (
     options: {
       ...options,
       target_domain: targetDomain,
+      target_tab_id: targetTabId,
       target_page: targetPage,
-      requested_execution_mode: requestedExecutionMode,
-      ...(targetTabId !== null ? { target_tab_id: targetTabId } : {})
+      requested_execution_mode: requestedExecutionMode
     }
   };
 };
@@ -377,8 +374,8 @@ export const ensureOfficialChromeRuntimeReady = async (
   fingerprintContext: ReturnType<typeof buildFingerprintContextForMeta>,
   _gate: ReturnType<typeof normalizeGateOptions>,
   readStatus?: () => Promise<JsonObject>
-): Promise<ReturnType<typeof buildFingerprintContextForMeta> | undefined> => {
-  const status = await prepareOfficialChromeRuntime({
+): Promise<void> => {
+  await prepareOfficialChromeRuntime({
     context,
     consumerId: ability.id,
     requestedExecutionMode,
@@ -386,7 +383,6 @@ export const ensureOfficialChromeRuntimeReady = async (
     fingerprintContext,
     readStatus
   });
-  return status.executionFingerprintContext;
 };
 
 const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResult> => {
@@ -419,65 +415,38 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
     });
   }
 
+  const bridge = resolveRuntimeBridge();
   const profileStore = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
   const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
   const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
     requestedExecutionMode: gate.requestedExecutionMode
   });
-  const runtimeStatusParams = buildOfficialChromeRuntimeStatusParams(context, gate.requestedExecutionMode);
-  let cachedRuntimeStatus =
-    context.profile
-      ? await profileRuntime.status({
-          cwd: context.cwd,
-          profile: context.profile,
-          runId: context.run_id,
-          params: runtimeStatusParams
-        })
-      : null;
-  const bridge = resolveRuntimeBridge({
-    cwd: context.cwd,
-    profile: context.profile,
-    requireProfileSocket: shouldUseProfileSocketBridge(cachedRuntimeStatus)
-  });
-  const readStatus =
-    context.profile
-      ? async (): Promise<JsonObject> => {
-          if (cachedRuntimeStatus) {
-            const status = cachedRuntimeStatus;
-            cachedRuntimeStatus = null;
-            return status;
-          }
-          return await profileRuntime.status({
-            cwd: context.cwd,
-            profile: context.profile ?? "",
-            runId: context.run_id,
-            params: runtimeStatusParams
-          });
-        }
-      : undefined;
 
   try {
-    const executionFingerprintContext =
-      (await ensureOfficialChromeRuntimeReady(
-        context,
-        envelope.ability,
-        gate.requestedExecutionMode,
-        bridge,
-        fingerprintContext,
-        gate,
-        readStatus
-      )) ?? fingerprintContext;
+    await ensureOfficialChromeRuntimeReady(
+      context,
+      envelope.ability,
+      gate.requestedExecutionMode,
+      bridge,
+      fingerprintContext,
+      gate
+    );
     const commandParams = appendFingerprintContext(
       {
         target_domain: gate.targetDomain,
+        target_tab_id: gate.targetTabId,
         target_page: gate.targetPage,
         requested_execution_mode: gate.requestedExecutionMode,
         ability: envelope.ability,
-        input: parseSearchInput(envelope.input, envelope.ability.id),
-        options: gate.options,
-        ...(gate.targetTabId !== null ? { target_tab_id: gate.targetTabId } : {})
+        input: parseSearchInput(
+          envelope.input,
+          envelope.ability.id,
+          gate.options,
+          envelope.ability.action
+        ),
+        options: gate.options
       },
-      executionFingerprintContext
+      fingerprintContext
     );
     const bridgeResult = await bridge.runCommand({
       runId: context.run_id,
@@ -520,8 +489,6 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
       throw toTransportCliError(error, envelope.ability);
     }
     throw error;
-  } finally {
-    await bridge.close();
   }
 };
 

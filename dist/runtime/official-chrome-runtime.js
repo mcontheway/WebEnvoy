@@ -2,11 +2,6 @@ import { randomUUID } from "node:crypto";
 import { CliError } from "../core/errors.js";
 import { buildRuntimeBootstrapContextId } from "./runtime-bootstrap.js";
 import { ProfileRuntimeService } from "./profile-runtime.js";
-const LIVE_EXECUTION_MODES = new Set([
-    "live_read_limited",
-    "live_read_high_risk",
-    "live_write"
-]);
 const OFFICIAL_CHROME_BOOTSTRAP_READINESS_MAX_ATTEMPTS = 5;
 const OFFICIAL_CHROME_BOOTSTRAP_READINESS_RETRY_DELAY_MS = 50;
 const profileRuntime = new ProfileRuntimeService();
@@ -140,16 +135,10 @@ const applyReadinessToStatus = (status, input) => ({
     transportState: input.transportState,
     lockHeld: input.lockHeld
 });
-export const buildOfficialChromeRuntimeStatusParams = (context, requestedExecutionMode) => {
-    const params = {
+export const buildOfficialChromeRuntimeStatusParams = (_context, requestedExecutionMode) => {
+    return {
         requested_execution_mode: requestedExecutionMode
     };
-    const persistentExtensionIdentity = asObject(context.params.persistent_extension_identity) ??
-        asObject(context.params.persistentExtensionIdentity);
-    if (persistentExtensionIdentity) {
-        params.persistent_extension_identity = persistentExtensionIdentity;
-    }
-    return params;
 };
 export const prepareOfficialChromeRuntime = async (input) => {
     const readStatus = input.readStatus ??
@@ -207,7 +196,7 @@ export const prepareOfficialChromeRuntime = async (input) => {
                 });
             }
             if (isRuntimeBootstrapPendingCode(bootstrapResult.error.code)) {
-                return undefined;
+                return;
             }
             if (isRuntimeBootstrapFailureCode(bootstrapResult.error.code)) {
                 throw new CliError(bootstrapResult.error.code, bootstrapResult.error.message, {
@@ -255,13 +244,8 @@ export const prepareOfficialChromeRuntime = async (input) => {
                 retryable: true
             });
         }
-        const attestedFingerprintRuntime = asObject(payload?.fingerprint_runtime);
-        return attestedFingerprintRuntime
-            ? attestedFingerprintRuntime
-            : undefined;
     };
-    const forceExecutionBootstrap = LIVE_EXECUTION_MODES.has(input.requestedExecutionMode);
-    if (runtimeReadiness === "ready" && lockHeld && !forceExecutionBootstrap) {
+    if (runtimeReadiness === "ready" && lockHeld) {
         return applyReadinessToStatus(status, {
             runtimeReadiness,
             identityBindingState,
@@ -282,11 +266,8 @@ export const prepareOfficialChromeRuntime = async (input) => {
     if (lockHeld &&
         identityBindingState === "bound" &&
         transportState === "ready" &&
-        (forceExecutionBootstrap ||
-            bootstrapState === "not_started" ||
-            bootstrapState === "pending" ||
-            bootstrapState === "stale")) {
-        const executionFingerprintContext = await attemptExecutionBootstrap();
+        (bootstrapState === "not_started" || bootstrapState === "pending" || bootstrapState === "stale")) {
+        await attemptExecutionBootstrap();
         status = await readStatus();
         profileState =
             typeof status.profileState === "string" ? status.profileState : "uninitialized";
@@ -327,16 +308,13 @@ export const prepareOfficialChromeRuntime = async (input) => {
             }
         }
         if (runtimeReadiness === "ready") {
-            return {
-                ...applyReadinessToStatus(status, {
-                    runtimeReadiness,
-                    identityBindingState,
-                    bootstrapState,
-                    transportState,
-                    lockHeld
-                }),
-                ...(executionFingerprintContext ? { executionFingerprintContext } : {})
-            };
+            return applyReadinessToStatus(status, {
+                runtimeReadiness,
+                identityBindingState,
+                bootstrapState,
+                transportState,
+                lockHeld
+            });
         }
     }
     if (identityBindingState === "missing") {

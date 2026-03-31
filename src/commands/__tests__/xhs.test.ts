@@ -11,7 +11,7 @@ import { createCommandRegistry } from "../index.js";
 import type { RuntimeContext } from "../../core/types.js";
 
 describe("ensureOfficialChromeRuntimeReady", () => {
-  it("forwards persistent extension identity into runtime.status params", () => {
+  it("does not forward persistent extension identity into runtime.status params", () => {
     expect(
       buildOfficialChromeRuntimeStatusParams(
         {
@@ -28,12 +28,8 @@ describe("ensureOfficialChromeRuntimeReady", () => {
         },
         "live_read_high_risk"
       )
-    ).toMatchObject({
-      requested_execution_mode: "live_read_high_risk",
-      persistent_extension_identity: {
-        extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        manifestPath: "/tmp/native-host-manifest.json"
-      }
+    ).toEqual({
+      requested_execution_mode: "live_read_high_risk"
     });
   });
 
@@ -122,7 +118,7 @@ describe("ensureOfficialChromeRuntimeReady", () => {
     expect(bootstrapCommand.params.main_world_secret).toEqual(expect.any(String));
   });
 
-  it("re-bootstrap live execution even when official Chrome runtime already reports ready", async () => {
+  it("skips re-bootstrap when official Chrome runtime already reports ready", async () => {
     const readStatus = vi
       .fn()
       .mockResolvedValueOnce({
@@ -190,18 +186,10 @@ describe("ensureOfficialChromeRuntimeReady", () => {
       )
     ).resolves.toBeUndefined();
 
-    expect(bridge.runCommand).toHaveBeenCalledWith(
-      expect.objectContaining({
-        command: "runtime.bootstrap",
-        params: expect.objectContaining({
-          run_id: "run-xhs-live-ready-rebootstrap-001",
-          profile: "official_live_ready_profile"
-        })
-      })
-    );
+    expect(bridge.runCommand).not.toHaveBeenCalled();
   });
 
-  it("returns attested fingerprint runtime from runtime.bootstrap for live execution", async () => {
+  it("keeps caller fingerprint runtime when runtime is already ready", async () => {
     const readStatus = vi
       .fn()
       .mockResolvedValueOnce({
@@ -279,15 +267,8 @@ describe("ensureOfficialChromeRuntimeReady", () => {
         } as never,
         readStatus
       )
-    ).resolves.toMatchObject({
-      injection: {
-        installed: true,
-        channel: "main_world"
-      },
-      fingerprint_profile_bundle: {
-        id: "bundle-attested"
-      }
-    });
+    ).resolves.toBeUndefined();
+    expect(bridge.runCommand).not.toHaveBeenCalled();
   });
 
   it("re-bootstrap current run when readiness reports stale bootstrap state", async () => {

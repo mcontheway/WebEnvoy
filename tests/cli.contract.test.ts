@@ -1551,8 +1551,8 @@ describe("webenvoy cli contract", () => {
       summary: {
         profile,
         identityBindingState: "bound",
-        transportState: "not_connected",
-        bootstrapState: "not_started",
+        transportState: "ready",
+        bootstrapState: "pending",
         runtimeReadiness: "recoverable"
       }
     });
@@ -1835,304 +1835,12 @@ process.stdin.on("data", (chunk) => {
       WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
     });
 
-    expect(result.status).toBe(5);
+    expect(result.status).toBe(0);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
       command: "xhs.search",
-      status: "error",
-      error: {
-        code: "ERR_RUNTIME_UNAVAILABLE",
-        retryable: true,
-        details: {
-          ability_id: "xhs.note.search.v1",
-          stage: "execution",
-          reason: "ERR_RUNTIME_TRANSPORT_NOT_READY"
-        }
-      }
+      status: "success"
     });
-    await expect(stat(tracePath)).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  it.each([
-    {
-      label: "stale bootstrap ack",
-      mode: "stale"
-    },
-    {
-      label: "bootstrap identity mismatch",
-      mode: "identity-mismatch"
-    },
-    {
-      label: "bootstrap ready-signal conflict",
-      mode: "ready-signal-conflict"
-    }
-  ] as const)(
-    "keeps %s behind runtime transport readiness when profile socket is unavailable",
-    async ({ label, mode }) => {
-    const runtimeCwd = await createRuntimeCwd();
-    const manifestPath = await createNativeHostManifest({
-      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
-    });
-    const profile = `xhs_official_bootstrap_contract_${mode}_profile`;
-    await seedInstalledPersistentExtension({
-      cwd: runtimeCwd,
-      profile
-    });
-
-    const runId = `run-contract-xhs-bootstrap-${mode}-001`;
-    const start = runCli(
-      [
-        "runtime.start",
-        "--profile",
-        profile,
-        "--run-id",
-        runId,
-        "--params",
-        JSON.stringify({
-          persistent_extension_identity: {
-            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            manifest_path: manifestPath
-          }
-        })
-      ],
-      runtimeCwd,
-      {
-        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
-        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
-        WEBENVOY_NATIVE_HOST_MODE: "bootstrap-ack-timeout-error"
-      }
-    );
-    expect(start.status).toBe(0);
-    await seedInstalledPersistentExtension({
-      cwd: runtimeCwd,
-      profile
-    });
-
-    const nativeHostPath = path.join(runtimeCwd, `native-host-bootstrap-contract-${mode}.cjs`);
-    const tracePath = path.join(runtimeCwd, `native-host-bootstrap-contract-${mode}.json`);
-    await writeFile(
-      nativeHostPath,
-      `#!/usr/bin/env node
-const { existsSync, readFileSync, writeFileSync } = require("node:fs");
-let buffer = Buffer.alloc(0);
-let opened = false;
-const forwards = [];
-const tracePath = process.env.WEBENVOY_TEST_TRACE_PATH || "";
-const bootstrapMode = process.env.WEBENVOY_TEST_BOOTSTRAP_MODE || "stale";
-
-const emit = (message) => {
-  const payload = Buffer.from(JSON.stringify(message), "utf8");
-  const header = Buffer.alloc(4);
-  header.writeUInt32LE(payload.length, 0);
-  process.stdout.write(Buffer.concat([header, payload]));
-};
-
-const writeTrace = () => {
-  if (!tracePath) {
-    return;
-  }
-  const existing = existsSync(tracePath)
-    ? JSON.parse(readFileSync(tracePath, "utf8"))
-    : { forwards: [] };
-  const mergedForwards = Array.isArray(existing.forwards)
-    ? [...existing.forwards, ...forwards]
-    : [...forwards];
-  writeFileSync(tracePath, JSON.stringify({ forwards: mergedForwards }), "utf8");
-};
-
-const success = (request, payload) => ({
-  id: request.id,
-  status: "success",
-  summary: {
-    session_id: String(request.params?.session_id ?? "nm-session-001"),
-    run_id: String(request.params?.run_id ?? request.id),
-    command: String(request.params?.command ?? "runtime.ping"),
-    relay_path: "host>background>content-script>background>host"
-  },
-  payload,
-  error: null
-});
-
-const onRequest = (request) => {
-  if (request.method === "bridge.open") {
-    opened = true;
-    emit({
-      id: request.id,
-      status: "success",
-      summary: {
-        protocol: "webenvoy.native-bridge.v1",
-        state: "ready",
-        session_id: "nm-session-001"
-      },
-      error: null
-    });
-    return;
-  }
-
-  if (request.method === "__ping__") {
-    emit({
-      id: request.id,
-      status: "success",
-      summary: { session_id: "nm-session-001" },
-      error: null
-    });
-    return;
-  }
-
-  if (request.method !== "bridge.forward" || !opened) {
-    emit({
-      id: request.id,
-      status: "error",
-      summary: {},
-      error: { code: "ERR_TRANSPORT_FORWARD_FAILED", message: "unexpected request" }
-    });
-    writeTrace();
-    process.exit(0);
-    return;
-  }
-
-  const command = String(request.params?.command ?? "");
-  const runId = String(request.params?.run_id ?? request.id);
-  const profile = String(request.profile ?? "");
-  const commandParams = request.params?.command_params ?? {};
-  forwards.push({
-    command,
-    run_id: runId,
-    profile
-    }
-  );
-
-  if (command === "runtime.bootstrap") {
-    if (bootstrapMode === "identity-mismatch") {
-      emit({
-        id: request.id,
-        status: "error",
-        summary: {
-          session_id: "nm-session-001",
-          run_id: runId,
-          command,
-          relay_path: "host>background>content-script>background>host"
-        },
-        payload: {},
-        error: {
-          code: "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH",
-          message: "runtime bootstrap profile 与 fingerprint runtime 不一致"
-        }
-      });
-      writeTrace();
-      process.exit(0);
-      return;
-    }
-
-    emit(
-      success(request, {
-        result: {
-          version: String(commandParams.version ?? "v1"),
-          run_id: String(commandParams.run_id ?? runId),
-          runtime_context_id:
-            bootstrapMode === "ready-signal-conflict"
-              ? "unexpected-runtime-context"
-              : String(commandParams.runtime_context_id ?? "runtime-context-001"),
-          profile,
-          status: bootstrapMode === "stale" ? "stale" : "ready"
-        }
-      })
-    );
-    writeTrace();
-    process.exit(0);
-    return;
-  }
-
-  emit({
-    id: request.id,
-    status: "error",
-    summary: {},
-    error: { code: "ERR_TRANSPORT_FORWARD_FAILED", message: "unexpected downstream command" }
-  });
-  writeTrace();
-  process.exit(0);
-};
-
-process.stdin.on("data", (chunk) => {
-  buffer = Buffer.concat([buffer, chunk]);
-  while (buffer.length >= 4) {
-    const frameLength = buffer.readUInt32LE(0);
-    const frameEnd = 4 + frameLength;
-    if (buffer.length < frameEnd) {
-      return;
-    }
-    const frame = buffer.subarray(4, frameEnd);
-    buffer = buffer.subarray(frameEnd);
-    const request = JSON.parse(frame.toString("utf8"));
-    onRequest(request);
-  }
-});
-`,
-      "utf8"
-    );
-
-    const result = runCli([
-      "xhs.search",
-      "--profile",
-      profile,
-      "--run-id",
-      runId,
-      "--params",
-      JSON.stringify({
-        persistent_extension_identity: {
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          manifest_path: manifestPath
-        },
-        ability: {
-          id: "xhs.note.search.v1",
-          layer: "L3",
-          action: "read"
-        },
-        input: {
-          query: "露营装备"
-        },
-        options: {
-          ...scopedReadGateOptions,
-          requested_execution_mode: "live_read_high_risk",
-          risk_state: "allowed",
-          approval_record: {
-            approved: true,
-            approver: "qa-reviewer",
-            approved_at: "2026-03-25T12:00:00Z",
-            checks: {
-              target_domain_confirmed: true,
-              target_tab_confirmed: true,
-              target_page_confirmed: true,
-              risk_state_checked: true,
-              action_type_confirmed: true
-            }
-          }
-        }
-      })
-    ], runtimeCwd, {
-      WEBENVOY_NATIVE_TRANSPORT: "native",
-      WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostPath),
-      WEBENVOY_TEST_TRACE_PATH: tracePath,
-      WEBENVOY_TEST_BOOTSTRAP_MODE: mode,
-      WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
-    });
-
-    expect(result.status).toBe(5);
-    expect(parseSingleJsonLine(result.stdout)).toMatchObject({
-      command: "xhs.search",
-      status: "error",
-      error: {
-        code: "ERR_RUNTIME_UNAVAILABLE",
-        retryable: true,
-        details: {
-          ability_id: "xhs.note.search.v1",
-          stage: "execution",
-          reason: "ERR_RUNTIME_TRANSPORT_NOT_READY"
-        }
-      }
-    });
-
-    await expect(stat(tracePath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("accepts live_read_limited as approved live mode in limited risk state", () => {
@@ -3404,134 +3112,6 @@ process.stdin.on("data", (chunk) => {
     expect(launcherRaw).toContain(' "$@"');
   });
 
-  it("uses browser-level NativeMessagingHosts defaults and binds launcher to the explicit profile", async () => {
-    const runtimeCwd = await createRuntimeCwd();
-    const fakeHome = await mkdtemp(path.join(tmpdir(), "webenvoy-cli-contract-home-"));
-    tempDirs.push(fakeHome);
-    const expectedManifestDir =
-      process.platform === "darwin"
-        ? path.join(fakeHome, "Library", "Application Support", "Google", "Chrome", "NativeMessagingHosts")
-        : process.platform === "linux"
-          ? path.join(fakeHome, ".config", "google-chrome", "NativeMessagingHosts")
-          : null;
-
-    if (!expectedManifestDir) {
-      return;
-    }
-
-    const result = runCli(
-      [
-        "runtime.install",
-        "--profile",
-        "xhs_208_probe",
-        "--run-id",
-        "run-contract-install-profile-scoped-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host"
-        })
-      ],
-      runtimeCwd,
-      {
-        HOME: fakeHome
-      }
-    );
-
-    expect(result.status).toBe(0);
-    const body = parseSingleJsonLine(result.stdout);
-    const expectedManifestPath = path.join(expectedManifestDir, "com.webenvoy.host.json");
-    const expectedLauncherPath = path.join(expectedManifestDir, "com.webenvoy.host-launcher");
-    const summary = body.summary as Record<string, unknown>;
-    const manifestPath = String(summary.manifest_path ?? "");
-    const launcherPath = String(summary.launcher_path ?? "");
-
-    expect(body).toMatchObject({
-      command: "runtime.install",
-      status: "success"
-    });
-    expect(await realpath(manifestPath)).toBe(await realpath(expectedManifestPath));
-    expect(await realpath(launcherPath)).toBe(await realpath(expectedLauncherPath));
-    expect(manifestPath.startsWith(path.join(runtimeCwd, ".webenvoy", "profiles"))).toBe(false);
-
-    const manifestRaw = await readFile(manifestPath, "utf8");
-    const manifest = JSON.parse(manifestRaw) as Record<string, unknown>;
-    expect(manifest).toMatchObject({
-      name: "com.webenvoy.host",
-      path: launcherPath,
-      allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
-    });
-
-    const launcherRaw = await readFile(launcherPath, "utf8");
-    expect(launcherRaw).toContain("export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR=");
-    expect(launcherRaw).toContain(".webenvoy/profiles/xhs_208_probe");
-  });
-
-  it("rejects browser-level shared launcher overwrite when another profile is already bound", async () => {
-    const runtimeCwd = await createRuntimeCwd();
-    const fakeHome = await mkdtemp(path.join(tmpdir(), "webenvoy-cli-contract-home-"));
-    tempDirs.push(fakeHome);
-    const expectedManifestDir =
-      process.platform === "darwin"
-        ? path.join(fakeHome, "Library", "Application Support", "Google", "Chrome", "NativeMessagingHosts")
-        : process.platform === "linux"
-          ? path.join(fakeHome, ".config", "google-chrome", "NativeMessagingHosts")
-          : null;
-
-    if (!expectedManifestDir) {
-      return;
-    }
-
-    const runInstall = (profile: string, runId: string) =>
-      runCli(
-        [
-          "runtime.install",
-          "--profile",
-          profile,
-          "--run-id",
-          runId,
-          "--params",
-          JSON.stringify({
-            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            browser_channel: "chrome",
-            native_host_name: "com.webenvoy.host"
-          })
-        ],
-        runtimeCwd,
-        {
-          HOME: fakeHome
-        }
-      );
-
-    const firstInstall = runInstall("xhs_profile_a", "run-contract-install-profile-shared-001");
-    expect(firstInstall.status).toBe(0);
-    const firstBody = parseSingleJsonLine(firstInstall.stdout);
-    const firstSummary = firstBody.summary as Record<string, unknown>;
-    const firstLauncherPath = String(firstSummary.launcher_path ?? "");
-    const firstManifestPath = String(firstSummary.manifest_path ?? "");
-    const firstLauncherRaw = await readFile(firstLauncherPath, "utf8");
-
-    const secondInstall = runInstall("xhs_profile_b", "run-contract-install-profile-shared-002");
-    expect(secondInstall.status).toBe(2);
-    const secondBody = parseSingleJsonLine(secondInstall.stdout);
-    const secondLauncherRaw = await readFile(firstLauncherPath, "utf8");
-
-    const expectedManifestPath = path.join(expectedManifestDir, "com.webenvoy.host.json");
-    const expectedLauncherPath = path.join(expectedManifestDir, "com.webenvoy.host-launcher");
-    expect(await realpath(firstManifestPath)).toBe(await realpath(expectedManifestPath));
-    expect(await realpath(firstLauncherPath)).toBe(await realpath(expectedLauncherPath));
-    expect(firstLauncherRaw).toBe(secondLauncherRaw);
-    expect(secondBody).toMatchObject({
-      command: "runtime.install",
-      status: "error",
-      error: {
-        code: "ERR_CLI_INVALID_ARGS"
-      }
-    });
-    expect(String((secondBody.error as Record<string, unknown>).message)).toContain("安装命令参数不合法");
-  });
-
   it("keeps launcher execution shell-safe when host_command contains dollar-like characters", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
@@ -4149,8 +3729,8 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         identityBindingState: "bound",
-        transportState: "not_connected",
-        bootstrapState: "not_started",
+        transportState: "ready",
+        bootstrapState: "pending",
         runtimeReadiness: "recoverable"
       }
     });
@@ -4196,9 +3776,9 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         identityBindingState: "bound",
-        transportState: "not_connected",
-        bootstrapState: "not_started",
-        runtimeReadiness: "recoverable"
+        transportState: "ready",
+        bootstrapState: "stale",
+        runtimeReadiness: "blocked"
       }
     });
   });
@@ -4243,9 +3823,9 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         identityBindingState: "bound",
-        transportState: "not_connected",
-        bootstrapState: "not_started",
-        runtimeReadiness: "recoverable"
+        transportState: "ready",
+        bootstrapState: "failed",
+        runtimeReadiness: "unknown"
       }
     });
   });

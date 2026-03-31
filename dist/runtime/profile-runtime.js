@@ -11,7 +11,6 @@ import { NativeMessagingBridge, NativeMessagingTransportError } from "./native-m
 import { NativeHostBridgeTransport } from "./native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "./native-messaging/loopback.js";
 import { buildRuntimeBootstrapContextId } from "./runtime-bootstrap.js";
-import { resolveProfileScopedNativeBridgeSocketPath } from "../install/native-host.js";
 import { applyProfileProxyBinding, beginLoginSession, beginStartSession, beginStopSession, buildRuntimeSession, markSessionReady, markSessionStopped } from "./runtime-session.js";
 const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
@@ -134,6 +133,14 @@ const readRequestedExecutionMode = (params) => {
     const mode = params.requested_execution_mode;
     return typeof mode === "string" && mode.length > 0 ? mode : null;
 };
+const stripTransientPersistentIdentityHints = (params) => {
+    const nextParams = {
+        ...params
+    };
+    delete nextParams.persistent_extension_identity;
+    delete nextParams.persistentExtensionIdentity;
+    return nextParams;
+};
 const ensureFingerprintExecutionAllowed = (requestedExecutionMode, fingerprintRuntime) => {
     if (!requestedExecutionMode || !LIVE_EXECUTION_MODES.has(requestedExecutionMode)) {
         return;
@@ -165,17 +172,14 @@ const buildRuntimeBootstrapEnvelope = (input) => ({
         : {},
     main_world_secret: input.mainWorldSecret
 });
-const resolveDefaultRuntimeBridge = (input) => {
+const resolveDefaultRuntimeBridge = () => {
     if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
         return new NativeMessagingBridge({
             transport: createLoopbackNativeBridgeTransport()
         });
     }
-    const socketPath = input?.requireProfileSocket && input.profile && input.cwd
-        ? resolveProfileScopedNativeBridgeSocketPath(join(input.cwd, ...PROFILE_ROOT_SEGMENTS, input.profile))
-        : null;
     return new NativeMessagingBridge({
-        transport: new NativeHostBridgeTransport(undefined, { socketPath })
+        transport: new NativeHostBridgeTransport()
     });
 };
 const isTransientBackfilledFingerprintBundle = (bundle) => {
@@ -374,7 +378,7 @@ export class ProfileRuntimeService {
             launch: launchBrowser,
             shutdown: shutdownBrowserSession
         };
-        this.#bridgeFactory = options?.bridgeFactory ?? ((input) => resolveDefaultRuntimeBridge(input));
+        this.#bridgeFactory = options?.bridgeFactory ?? (() => resolveDefaultRuntimeBridge());
     }
     async start(input) {
         const nowIso = isoNow();
@@ -737,7 +741,9 @@ export class ProfileRuntimeService {
             requestedExecutionMode
         });
         const identityPreflight = await runIdentityPreflight({
-            params: input.params,
+            params: meta?.persistentExtensionBinding === null || meta?.persistentExtensionBinding === undefined
+                ? stripTransientPersistentIdentityHints(input.params)
+                : input.params,
             meta,
             profileDir
         });
@@ -1156,11 +1162,7 @@ export class ProfileRuntimeService {
         };
     }
     async #deliverRuntimeBootstrap(input) {
-        const bridge = this.#bridgeFactory({
-            cwd: input.runtimeInput.cwd,
-            profile: input.profile,
-            requireProfileSocket: true
-        });
+        const bridge = this.#bridgeFactory();
         const envelope = buildRuntimeBootstrapEnvelope({
             profile: input.profile,
             runId: input.runtimeInput.runId,
@@ -1218,9 +1220,6 @@ export class ProfileRuntimeService {
                 };
             }
             throw error;
-        }
-        finally {
-            await bridge.close?.();
         }
     }
     async #readRuntimeReadiness(input) {
@@ -1282,11 +1281,7 @@ export class ProfileRuntimeService {
                 })
             };
         }
-        const bridge = this.#bridgeFactory({
-            cwd: input.runtimeInput.cwd,
-            profile: input.runtimeInput.profile,
-            requireProfileSocket: true
-        });
+        const bridge = this.#bridgeFactory();
         const runtimeContextId = buildRuntimeBootstrapContextId(input.runtimeInput.profile, input.runtimeInput.runId);
         try {
             const result = await bridge.runCommand({
@@ -1339,9 +1334,6 @@ export class ProfileRuntimeService {
                 return mapBootstrapCliErrorToReadiness(error, baseIdentity);
             }
             throw error;
-        }
-        finally {
-            await bridge.close?.();
         }
     }
     #buildRuntimeBootstrapCliError(result) {

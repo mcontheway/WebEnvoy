@@ -6,7 +6,7 @@ import {
 } from "../official-chrome-runtime.js";
 
 describe("prepareOfficialChromeRuntime", () => {
-  it("forwards persistent extension identity into runtime.status params", () => {
+  it("does not forward persistent extension identity into runtime.status params", () => {
     expect(
       buildOfficialChromeRuntimeStatusParams(
         {
@@ -23,12 +23,8 @@ describe("prepareOfficialChromeRuntime", () => {
         },
         "live_read_high_risk"
       )
-    ).toMatchObject({
-      requested_execution_mode: "live_read_high_risk",
-      persistent_extension_identity: {
-        extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        manifestPath: "/tmp/native-host-manifest.json"
-      }
+    ).toEqual({
+      requested_execution_mode: "live_read_high_risk"
     });
   });
 

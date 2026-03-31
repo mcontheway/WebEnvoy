@@ -37,7 +37,6 @@ const runtimeInstall = async (context) => {
         extensionId,
         nativeHostName,
         browserChannel,
-        profile: context.profile ?? undefined,
         hostCommand,
         manifestDir,
         launcherPath

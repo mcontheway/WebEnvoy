@@ -2133,7 +2133,19 @@ class ChromeBackgroundBridge {
                             .map((entry) => asVisibleElement(entry))
                             .filter((entry) => entry !== null);
                         if (candidates.length > 0) {
-                            editor = candidates[0];
+                            const active = document.activeElement;
+                            const activeCandidate = active instanceof Element
+                                ? candidates.find((candidate) => candidate === active || candidate.contains(active)) ?? null
+                                : null;
+                            if (activeCandidate) {
+                                editor = activeCandidate;
+                            }
+                            else if (candidates.length === 1) {
+                                editor = candidates[0];
+                            }
+                            else {
+                                editor = null;
+                            }
                             break;
                         }
                     }
