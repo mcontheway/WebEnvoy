@@ -72,21 +72,9 @@ const createEditorInputValidationResult = (text: string) => ({
   post_blur_text: text,
   focus_confirmed: true,
   preserved_after_blur: true,
-  success_signals: ["EDITOR_FOCUSED", "TEXT_VISIBLE_IN_EDITOR", "TEXT_PRESERVED_AFTER_BLUR"],
+  success_signals: ["editor_focused", "text_visible", "text_persisted_after_blur"],
   failure_signals: [] as string[],
-  minimum_replay: [
-    "open creator.xiaohongshu.com/publish",
-    "focus the publish editor",
-    "input a short validation text",
-    "blur once and re-read visible text",
-    "confirm upload/submit/publish were not triggered"
-  ],
-  boundary_assertions: {
-    upload_not_triggered: true,
-    submit_not_triggered: true,
-    publish_confirm_not_triggered: true,
-    full_write_flow_not_triggered: true
-  }
+  minimum_replay: ["focus_editor", "type_short_text", "blur_or_reobserve"]
 });
 
 describe("extension background relay contract", () => {
@@ -1501,14 +1489,13 @@ describe("extension background relay contract", () => {
             "ISSUE_208_EDITOR_INPUT_VALIDATION_APPROVED"
           ])
         },
-        issue_208_validation: {
+        interaction_result: {
           validation_action: "editor_input",
-          interaction_result: {
-            validation_action: "editor_input",
-            input_text: validationText,
-            focus_confirmed: true,
-            preserved_after_blur: true
-          }
+          target_page: "creator.xiaohongshu.com/publish",
+          success_signals: ["editor_focused", "text_visible", "text_persisted_after_blur"],
+          failure_signals: [],
+          minimum_replay: ["focus_editor", "type_short_text", "blur_or_reobserve"],
+          out_of_scope_actions: ["image_upload", "submit", "publish_confirm"]
         }
       }
     });

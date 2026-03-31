@@ -428,21 +428,11 @@ const createFailure = (code, message, details, observability, diagnosis, gate, a
 });
 const buildEditorInputEvidence = (result) => ({
     validation_action: "editor_input",
-    interaction_mode: result.mode,
-    interaction_result: {
-        validation_action: "editor_input",
-        editor_locator: result.editor_locator,
-        input_text: result.input_text,
-        before_text: result.before_text,
-        visible_text: result.visible_text,
-        post_blur_text: result.post_blur_text,
-        focus_confirmed: result.focus_confirmed,
-        preserved_after_blur: result.preserved_after_blur,
-        boundary_assertions: result.boundary_assertions
-    },
+    target_page: "creator.xiaohongshu.com/publish",
     success_signals: result.success_signals,
     failure_signals: result.failure_signals,
-    minimum_replay: result.minimum_replay
+    minimum_replay: result.minimum_replay,
+    out_of_scope_actions: ["image_upload", "submit", "publish_confirm"]
 });
 const createAuditRecord = (context, gate, env) => {
     const recordedAt = new Date(env.now()).toISOString();
@@ -717,14 +707,8 @@ export const executeXhsSearch = async (input, env) => {
                 focus_confirmed: false,
                 preserved_after_blur: false,
                 success_signals: [],
-                failure_signals: ["EDITOR_INPUT_VALIDATOR_UNAVAILABLE"],
-                minimum_replay: [],
-                boundary_assertions: {
-                    upload_not_triggered: true,
-                    submit_not_triggered: true,
-                    publish_confirm_not_triggered: true,
-                    full_write_flow_not_triggered: true
-                }
+                failure_signals: ["dom_variant"],
+                minimum_replay: ["focus_editor", "type_short_text", "blur_or_reobserve"]
             };
         if (!validationResult.ok) {
             return createFailure("ERR_EXECUTION_FAILED", "editor_input 真实验证失败", {
@@ -784,7 +768,7 @@ export const executeXhsSearch = async (input, env) => {
                     approval_record: gate.approval_record,
                     risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                     audit_record: auditRecord,
-                    issue_208_validation: buildEditorInputEvidence(validationResult)
+                    interaction_result: buildEditorInputEvidence(validationResult)
                 },
                 observability: {
                     page_state: {

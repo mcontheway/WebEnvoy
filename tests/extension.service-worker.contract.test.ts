@@ -4012,34 +4012,17 @@ describe("extension service worker recovery contract", () => {
                 "ISSUE_208_EDITOR_INPUT_VALIDATION_APPROVED"
               ]
             },
-            issue_208_validation: {
+            interaction_result: {
               validation_action: "editor_input",
-              interaction_result: {
-                validation_action: "editor_input",
-                editor_locator: "#editor",
-                input_text: "测试发布文案",
-                before_text: "",
-                visible_text: "测试发布文案",
-                post_blur_text: "测试发布文案",
-                focus_confirmed: true,
-                preserved_after_blur: true,
-                boundary_assertions: {
-                  upload_not_triggered: true,
-                  submit_not_triggered: true,
-                  publish_confirm_not_triggered: true,
-                  full_write_flow_not_triggered: true
-                }
-              },
+              target_page: "creator.xiaohongshu.com/publish",
               success_signals: [
-                "EDITOR_FOCUSED",
-                "TEXT_VISIBLE_IN_EDITOR",
-                "TEXT_PRESERVED_AFTER_BLUR"
+                "editor_focused",
+                "text_visible",
+                "text_persisted_after_blur"
               ],
               failure_signals: [],
-              minimum_replay: [
-                "open creator.xiaohongshu.com/publish",
-                "focus the publish editor"
-              ]
+              minimum_replay: ["focus_editor", "type_short_text", "blur_or_reobserve"],
+              out_of_scope_actions: ["image_upload", "submit", "publish_confirm"]
             }
           }
         }

@@ -678,41 +678,17 @@ class InMemoryContentScriptRuntime {
                                 }
                             },
                             ...gateBundle,
-                            issue_208_validation: {
+                            interaction_result: {
                                 validation_action: "editor_input",
-                                interaction_mode: "dom_editor_input_validation",
-                                interaction_result: {
-                                    validation_action: "editor_input",
-                                    editor_locator: "[contenteditable=\"true\"]",
-                                    input_text: validationText,
-                                    before_text: "",
-                                    visible_text: validationText,
-                                    post_blur_text: validationText,
-                                    focus_confirmed: true,
-                                    preserved_after_blur: true,
-                                    boundary_assertions: {
-                                        upload_not_triggered: true,
-                                        submit_not_triggered: true,
-                                        publish_confirm_not_triggered: true,
-                                        full_write_flow_not_triggered: true
-                                    }
-                                },
+                                target_page: "creator.xiaohongshu.com/publish",
                                 success_signals: [
-                                    "EDITOR_FOCUSED",
-                                    "TEXT_VISIBLE_IN_EDITOR",
-                                    "TEXT_PRESERVED_AFTER_BLUR",
-                                    "NO_UPLOAD_TRIGGERED",
-                                    "NO_SUBMIT_TRIGGERED",
-                                    "NO_PUBLISH_CONFIRM_TRIGGERED"
+                                    "editor_focused",
+                                    "text_visible",
+                                    "text_persisted_after_blur"
                                 ],
                                 failure_signals: [],
-                                minimum_replay: [
-                                    "open creator.xiaohongshu.com/publish",
-                                    "focus the publish editor",
-                                    "input a short validation text",
-                                    "blur once and re-read visible text",
-                                    "confirm upload/submit/publish were not triggered"
-                                ]
+                                minimum_replay: ["focus_editor", "type_short_text", "blur_or_reobserve"],
+                                out_of_scope_actions: ["image_upload", "submit", "publish_confirm"]
                             }
                         },
                         observability: {

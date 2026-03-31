@@ -1,3 +1,5 @@
+const TARGET_PAGE = "creator.xiaohongshu.com/publish";
+const MINIMUM_REPLAY = ["focus_editor", "type_short_text", "blur_or_reobserve"];
 const EDITOR_SELECTORS = [
     '[contenteditable="true"][role="textbox"]',
     '[contenteditable="true"][data-lexical-editor="true"]',
@@ -90,13 +92,6 @@ const appendTextToEditable = (element, text) => {
 };
 export const performEditorInputValidation = async (input) => {
     const editor = findEditorElement();
-    const minimumReplay = [
-        "open creator.xiaohongshu.com/publish",
-        "focus the publish editor",
-        "input a short validation text",
-        "blur once and re-read visible text",
-        "confirm upload/submit/publish were not triggered"
-    ];
     if (!editor) {
         return {
             ok: false,
@@ -109,14 +104,8 @@ export const performEditorInputValidation = async (input) => {
             focus_confirmed: false,
             preserved_after_blur: false,
             success_signals: [],
-            failure_signals: ["EDITOR_NOT_FOUND"],
-            minimum_replay: minimumReplay,
-            boundary_assertions: {
-                upload_not_triggered: true,
-                submit_not_triggered: true,
-                publish_confirm_not_triggered: true,
-                full_write_flow_not_triggered: true
-            }
+            failure_signals: ["dom_variant"],
+            minimum_replay: MINIMUM_REPLAY
         };
     }
     const beforeText = readElementText(editor);
@@ -132,25 +121,28 @@ export const performEditorInputValidation = async (input) => {
     const preservedAfterBlur = postBlurText.includes(input.text);
     const successSignals = [];
     const failureSignals = [];
+    const normalizedPageText = document.body?.innerText ?? "";
     if (focusConfirmed) {
-        successSignals.push("EDITOR_FOCUSED");
+        successSignals.push("editor_focused");
     }
     else {
-        failureSignals.push("EDITOR_FOCUS_NOT_CONFIRMED");
+        failureSignals.push("focus_lost");
     }
     if (visibleText.includes(input.text)) {
-        successSignals.push("TEXT_VISIBLE_IN_EDITOR");
+        successSignals.push("text_visible");
     }
     else {
-        failureSignals.push("TEXT_NOT_VISIBLE_AFTER_INPUT");
+        failureSignals.push("dom_variant");
     }
     if (preservedAfterBlur) {
-        successSignals.push("TEXT_PRESERVED_AFTER_BLUR");
+        successSignals.push("text_persisted_after_blur");
     }
     else {
-        failureSignals.push("TEXT_NOT_PRESERVED_AFTER_BLUR");
+        failureSignals.push("text_reverted");
     }
-    successSignals.push("NO_UPLOAD_TRIGGERED", "NO_SUBMIT_TRIGGERED", "NO_PUBLISH_CONFIRM_TRIGGERED");
+    if (/风险|risk|提示|异常/u.test(normalizedPageText)) {
+        failureSignals.push("risk_prompt");
+    }
     return {
         ok: focusConfirmed && visibleText.includes(input.text) && preservedAfterBlur,
         mode: "dom_editor_input_validation",
@@ -163,12 +155,6 @@ export const performEditorInputValidation = async (input) => {
         preserved_after_blur: preservedAfterBlur,
         success_signals: successSignals,
         failure_signals: failureSignals,
-        minimum_replay: minimumReplay,
-        boundary_assertions: {
-            upload_not_triggered: true,
-            submit_not_triggered: true,
-            publish_confirm_not_triggered: true,
-            full_write_flow_not_triggered: true
-        }
+        minimum_replay: MINIMUM_REPLAY
     };
 };
