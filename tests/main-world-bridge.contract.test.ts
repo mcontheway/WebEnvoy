@@ -11,21 +11,39 @@ describe("main-world bridge contract", () => {
   });
 
   it("rebinds the active channel when runtime.bootstrap rotates the secret", async () => {
+    const controlEventPrefix = "__mw_ctl__bridge__";
+    const controlSeedAttribute = "data-webenvoy-main-world-bridge-seed";
     const added: Array<{ type: string; listener: MockEventListener }> = [];
     const removed: Array<{ type: string; listener: MockEventListener }> = [];
+    const listeners = new Map<string, MockEventListener[]>();
+    const documentAttributes = new Map<string, string>();
     const mockWindow = {
       addEventListener: (type: string, listener: MockEventListener) => {
         added.push({ type, listener });
+        listeners.set(type, [...(listeners.get(type) ?? []), listener]);
       },
       removeEventListener: (type: string, listener: MockEventListener) => {
         removed.push({ type, listener });
+        listeners.set(
+          type,
+          (listeners.get(type) ?? []).filter((candidate) => candidate !== listener)
+        );
       },
-      dispatchEvent: () => true
+      dispatchEvent: (event: Event) => {
+        for (const listener of listeners.get(event.type) ?? []) {
+          listener(event);
+        }
+        return true;
+      }
     };
     const mockDocument = {
       createElement: () => ({ textContent: "", remove: () => {} }),
       documentElement: {
-        appendChild: (node: unknown) => node
+        appendChild: (node: unknown) => node,
+        getAttribute: (name: string) => documentAttributes.get(name) ?? null,
+        setAttribute: (name: string, value: string) => {
+          documentAttributes.set(name, value);
+        }
       }
     };
 
@@ -43,20 +61,41 @@ describe("main-world bridge contract", () => {
 
     await import("../extension/main-world-bridge.js");
 
-    const hook = (
-      mockWindow as unknown as Record<string, (requestEvent: string, resultEvent: string) => boolean>
-    ).__webenvoy_attachMainWorldEventChannel__;
-    expect(typeof hook).toBe("function");
+    const controlSeed = documentAttributes.get(controlSeedAttribute);
+    expect(typeof controlSeed).toBe("string");
+    expect(controlSeed?.length).toBeGreaterThan(0);
+    const controlEvent = `${controlEventPrefix}${controlSeed}`;
 
-    expect(hook("__mw_req__secret_a", "__mw_res__secret_a")).toBe(true);
-    expect(hook("__mw_req__secret_b", "__mw_res__secret_b")).toBe(true);
+    const firstControlRequest = new CustomEvent(controlEvent, {
+      detail: {
+        kind: "attach-channel",
+        requestEvent: "__mw_req__secret_a",
+        resultEvent: "__mw_res__secret_a",
+        attached: false
+      }
+    });
+    const secondControlRequest = new CustomEvent(controlEvent, {
+      detail: {
+        kind: "attach-channel",
+        requestEvent: "__mw_req__secret_b",
+        resultEvent: "__mw_res__secret_b",
+        attached: false
+      }
+    });
+
+    mockWindow.dispatchEvent(firstControlRequest);
+    mockWindow.dispatchEvent(secondControlRequest);
+
+    expect(firstControlRequest.detail.attached).toBe(true);
+    expect(secondControlRequest.detail.attached).toBe(true);
 
     expect(added.map((entry) => entry.type)).toEqual([
+      controlEvent,
       "__mw_req__secret_a",
       "__mw_req__secret_b"
     ]);
     expect(removed).toHaveLength(1);
     expect(removed[0]?.type).toBe("__mw_req__secret_a");
-    expect(removed[0]?.listener).toBe(added[0]?.listener);
+    expect(removed[0]?.listener).toBe(added[1]?.listener);
   });
 });

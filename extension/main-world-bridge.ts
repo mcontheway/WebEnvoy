@@ -22,10 +22,25 @@ type MainWorldEventChannel = {
   resultEvent: string;
 };
 
+type MainWorldControlRequest =
+  | {
+      kind: "attach-channel";
+      requestEvent?: unknown;
+      resultEvent?: unknown;
+      attached?: boolean;
+    }
+  | {
+      kind: "fingerprint-install";
+      runtime?: unknown;
+      result?: unknown;
+      ok?: boolean;
+      message?: string;
+    };
+
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
-const MAIN_WORLD_ATTACH_HOOK_KEY = "__webenvoy_attachMainWorldEventChannel__";
-const MAIN_WORLD_INSTALL_HOOK_KEY = "__webenvoy_installFingerprintRuntime__";
+const MAIN_WORLD_CONTROL_EVENT_PREFIX = "__mw_ctl__bridge__";
+const MAIN_WORLD_CONTROL_SEED_ATTRIBUTE = "data-webenvoy-main-world-bridge-seed";
 declare const EXPECTED_MAIN_WORLD_REQUEST_EVENT: string | undefined;
 declare const EXPECTED_MAIN_WORLD_RESULT_EVENT: string | undefined;
 let activeMainWorldEventChannel: MainWorldEventChannel | null = null;
@@ -95,6 +110,40 @@ const createWindowEvent = (type: string, detail: unknown): Event => {
     type,
     detail
   } as unknown as Event;
+};
+
+const normalizeNonEmptyString = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+
+const createMainWorldControlSeed = (): string => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID().replaceAll("-", "");
+  }
+  const fallbackRandom = Math.random().toString(36).slice(2, 12);
+  return `${Date.now().toString(36)}${fallbackRandom}`;
+};
+
+const resolveMainWorldControlSeed = (): string => {
+  if (typeof document === "undefined") {
+    return createMainWorldControlSeed();
+  }
+  const documentElement = document.documentElement;
+  if (!documentElement) {
+    return createMainWorldControlSeed();
+  }
+  const existingSeed = normalizeNonEmptyString(
+    typeof documentElement.getAttribute === "function"
+      ? documentElement.getAttribute(MAIN_WORLD_CONTROL_SEED_ATTRIBUTE)
+      : null
+  );
+  if (existingSeed) {
+    return existingSeed;
+  }
+  const createdSeed = createMainWorldControlSeed();
+  if (typeof documentElement.setAttribute === "function") {
+    documentElement.setAttribute(MAIN_WORLD_CONTROL_SEED_ATTRIBUTE, createdSeed);
+  }
+  return createdSeed;
 };
 
 const emitResult = async (resultEvent: string, result: MainWorldResult): Promise<void> => {
@@ -492,20 +541,28 @@ const attachMainWorldEventChannel = (channel: MainWorldEventChannel): void => {
   window.addEventListener(channel.requestEvent, activeMainWorldRequestListener as EventListener);
 };
 
-Object.defineProperty(mainWindow, MAIN_WORLD_ATTACH_HOOK_KEY, {
-  configurable: true,
-  enumerable: false,
-  writable: false,
-  value: (requestEvent: unknown, resultEvent: unknown) =>
-    attachMainWorldEventChannelIfValid(requestEvent, resultEvent)
-});
+const handleControlRequestEvent = (event: Event): void => {
+  const detail = asRecord((event as CustomEvent<unknown>).detail) as MainWorldControlRequest | null;
+  if (!detail || typeof detail.kind !== "string") {
+    return;
+  }
+  if (detail.kind === "attach-channel") {
+    detail.attached = attachMainWorldEventChannelIfValid(detail.requestEvent, detail.resultEvent);
+    return;
+  }
+  if (detail.kind === "fingerprint-install") {
+    try {
+      detail.result = installFingerprintRuntime(asRecord(detail.runtime));
+      detail.ok = true;
+    } catch (error) {
+      detail.ok = false;
+      detail.message = error instanceof Error ? error.message : String(error);
+    }
+  }
+};
 
-Object.defineProperty(mainWindow, MAIN_WORLD_INSTALL_HOOK_KEY, {
-  configurable: true,
-  enumerable: false,
-  writable: false,
-  value: (runtime: unknown) => installFingerprintRuntime(asRecord(runtime))
-});
+const mainWorldControlEvent = `${MAIN_WORLD_CONTROL_EVENT_PREFIX}${resolveMainWorldControlSeed()}`;
+window.addEventListener(mainWorldControlEvent, handleControlRequestEvent as EventListener);
 
 const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
 if (expectedMainWorldEventChannel) {

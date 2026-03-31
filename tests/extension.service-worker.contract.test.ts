@@ -636,7 +636,8 @@ describe("extension service worker recovery contract", () => {
         target: { tabId: 11 },
         world: "MAIN",
         args: [
-          "__webenvoy_attachMainWorldEventChannel__",
+          "__mw_ctl__bridge__",
+          "data-webenvoy-main-world-bridge-seed",
           resolveMainWorldEventNamesForSecret("secret-bootstrap-001").requestEvent,
           resolveMainWorldEventNamesForSecret("secret-bootstrap-001").resultEvent
         ]
@@ -781,7 +782,8 @@ describe("extension service worker recovery contract", () => {
         target: { tabId: 11 },
         world: "MAIN",
         args: [
-          "__webenvoy_attachMainWorldEventChannel__",
+          "__mw_ctl__bridge__",
+          "data-webenvoy-main-world-bridge-seed",
           resolveMainWorldEventNamesForSecret("secret-bootstrap-main-world-recover-001")
             .requestEvent,
           resolveMainWorldEventNamesForSecret("secret-bootstrap-main-world-recover-001").resultEvent
@@ -799,7 +801,8 @@ describe("extension service worker recovery contract", () => {
         target: { tabId: 11 },
         world: "MAIN",
         args: [
-          "__webenvoy_attachMainWorldEventChannel__",
+          "__mw_ctl__bridge__",
+          "data-webenvoy-main-world-bridge-seed",
           resolveMainWorldEventNamesForSecret("secret-bootstrap-main-world-recover-001")
             .requestEvent,
           resolveMainWorldEventNamesForSecret("secret-bootstrap-main-world-recover-001").resultEvent
@@ -1039,10 +1042,20 @@ describe("extension service worker recovery contract", () => {
       if (Array.isArray(args[0]) && Array.isArray(args[1])) {
         return [{ result: createEditorInputProbeResult() }];
       }
-      if (args[0] === "__webenvoy_attachMainWorldEventChannel__") {
+      if (
+        args[0] === "__mw_ctl__bridge__" &&
+        args[1] === "data-webenvoy-main-world-bridge-seed" &&
+        args[2] !== undefined &&
+        args[3] !== undefined
+      ) {
         return [{ result: true }];
       }
-      if (args[0] === "__webenvoy_installFingerprintRuntime__") {
+      if (
+        args[0] === "__mw_ctl__bridge__" &&
+        args[1] === "data-webenvoy-main-world-bridge-seed" &&
+        args[2] !== undefined &&
+        args[3] === undefined
+      ) {
         return [
           {
             result: {

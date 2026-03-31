@@ -5,8 +5,8 @@ const defaultForwardTimeoutMs = 3_000;
 const defaultHandshakeTimeoutMs = 30_000;
 const defaultNativeHostName = "com.webenvoy.host";
 const bridgeProtocol = "webenvoy.native-bridge.v1";
-const MAIN_WORLD_ATTACH_HOOK_KEY = "__webenvoy_attachMainWorldEventChannel__";
-const MAIN_WORLD_INSTALL_HOOK_KEY = "__webenvoy_installFingerprintRuntime__";
+const MAIN_WORLD_CONTROL_EVENT_PREFIX = "__mw_ctl__bridge__";
+const MAIN_WORLD_CONTROL_SEED_ATTRIBUTE = "data-webenvoy-main-world-bridge-seed";
 const maxRecoveryQueuedForwards = 5;
 const debuggerProtocolVersion = "1.3";
 const editorInputDebuggerProbeWaitMs = 150;
@@ -3032,15 +3032,37 @@ class ChromeBackgroundBridge {
         const results = await this.chromeApi.scripting.executeScript({
             target: { tabId },
             world: "MAIN",
-            func: (hookKey, requestEventName, resultEventName) => {
-                const host = window;
-                const hook = typeof hookKey === "string" ? host[hookKey] : undefined;
-                if (typeof hook !== "function") {
+            func: (controlEventPrefix, controlSeedAttribute, requestEventName, resultEventName) => {
+                if (typeof controlEventPrefix !== "string" ||
+                    controlEventPrefix.length === 0 ||
+                    typeof controlSeedAttribute !== "string" ||
+                    controlSeedAttribute.length === 0 ||
+                    typeof document === "undefined") {
                     return false;
                 }
-                return hook(requestEventName, resultEventName) === true;
+                const documentElement = document.documentElement;
+                const seed = documentElement && typeof documentElement.getAttribute === "function"
+                    ? documentElement.getAttribute(controlSeedAttribute)
+                    : null;
+                if (typeof seed !== "string" || seed.length === 0) {
+                    return false;
+                }
+                const controlEvent = `${controlEventPrefix}${seed}`;
+                const detail = {
+                    kind: "attach-channel",
+                    requestEvent: requestEventName,
+                    resultEvent: resultEventName,
+                    attached: false
+                };
+                window.dispatchEvent(new CustomEvent(controlEvent, { detail }));
+                return detail.attached === true;
             },
-            args: [MAIN_WORLD_ATTACH_HOOK_KEY, requestEvent, resultEvent]
+            args: [
+                MAIN_WORLD_CONTROL_EVENT_PREFIX,
+                MAIN_WORLD_CONTROL_SEED_ATTRIBUTE,
+                requestEvent,
+                resultEvent
+            ]
         });
         return results.some((result) => result?.result === true);
     }
@@ -3062,9 +3084,20 @@ class ChromeBackgroundBridge {
         const results = await this.chromeApi.scripting.executeScript({
             target: { tabId },
             world: "MAIN",
-            func: async (url) => {
-                if (typeof window
-                    .__webenvoy_attachMainWorldEventChannel__ === "function") {
+            func: async (url, controlSeedAttribute) => {
+                const hasControlSeed = () => {
+                    if (typeof document === "undefined" ||
+                        typeof controlSeedAttribute !== "string" ||
+                        controlSeedAttribute.length === 0) {
+                        return false;
+                    }
+                    const documentElement = document.documentElement;
+                    const seed = documentElement && typeof documentElement.getAttribute === "function"
+                        ? documentElement.getAttribute(controlSeedAttribute)
+                        : null;
+                    return typeof seed === "string" && seed.length > 0;
+                };
+                if (hasControlSeed()) {
                     return true;
                 }
                 if (typeof document === "undefined" || typeof url !== "string" || url.length === 0) {
@@ -3073,9 +3106,7 @@ class ChromeBackgroundBridge {
                 const existing = document.querySelector('script[data-webenvoy-main-world-bridge="1"]');
                 if (existing) {
                     await new Promise((resolve) => setTimeout(resolve, 0));
-                    return (typeof window
-                        .__webenvoy_attachMainWorldEventChannel__ ===
-                        "function");
+                    return hasControlSeed();
                 }
                 const script = document.createElement("script");
                 script.setAttribute("data-webenvoy-main-world-bridge", "1");
@@ -3085,12 +3116,9 @@ class ChromeBackgroundBridge {
                     script.addEventListener("error", () => resolve(false), { once: true });
                     (document.documentElement ?? document.head ?? document.body)?.appendChild(script);
                 });
-                return (loaded &&
-                    typeof window
-                        .__webenvoy_attachMainWorldEventChannel__ ===
-                        "function");
+                return loaded && hasControlSeed();
             },
-            args: [bridgeUrl]
+            args: [bridgeUrl, MAIN_WORLD_CONTROL_SEED_ATTRIBUTE]
         });
         return results.some((result) => result?.result === true);
     }
@@ -3127,16 +3155,33 @@ class ChromeBackgroundBridge {
             const results = await executeScript({
                 target: { tabId },
                 world: "MAIN",
-                func: (hookKey, runtime) => {
-                    const host = window;
-                    const hook = typeof hookKey === "string" ? host[hookKey] : undefined;
-                    if (typeof hook !== "function") {
+                func: (controlEventPrefix, controlSeedAttribute, runtime) => {
+                    if (typeof controlEventPrefix !== "string" ||
+                        controlEventPrefix.length === 0 ||
+                        typeof controlSeedAttribute !== "string" ||
+                        controlSeedAttribute.length === 0 ||
+                        typeof document === "undefined") {
                         return null;
                     }
-                    const result = hook(runtime);
-                    return typeof result === "object" && result !== null ? result : null;
+                    const documentElement = document.documentElement;
+                    const seed = documentElement && typeof documentElement.getAttribute === "function"
+                        ? documentElement.getAttribute(controlSeedAttribute)
+                        : null;
+                    if (typeof seed !== "string" || seed.length === 0) {
+                        return null;
+                    }
+                    const controlEvent = `${controlEventPrefix}${seed}`;
+                    const detail = {
+                        kind: "fingerprint-install",
+                        runtime
+                    };
+                    window.dispatchEvent(new CustomEvent(controlEvent, { detail }));
+                    if (detail.ok !== true || typeof detail.result !== "object" || detail.result === null) {
+                        return null;
+                    }
+                    return detail.result;
                 },
-                args: [MAIN_WORLD_INSTALL_HOOK_KEY, fingerprintRuntime]
+                args: [MAIN_WORLD_CONTROL_EVENT_PREFIX, MAIN_WORLD_CONTROL_SEED_ATTRIBUTE, fingerprintRuntime]
             });
             return asRecord(results[0]?.result);
         };
