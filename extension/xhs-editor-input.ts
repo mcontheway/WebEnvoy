@@ -9,7 +9,9 @@ export interface EditorInputFocusAttestation {
   editable_state: "already_ready" | "entered";
   focus_confirmed: boolean;
   entry_button_locator: string | null;
+  entry_button_target_key?: string | null;
   editor_locator: string | null;
+  editor_target_key?: string | null;
   failure_reason?: string | null;
 }
 
@@ -39,11 +41,10 @@ const EDITOR_MODE_ENTRY_WAIT_MS = 200;
 const EDITOR_MODE_ENTRY_MAX_ATTEMPTS = 10;
 
 const EDITOR_SELECTORS = [
-  '[contenteditable="true"][role="textbox"]',
-  '[contenteditable="true"][data-lexical-editor="true"]',
-  '[contenteditable="true"]',
-  "textarea",
-  'input[type="text"]'
+  'div.tiptap.ProseMirror[contenteditable="true"]',
+  '[contenteditable="true"].tiptap.ProseMirror',
+  '[contenteditable="true"].ProseMirror',
+  '[contenteditable="true"][data-lexical-editor="true"]'
 ] as const;
 
 type SearchRoot = Document | ShadowRoot;
@@ -82,6 +83,31 @@ const buildLocator = (element: HTMLElement): string => {
     return `${element.tagName.toLowerCase()}.${className}`;
   }
   return element.tagName.toLowerCase();
+};
+
+const buildTargetKey = (element: HTMLElement): string => {
+  const segments: string[] = [];
+  let current: HTMLElement | null = element;
+
+  while (current) {
+    const parent: HTMLElement | null = current.parentElement;
+    const tagName = current.tagName.toLowerCase();
+    if (!parent) {
+      segments.unshift(current.id ? `${tagName}#${current.id}` : tagName);
+      break;
+    }
+
+    const siblings = [...parent.children].filter(
+      (candidate): candidate is HTMLElement =>
+        candidate instanceof HTMLElement && candidate.tagName === current?.tagName
+    );
+    const position = siblings.indexOf(current) + 1;
+    const idSegment = current.id ? `#${current.id}` : "";
+    segments.unshift(`${tagName}${idSegment}:nth-of-type(${position})`);
+    current = parent;
+  }
+
+  return segments.join(" > ");
 };
 
 const collectSearchRoots = (root: SearchRoot): SearchRoot[] => {
@@ -257,6 +283,25 @@ const normalizeFocusAttestationFailure = (
   return ["editor_focus_not_attested"];
 };
 
+const resolveAttestedTargetBinding = (
+  attestation: EditorInputFocusAttestation | null | undefined,
+  targetKey: string
+): { focusConfirmed: boolean; bindingFailureSignal: string | null } => {
+  if (!attestation || attestation.focus_confirmed !== true) {
+    return { focusConfirmed: false, bindingFailureSignal: null };
+  }
+
+  if (typeof attestation.editor_target_key !== "string" || attestation.editor_target_key.length === 0) {
+    return { focusConfirmed: false, bindingFailureSignal: "ambiguous_editor_target" };
+  }
+
+  return {
+    focusConfirmed: attestation.editor_target_key === targetKey,
+    bindingFailureSignal:
+      attestation.editor_target_key === targetKey ? null : "ambiguous_editor_target"
+  };
+};
+
 const isTargetPage = (): boolean => window.location.href.includes(TARGET_PAGE);
 
 const isArticleTargetPage = (): boolean => {
@@ -335,9 +380,11 @@ export const performEditorInputValidation = async (
   for (const editor of editors) {
     const beforeText = readElementText(editor);
     const locator = buildLocator(editor);
-    const focusConfirmed =
-      focusAttestation?.focus_confirmed === true &&
-      (focusAttestation.editor_locator === null || focusAttestation.editor_locator === locator);
+    const targetKey = buildTargetKey(editor);
+    const { focusConfirmed, bindingFailureSignal } = resolveAttestedTargetBinding(
+      focusAttestation,
+      targetKey
+    );
     const textInserted = focusConfirmed ? appendTextToEditable(editor, input.text) : false;
     await Promise.resolve();
     const visibleText = readElementText(editor);
@@ -354,6 +401,9 @@ export const performEditorInputValidation = async (
       successSignals.push("editor_focus_attested");
     } else {
       failureSignals.push(...normalizeFocusAttestationFailure(focusAttestation));
+      if (bindingFailureSignal) {
+        failureSignals.push(bindingFailureSignal);
+      }
     }
     if (textInserted && visibleText.includes(input.text)) {
       successSignals.push("text_visible");

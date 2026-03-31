@@ -5,11 +5,10 @@ const EDITOR_MODE_ENTRY_LABELS = ["新的创作"];
 const EDITOR_MODE_ENTRY_WAIT_MS = 200;
 const EDITOR_MODE_ENTRY_MAX_ATTEMPTS = 10;
 const EDITOR_SELECTORS = [
-    '[contenteditable="true"][role="textbox"]',
-    '[contenteditable="true"][data-lexical-editor="true"]',
-    '[contenteditable="true"]',
-    "textarea",
-    'input[type="text"]'
+    'div.tiptap.ProseMirror[contenteditable="true"]',
+    '[contenteditable="true"].tiptap.ProseMirror',
+    '[contenteditable="true"].ProseMirror',
+    '[contenteditable="true"][data-lexical-editor="true"]'
 ];
 const asHTMLElement = (value) => value instanceof HTMLElement ? value : null;
 const isVisible = (element) => {
@@ -36,6 +35,24 @@ const buildLocator = (element) => {
         return `${element.tagName.toLowerCase()}.${className}`;
     }
     return element.tagName.toLowerCase();
+};
+const buildTargetKey = (element) => {
+    const segments = [];
+    let current = element;
+    while (current) {
+        const parent = current.parentElement;
+        const tagName = current.tagName.toLowerCase();
+        if (!parent) {
+            segments.unshift(current.id ? `${tagName}#${current.id}` : tagName);
+            break;
+        }
+        const siblings = [...parent.children].filter((candidate) => candidate instanceof HTMLElement && candidate.tagName === current?.tagName);
+        const position = siblings.indexOf(current) + 1;
+        const idSegment = current.id ? `#${current.id}` : "";
+        segments.unshift(`${tagName}${idSegment}:nth-of-type(${position})`);
+        current = parent;
+    }
+    return segments.join(" > ");
 };
 const collectSearchRoots = (root) => {
     const roots = [root];
@@ -189,6 +206,18 @@ const normalizeFocusAttestationFailure = (attestation) => {
     }
     return ["editor_focus_not_attested"];
 };
+const resolveAttestedTargetBinding = (attestation, targetKey) => {
+    if (!attestation || attestation.focus_confirmed !== true) {
+        return { focusConfirmed: false, bindingFailureSignal: null };
+    }
+    if (typeof attestation.editor_target_key !== "string" || attestation.editor_target_key.length === 0) {
+        return { focusConfirmed: false, bindingFailureSignal: "ambiguous_editor_target" };
+    }
+    return {
+        focusConfirmed: attestation.editor_target_key === targetKey,
+        bindingFailureSignal: attestation.editor_target_key === targetKey ? null : "ambiguous_editor_target"
+    };
+};
 const isTargetPage = () => window.location.href.includes(TARGET_PAGE);
 const isArticleTargetPage = () => {
     if (!isTargetPage()) {
@@ -260,8 +289,8 @@ export const performEditorInputValidation = async (input) => {
     for (const editor of editors) {
         const beforeText = readElementText(editor);
         const locator = buildLocator(editor);
-        const focusConfirmed = focusAttestation?.focus_confirmed === true &&
-            (focusAttestation.editor_locator === null || focusAttestation.editor_locator === locator);
+        const targetKey = buildTargetKey(editor);
+        const { focusConfirmed, bindingFailureSignal } = resolveAttestedTargetBinding(focusAttestation, targetKey);
         const textInserted = focusConfirmed ? appendTextToEditable(editor, input.text) : false;
         await Promise.resolve();
         const visibleText = readElementText(editor);
@@ -278,6 +307,9 @@ export const performEditorInputValidation = async (input) => {
         }
         else {
             failureSignals.push(...normalizeFocusAttestationFailure(focusAttestation));
+            if (bindingFailureSignal) {
+                failureSignals.push(bindingFailureSignal);
+            }
         }
         if (textInserted && visibleText.includes(input.text)) {
             successSignals.push("text_visible");

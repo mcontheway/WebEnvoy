@@ -66,7 +66,9 @@ const resolveEditorFocusAttestation = (options) => {
         editable_state: editableState,
         focus_confirmed: record.focus_confirmed === true,
         entry_button_locator: typeof record.entry_button_locator === "string" ? record.entry_button_locator : null,
+        entry_button_target_key: typeof record.entry_button_target_key === "string" ? record.entry_button_target_key : null,
         editor_locator: typeof record.editor_locator === "string" ? record.editor_locator : null,
+        editor_target_key: typeof record.editor_target_key === "string" ? record.editor_target_key : null,
         failure_reason: typeof record.failure_reason === "string" ? record.failure_reason : null
     };
 };

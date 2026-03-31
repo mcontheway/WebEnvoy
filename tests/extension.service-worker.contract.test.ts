@@ -37,7 +37,8 @@ const createEditorInputProbeResult = (overrides?: {
   entryButton: overrides?.entryButton ?? null,
   editor:
     overrides?.editor ?? {
-      locator: "textarea",
+      locator: "div.tiptap.ProseMirror",
+      targetKey: "body > div:nth-of-type(1)",
       centerX: 120,
       centerY: 48
     },
@@ -4384,11 +4385,13 @@ describe("extension service worker recovery contract", () => {
               result: {
                 entryButton: {
                   locator: "button.新的创作",
+                  targetKey: "body > button:nth-of-type(1)",
                   centerX: 100,
                   centerY: 100
                 },
                 editor: {
-                  locator: "textarea",
+                  locator: "div.tiptap.ProseMirror",
+                  targetKey: "body > div:nth-of-type(1)",
                   centerX: 200,
                   centerY: 220
                 },
@@ -4459,7 +4462,9 @@ describe("extension service worker recovery contract", () => {
               editor_focus_attestation: expect.objectContaining({
                 source: "chrome_debugger",
                 target_tab_id: 32,
-                focus_confirmed: true
+                focus_confirmed: true,
+                editor_locator: "div.tiptap.ProseMirror",
+                editor_target_key: "body > div:nth-of-type(1)"
               })
             })
           })
@@ -4616,6 +4621,8 @@ describe("extension service worker recovery contract", () => {
       source: "chrome_debugger",
       target_tab_id: 32,
       focus_confirmed: false,
+      editor_locator: "div.tiptap.ProseMirror",
+      editor_target_key: "body > div:nth-of-type(1)",
       failure_reason: "DEBUGGER_ATTACH_FAILED"
     });
   });

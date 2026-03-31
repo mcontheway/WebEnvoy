@@ -12,11 +12,10 @@ const debuggerProtocolVersion = "1.3";
 const editorInputDebuggerProbeWaitMs = 150;
 const editorInputDebuggerEntryLabels = ["新的创作"];
 const editorInputSelectors = [
-    '[contenteditable="true"][role="textbox"]',
-    '[contenteditable="true"][data-lexical-editor="true"]',
-    '[contenteditable="true"]',
-    "textarea",
-    'input[type="text"]'
+    'div.tiptap.ProseMirror[contenteditable="true"]',
+    '[contenteditable="true"].tiptap.ProseMirror',
+    '[contenteditable="true"].ProseMirror',
+    '[contenteditable="true"][data-lexical-editor="true"]'
 ];
 const readTimeoutMs = (value) => {
     if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -1951,7 +1950,9 @@ class ChromeBackgroundBridge {
             editable_state: input?.editableState ?? "already_ready",
             focus_confirmed: false,
             entry_button_locator: input?.entryButtonLocator ?? null,
+            entry_button_target_key: input?.entryButtonTargetKey ?? null,
             editor_locator: input?.editorLocator ?? null,
+            editor_target_key: input?.editorTargetKey ?? null,
             failure_reason: reason
         });
         const debuggerApi = this.chromeApi.debugger;
@@ -1963,7 +1964,9 @@ class ChromeBackgroundBridge {
             return buildFailure("DEBUGGER_INTERACTION_FAILED");
         }
         let entryButtonLocator = initialProbe.entryButton?.locator ?? null;
+        let entryButtonTargetKey = initialProbe.entryButton?.targetKey ?? null;
         let editorLocator = initialProbe.editor?.locator ?? null;
+        let editorTargetKey = initialProbe.editor?.targetKey ?? null;
         let editableState = "already_ready";
         let attached = false;
         try {
@@ -1973,7 +1976,9 @@ class ChromeBackgroundBridge {
         catch {
             return buildFailure("DEBUGGER_ATTACH_FAILED", {
                 entryButtonLocator,
-                editorLocator
+                entryButtonTargetKey,
+                editorLocator,
+                editorTargetKey
             });
         }
         try {
@@ -1982,7 +1987,9 @@ class ChromeBackgroundBridge {
                 if (!workingProbe.entryButton) {
                     return buildFailure("EDITOR_ENTRY_NOT_VISIBLE", {
                         entryButtonLocator,
-                        editorLocator
+                        entryButtonTargetKey,
+                        editorLocator,
+                        editorTargetKey
                     });
                 }
                 await this.#dispatchDebuggerPrimaryClick(tabId, workingProbe.entryButton);
@@ -1991,19 +1998,25 @@ class ChromeBackgroundBridge {
                 if (!postEntryProbe || !postEntryProbe.editor) {
                     return buildFailure("EDITOR_ENTRY_NOT_VISIBLE", {
                         entryButtonLocator,
-                        editorLocator
+                        entryButtonTargetKey,
+                        editorLocator,
+                        editorTargetKey
                     });
                 }
                 editableState = "entered";
                 workingProbe = postEntryProbe;
                 entryButtonLocator = workingProbe.entryButton?.locator ?? entryButtonLocator;
+                entryButtonTargetKey = workingProbe.entryButton?.targetKey ?? entryButtonTargetKey;
                 editorLocator = workingProbe.editor?.locator ?? editorLocator;
+                editorTargetKey = workingProbe.editor?.targetKey ?? editorTargetKey;
             }
             if (!workingProbe.editor) {
                 return buildFailure("EDITOR_ENTRY_NOT_VISIBLE", {
                     editableState,
                     entryButtonLocator,
-                    editorLocator
+                    entryButtonTargetKey,
+                    editorLocator,
+                    editorTargetKey
                 });
             }
             await this.#dispatchDebuggerPrimaryClick(tabId, workingProbe.editor);
@@ -2011,11 +2024,14 @@ class ChromeBackgroundBridge {
             const finalProbe = await this.#probeEditorInputTargets(tabId);
             const focusConfirmed = finalProbe?.editorFocused === true;
             const finalEditorLocator = finalProbe?.editor?.locator ?? workingProbe.editor.locator;
+            const finalEditorTargetKey = finalProbe?.editor?.targetKey ?? workingProbe.editor.targetKey;
             if (!focusConfirmed) {
                 return buildFailure("EDITOR_FOCUS_NOT_ATTESTED", {
                     editableState,
                     entryButtonLocator,
-                    editorLocator: finalEditorLocator
+                    entryButtonTargetKey,
+                    editorLocator: finalEditorLocator,
+                    editorTargetKey: finalEditorTargetKey
                 });
             }
             return {
@@ -2024,7 +2040,9 @@ class ChromeBackgroundBridge {
                 editable_state: editableState,
                 focus_confirmed: true,
                 entry_button_locator: entryButtonLocator,
+                entry_button_target_key: entryButtonTargetKey,
                 editor_locator: finalEditorLocator,
+                editor_target_key: finalEditorTargetKey,
                 failure_reason: null
             };
         }
@@ -2032,7 +2050,9 @@ class ChromeBackgroundBridge {
             return buildFailure("DEBUGGER_INTERACTION_FAILED", {
                 editableState,
                 entryButtonLocator,
-                editorLocator
+                entryButtonTargetKey,
+                editorLocator,
+                editorTargetKey
             });
         }
         finally {
@@ -2093,6 +2113,24 @@ class ChromeBackgroundBridge {
                         }
                         return element.tagName.toLowerCase();
                     };
+                    const buildTargetKey = (element) => {
+                        const segments = [];
+                        let current = element;
+                        while (current) {
+                            const parent = current.parentElement;
+                            const tagName = current.tagName.toLowerCase();
+                            if (!parent) {
+                                segments.unshift(current.id ? `${tagName}#${current.id}` : tagName);
+                                break;
+                            }
+                            const siblings = Array.from(parent.children).filter((candidate) => candidate instanceof HTMLElement && candidate.tagName === current?.tagName);
+                            const position = siblings.indexOf(current) + 1;
+                            const idSegment = current.id ? `#${current.id}` : "";
+                            segments.unshift(`${tagName}${idSegment}:nth-of-type(${position})`);
+                            current = parent;
+                        }
+                        return segments.join(" > ");
+                    };
                     const toTarget = (element) => {
                         if (!element) {
                             return null;
@@ -2100,6 +2138,7 @@ class ChromeBackgroundBridge {
                         const rect = element.getBoundingClientRect();
                         return {
                             locator: buildLocator(element),
+                            targetKey: buildTargetKey(element),
                             centerX: Math.round(rect.left + rect.width / 2),
                             centerY: Math.round(rect.top + rect.height / 2)
                         };
@@ -2160,9 +2199,11 @@ class ChromeBackgroundBridge {
             return null;
         }
         const locator = asNonEmptyString(record.locator);
+        const targetKey = asNonEmptyString(record.targetKey);
         const centerX = typeof record.centerX === "number" ? record.centerX : null;
         const centerY = typeof record.centerY === "number" ? record.centerY : null;
         if (!locator ||
+            !targetKey ||
             centerX === null ||
             centerY === null ||
             !Number.isFinite(centerX) ||
@@ -2171,6 +2212,7 @@ class ChromeBackgroundBridge {
         }
         return {
             locator,
+            targetKey,
             centerX,
             centerY
         };
