@@ -38,6 +38,7 @@ const buildContentScriptBundle = async () => {
   const fingerprintSource = await readSource(join(sharedRoot, "fingerprint-profile.js"));
   const riskStateSource = await readSource(join(sharedRoot, "risk-state.js"));
   const xhsSearchSource = await readSource(join(buildRoot, "xhs-search.js"));
+  const xhsEditorInputSource = await readSource(join(buildRoot, "xhs-editor-input.js"));
   const handlerSource = await readSource(join(buildRoot, "content-script-handler.js"));
   const contentScriptSource = await readSource(join(buildRoot, "content-script.js"));
 
@@ -86,10 +87,17 @@ const buildContentScriptBundle = async () => {
     exports: ["executeXhsSearch"]
   });
 
+  const xhsEditorInputModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_xhs_editor_input",
+    sourceBody: xhsEditorInputSource,
+    exports: ["performEditorInputValidation"]
+  });
+
   const handlerModule = renderClassicModule({
     moduleVar: "__webenvoy_module_content_script_handler",
     prelude: [
       "const { executeXhsSearch } = __webenvoy_module_xhs_search;",
+      "const { performEditorInputValidation } = __webenvoy_module_xhs_editor_input;",
       "const {",
       "  DEFAULT_MIME_TYPE_DESCRIPTORS,",
       "  DEFAULT_PLUGIN_DESCRIPTORS,",
@@ -127,6 +135,7 @@ const buildContentScriptBundle = async () => {
     riskStateModule,
     fingerprintModule,
     xhsSearchModule,
+    xhsEditorInputModule,
     handlerModule,
     contentScriptModule
   ].join("\n");

@@ -18,7 +18,11 @@ export interface EditorInputValidationResult {
 }
 
 const TARGET_PAGE = "creator.xiaohongshu.com/publish";
-const MINIMUM_REPLAY = ["focus_editor", "type_short_text", "blur_or_reobserve"];
+const BASE_MINIMUM_REPLAY = ["focus_editor", "type_short_text", "blur_or_reobserve"] as const;
+const ARTICLE_EDIT_MODE_REPLAY_STEP = "enter_editable_mode";
+const EDITOR_MODE_ENTRY_LABELS = ["新的创作"] as const;
+const EDITOR_MODE_ENTRY_WAIT_MS = 200;
+const EDITOR_MODE_ENTRY_MAX_ATTEMPTS = 10;
 
 const EDITOR_SELECTORS = [
   '[contenteditable="true"][role="textbox"]',
@@ -27,6 +31,11 @@ const EDITOR_SELECTORS = [
   "textarea",
   'input[type="text"]'
 ] as const;
+
+type SearchRoot = Document | ShadowRoot;
+
+type SearchScope = SearchRoot | HTMLElement;
+type EditStateActivation = "already_ready" | "activated" | "entry_missing" | "activation_failed";
 
 const asHTMLElement = (value: Element | null): HTMLElement | null =>
   value instanceof HTMLElement ? value : null;
@@ -61,16 +70,47 @@ const buildLocator = (element: HTMLElement): string => {
   return element.tagName.toLowerCase();
 };
 
-const findEditorElement = (): HTMLElement | null => {
-  for (const selector of EDITOR_SELECTORS) {
-    const candidates = [...document.querySelectorAll(selector)]
-      .map((entry) => asHTMLElement(entry))
-      .filter((entry): entry is HTMLElement => entry !== null && isVisible(entry));
-    if (candidates.length > 0) {
-      return candidates[0];
+const collectSearchRoots = (root: SearchRoot): SearchRoot[] => {
+  const roots: SearchRoot[] = [root];
+  const descendants = [...root.querySelectorAll("*")];
+  for (const element of descendants) {
+    if (element.shadowRoot) {
+      roots.push(...collectSearchRoots(element.shadowRoot));
     }
   }
-  return null;
+  const iframes = [...root.querySelectorAll("iframe")];
+  for (const iframe of iframes) {
+    try {
+      const frameDocument = iframe.contentDocument;
+      if (frameDocument) {
+        roots.push(...collectSearchRoots(frameDocument));
+      }
+    } catch {
+      continue;
+    }
+  }
+  return roots;
+};
+
+const findEditorElements = (): HTMLElement[] => {
+  const seen = new Set<HTMLElement>();
+  const results: HTMLElement[] = [];
+  const roots = collectSearchRoots(document);
+  for (const selector of EDITOR_SELECTORS) {
+    for (const searchRoot of roots) {
+      const candidates = [...searchRoot.querySelectorAll(selector)]
+        .map((entry) => asHTMLElement(entry))
+        .filter((entry): entry is HTMLElement => entry !== null && isVisible(entry));
+      for (const candidate of candidates) {
+        if (seen.has(candidate)) {
+          continue;
+        }
+        seen.add(candidate);
+        results.push(candidate);
+      }
+    }
+  }
+  return results;
 };
 
 const readElementText = (element: HTMLElement): string => {
@@ -126,12 +166,82 @@ const appendTextToEditable = (element: HTMLElement, text: string): void => {
   element.dispatchEvent(new InputEvent("input", { bubbles: true, data: text }));
 };
 
+const findVisibleButtonByLabels = (
+  scope: SearchScope,
+  labels: readonly string[]
+): HTMLElement | null => {
+  const buttons = [...scope.querySelectorAll("button, [role='button']")]
+    .map((entry) => asHTMLElement(entry))
+    .filter((entry): entry is HTMLElement => entry !== null && isVisible(entry));
+  for (const button of buttons) {
+    const text = button.innerText?.trim() ?? button.textContent?.trim() ?? "";
+    if (labels.some((label) => text.includes(label))) {
+      return button;
+    }
+  }
+  return null;
+};
+
+const sleep = async (timeoutMs: number): Promise<void> => {
+  await new Promise((resolve) => setTimeout(resolve, timeoutMs));
+};
+
+const buildMinimumReplay = (activation: EditStateActivation): string[] =>
+  activation === "activated"
+    ? [ARTICLE_EDIT_MODE_REPLAY_STEP, ...BASE_MINIMUM_REPLAY]
+    : [...BASE_MINIMUM_REPLAY];
+
+const isTargetPage = (): boolean => window.location.href.includes(TARGET_PAGE);
+
+const isArticleTargetPage = (): boolean => {
+  if (!isTargetPage()) {
+    return false;
+  }
+  try {
+    const url = new URL(window.location.href);
+    return url.searchParams.get("target") === "article";
+  } catch {
+    return false;
+  }
+};
+
+const enterEditableStateIfNeeded = async (): Promise<EditStateActivation> => {
+  if (!isArticleTargetPage()) {
+    return "already_ready";
+  }
+  if (findEditorElements().length > 0) {
+    return "already_ready";
+  }
+  const createButton = findVisibleButtonByLabels(document, EDITOR_MODE_ENTRY_LABELS);
+  if (!createButton) {
+    return "entry_missing";
+  }
+  createButton.click();
+  for (let attempt = 0; attempt < EDITOR_MODE_ENTRY_MAX_ATTEMPTS; attempt += 1) {
+    await Promise.resolve();
+    await sleep(EDITOR_MODE_ENTRY_WAIT_MS);
+    await Promise.resolve();
+    if (findEditorElements().length > 0) {
+      return "activated";
+    }
+  }
+  return "activation_failed";
+};
+
 export const performEditorInputValidation = async (
   input: EditorInputValidationInput
 ): Promise<EditorInputValidationResult> => {
-  const editor = findEditorElement();
+  const activation = await enterEditableStateIfNeeded();
+  const editors = findEditorElements();
+  const minimumReplay = buildMinimumReplay(activation);
 
-  if (!editor) {
+  if (editors.length === 0) {
+    const failureSignals =
+      activation === "entry_missing"
+        ? ["editable_state_entry_missing", "dom_variant"]
+        : activation === "activation_failed"
+          ? ["editable_state_not_entered", "dom_variant"]
+          : ["dom_variant"];
     return {
       ok: false,
       mode: "dom_editor_input_validation",
@@ -143,57 +253,84 @@ export const performEditorInputValidation = async (
       focus_confirmed: false,
       preserved_after_blur: false,
       success_signals: [],
-      failure_signals: ["dom_variant"],
-      minimum_replay: MINIMUM_REPLAY
+      failure_signals: failureSignals,
+      minimum_replay: minimumReplay
     };
   }
-
-  const beforeText = readElementText(editor);
-  const focusConfirmed = focusElement(editor);
-  appendTextToEditable(editor, input.text);
-  await Promise.resolve();
-  const visibleText = readElementText(editor);
-  if (typeof editor.blur === "function") {
-    editor.blur();
-  }
-  await Promise.resolve();
-  const postBlurText = readElementText(editor);
-  const preservedAfterBlur = postBlurText.includes(input.text);
-  const successSignals: string[] = [];
-  const failureSignals: string[] = [];
   const normalizedPageText = document.body?.innerText ?? "";
+  let bestAttempt: EditorInputValidationResult | null = null;
 
-  if (focusConfirmed) {
-    successSignals.push("editor_focused");
-  } else {
-    failureSignals.push("focus_lost");
-  }
-  if (visibleText.includes(input.text)) {
-    successSignals.push("text_visible");
-  } else {
-    failureSignals.push("dom_variant");
-  }
-  if (preservedAfterBlur) {
-    successSignals.push("text_persisted_after_blur");
-  } else {
-    failureSignals.push("text_reverted");
-  }
-  if (/风险|risk|提示|异常/u.test(normalizedPageText)) {
-    failureSignals.push("risk_prompt");
+  for (const editor of editors) {
+    const beforeText = readElementText(editor);
+    const focusConfirmed = focusElement(editor);
+    appendTextToEditable(editor, input.text);
+    await Promise.resolve();
+    const visibleText = readElementText(editor);
+    if (typeof editor.blur === "function") {
+      editor.blur();
+    }
+    await Promise.resolve();
+    const postBlurText = readElementText(editor);
+    const preservedAfterBlur = postBlurText.includes(input.text);
+    const successSignals: string[] = activation === "activated" ? ["editable_state_entered"] : [];
+    const failureSignals: string[] = [];
+
+    if (focusConfirmed) {
+      successSignals.push("editor_focused");
+    } else {
+      failureSignals.push("focus_lost");
+    }
+    if (visibleText.includes(input.text)) {
+      successSignals.push("text_visible");
+    } else {
+      failureSignals.push("dom_variant");
+    }
+    if (preservedAfterBlur) {
+      successSignals.push("text_persisted_after_blur");
+    } else {
+      failureSignals.push("text_reverted");
+    }
+    if (/风险|risk|提示|异常/u.test(normalizedPageText)) {
+      failureSignals.push("risk_prompt");
+    }
+
+    const attempt: EditorInputValidationResult = {
+      ok: focusConfirmed && visibleText.includes(input.text) && preservedAfterBlur,
+      mode: "dom_editor_input_validation",
+      editor_locator: buildLocator(editor),
+      input_text: input.text,
+      before_text: beforeText,
+      visible_text: visibleText,
+      post_blur_text: postBlurText,
+      focus_confirmed: focusConfirmed,
+      preserved_after_blur: preservedAfterBlur,
+      success_signals: successSignals,
+      failure_signals: failureSignals,
+      minimum_replay: minimumReplay
+    };
+
+    if (attempt.ok) {
+      return attempt;
+    }
+    if (!bestAttempt || attempt.success_signals.length > bestAttempt.success_signals.length) {
+      bestAttempt = attempt;
+    }
   }
 
-  return {
-    ok: focusConfirmed && visibleText.includes(input.text) && preservedAfterBlur,
-    mode: "dom_editor_input_validation",
-    editor_locator: buildLocator(editor),
-    input_text: input.text,
-    before_text: beforeText,
-    visible_text: visibleText,
-    post_blur_text: postBlurText,
-    focus_confirmed: focusConfirmed,
-    preserved_after_blur: preservedAfterBlur,
-    success_signals: successSignals,
-    failure_signals: failureSignals,
-    minimum_replay: MINIMUM_REPLAY
-  };
+  return (
+    bestAttempt ?? {
+      ok: false,
+      mode: "dom_editor_input_validation",
+      editor_locator: null,
+      input_text: input.text,
+      before_text: "",
+      visible_text: "",
+      post_blur_text: "",
+      focus_confirmed: false,
+      preserved_after_blur: false,
+      success_signals: [],
+      failure_signals: ["dom_variant"],
+      minimum_replay: minimumReplay
+    }
+  );
 };

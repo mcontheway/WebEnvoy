@@ -13,6 +13,12 @@ type TransportState = "not_connected" | "ready" | "disconnected";
 
 type RuntimeStatusReader = () => Promise<JsonObject>;
 
+const LIVE_EXECUTION_MODES = new Set([
+  "live_read_limited",
+  "live_read_high_risk",
+  "live_write"
+]);
+
 const OFFICIAL_CHROME_BOOTSTRAP_READINESS_MAX_ATTEMPTS = 5;
 const OFFICIAL_CHROME_BOOTSTRAP_READINESS_RETRY_DELAY_MS = 50;
 const profileRuntime = new ProfileRuntimeService();
@@ -244,7 +250,11 @@ export const prepareOfficialChromeRuntime = async (input: {
   bridge: NativeMessagingBridge;
   fingerprintContext: ReturnType<typeof buildFingerprintContextForMeta>;
   readStatus?: RuntimeStatusReader;
-}): Promise<JsonObject> => {
+}): Promise<
+  JsonObject & {
+    executionFingerprintContext?: ReturnType<typeof buildFingerprintContextForMeta>;
+  }
+> => {
   const readStatus =
     input.readStatus ??
     (async () =>
@@ -289,7 +299,9 @@ export const prepareOfficialChromeRuntime = async (input: {
     confirmation_required: confirmationRequired
   });
 
-  const attemptExecutionBootstrap = async (): Promise<void> => {
+  const attemptExecutionBootstrap = async (): Promise<
+    ReturnType<typeof buildFingerprintContextForMeta> | undefined
+  > => {
     const envelope = buildRuntimeBootstrapEnvelope({
       profile: input.context.profile ?? "",
       runId: input.context.run_id,
@@ -314,7 +326,7 @@ export const prepareOfficialChromeRuntime = async (input: {
         });
       }
       if (isRuntimeBootstrapPendingCode(bootstrapResult.error.code)) {
-        return;
+        return undefined;
       }
       if (isRuntimeBootstrapFailureCode(bootstrapResult.error.code)) {
         throw new CliError(bootstrapResult.error.code, bootstrapResult.error.message, {
@@ -370,9 +382,16 @@ export const prepareOfficialChromeRuntime = async (input: {
         }
       );
     }
+
+    const attestedFingerprintRuntime = asObject(payload?.fingerprint_runtime);
+    return attestedFingerprintRuntime
+      ? (attestedFingerprintRuntime as unknown as ReturnType<typeof buildFingerprintContextForMeta>)
+      : undefined;
   };
 
-  if (runtimeReadiness === "ready" && lockHeld) {
+  const forceExecutionBootstrap = LIVE_EXECUTION_MODES.has(input.requestedExecutionMode);
+
+  if (runtimeReadiness === "ready" && lockHeld && !forceExecutionBootstrap) {
     return applyReadinessToStatus(status, {
       runtimeReadiness,
       identityBindingState,
@@ -396,9 +415,14 @@ export const prepareOfficialChromeRuntime = async (input: {
     lockHeld &&
     identityBindingState === "bound" &&
     transportState === "ready" &&
-    (bootstrapState === "not_started" || bootstrapState === "pending" || bootstrapState === "stale")
+    (
+      forceExecutionBootstrap ||
+      bootstrapState === "not_started" ||
+      bootstrapState === "pending" ||
+      bootstrapState === "stale"
+    )
   ) {
-    await attemptExecutionBootstrap();
+    const executionFingerprintContext = await attemptExecutionBootstrap();
     status = await readStatus();
     profileState =
       typeof status.profileState === "string" ? status.profileState : "uninitialized";
@@ -441,13 +465,16 @@ export const prepareOfficialChromeRuntime = async (input: {
     }
 
     if (runtimeReadiness === "ready") {
-      return applyReadinessToStatus(status, {
-        runtimeReadiness,
-        identityBindingState,
-        bootstrapState,
-        transportState,
-        lockHeld
-      });
+      return {
+        ...applyReadinessToStatus(status, {
+          runtimeReadiness,
+          identityBindingState,
+          bootstrapState,
+          transportState,
+          lockHeld
+        }),
+        ...(executionFingerprintContext ? { executionFingerprintContext } : {})
+      };
     }
   }
 

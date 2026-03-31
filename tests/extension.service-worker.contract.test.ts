@@ -135,6 +135,20 @@ const primeTrustedFingerprintContext = async (input: {
   tabId?: number;
   tabUrl?: string;
 }) => {
+  const fingerprintContext =
+    asRecord(input.fingerprintContext.injection) !== null
+      ? input.fingerprintContext
+      : {
+          ...input.fingerprintContext,
+          injection: {
+            installed: true,
+            required_patches:
+              ((asRecord(input.fingerprintContext.fingerprint_patch_manifest)?.required_patches ??
+                []) as string[]) ?? [],
+            missing_required_patches: [],
+            source: "main_world"
+          }
+        };
   input.runtimeMessageListeners[0]?.(
     {
       kind: "result",
@@ -146,7 +160,7 @@ const primeTrustedFingerprintContext = async (input: {
           runtime_context_id: input.runtimeContextId,
           profile: input.profile,
           session_id: input.sessionId ?? "nm-session-001",
-          fingerprint_runtime: input.fingerprintContext,
+          fingerprint_runtime: fingerprintContext,
           trust_source: "extension_bootstrap_context",
           bootstrap_attested: true,
           main_world_result_used_for_trust: false
@@ -157,6 +171,56 @@ const primeTrustedFingerprintContext = async (input: {
       tab: {
         id: input.tabId ?? 32,
         url: input.tabUrl ?? "https://www.xiaohongshu.com/search_result?keyword=露营"
+      }
+    }
+  );
+  await Promise.resolve();
+  await Promise.resolve();
+};
+
+const promoteBootstrapReadinessThroughPing = async (input: {
+  runtimeMessageListeners: Array<
+    (
+      message: unknown,
+      sender: { tab?: { id?: number; url?: string }; url?: string },
+      sendResponse?: (response: unknown) => void
+    ) => boolean | void
+  >;
+  pingId: string;
+  fingerprintContext: Record<string, unknown>;
+  tabId?: number;
+  tabUrl?: string;
+}) => {
+  const requiredPatches =
+    ((asRecord(input.fingerprintContext.fingerprint_patch_manifest)?.required_patches ?? []) as string[]) ??
+    [];
+  input.runtimeMessageListeners[0]?.(
+    {
+      kind: "result",
+      id: input.pingId,
+      ok: true,
+      payload: {
+        fingerprint_runtime: {
+          ...input.fingerprintContext,
+          injection: {
+            installed: true,
+            required_patches: requiredPatches,
+            missing_required_patches: [],
+            source: "main_world"
+          }
+        },
+        target_tab_id: input.tabId ?? 77,
+        summary: {
+          capability_result: {
+            outcome: "success"
+          }
+        }
+      }
+    },
+    {
+      tab: {
+        id: input.tabId ?? 77,
+        url: input.tabUrl
       }
     }
   );
@@ -481,6 +545,24 @@ describe("extension service worker recovery contract", () => {
     });
 
     firstPort.onMessageListeners[0]?.({
+      id: "run-ping-promote-bootstrap-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-001",
+        command: "runtime.ping",
+        command_params: {
+          fingerprint_context: fingerprintContext
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
       id: "run-readiness-001",
       method: "bridge.forward",
       profile: "profile-a",
@@ -528,15 +610,13 @@ describe("extension service worker recovery contract", () => {
       })
     );
 
-    await primeTrustedFingerprintContext({
+    await promoteBootstrapReadinessThroughPing({
       runtimeMessageListeners,
-      runId: "run-bootstrap-001",
-      runtimeContextId: "ctx-bootstrap-001",
-      profile: "profile-a",
+      pingId: "run-ping-promote-bootstrap-001",
       fingerprintContext,
-      tabId: 11
+      tabId: 11,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
     });
-    await Promise.resolve();
 
     firstPort.onMessageListeners[0]?.({
       id: "run-readiness-002",
@@ -702,7 +782,7 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("promotes pending runtime.bootstrap to ready from content-script startup trust payload shape", async () => {
+  it("keeps runtime.bootstrap pending when startup trust lacks main-world attestation", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     const fingerprintContext = createFingerprintRuntimeContext();
@@ -773,23 +853,15 @@ describe("extension service worker recovery contract", () => {
     await Promise.resolve();
 
     firstPort.onMessageListeners[0]?.({
-      id: "run-bootstrap-startup-trust-002",
+      id: "run-readiness-startup-trust-002",
       method: "bridge.forward",
       profile: "profile-a",
       params: {
         session_id: "nm-session-001",
         run_id: "run-bootstrap-startup-trust-001",
-        command: "runtime.bootstrap",
+        command: "runtime.readiness",
         command_params: {
-          version: "v1",
-          run_id: "run-bootstrap-startup-trust-001",
-          runtime_context_id: "ctx-bootstrap-startup-trust-001",
-          profile: "profile-a",
-          fingerprint_runtime: fingerprintContext,
-          fingerprint_patch_manifest: {
-            required_patches: ["audio_context"]
-          },
-          main_world_secret: "secret-bootstrap-startup-trust-001"
+          runtime_context_id: "ctx-bootstrap-startup-trust-001"
         },
         cwd: "/workspace/WebEnvoy"
       },
@@ -799,16 +871,10 @@ describe("extension service worker recovery contract", () => {
 
     expect(firstPort.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: "run-bootstrap-startup-trust-002",
+        id: "run-readiness-startup-trust-002",
         status: "success",
         payload: expect.objectContaining({
-          method: "runtime.bootstrap.ack",
-          result: expect.objectContaining({
-            status: "ready",
-            profile: "profile-a",
-            run_id: "run-bootstrap-startup-trust-001",
-            runtime_context_id: "ctx-bootstrap-startup-trust-001"
-          })
+          bootstrap_state: "pending"
         })
       })
     );
@@ -856,16 +922,31 @@ describe("extension service worker recovery contract", () => {
       })
     });
 
-    await primeTrustedFingerprintContext({
-      runtimeMessageListeners,
-      runId: "run-bootstrap-generic-001",
-      runtimeContextId: "ctx-bootstrap-generic-001",
+    firstPort.onMessageListeners[0]?.({
+      id: "run-ping-generic-promote-001",
+      method: "bridge.forward",
       profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-generic-001",
+        command: "runtime.ping",
+        command_params: {
+          fingerprint_context: fingerprintContext
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await promoteBootstrapReadinessThroughPing({
+      runtimeMessageListeners,
+      pingId: "run-ping-generic-promote-001",
       fingerprintContext,
       tabId: 77,
       tabUrl: "https://example.com/runtime-readiness"
     });
-    await Promise.resolve();
 
     firstPort.onMessageListeners[0]?.({
       id: "run-readiness-generic-001",
@@ -925,14 +1006,131 @@ describe("extension service worker recovery contract", () => {
     expect(firstPort.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "run-bootstrap-generic-002",
-        status: "success",
-        payload: expect.objectContaining({
-          method: "runtime.bootstrap.ack",
-          result: expect.objectContaining({
-            status: "ready",
-            profile: "profile-a",
-            run_id: "run-bootstrap-generic-001",
-            runtime_context_id: "ctx-bootstrap-generic-001"
+        status: "error",
+        error: expect.objectContaining({
+          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+        })
+      })
+    );
+  });
+
+  it("reuses attested runtime.bootstrap fingerprint injection for later issue_208 xhs.search", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext({
+      live_allowed: true,
+      live_decision: "allowed",
+      allowed_execution_modes: [
+        "dry_run",
+        "recon",
+        "live_read_limited",
+        "live_read_high_risk",
+        "live_write"
+      ]
+    });
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
+    ]);
+    executeScript.mockImplementation(async (input: Record<string, unknown>) => {
+      const args = Array.isArray(input.args) ? input.args : [];
+      if (args[0] === "__webenvoy_attachMainWorldEventChannel__") {
+        return [{ result: true }];
+      }
+      if (args[0] === "__webenvoy_installFingerprintRuntime__") {
+        return [
+          {
+            result: {
+              installed: true,
+              applied_patches: [
+                "audio_context",
+                "battery",
+                "navigator_plugins",
+                "navigator_mime_types"
+              ],
+              required_patches: [
+                "audio_context",
+                "battery",
+                "navigator_plugins",
+                "navigator_mime_types"
+              ],
+              missing_required_patches: [],
+              source: "profile_meta"
+            }
+          }
+        ];
+      }
+      return [{ result: undefined }];
+    });
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-direct-attest-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-direct-attest-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-direct-attest-001",
+          runtime_context_id: "ctx-bootstrap-direct-attest-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: [
+              "audio_context",
+              "battery",
+              "navigator_plugins",
+              "navigator_mime_types"
+            ]
+          },
+          main_world_secret: "secret-bootstrap-direct-attest-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+
+    await waitForBridgeTurn();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-bootstrap-direct-attest-001",
+      runtimeContextId: "ctx-bootstrap-direct-attest-001",
+      profile: "profile-a",
+      fingerprintContext,
+      tabId: 32,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-editor-after-bootstrap-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-direct-attest-001",
+        command: "xhs.search",
+        command_params: createXhsEditorInputCommandParams(),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "run-xhs-editor-after-bootstrap-001",
+        command: "xhs.search",
+        fingerprintContext: expect.objectContaining({
+          injection: expect.objectContaining({
+            installed: true,
+            missing_required_patches: []
           })
         })
       })
@@ -976,6 +1174,9 @@ describe("extension service worker recovery contract", () => {
     await waitForPostedMessage(firstPort.postMessage, {
       id: "run-bootstrap-ping-promote-001",
       status: "error",
+      payload: expect.objectContaining({
+        bootstrap_target_tab_id: 11
+      }),
       error: expect.objectContaining({
         code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
       })
@@ -1013,6 +1214,7 @@ describe("extension service worker recovery contract", () => {
               missing_required_patches: []
             }
           },
+          target_tab_id: 77,
           summary: {
             capability_result: {
               outcome: "success"
@@ -1564,14 +1766,31 @@ describe("extension service worker recovery contract", () => {
     });
     await Promise.resolve();
 
-    await primeTrustedFingerprintContext({
-      runtimeMessageListeners,
-      runId: "run-bootstrap-owner-001",
-      runtimeContextId: "ctx-bootstrap-owner-001",
+    firstPort.onMessageListeners[0]?.({
+      id: "run-ping-owner-promote-001",
+      method: "bridge.forward",
       profile: "profile-a",
-      fingerprintContext
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-owner-001",
+        command: "runtime.ping",
+        command_params: {
+          fingerprint_context: fingerprintContext
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
     });
     await Promise.resolve();
+    await Promise.resolve();
+
+    await promoteBootstrapReadinessThroughPing({
+      runtimeMessageListeners,
+      pingId: "run-ping-owner-promote-001",
+      fingerprintContext,
+      tabId: 32,
+      tabUrl: "https://www.xiaohongshu.com/search_result?keyword=露营"
+    });
 
     firstPort.onMessageListeners[0]?.({
       id: "run-readiness-owner-001",
@@ -1840,7 +2059,8 @@ describe("extension service worker recovery contract", () => {
       },
       {
         tab: {
-          id: 32
+          id: 32,
+          url: "https://www.xiaohongshu.com/search_result?keyword=露营"
         }
       }
     );
@@ -2103,7 +2323,7 @@ describe("extension service worker recovery contract", () => {
         ]
       }),
       tabId: 32,
-      tabUrl: "https://creator.xiaohongshu.com/publish/publish"
+      tabUrl: "https://www.xiaohongshu.com/search_result?keyword=露营"
     });
 
     firstPort.onMessageListeners[0]?.({
@@ -3428,8 +3648,7 @@ describe("extension service worker recovery contract", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
     const blocked = firstPort.postMessage.mock.calls
@@ -3684,7 +3903,9 @@ describe("extension service worker recovery contract", () => {
       runtimeMessageListeners,
       runId: startupRunId,
       profile,
-      fingerprintContext
+      fingerprintContext,
+      tabId: 32,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish"
     });
     chromeApi.tabs.sendMessage.mockClear();
 
@@ -4320,8 +4541,7 @@ describe("extension service worker recovery contract", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       32,

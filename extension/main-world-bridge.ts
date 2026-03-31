@@ -25,6 +25,7 @@ type MainWorldEventChannel = {
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 const MAIN_WORLD_ATTACH_HOOK_KEY = "__webenvoy_attachMainWorldEventChannel__";
+const MAIN_WORLD_INSTALL_HOOK_KEY = "__webenvoy_installFingerprintRuntime__";
 declare const EXPECTED_MAIN_WORLD_REQUEST_EVENT: string | undefined;
 declare const EXPECTED_MAIN_WORLD_RESULT_EVENT: string | undefined;
 let activeMainWorldEventChannel: MainWorldEventChannel | null = null;
@@ -497,6 +498,13 @@ Object.defineProperty(mainWindow, MAIN_WORLD_ATTACH_HOOK_KEY, {
   writable: false,
   value: (requestEvent: unknown, resultEvent: unknown) =>
     attachMainWorldEventChannelIfValid(requestEvent, resultEvent)
+});
+
+Object.defineProperty(mainWindow, MAIN_WORLD_INSTALL_HOOK_KEY, {
+  configurable: true,
+  enumerable: false,
+  writable: false,
+  value: (runtime: unknown) => installFingerprintRuntime(asRecord(runtime))
 });
 
 const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();

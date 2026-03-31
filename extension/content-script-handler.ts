@@ -63,15 +63,45 @@ const resolveRequestedExecutionMode = (message: BackgroundToContentMessage): str
   return asString(options?.requested_execution_mode);
 };
 
+const resolveAttestedFingerprintRuntimeContext = (
+  value: unknown
+): FingerprintRuntimeContext | null => {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const injection = asRecord(record.injection);
+  const cloneWithInjection = (
+    runtime: FingerprintRuntimeContext
+  ): FingerprintRuntimeContext =>
+    injection
+      ? ({
+          ...runtime,
+          injection: JSON.parse(JSON.stringify(injection))
+        } as FingerprintRuntimeContext)
+      : { ...runtime };
+
+  const direct = ensureFingerprintRuntimeContext(record);
+  if (direct) {
+    return cloneWithInjection(direct);
+  }
+
+  const sanitized = { ...record };
+  delete sanitized.injection;
+  const normalized = ensureFingerprintRuntimeContext(sanitized);
+  return normalized ? cloneWithInjection(normalized) : null;
+};
+
 const resolveFingerprintContextFromMessage = (
   message: BackgroundToContentMessage
 ): FingerprintRuntimeContext | null => {
-  const direct = ensureFingerprintRuntimeContext(message.fingerprintContext ?? null);
+  const direct = resolveAttestedFingerprintRuntimeContext(message.fingerprintContext ?? null);
   if (direct) {
     return direct;
   }
 
-  const fallback = ensureFingerprintRuntimeContext(
+  const fallback = resolveAttestedFingerprintRuntimeContext(
     asRecord(message.commandParams)?.fingerprint_context ??
       asRecord(message.commandParams)?.fingerprint_runtime ??
       null
@@ -108,6 +138,38 @@ const resolveMissingRequiredFingerprintPatches = (
     return [];
   }
   return requiredPatches;
+};
+
+const summarizeFingerprintRuntimeContext = (
+  fingerprintRuntime: Record<string, unknown> | FingerprintRuntimeContext | null
+): Record<string, unknown> | null => {
+  if (!fingerprintRuntime) {
+    return null;
+  }
+  const record = fingerprintRuntime as Record<string, unknown>;
+  const execution = asRecord(record.execution);
+  const injection = asRecord(record.injection);
+  return {
+    profile: asString(record.profile),
+    source: asString(record.source),
+    execution: execution
+      ? {
+          live_allowed: execution.live_allowed === true,
+          live_decision: asString(execution.live_decision),
+          allowed_execution_modes: asStringArray(execution.allowed_execution_modes),
+          reason_codes: asStringArray(execution.reason_codes)
+        }
+      : null,
+    injection: injection
+      ? {
+          installed: injection.installed === true,
+          source: asString(injection.source),
+          required_patches: asStringArray(injection.required_patches),
+          missing_required_patches: asStringArray(injection.missing_required_patches),
+          error: asString(injection.error)
+        }
+      : null
+  };
 };
 
 export const resolveFingerprintContextForContract = (
@@ -672,6 +734,15 @@ export class ContentScriptHandler {
     if (!fingerprintRuntime) {
       return null;
     }
+    const existingInjection = asRecord(
+      (fingerprintRuntime as unknown as Record<string, unknown>).injection
+    );
+    if (
+      existingInjection?.installed === true &&
+      asStringArray(existingInjection.missing_required_patches).length === 0
+    ) {
+      return fingerprintRuntime as unknown as Record<string, unknown>;
+    }
 
     try {
       const requiredPatches = resolveRequiredFingerprintPatches(fingerprintRuntime);
@@ -845,6 +916,7 @@ export class ContentScriptHandler {
   }
 
   async #handleXhsSearch(message: BackgroundToContentMessage): Promise<void> {
+    const messageFingerprintContext = resolveFingerprintContextFromMessage(message);
     const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
     const requestedExecutionMode = resolveRequestedExecutionMode(message);
     const missingRequiredPatches =
@@ -869,7 +941,14 @@ export class ContentScriptHandler {
             requested_execution_mode: requestedExecutionMode,
             missing_required_patches: missingRequiredPatches
           },
-          ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {})
+          ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {}),
+          fingerprint_forward_diagnostics: {
+            direct_message_context: summarizeFingerprintRuntimeContext(
+              ensureFingerprintRuntimeContext(message.fingerprintContext ?? null)
+            ),
+            resolved_message_context: summarizeFingerprintRuntimeContext(messageFingerprintContext),
+            installed_runtime_context: summarizeFingerprintRuntimeContext(fingerprintRuntime)
+          }
         }
       });
       return;

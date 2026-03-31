@@ -1553,6 +1553,13 @@ const createFailure = (code, message, details, observability, diagnosis, gate, a
 const buildEditorInputEvidence = (result) => ({
     validation_action: "editor_input",
     target_page: "creator.xiaohongshu.com/publish",
+    editor_locator: result.editor_locator,
+    input_text: result.input_text,
+    before_text: result.before_text,
+    visible_text: result.visible_text,
+    post_blur_text: result.post_blur_text,
+    focus_confirmed: result.focus_confirmed,
+    preserved_after_blur: result.preserved_after_blur,
     success_signals: result.success_signals,
     failure_signals: result.failure_signals,
     minimum_replay: result.minimum_replay,
@@ -2120,8 +2127,290 @@ const executeXhsSearch = async (input, env) => {
 };
 return { executeXhsSearch };
 })();
+const __webenvoy_module_xhs_editor_input = (() => {
+const TARGET_PAGE = "creator.xiaohongshu.com/publish";
+const BASE_MINIMUM_REPLAY = ["focus_editor", "type_short_text", "blur_or_reobserve"];
+const ARTICLE_EDIT_MODE_REPLAY_STEP = "enter_editable_mode";
+const EDITOR_MODE_ENTRY_LABELS = ["新的创作"];
+const EDITOR_MODE_ENTRY_WAIT_MS = 200;
+const EDITOR_MODE_ENTRY_MAX_ATTEMPTS = 10;
+const EDITOR_SELECTORS = [
+    '[contenteditable="true"][role="textbox"]',
+    '[contenteditable="true"][data-lexical-editor="true"]',
+    '[contenteditable="true"]',
+    "textarea",
+    'input[type="text"]'
+];
+const asHTMLElement = (value) => value instanceof HTMLElement ? value : null;
+const isVisible = (element) => {
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    return (rect.width > 0 &&
+        rect.height > 0 &&
+        style.visibility !== "hidden" &&
+        style.display !== "none");
+};
+const buildLocator = (element) => {
+    if (element.id) {
+        return `#${element.id}`;
+    }
+    const className = typeof element.className === "string"
+        ? element.className
+            .split(/\s+/)
+            .map((token) => token.trim())
+            .filter((token) => token.length > 0)
+            .slice(0, 2)
+            .join(".")
+        : "";
+    if (className) {
+        return `${element.tagName.toLowerCase()}.${className}`;
+    }
+    return element.tagName.toLowerCase();
+};
+const collectSearchRoots = (root) => {
+    const roots = [root];
+    const descendants = [...root.querySelectorAll("*")];
+    for (const element of descendants) {
+        if (element.shadowRoot) {
+            roots.push(...collectSearchRoots(element.shadowRoot));
+        }
+    }
+    const iframes = [...root.querySelectorAll("iframe")];
+    for (const iframe of iframes) {
+        try {
+            const frameDocument = iframe.contentDocument;
+            if (frameDocument) {
+                roots.push(...collectSearchRoots(frameDocument));
+            }
+        }
+        catch {
+            continue;
+        }
+    }
+    return roots;
+};
+const findEditorElements = () => {
+    const seen = new Set();
+    const results = [];
+    const roots = collectSearchRoots(document);
+    for (const selector of EDITOR_SELECTORS) {
+        for (const searchRoot of roots) {
+            const candidates = [...searchRoot.querySelectorAll(selector)]
+                .map((entry) => asHTMLElement(entry))
+                .filter((entry) => entry !== null && isVisible(entry));
+            for (const candidate of candidates) {
+                if (seen.has(candidate)) {
+                    continue;
+                }
+                seen.add(candidate);
+                results.push(candidate);
+            }
+        }
+    }
+    return results;
+};
+const readElementText = (element) => {
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+        return element.value;
+    }
+    return element.textContent?.trim() ?? "";
+};
+const focusElement = (element) => {
+    if (typeof element.click === "function") {
+        element.click();
+    }
+    if (typeof element.focus === "function") {
+        element.focus();
+    }
+    return document.activeElement === element || element.contains(document.activeElement);
+};
+const appendTextToEditable = (element, text) => {
+    const current = readElementText(element);
+    const next = current.length > 0 ? `${current} ${text}` : text;
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+        element.value = next;
+        element.dispatchEvent(new InputEvent("input", { bubbles: true, data: text }));
+        element.dispatchEvent(new Event("change", { bubbles: true }));
+        return;
+    }
+    const selection = window.getSelection();
+    if (selection) {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+    }
+    let inserted = false;
+    if (typeof document.execCommand === "function") {
+        try {
+            inserted = document.execCommand("insertText", false, current.length > 0 ? ` ${text}` : text);
+        }
+        catch {
+            inserted = false;
+        }
+    }
+    if (!inserted) {
+        element.textContent = next;
+    }
+    element.dispatchEvent(new InputEvent("input", { bubbles: true, data: text }));
+};
+const findVisibleButtonByLabels = (scope, labels) => {
+    const buttons = [...scope.querySelectorAll("button, [role='button']")]
+        .map((entry) => asHTMLElement(entry))
+        .filter((entry) => entry !== null && isVisible(entry));
+    for (const button of buttons) {
+        const text = button.innerText?.trim() ?? button.textContent?.trim() ?? "";
+        if (labels.some((label) => text.includes(label))) {
+            return button;
+        }
+    }
+    return null;
+};
+const sleep = async (timeoutMs) => {
+    await new Promise((resolve) => setTimeout(resolve, timeoutMs));
+};
+const buildMinimumReplay = (activation) => activation === "activated"
+    ? [ARTICLE_EDIT_MODE_REPLAY_STEP, ...BASE_MINIMUM_REPLAY]
+    : [...BASE_MINIMUM_REPLAY];
+const isTargetPage = () => window.location.href.includes(TARGET_PAGE);
+const isArticleTargetPage = () => {
+    if (!isTargetPage()) {
+        return false;
+    }
+    try {
+        const url = new URL(window.location.href);
+        return url.searchParams.get("target") === "article";
+    }
+    catch {
+        return false;
+    }
+};
+const enterEditableStateIfNeeded = async () => {
+    if (!isArticleTargetPage()) {
+        return "already_ready";
+    }
+    if (findEditorElements().length > 0) {
+        return "already_ready";
+    }
+    const createButton = findVisibleButtonByLabels(document, EDITOR_MODE_ENTRY_LABELS);
+    if (!createButton) {
+        return "entry_missing";
+    }
+    createButton.click();
+    for (let attempt = 0; attempt < EDITOR_MODE_ENTRY_MAX_ATTEMPTS; attempt += 1) {
+        await Promise.resolve();
+        await sleep(EDITOR_MODE_ENTRY_WAIT_MS);
+        await Promise.resolve();
+        if (findEditorElements().length > 0) {
+            return "activated";
+        }
+    }
+    return "activation_failed";
+};
+const performEditorInputValidation = async (input) => {
+    const activation = await enterEditableStateIfNeeded();
+    const editors = findEditorElements();
+    const minimumReplay = buildMinimumReplay(activation);
+    if (editors.length === 0) {
+        const failureSignals = activation === "entry_missing"
+            ? ["editable_state_entry_missing", "dom_variant"]
+            : activation === "activation_failed"
+                ? ["editable_state_not_entered", "dom_variant"]
+                : ["dom_variant"];
+        return {
+            ok: false,
+            mode: "dom_editor_input_validation",
+            editor_locator: null,
+            input_text: input.text,
+            before_text: "",
+            visible_text: "",
+            post_blur_text: "",
+            focus_confirmed: false,
+            preserved_after_blur: false,
+            success_signals: [],
+            failure_signals: failureSignals,
+            minimum_replay: minimumReplay
+        };
+    }
+    const normalizedPageText = document.body?.innerText ?? "";
+    let bestAttempt = null;
+    for (const editor of editors) {
+        const beforeText = readElementText(editor);
+        const focusConfirmed = focusElement(editor);
+        appendTextToEditable(editor, input.text);
+        await Promise.resolve();
+        const visibleText = readElementText(editor);
+        if (typeof editor.blur === "function") {
+            editor.blur();
+        }
+        await Promise.resolve();
+        const postBlurText = readElementText(editor);
+        const preservedAfterBlur = postBlurText.includes(input.text);
+        const successSignals = activation === "activated" ? ["editable_state_entered"] : [];
+        const failureSignals = [];
+        if (focusConfirmed) {
+            successSignals.push("editor_focused");
+        }
+        else {
+            failureSignals.push("focus_lost");
+        }
+        if (visibleText.includes(input.text)) {
+            successSignals.push("text_visible");
+        }
+        else {
+            failureSignals.push("dom_variant");
+        }
+        if (preservedAfterBlur) {
+            successSignals.push("text_persisted_after_blur");
+        }
+        else {
+            failureSignals.push("text_reverted");
+        }
+        if (/风险|risk|提示|异常/u.test(normalizedPageText)) {
+            failureSignals.push("risk_prompt");
+        }
+        const attempt = {
+            ok: focusConfirmed && visibleText.includes(input.text) && preservedAfterBlur,
+            mode: "dom_editor_input_validation",
+            editor_locator: buildLocator(editor),
+            input_text: input.text,
+            before_text: beforeText,
+            visible_text: visibleText,
+            post_blur_text: postBlurText,
+            focus_confirmed: focusConfirmed,
+            preserved_after_blur: preservedAfterBlur,
+            success_signals: successSignals,
+            failure_signals: failureSignals,
+            minimum_replay: minimumReplay
+        };
+        if (attempt.ok) {
+            return attempt;
+        }
+        if (!bestAttempt || attempt.success_signals.length > bestAttempt.success_signals.length) {
+            bestAttempt = attempt;
+        }
+    }
+    return (bestAttempt ?? {
+        ok: false,
+        mode: "dom_editor_input_validation",
+        editor_locator: null,
+        input_text: input.text,
+        before_text: "",
+        visible_text: "",
+        post_blur_text: "",
+        focus_confirmed: false,
+        preserved_after_blur: false,
+        success_signals: [],
+        failure_signals: ["dom_variant"],
+        minimum_replay: minimumReplay
+    });
+};
+return { performEditorInputValidation };
+})();
 const __webenvoy_module_content_script_handler = (() => {
 const { executeXhsSearch } = __webenvoy_module_xhs_search;
+const { performEditorInputValidation } = __webenvoy_module_xhs_editor_input;
 const {
   DEFAULT_MIME_TYPE_DESCRIPTORS,
   DEFAULT_PLUGIN_DESCRIPTORS,
@@ -2141,12 +2430,33 @@ const resolveRequestedExecutionMode = (message) => {
     const options = asRecord(message.commandParams.options);
     return asString(options?.requested_execution_mode);
 };
+const resolveAttestedFingerprintRuntimeContext = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    const injection = asRecord(record.injection);
+    const cloneWithInjection = (runtime) => injection
+        ? {
+            ...runtime,
+            injection: JSON.parse(JSON.stringify(injection))
+        }
+        : { ...runtime };
+    const direct = ensureFingerprintRuntimeContext(record);
+    if (direct) {
+        return cloneWithInjection(direct);
+    }
+    const sanitized = { ...record };
+    delete sanitized.injection;
+    const normalized = ensureFingerprintRuntimeContext(sanitized);
+    return normalized ? cloneWithInjection(normalized) : null;
+};
 const resolveFingerprintContextFromMessage = (message) => {
-    const direct = ensureFingerprintRuntimeContext(message.fingerprintContext ?? null);
+    const direct = resolveAttestedFingerprintRuntimeContext(message.fingerprintContext ?? null);
     if (direct) {
         return direct;
     }
-    const fallback = ensureFingerprintRuntimeContext(asRecord(message.commandParams)?.fingerprint_context ??
+    const fallback = resolveAttestedFingerprintRuntimeContext(asRecord(message.commandParams)?.fingerprint_context ??
         asRecord(message.commandParams)?.fingerprint_runtime ??
         null);
     return fallback ?? null;
@@ -2174,6 +2484,35 @@ const resolveMissingRequiredFingerprintPatches = (fingerprintRuntime) => {
         return [];
     }
     return requiredPatches;
+};
+const summarizeFingerprintRuntimeContext = (fingerprintRuntime) => {
+    if (!fingerprintRuntime) {
+        return null;
+    }
+    const record = fingerprintRuntime;
+    const execution = asRecord(record.execution);
+    const injection = asRecord(record.injection);
+    return {
+        profile: asString(record.profile),
+        source: asString(record.source),
+        execution: execution
+            ? {
+                live_allowed: execution.live_allowed === true,
+                live_decision: asString(execution.live_decision),
+                allowed_execution_modes: asStringArray(execution.allowed_execution_modes),
+                reason_codes: asStringArray(execution.reason_codes)
+            }
+            : null,
+        injection: injection
+            ? {
+                installed: injection.installed === true,
+                source: asString(injection.source),
+                required_patches: asStringArray(injection.required_patches),
+                missing_required_patches: asStringArray(injection.missing_required_patches),
+                error: asString(injection.error)
+            }
+            : null
+    };
 };
 const resolveFingerprintContextForContract = (message) => resolveFingerprintContextFromMessage({
     kind: "forward",
@@ -2623,6 +2962,11 @@ class ContentScriptHandler {
         if (!fingerprintRuntime) {
             return null;
         }
+        const existingInjection = asRecord(fingerprintRuntime.injection);
+        if (existingInjection?.installed === true &&
+            asStringArray(existingInjection.missing_required_patches).length === 0) {
+            return fingerprintRuntime;
+        }
         try {
             const requiredPatches = resolveRequiredFingerprintPatches(fingerprintRuntime);
             const preInstallAudioSample = requiredPatches.includes("audio_context")
@@ -2780,6 +3124,7 @@ class ContentScriptHandler {
         }
     }
     async #handleXhsSearch(message) {
+        const messageFingerprintContext = resolveFingerprintContextFromMessage(message);
         const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
         const requestedExecutionMode = resolveRequestedExecutionMode(message);
         const missingRequiredPatches = fingerprintRuntime !== null ? resolveMissingRequiredFingerprintPatches(fingerprintRuntime) : [];
@@ -2801,7 +3146,12 @@ class ContentScriptHandler {
                         requested_execution_mode: requestedExecutionMode,
                         missing_required_patches: missingRequiredPatches
                     },
-                    ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {})
+                    ...(fingerprintRuntime ? { fingerprint_runtime: fingerprintRuntime } : {}),
+                    fingerprint_forward_diagnostics: {
+                        direct_message_context: summarizeFingerprintRuntimeContext(ensureFingerprintRuntimeContext(message.fingerprintContext ?? null)),
+                        resolved_message_context: summarizeFingerprintRuntimeContext(messageFingerprintContext),
+                        installed_runtime_context: summarizeFingerprintRuntimeContext(fingerprintRuntime)
+                    }
                 }
             });
             return;

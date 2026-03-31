@@ -2,6 +2,11 @@ import { randomUUID } from "node:crypto";
 import { CliError } from "../core/errors.js";
 import { buildRuntimeBootstrapContextId } from "./runtime-bootstrap.js";
 import { ProfileRuntimeService } from "./profile-runtime.js";
+const LIVE_EXECUTION_MODES = new Set([
+    "live_read_limited",
+    "live_read_high_risk",
+    "live_write"
+]);
 const OFFICIAL_CHROME_BOOTSTRAP_READINESS_MAX_ATTEMPTS = 5;
 const OFFICIAL_CHROME_BOOTSTRAP_READINESS_RETRY_DELAY_MS = 50;
 const profileRuntime = new ProfileRuntimeService();
@@ -202,7 +207,7 @@ export const prepareOfficialChromeRuntime = async (input) => {
                 });
             }
             if (isRuntimeBootstrapPendingCode(bootstrapResult.error.code)) {
-                return;
+                return undefined;
             }
             if (isRuntimeBootstrapFailureCode(bootstrapResult.error.code)) {
                 throw new CliError(bootstrapResult.error.code, bootstrapResult.error.message, {
@@ -250,8 +255,13 @@ export const prepareOfficialChromeRuntime = async (input) => {
                 retryable: true
             });
         }
+        const attestedFingerprintRuntime = asObject(payload?.fingerprint_runtime);
+        return attestedFingerprintRuntime
+            ? attestedFingerprintRuntime
+            : undefined;
     };
-    if (runtimeReadiness === "ready" && lockHeld) {
+    const forceExecutionBootstrap = LIVE_EXECUTION_MODES.has(input.requestedExecutionMode);
+    if (runtimeReadiness === "ready" && lockHeld && !forceExecutionBootstrap) {
         return applyReadinessToStatus(status, {
             runtimeReadiness,
             identityBindingState,
@@ -272,8 +282,11 @@ export const prepareOfficialChromeRuntime = async (input) => {
     if (lockHeld &&
         identityBindingState === "bound" &&
         transportState === "ready" &&
-        (bootstrapState === "not_started" || bootstrapState === "pending" || bootstrapState === "stale")) {
-        await attemptExecutionBootstrap();
+        (forceExecutionBootstrap ||
+            bootstrapState === "not_started" ||
+            bootstrapState === "pending" ||
+            bootstrapState === "stale")) {
+        const executionFingerprintContext = await attemptExecutionBootstrap();
         status = await readStatus();
         profileState =
             typeof status.profileState === "string" ? status.profileState : "uninitialized";
@@ -314,13 +327,16 @@ export const prepareOfficialChromeRuntime = async (input) => {
             }
         }
         if (runtimeReadiness === "ready") {
-            return applyReadinessToStatus(status, {
-                runtimeReadiness,
-                identityBindingState,
-                bootstrapState,
-                transportState,
-                lockHeld
-            });
+            return {
+                ...applyReadinessToStatus(status, {
+                    runtimeReadiness,
+                    identityBindingState,
+                    bootstrapState,
+                    transportState,
+                    lockHeld
+                }),
+                ...(executionFingerprintContext ? { executionFingerprintContext } : {})
+            };
         }
     }
     if (identityBindingState === "missing") {

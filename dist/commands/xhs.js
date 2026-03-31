@@ -115,6 +115,7 @@ const parseSearchInput = (input, abilityId) => {
     return normalized;
 };
 const normalizeGateOptions = (options, abilityId) => {
+    const allowMissingTargetTabId = options.issue_scope === "issue_208" && options.validation_action === "editor_input";
     const targetDomain = typeof options.target_domain === "string" && options.target_domain.trim().length > 0
         ? options.target_domain.trim()
         : null;
@@ -124,7 +125,7 @@ const normalizeGateOptions = (options, abilityId) => {
     const targetTabId = typeof options.target_tab_id === "number" && Number.isInteger(options.target_tab_id)
         ? options.target_tab_id
         : null;
-    if (targetTabId === null) {
+    if (targetTabId === null && !allowMissingTargetTabId) {
         throw invalidAbilityInput("TARGET_TAB_ID_INVALID", abilityId);
     }
     const targetPage = typeof options.target_page === "string" && options.target_page.trim().length > 0
@@ -148,12 +149,13 @@ const normalizeGateOptions = (options, abilityId) => {
         options: {
             ...options,
             target_domain: targetDomain,
-            target_tab_id: targetTabId,
             target_page: targetPage,
-            requested_execution_mode: requestedExecutionMode
+            requested_execution_mode: requestedExecutionMode,
+            ...(targetTabId !== null ? { target_tab_id: targetTabId } : {})
         }
     };
 };
+export const normalizeGateOptionsForContract = normalizeGateOptions;
 const buildCapabilityResult = (ability, summary) => ({
     capability_result: {
         ability_id: ability.id,
@@ -173,6 +175,20 @@ const asDiagnosisInput = (value) => {
 };
 const pickGateErrorDetails = (payload, details) => {
     const detailKeys = [
+        "validation_action",
+        "target_page",
+        "editor_locator",
+        "input_text",
+        "before_text",
+        "visible_text",
+        "post_blur_text",
+        "focus_confirmed",
+        "preserved_after_blur",
+        "success_signals",
+        "failure_signals",
+        "minimum_replay",
+        "out_of_scope_actions",
+        "execution_failure",
         "scope_context",
         "gate_input",
         "gate_outcome",
@@ -232,7 +248,7 @@ const toTransportCliError = (error, ability) => new CliError("ERR_RUNTIME_UNAVAI
     }
 });
 export const ensureOfficialChromeRuntimeReady = async (context, ability, requestedExecutionMode, bridge, fingerprintContext, _gate, readStatus) => {
-    await prepareOfficialChromeRuntime({
+    const status = await prepareOfficialChromeRuntime({
         context,
         consumerId: ability.id,
         requestedExecutionMode,
@@ -240,6 +256,7 @@ export const ensureOfficialChromeRuntimeReady = async (context, ability, request
         fingerprintContext,
         readStatus
     });
+    return status.executionFingerprintContext;
 };
 const xhsSearch = async (context) => {
     const envelope = parseAbilityEnvelope(context.params);
@@ -276,16 +293,16 @@ const xhsSearch = async (context) => {
         requestedExecutionMode: gate.requestedExecutionMode
     });
     try {
-        await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, gate);
+        const executionFingerprintContext = (await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, gate)) ?? fingerprintContext;
         const commandParams = appendFingerprintContext({
             target_domain: gate.targetDomain,
-            target_tab_id: gate.targetTabId,
             target_page: gate.targetPage,
             requested_execution_mode: gate.requestedExecutionMode,
             ability: envelope.ability,
             input: parseSearchInput(envelope.input, envelope.ability.id),
-            options: gate.options
-        }, fingerprintContext);
+            options: gate.options,
+            ...(gate.targetTabId !== null ? { target_tab_id: gate.targetTabId } : {})
+        }, executionFingerprintContext);
         const bridgeResult = await bridge.runCommand({
             runId: context.run_id,
             profile: context.profile,

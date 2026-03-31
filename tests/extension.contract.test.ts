@@ -10,6 +10,7 @@ const backgroundBuildPath = path.join(extensionRoot, "build", "background.js");
 const mainWorldBridgeBuildPath = path.join(extensionRoot, "build", "main-world-bridge.js");
 const contentScriptBuildPath = path.join(extensionRoot, "build", "content-script.js");
 const contentScriptHandlerBuildPath = path.join(extensionRoot, "build", "content-script-handler.js");
+const xhsEditorInputBuildPath = path.join(extensionRoot, "build", "xhs-editor-input.js");
 const fingerprintProfileSharedPath = path.join(extensionRoot, "shared", "fingerprint-profile.js");
 const expectedMainWorldBridgeMatches = [
   "https://www.xiaohongshu.com/*",
@@ -54,6 +55,7 @@ describe("extension build contract", () => {
     expect(fs.existsSync(mainWorldBridgeBuildPath)).toBe(true);
     expect(fs.existsSync(contentScriptBuildPath)).toBe(true);
     expect(fs.existsSync(contentScriptHandlerBuildPath)).toBe(true);
+    expect(fs.existsSync(xhsEditorInputBuildPath)).toBe(true);
     expect(fs.existsSync(fingerprintProfileSharedPath)).toBe(true);
   });
 
@@ -65,9 +67,13 @@ describe("extension build contract", () => {
 
   it("emits chrome-loadable classic content-script bundle without top-level esm imports", () => {
     const contentScriptBuild = fs.readFileSync(contentScriptBuildPath, "utf8");
+    const xhsEditorInputBuild = fs.readFileSync(xhsEditorInputBuildPath, "utf8");
     expect(contentScriptBuild).toContain("bootstrapContentScript");
     expect(contentScriptBuild).toContain("installMainWorldEventChannelSecret");
     expect(contentScriptBuild).toContain("installFingerprintRuntimeViaMainWorld");
+    expect(xhsEditorInputBuild).toContain("performEditorInputValidation");
+    expect(xhsEditorInputBuild).toContain("新的创作");
+    expect(xhsEditorInputBuild).toContain("enter_editable_mode");
     expect(contentScriptBuild).not.toMatch(/^\s*import\s+/m);
   });
 

@@ -730,6 +730,13 @@ const createFailure = (
 const buildEditorInputEvidence = (result: EditorInputValidationResult): JsonRecord => ({
   validation_action: "editor_input",
   target_page: "creator.xiaohongshu.com/publish",
+  editor_locator: result.editor_locator,
+  input_text: result.input_text,
+  before_text: result.before_text,
+  visible_text: result.visible_text,
+  post_blur_text: result.post_blur_text,
+  focus_confirmed: result.focus_confirmed,
+  preserved_after_blur: result.preserved_after_blur,
   success_signals: result.success_signals,
   failure_signals: result.failure_signals,
   minimum_replay: result.minimum_replay,

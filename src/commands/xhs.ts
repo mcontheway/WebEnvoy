@@ -180,11 +180,13 @@ const normalizeGateOptions = (
   abilityId: string
 ): {
   targetDomain: string;
-  targetTabId: number;
+  targetTabId: number | null;
   targetPage: string;
   requestedExecutionMode: XhsExecutionMode;
   options: JsonObject;
 } => {
+  const allowMissingTargetTabId =
+    options.issue_scope === "issue_208" && options.validation_action === "editor_input";
   const targetDomain =
     typeof options.target_domain === "string" && options.target_domain.trim().length > 0
       ? options.target_domain.trim()
@@ -197,7 +199,7 @@ const normalizeGateOptions = (
     typeof options.target_tab_id === "number" && Number.isInteger(options.target_tab_id)
       ? options.target_tab_id
       : null;
-  if (targetTabId === null) {
+  if (targetTabId === null && !allowMissingTargetTabId) {
     throw invalidAbilityInput("TARGET_TAB_ID_INVALID", abilityId);
   }
 
@@ -226,12 +228,14 @@ const normalizeGateOptions = (
     options: {
       ...options,
       target_domain: targetDomain,
-      target_tab_id: targetTabId,
       target_page: targetPage,
-      requested_execution_mode: requestedExecutionMode
+      requested_execution_mode: requestedExecutionMode,
+      ...(targetTabId !== null ? { target_tab_id: targetTabId } : {})
     }
   };
 };
+
+export const normalizeGateOptionsForContract = normalizeGateOptions;
 
 const buildCapabilityResult = (ability: AbilityRef, summary?: JsonObject): JsonObject => ({
   capability_result: {
@@ -258,6 +262,20 @@ const pickGateErrorDetails = (
   details?: JsonObject | null
 ): JsonObject => {
   const detailKeys = [
+    "validation_action",
+    "target_page",
+    "editor_locator",
+    "input_text",
+    "before_text",
+    "visible_text",
+    "post_blur_text",
+    "focus_confirmed",
+    "preserved_after_blur",
+    "success_signals",
+    "failure_signals",
+    "minimum_replay",
+    "out_of_scope_actions",
+    "execution_failure",
     "scope_context",
     "gate_input",
     "gate_outcome",
@@ -335,8 +353,8 @@ export const ensureOfficialChromeRuntimeReady = async (
   fingerprintContext: ReturnType<typeof buildFingerprintContextForMeta>,
   _gate: ReturnType<typeof normalizeGateOptions>,
   readStatus?: () => Promise<JsonObject>
-): Promise<void> => {
-  await prepareOfficialChromeRuntime({
+): Promise<ReturnType<typeof buildFingerprintContextForMeta> | undefined> => {
+  const status = await prepareOfficialChromeRuntime({
     context,
     consumerId: ability.id,
     requestedExecutionMode,
@@ -344,6 +362,7 @@ export const ensureOfficialChromeRuntimeReady = async (
     fingerprintContext,
     readStatus
   });
+  return status.executionFingerprintContext;
 };
 
 const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResult> => {
@@ -387,25 +406,26 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
   });
 
   try {
-    await ensureOfficialChromeRuntimeReady(
-      context,
-      envelope.ability,
-      gate.requestedExecutionMode,
-      bridge,
-      fingerprintContext,
-      gate
-    );
+    const executionFingerprintContext =
+      (await ensureOfficialChromeRuntimeReady(
+        context,
+        envelope.ability,
+        gate.requestedExecutionMode,
+        bridge,
+        fingerprintContext,
+        gate
+      )) ?? fingerprintContext;
     const commandParams = appendFingerprintContext(
       {
         target_domain: gate.targetDomain,
-        target_tab_id: gate.targetTabId,
         target_page: gate.targetPage,
         requested_execution_mode: gate.requestedExecutionMode,
         ability: envelope.ability,
         input: parseSearchInput(envelope.input, envelope.ability.id),
-        options: gate.options
+        options: gate.options,
+        ...(gate.targetTabId !== null ? { target_tab_id: gate.targetTabId } : {})
       },
-      fingerprintContext
+      executionFingerprintContext
     );
     const bridgeResult = await bridge.runCommand({
       runId: context.run_id,

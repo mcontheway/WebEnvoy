@@ -2,6 +2,7 @@
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 const MAIN_WORLD_ATTACH_HOOK_KEY = "__webenvoy_attachMainWorldEventChannel__";
+const MAIN_WORLD_INSTALL_HOOK_KEY = "__webenvoy_installFingerprintRuntime__";
 let activeMainWorldEventChannel = null;
 let activeMainWorldRequestListener = null;
 const patchedAudioContextPrototypes = new WeakSet();
@@ -388,6 +389,12 @@ Object.defineProperty(mainWindow, MAIN_WORLD_ATTACH_HOOK_KEY, {
     enumerable: false,
     writable: false,
     value: (requestEvent, resultEvent) => attachMainWorldEventChannelIfValid(requestEvent, resultEvent)
+});
+Object.defineProperty(mainWindow, MAIN_WORLD_INSTALL_HOOK_KEY, {
+    configurable: true,
+    enumerable: false,
+    writable: false,
+    value: (runtime) => installFingerprintRuntime(asRecord(runtime))
 });
 const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
 if (expectedMainWorldEventChannel) {

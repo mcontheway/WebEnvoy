@@ -6,6 +6,7 @@ const defaultHandshakeTimeoutMs = 30_000;
 const defaultNativeHostName = "com.webenvoy.host";
 const bridgeProtocol = "webenvoy.native-bridge.v1";
 const MAIN_WORLD_ATTACH_HOOK_KEY = "__webenvoy_attachMainWorldEventChannel__";
+const MAIN_WORLD_INSTALL_HOOK_KEY = "__webenvoy_installFingerprintRuntime__";
 const maxRecoveryQueuedForwards = 5;
 const readTimeoutMs = (value) => {
     if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -101,7 +102,7 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 const resolveFingerprintContext = (commandParams) => {
-    const direct = ensureFingerprintRuntimeContext(commandParams.fingerprint_context) ??
+    const direct = resolveAttestedFingerprintRuntimeContext(commandParams.fingerprint_context) ??
         resolveAttestedFingerprintRuntimeContext(commandParams.fingerprint_runtime);
     const context = direct;
     return context ? { ...context } : null;
@@ -111,14 +112,24 @@ const resolveAttestedFingerprintRuntimeContext = (value) => {
     if (!record) {
         return null;
     }
+    const injection = asRecord(record.injection);
+    const cloneWithInjection = (runtime) => injection
+        ? {
+            ...runtime,
+            injection: JSON.parse(JSON.stringify(injection))
+        }
+        : { ...runtime };
     const direct = ensureFingerprintRuntimeContext(record);
+    if (direct) {
+        return cloneWithInjection(direct);
+    }
     const sanitized = { ...record };
     delete sanitized.injection;
     const normalized = ensureFingerprintRuntimeContext(sanitized);
     if (normalized) {
-        return { ...normalized };
+        return cloneWithInjection(normalized);
     }
-    return direct ? { ...direct } : null;
+    return null;
 };
 const hasSuccessfulExecutionAttestation = (payload) => {
     const startupTrust = asRecord(payload.startup_fingerprint_trust);
@@ -446,7 +457,19 @@ const createRelayXhsGatePayload = (input) => {
     };
 };
 const buildTrustedFingerprintContextKey = (profile, sessionId) => `${profile}::${sessionId}`;
-const serializeFingerprintRuntimeContext = (fingerprintRuntime) => JSON.stringify(fingerprintRuntime);
+const serializeFingerprintRuntimeContext = (fingerprintRuntime) => {
+    const record = { ...fingerprintRuntime };
+    delete record.injection;
+    return JSON.stringify(record);
+};
+const hasInstalledFingerprintInjection = (fingerprintRuntime) => {
+    if (!fingerprintRuntime) {
+        return false;
+    }
+    const injection = asRecord(fingerprintRuntime.injection);
+    return (injection?.installed === true &&
+        asStringArray(injection.missing_required_patches).length === 0);
+};
 const isFingerprintRuntimeContextEquivalent = (left, right) => serializeFingerprintRuntimeContext(left) === serializeFingerprintRuntimeContext(right);
 const TRUST_INVALIDATION_COMMANDS = new Set(["runtime.stop", "runtime.start", "runtime.login"]);
 // Trust must come from startup trust bound to an allowlist page, not generic bridge commands.
@@ -1057,8 +1080,9 @@ class ChromeBackgroundBridge {
         if (!explicitSessionId || explicitSessionId !== this.#sessionId) {
             return;
         }
-        // Startup trust can attest runtime bootstrap readiness in a runtime-generic way.
-        this.#promoteRuntimeBootstrapStateFromExecutionSignal(profile, explicitSessionId, fingerprintRuntime, asNonEmptyString(startupTrust.run_id ?? null), asNonEmptyString(startupTrust.runtime_context_id ?? null));
+        if (hasInstalledFingerprintInjection(fingerprintRuntime)) {
+            this.#promoteRuntimeBootstrapStateFromExecutionSignal(profile, explicitSessionId, fingerprintRuntime, asNonEmptyString(startupTrust.run_id ?? null), asNonEmptyString(startupTrust.runtime_context_id ?? null));
+        }
         const senderBinding = await this.#resolveStartupTrustSenderBinding(sender);
         if (!senderBinding) {
             return;
@@ -1071,6 +1095,7 @@ class ChromeBackgroundBridge {
         });
     }
     #normalizeTrustedFingerprintRuntime(fingerprintRuntime) {
+        const injection = asRecord(fingerprintRuntime.injection);
         return {
             profile: fingerprintRuntime.profile,
             source: fingerprintRuntime.source,
@@ -1081,7 +1106,8 @@ class ChromeBackgroundBridge {
                 ? JSON.parse(JSON.stringify(fingerprintRuntime.fingerprint_patch_manifest))
                 : null,
             fingerprint_consistency_check: JSON.parse(JSON.stringify(fingerprintRuntime.fingerprint_consistency_check)),
-            execution: JSON.parse(JSON.stringify(fingerprintRuntime.execution))
+            execution: JSON.parse(JSON.stringify(fingerprintRuntime.execution)),
+            ...(injection ? { injection: JSON.parse(JSON.stringify(injection)) } : {})
         };
     }
     #upsertTrustedFingerprintContext(profile, sessionId, fingerprintRuntime, source) {
@@ -1349,12 +1375,15 @@ class ChromeBackgroundBridge {
             currentBootstrapState.runtimeContextId === runtimeContextId &&
             currentBootstrapState.serializedFingerprintRuntime === serializedFingerprintRuntime;
         const trusted = this.#trustedFingerprintContexts.get(buildTrustedFingerprintContextKey(profile, requestSessionId));
-        const bootstrapReadyFromTrusted = !!trusted &&
+        const trustedHasInstalledInjection = hasInstalledFingerprintInjection(trusted?.fingerprintRuntime ?? null);
+        const trustedMatchesBootstrap = !!trusted &&
             trusted.sessionId === requestSessionId &&
             trusted.runId === runId &&
             trusted.runtimeContextId === runtimeContextId &&
+            trustedHasInstalledInjection;
+        const bootstrapReadyFromTrusted = trustedMatchesBootstrap &&
             trusted.serializedFingerprintRuntime === serializedFingerprintRuntime;
-        if (bootstrapReadyFromState || bootstrapReadyFromTrusted) {
+        if (bootstrapReadyFromState && trustedMatchesBootstrap || bootstrapReadyFromTrusted) {
             this.#emit({
                 id: request.id,
                 status: "success",
@@ -1373,7 +1402,13 @@ class ChromeBackgroundBridge {
                         runtime_context_id: runtimeContextId,
                         profile,
                         status: "ready"
-                    }
+                    },
+                    ...(trustedMatchesBootstrap
+                        ? {
+                            runtime_bootstrap_attested: true,
+                            fingerprint_runtime: trusted?.fingerprintRuntime ?? null
+                        }
+                        : {})
                 },
                 error: null
             });
@@ -1390,8 +1425,59 @@ class ChromeBackgroundBridge {
             updatedAt: new Date().toISOString()
         });
         const bootstrapTargetTabId = await this.#resolveTargetTabId(request);
+        let directInstallResult = null;
         if (bootstrapTargetTabId !== null) {
             await this.#ensureMainWorldEventChannel(bootstrapTargetTabId, mainWorldSecret);
+            directInstallResult = await this.#executeFingerprintInstallInMainWorld(bootstrapTargetTabId, fingerprintRuntime);
+            if (directInstallResult?.installed === true) {
+                const attestedFingerprintRuntime = {
+                    ...fingerprintRuntime,
+                    injection: directInstallResult
+                };
+                const readyState = {
+                    version,
+                    runId,
+                    runtimeContextId,
+                    profile,
+                    sessionId: requestSessionId,
+                    status: "ready",
+                    serializedFingerprintRuntime,
+                    updatedAt: new Date().toISOString()
+                };
+                this.#runtimeBootstrapStates.set(profile, readyState);
+                const sourceDomain = (await this.#resolveAllowlistedTabDomain(bootstrapTargetTabId)) ?? null;
+                this.#upsertTrustedFingerprintContext(profile, requestSessionId, attestedFingerprintRuntime, {
+                    sourceTabId: bootstrapTargetTabId,
+                    sourceDomain,
+                    runId,
+                    runtimeContextId
+                });
+                this.#emit({
+                    id: request.id,
+                    status: "success",
+                    summary: {
+                        session_id: this.#sessionId,
+                        run_id: requestRunId ?? request.id,
+                        command: "runtime.bootstrap",
+                        profile,
+                        relay_path: "host>background>main-world>host"
+                    },
+                    payload: {
+                        method: "runtime.bootstrap.ack",
+                        result: {
+                            version,
+                            run_id: runId,
+                            runtime_context_id: runtimeContextId,
+                            profile,
+                            status: "ready"
+                        },
+                        runtime_bootstrap_attested: true,
+                        fingerprint_runtime: attestedFingerprintRuntime
+                    },
+                    error: null
+                });
+                return;
+            }
         }
         // runtime.bootstrap must be delivered to the execution surface; host response stays pending
         // until explicit attestation is observed from content-script / MAIN world.
@@ -1401,6 +1487,10 @@ class ChromeBackgroundBridge {
             status: "error",
             summary: {
                 relay_path: "host>background"
+            },
+            payload: {
+                bootstrap_target_tab_id: bootstrapTargetTabId,
+                ...(directInstallResult ? { direct_install_result: directInstallResult } : {})
             },
             error: {
                 code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
@@ -1701,6 +1791,12 @@ class ChromeBackgroundBridge {
             ? normalizeXhsSearchCommandParams(rawCommandParams)
             : rawCommandParams;
         const optionParams = asRecord(commandParams.options);
+        const validationAction = asNonEmptyString(Object.prototype.hasOwnProperty.call(commandParams, "validation_action")
+            ? commandParams.validation_action
+            : optionParams?.validation_action);
+        const issueScope = asNonEmptyString(Object.prototype.hasOwnProperty.call(commandParams, "issue_scope")
+            ? commandParams.issue_scope
+            : optionParams?.issue_scope);
         const requestedExecutionMode = parseRequestedExecutionMode(Object.prototype.hasOwnProperty.call(commandParams, "requested_execution_mode")
             ? commandParams.requested_execution_mode
             : optionParams?.requested_execution_mode);
@@ -1785,6 +1881,23 @@ class ChromeBackgroundBridge {
                 }
             });
             return;
+        }
+        if (command === "xhs.search" &&
+            issueScope === "issue_208" &&
+            validationAction === "editor_input") {
+            await this.#ensureContentScriptInjected(tabId);
+        }
+        if (command === "xhs.search" &&
+            requestedLiveMode &&
+            forwardFingerprintContext &&
+            !hasInstalledFingerprintInjection(forwardFingerprintContext)) {
+            const directInstallResult = await this.#executeFingerprintInstallInMainWorld(tabId, forwardFingerprintContext);
+            if (directInstallResult?.installed === true) {
+                forwardFingerprintContext = {
+                    ...forwardFingerprintContext,
+                    injection: directInstallResult
+                };
+            }
         }
         const timeoutMs = requestDeadlineMs - Date.now();
         if (timeoutMs <= 0) {
@@ -2484,6 +2597,7 @@ class ChromeBackgroundBridge {
         if (suppressHostResponse) {
             return;
         }
+        const senderTabId = typeof sender.tab?.id === "number" ? sender.tab.id : null;
         this.#emit({
             id: request.id,
             status: "success",
@@ -2496,7 +2610,10 @@ class ChromeBackgroundBridge {
                 tab_id: sender.tab?.id ?? null,
                 relay_path: "host>background>content-script>background>host"
             },
-            payload,
+            payload: {
+                ...payload,
+                ...(senderTabId !== null ? { target_tab_id: senderTabId } : {})
+            },
             error: null
         });
     }
@@ -2687,6 +2804,55 @@ class ChromeBackgroundBridge {
         catch {
             // Keep runtime.bootstrap compatible with staged injection fallback.
         }
+    }
+    async #executeFingerprintInstallInMainWorld(tabId, fingerprintRuntime) {
+        const executeScript = this.chromeApi.scripting?.executeScript;
+        if (!executeScript) {
+            return null;
+        }
+        const tryInvoke = async () => {
+            const results = await executeScript({
+                target: { tabId },
+                world: "MAIN",
+                func: (hookKey, runtime) => {
+                    const host = window;
+                    const hook = typeof hookKey === "string" ? host[hookKey] : undefined;
+                    if (typeof hook !== "function") {
+                        return null;
+                    }
+                    const result = hook(runtime);
+                    return typeof result === "object" && result !== null ? result : null;
+                },
+                args: [MAIN_WORLD_INSTALL_HOOK_KEY, fingerprintRuntime]
+            });
+            return asRecord(results[0]?.result);
+        };
+        let result = await tryInvoke();
+        if (result) {
+            return result;
+        }
+        await this.#ensureMainWorldBridgeInjected(tabId);
+        result = await tryInvoke();
+        if (result) {
+            return result;
+        }
+        const domInjected = await this.#ensureMainWorldBridgeInjectedViaDom(tabId);
+        if (!domInjected) {
+            return null;
+        }
+        return await tryInvoke();
+    }
+    async #resolveAllowlistedTabDomain(tabId) {
+        const tabs = await this.chromeApi.tabs.query({
+            url: STARTUP_TRUST_ALLOWLIST_URLS
+        });
+        const targetTab = tabs.find((tab) => tab.id === tabId);
+        const tabUrl = typeof targetTab?.url === "string" ? targetTab.url : "";
+        const parsed = parseUrl(tabUrl);
+        if (!parsed || !XHS_DOMAIN_ALLOWLIST.has(parsed.hostname)) {
+            return null;
+        }
+        return parsed.hostname;
     }
     async #ensureContentScriptInjected(tabId) {
         if (!this.chromeApi.scripting?.executeScript) {
