@@ -1,5 +1,5 @@
 import { access, chmod, lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -218,8 +218,25 @@ export const resolveRepoOwnedNativeHostEntryPath = (): string =>
 export const resolveRepoOwnedNativeHostCommand = (): string =>
   `${quoteShellToken(process.execPath)} ${quoteShellToken(resolveRepoOwnedNativeHostEntryPath())}`;
 
-export const resolveProfileScopedNativeBridgeSocketPath = (profileDir: string): string =>
-  join(profileDir, "__webenvoy_native_bridge.sock");
+const PROFILE_SOCKET_FILENAME = "__webenvoy_native_bridge.sock";
+const MAX_UNIX_SOCKET_PATH_LENGTH = 96;
+
+const hashSocketPathSeed = (value: string): string => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+};
+
+export const resolveProfileScopedNativeBridgeSocketPath = (profileDir: string): string => {
+  const directPath = join(profileDir, PROFILE_SOCKET_FILENAME);
+  if (directPath.length <= MAX_UNIX_SOCKET_PATH_LENGTH) {
+    return directPath;
+  }
+  return join(tmpdir(), "webenvoy-native-bridge", `${hashSocketPathSeed(profileDir)}.sock`);
+};
 
 export const isBrowserChannel = (value: string): value is BrowserChannel =>
   BROWSER_CHANNELS.includes(value as BrowserChannel);

@@ -22,29 +22,8 @@ type MainWorldEventChannel = {
   resultEvent: string;
 };
 
-type MainWorldControlRequest =
-  | {
-      scope?: unknown;
-      kind: "attach-channel";
-      requestEvent?: unknown;
-      resultEvent?: unknown;
-    }
-  | {
-      scope?: unknown;
-      kind: "fingerprint-install";
-      runtime?: unknown;
-    };
-
-type MainWorldControlResponse = {
-  ok: boolean;
-  attached?: boolean;
-  result?: unknown;
-  message?: string;
-};
-
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
-const MAIN_WORLD_CONTROL_MESSAGE_SCOPE = "webenvoy.main_world.bridge.control.v1";
 declare const EXPECTED_MAIN_WORLD_REQUEST_EVENT: string | undefined;
 declare const EXPECTED_MAIN_WORLD_RESULT_EVENT: string | undefined;
 let activeMainWorldEventChannel: MainWorldEventChannel | null = null;
@@ -510,55 +489,6 @@ const attachMainWorldEventChannel = (channel: MainWorldEventChannel): void => {
   };
   window.addEventListener(channel.requestEvent, activeMainWorldRequestListener as EventListener);
 };
-
-const emitControlResponse = (port: MessagePort, response: MainWorldControlResponse): void => {
-  try {
-    port.postMessage(response);
-  } finally {
-    if (typeof port.close === "function") {
-      port.close();
-    }
-  }
-};
-
-const handleControlMessageEvent = (event: Event): void => {
-  const messageEvent = event as MessageEvent<unknown>;
-  if (messageEvent.source !== window) {
-    return;
-  }
-  const detail = asRecord(messageEvent.data) as MainWorldControlRequest | null;
-  const port = Array.isArray(messageEvent.ports) ? messageEvent.ports[0] : null;
-  if (
-    !detail ||
-    detail.scope !== MAIN_WORLD_CONTROL_MESSAGE_SCOPE ||
-    typeof detail.kind !== "string" ||
-    !port
-  ) {
-    return;
-  }
-  if (detail.kind === "attach-channel") {
-    emitControlResponse(port, {
-      ok: true,
-      attached: attachMainWorldEventChannelIfValid(detail.requestEvent, detail.resultEvent)
-    });
-    return;
-  }
-  if (detail.kind === "fingerprint-install") {
-    try {
-      emitControlResponse(port, {
-        ok: true,
-        result: installFingerprintRuntime(asRecord(detail.runtime))
-      });
-    } catch (error) {
-      emitControlResponse(port, {
-        ok: false,
-        message: error instanceof Error ? error.message : String(error)
-      });
-    }
-  }
-};
-
-window.addEventListener("message", handleControlMessageEvent as EventListener);
 
 const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
 if (expectedMainWorldEventChannel) {

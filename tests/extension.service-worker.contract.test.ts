@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { startChromeBackgroundBridge } from "../extension/background.js";
-import { resolveMainWorldEventNamesForSecret } from "../extension/content-script-handler.js";
-
-const mainWorldControlMessageScope = "webenvoy.main_world.bridge.control.v1";
 
 const createMockPort = () => {
   const onMessageListeners: Array<(message: Record<string, unknown>) => void> = [];
@@ -633,17 +630,7 @@ describe("extension service worker recovery contract", () => {
         command: "runtime.bootstrap"
       })
     );
-    expect(executeScript).toHaveBeenCalledWith(
-      expect.objectContaining({
-        target: { tabId: 11 },
-        world: "MAIN",
-        args: [
-          mainWorldControlMessageScope,
-          resolveMainWorldEventNamesForSecret("secret-bootstrap-001").requestEvent,
-          resolveMainWorldEventNamesForSecret("secret-bootstrap-001").resultEvent
-        ]
-      })
-    );
+    expect(executeScript).not.toHaveBeenCalled();
 
     await promoteBootstrapReadinessThroughPing({
       runtimeMessageListeners,
@@ -723,12 +710,7 @@ describe("extension service worker recovery contract", () => {
 
     await waitForBridgeTurn();
 
-    expect(executeScript).toHaveBeenCalledWith(
-      expect.objectContaining({
-        target: { tabId: 52 },
-        world: "MAIN"
-      })
-    );
+    expect(executeScript).not.toHaveBeenCalled();
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       52,
       expect.objectContaining({
@@ -738,14 +720,10 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("injects main-world bridge and retries attach when runtime.bootstrap hook is missing", async () => {
+  it("does not rely on a background main-world control channel before runtime.bootstrap forward", async () => {
     const firstPort = createMockPort();
     const { chromeApi, executeScript } = createChromeApi([firstPort]);
     const fingerprintContext = createFingerprintRuntimeContext();
-    executeScript
-      .mockResolvedValueOnce([{ result: false }])
-      .mockResolvedValueOnce([{ result: undefined }])
-      .mockResolvedValueOnce([{ result: true }]);
 
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
@@ -777,37 +755,7 @@ describe("extension service worker recovery contract", () => {
 
     await waitForBridgeTurn();
 
-    expect(executeScript).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        target: { tabId: 11 },
-        world: "MAIN",
-        args: [
-          mainWorldControlMessageScope,
-          resolveMainWorldEventNamesForSecret("secret-bootstrap-main-world-recover-001")
-            .requestEvent,
-          resolveMainWorldEventNamesForSecret("secret-bootstrap-main-world-recover-001").resultEvent
-        ]
-      })
-    );
-    expect(executeScript).toHaveBeenNthCalledWith(2, {
-      target: { tabId: 11 },
-      world: "MAIN",
-      files: ["build/main-world-bridge.js"]
-    });
-    expect(executeScript).toHaveBeenNthCalledWith(
-      3,
-      expect.objectContaining({
-        target: { tabId: 11 },
-        world: "MAIN",
-        args: [
-          mainWorldControlMessageScope,
-          resolveMainWorldEventNamesForSecret("secret-bootstrap-main-world-recover-001")
-            .requestEvent,
-          resolveMainWorldEventNamesForSecret("secret-bootstrap-main-world-recover-001").resultEvent
-        ]
-      })
-    );
+    expect(executeScript).not.toHaveBeenCalled();
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       11,
       expect.objectContaining({
@@ -1040,40 +988,6 @@ describe("extension service worker recovery contract", () => {
       const args = Array.isArray(input.args) ? input.args : [];
       if (Array.isArray(args[0]) && Array.isArray(args[1])) {
         return [{ result: createEditorInputProbeResult() }];
-      }
-      if (
-        args[0] === mainWorldControlMessageScope &&
-        args[1] !== undefined &&
-        args[2] !== undefined
-      ) {
-        return [{ result: true }];
-      }
-      if (
-        args[0] === mainWorldControlMessageScope &&
-        typeof args[1] === "object" &&
-        args[1] !== null
-      ) {
-        return [
-          {
-            result: {
-              installed: true,
-              applied_patches: [
-                "audio_context",
-                "battery",
-                "navigator_plugins",
-                "navigator_mime_types"
-              ],
-              required_patches: [
-                "audio_context",
-                "battery",
-                "navigator_plugins",
-                "navigator_mime_types"
-              ],
-              missing_required_patches: [],
-              source: "profile_meta"
-            }
-          }
-        ];
       }
       return [{ result: undefined }];
     });
@@ -3419,7 +3333,7 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("does not reuse startup trust across different run_id within the same session", async () => {
+  it("allows startup trust reuse across different run_id within the same session when trust remains bound", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -3487,7 +3401,13 @@ describe("extension service worker recovery contract", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: liveRequestId,
+        command: "xhs.search"
+      })
+    );
   });
 
   it("does not establish trusted fingerprint context from runtime.ping", async () => {

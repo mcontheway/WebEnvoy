@@ -1,6 +1,5 @@
 import {
   ContentScriptHandler,
-  resolveMainWorldEventNamesForSecret,
   type BackgroundToContentMessage,
   type ContentToBackgroundMessage
 } from "./content-script-handler.js";
@@ -73,7 +72,6 @@ const defaultForwardTimeoutMs = 3_000;
 const defaultHandshakeTimeoutMs = 30_000;
 const defaultNativeHostName = "com.webenvoy.host";
 const bridgeProtocol = "webenvoy.native-bridge.v1";
-const MAIN_WORLD_CONTROL_MESSAGE_SCOPE = "webenvoy.main_world.bridge.control.v1";
 const maxRecoveryQueuedForwards = 5;
 const debuggerProtocolVersion = "1.3";
 const editorInputDebuggerProbeWaitMs = 150;
@@ -1962,36 +1960,9 @@ class ChromeBackgroundBridge {
       updatedAt: new Date().toISOString()
     });
 
-    const bootstrapTargetTabId = await this.#resolveTargetTabId(request);
-    let directInstallResult: Record<string, unknown> | null = null;
-    let bootstrapRequest = request;
-    if (bootstrapTargetTabId !== null) {
-      await this.#ensureMainWorldEventChannel(bootstrapTargetTabId, mainWorldSecret);
-      directInstallResult = await this.#executeFingerprintInstallInMainWorld(
-        bootstrapTargetTabId,
-        fingerprintRuntime
-      );
-      if (directInstallResult?.installed === true) {
-        const attestedFingerprintRuntime = {
-          ...fingerprintRuntime,
-          injection: directInstallResult
-        };
-        bootstrapRequest = {
-          ...request,
-          params: {
-            ...request.params,
-            command_params: {
-              ...(asRecord(request.params.command_params) ?? {}),
-              fingerprint_runtime: attestedFingerprintRuntime
-            }
-          }
-        };
-      }
-    }
-
     // Keep the request pending until the execution surface returns an explicit bootstrap ack
     // or the normal forward timeout resolves it.
-    void this.#dispatchForward(bootstrapRequest);
+    void this.#dispatchForward(request);
     return;
   }
 
@@ -2424,24 +2395,6 @@ class ChromeBackgroundBridge {
         }
       });
       return;
-    }
-
-    if (
-      command === "xhs.search" &&
-      requestedLiveMode &&
-      forwardFingerprintContext &&
-      !hasInstalledFingerprintInjection(forwardFingerprintContext)
-    ) {
-      const directInstallResult = await this.#executeFingerprintInstallInMainWorld(
-        tabId,
-        forwardFingerprintContext
-      );
-      if (directInstallResult?.installed === true) {
-        forwardFingerprintContext = ({
-          ...(forwardFingerprintContext as unknown as Record<string, unknown>),
-          injection: directInstallResult
-        } as unknown) as FingerprintRuntimeContext;
-      }
     }
 
     if (issue208EditorInputValidation) {
@@ -3722,182 +3675,6 @@ class ChromeBackgroundBridge {
     for (const [id] of this.#pending.entries()) {
       this.#failPending(id, error);
     }
-  }
-
-  async #attachMainWorldEventChannel(tabId: number, secret: string): Promise<boolean> {
-    if (!this.chromeApi.scripting?.executeScript) {
-      return false;
-    }
-    const { requestEvent, resultEvent } = resolveMainWorldEventNamesForSecret(secret);
-    const results = await this.chromeApi.scripting.executeScript({
-      target: { tabId },
-      world: "MAIN",
-      func: (messageScope: unknown, requestEventName: unknown, resultEventName: unknown) => {
-        if (
-          typeof messageScope !== "string" ||
-          messageScope.length === 0 ||
-          typeof window.postMessage !== "function" ||
-          typeof MessageChannel !== "function"
-        ) {
-          return false;
-        }
-        return new Promise<boolean>((resolve) => {
-          const channel = new MessageChannel();
-          channel.port1.onmessage = (event) => {
-            const record =
-              typeof event.data === "object" && event.data !== null
-                ? (event.data as Record<string, unknown>)
-                : null;
-            resolve(record?.ok === true && record.attached === true);
-          };
-          window.postMessage(
-            {
-              scope: messageScope,
-              kind: "attach-channel",
-              requestEvent: requestEventName,
-              resultEvent: resultEventName
-            },
-            "*",
-            [channel.port2]
-          );
-        });
-      },
-      args: [MAIN_WORLD_CONTROL_MESSAGE_SCOPE, requestEvent, resultEvent]
-    });
-    return results.some((result) => result?.result === true);
-  }
-
-  async #ensureMainWorldBridgeInjected(tabId: number): Promise<void> {
-    if (!this.chromeApi.scripting?.executeScript) {
-      return;
-    }
-    await this.chromeApi.scripting.executeScript({
-      target: { tabId },
-      world: "MAIN",
-      files: ["build/main-world-bridge.js"]
-    });
-  }
-
-  async #ensureMainWorldBridgeInjectedViaDom(tabId: number): Promise<boolean> {
-    if (!this.chromeApi.scripting?.executeScript || !this.chromeApi.runtime?.getURL) {
-      return false;
-    }
-    const bridgeUrl = this.chromeApi.runtime.getURL("build/main-world-bridge.js");
-    const results = await this.chromeApi.scripting.executeScript({
-      target: { tabId },
-      world: "MAIN",
-      func: async (url: unknown) => {
-        if (typeof document === "undefined" || typeof url !== "string" || url.length === 0) {
-          return false;
-        }
-        const existing = document.querySelector('script[data-webenvoy-main-world-bridge="1"]');
-        if (existing) {
-          await new Promise((resolve) => setTimeout(resolve, 0));
-          return true;
-        }
-        const script = document.createElement("script");
-        script.setAttribute("data-webenvoy-main-world-bridge", "1");
-        script.src = url;
-        const loaded = await new Promise<boolean>((resolve) => {
-          script.addEventListener("load", () => resolve(true), { once: true });
-          script.addEventListener("error", () => resolve(false), { once: true });
-          (document.documentElement ?? document.head ?? document.body)?.appendChild(script);
-        });
-        return loaded;
-      },
-      args: [bridgeUrl]
-    });
-    return results.some((result) => result?.result === true);
-  }
-
-  async #ensureMainWorldEventChannel(tabId: number, secret: string): Promise<void> {
-    if (!this.chromeApi.scripting?.executeScript) {
-      return;
-    }
-    try {
-      const attached = await this.#attachMainWorldEventChannel(tabId, secret);
-      if (attached) {
-        return;
-      }
-      await this.#ensureMainWorldBridgeInjected(tabId);
-      const attachedAfterFileInjection = await this.#attachMainWorldEventChannel(tabId, secret);
-      if (attachedAfterFileInjection) {
-        return;
-      }
-      const domInjected = await this.#ensureMainWorldBridgeInjectedViaDom(tabId);
-      if (!domInjected) {
-        return;
-      }
-      await this.#attachMainWorldEventChannel(tabId, secret);
-    } catch {
-      // Keep runtime.bootstrap compatible with staged injection fallback.
-    }
-  }
-
-  async #executeFingerprintInstallInMainWorld(
-    tabId: number,
-    fingerprintRuntime: FingerprintRuntimeContext
-  ): Promise<Record<string, unknown> | null> {
-    const executeScript = this.chromeApi.scripting?.executeScript;
-    if (!executeScript) {
-      return null;
-    }
-    const tryInvoke = async (): Promise<Record<string, unknown> | null> => {
-      const results = await executeScript({
-        target: { tabId },
-        world: "MAIN",
-        func: (messageScope: unknown, runtime: unknown) => {
-          if (
-            typeof messageScope !== "string" ||
-            messageScope.length === 0 ||
-            typeof window.postMessage !== "function" ||
-            typeof MessageChannel !== "function"
-          ) {
-            return null;
-          }
-          return new Promise<Record<string, unknown> | null>((resolve) => {
-            const channel = new MessageChannel();
-            channel.port1.onmessage = (event) => {
-              const record =
-                typeof event.data === "object" && event.data !== null
-                  ? (event.data as Record<string, unknown>)
-                  : null;
-              if (record?.ok !== true || typeof record.result !== "object" || record.result === null) {
-                resolve(null);
-                return;
-              }
-              resolve(record.result as Record<string, unknown>);
-            };
-            window.postMessage(
-              {
-                scope: messageScope,
-                kind: "fingerprint-install",
-                runtime
-              },
-              "*",
-              [channel.port2]
-            );
-          });
-        },
-        args: [MAIN_WORLD_CONTROL_MESSAGE_SCOPE, fingerprintRuntime]
-      });
-      return asRecord(results[0]?.result);
-    };
-
-    let result = await tryInvoke();
-    if (result) {
-      return result;
-    }
-    await this.#ensureMainWorldBridgeInjected(tabId);
-    result = await tryInvoke();
-    if (result) {
-      return result;
-    }
-    const domInjected = await this.#ensureMainWorldBridgeInjectedViaDom(tabId);
-    if (!domInjected) {
-      return null;
-    }
-    return await tryInvoke();
   }
 
   async #resolveAllowlistedTabDomain(tabId: number): Promise<string | null> {

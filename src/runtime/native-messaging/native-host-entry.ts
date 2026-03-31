@@ -1,5 +1,7 @@
 import { createServer, Socket } from "node:net";
 import { rmSync } from "node:fs";
+import { dirname } from "node:path";
+import { mkdirSync } from "node:fs";
 
 import {
   BRIDGE_PROTOCOL,
@@ -17,6 +19,8 @@ let sessionId = DEFAULT_SESSION_ID;
 let extensionOpened = false;
 const profileDir = process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR ?? null;
 const socketPath = profileDir ? resolveProfileScopedNativeBridgeSocketPath(profileDir) : null;
+let nextSocketClientId = 1;
+let nextForwardRequestSequence = 1;
 
 const bootstrapReadiness = new Map<
   string,
@@ -33,9 +37,11 @@ const pendingSocketResponses = new Map<
   {
     socket: Socket;
     timeout: NodeJS.Timeout;
+    originalRequestId: string;
   }
 >();
 const socketBuffers = new WeakMap<Socket, Buffer>();
+const socketClientIds = new WeakMap<Socket, number>();
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -65,6 +71,24 @@ const writeStdoutEnvelope = (envelope: Record<string, unknown>, onFlushed?: () =
 
 const writeSocketEnvelope = (socket: Socket, envelope: Record<string, unknown>): void => {
   socket.end(encodeFrame(envelope));
+};
+
+const resolveSocketClientId = (socket: Socket): number => {
+  const existing = socketClientIds.get(socket);
+  if (typeof existing === "number") {
+    return existing;
+  }
+  const created = nextSocketClientId;
+  nextSocketClientId += 1;
+  socketClientIds.set(socket, created);
+  return created;
+};
+
+const createForwardCorrelationId = (socket: Socket, originalRequestId: string): string => {
+  const socketClientId = resolveSocketClientId(socket);
+  const sequence = nextForwardRequestSequence;
+  nextForwardRequestSequence += 1;
+  return `cli-${socketClientId}:${sequence}:${originalRequestId}`;
 };
 
 const buildRuntimeReadinessPayload = (request: BridgeRequestEnvelope): Record<string, unknown> => {
@@ -124,13 +148,20 @@ const writeStdoutError = (
   });
 };
 
-const writeSocketResponse = (socket: Socket, requestId: string, response: BridgeResponseEnvelope): void => {
-  const timeoutEntry = pendingSocketResponses.get(requestId);
-  if (timeoutEntry) {
-    clearTimeout(timeoutEntry.timeout);
-    pendingSocketResponses.delete(requestId);
+const writeSocketResponse = (
+  correlationId: string,
+  response: BridgeResponseEnvelope
+): void => {
+  const timeoutEntry = pendingSocketResponses.get(correlationId);
+  if (!timeoutEntry) {
+    return;
   }
-  writeSocketEnvelope(socket, response as unknown as Record<string, unknown>);
+  clearTimeout(timeoutEntry.timeout);
+  pendingSocketResponses.delete(correlationId);
+  writeSocketEnvelope(timeoutEntry.socket, {
+    ...(response as unknown as Record<string, unknown>),
+    id: timeoutEntry.originalRequestId
+  });
 };
 
 const writeSocketError = (socket: Socket, request: BridgeRequestEnvelope, code: string, message: string): void => {
@@ -140,6 +171,27 @@ const writeSocketError = (socket: Socket, request: BridgeRequestEnvelope, code: 
     summary: {},
     error: { code, message }
   });
+};
+
+const failAllPendingSocketResponses = (code: string, message: string): void => {
+  for (const [correlationId, pending] of pendingSocketResponses.entries()) {
+    clearTimeout(pending.timeout);
+    pendingSocketResponses.delete(correlationId);
+    writeSocketEnvelope(pending.socket, {
+      id: pending.originalRequestId,
+      status: "error",
+      summary: {},
+      error: { code, message }
+    });
+  }
+};
+
+const markExtensionDisconnected = (): void => {
+  if (!extensionOpened) {
+    return;
+  }
+  extensionOpened = false;
+  failAllPendingSocketResponses("ERR_TRANSPORT_DISCONNECTED", "native bridge disconnected");
 };
 
 const handleExtensionBridgeOpen = (request: BridgeRequestEnvelope): void => {
@@ -287,16 +339,20 @@ const handleCliRequest = (socket: Socket, request: BridgeRequestEnvelope): void 
   }
 
   const command = asString(request.params.command) ?? "";
+  const correlationId = createForwardCorrelationId(socket, request.id);
   const timeoutMs =
     typeof request.timeout_ms === "number" && Number.isFinite(request.timeout_ms) && request.timeout_ms > 0
       ? Math.floor(request.timeout_ms)
       : 30_000;
   const timeout = setTimeout(() => {
-    pendingSocketResponses.delete(request.id);
+    pendingSocketResponses.delete(correlationId);
     writeSocketError(socket, request, "ERR_TRANSPORT_TIMEOUT", "native bridge socket timeout");
   }, timeoutMs);
-  pendingSocketResponses.set(request.id, { socket, timeout });
-  writeStdoutEnvelope(request as unknown as Record<string, unknown>);
+  pendingSocketResponses.set(correlationId, { socket, timeout, originalRequestId: request.id });
+  writeStdoutEnvelope({
+    ...(request as unknown as Record<string, unknown>),
+    id: correlationId
+  });
 };
 
 const processSocketFrame = (socket: Socket, frame: Buffer): void => {
@@ -323,12 +379,19 @@ const startSocketBroker = (): void => {
   }
 
   try {
+    mkdirSync(dirname(socketPath), { recursive: true });
+  } catch {
+    // ignore directory creation failures and let server.listen surface the real error
+  }
+
+  try {
     rmSync(socketPath, { force: true });
   } catch {
     // ignore stale socket cleanup failures
   }
 
   const server = createServer((socket) => {
+    resolveSocketClientId(socket);
     socketBuffers.set(socket, Buffer.alloc(0));
 
     socket.on("data", (chunk: Buffer) => {
@@ -348,6 +411,7 @@ const startSocketBroker = (): void => {
 
     socket.on("close", () => {
       socketBuffers.delete(socket);
+      socketClientIds.delete(socket);
       for (const [requestId, pending] of pendingSocketResponses.entries()) {
         if (pending.socket !== socket) {
           continue;
@@ -389,7 +453,7 @@ const handleIncomingFrame = (frame: Buffer): void => {
   if (isBridgeResponseEnvelope(raw)) {
     const pending = pendingSocketResponses.get(raw.id);
     if (pending) {
-      writeSocketResponse(pending.socket, raw.id, raw);
+      writeSocketResponse(raw.id, raw);
     }
     return;
   }
@@ -426,6 +490,18 @@ process.stdin.on("data", (chunk: Buffer) => {
       });
     }
   }
+});
+
+process.stdin.on("end", () => {
+  markExtensionDisconnected();
+});
+
+process.stdin.on("close", () => {
+  markExtensionDisconnected();
+});
+
+process.stdin.on("error", () => {
+  markExtensionDisconnected();
 });
 
 process.stdin.resume();

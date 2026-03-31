@@ -1,7 +1,6 @@
 "use strict";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
-const MAIN_WORLD_CONTROL_MESSAGE_SCOPE = "webenvoy.main_world.bridge.control.v1";
 let activeMainWorldEventChannel = null;
 let activeMainWorldRequestListener = null;
 const patchedAudioContextPrototypes = new WeakSet();
@@ -383,52 +382,6 @@ const attachMainWorldEventChannel = (channel) => {
     };
     window.addEventListener(channel.requestEvent, activeMainWorldRequestListener);
 };
-const emitControlResponse = (port, response) => {
-    try {
-        port.postMessage(response);
-    }
-    finally {
-        if (typeof port.close === "function") {
-            port.close();
-        }
-    }
-};
-const handleControlMessageEvent = (event) => {
-    const messageEvent = event;
-    if (messageEvent.source !== window) {
-        return;
-    }
-    const detail = asRecord(messageEvent.data);
-    const port = Array.isArray(messageEvent.ports) ? messageEvent.ports[0] : null;
-    if (!detail ||
-        detail.scope !== MAIN_WORLD_CONTROL_MESSAGE_SCOPE ||
-        typeof detail.kind !== "string" ||
-        !port) {
-        return;
-    }
-    if (detail.kind === "attach-channel") {
-        emitControlResponse(port, {
-            ok: true,
-            attached: attachMainWorldEventChannelIfValid(detail.requestEvent, detail.resultEvent)
-        });
-        return;
-    }
-    if (detail.kind === "fingerprint-install") {
-        try {
-            emitControlResponse(port, {
-                ok: true,
-                result: installFingerprintRuntime(asRecord(detail.runtime))
-            });
-        }
-        catch (error) {
-            emitControlResponse(port, {
-                ok: false,
-                message: error instanceof Error ? error.message : String(error)
-            });
-        }
-    }
-};
-window.addEventListener("message", handleControlMessageEvent);
 const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
 if (expectedMainWorldEventChannel) {
     attachMainWorldEventChannel(expectedMainWorldEventChannel);
