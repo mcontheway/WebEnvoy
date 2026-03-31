@@ -1452,21 +1452,6 @@ class ChromeBackgroundBridge {
         void this.#dispatchForward(bootstrapRequest);
         return;
     }
-    #isIssue208EditorInputAutoTabRequest(commandParams) {
-        const options = asRecord(commandParams.options);
-        const issueScope = asNonEmptyString(Object.prototype.hasOwnProperty.call(commandParams, "issue_scope")
-            ? commandParams.issue_scope
-            : options?.issue_scope);
-        const validationAction = asNonEmptyString(Object.prototype.hasOwnProperty.call(commandParams, "validation_action")
-            ? commandParams.validation_action
-            : options?.validation_action);
-        const targetPage = asNonEmptyString(Object.prototype.hasOwnProperty.call(commandParams, "target_page")
-            ? commandParams.target_page
-            : options?.target_page);
-        return (issueScope === "issue_208" &&
-            validationAction === "editor_input" &&
-            targetPage === "creator_publish_tab");
-    }
     #handleRuntimeReadiness(request) {
         const profile = asNonEmptyString(request.profile);
         const bootstrap = profile ? this.#runtimeBootstrapStates.get(profile) ?? null : null;
@@ -2628,15 +2613,11 @@ class ChromeBackgroundBridge {
             return typeof candidate?.id === "number" ? candidate.id : null;
         }
         if (command === "xhs.search") {
-            const preferCreatorPublish = this.#isIssue208EditorInputAutoTabRequest(commandParams);
-            const xhsUrlPatterns = preferCreatorPublish
-                ? [
-                    "*://creator.xiaohongshu.com/*",
-                    "*://www.xiaohongshu.com/*",
-                    "*://edith.xiaohongshu.com/*",
-                    "*://*.xiaohongshu.com/*"
-                ]
-                : ["*://www.xiaohongshu.com/*", "*://edith.xiaohongshu.com/*", "*://*.xiaohongshu.com/*"];
+            const xhsUrlPatterns = [
+                "*://www.xiaohongshu.com/*",
+                "*://edith.xiaohongshu.com/*",
+                "*://*.xiaohongshu.com/*"
+            ];
             const currentWindowTabs = await this.chromeApi.tabs.query({
                 currentWindow: true,
                 url: xhsUrlPatterns
@@ -2649,9 +2630,7 @@ class ChromeBackgroundBridge {
             const ranked = xhsTabs
                 .filter((tab) => typeof tab.id === "number")
                 .sort((left, right) => {
-                const scoreDiff = preferCreatorPublish
-                    ? scoreXhsRuntimeSurfaceTab(left) - scoreXhsRuntimeSurfaceTab(right)
-                    : scoreXhsTab(left) - scoreXhsTab(right);
+                const scoreDiff = scoreXhsTab(left) - scoreXhsTab(right);
                 if (scoreDiff !== 0) {
                     return scoreDiff;
                 }
