@@ -1169,6 +1169,31 @@ const isIssue208EditorInputValidation = (options) => options.issue_scope === "is
 const resolveEditorValidationText = (options) => typeof options.validation_text === "string" && options.validation_text.trim().length > 0
     ? options.validation_text.trim()
     : "WebEnvoy editor_input validation";
+const resolveEditorFocusAttestation = (options) => {
+    const record = asRecord(options.editor_focus_attestation);
+    if (!record) {
+        return null;
+    }
+    const source = typeof record.source === "string" ? record.source : null;
+    const targetTabId = typeof record.target_tab_id === "number" && Number.isInteger(record.target_tab_id)
+        ? record.target_tab_id
+        : null;
+    const editableState = record.editable_state === "entered" || record.editable_state === "already_ready"
+        ? record.editable_state
+        : null;
+    if (source !== "chrome_debugger" || targetTabId === null || editableState === null) {
+        return null;
+    }
+    return {
+        source,
+        target_tab_id: targetTabId,
+        editable_state: editableState,
+        focus_confirmed: record.focus_confirmed === true,
+        entry_button_locator: typeof record.entry_button_locator === "string" ? record.entry_button_locator : null,
+        editor_locator: typeof record.editor_locator === "string" ? record.editor_locator : null,
+        failure_reason: typeof record.failure_reason === "string" ? record.failure_reason : null
+    };
+};
 const resolveIssueActionMatrix = (issueScope, state) => getIssueActionMatrixEntry(issueScope, state);
 const resolveWriteActionMatrix = (issueScope, actionType, requestedExecutionMode) => actionType === null || requestedExecutionMode === null
     ? null
@@ -1561,6 +1586,8 @@ const buildEditorInputEvidence = (result) => ({
     visible_text: result.visible_text,
     post_blur_text: result.post_blur_text,
     focus_confirmed: result.focus_confirmed,
+    focus_attestation_source: result.focus_attestation_source,
+    focus_attestation_reason: result.focus_attestation_reason,
     preserved_after_blur: result.preserved_after_blur,
     success_signals: result.success_signals,
     failure_signals: result.failure_signals,
@@ -1828,9 +1855,11 @@ const executeXhsSearch = async (input, env) => {
     if (isIssue208EditorInputValidation(input.options)) {
         const startedAt = env.now();
         const validationText = resolveEditorValidationText(input.options);
+        const focusAttestation = resolveEditorFocusAttestation(input.options);
         const validationResult = env.performEditorInputValidation
             ? await env.performEditorInputValidation({
-                text: validationText
+                text: validationText,
+                focusAttestation
             })
             : {
                 ok: false,
@@ -1842,10 +1871,17 @@ const executeXhsSearch = async (input, env) => {
                 visible_text: "",
                 post_blur_text: "",
                 focus_confirmed: false,
+                focus_attestation_source: focusAttestation?.source ?? null,
+                focus_attestation_reason: focusAttestation?.failure_reason ?? null,
                 preserved_after_blur: false,
                 success_signals: [],
-                failure_signals: ["dom_variant"],
-                minimum_replay: ["focus_editor", "type_short_text", "blur_or_reobserve"]
+                failure_signals: ["missing_focus_attestation", "dom_variant"],
+                minimum_replay: [
+                    "enter_editable_mode",
+                    "focus_editor",
+                    "type_short_text",
+                    "blur_or_reobserve"
+                ]
             };
         if (!isTrustedEditorInputValidation(validationResult)) {
             return createFailure("ERR_EXECUTION_FAILED", "editor_input 真实验证失败", {
@@ -2252,15 +2288,6 @@ const dispatchSyntheticTextInputSequence = (element, text) => {
     element.dispatchEvent(createBubbledInputEvent("input", text));
     element.dispatchEvent(createBubbledEvent("change"));
 };
-const focusElement = (element) => {
-    if (typeof element.click === "function") {
-        element.click();
-    }
-    if (typeof element.focus === "function") {
-        element.focus();
-    }
-    return document.activeElement === element || element.contains(document.activeElement);
-};
 const appendTextToEditable = (element, text) => {
     const current = readElementText(element);
     const next = current.length > 0 ? `${current} ${text}` : text;
@@ -2310,6 +2337,30 @@ const sleep = async (timeoutMs) => {
 const buildMinimumReplay = (activation) => activation === "activated"
     ? [ARTICLE_EDIT_MODE_REPLAY_STEP, ...BASE_MINIMUM_REPLAY]
     : [...BASE_MINIMUM_REPLAY];
+const resolveActivationFromAttestation = (attestation) => {
+    if (!attestation) {
+        return "already_ready";
+    }
+    return attestation.editable_state === "entered" ? "activated" : "already_ready";
+};
+const normalizeFocusAttestationFailure = (attestation) => {
+    if (!attestation) {
+        return ["missing_focus_attestation"];
+    }
+    if (attestation.failure_reason === "EDITOR_ENTRY_NOT_VISIBLE") {
+        return ["editable_state_entry_missing"];
+    }
+    if (attestation.failure_reason === "EDITOR_FOCUS_NOT_ATTESTED") {
+        return ["editor_focus_not_attested"];
+    }
+    if (attestation.failure_reason === "DEBUGGER_ATTACH_FAILED") {
+        return ["debugger_attach_failed", "editor_focus_not_attested"];
+    }
+    if (attestation.failure_reason === "DEBUGGER_INTERACTION_FAILED") {
+        return ["debugger_interaction_failed", "editor_focus_not_attested"];
+    }
+    return ["editor_focus_not_attested"];
+};
 const isTargetPage = () => window.location.href.includes(TARGET_PAGE);
 const isArticleTargetPage = () => {
     if (!isTargetPage()) {
@@ -2346,7 +2397,10 @@ const enterEditableStateIfNeeded = async () => {
     return "activation_failed";
 };
 const performEditorInputValidation = async (input) => {
-    const activation = await enterEditableStateIfNeeded();
+    const focusAttestation = input.focusAttestation ?? null;
+    const activation = focusAttestation
+        ? resolveActivationFromAttestation(focusAttestation)
+        : await enterEditableStateIfNeeded();
     const editors = findEditorElements();
     const minimumReplay = buildMinimumReplay(activation);
     if (editors.length === 0) {
@@ -2354,7 +2408,7 @@ const performEditorInputValidation = async (input) => {
             ? ["editable_state_entry_missing", "dom_variant"]
             : activation === "activation_failed"
                 ? ["editable_state_not_entered", "dom_variant"]
-                : ["dom_variant"];
+                : [...normalizeFocusAttestationFailure(focusAttestation), "dom_variant"];
         return {
             ok: false,
             mode: "dom_editor_input_validation",
@@ -2365,6 +2419,8 @@ const performEditorInputValidation = async (input) => {
             visible_text: "",
             post_blur_text: "",
             focus_confirmed: false,
+            focus_attestation_source: focusAttestation?.source ?? null,
+            focus_attestation_reason: focusAttestation?.failure_reason ?? null,
             preserved_after_blur: false,
             success_signals: [],
             failure_signals: failureSignals,
@@ -2375,8 +2431,10 @@ const performEditorInputValidation = async (input) => {
     let bestAttempt = null;
     for (const editor of editors) {
         const beforeText = readElementText(editor);
-        const focusConfirmed = focusElement(editor);
-        const textInserted = appendTextToEditable(editor, input.text);
+        const locator = buildLocator(editor);
+        const focusConfirmed = focusAttestation?.focus_confirmed === true &&
+            (focusAttestation.editor_locator === null || focusAttestation.editor_locator === locator);
+        const textInserted = focusConfirmed ? appendTextToEditable(editor, input.text) : false;
         await Promise.resolve();
         const visibleText = readElementText(editor);
         if (typeof editor.blur === "function") {
@@ -2388,10 +2446,10 @@ const performEditorInputValidation = async (input) => {
         const successSignals = activation === "activated" ? ["editable_state_entered"] : [];
         const failureSignals = [];
         if (focusConfirmed) {
-            successSignals.push("editor_focused");
+            successSignals.push("editor_focus_attested");
         }
         else {
-            failureSignals.push("focus_lost");
+            failureSignals.push(...normalizeFocusAttestationFailure(focusAttestation));
         }
         if (textInserted && visibleText.includes(input.text)) {
             successSignals.push("text_visible");
@@ -2408,11 +2466,11 @@ const performEditorInputValidation = async (input) => {
         if (/风险|risk|提示|异常/u.test(normalizedPageText)) {
             failureSignals.push("risk_prompt");
         }
-        const hasBlockingFailure = failureSignals.includes("focus_lost") ||
-            failureSignals.includes("text_reverted") ||
+        const hasBlockingFailure = failureSignals.includes("text_reverted") ||
             failureSignals.includes("risk_prompt") ||
             failureSignals.includes("dom_variant");
-        const controlledSuccess = focusConfirmed &&
+        const controlledSuccess = focusAttestation?.source === "chrome_debugger" &&
+            focusConfirmed &&
             textInserted &&
             visibleText.includes(input.text) &&
             preservedAfterBlur &&
@@ -2423,12 +2481,14 @@ const performEditorInputValidation = async (input) => {
                 ? "controlled_editor_input_validation"
                 : "dom_editor_input_validation",
             attestation: controlledSuccess ? "controlled_real_interaction" : "dom_self_certified",
-            editor_locator: buildLocator(editor),
+            editor_locator: locator,
             input_text: input.text,
             before_text: beforeText,
             visible_text: visibleText,
             post_blur_text: postBlurText,
             focus_confirmed: focusConfirmed,
+            focus_attestation_source: focusAttestation?.source ?? null,
+            focus_attestation_reason: focusAttestation?.failure_reason ?? null,
             preserved_after_blur: preservedAfterBlur,
             success_signals: successSignals,
             failure_signals: failureSignals,
@@ -2451,9 +2511,11 @@ const performEditorInputValidation = async (input) => {
         visible_text: "",
         post_blur_text: "",
         focus_confirmed: false,
+        focus_attestation_source: focusAttestation?.source ?? null,
+        focus_attestation_reason: focusAttestation?.failure_reason ?? null,
         preserved_after_blur: false,
         success_signals: [],
-        failure_signals: ["dom_variant"],
+        failure_signals: [...normalizeFocusAttestationFailure(focusAttestation), "dom_variant"],
         minimum_replay: minimumReplay
     });
 };
@@ -3281,6 +3343,11 @@ class ContentScriptHandler {
                         : {}),
                     ...(typeof options.validation_text === "string"
                         ? { validation_text: options.validation_text }
+                        : {}),
+                    ...(asRecord(options.editor_focus_attestation)
+                        ? {
+                            editor_focus_attestation: asRecord(options.editor_focus_attestation) ?? {}
+                        }
                         : {}),
                     ...(asRecord(options.approval_record)
                         ? { approval_record: asRecord(options.approval_record) ?? {} }

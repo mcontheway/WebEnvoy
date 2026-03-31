@@ -155,14 +155,13 @@ describe("xhs editor input contract", () => {
     delete (globalThis as { CompositionEvent?: unknown }).CompositionEvent;
   });
 
-  it("enters article editable state via 新的创作 before validating editor input", async () => {
+  it("uses background attestation to validate editor input after entering editable state", async () => {
     const document = new MockDocument("长文落地页");
     const createButton = new MockButtonElement(document, "新的创作");
     const editor = new MockHTMLTextAreaElement(document);
-    createButton.onClick = () => {
-      document.editors = [editor];
-    };
+    document.editors = [editor];
     document.landingButtons = [createButton];
+    document.editors = [editor];
 
     (globalThis as { document?: unknown }).document = document;
     (globalThis as { window?: unknown }).window = {
@@ -178,19 +177,38 @@ describe("xhs editor input contract", () => {
     (globalThis as { InputEvent?: unknown }).InputEvent = Event;
     (globalThis as { CompositionEvent?: unknown }).CompositionEvent = Event;
 
-    const result = await performEditorInputValidation({ text: "测试发布文案" });
+    const result = await performEditorInputValidation({
+      text: "测试发布文案",
+      focusAttestation: {
+        source: "chrome_debugger",
+        target_tab_id: 32,
+        editable_state: "entered",
+        focus_confirmed: true,
+        entry_button_locator: "button",
+        editor_locator: "textarea",
+        failure_reason: null
+      }
+    });
 
-    expect(createButton.clickCount).toBe(1);
+    expect(createButton.clickCount).toBe(0);
     expect(result.ok).toBe(true);
     expect(result.mode).toBe("controlled_editor_input_validation");
     expect(result.attestation).toBe("controlled_real_interaction");
     expect(result.editor_locator).toBe("textarea");
+    expect(result.focus_attestation_source).toBe("chrome_debugger");
+    expect(result.focus_attestation_reason).toBeNull();
     expect(result.visible_text).toContain("测试发布文案");
     expect(result.success_signals).toEqual([
       "editable_state_entered",
-      "editor_focused",
+      "editor_focus_attested",
       "text_visible",
       "text_persisted_after_blur"
+    ]);
+    expect(result.minimum_replay).toEqual([
+      "enter_editable_mode",
+      "focus_editor",
+      "type_short_text",
+      "blur_or_reobserve"
     ]);
   });
 
@@ -249,7 +267,50 @@ describe("xhs editor input contract", () => {
     expect(result.ok).toBe(false);
     expect(result.attestation).toBe("dom_self_certified");
     expect(result.editor_locator).toBe("div");
+    expect(result.focus_attestation_source).toBeNull();
     expect(result.failure_signals).toContain("dom_variant");
+    expect(result.failure_signals).toContain("missing_focus_attestation");
     expect(result.success_signals).not.toContain("text_visible");
+  });
+
+  it("fails when background debugger attestation cannot attach", async () => {
+    const document = new MockDocument("创作者平台");
+    const editor = new MockHTMLTextAreaElement(document);
+    document.editors = [editor];
+
+    (globalThis as { document?: unknown }).document = document;
+    (globalThis as { window?: unknown }).window = {
+      location: {
+        href: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
+      },
+      getComputedStyle: () => ({ visibility: "visible", display: "block" }),
+      getSelection: () => null
+    };
+    (globalThis as { HTMLElement?: unknown }).HTMLElement = MockHTMLElement;
+    (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement = MockHTMLInputElement;
+    (globalThis as { HTMLTextAreaElement?: unknown }).HTMLTextAreaElement = MockHTMLTextAreaElement;
+    (globalThis as { InputEvent?: unknown }).InputEvent = Event;
+    (globalThis as { CompositionEvent?: unknown }).CompositionEvent = Event;
+
+    const result = await performEditorInputValidation({
+      text: "测试发布文案",
+      focusAttestation: {
+        source: "chrome_debugger",
+        target_tab_id: 32,
+        editable_state: "already_ready",
+        focus_confirmed: false,
+        entry_button_locator: null,
+        editor_locator: "textarea",
+        failure_reason: "DEBUGGER_ATTACH_FAILED"
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.attestation).toBe("dom_self_certified");
+    expect(result.focus_attestation_source).toBe("chrome_debugger");
+    expect(result.focus_attestation_reason).toBe("DEBUGGER_ATTACH_FAILED");
+    expect(result.failure_signals).toEqual(
+      expect.arrayContaining(["debugger_attach_failed", "editor_focus_not_attested", "dom_variant"])
+    );
   });
 });

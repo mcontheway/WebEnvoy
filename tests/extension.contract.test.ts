@@ -29,6 +29,7 @@ describe("extension build contract", () => {
   it("generates chrome-loadable background/content-script artifacts referenced by manifest", () => {
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
       background: { service_worker: string };
+      permissions?: string[];
       content_scripts: Array<{
         matches?: string[];
         js: string[];
@@ -51,6 +52,7 @@ describe("extension build contract", () => {
     expect(contentScriptEntry).toBeDefined();
     expect(contentScriptEntry?.matches).toEqual(expectedContentScriptMatches);
     expect(contentScriptEntry?.run_at).toBe("document_start");
+    expect(manifest.permissions).toEqual(expect.arrayContaining(["debugger"]));
     expect(fs.existsSync(backgroundBuildPath)).toBe(true);
     expect(fs.existsSync(mainWorldBridgeBuildPath)).toBe(true);
     expect(fs.existsSync(contentScriptBuildPath)).toBe(true);

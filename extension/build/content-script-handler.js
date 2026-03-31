@@ -816,6 +816,11 @@ export class ContentScriptHandler {
                     ...(typeof options.validation_text === "string"
                         ? { validation_text: options.validation_text }
                         : {}),
+                    ...(asRecord(options.editor_focus_attestation)
+                        ? {
+                            editor_focus_attestation: asRecord(options.editor_focus_attestation) ?? {}
+                        }
+                        : {}),
                     ...(asRecord(options.approval_record)
                         ? { approval_record: asRecord(options.approval_record) ?? {} }
                         : {}),

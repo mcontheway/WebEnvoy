@@ -15,7 +15,10 @@ import {
   type WriteActionMatrixDecisionsOutput,
   type WriteInteractionTier
 } from "../shared/risk-state.js";
-import type { EditorInputValidationResult } from "./xhs-editor-input.js";
+import type {
+  EditorInputFocusAttestation,
+  EditorInputValidationResult
+} from "./xhs-editor-input.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -47,6 +50,7 @@ export interface XhsSearchOptions {
   approval_record?: Record<string, unknown>;
   validation_action?: string;
   validation_text?: string;
+  editor_focus_attestation?: EditorInputFocusAttestation | Record<string, unknown>;
 }
 
 interface SignatureResult {
@@ -75,7 +79,7 @@ export interface XhsSearchEnvironment {
     timeoutMs: number;
   }): Promise<FetchResult>;
   performEditorInputValidation?(
-    input: { text: string }
+    input: { text: string; focusAttestation?: EditorInputFocusAttestation | null }
   ): Promise<EditorInputValidationResult>;
 }
 
@@ -261,6 +265,37 @@ const resolveEditorValidationText = (options: XhsSearchOptions): string =>
   typeof options.validation_text === "string" && options.validation_text.trim().length > 0
     ? options.validation_text.trim()
     : "WebEnvoy editor_input validation";
+
+const resolveEditorFocusAttestation = (
+  options: XhsSearchOptions
+): EditorInputFocusAttestation | null => {
+  const record = asRecord(options.editor_focus_attestation);
+  if (!record) {
+    return null;
+  }
+  const source = typeof record.source === "string" ? record.source : null;
+  const targetTabId =
+    typeof record.target_tab_id === "number" && Number.isInteger(record.target_tab_id)
+      ? record.target_tab_id
+      : null;
+  const editableState =
+    record.editable_state === "entered" || record.editable_state === "already_ready"
+      ? record.editable_state
+      : null;
+  if (source !== "chrome_debugger" || targetTabId === null || editableState === null) {
+    return null;
+  }
+  return {
+    source,
+    target_tab_id: targetTabId,
+    editable_state: editableState,
+    focus_confirmed: record.focus_confirmed === true,
+    entry_button_locator:
+      typeof record.entry_button_locator === "string" ? record.entry_button_locator : null,
+    editor_locator: typeof record.editor_locator === "string" ? record.editor_locator : null,
+    failure_reason: typeof record.failure_reason === "string" ? record.failure_reason : null
+  };
+};
 
 const resolveIssueActionMatrix = (
   issueScope: IssueScope,
@@ -738,6 +773,8 @@ const buildEditorInputEvidence = (result: EditorInputValidationResult): JsonReco
   visible_text: result.visible_text,
   post_blur_text: result.post_blur_text,
   focus_confirmed: result.focus_confirmed,
+  focus_attestation_source: result.focus_attestation_source,
+  focus_attestation_reason: result.focus_attestation_reason,
   preserved_after_blur: result.preserved_after_blur,
   success_signals: result.success_signals,
   failure_signals: result.failure_signals,
@@ -1065,9 +1102,11 @@ export const executeXhsSearch = async (
   if (isIssue208EditorInputValidation(input.options)) {
     const startedAt = env.now();
     const validationText = resolveEditorValidationText(input.options);
+    const focusAttestation = resolveEditorFocusAttestation(input.options);
     const validationResult: EditorInputValidationResult = env.performEditorInputValidation
       ? await env.performEditorInputValidation({
-          text: validationText
+          text: validationText,
+          focusAttestation
         })
       : {
           ok: false,
@@ -1079,10 +1118,17 @@ export const executeXhsSearch = async (
           visible_text: "",
           post_blur_text: "",
           focus_confirmed: false,
+          focus_attestation_source: focusAttestation?.source ?? null,
+          focus_attestation_reason: focusAttestation?.failure_reason ?? null,
           preserved_after_blur: false,
           success_signals: [],
-          failure_signals: ["dom_variant"],
-          minimum_replay: ["focus_editor", "type_short_text", "blur_or_reobserve"]
+          failure_signals: ["missing_focus_attestation", "dom_variant"],
+          minimum_replay: [
+            "enter_editable_mode",
+            "focus_editor",
+            "type_short_text",
+            "blur_or_reobserve"
+          ]
         };
 
     if (!isTrustedEditorInputValidation(validationResult)) {

@@ -1229,6 +1229,11 @@ describe("webenvoy cli contract", () => {
         code: "ERR_EXECUTION_FAILED"
       }
     });
+    const payload = asRecord(body.payload) ?? {};
+    const observability = asRecord(payload.observability) ?? {};
+    const failureSite = asRecord(observability.failure_site) ?? {};
+    expect(typeof failureSite).toBe("object");
+    expect(String(body.error?.message ?? "")).toContain("执行模式门禁阻断");
   });
 
   it("blocks issue_209 write dry_run even with complete approval to keep gate-only scoped to issue_208", () => {

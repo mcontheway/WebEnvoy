@@ -29,6 +29,21 @@ const createMockPort = () => {
   };
 };
 
+const createEditorInputProbeResult = (overrides?: {
+  entryButton?: Record<string, unknown> | null;
+  editor?: Record<string, unknown> | null;
+  editorFocused?: boolean;
+}) => ({
+  entryButton: overrides?.entryButton ?? null,
+  editor:
+    overrides?.editor ?? {
+      locator: "textarea",
+      centerX: 120,
+      centerY: 48
+    },
+  editorFocused: overrides?.editorFocused ?? true
+});
+
 const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
   let connectIndex = 0;
   const runtimeMessageListeners: Array<
@@ -38,7 +53,16 @@ const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
       sendResponse?: (response: unknown) => void
     ) => boolean | void
   > = [];
-  const executeScript = vi.fn(async () => [{ result: { "X-s": "signed", "X-t": "1700000000" } }]);
+  const executeScript = vi.fn(async (input: Record<string, unknown>) => {
+    const args = Array.isArray(input.args) ? input.args : [];
+    if (Array.isArray(args[0]) && Array.isArray(args[1])) {
+      return [{ result: createEditorInputProbeResult() }];
+    }
+    return [{ result: { "X-s": "signed", "X-t": "1700000000" } }];
+  });
+  const debuggerAttach = vi.fn(async () => {});
+  const debuggerSendCommand = vi.fn(async () => ({}));
+  const debuggerDetach = vi.fn(async () => {});
   const chromeApi = {
     runtime: {
       connectNative: vi.fn(() => {
@@ -71,13 +95,21 @@ const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
     },
     scripting: {
       executeScript
+    },
+    debugger: {
+      attach: debuggerAttach,
+      sendCommand: debuggerSendCommand,
+      detach: debuggerDetach
     }
   };
 
   return {
     chromeApi,
     runtimeMessageListeners,
-    executeScript
+    executeScript,
+    debuggerAttach,
+    debuggerSendCommand,
+    debuggerDetach
   };
 };
 
@@ -980,7 +1012,7 @@ describe("extension service worker recovery contract", () => {
 
   });
 
-  it("forwards issue_208 xhs.search after current-run trusted context is primed following bootstrap attestation", async () => {
+  it("keeps issue_208 xhs.search blocked after bootstrap trust when editor attestation is still missing", async () => {
     const firstPort = createMockPort();
     const { chromeApi, executeScript, runtimeMessageListeners } = createChromeApi([firstPort]);
     const fingerprintContext = createFingerprintRuntimeContext({
@@ -999,6 +1031,9 @@ describe("extension service worker recovery contract", () => {
     ]);
     executeScript.mockImplementation(async (input: Record<string, unknown>) => {
       const args = Array.isArray(input.args) ? input.args : [];
+      if (Array.isArray(args[0]) && Array.isArray(args[1])) {
+        return [{ result: createEditorInputProbeResult() }];
+      }
       if (args[0] === "__webenvoy_attachMainWorldEventChannel__") {
         return [{ result: true }];
       }
@@ -1088,19 +1123,11 @@ describe("extension service worker recovery contract", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledTimes(2);
-    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
-      32,
-      expect.objectContaining({
-        command: "runtime.bootstrap"
-      })
+    const forwardedCommands = chromeApi.tabs.sendMessage.mock.calls.map(
+      (call) => (call[1] as { command?: string }).command
     );
-    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
-      32,
-      expect.objectContaining({
-        command: "xhs.search"
-      })
-    );
+    expect(forwardedCommands).toEqual(expect.arrayContaining(["runtime.bootstrap"]));
+    expect(forwardedCommands).not.toEqual(expect.arrayContaining(["xhs.search"]));
   });
 
   it("promotes pending bootstrap to ready through runtime.ping then runtime.readiness", async () => {
@@ -4343,6 +4370,36 @@ describe("extension service worker recovery contract", () => {
   it("forwards issue_208 live_write with editor_input validation through the real background bridge", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    let probeCall = 0;
+    executeScript.mockImplementation(
+      async (
+        input:
+          | { world?: "MAIN" | "ISOLATED"; files?: string[] }
+          | { world?: "MAIN" | "ISOLATED"; func?: (...args: unknown[]) => unknown }
+      ) => {
+        if (input.world === "ISOLATED" && "func" in input) {
+          probeCall += 1;
+          return [
+            {
+              result: {
+                entryButton: {
+                  locator: "button.新的创作",
+                  centerX: 100,
+                  centerY: 100
+                },
+                editor: {
+                  locator: "textarea",
+                  centerX: 200,
+                  centerY: 220
+                },
+                editorFocused: probeCall >= 2
+              }
+            }
+          ];
+        }
+        return [{ result: { "X-s": "signed", "X-t": "1700000000" } }];
+      }
+    );
     chromeApi.tabs.query.mockImplementation(async () => [
       { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
     ]);
@@ -4382,6 +4439,9 @@ describe("extension service worker recovery contract", () => {
       timeout_ms: 100
     });
     await waitForBridgeTurn();
+    await vi.waitFor(() => {
+      expect(chromeApi.tabs.sendMessage).toHaveBeenCalled();
+    });
 
     const proactiveContentScriptInject = executeScript.mock.calls.find(
       (call) =>
@@ -4389,18 +4449,23 @@ describe("extension service worker recovery contract", () => {
         ((call[0] as { files?: string[] }).files ?? []).includes("build/content-script.js")
     );
     expect(proactiveContentScriptInject).toBeUndefined();
-
-    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
-      32,
-      expect.objectContaining({
-        id: "run-xhs-issue-208-editor-input-allowed-001",
-        command: "xhs.search",
-        commandParams: expect.objectContaining({
-          validation_action: "editor_input",
-          requested_execution_mode: "live_write"
+    await vi.waitFor(() => {
+      expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+        32,
+        expect.objectContaining({
+          command: "xhs.search",
+          commandParams: expect.objectContaining({
+            options: expect.objectContaining({
+              editor_focus_attestation: expect.objectContaining({
+                source: "chrome_debugger",
+                target_tab_id: 32,
+                focus_confirmed: true
+              })
+            })
+          })
         })
-      })
-    );
+      );
+    });
 
     runtimeMessageListeners[0]?.(
       {
@@ -4429,13 +4494,20 @@ describe("extension service worker recovery contract", () => {
             interaction_result: {
               validation_action: "editor_input",
               target_page: "creator.xiaohongshu.com/publish",
+              validation_attestation: "controlled_real_interaction",
               success_signals: [
-                "editor_focused",
+                "editable_state_entered",
+                "editor_focus_attested",
                 "text_visible",
                 "text_persisted_after_blur"
               ],
               failure_signals: [],
-              minimum_replay: ["focus_editor", "type_short_text", "blur_or_reobserve"],
+              minimum_replay: [
+                "enter_editable_mode",
+                "focus_editor",
+                "type_short_text",
+                "blur_or_reobserve"
+              ],
               out_of_scope_actions: ["image_upload", "submit", "publish_confirm"]
             }
           }
@@ -4477,9 +4549,74 @@ describe("extension service worker recovery contract", () => {
             requested_execution_mode: "live_write",
             effective_execution_mode: "live_write",
             gate_decision: "allowed"
+          },
+          interaction_result: {
+            validation_attestation: "controlled_real_interaction",
+            success_signals: expect.arrayContaining(["editor_focus_attested"])
           }
         }
       }
+    });
+  });
+
+  it("annotates editor_input forward with debugger attach failure attestation", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, debuggerAttach } = createChromeApi([firstPort]);
+    debuggerAttach.mockRejectedValueOnce(new Error("debugger attach denied"));
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-issue-208-editor-input-debugger-attach-failed-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext({
+        live_allowed: true,
+        live_decision: "allowed",
+        allowed_execution_modes: [
+          "dry_run",
+          "recon",
+          "live_read_limited",
+          "live_read_high_risk",
+          "live_write"
+        ]
+      }),
+      tabId: 32,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-issue-208-editor-input-debugger-attach-failed-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-issue-208-editor-input-debugger-attach-failed-001",
+        command: "xhs.search",
+        command_params: createXhsEditorInputCommandParams(),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    const forwardCall = chromeApi.tabs.sendMessage.mock.calls.find(
+      (call) =>
+        (call[1] as { id?: string }).id ===
+        "run-xhs-issue-208-editor-input-debugger-attach-failed-001"
+    );
+    expect(forwardCall).toBeDefined();
+    const forwarded = (forwardCall?.[1] as { commandParams?: { options?: Record<string, unknown> } })
+      .commandParams?.options;
+    const attestation = asRecord(forwarded?.editor_focus_attestation);
+    expect(attestation).toMatchObject({
+      source: "chrome_debugger",
+      target_tab_id: 32,
+      focus_confirmed: false,
+      failure_reason: "DEBUGGER_ATTACH_FAILED"
     });
   });
 

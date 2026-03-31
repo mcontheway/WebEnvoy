@@ -8,6 +8,16 @@ const bridgeProtocol = "webenvoy.native-bridge.v1";
 const MAIN_WORLD_ATTACH_HOOK_KEY = "__webenvoy_attachMainWorldEventChannel__";
 const MAIN_WORLD_INSTALL_HOOK_KEY = "__webenvoy_installFingerprintRuntime__";
 const maxRecoveryQueuedForwards = 5;
+const debuggerProtocolVersion = "1.3";
+const editorInputDebuggerProbeWaitMs = 150;
+const editorInputDebuggerEntryLabels = ["新的创作"];
+const editorInputSelectors = [
+    '[contenteditable="true"][role="textbox"]',
+    '[contenteditable="true"][data-lexical-editor="true"]',
+    '[contenteditable="true"]',
+    "textarea",
+    'input[type="text"]'
+];
 const readTimeoutMs = (value) => {
     if (typeof value !== "number" || !Number.isFinite(value)) {
         return null;
@@ -289,6 +299,7 @@ const XHS_FORWARD_OPTION_KEYS = [
     "risk_state",
     "validation_action",
     "validation_text",
+    "editor_focus_attestation",
     "approval_record",
     "approval",
     "timeout_ms",
@@ -1754,6 +1765,10 @@ class ChromeBackgroundBridge {
         const requestedExecutionMode = parseRequestedExecutionMode(Object.prototype.hasOwnProperty.call(commandParams, "requested_execution_mode")
             ? commandParams.requested_execution_mode
             : optionParams?.requested_execution_mode);
+        const issue208EditorInputValidation = command === "xhs.search" &&
+            issueScope === "issue_208" &&
+            requestedExecutionMode === "live_write" &&
+            validationAction === "editor_input";
         const requestedLiveMode = requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
         const requestedFingerprintContext = resolveFingerprintContext(commandParams);
         let forwardFingerprintContext = command === "xhs.search" ? requestedFingerprintContext : requestedFingerprintContext;
@@ -1848,6 +1863,10 @@ class ChromeBackgroundBridge {
                 };
             }
         }
+        if (issue208EditorInputValidation) {
+            const editorFocusAttestation = await this.#buildEditorInputFocusAttestation(tabId);
+            commandParams = this.#injectEditorFocusAttestation(commandParams, editorFocusAttestation);
+        }
         const timeoutMs = requestDeadlineMs - Date.now();
         if (timeoutMs <= 0) {
             if (suppressHostResponse) {
@@ -1913,6 +1932,280 @@ class ChromeBackgroundBridge {
                 message: error instanceof Error ? error.message : "content script dispatch failed"
             });
         }
+    }
+    #injectEditorFocusAttestation(commandParams, attestation) {
+        const normalized = {
+            ...commandParams,
+            editor_focus_attestation: attestation
+        };
+        const optionParams = asRecord(commandParams.options);
+        const normalizedOptions = optionParams ? { ...optionParams } : {};
+        normalizedOptions.editor_focus_attestation = attestation;
+        normalized.options = normalizedOptions;
+        return normalized;
+    }
+    async #buildEditorInputFocusAttestation(tabId) {
+        const buildFailure = (reason, input) => ({
+            source: "chrome_debugger",
+            target_tab_id: tabId,
+            editable_state: input?.editableState ?? "already_ready",
+            focus_confirmed: false,
+            entry_button_locator: input?.entryButtonLocator ?? null,
+            editor_locator: input?.editorLocator ?? null,
+            failure_reason: reason
+        });
+        const debuggerApi = this.chromeApi.debugger;
+        if (!debuggerApi) {
+            return buildFailure("DEBUGGER_ATTACH_FAILED");
+        }
+        const initialProbe = await this.#probeEditorInputTargets(tabId);
+        if (!initialProbe) {
+            return buildFailure("DEBUGGER_INTERACTION_FAILED");
+        }
+        let entryButtonLocator = initialProbe.entryButton?.locator ?? null;
+        let editorLocator = initialProbe.editor?.locator ?? null;
+        let editableState = "already_ready";
+        let attached = false;
+        try {
+            await debuggerApi.attach({ tabId }, debuggerProtocolVersion);
+            attached = true;
+        }
+        catch {
+            return buildFailure("DEBUGGER_ATTACH_FAILED", {
+                entryButtonLocator,
+                editorLocator
+            });
+        }
+        try {
+            let workingProbe = initialProbe;
+            if (!workingProbe.editor) {
+                if (!workingProbe.entryButton) {
+                    return buildFailure("EDITOR_ENTRY_NOT_VISIBLE", {
+                        entryButtonLocator,
+                        editorLocator
+                    });
+                }
+                await this.#dispatchDebuggerPrimaryClick(tabId, workingProbe.entryButton);
+                await this.#sleep(editorInputDebuggerProbeWaitMs);
+                const postEntryProbe = await this.#probeEditorInputTargets(tabId);
+                if (!postEntryProbe || !postEntryProbe.editor) {
+                    return buildFailure("EDITOR_ENTRY_NOT_VISIBLE", {
+                        entryButtonLocator,
+                        editorLocator
+                    });
+                }
+                editableState = "entered";
+                workingProbe = postEntryProbe;
+                entryButtonLocator = workingProbe.entryButton?.locator ?? entryButtonLocator;
+                editorLocator = workingProbe.editor?.locator ?? editorLocator;
+            }
+            if (!workingProbe.editor) {
+                return buildFailure("EDITOR_ENTRY_NOT_VISIBLE", {
+                    editableState,
+                    entryButtonLocator,
+                    editorLocator
+                });
+            }
+            await this.#dispatchDebuggerPrimaryClick(tabId, workingProbe.editor);
+            await this.#sleep(50);
+            const finalProbe = await this.#probeEditorInputTargets(tabId);
+            const focusConfirmed = finalProbe?.editorFocused === true;
+            const finalEditorLocator = finalProbe?.editor?.locator ?? workingProbe.editor.locator;
+            if (!focusConfirmed) {
+                return buildFailure("EDITOR_FOCUS_NOT_ATTESTED", {
+                    editableState,
+                    entryButtonLocator,
+                    editorLocator: finalEditorLocator
+                });
+            }
+            return {
+                source: "chrome_debugger",
+                target_tab_id: tabId,
+                editable_state: editableState,
+                focus_confirmed: true,
+                entry_button_locator: entryButtonLocator,
+                editor_locator: finalEditorLocator,
+                failure_reason: null
+            };
+        }
+        catch {
+            return buildFailure("DEBUGGER_INTERACTION_FAILED", {
+                editableState,
+                entryButtonLocator,
+                editorLocator
+            });
+        }
+        finally {
+            if (attached) {
+                try {
+                    await debuggerApi.detach({ tabId });
+                }
+                catch {
+                    // Swallow detach errors to avoid overriding primary failure semantics.
+                }
+            }
+        }
+    }
+    async #probeEditorInputTargets(tabId) {
+        const executeScript = this.chromeApi.scripting?.executeScript;
+        if (!executeScript) {
+            return null;
+        }
+        try {
+            const results = await executeScript({
+                target: { tabId },
+                world: "ISOLATED",
+                func: (entryLabels, selectors) => {
+                    const labels = Array.isArray(entryLabels)
+                        ? entryLabels.filter((item) => typeof item === "string")
+                        : [];
+                    const editorSelectors = Array.isArray(selectors)
+                        ? selectors.filter((item) => typeof item === "string")
+                        : [];
+                    const asVisibleElement = (value) => {
+                        if (!(value instanceof HTMLElement)) {
+                            return null;
+                        }
+                        const rect = value.getBoundingClientRect();
+                        const style = window.getComputedStyle(value);
+                        if (rect.width <= 0 ||
+                            rect.height <= 0 ||
+                            style.visibility === "hidden" ||
+                            style.display === "none") {
+                            return null;
+                        }
+                        return value;
+                    };
+                    const buildLocator = (element) => {
+                        if (typeof element.id === "string" && element.id.length > 0) {
+                            return `#${element.id}`;
+                        }
+                        const className = typeof element.className === "string"
+                            ? element.className
+                                .split(/\s+/)
+                                .map((token) => token.trim())
+                                .filter((token) => token.length > 0)
+                                .slice(0, 2)
+                                .join(".")
+                            : "";
+                        if (className) {
+                            return `${element.tagName.toLowerCase()}.${className}`;
+                        }
+                        return element.tagName.toLowerCase();
+                    };
+                    const toTarget = (element) => {
+                        if (!element) {
+                            return null;
+                        }
+                        const rect = element.getBoundingClientRect();
+                        return {
+                            locator: buildLocator(element),
+                            centerX: Math.round(rect.left + rect.width / 2),
+                            centerY: Math.round(rect.top + rect.height / 2)
+                        };
+                    };
+                    const buttons = Array.from(document.querySelectorAll("button, [role='button']"))
+                        .map((entry) => asVisibleElement(entry))
+                        .filter((entry) => entry !== null);
+                    let entryButton = null;
+                    for (const button of buttons) {
+                        const text = button.innerText?.trim() ?? button.textContent?.trim() ?? "";
+                        if (labels.some((label) => text.includes(label))) {
+                            entryButton = button;
+                            break;
+                        }
+                    }
+                    let editor = null;
+                    for (const selector of editorSelectors) {
+                        const candidates = Array.from(document.querySelectorAll(selector))
+                            .map((entry) => asVisibleElement(entry))
+                            .filter((entry) => entry !== null);
+                        if (candidates.length > 0) {
+                            editor = candidates[0];
+                            break;
+                        }
+                    }
+                    const active = document.activeElement;
+                    const editorFocused = editor !== null &&
+                        (active === editor ||
+                            (active instanceof Element && editor.contains(active)));
+                    return {
+                        entryButton: toTarget(entryButton),
+                        editor: toTarget(editor),
+                        editorFocused
+                    };
+                },
+                args: [[...editorInputDebuggerEntryLabels], [...editorInputSelectors]]
+            });
+            return this.#parseEditorInputProbeResult(results[0]?.result ?? null);
+        }
+        catch {
+            return null;
+        }
+    }
+    #parseEditorInputProbeResult(value) {
+        const record = asRecord(value);
+        if (!record) {
+            return null;
+        }
+        return {
+            entryButton: this.#parseEditorInputProbeTarget(record.entryButton),
+            editor: this.#parseEditorInputProbeTarget(record.editor),
+            editorFocused: record.editorFocused === true
+        };
+    }
+    #parseEditorInputProbeTarget(value) {
+        const record = asRecord(value);
+        if (!record) {
+            return null;
+        }
+        const locator = asNonEmptyString(record.locator);
+        const centerX = typeof record.centerX === "number" ? record.centerX : null;
+        const centerY = typeof record.centerY === "number" ? record.centerY : null;
+        if (!locator ||
+            centerX === null ||
+            centerY === null ||
+            !Number.isFinite(centerX) ||
+            !Number.isFinite(centerY)) {
+            return null;
+        }
+        return {
+            locator,
+            centerX,
+            centerY
+        };
+    }
+    async #dispatchDebuggerPrimaryClick(tabId, target) {
+        const debuggerApi = this.chromeApi.debugger;
+        if (!debuggerApi) {
+            throw new Error("chrome.debugger is unavailable");
+        }
+        await debuggerApi.sendCommand({ tabId }, "Input.dispatchMouseEvent", {
+            type: "mouseMoved",
+            x: target.centerX,
+            y: target.centerY,
+            button: "left",
+            buttons: 0
+        });
+        await debuggerApi.sendCommand({ tabId }, "Input.dispatchMouseEvent", {
+            type: "mousePressed",
+            x: target.centerX,
+            y: target.centerY,
+            button: "left",
+            buttons: 1,
+            clickCount: 1
+        });
+        await debuggerApi.sendCommand({ tabId }, "Input.dispatchMouseEvent", {
+            type: "mouseReleased",
+            x: target.centerX,
+            y: target.centerY,
+            button: "left",
+            buttons: 0,
+            clickCount: 1
+        });
+    }
+    async #sleep(timeoutMs) {
+        await new Promise((resolve) => setTimeout(resolve, timeoutMs));
     }
     #appendGateReason(target, reason) {
         const gateReasons = asStringArray(target.gate_reasons);
