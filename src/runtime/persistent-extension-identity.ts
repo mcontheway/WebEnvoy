@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile, readdir } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -23,6 +23,10 @@ interface NativeHostManifest {
 }
 
 type ProfileExtensionState = "enabled" | "disabled" | "missing";
+type ProfileExtensionPreferencesState = {
+  state: ProfileExtensionState;
+  unpackedPath: string | null;
+};
 
 export interface IdentityPreflightResult {
   mode: RuntimeIdentityMode;
@@ -203,7 +207,8 @@ const parseWindowsRegistryDefaultValue = (stdout: string): string | null => {
 };
 
 const resolveManifestPathForBinding = async (
-  binding: PersistentExtensionBinding
+  binding: PersistentExtensionBinding,
+  _profileDir: string | null
 ): Promise<string | null> => {
   if (binding.manifestPath) {
     return binding.manifestPath;
@@ -371,22 +376,38 @@ const readNativeHostManifest = async (manifestPath: string): Promise<NativeHostM
 const readProfileExtensionStateFromPreferences = (
   input: Record<string, unknown>,
   extensionId: string
-): ProfileExtensionState => {
+): ProfileExtensionPreferencesState => {
   const extensions = asRecord(input.extensions);
   const settings = asRecord(extensions?.settings);
   const extensionEntry = asRecord(settings?.[extensionId]);
   if (!extensionEntry) {
-    return "missing";
+    return {
+      state: "missing",
+      unpackedPath: null
+    };
   }
 
   const state = extensionEntry.state;
+  const unpackedPath =
+    extensionEntry.location === 4 && asNonEmptyString(extensionEntry.path)
+      ? asNonEmptyString(extensionEntry.path)
+      : null;
   if (state === 1 || state === true) {
-    return "enabled";
+    return {
+      state: "enabled",
+      unpackedPath
+    };
   }
   if (typeof state === "number" || typeof state === "boolean") {
-    return "disabled";
+    return {
+      state: "disabled",
+      unpackedPath
+    };
   }
-  return "enabled";
+  return {
+    state: "enabled",
+    unpackedPath
+  };
 };
 
 const resolveProfileExtensionState = async (
@@ -401,6 +422,7 @@ const resolveProfileExtensionState = async (
 
   let foundDisabled = false;
   let enabledInPreferences = false;
+  let unpackedPath: string | null = null;
 
   for (const preferencePath of preferenceCandidates) {
     try {
@@ -410,12 +432,15 @@ const resolveProfileExtensionState = async (
       if (!record) {
         continue;
       }
-      const state = readProfileExtensionStateFromPreferences(record, extensionId);
-      if (state === "enabled") {
+      const preferenceState = readProfileExtensionStateFromPreferences(record, extensionId);
+      if (preferenceState.state === "enabled") {
         enabledInPreferences = true;
+        if (preferenceState.unpackedPath) {
+          unpackedPath = preferenceState.unpackedPath;
+        }
         continue;
       }
-      if (state === "disabled") {
+      if (preferenceState.state === "disabled") {
         foundDisabled = true;
       }
     } catch {
@@ -425,6 +450,15 @@ const resolveProfileExtensionState = async (
 
   if (!enabledInPreferences) {
     return foundDisabled ? "disabled" : "missing";
+  }
+
+  if (unpackedPath) {
+    try {
+      await access(unpackedPath);
+      return "enabled";
+    } catch {
+      return "missing";
+    }
   }
 
   try {
@@ -558,6 +592,8 @@ export const runIdentityPreflight = async (input: {
   }
 
   const expectedOrigin = `chrome-extension://${binding.extensionId}/`;
+  const profileDir =
+    asNonEmptyString(input.meta?.profileDir) ?? asNonEmptyString(input.profileDir);
   const resolvedBrowserChannel = inferResolvedBrowserChannel({
     browserPath,
     browserVersion
@@ -575,7 +611,7 @@ export const runIdentityPreflight = async (input: {
       failureReason: "IDENTITY_BINDING_CONFLICT"
     });
   }
-  const manifestPath = await resolveManifestPathForBinding(binding);
+  const manifestPath = await resolveManifestPathForBinding(binding, profileDir ?? null);
   if (manifestPath === null) {
     return buildBlockingResult({
       mode: "official_chrome_persistent_extension",
@@ -641,8 +677,6 @@ export const runIdentityPreflight = async (input: {
     });
   }
 
-  const profileDir =
-    asNonEmptyString(input.meta?.profileDir) ?? asNonEmptyString(input.profileDir);
   if (profileDir) {
     const extensionState = await resolveProfileExtensionState(profileDir, binding.extensionId);
     if (extensionState !== "enabled") {

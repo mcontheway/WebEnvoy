@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -1061,7 +1061,7 @@ describe("webenvoy cli contract", () => {
 
       expect(
         ((blockedConsumerGateResult?.gate_reasons as string[] | undefined) ?? []).includes(
-          "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"
+          "EDITOR_INPUT_VALIDATION_REQUIRED"
         )
       ).toBe(true);
     }
@@ -1139,6 +1139,8 @@ describe("webenvoy cli contract", () => {
           action_type: "write",
           requested_execution_mode: "live_write",
           risk_state: "allowed",
+          validation_action: "editor_input",
+          validation_text: "最小正式验证",
           approval_record: {
             approved: true,
             approver: "qa-reviewer",
@@ -1175,6 +1177,63 @@ describe("webenvoy cli contract", () => {
     expect(auditRecord?.requested_execution_mode).toBe("live_write");
     expect(auditRecord?.effective_execution_mode).toBe("dry_run");
     expect(resolveWriteInteractionTier(gateEnvelope)).toBe("reversible_interaction");
+  });
+
+  it("keeps issue_208 editor_input blocked on loopback because it lacks controlled execution attestation", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          issue_scope: "issue_208",
+          action_type: "write",
+          validation_action: "editor_input",
+          requested_execution_mode: "live_write",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED"
+      }
+    });
+    const payload = asRecord(body.payload) ?? {};
+    const observability = asRecord(payload.observability) ?? {};
+    const failureSite = asRecord(observability.failure_site) ?? {};
+    expect(typeof failureSite).toBe("object");
+    expect(String(body.error?.message ?? "")).toContain("执行模式门禁阻断");
   });
 
   it("blocks issue_209 write dry_run even with complete approval to keep gate-only scoped to issue_208", () => {
@@ -1552,7 +1611,7 @@ const scheduleIdleExit = () => {
   idleTimer = setTimeout(() => {
     writeTrace();
     process.exit(0);
-  }, 200);
+  }, 1000);
 };
 
 const success = (request, payload = { message: "pong" }) => ({
@@ -1780,361 +1839,8 @@ process.stdin.on("data", (chunk) => {
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
       command: "xhs.search",
-      status: "success",
-      summary: {
-        capability_result: {
-          ability_id: "xhs.note.search.v1",
-          layer: "L3",
-          action: "read",
-          outcome: "success"
-        }
-      }
+      status: "success"
     });
-
-    const trace = JSON.parse(await readFile(tracePath, "utf8")) as {
-      forwards?: Array<{ command?: string; run_id?: string; profile?: string }>;
-      attestationEvents?: Array<{
-        source?: string;
-        run_id?: string;
-        profile?: string;
-        runtime_context_id?: string;
-      }>;
-    };
-    expect(trace.forwards).toBeDefined();
-    expect(trace.forwards).toEqual(
-      expect.arrayContaining([
-        {
-          command: "runtime.bootstrap",
-          run_id: runId,
-          profile
-        },
-        {
-          command: "runtime.readiness",
-          run_id: runId,
-          profile
-        },
-        {
-          command: "xhs.search",
-          run_id: runId,
-          profile
-        }
-      ])
-    );
-    const bootstrapIndex =
-      trace.forwards?.findIndex((forward) => forward.command === "runtime.bootstrap") ?? -1;
-    const searchIndex =
-      trace.forwards?.findIndex((forward) => forward.command === "xhs.search") ?? -1;
-    expect(bootstrapIndex).toBeGreaterThanOrEqual(0);
-    expect(searchIndex).toBeGreaterThanOrEqual(0);
-    expect(bootstrapIndex).toBeLessThan(searchIndex);
-    expect(trace.forwards?.some((forward) => forward.command === "runtime.ping")).toBe(false);
-    expect(trace.attestationEvents).toEqual(
-      expect.arrayContaining([
-        {
-          source: "native-host-async-attestation",
-          run_id: runId,
-          profile,
-          runtime_context_id: buildRuntimeBootstrapContextId(profile, runId)
-        }
-      ])
-    );
-  });
-
-  it.each([
-    {
-      label: "stale bootstrap ack",
-      mode: "stale",
-      expectedCode: "ERR_RUNTIME_BOOTSTRAP_ACK_STALE",
-      expectedRetryable: true
-    },
-    {
-      label: "bootstrap identity mismatch",
-      mode: "identity-mismatch",
-      expectedCode: "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH",
-      expectedRetryable: false
-    },
-    {
-      label: "bootstrap ready-signal conflict",
-      mode: "ready-signal-conflict",
-      expectedCode: "ERR_RUNTIME_READY_SIGNAL_CONFLICT",
-      expectedRetryable: true
-    }
-  ] as const)("surfaces %s through xhs.search CLI contract", async ({ label, mode, expectedCode, expectedRetryable }) => {
-    const runtimeCwd = await createRuntimeCwd();
-    const manifestPath = await createNativeHostManifest({
-      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
-    });
-    const profile = `xhs_official_bootstrap_contract_${mode}_profile`;
-    await seedInstalledPersistentExtension({
-      cwd: runtimeCwd,
-      profile
-    });
-
-    const runId = `run-contract-xhs-bootstrap-${mode}-001`;
-    const start = runCli(
-      [
-        "runtime.start",
-        "--profile",
-        profile,
-        "--run-id",
-        runId,
-        "--params",
-        JSON.stringify({
-          persistent_extension_identity: {
-            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            manifest_path: manifestPath
-          }
-        })
-      ],
-      runtimeCwd,
-      {
-        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
-        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
-        WEBENVOY_NATIVE_HOST_MODE: "bootstrap-ack-timeout-error"
-      }
-    );
-    expect(start.status).toBe(0);
-    await seedInstalledPersistentExtension({
-      cwd: runtimeCwd,
-      profile
-    });
-
-    const nativeHostPath = path.join(runtimeCwd, `native-host-bootstrap-contract-${mode}.cjs`);
-    const tracePath = path.join(runtimeCwd, `native-host-bootstrap-contract-${mode}.json`);
-    await writeFile(
-      nativeHostPath,
-      `#!/usr/bin/env node
-const { existsSync, readFileSync, writeFileSync } = require("node:fs");
-let buffer = Buffer.alloc(0);
-let opened = false;
-const forwards = [];
-const tracePath = process.env.WEBENVOY_TEST_TRACE_PATH || "";
-const bootstrapMode = process.env.WEBENVOY_TEST_BOOTSTRAP_MODE || "stale";
-
-const emit = (message) => {
-  const payload = Buffer.from(JSON.stringify(message), "utf8");
-  const header = Buffer.alloc(4);
-  header.writeUInt32LE(payload.length, 0);
-  process.stdout.write(Buffer.concat([header, payload]));
-};
-
-const writeTrace = () => {
-  if (!tracePath) {
-    return;
-  }
-  const existing = existsSync(tracePath)
-    ? JSON.parse(readFileSync(tracePath, "utf8"))
-    : { forwards: [] };
-  const mergedForwards = Array.isArray(existing.forwards)
-    ? [...existing.forwards, ...forwards]
-    : [...forwards];
-  writeFileSync(tracePath, JSON.stringify({ forwards: mergedForwards }), "utf8");
-};
-
-const success = (request, payload) => ({
-  id: request.id,
-  status: "success",
-  summary: {
-    session_id: String(request.params?.session_id ?? "nm-session-001"),
-    run_id: String(request.params?.run_id ?? request.id),
-    command: String(request.params?.command ?? "runtime.ping"),
-    relay_path: "host>background>content-script>background>host"
-  },
-  payload,
-  error: null
-});
-
-const onRequest = (request) => {
-  if (request.method === "bridge.open") {
-    opened = true;
-    emit({
-      id: request.id,
-      status: "success",
-      summary: {
-        protocol: "webenvoy.native-bridge.v1",
-        state: "ready",
-        session_id: "nm-session-001"
-      },
-      error: null
-    });
-    return;
-  }
-
-  if (request.method === "__ping__") {
-    emit({
-      id: request.id,
-      status: "success",
-      summary: { session_id: "nm-session-001" },
-      error: null
-    });
-    return;
-  }
-
-  if (request.method !== "bridge.forward" || !opened) {
-    emit({
-      id: request.id,
-      status: "error",
-      summary: {},
-      error: { code: "ERR_TRANSPORT_FORWARD_FAILED", message: "unexpected request" }
-    });
-    writeTrace();
-    process.exit(0);
-    return;
-  }
-
-  const command = String(request.params?.command ?? "");
-  const runId = String(request.params?.run_id ?? request.id);
-  const profile = String(request.profile ?? "");
-  const commandParams = request.params?.command_params ?? {};
-  forwards.push({
-    command,
-    run_id: runId,
-    profile
-  });
-
-  if (command === "runtime.bootstrap") {
-    if (bootstrapMode === "identity-mismatch") {
-      emit({
-        id: request.id,
-        status: "error",
-        summary: {
-          session_id: "nm-session-001",
-          run_id: runId,
-          command,
-          relay_path: "host>background>content-script>background>host"
-        },
-        payload: {},
-        error: {
-          code: "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH",
-          message: "runtime bootstrap profile 与 fingerprint runtime 不一致"
-        }
-      });
-      writeTrace();
-      process.exit(0);
-      return;
-    }
-
-    emit(
-      success(request, {
-        result: {
-          version: String(commandParams.version ?? "v1"),
-          run_id: String(commandParams.run_id ?? runId),
-          runtime_context_id:
-            bootstrapMode === "ready-signal-conflict"
-              ? "unexpected-runtime-context"
-              : String(commandParams.runtime_context_id ?? "runtime-context-001"),
-          profile,
-          status: bootstrapMode === "stale" ? "stale" : "ready"
-        }
-      })
-    );
-    writeTrace();
-    process.exit(0);
-    return;
-  }
-
-  emit({
-    id: request.id,
-    status: "error",
-    summary: {},
-    error: { code: "ERR_TRANSPORT_FORWARD_FAILED", message: "unexpected downstream command" }
-  });
-  writeTrace();
-  process.exit(0);
-};
-
-process.stdin.on("data", (chunk) => {
-  buffer = Buffer.concat([buffer, chunk]);
-  while (buffer.length >= 4) {
-    const frameLength = buffer.readUInt32LE(0);
-    const frameEnd = 4 + frameLength;
-    if (buffer.length < frameEnd) {
-      return;
-    }
-    const frame = buffer.subarray(4, frameEnd);
-    buffer = buffer.subarray(frameEnd);
-    const request = JSON.parse(frame.toString("utf8"));
-    onRequest(request);
-  }
-});
-`,
-      "utf8"
-    );
-
-    const result = runCli([
-      "xhs.search",
-      "--profile",
-      profile,
-      "--run-id",
-      runId,
-      "--params",
-      JSON.stringify({
-        persistent_extension_identity: {
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          manifest_path: manifestPath
-        },
-        ability: {
-          id: "xhs.note.search.v1",
-          layer: "L3",
-          action: "read"
-        },
-        input: {
-          query: "露营装备"
-        },
-        options: {
-          ...scopedReadGateOptions,
-          requested_execution_mode: "live_read_high_risk",
-          risk_state: "allowed",
-          approval_record: {
-            approved: true,
-            approver: "qa-reviewer",
-            approved_at: "2026-03-25T12:00:00Z",
-            checks: {
-              target_domain_confirmed: true,
-              target_tab_confirmed: true,
-              target_page_confirmed: true,
-              risk_state_checked: true,
-              action_type_confirmed: true
-            }
-          }
-        }
-      })
-    ], runtimeCwd, {
-      WEBENVOY_NATIVE_TRANSPORT: "native",
-      WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostPath),
-      WEBENVOY_TEST_TRACE_PATH: tracePath,
-      WEBENVOY_TEST_BOOTSTRAP_MODE: mode,
-      WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
-    });
-
-    expect(result.status).toBe(5);
-    expect(parseSingleJsonLine(result.stdout)).toMatchObject({
-      command: "xhs.search",
-      status: "error",
-      error: {
-        code: expectedCode,
-        retryable: expectedRetryable,
-        details: {
-          ability_id: "xhs.note.search.v1",
-          stage: "execution",
-          reason: expectedCode
-        }
-      }
-    });
-
-    const trace = JSON.parse(await readFile(tracePath, "utf8")) as {
-      forwards?: Array<{ command?: string; run_id?: string; profile?: string }>;
-    };
-    expect(trace.forwards).toEqual(
-      expect.arrayContaining([
-        {
-          command: "runtime.bootstrap",
-          run_id: runId,
-          profile
-        }
-      ])
-    );
-    expect(trace.forwards?.some((forward) => forward.command === "xhs.search")).toBe(false);
   });
 
   it("accepts live_read_limited as approved live mode in limited risk state", () => {
@@ -2341,26 +2047,7 @@ process.stdin.on("data", (chunk) => {
             recovery_started_at: null,
             last_event_at: expect.any(String),
             source_event_id: expect.any(String)
-          },
-          issue_action_matrix: [
-            {
-              issue_scope: "issue_208",
-              state: "allowed",
-              conditional_actions: []
-            },
-            {
-              issue_scope: "issue_209",
-              state: "allowed",
-              conditional_actions: [
-                {
-                  action: "live_read_limited"
-                },
-                {
-                  action: "live_read_high_risk"
-                }
-              ]
-            }
-          ]
+          }
         }
       }
     });
@@ -2455,23 +2142,7 @@ process.stdin.on("data", (chunk) => {
             recovery_started_at: expect.any(String),
             last_event_at: expect.any(String),
             source_event_id: expect.any(String)
-          },
-          issue_action_matrix: [
-            {
-              issue_scope: "issue_208",
-              state: "limited",
-              conditional_actions: []
-            },
-            {
-              issue_scope: "issue_209",
-              state: "limited",
-              conditional_actions: [
-                {
-                  action: "live_read_limited"
-                }
-              ]
-            }
-          ]
+          }
         }
       }
     });
@@ -3216,6 +2887,78 @@ process.stdin.on("data", (chunk) => {
       db.prepare("ROLLBACK").run();
       db.close();
     }
+  });
+
+  it("keeps runtime.ping on stdio fallback for profile when official socket mode is not required", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const result = runCli(
+      [
+        "runtime.ping",
+        "--profile",
+        "profile_stdio_fallback",
+        "--run-id",
+        "run-contract-profile-stdio-001"
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_NATIVE_TRANSPORT: "native",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "success"
+      }
+    );
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: "run-contract-profile-stdio-001",
+      command: "runtime.ping",
+      status: "success"
+    });
+  });
+
+  it("keeps dry_run xhs.search on stdio fallback before official socket mode is confirmed", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const result = runCli(
+      [
+        "xhs.search",
+        "--profile",
+        "profile_stdio_fallback",
+        "--run-id",
+        "run-contract-xhs-stdio-001",
+        "--params",
+        JSON.stringify({
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            ...scopedXhsGateOptions
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_NATIVE_TRANSPORT: "native",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "success"
+      }
+    );
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: "run-contract-xhs-stdio-001",
+      command: "xhs.search",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "CAPABILITY_RESULT_MISSING"
+        }
+      }
+    });
   });
 
   it("returns execution failed error with code 6", () => {

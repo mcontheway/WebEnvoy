@@ -284,6 +284,15 @@ const readRequestedExecutionMode = (params: JsonObject): string | null => {
   return typeof mode === "string" && mode.length > 0 ? mode : null;
 };
 
+const stripTransientPersistentIdentityHints = (params: JsonObject): JsonObject => {
+  const nextParams: JsonObject = {
+    ...params
+  };
+  delete nextParams.persistent_extension_identity;
+  delete nextParams.persistentExtensionIdentity;
+  return nextParams;
+};
+
 const ensureFingerprintExecutionAllowed = (
   requestedExecutionMode: string | null,
   fingerprintRuntime: ReturnType<typeof buildFingerprintContextForMeta>
@@ -1032,7 +1041,10 @@ export class ProfileRuntimeService {
       requestedExecutionMode
     });
     const identityPreflight = await runIdentityPreflight({
-      params: input.params,
+      params:
+        meta?.persistentExtensionBinding === null || meta?.persistentExtensionBinding === undefined
+          ? stripTransientPersistentIdentityHints(input.params)
+          : input.params,
       meta,
       profileDir
     });

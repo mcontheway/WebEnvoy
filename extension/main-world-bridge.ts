@@ -412,6 +412,23 @@ const handleRequest = async (request: MainWorldRequest): Promise<void> => {
 const isValidChannelEventName = (value: string, prefix: string): boolean =>
   value.startsWith(prefix) && /^[A-Za-z0-9_.:-]+$/.test(value) && value.length <= 128;
 
+const attachMainWorldEventChannelIfValid = (requestEvent: unknown, resultEvent: unknown): boolean => {
+  if (typeof requestEvent !== "string" || typeof resultEvent !== "string") {
+    return false;
+  }
+  if (!isValidChannelEventName(requestEvent, MAIN_WORLD_EVENT_REQUEST_PREFIX)) {
+    return false;
+  }
+  if (!isValidChannelEventName(resultEvent, MAIN_WORLD_EVENT_RESULT_PREFIX)) {
+    return false;
+  }
+  attachMainWorldEventChannel({
+    requestEvent,
+    resultEvent
+  });
+  return true;
+};
+
 const resolveExpectedMainWorldEventChannel = (): MainWorldEventChannel | null => {
   const requestEvent =
     typeof EXPECTED_MAIN_WORLD_REQUEST_EVENT === "string"
@@ -444,7 +461,14 @@ const attachMainWorldEventChannel = (channel: MainWorldEventChannel): void => {
     ) {
       return;
     }
-    return;
+    if (activeMainWorldRequestListener) {
+      window.removeEventListener(
+        activeMainWorldEventChannel.requestEvent,
+        activeMainWorldRequestListener as EventListener
+      );
+    }
+    activeMainWorldEventChannel = null;
+    activeMainWorldRequestListener = null;
   }
   activeMainWorldEventChannel = channel;
   activeMainWorldRequestListener = (event: Event) => {

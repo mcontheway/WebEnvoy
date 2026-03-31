@@ -135,7 +135,22 @@ const parseAbilityEnvelope = (params: JsonObject): AbilityEnvelope => {
   };
 };
 
-const parseSearchInput = (input: JsonObject, abilityId: string): JsonObject => {
+const parseSearchInput = (
+  input: JsonObject,
+  abilityId: string,
+  options: JsonObject,
+  abilityAction: AbilityAction
+): JsonObject => {
+  const issue208EditorInputValidation =
+    abilityAction === "write" &&
+    options.issue_scope === "issue_208" &&
+    options.action_type === "write" &&
+    options.requested_execution_mode === "live_write" &&
+    options.validation_action === "editor_input";
+  if (issue208EditorInputValidation) {
+    return {};
+  }
+
   const query =
     typeof input.query === "string" && input.query.trim().length > 0 ? input.query.trim() : null;
   if (!query) {
@@ -173,7 +188,7 @@ const normalizeGateOptions = (
   abilityId: string
 ): {
   targetDomain: string;
-  targetTabId: number;
+  targetTabId: number | null;
   targetPage: string;
   requestedExecutionMode: XhsExecutionMode;
   options: JsonObject;
@@ -201,6 +216,21 @@ const normalizeGateOptions = (
   if (!targetPage) {
     throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
   }
+  const issueScope =
+    typeof options.issue_scope === "string" && options.issue_scope.trim().length > 0
+      ? options.issue_scope.trim()
+      : null;
+  const validationAction =
+    typeof options.validation_action === "string" && options.validation_action.trim().length > 0
+      ? options.validation_action.trim()
+      : null;
+  if (
+    issueScope === "issue_208" &&
+    validationAction === "editor_input" &&
+    targetPage !== "creator_publish_tab"
+  ) {
+    throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
+  }
 
   const requestedExecutionMode =
     typeof options.requested_execution_mode === "string" &&
@@ -225,6 +255,8 @@ const normalizeGateOptions = (
     }
   };
 };
+
+export const normalizeGateOptionsForContract = normalizeGateOptions;
 
 const buildCapabilityResult = (ability: AbilityRef, summary?: JsonObject): JsonObject => ({
   capability_result: {
@@ -251,6 +283,20 @@ const pickGateErrorDetails = (
   details?: JsonObject | null
 ): JsonObject => {
   const detailKeys = [
+    "validation_action",
+    "target_page",
+    "editor_locator",
+    "input_text",
+    "before_text",
+    "visible_text",
+    "post_blur_text",
+    "focus_confirmed",
+    "preserved_after_blur",
+    "success_signals",
+    "failure_signals",
+    "minimum_replay",
+    "out_of_scope_actions",
+    "execution_failure",
     "scope_context",
     "gate_input",
     "gate_outcome",
@@ -392,7 +438,12 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
         target_page: gate.targetPage,
         requested_execution_mode: gate.requestedExecutionMode,
         ability: envelope.ability,
-        input: parseSearchInput(envelope.input, envelope.ability.id),
+        input: parseSearchInput(
+          envelope.input,
+          envelope.ability.id,
+          gate.options,
+          envelope.ability.action
+        ),
         options: gate.options
       },
       fingerprintContext

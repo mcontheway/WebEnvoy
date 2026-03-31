@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -41,6 +41,8 @@ const writeProfileExtensionPreferences = async (input: {
   profileDir: string;
   extensionId: string;
   state?: 0 | 1;
+  location?: number;
+  extensionPath?: string;
 }): Promise<void> => {
   const defaultDir = join(input.profileDir, "Default");
   await mkdir(defaultDir, { recursive: true });
@@ -50,7 +52,11 @@ const writeProfileExtensionPreferences = async (input: {
       {
         extensions: {
           settings: {
-            [input.extensionId]: input.state === undefined ? {} : { state: input.state }
+            [input.extensionId]: {
+              ...(input.state === undefined ? {} : { state: input.state }),
+              ...(input.location === undefined ? {} : { location: input.location }),
+              ...(input.extensionPath === undefined ? {} : { path: input.extensionPath })
+            }
           }
         }
       },
@@ -374,6 +380,131 @@ describe("runIdentityPreflight", () => {
     expect(result.identityBindingState).toBe("missing");
     expect(result.failureReason).toBe("IDENTITY_BINDING_MISSING");
     expect(result.blocking).toBe(true);
+  });
+
+  it("resolves the native host manifest from browser channel defaults when binding omits manifestPath", async () => {
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-profile-scoped-"));
+    const fakeHome = await mkdtemp(join(tmpdir(), "webenvoy-native-host-home-"));
+    const manifestPath = join(
+      fakeHome,
+      "Library",
+      "Application Support",
+      "Google",
+      "Chrome",
+      "NativeMessagingHosts",
+      "com.webenvoy.host.json"
+    );
+    vi.stubEnv("HOME", fakeHome);
+    await mkdir(dirname(manifestPath), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          allowed_origins: [`chrome-extension://${EXTENSION_ID}/`]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeProfileExtensionPreferences({
+      profileDir,
+      extensionId: EXTENSION_ID,
+      state: 1
+    });
+    await writeInstalledProfileExtension({
+      profileDir,
+      extensionId: EXTENSION_ID
+    });
+
+    setIdentityPreflightAdaptersForTests({
+      resolvePreferredBrowserVersionTruthSource: vi.fn().mockResolvedValue({
+        executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        browserVersion: "Google Chrome 146.0.7680.154"
+      }),
+      isUnsupportedBrandedChromeForExtensions: vi.fn().mockReturnValue(true),
+      platform: () => "darwin"
+    });
+
+    const result = await runIdentityPreflight({
+      params: {
+        persistent_extension_identity: {
+          extension_id: EXTENSION_ID
+        }
+      },
+      meta: createProfileMeta(profileDir),
+      profileDir
+    });
+
+    expect(result).toMatchObject({
+      identityBindingState: "bound",
+      failureReason: "IDENTITY_PREFLIGHT_PASSED",
+      manifestPath,
+      expectedOrigin: `chrome-extension://${EXTENSION_ID}/`,
+      allowedOrigins: [`chrome-extension://${EXTENSION_ID}/`]
+    });
+    expect(result.manifestPath?.startsWith(profileDir)).toBe(false);
+  });
+
+  it("treats developer-mode unpacked extension path as enabled when profile Extensions dir is absent", async () => {
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-profile-unpacked-"));
+    const fakeHome = await mkdtemp(join(tmpdir(), "webenvoy-native-host-home-unpacked-"));
+    const manifestPath = join(
+      fakeHome,
+      "Library",
+      "Application Support",
+      "Google",
+      "Chrome",
+      "NativeMessagingHosts",
+      "com.webenvoy.host.json"
+    );
+    const unpackedDir = await mkdtemp(join(tmpdir(), "webenvoy-unpacked-extension-"));
+    vi.stubEnv("HOME", fakeHome);
+    await mkdir(dirname(manifestPath), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          allowed_origins: [`chrome-extension://${EXTENSION_ID}/`]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeProfileExtensionPreferences({
+      profileDir,
+      extensionId: EXTENSION_ID,
+      location: 4,
+      extensionPath: unpackedDir
+    });
+
+    setIdentityPreflightAdaptersForTests({
+      resolvePreferredBrowserVersionTruthSource: vi.fn().mockResolvedValue({
+        executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        browserVersion: "Google Chrome 146.0.7680.154"
+      }),
+      isUnsupportedBrandedChromeForExtensions: vi.fn().mockReturnValue(true),
+      platform: () => "darwin"
+    });
+
+    const result = await runIdentityPreflight({
+      params: {
+        persistent_extension_identity: {
+          extension_id: EXTENSION_ID
+        }
+      },
+      meta: createProfileMeta(profileDir),
+      profileDir
+    });
+
+    expect(result).toMatchObject({
+      identityBindingState: "bound",
+      failureReason: "IDENTITY_PREFLIGHT_PASSED",
+      manifestPath
+    });
   });
 
   it("falls back to persistent binding from profile meta when params omit identity", async () => {

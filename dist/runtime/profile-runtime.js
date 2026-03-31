@@ -133,6 +133,14 @@ const readRequestedExecutionMode = (params) => {
     const mode = params.requested_execution_mode;
     return typeof mode === "string" && mode.length > 0 ? mode : null;
 };
+const stripTransientPersistentIdentityHints = (params) => {
+    const nextParams = {
+        ...params
+    };
+    delete nextParams.persistent_extension_identity;
+    delete nextParams.persistentExtensionIdentity;
+    return nextParams;
+};
 const ensureFingerprintExecutionAllowed = (requestedExecutionMode, fingerprintRuntime) => {
     if (!requestedExecutionMode || !LIVE_EXECUTION_MODES.has(requestedExecutionMode)) {
         return;
@@ -733,7 +741,9 @@ export class ProfileRuntimeService {
             requestedExecutionMode
         });
         const identityPreflight = await runIdentityPreflight({
-            params: input.params,
+            params: meta?.persistentExtensionBinding === null || meta?.persistentExtensionBinding === undefined
+                ? stripTransientPersistentIdentityHints(input.params)
+                : input.params,
             meta,
             profileDir
         });

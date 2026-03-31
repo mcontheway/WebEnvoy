@@ -34,5 +34,5 @@
       "run_at": "document_start"
     }
   ],
-  "permissions": ["nativeMessaging", "storage", "scripting"]
+  "permissions": ["nativeMessaging", "storage", "scripting", "tabs", "debugger"]
 }

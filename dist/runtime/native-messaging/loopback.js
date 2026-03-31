@@ -7,6 +7,12 @@ const XHS_ALLOWED_DOMAINS = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
 const LOOPBACK_EXECUTION_MODES = new Set(EXECUTION_MODES);
 const LOOPBACK_ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
 const LOOPBACK_REQUIRED_APPROVAL_CHECKS = APPROVAL_CHECK_KEYS;
+const XHS_WRITE_APPROVAL_REQUIREMENTS = [
+    "approval_record_approved_true",
+    "approval_record_approver_present",
+    "approval_record_approved_at_present",
+    "approval_record_checks_all_true"
+];
 const LOOPBACK_READ_EXECUTION_POLICY = {
     default_mode: "dry_run",
     allowed_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
@@ -113,6 +119,9 @@ const buildLoopbackGate = (options, abilityAction, allowIssue208InteractProbe = 
     const issue208WriteGateOnly = issueScope === "issue_208" &&
         actionType !== null &&
         writeActionMatrixDecisions.write_interaction_tier !== "observe_only";
+    const issue208EditorInputValidation = issue208WriteGateOnly &&
+        requestedExecutionMode === "live_write" &&
+        asString(options.validation_action) === "editor_input";
     const writeTierReason = `WRITE_INTERACTION_TIER_${writeActionMatrixDecisions.write_interaction_tier.toUpperCase()}`;
     const targetDomain = asString(options.target_domain);
     const targetTabId = asInteger(options.target_tab_id);
@@ -149,7 +158,8 @@ const buildLoopbackGate = (options, abilityAction, allowIssue208InteractProbe = 
     if (requestedExecutionMode === "live_write" && actionType === "irreversible_write") {
         gateReasons.push("IRREVERSIBLE_WRITE_NOT_ALLOWED");
     }
-    if (requestedExecutionMode === "live_write" && !issue208WriteGateOnly) {
+    if (requestedExecutionMode === "live_write" &&
+        (!issue208WriteGateOnly || !issue208EditorInputValidation)) {
         gateReasons.push("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
     }
     if (targetDomain === XHS_WRITE_DOMAIN && actionType === "read") {
@@ -169,15 +179,38 @@ const buildLoopbackGate = (options, abilityAction, allowIssue208InteractProbe = 
     else if (issue208WriteGateOnly &&
         actionType &&
         requestedExecutionMode !== null) {
-        effectiveExecutionMode = resolveLoopbackFallbackMode(requestedExecutionMode, riskState);
-        if (allowIssue208InteractProbe &&
-            (requestedExecutionMode === "dry_run" || requestedExecutionMode === "recon")) {
-            gateDecision = "allowed";
-            gateReasons.push(requestedExecutionMode === "recon" ? "DEFAULT_MODE_RECON" : "DEFAULT_MODE_DRY_RUN", "WRITE_EXECUTION_GATE_ONLY", "ISSUE_208_GATE_ONLY_FREEZE");
+        const approvalRequirementGaps = resolveApprovalRequirementGaps([...XHS_WRITE_APPROVAL_REQUIREMENTS], approvalRecord, approvalChecks);
+        if (issue208EditorInputValidation &&
+            riskState === "allowed" &&
+            approvalRequirementGaps.length === 0) {
+            gateDecision = "blocked";
+            effectiveExecutionMode = resolveLoopbackFallbackMode(requestedExecutionMode, riskState);
+            gateReasons.push("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
         }
         else {
+            effectiveExecutionMode = resolveLoopbackFallbackMode(requestedExecutionMode, riskState);
             gateDecision = "blocked";
-            gateReasons.push("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
+            if (!issue208EditorInputValidation) {
+                gateReasons.push("EDITOR_INPUT_VALIDATION_REQUIRED");
+            }
+            if (riskState !== "allowed") {
+                gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
+                gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
+            }
+            for (const gap of approvalRequirementGaps) {
+                if (gap === "approval_record_approved_true" ||
+                    gap === "approval_record_approver_present" ||
+                    gap === "approval_record_approved_at_present") {
+                    if (!gateReasons.includes("MANUAL_CONFIRMATION_MISSING")) {
+                        gateReasons.push("MANUAL_CONFIRMATION_MISSING");
+                    }
+                }
+                if (gap === "approval_record_checks_all_true") {
+                    if (!gateReasons.includes("APPROVAL_CHECKS_INCOMPLETE")) {
+                        gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
+                    }
+                }
+            }
         }
     }
     else if (actionType && actionType !== "read") {
@@ -618,6 +651,61 @@ class InMemoryContentScriptRuntime {
                             key_requests: [],
                             failure_site: null
                         }
+                    }
+                };
+            }
+            if (consumerGateResult.effective_execution_mode === "live_write" &&
+                options.validation_action === "editor_input") {
+                const validationText = typeof options.validation_text === "string" && options.validation_text.trim().length > 0
+                    ? options.validation_text.trim()
+                    : "WebEnvoy editor_input validation";
+                return {
+                    kind: "result",
+                    id: message.id,
+                    ok: false,
+                    payload: {
+                        summary: {
+                            capability_result: {
+                                ability_id: String(ability.id ?? "xhs.issue208.editor_input"),
+                                layer: String(ability.layer ?? "L3"),
+                                action: String(consumerGateResult.action_type ?? ability.action ?? "write"),
+                                outcome: "blocked",
+                                data_ref: {
+                                    validation_action: "editor_input"
+                                },
+                                metrics: {
+                                    duration_ms: 12
+                                }
+                            },
+                            ...gateBundle,
+                            interaction_result: {
+                                validation_action: "editor_input",
+                                target_page: "creator.xiaohongshu.com/publish",
+                                success_signals: [],
+                                failure_signals: ["EDITOR_INPUT_VALIDATION_REQUIRED"],
+                                minimum_replay: ["focus_editor", "type_short_text", "blur_or_reobserve"],
+                                out_of_scope_actions: ["image_upload", "submit", "publish_confirm"]
+                            }
+                        },
+                        observability: {
+                            page_state: {
+                                page_kind: "compose",
+                                url: "https://creator.xiaohongshu.com/publish/publish",
+                                title: "Creator Publish",
+                                ready_state: "complete"
+                            },
+                            key_requests: [],
+                            failure_site: {
+                                stage: "execution",
+                                component: "page",
+                                target: "editor_input",
+                                summary: "loopback transport cannot attest controlled editor_input validation"
+                            }
+                        }
+                    },
+                    error: {
+                        code: "ERR_EXECUTION_FAILED",
+                        message: `editor_input validation requires a controlled execution surface: ${validationText}`
                     }
                 };
             }

@@ -51,10 +51,11 @@ export const BROWSER_CONTROL_FILENAME = "__webenvoy_browser_control.json";
 export const EXTENSION_STAGING_DIRNAME = "__webenvoy_extension_staging";
 export const EXTENSION_BOOTSTRAP_FILENAME = "__webenvoy_fingerprint_bootstrap.json";
 export const EXTENSION_BOOTSTRAP_SCRIPT_FILENAME = "__webenvoy_fingerprint_bootstrap.js";
-const READY_WAIT_MAX_ATTEMPTS = 20;
+const READY_WAIT_MAX_ATTEMPTS = 80;
 const READY_WAIT_INTERVAL_MS = 150;
 const READY_MIN_UPTIME_MS = 600;
 const READY_CONFIRM_DELAY_MS = 120;
+const READY_MARKER_GRANULARITY_TOLERANCE_MS = 1_000;
 const SUPERVISOR_STATE_WAIT_ATTEMPTS = 40;
 const SUPERVISOR_STATE_WAIT_INTERVAL_MS = 80;
 const SUPERVISOR_SHUTDOWN_TIMEOUT_MS = 4_000;
@@ -151,7 +152,7 @@ const pathExists = async (path) => {
 const isFreshReadyMarker = async (path, launchedAtMs) => {
     try {
         const markerStat = await stat(path);
-        return markerStat.mtimeMs >= launchedAtMs;
+        return markerStat.mtimeMs + READY_MARKER_GRANULARITY_TOLERANCE_MS >= launchedAtMs;
     }
     catch {
         return false;

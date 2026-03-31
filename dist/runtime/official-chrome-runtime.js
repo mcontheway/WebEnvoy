@@ -135,16 +135,10 @@ const applyReadinessToStatus = (status, input) => ({
     transportState: input.transportState,
     lockHeld: input.lockHeld
 });
-export const buildOfficialChromeRuntimeStatusParams = (context, requestedExecutionMode) => {
-    const params = {
+export const buildOfficialChromeRuntimeStatusParams = (_context, requestedExecutionMode) => {
+    return {
         requested_execution_mode: requestedExecutionMode
     };
-    const persistentExtensionIdentity = asObject(context.params.persistent_extension_identity) ??
-        asObject(context.params.persistentExtensionIdentity);
-    if (persistentExtensionIdentity) {
-        params.persistent_extension_identity = persistentExtensionIdentity;
-    }
-    return params;
 };
 export const prepareOfficialChromeRuntime = async (input) => {
     const readStatus = input.readStatus ??

@@ -13,8 +13,6 @@ import {
 } from "../runtime/native-messaging/bridge.js";
 import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
-import {
-} from "../runtime/official-chrome-runtime.js";
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { buildFingerprintContextForMeta, appendFingerprintContext } from "../runtime/fingerprint-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";

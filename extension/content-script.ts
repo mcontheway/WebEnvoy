@@ -432,6 +432,16 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
     void loadBootstrapFingerprintContextFromExtension(runtime).then((resolvedBootstrap) => {
       installMainWorldEventChannelSecret(resolvedBootstrap.mainWorldSecret);
       if (!resolvedBootstrap.fingerprintRuntime) {
+        runtime.sendMessage?.({
+          kind: "result",
+          id: "startup-background-wake",
+          ok: true,
+          payload: {
+            startup_background_wake: {
+              source: "content_script_bootstrap"
+            }
+          }
+        });
         return;
       }
       persistExtensionFingerprintContext(

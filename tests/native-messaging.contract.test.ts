@@ -36,7 +36,7 @@ const withRepoOwnedNativeHost = (): Record<string, string> => ({
 });
 
 describe("native messaging contract", () => {
-  it("returns handshake failure on default transport when bridge is not connected", () => {
+  it("fails runtime.ping on default transport when no native host command is configured", () => {
     const result = runCli(["runtime.ping", "--run-id", "run-nm-default-001"]);
     expect(result.status).toBe(5);
 

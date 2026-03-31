@@ -222,19 +222,12 @@ const applyReadinessToStatus = (
 });
 
 export const buildOfficialChromeRuntimeStatusParams = (
-  context: RuntimeContext,
+  _context: RuntimeContext,
   requestedExecutionMode: string
 ): JsonObject => {
-  const params: JsonObject = {
+  return {
     requested_execution_mode: requestedExecutionMode
   };
-  const persistentExtensionIdentity =
-    asObject(context.params.persistent_extension_identity) ??
-    asObject(context.params.persistentExtensionIdentity);
-  if (persistentExtensionIdentity) {
-    params.persistent_extension_identity = persistentExtensionIdentity;
-  }
-  return params;
 };
 
 export const prepareOfficialChromeRuntime = async (input: {

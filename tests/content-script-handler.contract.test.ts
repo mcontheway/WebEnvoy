@@ -1066,6 +1066,147 @@ describe("content-script handler contract", () => {
     });
   });
 
+  it("reuses already-attested fingerprint runtime for xhs.search when main-world install is unavailable", async () => {
+    await withMockMainWorld(async ({ mockWindow }) => {
+      (mockWindow as Window & Record<string, unknown>).__disableMainWorldBridgeFingerprintInstall__ = true;
+      const handler = new ContentScriptHandler();
+      const results: Array<Record<string, unknown>> = [];
+      handler.onResult((message) => {
+        results.push(message as unknown as Record<string, unknown>);
+      });
+
+      const fingerprintContext = {
+        ...createFingerprintContext(),
+        injection: {
+          installed: true,
+          applied_patches: [
+            "audio_context",
+            "battery",
+            "navigator_plugins",
+            "navigator_mime_types"
+          ],
+          required_patches: [
+            "audio_context",
+            "battery",
+            "navigator_plugins",
+            "navigator_mime_types"
+          ],
+          missing_required_patches: [],
+          source: "profile_meta"
+        }
+      };
+
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "run-xhs-attested-001",
+        runId: "run-xhs-attested-001",
+        tabId: 1,
+        profile: "profile-a",
+        cwd: "/workspace/WebEnvoy",
+        timeoutMs: 1_000,
+        command: "xhs.search",
+        params: {},
+        commandParams: {},
+        fingerprintContext
+      });
+
+      await waitForResult(results);
+
+      const payload = results[0]?.payload as Record<string, unknown>;
+      const fingerprintRuntime = payload?.fingerprint_runtime as Record<string, unknown>;
+      const injection = fingerprintRuntime?.injection as Record<string, unknown>;
+      expect(results[0]?.ok).toBe(false);
+      expect(injection?.installed).toBe(true);
+      expect(injection?.missing_required_patches).toEqual([]);
+      expect(injection?.source).toBe("profile_meta");
+    });
+  });
+
+  it("preserves attested injection when fingerprint_context is provided through commandParams", async () => {
+    await withMockMainWorld(async () => {
+      const handler = new ContentScriptHandler();
+      const results: Array<Record<string, unknown>> = [];
+      handler.onResult((message) => {
+        results.push(message as unknown as Record<string, unknown>);
+      });
+
+      const fingerprintContext = {
+        ...createFingerprintContext(),
+        injection: {
+          installed: true,
+          applied_patches: [
+            "audio_context",
+            "battery",
+            "navigator_plugins",
+            "navigator_mime_types"
+          ],
+          required_patches: [
+            "audio_context",
+            "battery",
+            "navigator_plugins",
+            "navigator_mime_types"
+          ],
+          missing_required_patches: [],
+          source: "main_world"
+        }
+      };
+
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "run-xhs-attested-command-params-001",
+        runId: "run-xhs-attested-command-params-001",
+        tabId: 1,
+        profile: "profile-a",
+        cwd: "/workspace/WebEnvoy",
+        timeoutMs: 1_000,
+        command: "xhs.search",
+        params: {},
+        commandParams: {
+          issue_scope: "issue_208",
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 1,
+          target_page: "creator_publish_tab",
+          action_type: "write",
+          requested_execution_mode: "live_write",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-31T05:36:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          },
+          validation_action: "editor_input",
+          input: {
+            query: "测试发布文案"
+          },
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "write"
+          },
+          fingerprint_context: fingerprintContext
+        },
+        fingerprintContext: null
+      });
+
+      await waitForResult(results);
+
+      const payload = results[0]?.payload as Record<string, unknown>;
+      const returnedFingerprintRuntime = payload?.fingerprint_runtime as Record<string, unknown>;
+      const injection = returnedFingerprintRuntime?.injection as Record<string, unknown>;
+      expect(results[0]?.ok).toBe(false);
+      expect(injection?.installed).toBe(true);
+      expect(injection?.missing_required_patches).toEqual([]);
+      expect(injection?.source).toBe("main_world");
+    });
+  });
+
   it("blocks live xhs.search when required fingerprint patches are missing (top-level requested_execution_mode)", async () => {
     await withMockMainWorld(async () => {
       const fingerprintContext = createFingerprintContext();
@@ -1107,6 +1248,10 @@ describe("content-script handler contract", () => {
       const details = payload?.details as Record<string, unknown>;
       const fingerprintRuntime = payload?.fingerprint_runtime as Record<string, unknown>;
       const injection = fingerprintRuntime?.injection as Record<string, unknown>;
+      const diagnostics = payload?.fingerprint_forward_diagnostics as Record<string, unknown>;
+      const directMessageContext = diagnostics?.direct_message_context as Record<string, unknown>;
+      const resolvedMessageContext = diagnostics?.resolved_message_context as Record<string, unknown>;
+      const installedRuntimeContext = diagnostics?.installed_runtime_context as Record<string, unknown>;
       expect(results[0]?.ok).toBe(false);
       expect((results[0]?.error as { code?: string } | undefined)?.code).toBe("ERR_EXECUTION_FAILED");
       expect(details?.reason).toBe("FINGERPRINT_REQUIRED_PATCH_MISSING");
@@ -1114,6 +1259,11 @@ describe("content-script handler contract", () => {
       expect(details?.missing_required_patches).toContain("unknown_required_patch");
       expect(injection?.installed).toBe(false);
       expect(injection?.missing_required_patches).toContain("unknown_required_patch");
+      expect(directMessageContext?.injection ?? null).toBeNull();
+      expect(resolvedMessageContext?.injection ?? null).toBeNull();
+      expect(
+        (installedRuntimeContext?.injection as Record<string, unknown> | undefined)?.installed
+      ).toBe(false);
     });
   });
 });

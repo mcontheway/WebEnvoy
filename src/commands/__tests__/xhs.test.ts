@@ -1,13 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { join } from "node:path";
 
-import { buildOfficialChromeRuntimeStatusParams, ensureOfficialChromeRuntimeReady } from "../xhs.js";
+import {
+  buildOfficialChromeRuntimeStatusParams,
+  ensureOfficialChromeRuntimeReady,
+  normalizeGateOptionsForContract
+} from "../xhs.js";
 import { executeCommand } from "../../core/router.js";
 import { createCommandRegistry } from "../index.js";
 import type { RuntimeContext } from "../../core/types.js";
 
 describe("ensureOfficialChromeRuntimeReady", () => {
-  it("forwards persistent extension identity into runtime.status params", () => {
+  it("does not forward persistent extension identity into runtime.status params", () => {
     expect(
       buildOfficialChromeRuntimeStatusParams(
         {
@@ -24,12 +28,8 @@ describe("ensureOfficialChromeRuntimeReady", () => {
         },
         "live_read_high_risk"
       )
-    ).toMatchObject({
-      requested_execution_mode: "live_read_high_risk",
-      persistent_extension_identity: {
-        extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        manifestPath: "/tmp/native-host-manifest.json"
-      }
+    ).toEqual({
+      requested_execution_mode: "live_read_high_risk"
     });
   });
 
@@ -116,6 +116,159 @@ describe("ensureOfficialChromeRuntimeReady", () => {
     const bootstrapCommand = bridge.runCommand.mock.calls[0]?.[0];
     expect(bootstrapCommand.params.runtime_context_id).toEqual(expect.any(String));
     expect(bootstrapCommand.params.main_world_secret).toEqual(expect.any(String));
+  });
+
+  it("skips re-bootstrap when official Chrome runtime already reports ready", async () => {
+    const readStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        runtimeReadiness: "ready",
+        identityBindingState: "bound",
+        bootstrapState: "ready",
+        transportState: "ready",
+        lockHeld: true
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        runtimeReadiness: "ready",
+        identityBindingState: "bound",
+        bootstrapState: "ready",
+        transportState: "ready",
+        lockHeld: true
+      });
+    const bridge = {
+      runCommand: vi.fn(async (request: { params: { runtime_context_id: string } }) => ({
+        ok: true,
+        payload: {
+          result: {
+            version: "v1",
+            run_id: "run-xhs-live-ready-rebootstrap-001",
+            runtime_context_id: request.params.runtime_context_id,
+            profile: "official_live_ready_profile",
+            status: "ready"
+          }
+        },
+        error: null
+      }))
+    };
+
+    await expect(
+      ensureOfficialChromeRuntimeReady(
+        {
+          cwd: "/tmp/webenvoy",
+          profile: "official_live_ready_profile",
+          run_id: "run-xhs-live-ready-rebootstrap-001"
+        } as never,
+        {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        } as never,
+        "live_read_high_risk",
+        bridge as never,
+        {
+          fingerprint_profile_bundle: null
+        } as never,
+        {
+          targetDomain: "www.xiaohongshu.com",
+          targetTabId: 32,
+          targetPage: "search_result_tab",
+          options: {
+            requested_execution_mode: "live_read_high_risk"
+          }
+        } as never,
+        readStatus
+      )
+    ).resolves.toBeUndefined();
+
+    expect(bridge.runCommand).not.toHaveBeenCalled();
+  });
+
+  it("keeps caller fingerprint runtime when runtime is already ready", async () => {
+    const readStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        runtimeReadiness: "ready",
+        identityBindingState: "bound",
+        bootstrapState: "ready",
+        transportState: "ready",
+        lockHeld: true
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        runtimeReadiness: "ready",
+        identityBindingState: "bound",
+        bootstrapState: "ready",
+        transportState: "ready",
+        lockHeld: true
+      });
+    const bridge = {
+      runCommand: vi.fn(async (request: { params: { runtime_context_id: string } }) => ({
+        ok: true,
+        payload: {
+          result: {
+            version: "v1",
+            run_id: "run-xhs-live-ready-attested-001",
+            runtime_context_id: request.params.runtime_context_id,
+            profile: "official_live_ready_attested_profile",
+            status: "ready"
+          },
+          fingerprint_runtime: {
+            fingerprint_profile_bundle: {
+              id: "bundle-attested"
+            },
+            fingerprint_patch_manifest: {
+              runtime_id: "runtime-attested"
+            },
+            injection: {
+              installed: true,
+              channel: "main_world"
+            }
+          }
+        },
+        error: null
+      }))
+    };
+
+    await expect(
+      ensureOfficialChromeRuntimeReady(
+        {
+          cwd: "/tmp/webenvoy",
+          profile: "official_live_ready_attested_profile",
+          run_id: "run-xhs-live-ready-attested-001"
+        } as never,
+        {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        } as never,
+        "live_write",
+        bridge as never,
+        {
+          fingerprint_profile_bundle: null
+        } as never,
+        {
+          targetDomain: "creator.xiaohongshu.com",
+          targetTabId: 32,
+          targetPage: "creator_publish_tab",
+          options: {
+            requested_execution_mode: "live_write"
+          }
+        } as never,
+        readStatus
+      )
+    ).resolves.toBeUndefined();
+    expect(bridge.runCommand).not.toHaveBeenCalled();
   });
 
   it("re-bootstrap current run when readiness reports stale bootstrap state", async () => {
@@ -685,5 +838,98 @@ describe("ensureOfficialChromeRuntimeReady", () => {
       })
     });
     expect(bridge.runCommand).not.toHaveBeenCalled();
+  });
+});
+
+describe("normalizeGateOptionsForContract", () => {
+  it("keeps target_tab_id mandatory for issue_208 editor_input", () => {
+    try {
+      normalizeGateOptionsForContract(
+        {
+          issue_scope: "issue_208",
+          target_domain: "creator.xiaohongshu.com",
+          target_page: "creator_publish_tab",
+          requested_execution_mode: "live_write",
+          validation_action: "editor_input"
+        },
+        "xhs.note.search.v1"
+      );
+      throw new Error("expected normalizeGateOptionsForContract to throw");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "TARGET_TAB_ID_INVALID"
+        }
+      });
+    }
+  });
+
+  it("keeps target_tab_id mandatory outside issue_208 editor_input validation", () => {
+    try {
+      normalizeGateOptionsForContract(
+        {
+          target_domain: "creator.xiaohongshu.com",
+          target_page: "creator_publish_tab",
+          requested_execution_mode: "live_write"
+        },
+        "xhs.note.search.v1"
+      );
+      throw new Error("expected normalizeGateOptionsForContract to throw");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "TARGET_TAB_ID_INVALID"
+        }
+      });
+    }
+  });
+
+  it("keeps target_tab_id mandatory when issue_208 editor_input is not pinned to creator_publish_tab", () => {
+    try {
+      normalizeGateOptionsForContract(
+        {
+          issue_scope: "issue_208",
+          target_domain: "creator.xiaohongshu.com",
+          target_page: "search_result_tab",
+          requested_execution_mode: "live_write",
+          validation_action: "editor_input"
+        },
+        "xhs.note.search.v1"
+      );
+      throw new Error("expected normalizeGateOptionsForContract to throw");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "TARGET_TAB_ID_INVALID"
+        }
+      });
+    }
+  });
+
+  it("rejects issue_208 editor_input when explicit target_tab_id is paired with a non-publish target_page", () => {
+    try {
+      normalizeGateOptionsForContract(
+        {
+          issue_scope: "issue_208",
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
+          requested_execution_mode: "live_write",
+          validation_action: "editor_input"
+        },
+        "xhs.note.search.v1"
+      );
+      throw new Error("expected normalizeGateOptionsForContract to throw");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "TARGET_PAGE_INVALID"
+        }
+      });
+    }
   });
 });

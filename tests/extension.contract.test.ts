@@ -10,6 +10,7 @@ const backgroundBuildPath = path.join(extensionRoot, "build", "background.js");
 const mainWorldBridgeBuildPath = path.join(extensionRoot, "build", "main-world-bridge.js");
 const contentScriptBuildPath = path.join(extensionRoot, "build", "content-script.js");
 const contentScriptHandlerBuildPath = path.join(extensionRoot, "build", "content-script-handler.js");
+const xhsEditorInputBuildPath = path.join(extensionRoot, "build", "xhs-editor-input.js");
 const fingerprintProfileSharedPath = path.join(extensionRoot, "shared", "fingerprint-profile.js");
 const expectedMainWorldBridgeMatches = [
   "https://www.xiaohongshu.com/*",
@@ -28,6 +29,7 @@ describe("extension build contract", () => {
   it("generates chrome-loadable background/content-script artifacts referenced by manifest", () => {
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
       background: { service_worker: string };
+      permissions?: string[];
       content_scripts: Array<{
         matches?: string[];
         js: string[];
@@ -50,10 +52,12 @@ describe("extension build contract", () => {
     expect(contentScriptEntry).toBeDefined();
     expect(contentScriptEntry?.matches).toEqual(expectedContentScriptMatches);
     expect(contentScriptEntry?.run_at).toBe("document_start");
+    expect(manifest.permissions).toEqual(expect.arrayContaining(["debugger"]));
     expect(fs.existsSync(backgroundBuildPath)).toBe(true);
     expect(fs.existsSync(mainWorldBridgeBuildPath)).toBe(true);
     expect(fs.existsSync(contentScriptBuildPath)).toBe(true);
     expect(fs.existsSync(contentScriptHandlerBuildPath)).toBe(true);
+    expect(fs.existsSync(xhsEditorInputBuildPath)).toBe(true);
     expect(fs.existsSync(fingerprintProfileSharedPath)).toBe(true);
   });
 
@@ -61,6 +65,18 @@ describe("extension build contract", () => {
     await expect(import(backgroundBuildPath)).resolves.toBeDefined();
     await expect(import(contentScriptBuildPath)).resolves.toBeDefined();
     await expect(import(contentScriptHandlerBuildPath)).resolves.toBeDefined();
+  });
+
+  it("emits chrome-loadable classic content-script bundle without top-level esm imports", () => {
+    const contentScriptBuild = fs.readFileSync(contentScriptBuildPath, "utf8");
+    const xhsEditorInputBuild = fs.readFileSync(xhsEditorInputBuildPath, "utf8");
+    expect(contentScriptBuild).toContain("bootstrapContentScript");
+    expect(contentScriptBuild).toContain("installMainWorldEventChannelSecret");
+    expect(contentScriptBuild).toContain("installFingerprintRuntimeViaMainWorld");
+    expect(xhsEditorInputBuild).toContain("performEditorInputValidation");
+    expect(xhsEditorInputBuild).toContain("新的创作");
+    expect(xhsEditorInputBuild).toContain("enter_editable_mode");
+    expect(contentScriptBuild).not.toMatch(/^\s*import\s+/m);
   });
 
   it("keeps background build artifact aligned with xhs gate contract markers", () => {

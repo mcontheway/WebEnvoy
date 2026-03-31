@@ -84,7 +84,15 @@ const parseAbilityEnvelope = (params) => {
         options
     };
 };
-const parseSearchInput = (input, abilityId) => {
+const parseSearchInput = (input, abilityId, options, abilityAction) => {
+    const issue208EditorInputValidation = abilityAction === "write" &&
+        options.issue_scope === "issue_208" &&
+        options.action_type === "write" &&
+        options.requested_execution_mode === "live_write" &&
+        options.validation_action === "editor_input";
+    if (issue208EditorInputValidation) {
+        return {};
+    }
     const query = typeof input.query === "string" && input.query.trim().length > 0 ? input.query.trim() : null;
     if (!query) {
         throw invalidAbilityInput("QUERY_MISSING", abilityId);
@@ -129,6 +137,17 @@ const normalizeGateOptions = (options, abilityId) => {
     if (!targetPage) {
         throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
     }
+    const issueScope = typeof options.issue_scope === "string" && options.issue_scope.trim().length > 0
+        ? options.issue_scope.trim()
+        : null;
+    const validationAction = typeof options.validation_action === "string" && options.validation_action.trim().length > 0
+        ? options.validation_action.trim()
+        : null;
+    if (issueScope === "issue_208" &&
+        validationAction === "editor_input" &&
+        targetPage !== "creator_publish_tab") {
+        throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
+    }
     const requestedExecutionMode = typeof options.requested_execution_mode === "string" &&
         XHS_EXECUTION_MODES.has(options.requested_execution_mode)
         ? options.requested_execution_mode
@@ -150,6 +169,7 @@ const normalizeGateOptions = (options, abilityId) => {
         }
     };
 };
+export const normalizeGateOptionsForContract = normalizeGateOptions;
 const buildCapabilityResult = (ability, summary) => ({
     capability_result: {
         ability_id: ability.id,
@@ -169,6 +189,20 @@ const asDiagnosisInput = (value) => {
 };
 const pickGateErrorDetails = (payload, details) => {
     const detailKeys = [
+        "validation_action",
+        "target_page",
+        "editor_locator",
+        "input_text",
+        "before_text",
+        "visible_text",
+        "post_blur_text",
+        "focus_confirmed",
+        "preserved_after_blur",
+        "success_signals",
+        "failure_signals",
+        "minimum_replay",
+        "out_of_scope_actions",
+        "execution_failure",
         "scope_context",
         "gate_input",
         "gate_outcome",
@@ -276,7 +310,7 @@ const xhsSearch = async (context) => {
             target_page: gate.targetPage,
             requested_execution_mode: gate.requestedExecutionMode,
             ability: envelope.ability,
-            input: parseSearchInput(envelope.input, envelope.ability.id),
+            input: parseSearchInput(envelope.input, envelope.ability.id, gate.options, envelope.ability.action),
             options: gate.options
         }, fingerprintContext);
         const bridgeResult = await bridge.runCommand({

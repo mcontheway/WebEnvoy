@@ -10,12 +10,12 @@
   "scripts": {
     "build": "npm run build:runtime && npm run build:extension",
     "build:runtime": "tsc -p tsconfig.json",
-    "build:extension": "tsc -p tsconfig.extension.json",
+    "build:extension": "node scripts/sync-extension-shared.mjs && tsc -p tsconfig.extension.json && node scripts/bundle-extension-content-script.mjs",
     "test": "npm run build && vitest run && bash tests/pr-guardian.merge-guard.test.sh",
     "test:watch": "vitest",
     "typecheck": "npm run typecheck:runtime && npm run typecheck:extension",
     "typecheck:runtime": "tsc -p tsconfig.json --noEmit",
-    "typecheck:extension": "tsc -p tsconfig.extension.json --noEmit"
+    "typecheck:extension": "node scripts/sync-extension-shared.mjs && tsc -p tsconfig.extension.json --noEmit"
   },
   "engines": {
     "node": ">=23.9.0"

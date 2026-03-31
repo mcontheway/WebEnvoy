@@ -105,6 +105,27 @@ const runWithTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promis
   }
 };
 
+const asObject = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const isNonIdempotentForward = (input: BridgeCommandInput): boolean => {
+  if (
+    input.command === "runtime.bootstrap" ||
+    input.command === "runtime.start" ||
+    input.command === "runtime.login"
+  ) {
+    return true;
+  }
+  const requestedExecutionMode = input.params.requested_execution_mode;
+  if (requestedExecutionMode === "live_write") {
+    return true;
+  }
+  const options = asObject(input.params.options);
+  return options?.validation_action === "editor_input";
+};
+
 export const createFakeNativeBridgeTransport = (
   options?: FakeTransportOptions
 ): NativeBridgeTransport => {
@@ -285,6 +306,10 @@ export class NativeMessagingBridge {
     this.#heartbeatTimeoutMs = options?.heartbeatTimeoutMs ?? defaultHeartbeatTimeoutMs;
   }
 
+  async close(): Promise<void> {
+    await this.#transport.close?.();
+  }
+
   async runtimePing(input: RuntimePingInput): Promise<RuntimePingResult> {
     const timeoutMs = readTimeoutMs(input.params.timeout_ms) ?? DEFAULT_TRANSPORT_TIMEOUT_MS;
     const budget = createTimeoutBudget(timeoutMs, this.#now);
@@ -435,7 +460,40 @@ export class NativeMessagingBridge {
       this.#session.completeForward();
       return response;
     } catch (error) {
-      throw this.#normalizeForwardFailure(error);
+      const normalized = this.#normalizeForwardFailure(error);
+      if (isNonIdempotentForward(input)) {
+        throw normalized;
+      }
+      const shouldRetry =
+        normalized.code === "ERR_TRANSPORT_DISCONNECTED" ||
+        normalized.code === "ERR_TRANSPORT_FORWARD_FAILED";
+      if (!shouldRetry) {
+        throw normalized;
+      }
+
+      this.#session.observeDisconnect("forward_retry", this.#now());
+      await this.#recoverIfDisconnected(input.profile, budget);
+      await this.#ensureReady(input.profile, budget);
+      await this.#pulseHeartbeat(budget);
+
+      const retryTimeoutMs = budget.remainingMs();
+      const retryRequest = createBridgeForwardRequest({
+        id: this.#nextId("run"),
+        profile: input.profile,
+        sessionId: this.#session.sessionIdOrThrow(),
+        runId: input.runId,
+        command: input.command,
+        commandParams: input.params,
+        cwd: input.cwd,
+        timeoutMs: retryTimeoutMs
+      });
+
+      try {
+        const response = await runWithTimeout(this.#transport.forward(retryRequest), retryTimeoutMs);
+        return response;
+      } catch (retryError) {
+        throw this.#normalizeForwardFailure(retryError);
+      }
     } finally {
       this.#session.completeForward();
     }

@@ -28,6 +28,22 @@ const createMockPort = () => {
   };
 };
 
+const createEditorInputProbeResult = (overrides?: {
+  entryButton?: Record<string, unknown> | null;
+  editor?: Record<string, unknown> | null;
+  editorFocused?: boolean;
+}) => ({
+  entryButton: overrides?.entryButton ?? null,
+  editor:
+    overrides?.editor ?? {
+      locator: "div.tiptap.ProseMirror",
+      targetKey: "body > div:nth-of-type(1)",
+      centerX: 120,
+      centerY: 48
+    },
+  editorFocused: overrides?.editorFocused ?? true
+});
+
 const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
   let connectIndex = 0;
   const runtimeMessageListeners: Array<
@@ -37,7 +53,16 @@ const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
       sendResponse?: (response: unknown) => void
     ) => boolean | void
   > = [];
-  const executeScript = vi.fn(async () => [{ result: { "X-s": "signed", "X-t": "1700000000" } }]);
+  const executeScript = vi.fn(async (input: Record<string, unknown>) => {
+    const args = Array.isArray(input.args) ? input.args : [];
+    if (Array.isArray(args[0]) && Array.isArray(args[1])) {
+      return [{ result: createEditorInputProbeResult() }];
+    }
+    return [{ result: { "X-s": "signed", "X-t": "1700000000" } }];
+  });
+  const debuggerAttach = vi.fn(async () => {});
+  const debuggerSendCommand = vi.fn(async () => ({}));
+  const debuggerDetach = vi.fn(async () => {});
   const chromeApi = {
     runtime: {
       connectNative: vi.fn(() => {
@@ -45,6 +70,7 @@ const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
         connectIndex += 1;
         return current.port;
       }),
+      getURL: vi.fn((path: string) => `chrome-extension://test-extension/${path}`),
       onMessage: {
         addListener: (
           listener: (
@@ -69,13 +95,21 @@ const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
     },
     scripting: {
       executeScript
+    },
+    debugger: {
+      attach: debuggerAttach,
+      sendCommand: debuggerSendCommand,
+      detach: debuggerDetach
     }
   };
 
   return {
     chromeApi,
     runtimeMessageListeners,
-    executeScript
+    executeScript,
+    debuggerAttach,
+    debuggerSendCommand,
+    debuggerDetach
   };
 };
 
@@ -102,6 +136,21 @@ const respondHandshake = (
   });
 };
 
+const waitForBridgeTurn = async (): Promise<void> => {
+  await Promise.resolve();
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+};
+
+const waitForPostedMessage = async (
+  spy: ReturnType<typeof vi.fn>,
+  expected: Record<string, unknown>
+): Promise<void> => {
+  await vi.waitFor(() => {
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining(expected));
+  });
+};
+
 const primeTrustedFingerprintContext = async (input: {
   runtimeMessageListeners: Array<
     (
@@ -118,6 +167,20 @@ const primeTrustedFingerprintContext = async (input: {
   tabId?: number;
   tabUrl?: string;
 }) => {
+  const fingerprintContext =
+    asRecord(input.fingerprintContext.injection) !== null
+      ? input.fingerprintContext
+      : {
+          ...input.fingerprintContext,
+          injection: {
+            installed: true,
+            required_patches:
+              ((asRecord(input.fingerprintContext.fingerprint_patch_manifest)?.required_patches ??
+                []) as string[]) ?? [],
+            missing_required_patches: [],
+            source: "main_world"
+          }
+        };
   input.runtimeMessageListeners[0]?.(
     {
       kind: "result",
@@ -129,7 +192,7 @@ const primeTrustedFingerprintContext = async (input: {
           runtime_context_id: input.runtimeContextId,
           profile: input.profile,
           session_id: input.sessionId ?? "nm-session-001",
-          fingerprint_runtime: input.fingerprintContext,
+          fingerprint_runtime: fingerprintContext,
           trust_source: "extension_bootstrap_context",
           bootstrap_attested: true,
           main_world_result_used_for_trust: false
@@ -140,6 +203,56 @@ const primeTrustedFingerprintContext = async (input: {
       tab: {
         id: input.tabId ?? 32,
         url: input.tabUrl ?? "https://www.xiaohongshu.com/search_result?keyword=露营"
+      }
+    }
+  );
+  await Promise.resolve();
+  await Promise.resolve();
+};
+
+const promoteBootstrapReadinessThroughPing = async (input: {
+  runtimeMessageListeners: Array<
+    (
+      message: unknown,
+      sender: { tab?: { id?: number; url?: string }; url?: string },
+      sendResponse?: (response: unknown) => void
+    ) => boolean | void
+  >;
+  pingId: string;
+  fingerprintContext: Record<string, unknown>;
+  tabId?: number;
+  tabUrl?: string;
+}) => {
+  const requiredPatches =
+    ((asRecord(input.fingerprintContext.fingerprint_patch_manifest)?.required_patches ?? []) as string[]) ??
+    [];
+  input.runtimeMessageListeners[0]?.(
+    {
+      kind: "result",
+      id: input.pingId,
+      ok: true,
+      payload: {
+        fingerprint_runtime: {
+          ...input.fingerprintContext,
+          injection: {
+            installed: true,
+            required_patches: requiredPatches,
+            missing_required_patches: [],
+            source: "main_world"
+          }
+        },
+        target_tab_id: input.tabId ?? 77,
+        summary: {
+          capability_result: {
+            outcome: "success"
+          }
+        }
+      }
+    },
+    {
+      tab: {
+        id: input.tabId ?? 77,
+        url: input.tabUrl
       }
     }
   );
@@ -158,23 +271,24 @@ const createXhsCommandParams = (overrides?: Record<string, unknown>) => ({
   ...overrides
 });
 
-const createXhsInteractCommandParams = (overrides?: Record<string, unknown>) => ({
+const createXhsEditorInputCommandParams = (overrides?: Record<string, unknown>) => ({
   issue_scope: "issue_208",
   target_domain: "creator.xiaohongshu.com",
   target_tab_id: 32,
   target_page: "creator_publish_tab",
   action_type: "write",
-  requested_execution_mode: "dry_run",
+  requested_execution_mode: "live_write",
   risk_state: "allowed",
   approval_record: createApprovedReadApprovalRecord(),
+  validation_action: "editor_input",
+  validation_text: "测试发布文案",
   ability: {
-    id: "xhs.interact.editor-input.v1",
+    id: "xhs.note.search.v1",
     layer: "L3",
     action: "write"
   },
   input: {
-    action_id: "editor_input",
-    text: "测试发布文案"
+    query: "测试发布文案"
   },
   ...overrides
 });
@@ -288,7 +402,8 @@ describe("extension service worker recovery contract", () => {
     respondHandshake(firstPort, {
       protocol: "webenvoy.native-bridge.v0"
     });
-    await Promise.resolve();
+    await waitForBridgeTurn();
+    await waitForBridgeTurn();
 
     firstPort.onMessageListeners[0]?.({
       id: "run-after-bad-open-001",
@@ -303,7 +418,8 @@ describe("extension service worker recovery contract", () => {
       },
       timeout_ms: 50
     });
-    await Promise.resolve();
+    await waitForBridgeTurn();
+    await waitForBridgeTurn();
 
     const retryHandshakeCall = firstPort.postMessage.mock.calls.findLast(
       (call) => (call[0] as { method?: string }).method === "bridge.open"
@@ -331,7 +447,8 @@ describe("extension service worker recovery contract", () => {
       },
       timeout_ms: 50
     });
-    await Promise.resolve();
+    await waitForBridgeTurn();
+    await waitForBridgeTurn();
 
     expect(firstPort.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -345,6 +462,7 @@ describe("extension service worker recovery contract", () => {
     expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
 
     respondHandshake(firstPort);
+    await waitForBridgeTurn();
     await Promise.resolve();
 
     firstPort.onMessageListeners[0]?.({
@@ -363,6 +481,8 @@ describe("extension service worker recovery contract", () => {
 
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       11,
       expect.objectContaining({
@@ -371,13 +491,56 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
+  it("injects the classic content-script bundle and retries when target tab has no receiver", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.sendMessage = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Could not establish connection. Receiving end does not exist."))
+      .mockResolvedValueOnce(undefined);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-retry-inject-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-retry-inject-001",
+        command: "runtime.ping",
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(executeScript).toHaveBeenCalledWith({
+      target: { tabId: 11 },
+      world: "ISOLATED",
+      files: ["build/content-script.js"]
+    });
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledTimes(2);
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-retry-inject-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_TRANSPORT_TIMEOUT"
+      })
+    });
+  });
+
   it("keeps runtime.readiness pending until bootstrap receives execution-surface trust", async () => {
     const firstPort = createMockPort();
-    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
     const fingerprintContext = createFingerprintRuntimeContext();
 
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
+    await Promise.resolve();
     await Promise.resolve();
 
     firstPort.onMessageListeners[0]?.({
@@ -405,15 +568,31 @@ describe("extension service worker recovery contract", () => {
     });
     await Promise.resolve();
 
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-bootstrap-001",
-        status: "error",
-        error: expect.objectContaining({
-          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
-        })
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
       })
-    );
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-ping-promote-bootstrap-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-001",
+        command: "runtime.ping",
+        command_params: {
+          fingerprint_context: fingerprintContext
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+    await Promise.resolve();
 
     firstPort.onMessageListeners[0]?.({
       id: "run-readiness-001",
@@ -451,16 +630,15 @@ describe("extension service worker recovery contract", () => {
         command: "runtime.bootstrap"
       })
     );
+    expect(executeScript).not.toHaveBeenCalled();
 
-    await primeTrustedFingerprintContext({
+    await promoteBootstrapReadinessThroughPing({
       runtimeMessageListeners,
-      runId: "run-bootstrap-001",
-      runtimeContextId: "ctx-bootstrap-001",
-      profile: "profile-a",
+      pingId: "run-ping-promote-bootstrap-001",
       fingerprintContext,
-      tabId: 11
+      tabId: 11,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
     });
-    await Promise.resolve();
 
     firstPort.onMessageListeners[0]?.({
       id: "run-readiness-002",
@@ -493,7 +671,101 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("promotes pending runtime.bootstrap to ready from content-script startup trust payload shape", async () => {
+  it("pins runtime.bootstrap to creator publish tab instead of a generic active xhs tab", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.query = vi.fn(async () => [
+      { id: 31, active: true, url: "https://www.xiaohongshu.com/explore/abc" },
+      { id: 52, active: false, url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=image" }
+    ]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-tab-pick-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-tab-pick-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-tab-pick-001",
+          runtime_context_id: "ctx-bootstrap-tab-pick-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-tab-pick-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(executeScript).not.toHaveBeenCalled();
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      52,
+      expect.objectContaining({
+        id: "run-bootstrap-tab-pick-001",
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
+  it("does not rely on a background main-world control channel before runtime.bootstrap forward", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-main-world-recover-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-main-world-recover-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-main-world-recover-001",
+          runtime_context_id: "ctx-bootstrap-main-world-recover-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-main-world-recover-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(executeScript).not.toHaveBeenCalled();
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      11,
+      expect.objectContaining({
+        id: "run-bootstrap-main-world-recover-001",
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
+  it("keeps runtime.bootstrap pending when startup trust lacks main-world attestation", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     const fingerprintContext = createFingerprintRuntimeContext();
@@ -527,15 +799,13 @@ describe("extension service worker recovery contract", () => {
     });
     await Promise.resolve();
 
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-bootstrap-startup-trust-001",
-        status: "error",
-        error: expect.objectContaining({
-          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
-        })
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-startup-trust-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
       })
-    );
+    });
 
     runtimeMessageListeners[0]?.(
       {
@@ -566,23 +836,15 @@ describe("extension service worker recovery contract", () => {
     await Promise.resolve();
 
     firstPort.onMessageListeners[0]?.({
-      id: "run-bootstrap-startup-trust-002",
+      id: "run-readiness-startup-trust-002",
       method: "bridge.forward",
       profile: "profile-a",
       params: {
         session_id: "nm-session-001",
         run_id: "run-bootstrap-startup-trust-001",
-        command: "runtime.bootstrap",
+        command: "runtime.readiness",
         command_params: {
-          version: "v1",
-          run_id: "run-bootstrap-startup-trust-001",
-          runtime_context_id: "ctx-bootstrap-startup-trust-001",
-          profile: "profile-a",
-          fingerprint_runtime: fingerprintContext,
-          fingerprint_patch_manifest: {
-            required_patches: ["audio_context"]
-          },
-          main_world_secret: "secret-bootstrap-startup-trust-001"
+          runtime_context_id: "ctx-bootstrap-startup-trust-001"
         },
         cwd: "/workspace/WebEnvoy"
       },
@@ -592,22 +854,132 @@ describe("extension service worker recovery contract", () => {
 
     expect(firstPort.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: "run-bootstrap-startup-trust-002",
+        id: "run-readiness-startup-trust-002",
         status: "success",
         payload: expect.objectContaining({
-          method: "runtime.bootstrap.ack",
-          result: expect.objectContaining({
-            status: "ready",
-            profile: "profile-a",
-            run_id: "run-bootstrap-startup-trust-001",
-            runtime_context_id: "ctx-bootstrap-startup-trust-001"
-          })
+          bootstrap_state: "pending"
         })
       })
     );
   });
 
-  it("allows runtime bootstrap readiness promotion without xhs-specific target binding", async () => {
+  it("converges runtime bootstrap state to ready after trusted bootstrap hit", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-trusted-ready-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-trusted-ready-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-trusted-ready-001",
+          runtime_context_id: "ctx-bootstrap-trusted-ready-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-trusted-ready-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-trusted-ready-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+      })
+    });
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-bootstrap-trusted-ready-001",
+      runtimeContextId: "ctx-bootstrap-trusted-ready-001",
+      profile: "profile-a",
+      sessionId: "nm-session-001",
+      fingerprintContext,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-trusted-ready-002",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-trusted-ready-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-trusted-ready-001",
+          runtime_context_id: "ctx-bootstrap-trusted-ready-001",
+          profile: "profile-a",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-trusted-ready-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-trusted-ready-002",
+      status: "success",
+      payload: expect.objectContaining({
+        method: "runtime.bootstrap.ack",
+        result: expect.objectContaining({
+          status: "ready"
+        })
+      })
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-trusted-ready-003",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-trusted-ready-001",
+        command: "runtime.readiness",
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-trusted-ready-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-readiness-trusted-ready-003",
+      status: "success",
+      payload: expect.objectContaining({
+        bootstrap_state: "ready",
+        run_id: "run-bootstrap-trusted-ready-001",
+        runtime_context_id: "ctx-bootstrap-trusted-ready-001"
+      })
+    });
+  });
+
+  it("allows runtime.readiness promotion without xhs-specific target binding", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     const fingerprintContext = createFingerprintRuntimeContext();
@@ -641,26 +1013,39 @@ describe("extension service worker recovery contract", () => {
     });
     await Promise.resolve();
 
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-bootstrap-generic-001",
-        status: "error",
-        error: expect.objectContaining({
-          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
-        })
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-generic-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
       })
-    );
+    });
 
-    await primeTrustedFingerprintContext({
-      runtimeMessageListeners,
-      runId: "run-bootstrap-generic-001",
-      runtimeContextId: "ctx-bootstrap-generic-001",
+    firstPort.onMessageListeners[0]?.({
+      id: "run-ping-generic-promote-001",
+      method: "bridge.forward",
       profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-generic-001",
+        command: "runtime.ping",
+        command_params: {
+          fingerprint_context: fingerprintContext
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await promoteBootstrapReadinessThroughPing({
+      runtimeMessageListeners,
+      pingId: "run-ping-generic-promote-001",
       fingerprintContext,
       tabId: 77,
       tabUrl: "https://example.com/runtime-readiness"
     });
-    await Promise.resolve();
 
     firstPort.onMessageListeners[0]?.({
       id: "run-readiness-generic-001",
@@ -692,46 +1077,106 @@ describe("extension service worker recovery contract", () => {
       })
     );
 
+  });
+
+  it("keeps issue_208 xhs.search blocked after bootstrap trust when editor attestation is still missing", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext({
+      live_allowed: true,
+      live_decision: "allowed",
+      allowed_execution_modes: [
+        "dry_run",
+        "recon",
+        "live_read_limited",
+        "live_read_high_risk",
+        "live_write"
+      ]
+    });
+    chromeApi.tabs.query.mockImplementation(async () => [
+      {
+        id: 32,
+        url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article",
+        active: true
+      }
+    ]);
+    executeScript.mockImplementation(async (input: Record<string, unknown>) => {
+      const args = Array.isArray(input.args) ? input.args : [];
+      if (Array.isArray(args[0]) && Array.isArray(args[1])) {
+        return [{ result: createEditorInputProbeResult() }];
+      }
+      return [{ result: undefined }];
+    });
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
     firstPort.onMessageListeners[0]?.({
-      id: "run-bootstrap-generic-002",
+      id: "run-bootstrap-direct-attest-001",
       method: "bridge.forward",
       profile: "profile-a",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-bootstrap-generic-001",
+        run_id: "run-bootstrap-direct-attest-001",
         command: "runtime.bootstrap",
         command_params: {
           version: "v1",
-          run_id: "run-bootstrap-generic-001",
-          runtime_context_id: "ctx-bootstrap-generic-001",
+          run_id: "run-bootstrap-direct-attest-001",
+          runtime_context_id: "ctx-bootstrap-direct-attest-001",
           profile: "profile-a",
           fingerprint_runtime: fingerprintContext,
           fingerprint_patch_manifest: {
-            required_patches: ["audio_context"]
+            required_patches: [
+              "audio_context",
+              "battery",
+              "navigator_plugins",
+              "navigator_mime_types"
+            ]
           },
-          main_world_secret: "secret-bootstrap-generic-001"
+          main_world_secret: "secret-bootstrap-direct-attest-001"
         },
         cwd: "/workspace/WebEnvoy"
       },
-      timeout_ms: 50
+      timeout_ms: 100
+    });
+
+    await waitForBridgeTurn();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-bootstrap-direct-attest-001",
+      runtimeContextId: "ctx-bootstrap-direct-attest-001",
+      profile: "profile-a",
+      fingerprintContext,
+      tabId: 32,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
+    });
+
+    if (firstPort.onMessageListeners.length === 0) {
+      throw new Error("missing native onMessage listener");
+    }
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-editor-after-bootstrap-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-direct-attest-001",
+        command: "xhs.search",
+        command_params: createXhsEditorInputCommandParams(),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
     });
     await Promise.resolve();
+    await Promise.resolve();
 
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-bootstrap-generic-002",
-        status: "success",
-        payload: expect.objectContaining({
-          method: "runtime.bootstrap.ack",
-          result: expect.objectContaining({
-            status: "ready",
-            profile: "profile-a",
-            run_id: "run-bootstrap-generic-001",
-            runtime_context_id: "ctx-bootstrap-generic-001"
-          })
-        })
-      })
+    const forwardedCommands = chromeApi.tabs.sendMessage.mock.calls.map(
+      (call) => (call[1] as { command?: string }).command
     );
+    expect(forwardedCommands).toEqual(expect.arrayContaining(["runtime.bootstrap"]));
+    expect(forwardedCommands).not.toEqual(expect.arrayContaining(["xhs.search"]));
   });
 
   it("promotes pending bootstrap to ready through runtime.ping then runtime.readiness", async () => {
@@ -768,15 +1213,13 @@ describe("extension service worker recovery contract", () => {
     });
     await Promise.resolve();
 
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-bootstrap-ping-promote-001",
-        status: "error",
-        error: expect.objectContaining({
-          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
-        })
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-ping-promote-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
       })
-    );
+    });
 
     firstPort.onMessageListeners[0]?.({
       id: "run-ping-promote-001",
@@ -810,6 +1253,7 @@ describe("extension service worker recovery contract", () => {
               missing_required_patches: []
             }
           },
+          target_tab_id: 77,
           summary: {
             capability_result: {
               outcome: "success"
@@ -891,15 +1335,13 @@ describe("extension service worker recovery contract", () => {
     });
     await Promise.resolve();
 
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-bootstrap-main-world-fail-001",
-        status: "error",
-        error: expect.objectContaining({
-          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
-        })
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-main-world-fail-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
       })
-    );
+    });
 
     firstPort.onMessageListeners[0]?.({
       id: "run-ping-main-world-fail-001",
@@ -1010,15 +1452,13 @@ describe("extension service worker recovery contract", () => {
     });
     await Promise.resolve();
 
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-bootstrap-missing-patch-001",
-        status: "error",
-        error: expect.objectContaining({
-          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
-        })
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-missing-patch-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
       })
-    );
+    });
 
     firstPort.onMessageListeners[0]?.({
       id: "run-ping-missing-patch-001",
@@ -1164,15 +1604,13 @@ describe("extension service worker recovery contract", () => {
     });
     await Promise.resolve();
 
-    expect(firstPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "run-bootstrap-new-001",
-        status: "error",
-        error: expect.objectContaining({
-          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
-        })
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-new-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
       })
-    );
+    });
   });
 
   it("keeps new runtime.bootstrap pending when a stale trusted context arrives later", async () => {
@@ -1367,14 +1805,31 @@ describe("extension service worker recovery contract", () => {
     });
     await Promise.resolve();
 
-    await primeTrustedFingerprintContext({
-      runtimeMessageListeners,
-      runId: "run-bootstrap-owner-001",
-      runtimeContextId: "ctx-bootstrap-owner-001",
+    firstPort.onMessageListeners[0]?.({
+      id: "run-ping-owner-promote-001",
+      method: "bridge.forward",
       profile: "profile-a",
-      fingerprintContext
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-owner-001",
+        command: "runtime.ping",
+        command_params: {
+          fingerprint_context: fingerprintContext
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
     });
     await Promise.resolve();
+    await Promise.resolve();
+
+    await promoteBootstrapReadinessThroughPing({
+      runtimeMessageListeners,
+      pingId: "run-ping-owner-promote-001",
+      fingerprintContext,
+      tabId: 32,
+      tabUrl: "https://www.xiaohongshu.com/search_result?keyword=露营"
+    });
 
     firstPort.onMessageListeners[0]?.({
       id: "run-readiness-owner-001",
@@ -1643,7 +2098,8 @@ describe("extension service worker recovery contract", () => {
       },
       {
         tab: {
-          id: 32
+          id: 32,
+          url: "https://www.xiaohongshu.com/search_result?keyword=露营"
         }
       }
     );
@@ -1843,6 +2299,8 @@ describe("extension service worker recovery contract", () => {
       timeout_ms: 100
     });
     await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const blocked = firstPort.postMessage.mock.calls
       .map((call) => call[0] as {
@@ -1879,20 +2337,121 @@ describe("extension service worker recovery contract", () => {
     expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("blocks xhs.search when target_tab_id is missing", async () => {
+  it("keeps target_tab_id explicit for issue_208 editor_input forward", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 18, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true },
+      { id: 32, url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article", active: false }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-issue-208-editor-input-autotab-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext({
+        live_allowed: true,
+        live_decision: "allowed",
+        allowed_execution_modes: [
+          "dry_run",
+          "recon",
+          "live_read_limited",
+          "live_read_high_risk",
+          "live_write"
+        ]
+      }),
+      tabId: 32,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-issue-208-editor-input-autotab-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-issue-208-editor-input-autotab-001",
+        command: "xhs.search",
+        command_params: createXhsEditorInputCommandParams({
+          target_tab_id: undefined
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const proactiveContentScriptInject = executeScript.mock.calls.find(
+      (call) =>
+        (call[0] as { world?: string; files?: string[] }).world === "ISOLATED" &&
+        ((call[0] as { files?: string[] }).files ?? []).includes("build/content-script.js")
+    );
+    expect(proactiveContentScriptInject).toBeUndefined();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "run-xhs-issue-208-editor-input-autotab-001",
+        command: "xhs.search"
+      })
+    );
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map(
+        (call) =>
+          call[0] as {
+            id?: string;
+            status?: string;
+            payload?: {
+              consumer_gate_result?: {
+                target_tab_id?: number | null;
+                gate_decision?: string;
+                gate_reasons?: string[];
+              };
+            };
+          }
+      )
+      .find((message) => message.id === "run-xhs-issue-208-editor-input-autotab-001");
+    expect(blocked).toMatchObject({
+      id: "run-xhs-issue-208-editor-input-autotab-001",
+      status: "error",
+      payload: {
+        consumer_gate_result: {
+          target_tab_id: null,
+          gate_decision: "blocked",
+          gate_reasons: expect.arrayContaining(["TARGET_TAB_NOT_EXPLICIT"])
+        }
+      }
+    });
+  });
+
+  it("falls back to global xhs tab resolution when currentWindow query is empty", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async (filter: { currentWindow?: boolean; url?: string | string[] }) => {
+      if (filter.currentWindow) {
+        return [];
+      }
+      if (filter.url) {
+        return [{ id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }];
+      }
+      return [];
+    });
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
     await Promise.resolve();
 
     firstPort.onMessageListeners[0]?.({
-      id: "run-xhs-missing-tab-001",
+      id: "run-xhs-issue-208-editor-input-globaltab-001",
       method: "bridge.forward",
       profile: "profile-a",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-xhs-missing-tab-001",
+        run_id: "run-xhs-issue-208-editor-input-globaltab-001",
         command: "xhs.search",
         command_params: createXhsCommandParams({
           target_tab_id: undefined
@@ -1902,32 +2461,16 @@ describe("extension service worker recovery contract", () => {
       timeout_ms: 100
     });
     await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const blocked = firstPort.postMessage.mock.calls
-      .map((call) => call[0] as {
-        id?: string;
-        status?: string;
-        payload?: {
-          consumer_gate_result?: {
-            requested_execution_mode?: string;
-            effective_execution_mode?: string;
-            gate_reasons?: string[];
-          };
-        };
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "run-xhs-issue-208-editor-input-globaltab-001",
+        command: "xhs.search"
       })
-      .find((message) => message.id === "run-xhs-missing-tab-001");
-    expect(blocked).toMatchObject({
-      id: "run-xhs-missing-tab-001",
-      status: "error",
-      payload: {
-        consumer_gate_result: {
-          requested_execution_mode: "dry_run",
-          effective_execution_mode: "dry_run",
-          gate_reasons: ["TARGET_TAB_NOT_EXPLICIT"]
-        }
-      }
-    });
-    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    );
   });
 
   it("blocks xhs.search when requested_execution_mode is missing", async () => {
@@ -2193,7 +2736,11 @@ describe("extension service worker recovery contract", () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
-      { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
+      {
+        id: 32,
+        url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article",
+        active: true
+      }
     ]);
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
@@ -2342,7 +2889,11 @@ describe("extension service worker recovery contract", () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
-      { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
+      {
+        id: 32,
+        url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article",
+        active: true
+      }
     ]);
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
@@ -2563,16 +3114,8 @@ describe("extension service worker recovery contract", () => {
       expect(blocked?.status).toBe("error");
       const blockedPayload = asRecord(blocked?.payload) ?? {};
       const blockedConsumerGateResult = asRecord(blockedPayload.consumer_gate_result);
-      const blockedIssueActionMatrix = asRecord(blockedPayload.issue_action_matrix);
-      const blockedConditionalActions = Array.isArray(blockedIssueActionMatrix?.conditional_actions)
-        ? blockedIssueActionMatrix.conditional_actions
-        : [];
-      const blockedWriteMatrixDecisions = asRecord(blockedPayload.write_action_matrix_decisions);
       expect(blockedConsumerGateResult?.gate_decision).toBe("blocked");
       expect(blockedPayload.write_action_matrix).toBeUndefined();
-      expect(blockedWriteMatrixDecisions).not.toBeNull();
-      expect(blockedConditionalActions).toEqual([]);
-      expect(resolveWriteInteractionTier(blockedPayload)).toBe("reversible_interaction");
 
       const approvedPort = createMockPort();
       const { chromeApi: approvedChromeApi, runtimeMessageListeners } = createChromeApi([approvedPort]);
@@ -2627,18 +3170,10 @@ describe("extension service worker recovery contract", () => {
       expect(approved?.status).toBe("error");
       const payload = asRecord(approved?.payload) ?? {};
       const approvedConsumerGateResult = asRecord(payload.consumer_gate_result);
-      const approvedIssueActionMatrix = asRecord(payload.issue_action_matrix);
-      const approvedConditionalActions = Array.isArray(approvedIssueActionMatrix?.conditional_actions)
-        ? approvedIssueActionMatrix.conditional_actions
-        : [];
-      const approvedWriteMatrixDecisions = asRecord(payload.write_action_matrix_decisions);
       const writeGateOnlyDecision = asRecord(payload.write_gate_only_decision);
       expect(approvedConsumerGateResult?.gate_decision).toBe("blocked");
       expect(payload.write_action_matrix).toBeUndefined();
-      expect(approvedWriteMatrixDecisions).not.toBeNull();
-      expect(approvedConditionalActions).toEqual([]);
       expect(writeGateOnlyDecision?.execution_enabled).toBe(false);
-      expect(resolveWriteInteractionTier(payload)).toBe("reversible_interaction");
     }
   });
 
@@ -2914,7 +3449,7 @@ describe("extension service worker recovery contract", () => {
     );
   });
 
-  it("reuses startup trust across different run_id within the same session", async () => {
+  it("allows startup trust reuse across different run_id within the same session when trust remains bound", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -2989,32 +3524,6 @@ describe("extension service worker recovery contract", () => {
         command: "xhs.search"
       })
     );
-
-    runtimeMessageListeners[0]?.(
-      {
-        kind: "result",
-        id: liveRequestId,
-        ok: true,
-        payload: {
-          summary: {
-            capability_result: {
-              outcome: "success"
-            }
-          }
-        }
-      },
-      {
-        tab: {
-          id: 32
-        }
-      }
-    );
-    await Promise.resolve();
-
-    const allowed = firstPort.postMessage.mock.calls
-      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
-      .find((message) => message.id === liveRequestId);
-    expect(allowed?.status).toBe("success");
   });
 
   it("does not establish trusted fingerprint context from runtime.ping", async () => {
@@ -3096,8 +3605,7 @@ describe("extension service worker recovery contract", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
     const blocked = firstPort.postMessage.mock.calls
@@ -3332,7 +3840,7 @@ describe("extension service worker recovery contract", () => {
     expect(allowed?.status).toBe("success");
   });
 
-  it("reuses startup trust across new run_id in the same session for live xhs.search", async () => {
+  it("does not reuse startup trust across new run_id in the same session for live xhs.search", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -3352,7 +3860,9 @@ describe("extension service worker recovery contract", () => {
       runtimeMessageListeners,
       runId: startupRunId,
       profile,
-      fingerprintContext
+      fingerprintContext,
+      tabId: 32,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
     });
     chromeApi.tabs.sendMessage.mockClear();
 
@@ -3380,43 +3890,16 @@ describe("extension service worker recovery contract", () => {
     const liveDispatch = chromeApi.tabs.sendMessage.mock.calls.find(
       (call) => (call[1] as { id?: string } | undefined)?.id === liveRunId
     );
-    expect(liveDispatch).toBeDefined();
-    expect((liveDispatch?.[1] as { command?: string } | undefined)?.command).toBe("xhs.search");
-
-    runtimeMessageListeners[0]?.(
-      {
-        kind: "result",
-        id: liveRunId,
-        ok: true,
-        payload: {
-          summary: {
-            query: "露营",
-            items: []
-          }
-        }
-      },
-      {
-        tab: {
-          id: 32
-        }
-      }
-    );
-    await Promise.resolve();
+    expect(liveDispatch).toBeUndefined();
 
     const blocked = firstPort.postMessage.mock.calls
-      .map((call) => call[0] as { id?: string; status?: string; error?: { code?: string }; payload?: Record<string, unknown> })
-      .find(
-        (message) =>
-          message.id === liveRunId &&
-          message.status === "error" &&
-          message.error?.code === "FINGERPRINT_CONTEXT_UNTRUSTED"
-      );
-    expect(blocked).toBeUndefined();
-
-    const succeeded = firstPort.postMessage.mock.calls
-      .map((call) => call[0] as { id?: string; status?: string })
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
       .find((message) => message.id === liveRunId);
-    expect(succeeded?.status).toBe("success");
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(consumerGateResult?.fingerprint_reason_codes).toEqual(["FINGERPRINT_CONTEXT_UNTRUSTED"]);
   });
 
   it("invalidates trusted fingerprint context after runtime.stop for same profile::session", async () => {
@@ -3930,7 +4413,7 @@ describe("extension service worker recovery contract", () => {
     expect(consumerGateResult?.effective_execution_mode).toBe("dry_run");
     expect(consumerGateResult?.gate_reasons).toEqual(
       expect.arrayContaining([
-        "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND",
+        "EDITOR_INPUT_VALIDATION_REQUIRED",
         "WRITE_INTERACTION_TIER_REVERSIBLE_INTERACTION"
       ])
     );
@@ -3947,34 +4430,170 @@ describe("extension service worker recovery contract", () => {
     });
   });
 
-  it("rejects xhs.interact because the command contract is not frozen", async () => {
+  it("forwards issue_208 live_write with editor_input validation through the real background bridge", async () => {
     const firstPort = createMockPort();
-    const { chromeApi } = createChromeApi([firstPort]);
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    let probeCall = 0;
+    executeScript.mockImplementation(
+      async (
+        input:
+          | { world?: "MAIN" | "ISOLATED"; files?: string[] }
+          | { world?: "MAIN" | "ISOLATED"; func?: (...args: unknown[]) => unknown }
+      ) => {
+        if (input.world === "ISOLATED" && "func" in input) {
+          probeCall += 1;
+          return [
+            {
+              result: {
+                entryButton: {
+                  locator: "button.新的创作",
+                  targetKey: "body > button:nth-of-type(1)",
+                  centerX: 100,
+                  centerY: 100
+                },
+                editor: {
+                  locator: "div.tiptap.ProseMirror",
+                  targetKey: "body > div:nth-of-type(1)",
+                  centerX: 200,
+                  centerY: 220
+                },
+                editorFocused: probeCall >= 2
+              }
+            }
+          ];
+        }
+        return [{ result: { "X-s": "signed", "X-t": "1700000000" } }];
+      }
+    );
     chromeApi.tabs.query.mockImplementation(async () => [
-      { id: 32, url: "https://creator.xiaohongshu.com/publish/publish", active: true }
+      {
+        id: 32,
+        url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article",
+        active: true
+      }
     ]);
     startChromeBackgroundBridge(chromeApi);
     respondHandshake(firstPort);
     await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-issue-208-editor-input-allowed-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext({
+        live_allowed: true,
+        live_decision: "allowed",
+        allowed_execution_modes: [
+          "dry_run",
+          "recon",
+          "live_read_limited",
+          "live_read_high_risk",
+          "live_write"
+        ]
+      }),
+      tabId: 32,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
+    });
 
     firstPort.onMessageListeners[0]?.({
-      id: "run-xhs-interact-editor-input-success-001",
+      id: "run-xhs-issue-208-editor-input-allowed-001",
       method: "bridge.forward",
       profile: "profile-a",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-xhs-interact-editor-input-success-001",
-        command: "xhs.interact",
-        command_params: createXhsInteractCommandParams(),
+        run_id: "run-xhs-issue-208-editor-input-allowed-001",
+        command: "xhs.search",
+        command_params: createXhsEditorInputCommandParams(),
         cwd: "/workspace/WebEnvoy"
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
+    await waitForBridgeTurn();
+    await vi.waitFor(() => {
+      expect(chromeApi.tabs.sendMessage).toHaveBeenCalled();
+    });
+
+    const proactiveContentScriptInject = executeScript.mock.calls.find(
+      (call) =>
+        (call[0] as { world?: string; files?: string[] }).world === "ISOLATED" &&
+        ((call[0] as { files?: string[] }).files ?? []).includes("build/content-script.js")
+    );
+    expect(proactiveContentScriptInject).toBeUndefined();
+    await vi.waitFor(() => {
+      expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+        32,
+        expect.objectContaining({
+          command: "xhs.search",
+          commandParams: expect.objectContaining({
+            options: expect.objectContaining({
+              editor_focus_attestation: expect.objectContaining({
+                source: "chrome_debugger",
+                target_tab_id: 32,
+                focus_confirmed: true,
+                editor_locator: "div.tiptap.ProseMirror",
+                editor_target_key: "body > div:nth-of-type(1)"
+              })
+            })
+          })
+        })
+      );
+    });
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-xhs-issue-208-editor-input-allowed-001",
+        ok: true,
+        payload: {
+          summary: {
+            capability_result: {
+              outcome: "success",
+              action: "write"
+            },
+            gate_outcome: {
+              gate_decision: "allowed",
+              effective_execution_mode: "live_write"
+            },
+            consumer_gate_result: {
+              requested_execution_mode: "live_write",
+              effective_execution_mode: "live_write",
+              gate_decision: "allowed",
+              gate_reasons: [
+                "WRITE_INTERACTION_APPROVED",
+                "ISSUE_208_EDITOR_INPUT_VALIDATION_APPROVED"
+              ]
+            },
+            interaction_result: {
+              validation_action: "editor_input",
+              target_page: "creator.xiaohongshu.com/publish",
+              validation_attestation: "controlled_real_interaction",
+              success_signals: [
+                "editable_state_entered",
+                "editor_focus_attested",
+                "text_visible",
+                "text_persisted_after_blur"
+              ],
+              failure_signals: [],
+              minimum_replay: [
+                "enter_editable_mode",
+                "focus_editor",
+                "type_short_text",
+                "blur_or_reobserve"
+              ],
+              out_of_scope_actions: ["image_upload", "submit", "publish_confirm"]
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
+        }
+      }
+    );
     await Promise.resolve();
 
-    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
-    const failed = firstPort.postMessage.mock.calls
+    const approved = firstPort.postMessage.mock.calls
       .map(
         (call) =>
           call[0] as {
@@ -3983,10 +4602,260 @@ describe("extension service worker recovery contract", () => {
             error?: { code?: string; message?: string };
           }
       )
-      .find((message) => message.id === "run-xhs-interact-editor-input-success-001");
-    expect(failed?.status).toBe("error");
-    expect(failed?.error?.code).toBe("ERR_TRANSPORT_FORWARD_FAILED");
-    expect(failed?.error?.message).toBe("unsupported command");
+      .find((message) => message.id === "run-xhs-issue-208-editor-input-allowed-001");
+    expect(approved?.status).toBe("success");
+    expect(approved).toMatchObject({
+      id: "run-xhs-issue-208-editor-input-allowed-001",
+      payload: {
+        summary: {
+          capability_result: {
+            outcome: "success",
+            action: "write"
+          },
+          gate_outcome: {
+            gate_decision: "allowed",
+            effective_execution_mode: "live_write"
+          },
+          consumer_gate_result: {
+            requested_execution_mode: "live_write",
+            effective_execution_mode: "live_write",
+            gate_decision: "allowed"
+          },
+          interaction_result: {
+            validation_attestation: "controlled_real_interaction",
+            success_signals: expect.arrayContaining(["editor_focus_attested"])
+          }
+        }
+      }
+    });
+  });
+
+  it("attests the active editor target when multiple editor candidates match", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    let probeCall = 0;
+    executeScript.mockImplementation(
+      async (
+        input:
+          | { world?: "MAIN" | "ISOLATED"; files?: string[] }
+          | { world?: "MAIN" | "ISOLATED"; func?: (...args: unknown[]) => unknown; args?: unknown[] }
+      ) => {
+        if (input.world === "ISOLATED" && "func" in input && typeof input.func === "function") {
+          probeCall += 1;
+          return [
+            {
+              result: {
+                entryButton: {
+                  locator: "button.新的创作",
+                  targetKey: "body > button:nth-of-type(1)",
+                  centerX: 100,
+                  centerY: 100
+                },
+                editor: {
+                  locator: "div.tiptap.ProseMirror",
+                  targetKey: "body > div:nth-of-type(2)",
+                  centerX: 360,
+                  centerY: 220
+                },
+                editorFocused: probeCall >= 2
+              }
+            }
+          ];
+        }
+        return [{ result: { "X-s": "signed", "X-t": "1700000000" } }];
+      }
+    );
+    chromeApi.tabs.query.mockImplementation(async () => [
+      {
+        id: 32,
+        url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article",
+        active: true
+      }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-issue-208-editor-input-multi-editor-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext({
+        live_allowed: true,
+        live_decision: "allowed",
+        allowed_execution_modes: [
+          "dry_run",
+          "recon",
+          "live_read_limited",
+          "live_read_high_risk",
+          "live_write"
+        ]
+      }),
+      tabId: 32,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-issue-208-editor-input-multi-editor-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-issue-208-editor-input-multi-editor-001",
+        command: "xhs.search",
+        command_params: createXhsEditorInputCommandParams(),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    await vi.waitFor(() => {
+      expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+        32,
+        expect.objectContaining({
+          commandParams: expect.objectContaining({
+            options: expect.objectContaining({
+              editor_focus_attestation: expect.objectContaining({
+                source: "chrome_debugger",
+                editor_locator: "div.tiptap.ProseMirror",
+                editor_target_key: "body > div:nth-of-type(2)",
+                focus_confirmed: true
+              })
+            })
+          })
+        })
+      );
+    });
+  });
+
+  it("annotates editor_input forward with debugger attach failure attestation", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, debuggerAttach } = createChromeApi([firstPort]);
+    debuggerAttach.mockRejectedValueOnce(new Error("debugger attach denied"));
+    chromeApi.tabs.query.mockImplementation(async () => [
+      {
+        id: 32,
+        url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article",
+        active: true
+      }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-issue-208-editor-input-debugger-attach-failed-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext({
+        live_allowed: true,
+        live_decision: "allowed",
+        allowed_execution_modes: [
+          "dry_run",
+          "recon",
+          "live_read_limited",
+          "live_read_high_risk",
+          "live_write"
+        ]
+      }),
+      tabId: 32,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-issue-208-editor-input-debugger-attach-failed-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-issue-208-editor-input-debugger-attach-failed-001",
+        command: "xhs.search",
+        command_params: createXhsEditorInputCommandParams(),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    const forwardCall = chromeApi.tabs.sendMessage.mock.calls.find(
+      (call) =>
+        (call[1] as { id?: string }).id ===
+        "run-xhs-issue-208-editor-input-debugger-attach-failed-001"
+    );
+    expect(forwardCall).toBeDefined();
+    const forwarded = (forwardCall?.[1] as { commandParams?: { options?: Record<string, unknown> } })
+      .commandParams?.options;
+    const attestation = asRecord(forwarded?.editor_focus_attestation);
+    expect(attestation).toMatchObject({
+      source: "chrome_debugger",
+      target_tab_id: 32,
+      focus_confirmed: false,
+      editor_locator: "div.tiptap.ProseMirror",
+      editor_target_key: "body > div:nth-of-type(1)",
+      failure_reason: "DEBUGGER_ATTACH_FAILED"
+    });
+  });
+
+  it("blocks issue_208 editor_input when explicit target_tab_id points at non-article publish page", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      {
+        id: 32,
+        url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=image",
+        active: true
+      }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-issue-208-editor-input-non-article-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext({
+        live_allowed: true,
+        live_decision: "allowed",
+        allowed_execution_modes: [
+          "dry_run",
+          "recon",
+          "live_read_limited",
+          "live_read_high_risk",
+          "live_write"
+        ]
+      }),
+      tabId: 32,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=image"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-issue-208-editor-input-non-article-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-issue-208-editor-input-non-article-001",
+        command: "xhs.search",
+        command_params: createXhsEditorInputCommandParams(),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: { summary?: Record<string, unknown> } })
+      .find((message) => message.id === "run-xhs-issue-208-editor-input-non-article-001");
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining([
+        "TARGET_PAGE_ARTICLE_REQUIRED",
+        "WRITE_INTERACTION_TIER_REVERSIBLE_INTERACTION"
+      ])
+    );
   });
 
   it("keeps issue_208 irreversible_write blocked and exposes irreversible write tier", async () => {
