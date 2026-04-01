@@ -358,7 +358,7 @@ if [[ "${1:-}" == "exec" ]]; then
         shift
         ;;
       *)
-        if [[ "${saw_command}" == "0" && -z "${prompt_value}" ]]; then
+        if [[ -z "${prompt_value}" ]]; then
           prompt_value="$1"
         fi
         shift
@@ -366,7 +366,11 @@ if [[ "${1:-}" == "exec" ]]; then
     esac
   done
 
-  printf '%s' "${prompt_value}" > "${prompt_file}"
+  if [[ "${prompt_value}" == "-" ]]; then
+    cat > "${prompt_file}"
+  else
+    printf '%s' "${prompt_value}" > "${prompt_file}"
+  fi
 
   [[ -n "${output_file}" ]] || {
     echo "missing output file" >&2
@@ -893,6 +897,58 @@ test_fetch_origin_tracking_ref_uses_gh_auth_token_for_https_fallback() {
   assert_file_contains "${gh_calls_log}" "auth token"
   assert_file_contains "${git_calls_log}" "http.https://github.com/.extraheader=${expected_header}"
   assert_file_contains "${git_calls_log}" "fetch https://github.com/mcontheway/WebEnvoy.git refs/heads/main:refs/remotes/origin/main"
+
+  unset -f gh
+  unset -f git
+  restore_test_repo_root
+}
+
+test_fetch_origin_tracking_ref_uses_gh_auth_token_when_origin_is_already_https() {
+  setup_case_dir "fetch-origin-https-remote-with-gh-token"
+
+  local git_calls_log="${TMP_DIR}/git.calls.log"
+  local gh_calls_log="${TMP_DIR}/gh.calls.log"
+  local expected_header=""
+  : > "${git_calls_log}"
+  : > "${gh_calls_log}"
+  REPO_ROOT="${TMP_DIR}/repo"
+  mkdir -p "${REPO_ROOT}"
+  export REPO_ROOT
+
+  expected_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' 'test-token' | base64 | tr -d '\n')"
+
+  gh() {
+    printf '%s\n' "$*" >> "${gh_calls_log}"
+    if [[ "${1:-}" == "auth" && "${2:-}" == "token" ]]; then
+      printf '%s\n' 'test-token'
+      return 0
+    fi
+    return 64
+  }
+
+  git() {
+    printf '%s\n' "$*" >> "${git_calls_log}"
+
+    if [[ "${1:-}" == "-C" && "${3:-}" == "fetch" && "${4:-}" == "origin" ]]; then
+      return 1
+    fi
+
+    if [[ "${1:-}" == "-C" && "${3:-}" == "remote" && "${4:-}" == "get-url" && "${5:-}" == "origin" ]]; then
+      printf '%s\n' 'https://github.com/mcontheway/WebEnvoy.git'
+      return 0
+    fi
+
+    if [[ "$*" == *"http.https://github.com/.extraheader=${expected_header}"* && "$*" == *"fetch https://github.com/mcontheway/WebEnvoy.git refs/heads/main:refs/remotes/origin/main"* ]]; then
+      return 0
+    fi
+
+    command git "$@"
+  }
+
+  assert_pass fetch_origin_tracking_ref "refs/heads/main" "refs/remotes/origin/main"
+  assert_file_contains "${gh_calls_log}" "auth token"
+  assert_file_contains "${git_calls_log}" "remote get-url origin"
+  assert_file_contains "${git_calls_log}" "http.https://github.com/.extraheader=${expected_header}"
 
   unset -f gh
   unset -f git
@@ -1471,9 +1527,14 @@ EOF
 
   assert_pass run_codex_review 1
   assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "exec -C"
-  assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "review --base main"
+  assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "review --base main -"
   assert_file_not_contains "${MOCK_CODEX_CALLS_LOG}" "--output-schema"
-  assert_file_empty "${MOCK_CODEX_PROMPT_CAPTURE}"
+  assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "Guardian 常驻审查摘要"
+  assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "vision.md"
+  assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "AGENTS.md"
+  assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "docs/dev/roadmap.md"
+  assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "code_review.md"
+  assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "Issue #123: Guardian issue"
   assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "Guardian 常驻审查摘要"
   assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "vision.md"
   assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "AGENTS.md"
@@ -2173,6 +2234,7 @@ main() {
   test_origin_url_to_https_normalizes_github_ssh_urls
   test_fetch_origin_tracking_ref_falls_back_to_https_when_ssh_fetch_fails
   test_fetch_origin_tracking_ref_uses_gh_auth_token_for_https_fallback
+  test_fetch_origin_tracking_ref_uses_gh_auth_token_when_origin_is_already_https
   test_append_unique_line_skips_repo_baseline_when_worktree_missing
   test_append_unique_line_skips_repo_file_when_worktree_missing
   test_mixed_spec_and_impl_changes_use_mixed_profile

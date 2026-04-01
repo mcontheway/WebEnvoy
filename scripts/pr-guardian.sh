@@ -62,9 +62,7 @@ fetch_origin_tracking_ref() {
   local refspec="${source_ref}:${target_ref}"
   local origin_url=""
   local https_url=""
-  local gh_token=""
-  local auth_header=""
-
+ 
   if git -C "${REPO_ROOT}" fetch origin "${refspec}" >/dev/null 2>&1; then
     return 0
   fi
@@ -72,12 +70,25 @@ fetch_origin_tracking_ref() {
   origin_url="$(git -C "${REPO_ROOT}" remote get-url origin 2>/dev/null || true)"
   https_url="$(origin_url_to_https "${origin_url}" 2>/dev/null || true)"
 
-  if [[ -z "${https_url}" || "${https_url}" == "${origin_url}" ]]; then
+  if [[ -z "${https_url}" ]]; then
     git -C "${REPO_ROOT}" fetch origin "${refspec}" >/dev/null
     return 0
   fi
 
-  warn "origin SSH 拉取失败，已回退到 HTTPS 继续准备审查上下文: ${source_ref}"
+  if [[ "${https_url}" == "${origin_url}" ]]; then
+    warn "origin HTTPS 拉取失败，已使用 GitHub token 回退继续准备审查上下文: ${source_ref}"
+  else
+    warn "origin SSH 拉取失败，已回退到 HTTPS 继续准备审查上下文: ${source_ref}"
+  fi
+
+  fetch_github_https_ref "${https_url}" "${refspec}"
+}
+
+fetch_github_https_ref() {
+  local https_url="$1"
+  local refspec="$2"
+  local gh_token=""
+  local auth_header=""
   gh_token="$(gh auth token 2>/dev/null || true)"
   if [[ -n "${gh_token}" ]]; then
     auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${gh_token}" | base64 | tr -d '\n')"
@@ -1062,7 +1073,8 @@ run_codex_review() {
     -s read-only \
     -o "${RAW_RESULT_FILE}" \
     review \
-    --base "${BASE_REF}" >/dev/null 2>"${native_error_file}"; then
+    --base "${BASE_REF}" \
+    - < "${PROMPT_RUN_FILE}" >/dev/null 2>"${native_error_file}"; then
     normalize_native_review_result "${RAW_RESULT_FILE}" "${RESULT_FILE}"
     validate_review_result_shape "${RESULT_FILE}"
   else
