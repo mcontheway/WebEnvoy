@@ -179,12 +179,24 @@ classify_review_profile() {
 append_unique_line() {
   local value="$1"
   local output_file="$2"
+  local resolved_path="$value"
 
   [[ -n "${value}" ]] || return 0
-  [[ -f "${value}" ]] || return 0
 
-  if [[ ! -f "${output_file}" ]] || ! grep -Fxq -- "${value}" "${output_file}"; then
-    printf '%s\n' "${value}" >> "${output_file}"
+  if [[ ! -f "${resolved_path}" ]] && [[ -n "${WORKTREE_DIR:-}" ]] && [[ "${value}" == "${REPO_ROOT}/"* ]]; then
+    local relative_path="${value#${REPO_ROOT}/}"
+    local worktree_path="${WORKTREE_DIR}/${relative_path}"
+    if [[ -f "${worktree_path}" ]]; then
+      resolved_path="${worktree_path}"
+    else
+      return 0
+    fi
+  elif [[ ! -f "${resolved_path}" ]]; then
+    return 0
+  fi
+
+  if [[ ! -f "${output_file}" ]] || ! grep -Fxq -- "${resolved_path}" "${output_file}"; then
+    printf '%s\n' "${resolved_path}" >> "${output_file}"
   fi
 }
 
@@ -310,9 +322,7 @@ collect_spec_review_docs() {
     [[ -n "${fr_dir}" ]] || continue
     append_unique_line "${REPO_ROOT}/${fr_dir}/spec.md" "${output_file}"
     append_unique_line "${REPO_ROOT}/${fr_dir}/TODO.md" "${output_file}"
-    if grep -Fxq -- "${fr_dir}/plan.md" "${changed_files_file}"; then
-      append_unique_line "${REPO_ROOT}/${fr_dir}/plan.md" "${output_file}"
-    fi
+    append_unique_line "${REPO_ROOT}/${fr_dir}/plan.md" "${output_file}"
     if grep -Eq "^${fr_dir}/contracts/" "${changed_files_file}"; then
       while IFS= read -r contract_file; do
         append_unique_line "${REPO_ROOT}/${contract_file}" "${output_file}"
@@ -353,6 +363,10 @@ collect_context_docs() {
 
 relative_to_repo_root() {
   local path="$1"
+  if [[ -n "${WORKTREE_DIR:-}" && "${path}" == "${WORKTREE_DIR}/"* ]]; then
+    printf '%s\n' "${path#${WORKTREE_DIR}/}"
+    return
+  fi
   printf '%s\n' "${path#${REPO_ROOT}/}"
 }
 

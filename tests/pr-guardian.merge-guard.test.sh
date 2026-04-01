@@ -414,6 +414,7 @@ test_collect_spec_review_docs_includes_todo_baseline() {
   mkdir -p "${REPO_ROOT}/docs/dev/specs/FR-0001-runtime-cli-entry"
   touch "${REPO_ROOT}/docs/dev/specs/FR-0001-runtime-cli-entry/spec.md"
   touch "${REPO_ROOT}/docs/dev/specs/FR-0001-runtime-cli-entry/TODO.md"
+  touch "${REPO_ROOT}/docs/dev/specs/FR-0001-runtime-cli-entry/plan.md"
 
   printf '%s\n' 'docs/dev/specs/FR-0001-runtime-cli-entry/spec.md' > "${changed_files_file}"
 
@@ -426,6 +427,39 @@ test_collect_spec_review_docs_includes_todo_baseline() {
   assert_file_contains "${output_file}" "${REPO_ROOT}/docs/dev/architecture/system-design.md"
   assert_file_contains "${output_file}" "${REPO_ROOT}/docs/dev/specs/FR-0001-runtime-cli-entry/spec.md"
   assert_file_contains "${output_file}" "${REPO_ROOT}/docs/dev/specs/FR-0001-runtime-cli-entry/TODO.md"
+  assert_file_contains "${output_file}" "${REPO_ROOT}/docs/dev/specs/FR-0001-runtime-cli-entry/plan.md"
+}
+
+test_append_unique_line_uses_worktree_for_new_spec_files() {
+  setup_case_dir "worktree-new-spec-files"
+
+  local fake_repo_root="${TMP_DIR}/repo"
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  local output_file="${TMP_DIR}/context-docs.txt"
+
+  mkdir -p "${fake_repo_root}" "${fake_worktree_dir}/docs/dev/specs/FR-9999-new-spec/contracts"
+
+  REPO_ROOT="${fake_repo_root}"
+  WORKTREE_DIR="${fake_worktree_dir}"
+  export REPO_ROOT WORKTREE_DIR
+
+  touch "${WORKTREE_DIR}/docs/dev/specs/FR-9999-new-spec/spec.md"
+  touch "${WORKTREE_DIR}/docs/dev/specs/FR-9999-new-spec/TODO.md"
+  touch "${WORKTREE_DIR}/docs/dev/specs/FR-9999-new-spec/plan.md"
+  touch "${WORKTREE_DIR}/docs/dev/specs/FR-9999-new-spec/contracts/runtime.json"
+
+  append_unique_line "${REPO_ROOT}/docs/dev/specs/FR-9999-new-spec/spec.md" "${output_file}"
+  append_unique_line "${REPO_ROOT}/docs/dev/specs/FR-9999-new-spec/TODO.md" "${output_file}"
+  append_unique_line "${REPO_ROOT}/docs/dev/specs/FR-9999-new-spec/plan.md" "${output_file}"
+  append_unique_line "${REPO_ROOT}/docs/dev/specs/FR-9999-new-spec/contracts/runtime.json" "${output_file}"
+
+  assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-9999-new-spec/spec.md"
+  assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-9999-new-spec/TODO.md"
+  assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-9999-new-spec/plan.md"
+  assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-9999-new-spec/contracts/runtime.json"
+
+  REPO_ROOT="${TEST_REPO_ROOT}"
+  export REPO_ROOT
 }
 
 test_run_codex_review_uses_context_budget_prompt_and_schema_exec() {
@@ -917,6 +951,7 @@ main() {
   test_classify_review_profile_matches_expected_buckets
   test_slim_pr_body_keeps_only_review_relevant_sections
   test_collect_spec_review_docs_includes_todo_baseline
+  test_append_unique_line_uses_worktree_for_new_spec_files
   test_run_codex_review_uses_context_budget_prompt_and_schema_exec
 
   assert_pass run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'
