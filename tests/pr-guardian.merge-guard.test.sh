@@ -487,6 +487,12 @@ test_classify_review_profile_matches_expected_buckets() {
     exit 1
   fi
 
+  printf '%s\n' 'docs/dev/review/guardian-spec-review-summary.md' > "${changed_files_file}"
+  if [[ "$(classify_review_profile "${changed_files_file}")" != "mixed_high_risk_spec_profile" ]]; then
+    echo "expected guardian spec review summary changes to be treated as mixed high-risk spec profile" >&2
+    exit 1
+  fi
+
   printf '%s\n' '.githooks/pre-commit' > "${changed_files_file}"
   if [[ "$(classify_review_profile "${changed_files_file}")" != "high_risk_impl_profile" ]]; then
     echo "expected githooks changes to be treated as high-risk implementation profile" >&2
@@ -1474,6 +1480,21 @@ EOF
   assert_file_contains "${result_file}" '"required_actions":[]'
 }
 
+test_normalize_native_review_result_fails_closed_for_ambiguous_safe_phrase() {
+  setup_case_dir "normalize-native-text-ambiguous-safe-phrase"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+This change does not affect code paths outside the guard, but it still breaks merge safety by approving an ambiguous plain-text review result.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
 test_run_codex_review_uses_context_budget_prompt_and_native_review_engine() {
   setup_case_dir "run-budget-review"
 
@@ -2264,6 +2285,7 @@ main() {
   test_normalize_native_review_result_maps_native_text_findings_to_guardian_schema
   test_normalize_native_review_result_fails_closed_for_unstructured_negative_text
   test_normalize_native_review_result_maps_native_text_approve_to_guardian_schema
+  test_normalize_native_review_result_fails_closed_for_ambiguous_safe_phrase
   test_run_codex_review_uses_context_budget_prompt_and_native_review_engine
   test_run_codex_review_accepts_plain_text_native_review_output
   test_write_review_context_overlay_keeps_tracked_root_todo_out_of_git_diff

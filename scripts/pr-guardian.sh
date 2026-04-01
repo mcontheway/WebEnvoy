@@ -232,7 +232,7 @@ classify_review_profile() {
   local has_formal_spec_changes=0
   local has_high_risk_impl_changes=0
 
-  if grep -Eq '^(docs/dev/specs/|docs/dev/architecture/|vision\.md$|AGENTS\.md$|docs/dev/AGENTS\.md$|code_review\.md$|spec_review\.md$)' "${changed_files_file}"; then
+  if grep -Eq '^(docs/dev/specs/|docs/dev/architecture/|docs/dev/review/guardian-spec-review-summary\.md$|vision\.md$|AGENTS\.md$|docs/dev/AGENTS\.md$|code_review\.md$|spec_review\.md$)' "${changed_files_file}"; then
     has_formal_spec_changes=1
   fi
 
@@ -962,9 +962,7 @@ normalize_native_review_result() {
       | ($lower | test("did not identify any actionable bugs"))
         or ($lower | test("no blocking issues found"))
         or ($lower | test("patch is correct"))
-        or ($lower | test("no actionable issues"))
-        or ($lower | test("does not affect code paths"))
-        or ($lower | test("does not modify executable code or behavior"));
+        or ($lower | test("no actionable issues"));
     def priority_num:
       if . == "P0" then 0
       elif . == "P1" then 1
