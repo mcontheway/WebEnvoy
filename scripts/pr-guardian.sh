@@ -807,7 +807,9 @@ collect_context_docs() {
   append_required_review_baseline "${output_file}"
   append_unique_line "${REVIEW_ADDENDUM_FILE}" "${output_file}"
   append_unique_line "${CODE_REVIEW_FILE}" "${output_file}"
-  append_unique_line "${SPEC_REVIEW_SUMMARY_FILE}" "${output_file}"
+  if [[ "${REVIEW_PROFILE}" == "spec_review_profile" || "${REVIEW_PROFILE}" == "mixed_high_risk_spec_profile" ]]; then
+    append_unique_line "${SPEC_REVIEW_SUMMARY_FILE}" "${output_file}"
+  fi
   collect_changed_trusted_baseline_paths "${changed_trusted_baselines_file}" "${changed_files_file}"
   while IFS= read -r baseline_path; do
     [[ -n "${baseline_path}" ]] || continue
@@ -994,6 +996,29 @@ normalize_review_path() {
   printf '%s\n' "${raw_path}"
 }
 
+first_changed_file_absolute_path() {
+  local first_changed_file=""
+
+  if [[ -n "${CHANGED_FILES_FILE:-}" && -f "${CHANGED_FILES_FILE}" ]]; then
+    first_changed_file="$(awk 'NF { print; exit }' "${CHANGED_FILES_FILE}")"
+  fi
+
+  if [[ -n "${first_changed_file}" ]]; then
+    if [[ -n "${WORKTREE_DIR:-}" ]]; then
+      printf '%s\n' "${WORKTREE_DIR}/${first_changed_file}"
+    else
+      printf '%s\n' "${REPO_ROOT}/${first_changed_file}"
+    fi
+    return 0
+  fi
+
+  if [[ -n "${WORKTREE_DIR:-}" ]]; then
+    printf '%s\n' "${WORKTREE_DIR}/scripts/pr-guardian.sh"
+  else
+    printf '%s\n' "${REPO_ROOT}/scripts/pr-guardian.sh"
+  fi
+}
+
 line_range_reviewable() {
   local path="$1"
   local line_start="$2"
@@ -1022,6 +1047,9 @@ line_range_reviewable() {
 normalize_native_review_result() {
   local raw_result_file="$1"
   local normalized_result_file="$2"
+  local fallback_path=""
+
+  fallback_path="$(first_changed_file_absolute_path)"
 
   if jq -e '
     type == "object"
@@ -1041,7 +1069,7 @@ normalize_native_review_result() {
     and (.findings? | type == "array")
     and (.overall_correctness? | type == "string")
   ' "${raw_result_file}" >/dev/null 2>&1; then
-    jq -c -e '
+    jq -c -e --arg fallback_path "${fallback_path}" '
       def inferred_priority:
         if (.priority // null) != null then .priority
         elif ((.title // "") | test("^\\[P0\\]")) then 0
@@ -1070,7 +1098,7 @@ normalize_native_review_result() {
                 title: normalized_title,
                 details: normalized_details,
                 code_location: {
-                  absolute_file_path: (.code_location.absolute_file_path // ""),
+                  absolute_file_path: ((.code_location.absolute_file_path // "") | if length > 0 then . else $fallback_path end),
                   line_range: {
                     start: (.code_location.line_range.start // 1),
                     end: (.code_location.line_range.end // (.code_location.line_range.start // 1))

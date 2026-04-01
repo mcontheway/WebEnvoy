@@ -1226,6 +1226,24 @@ test_collect_context_docs_includes_branch_todo_when_present() {
   restore_test_repo_root
 }
 
+test_collect_context_docs_skips_spec_review_summary_for_default_profile() {
+  setup_case_dir "default-profile-skips-spec-summary"
+  setup_fake_repo_root
+
+  REVIEW_PROFILE="default_impl_profile"
+  export REVIEW_PROFILE
+
+  local changed_files_file="${TMP_DIR}/changed-files.txt"
+  local output_file="${TMP_DIR}/context-docs.txt"
+  printf '%s\n' 'README.md' > "${changed_files_file}"
+
+  collect_context_docs "${changed_files_file}" "${output_file}"
+
+  assert_file_not_contains "${output_file}" "${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+
+  restore_test_repo_root
+}
+
 test_collect_context_docs_includes_changed_spec_review_summary_for_mixed_profile() {
   setup_case_dir "changed-spec-summary-context"
   setup_fake_repo_root
@@ -1657,6 +1675,27 @@ EOF
   assert_file_contains "${result_file}" '"title":"Keep native review path"'
   assert_file_contains "${result_file}" '"details":"The script still shells out through generic exec instead of the native review engine, so it bypasses the built-in review rubric we explicitly migrated toward."'
   assert_file_contains "${result_file}" '"required_actions":["修复：Keep native review path"]'
+}
+
+test_normalize_native_review_result_maps_native_schema_without_code_location() {
+  setup_case_dir "normalize-native-review-without-code-location"
+
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  printf '%s\n' 'scripts/pr-guardian.sh' > "${CHANGED_FILES_FILE}"
+  export CHANGED_FILES_FILE
+
+  local raw_file="${TMP_DIR}/native-review.json"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+{"findings":[{"title":"[P2] Preserve review context","body":"The patch drops required review context for medium items.","confidence_score":0.73}],"overall_correctness":"patch is incorrect","overall_explanation":"The patch still contains a blocking review-context regression.","overall_confidence_score":0.73}
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"absolute_file_path":"'
+  assert_file_contains "${result_file}" 'scripts/pr-guardian.sh'
+  assert_file_contains "${result_file}" '"start":1'
+  assert_file_contains "${result_file}" '"end":1'
 }
 
 test_normalize_native_review_result_accepts_guardian_schema_json() {
@@ -2515,6 +2554,7 @@ main() {
   test_collect_spec_review_docs_prefers_worktree_for_changed_formal_docs
   test_collect_spec_review_docs_skips_repo_only_changed_file_when_worktree_missing
   test_collect_context_docs_includes_branch_todo_when_present
+  test_collect_context_docs_skips_spec_review_summary_for_default_profile
   test_collect_context_docs_includes_changed_spec_review_summary_for_mixed_profile
   test_collect_context_docs_includes_proposed_changed_guardian_summaries
   test_collect_context_docs_includes_proposed_changed_trusted_baselines
@@ -2529,6 +2569,7 @@ main() {
   test_assert_required_review_context_available_fails_when_required_baseline_missing_everywhere
   test_normalize_native_review_result_accepts_guardian_schema_json
   test_normalize_native_review_result_maps_native_schema_to_guardian_schema
+  test_normalize_native_review_result_maps_native_schema_without_code_location
   test_normalize_native_review_result_maps_native_text_findings_to_guardian_schema
   test_normalize_native_review_result_fails_closed_for_unstructured_negative_text
   test_normalize_native_review_result_maps_native_text_approve_to_guardian_schema
