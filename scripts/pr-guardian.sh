@@ -219,9 +219,9 @@ prepare_pr_workspace() {
 
   list_changed_files > "${CHANGED_FILES_FILE}"
   REVIEW_PROFILE="$(classify_review_profile "${CHANGED_FILES_FILE}")"
-  ISSUE_NUMBER="$(jq -r 'if (.closingIssuesReferences | length) == 1 then (.closingIssuesReferences[0].number // "") else "" end' "${META_FILE}")"
+  ISSUE_NUMBER="$(extract_issue_number_from_pr_body)"
   if [[ -z "${ISSUE_NUMBER}" ]]; then
-    ISSUE_NUMBER="$(extract_issue_number_from_pr_body)"
+    ISSUE_NUMBER="$(jq -r 'if (.closingIssuesReferences | length) == 1 then (.closingIssuesReferences[0].number // "") else "" end' "${META_FILE}")"
   fi
   slim_pr_body > "${SLIM_PR_FILE}"
   fetch_issue_summary > "${ISSUE_SUMMARY_FILE}"
@@ -720,8 +720,7 @@ fetch_issue_summary() {
 
   issue_file="${TMP_DIR}/issue.json"
   if ! gh issue view "${ISSUE_NUMBER}" --json number,title,body > "${issue_file}" 2>/dev/null; then
-    warn "关联 Issue 拉取失败，已忽略 Issue 摘要: #${ISSUE_NUMBER}"
-    return 0
+    die "关联 Issue 拉取失败，无法按仓库要求补齐审查上下文: #${ISSUE_NUMBER}"
   fi
 
   issue_title="$(jq -r '.title // ""' "${issue_file}")"

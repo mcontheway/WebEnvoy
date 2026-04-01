@@ -2100,7 +2100,7 @@ EOF
   assert_file_contains "${err_file}" "Codex 审查执行失败"
 }
 
-test_run_codex_review_continues_without_issue_summary_when_issue_lookup_fails() {
+test_fetch_issue_summary_fails_closed_when_issue_lookup_fails() {
   setup_case_dir "run-review-without-issue-summary"
 
   BASE_REF="main"
@@ -2140,18 +2140,13 @@ test_run_codex_review_continues_without_issue_summary_when_issue_lookup_fails() 
   cp "${REPO_ROOT}/code_review.md" "${WORKTREE_DIR}/code_review.md"
   cp "${REVIEW_ADDENDUM_FILE}" "${WORKTREE_DIR}/docs/dev/review/guardian-review-addendum.md"
 
-  fetch_issue_summary > "${ISSUE_SUMMARY_FILE}"
+  MOCK_GH_ISSUE_VIEW_EXIT_CODE=1
+  MOCK_GH_ISSUE_VIEW_STDERR="issue not found"
+  export MOCK_GH_ISSUE_VIEW_EXIT_CODE MOCK_GH_ISSUE_VIEW_STDERR
 
-  collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
-
-  MOCK_CODEX_REVIEW_RESULT_JSON="${TMP_DIR}/native-review.json"
-  cat > "${MOCK_CODEX_REVIEW_RESULT_JSON}" <<'EOF'
-{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"No blocking issues found.","overall_confidence_score":0.42}
-EOF
-  export MOCK_CODEX_REVIEW_RESULT_JSON
-
-  assert_pass run_codex_review 2
-  assert_file_contains "${RESULT_FILE}" '"verdict":"APPROVE"'
+  local err_file="${TMP_DIR}/issue.err"
+  assert_fail fetch_issue_summary > "${ISSUE_SUMMARY_FILE}" 2>"${err_file}"
+  assert_file_contains "${err_file}" "关联 Issue 拉取失败，无法按仓库要求补齐审查上下文: #123"
 }
 
 setup_hydrate_fixture() {
@@ -2638,7 +2633,7 @@ main() {
   test_run_codex_review_uses_context_budget_prompt_and_native_review_engine
   test_run_codex_review_accepts_plain_text_native_review_output
   test_run_codex_review_fails_closed_when_native_review_command_fails
-  test_run_codex_review_continues_without_issue_summary_when_issue_lookup_fails
+  test_fetch_issue_summary_fails_closed_when_issue_lookup_fails
 
   assert_pass run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'
   assert_fail run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"fail","state":"FAILURE","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'
