@@ -559,6 +559,21 @@ test_slim_pr_body_falls_back_to_plain_text_when_template_headings_are_missing() 
   assert_file_contains "${slim_file}" "包含验收背景和验证线索。"
 }
 
+test_slim_pr_body_preserves_guardian_acceptance_lines() {
+  setup_case_dir "slim-pr-body-guardian-acceptance"
+
+  PR_BODY=$'## 摘要\n\n- latest guardian verdict = APPROVE\n- merge-if-safe 需要 guardian + checks 双门禁\n- request changes 代表阻断\n\n## 检查清单\n\n- [ ] ignore\n'
+  export PR_BODY
+
+  local slim_file="${TMP_DIR}/slim.md"
+  slim_pr_body > "${slim_file}"
+
+  assert_file_contains "${slim_file}" "latest guardian verdict = APPROVE"
+  assert_file_contains "${slim_file}" "merge-if-safe 需要 guardian + checks 双门禁"
+  assert_file_contains "${slim_file}" "request changes 代表阻断"
+  assert_file_not_contains "${slim_file}" "## 检查清单"
+}
+
 test_fetch_issue_summary_keeps_body_without_checklist() {
   setup_case_dir "issue-summary"
 
@@ -1615,6 +1630,21 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":false'
 }
 
+test_normalize_native_review_result_fails_closed_for_colon_caveat() {
+  setup_case_dir "normalize-native-text-colon-caveat"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+I did not identify any actionable bugs in the docs: the merge guard still approves an ambiguous native review and should not be merged.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
 test_add_fallback_finding_for_unstructured_rejection_creates_actionable_output() {
   setup_case_dir "fallback-finding-for-unstructured-rejection"
 
@@ -2310,6 +2340,7 @@ main() {
   test_slim_pr_body_keeps_only_review_relevant_sections
   test_slim_pr_body_preserves_plain_text_in_kept_sections
   test_slim_pr_body_falls_back_to_plain_text_when_template_headings_are_missing
+  test_slim_pr_body_preserves_guardian_acceptance_lines
   test_fetch_issue_summary_keeps_body_without_checklist
   test_fetch_issue_summary_preserves_plain_text_in_kept_sections
   test_fetch_issue_summary_falls_back_to_plain_text_when_template_headings_are_missing
@@ -2347,6 +2378,7 @@ main() {
   test_normalize_native_review_result_fails_closed_for_unstructured_negative_text
   test_normalize_native_review_result_maps_native_text_approve_to_guardian_schema
   test_normalize_native_review_result_fails_closed_for_ambiguous_safe_phrase
+  test_normalize_native_review_result_fails_closed_for_colon_caveat
   test_add_fallback_finding_for_unstructured_rejection_creates_actionable_output
   test_run_codex_review_uses_context_budget_prompt_and_native_review_engine
   test_run_codex_review_accepts_plain_text_native_review_output

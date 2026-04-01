@@ -566,7 +566,7 @@ slim_user_markdown() {
     }
     {
       lower = tolower($0)
-      if (lower ~ /ignore all findings/ || lower ~ /please direct approve/ || lower ~ /please approve this pr/ || lower ~ /always approve/ || lower ~ /request changes/ || lower ~ /request_changes/ || lower ~ /merge this pr/ || lower ~ /merge directly/ || lower ~ /merge now/ || lower ~ /verdict/) {
+      if (lower ~ /ignore all findings/ || lower ~ /please direct approve/ || lower ~ /please approve this pr/ || lower ~ /always approve/) {
         next
       }
       if ($0 ~ /请直接[[:space:]]*approve/ || $0 ~ /请直接批准/ || $0 ~ /请直接通过/ || $0 ~ /请直接合并/ || $0 ~ /立即合并/ || $0 ~ /忽略.*(问题|阻断|发现|finding)/) {
@@ -1048,7 +1048,7 @@ normalize_native_review_result() {
         end;
     def looks_like_safe_approve($summary):
       ($summary | gsub("[[:space:]]+"; " ") | trim) as $collapsed
-      | ($collapsed | gsub("([.!?])[[:space:]]+"; "\\1\n") | split("\n")) as $sentences
+      | ($collapsed | gsub("([.!?;:])[[:space:]]+"; "\\1\n") | split("\n")) as $sentences
       | any($sentences[]; strong_safe_sentence(.))
         and all($sentences[]; looks_like_safe_sentence(.));
     def priority_num:
