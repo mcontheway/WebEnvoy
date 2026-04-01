@@ -1288,31 +1288,6 @@ test_build_review_prompt_prefers_base_snapshot_review_baseline_files_when_change
   restore_test_repo_root
 }
 
-test_prepare_reviewer_owned_baseline_overlay_copies_base_snapshot_into_worktree() {
-  setup_case_dir "overlay-base-snapshot"
-  setup_fake_repo_root
-
-  local fake_worktree_dir="${TMP_DIR}/worktree"
-  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
-  mkdir -p "${fake_worktree_dir}" "${baseline_snapshot_root}"
-
-  printf '%s\n' "repo code review" > "${REPO_ROOT}/code_review.md"
-  printf '%s\n' "worktree code review" > "${fake_worktree_dir}/code_review.md"
-  printf '%s\n' "base snapshot code review" > "${baseline_snapshot_root}/code_review.md"
-
-  WORKTREE_DIR="${fake_worktree_dir}"
-  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
-  REVIEW_PROFILE="default_impl_profile"
-  export WORKTREE_DIR BASELINE_SNAPSHOT_ROOT REVIEW_PROFILE
-
-  prepare_reviewer_owned_baseline_overlay
-
-  assert_file_contains "${WORKTREE_DIR}/code_review.md" "base snapshot code review"
-  assert_file_not_contains "${WORKTREE_DIR}/code_review.md" "worktree code review"
-
-  restore_test_repo_root
-}
-
 test_assert_required_review_context_available_accepts_base_snapshot_review_summaries() {
   setup_case_dir "base-snapshot-review-summaries"
   setup_fake_repo_root
@@ -1524,6 +1499,21 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":false'
 }
 
+test_add_fallback_finding_for_unstructured_rejection_creates_actionable_output() {
+  setup_case_dir "fallback-finding-for-unstructured-rejection"
+
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${result_file}" <<'EOF'
+{"verdict":"REQUEST_CHANGES","safe_to_merge":false,"summary":"Native review returned a negative freeform summary.","findings":[],"required_actions":[]}
+EOF
+
+  assert_pass add_fallback_finding_for_unstructured_rejection "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"title":"Clarify native review rejection"'
+  assert_file_contains "${result_file}" '"details":"Native review returned a negative freeform summary."'
+  assert_file_contains "${result_file}" '"required_actions":["澄清并修复 native review 拒绝原因：Native review returned a negative freeform summary."]'
+}
+
 test_run_codex_review_uses_context_budget_prompt_and_native_review_engine() {
   setup_case_dir "run-budget-review"
 
@@ -1554,8 +1544,7 @@ test_run_codex_review_uses_context_budget_prompt_and_native_review_engine() {
   RAW_RESULT_FILE="${TMP_DIR}/review.raw.json"
   RESULT_FILE="${TMP_DIR}/review.json"
   REVIEW_MD_FILE="${TMP_DIR}/review.md"
-  WORKTREE_REVIEW_CONTEXT_FILE="${WORKTREE_DIR}/TODO.md"
-  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RAW_RESULT_FILE RESULT_FILE REVIEW_MD_FILE WORKTREE_REVIEW_CONTEXT_FILE
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RAW_RESULT_FILE RESULT_FILE REVIEW_MD_FILE
 
   printf '%s\n' 'scripts/pr-guardian.sh' > "${CHANGED_FILES_FILE}"
   slim_pr_body > "${SLIM_PR_FILE}"
@@ -1584,6 +1573,7 @@ EOF
 
   assert_pass run_codex_review 1
   assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "exec -C"
+  assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "--add-dir ${TMP_DIR}"
   assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "review -"
   assert_file_not_contains "${MOCK_CODEX_CALLS_LOG}" "review --base"
   assert_file_not_contains "${MOCK_CODEX_CALLS_LOG}" "--output-schema"
@@ -1595,9 +1585,10 @@ EOF
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "Issue #123: Guardian issue"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "## 目标"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "- Keep acceptance"
+  assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/review/guardian-review-addendum.md"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" 'git merge-base HEAD origin/main'
-  assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "branch todo"
-  assert_file_not_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "Guardian 常驻审查摘要"
+  assert_file_contains "${WORKTREE_DIR}/TODO.md" "branch todo"
+  assert_file_not_contains "${WORKTREE_DIR}/TODO.md" "Guardian 常驻审查摘要"
   assert_file_contains "${RESULT_FILE}" '"verdict":"APPROVE"'
 }
 
@@ -1628,8 +1619,7 @@ test_run_codex_review_accepts_plain_text_native_review_output() {
   RAW_RESULT_FILE="${TMP_DIR}/review.raw.txt"
   RESULT_FILE="${TMP_DIR}/review.json"
   REVIEW_MD_FILE="${TMP_DIR}/review.md"
-  WORKTREE_REVIEW_CONTEXT_FILE="${WORKTREE_DIR}/TODO.md"
-  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RAW_RESULT_FILE RESULT_FILE REVIEW_MD_FILE WORKTREE_REVIEW_CONTEXT_FILE
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RAW_RESULT_FILE RESULT_FILE REVIEW_MD_FILE
 
   printf '%s\n' 'README.md' > "${CHANGED_FILES_FILE}"
   slim_pr_body > "${SLIM_PR_FILE}"
@@ -1652,72 +1642,6 @@ EOF
   assert_pass run_codex_review 4
   assert_file_contains "${RESULT_FILE}" '"verdict":"APPROVE"'
   assert_file_contains "${REVIEW_MD_FILE}" "**结论**: APPROVE"
-}
-
-test_write_review_context_overlay_keeps_tracked_root_todo_out_of_git_diff() {
-  setup_case_dir "tracked-root-todo-overlay"
-
-  local repo_dir="${TMP_DIR}/worktree"
-  mkdir -p "${repo_dir}"
-  git init -q "${repo_dir}"
-  git -C "${repo_dir}" config user.email "test@example.com"
-  git -C "${repo_dir}" config user.name "Test User"
-  printf '%s\n' "当前分支真实 TODO" > "${repo_dir}/TODO.md"
-  git -C "${repo_dir}" add TODO.md
-  git -C "${repo_dir}" commit -qm "init"
-
-  WORKTREE_DIR="${repo_dir}"
-  WORKTREE_REVIEW_CONTEXT_FILE="${WORKTREE_DIR}/TODO.md"
-  PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
-  printf '%s\n' "Guardian overlay" > "${PROMPT_RUN_FILE}"
-  export WORKTREE_DIR WORKTREE_REVIEW_CONTEXT_FILE PROMPT_RUN_FILE
-
-  assert_pass write_review_context_overlay
-  assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "Guardian overlay"
-  assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "当前分支原始 TODO.md"
-  assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "当前分支真实 TODO"
-
-  local diff_file="${TMP_DIR}/todo.diff"
-  local status_file="${TMP_DIR}/todo.status"
-  git -C "${WORKTREE_DIR}" diff HEAD -- TODO.md > "${diff_file}"
-  git -C "${WORKTREE_DIR}" status --short > "${status_file}"
-  assert_file_empty "${diff_file}"
-  assert_file_empty "${status_file}"
-}
-
-test_prepare_reviewer_owned_baseline_overlay_keeps_snapshot_overrides_out_of_git_diff() {
-  setup_case_dir "tracked-baseline-overlay"
-  setup_fake_repo_root
-
-  local repo_dir="${TMP_DIR}/worktree"
-  mkdir -p "${repo_dir}"
-  git init -q "${repo_dir}"
-  git -C "${repo_dir}" config user.email "test@example.com"
-  git -C "${repo_dir}" config user.name "Test User"
-  printf '%s\n' "worktree vision" > "${repo_dir}/vision.md"
-  git -C "${repo_dir}" add vision.md
-  git -C "${repo_dir}" commit -qm "init"
-
-  WORKTREE_DIR="${repo_dir}"
-  BASELINE_SNAPSHOT_ROOT="${TMP_DIR}/baseline-snapshot"
-  REVIEW_PROFILE="default_impl_profile"
-  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
-  mkdir -p "${BASELINE_SNAPSHOT_ROOT}"
-  printf '%s\n' "base snapshot vision" > "${BASELINE_SNAPSHOT_ROOT}/vision.md"
-  : > "${CHANGED_FILES_FILE}"
-  export WORKTREE_DIR BASELINE_SNAPSHOT_ROOT REVIEW_PROFILE CHANGED_FILES_FILE
-
-  assert_pass prepare_reviewer_owned_baseline_overlay
-  assert_file_contains "${WORKTREE_DIR}/vision.md" "base snapshot vision"
-
-  local diff_file="${TMP_DIR}/vision.diff"
-  local status_file="${TMP_DIR}/vision.status"
-  git -C "${WORKTREE_DIR}" diff HEAD -- vision.md > "${diff_file}"
-  git -C "${WORKTREE_DIR}" status --short > "${status_file}"
-  assert_file_empty "${diff_file}"
-  assert_file_empty "${status_file}"
-
-  restore_test_repo_root
 }
 
 test_run_codex_review_fails_closed_when_native_review_command_fails() {
@@ -1747,8 +1671,7 @@ test_run_codex_review_fails_closed_when_native_review_command_fails() {
   RAW_RESULT_FILE="${TMP_DIR}/review.raw.json"
   RESULT_FILE="${TMP_DIR}/review.json"
   REVIEW_MD_FILE="${TMP_DIR}/review.md"
-  WORKTREE_REVIEW_CONTEXT_FILE="${WORKTREE_DIR}/TODO.md"
-  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RAW_RESULT_FILE RESULT_FILE REVIEW_MD_FILE WORKTREE_REVIEW_CONTEXT_FILE
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RAW_RESULT_FILE RESULT_FILE REVIEW_MD_FILE
 
   printf '%s\n' 'README.md' > "${CHANGED_FILES_FILE}"
   slim_pr_body > "${SLIM_PR_FILE}"
@@ -1806,8 +1729,7 @@ test_run_codex_review_continues_without_issue_summary_when_issue_lookup_fails() 
   RAW_RESULT_FILE="${TMP_DIR}/review.raw.json"
   RESULT_FILE="${TMP_DIR}/review.json"
   REVIEW_MD_FILE="${TMP_DIR}/review.md"
-  WORKTREE_REVIEW_CONTEXT_FILE="${WORKTREE_DIR}/TODO.md"
-  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RAW_RESULT_FILE RESULT_FILE REVIEW_MD_FILE WORKTREE_REVIEW_CONTEXT_FILE
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RAW_RESULT_FILE RESULT_FILE REVIEW_MD_FILE
 
   printf '%s\n' 'README.md' > "${CHANGED_FILES_FILE}"
   slim_pr_body > "${SLIM_PR_FILE}"
@@ -2296,7 +2218,6 @@ main() {
   test_build_review_prompt_includes_spec_upgrade_for_mixed_profile
   test_build_review_prompt_prefers_base_snapshot_review_baseline_files
   test_build_review_prompt_prefers_base_snapshot_review_baseline_files_when_changed
-  test_prepare_reviewer_owned_baseline_overlay_copies_base_snapshot_into_worktree
   test_assert_required_review_context_available_accepts_base_snapshot_review_summaries
   test_assert_required_review_context_available_accepts_missing_optional_review_summaries
   test_assert_required_review_context_available_fails_when_changed_review_baseline_is_missing
@@ -2306,10 +2227,9 @@ main() {
   test_normalize_native_review_result_fails_closed_for_unstructured_negative_text
   test_normalize_native_review_result_maps_native_text_approve_to_guardian_schema
   test_normalize_native_review_result_fails_closed_for_ambiguous_safe_phrase
+  test_add_fallback_finding_for_unstructured_rejection_creates_actionable_output
   test_run_codex_review_uses_context_budget_prompt_and_native_review_engine
   test_run_codex_review_accepts_plain_text_native_review_output
-  test_write_review_context_overlay_keeps_tracked_root_todo_out_of_git_diff
-  test_prepare_reviewer_owned_baseline_overlay_keeps_snapshot_overrides_out_of_git_diff
   test_run_codex_review_fails_closed_when_native_review_command_fails
   test_run_codex_review_continues_without_issue_summary_when_issue_lookup_fails
 

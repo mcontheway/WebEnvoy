@@ -207,7 +207,6 @@ prepare_pr_workspace() {
 
   WORKTREE_DIR="${TMP_DIR}/worktree"
   git -C "${REPO_ROOT}" worktree add --detach "${WORKTREE_DIR}" "origin/pr/${pr_number}" >/dev/null
-  WORKTREE_REVIEW_CONTEXT_FILE="${WORKTREE_DIR}/TODO.md"
   hydrate_worktree_dependencies
 
   list_changed_files > "${CHANGED_FILES_FILE}"
@@ -725,19 +724,6 @@ collect_context_docs() {
   esac
 }
 
-relative_to_repo_root() {
-  local path="$1"
-  if [[ -n "${WORKTREE_DIR:-}" && "${path}" == "${WORKTREE_DIR}/"* ]]; then
-    printf '%s\n' "${path#${WORKTREE_DIR}/}"
-    return
-  fi
-  if [[ -n "${BASELINE_SNAPSHOT_ROOT:-}" && "${path}" == "${BASELINE_SNAPSHOT_ROOT}/"* ]]; then
-    printf '%s\n' "${path#${BASELINE_SNAPSHOT_ROOT}/}"
-    return
-  fi
-  printf '%s\n' "${path#${REPO_ROOT}/}"
-}
-
 build_review_prompt() {
   local pr_number="$1"
   local context_count
@@ -799,7 +785,7 @@ build_review_prompt() {
       printf '\n你必须先查阅以下仓库文件，并按其中规则完成审查：\n'
       while IFS= read -r context_doc; do
         [[ -n "${context_doc}" ]] || continue
-        printf -- '- %s\n' "$(relative_to_repo_root "${context_doc}")"
+        printf -- '- %s\n' "$(format_review_context_reference "${context_doc}")"
       done < "${CONTEXT_DOCS_FILE}"
     fi
 
@@ -815,78 +801,21 @@ build_review_prompt() {
   } > "${REVIEW_STATS_FILE}"
 }
 
-prepare_reviewer_owned_baseline_overlay() {
-  local overlay_paths=(
-    "${REPO_ROOT}/vision.md"
-    "${REPO_ROOT}/AGENTS.md"
-    "${REPO_ROOT}/docs/dev/AGENTS.md"
-    "${REPO_ROOT}/docs/dev/roadmap.md"
-    "${REPO_ROOT}/docs/dev/architecture/system-design.md"
-    "${CODE_REVIEW_FILE}"
-    "${REVIEW_ADDENDUM_FILE}"
-  )
-  local value
-  local resolved_path
-  local relative_path
-  local target_path
-
-  if [[ "${REVIEW_PROFILE}" == "spec_review_profile" || "${REVIEW_PROFILE}" == "mixed_high_risk_spec_profile" ]]; then
-    overlay_paths+=("${SPEC_REVIEW_SUMMARY_FILE}" "${SPEC_REVIEW_FILE}")
-  fi
-
-  for value in "${overlay_paths[@]}"; do
-    resolved_path="$(resolve_review_path "${value}")"
-    [[ -n "${resolved_path}" && -f "${resolved_path}" ]] || continue
-    relative_path="${value#${REPO_ROOT}/}"
-    target_path="${WORKTREE_DIR}/${relative_path}"
-    if [[ "${resolved_path}" != "${target_path}" ]]; then
-      mkdir -p "$(dirname "${target_path}")"
-      mark_path_skip_worktree_if_tracked "${target_path}"
-      cp "${resolved_path}" "${target_path}"
-    fi
-  done
-}
-
-mark_path_skip_worktree_if_tracked() {
+format_review_context_reference() {
   local path="$1"
-  local relative_path
 
-  [[ -n "${WORKTREE_DIR:-}" && "${path}" == "${WORKTREE_DIR}/"* ]] || return 0
-  relative_path="${path#${WORKTREE_DIR}/}"
-
-  if git -C "${WORKTREE_DIR}" ls-files --error-unmatch -- "${relative_path}" >/dev/null 2>&1; then
-    git -C "${WORKTREE_DIR}" update-index --skip-worktree -- "${relative_path}" >/dev/null 2>&1 \
-      || die "无法隔离 review overlay 文件: ${relative_path}"
-  fi
-}
-
-write_review_context_overlay() {
-  local existing_context_file="${TMP_DIR}/existing-review-context.md"
-
-  mkdir -p "$(dirname "${WORKTREE_REVIEW_CONTEXT_FILE}")"
-
-  if [[ -f "${WORKTREE_REVIEW_CONTEXT_FILE}" ]]; then
-    cp "${WORKTREE_REVIEW_CONTEXT_FILE}" "${existing_context_file}"
-  else
-    : > "${existing_context_file}"
+  if [[ -n "${WORKTREE_DIR:-}" && "${path}" == "${WORKTREE_DIR}/"* ]]; then
+    printf '%s\n' "${path#${WORKTREE_DIR}/}"
+    return
   fi
 
-  mark_path_skip_worktree_if_tracked "${WORKTREE_REVIEW_CONTEXT_FILE}"
-
-  {
-    cat "${PROMPT_RUN_FILE}"
-    if [[ -s "${existing_context_file}" ]]; then
-      printf '\n\n---\n\n当前分支原始 TODO.md：\n'
-      cat "${existing_context_file}"
-    fi
-  } > "${WORKTREE_REVIEW_CONTEXT_FILE}"
+  printf '%s\n' "${path}"
 }
 
 prepare_review_worktree_context() {
   local pr_number="$1"
 
   build_review_prompt "${pr_number}"
-  prepare_reviewer_owned_baseline_overlay
 }
 
 normalize_review_path() {
@@ -1113,6 +1042,69 @@ normalize_native_review_result() {
     || die "原生 Codex review 输出无法转换为 guardian 结果，请检查 review 输出格式。"
 }
 
+add_fallback_finding_for_unstructured_rejection() {
+  local result_file="$1"
+  local fallback_path=""
+  local fallback_line="1"
+  local first_changed_file=""
+  local changed_line=""
+  local temp_file="${result_file}.tmp"
+
+  if ! jq -e '.verdict == "REQUEST_CHANGES" and (.findings | length) == 0' "${result_file}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ -n "${CHANGED_FILES_FILE:-}" && -f "${CHANGED_FILES_FILE}" ]]; then
+    while IFS= read -r first_changed_file; do
+      [[ -n "${first_changed_file}" ]] || continue
+      changed_line="$(
+        git -C "${WORKTREE_DIR}" diff --unified=0 "origin/${BASE_REF}" -- "${first_changed_file}" \
+          | awk '
+              /^@@ / {
+                if (match($0, /\+([0-9]+)/)) {
+                  print substr($0, RSTART + 1, RLENGTH - 1)
+                  exit
+                }
+              }
+            '
+      )"
+      fallback_path="${WORKTREE_DIR}/${first_changed_file}"
+      if [[ -n "${changed_line}" ]]; then
+        fallback_line="${changed_line}"
+      fi
+      break
+    done < "${CHANGED_FILES_FILE}"
+  fi
+
+  if [[ -z "${fallback_path}" ]]; then
+    fallback_path="${REPO_ROOT}/scripts/pr-guardian.sh"
+  fi
+
+  jq -c \
+    --arg path "${fallback_path}" \
+    --argjson line "${fallback_line}" \
+    '
+      .findings = [
+        {
+          severity: "medium",
+          title: "Clarify native review rejection",
+          details: .summary,
+          code_location: {
+            absolute_file_path: $path,
+            line_range: {
+              start: $line,
+              end: $line
+            }
+          },
+          confidence_score: 0.3,
+          priority: 2
+        }
+      ]
+      | .required_actions = ["澄清并修复 native review 拒绝原因：" + .summary]
+    ' "${result_file}" > "${temp_file}"
+  mv "${temp_file}" "${result_file}"
+}
+
 validate_review_result_shape() {
   local result_file="$1"
 
@@ -1147,10 +1139,12 @@ run_codex_review() {
   if codex exec \
     -C "${WORKTREE_DIR}" \
     -s read-only \
+    --add-dir "${TMP_DIR}" \
     -o "${RAW_RESULT_FILE}" \
     review \
     - < "${PROMPT_RUN_FILE}" >/dev/null 2>"${native_error_file}"; then
     normalize_native_review_result "${RAW_RESULT_FILE}" "${RESULT_FILE}"
+    add_fallback_finding_for_unstructured_rejection "${RESULT_FILE}"
     validate_review_result_shape "${RESULT_FILE}"
   else
     sed 's/^/  /' "${native_error_file}" >&2 || true
