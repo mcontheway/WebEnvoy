@@ -194,13 +194,13 @@ classify_review_profile() {
 resolve_review_path() {
   local value="$1"
 
-  if [[ -n "${WORKTREE_DIR:-}" ]] && [[ "${value}" == "${REPO_ROOT}/"* ]]; then
+  if [[ -n "${WORKTREE_DIR:-}" && -d "${WORKTREE_DIR}" ]] && [[ "${value}" == "${REPO_ROOT}/"* ]]; then
     local relative_path="${value#${REPO_ROOT}/}"
     local worktree_path="${WORKTREE_DIR}/${relative_path}"
     if [[ -f "${worktree_path}" ]]; then
       printf '%s\n' "${worktree_path}"
-      return
     fi
+    return
   fi
 
   printf '%s\n' "${value}"
@@ -280,7 +280,55 @@ slim_user_markdown() {
 }
 
 slim_pr_body() {
-  printf '%s\n' "${PR_BODY}" | slim_user_markdown
+  printf '%s\n' "${PR_BODY}" | awk '
+    BEGIN {
+      current = ""
+    }
+    /^## / {
+      current = $0
+      if (current == "## 摘要" || current == "## 关联事项" || current == "## 风险级别" || current == "## 验证" || current == "## 回滚" || current == "## 变更文件" || current == "## 自动生成的验证建议") {
+        print
+      } else {
+        current = ""
+      }
+      next
+    }
+    current == "## 摘要" {
+      if ($0 ~ /^- 变更目的：/ || $0 ~ /^- 主要改动：/ || NF == 0) {
+        print
+      }
+      next
+    }
+    current == "## 关联事项" {
+      if ($0 ~ /^- Issue:/ || $0 ~ /^- Closing:/ || NF == 0) {
+        print
+      }
+      next
+    }
+    current == "## 风险级别" {
+      if ($0 ~ /^- / || NF == 0) {
+        print
+      }
+      next
+    }
+    current == "## 验证" || current == "## 自动生成的验证建议" {
+      if ($0 ~ /^- 已执行：/ || $0 ~ /^- 未执行：/ || NF == 0) {
+        print
+      }
+      next
+    }
+    current == "## 回滚" {
+      if ($0 ~ /^- 回滚方式：/ || NF == 0) {
+        print
+      }
+      next
+    }
+    current == "## 变更文件" {
+      if ($0 ~ /^- `/ || NF == 0) {
+        print
+      }
+    }
+  ' | trim_blank_lines
 }
 
 slim_issue_body() {
@@ -455,12 +503,16 @@ build_review_prompt() {
     printf '只报告当前 PR 引入、且真正影响是否合并的可操作问题。\n\n'
 
     printf '常驻仓库审查摘要：\n'
-    cat "${review_addendum_path}"
+    if [[ -n "${review_addendum_path}" && -f "${review_addendum_path}" ]]; then
+      cat "${review_addendum_path}"
+    fi
     printf '\n'
 
     if [[ "${REVIEW_PROFILE}" == "spec_review_profile" || "${REVIEW_PROFILE}" == "mixed_high_risk_spec_profile" ]]; then
       printf 'Spec review 升级摘要：\n'
-      cat "${spec_review_summary_path}"
+      if [[ -n "${spec_review_summary_path}" && -f "${spec_review_summary_path}" ]]; then
+        cat "${spec_review_summary_path}"
+      fi
       printf '\n'
     fi
 
