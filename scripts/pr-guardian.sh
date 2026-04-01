@@ -88,11 +88,26 @@ fetch_github_https_ref() {
   local https_url="$1"
   local refspec="$2"
   local gh_token=""
-  local auth_header=""
+  local askpass_script=""
+  local token_file=""
+
   gh_token="$(gh auth token 2>/dev/null || true)"
   if [[ -n "${gh_token}" ]]; then
-    auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${gh_token}" | base64 | tr -d '\n')"
-    git -C "${REPO_ROOT}" -c credential.helper= -c "http.https://github.com/.extraheader=${auth_header}" fetch "${https_url}" "${refspec}" >/dev/null
+    askpass_script="${TMP_DIR}/git-askpass.sh"
+    token_file="${TMP_DIR}/github-token.txt"
+    printf '%s' "${gh_token}" > "${token_file}"
+    chmod 600 "${token_file}"
+    cat > "${askpass_script}" <<EOF
+#!/usr/bin/env bash
+case "\${1:-}" in
+  *Username*) printf '%s\n' 'x-access-token' ;;
+  *Password*) cat "${token_file}" ;;
+  *) printf '\n' ;;
+esac
+EOF
+    chmod 700 "${askpass_script}"
+    GIT_TERMINAL_PROMPT=0 GIT_ASKPASS="${askpass_script}" \
+      git -C "${REPO_ROOT}" -c credential.helper= fetch "${https_url}" "${refspec}" >/dev/null
     return 0
   fi
 
@@ -829,7 +844,6 @@ prepare_review_worktree_context() {
 
   build_review_prompt "${pr_number}"
   prepare_reviewer_owned_baseline_overlay
-  write_review_context_overlay
 }
 
 normalize_review_path() {
