@@ -971,12 +971,32 @@ normalize_native_review_result() {
   jq -Rn -c -e --rawfile text "${raw_result_file}" '
     def trim:
       sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
-    def looks_like_safe_approve($summary):
-      ($summary | ascii_downcase) as $lower
+    def has_contrast($sentence):
+      ($sentence | ascii_downcase | test("\\b(but|however|although|except|yet|still|though|nevertheless)\\b"));
+    def strong_safe_sentence($sentence):
+      ($sentence | ascii_downcase) as $lower
       | ($lower | test("did not identify any actionable bugs"))
         or ($lower | test("no blocking issues found"))
         or ($lower | test("patch is correct"))
         or ($lower | test("no actionable issues"));
+    def neutral_safe_sentence($sentence):
+      ($sentence | ascii_downcase) as $lower
+      | ($lower | test("does not affect code paths"))
+        or ($lower | test("does not modify executable code or behavior"))
+        or ($lower | test("does not affect .*runtime behavior"));
+    def looks_like_safe_sentence($sentence):
+      ($sentence | trim) as $trimmed
+      | if ($trimmed | length) == 0 then
+          true
+        else
+          ((has_contrast($trimmed) | not)
+          and (strong_safe_sentence($trimmed) or neutral_safe_sentence($trimmed)))
+        end;
+    def looks_like_safe_approve($summary):
+      ($summary | gsub("[[:space:]]+"; " ") | trim) as $collapsed
+      | ($collapsed | gsub("([.!?])[[:space:]]+"; "\\1\n") | split("\n")) as $sentences
+      | any($sentences[]; strong_safe_sentence(.))
+        and all($sentences[]; looks_like_safe_sentence(.));
     def priority_num:
       if . == "P0" then 0
       elif . == "P1" then 1

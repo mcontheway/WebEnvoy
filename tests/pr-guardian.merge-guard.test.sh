@@ -1482,7 +1482,7 @@ test_normalize_native_review_result_fails_closed_for_ambiguous_safe_phrase() {
   local raw_file="${TMP_DIR}/native-review.txt"
   local result_file="${TMP_DIR}/guardian-review.json"
   cat > "${raw_file}" <<'EOF'
-This change does not affect code paths outside the guard, but it still breaks merge safety by approving an ambiguous plain-text review result.
+I did not identify any actionable bugs in the docs, but the new merge guard still drops issue context and should not be approved.
 EOF
 
   assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
