@@ -266,6 +266,11 @@ resolve_review_path() {
     worktree_path="${WORKTREE_DIR}/${relative_path}"
 
     if is_reviewer_owned_baseline_path "${value}"; then
+      if [[ -f "${worktree_path}" ]] && path_changed_in_pr "${worktree_path}"; then
+        printf '%s\n' "${worktree_path}"
+        return 0
+      fi
+
       if [[ -f "${value}" ]]; then
         printf '%s\n' "${value}"
         return 0
@@ -287,6 +292,21 @@ resolve_review_path() {
   if [[ -f "${value}" ]]; then
     printf '%s\n' "${value}"
   fi
+}
+
+path_changed_in_pr() {
+  local value="$1"
+  local relative_path="$value"
+
+  [[ -n "${CHANGED_FILES_FILE:-}" && -f "${CHANGED_FILES_FILE}" ]] || return 1
+
+  if [[ "${value}" == "${WORKTREE_DIR}/"* ]]; then
+    relative_path="${value#${WORKTREE_DIR}/}"
+  elif [[ "${value}" == "${REPO_ROOT}/"* ]]; then
+    relative_path="${value#${REPO_ROOT}/}"
+  fi
+
+  grep -Fxq -- "${relative_path}" "${CHANGED_FILES_FILE}"
 }
 
 assert_required_review_context_available() {

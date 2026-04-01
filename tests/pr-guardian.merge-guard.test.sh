@@ -594,6 +594,31 @@ test_append_unique_line_prefers_repo_for_reviewer_owned_baseline() {
   restore_test_repo_root
 }
 
+test_append_unique_line_uses_worktree_for_changed_reviewer_owned_baseline() {
+  setup_case_dir "worktree-changed-review-baseline"
+
+  local fake_repo_root="${TMP_DIR}/repo"
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  local output_file="${TMP_DIR}/context-docs.txt"
+
+  mkdir -p "${fake_repo_root}" "${fake_worktree_dir}"
+  printf '%s\n' "repo" > "${fake_repo_root}/code_review.md"
+  printf '%s\n' "worktree" > "${fake_worktree_dir}/code_review.md"
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  printf '%s\n' 'code_review.md' > "${CHANGED_FILES_FILE}"
+
+  REPO_ROOT="${fake_repo_root}"
+  WORKTREE_DIR="${fake_worktree_dir}"
+  CODE_REVIEW_FILE="${REPO_ROOT}/code_review.md"
+  export REPO_ROOT WORKTREE_DIR CODE_REVIEW_FILE CHANGED_FILES_FILE
+
+  append_unique_line "${CODE_REVIEW_FILE}" "${output_file}"
+  assert_file_contains "${output_file}" "${WORKTREE_DIR}/code_review.md"
+  assert_file_not_contains "${output_file}" "${CODE_REVIEW_FILE}"
+
+  restore_test_repo_root
+}
+
 test_append_unique_line_uses_worktree_for_new_reviewer_owned_baseline() {
   setup_case_dir "worktree-new-review-baseline"
 
@@ -867,7 +892,7 @@ test_build_review_prompt_prefers_repo_review_baseline_files() {
   REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
   export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE
 
-  printf '%s\n' 'docs/dev/review/guardian-review-addendum.md' > "${CHANGED_FILES_FILE}"
+  printf '%s\n' 'docs/dev/specs/FR-0001-runtime-cli-entry/spec.md' > "${CHANGED_FILES_FILE}"
   : > "${CONTEXT_DOCS_FILE}"
   : > "${SLIM_PR_FILE}"
   : > "${ISSUE_SUMMARY_FILE}"
@@ -878,6 +903,50 @@ test_build_review_prompt_prefers_repo_review_baseline_files() {
   assert_file_contains "${PROMPT_RUN_FILE}" "repo spec summary"
   assert_file_not_contains "${PROMPT_RUN_FILE}" "worktree addendum"
   assert_file_not_contains "${PROMPT_RUN_FILE}" "worktree spec summary"
+
+  restore_test_repo_root
+}
+
+test_build_review_prompt_uses_worktree_review_baseline_files_when_changed() {
+  setup_case_dir "worktree-changed-review-baseline-prompt"
+  setup_fake_repo_root
+
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  mkdir -p "${fake_worktree_dir}/docs/dev/review"
+
+  printf '%s\n' "repo addendum" > "${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
+  printf '%s\n' "repo spec summary" > "${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+  printf '%s\n' "worktree addendum" > "${fake_worktree_dir}/docs/dev/review/guardian-review-addendum.md"
+  printf '%s\n' "worktree spec summary" > "${fake_worktree_dir}/docs/dev/review/guardian-spec-review-summary.md"
+
+  REVIEW_PROFILE="spec_review_profile"
+  PR_TITLE="review baseline changed"
+  PR_URL="https://example.test/pr/312"
+  BASE_REF="main"
+  HEAD_SHA="abc123"
+  WORKTREE_DIR="${fake_worktree_dir}"
+  export REVIEW_PROFILE PR_TITLE PR_URL BASE_REF HEAD_SHA WORKTREE_DIR
+
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
+  REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE
+
+  printf '%s\n' 'docs/dev/review/guardian-review-addendum.md' > "${CHANGED_FILES_FILE}"
+  printf '%s\n' 'docs/dev/review/guardian-spec-review-summary.md' >> "${CHANGED_FILES_FILE}"
+  : > "${CONTEXT_DOCS_FILE}"
+  : > "${SLIM_PR_FILE}"
+  : > "${ISSUE_SUMMARY_FILE}"
+
+  build_review_prompt 312
+
+  assert_file_contains "${PROMPT_RUN_FILE}" "worktree addendum"
+  assert_file_contains "${PROMPT_RUN_FILE}" "worktree spec summary"
+  assert_file_not_contains "${PROMPT_RUN_FILE}" "repo addendum"
+  assert_file_not_contains "${PROMPT_RUN_FILE}" "repo spec summary"
 
   restore_test_repo_root
 }
@@ -1533,6 +1602,7 @@ main() {
   test_collect_spec_review_docs_includes_todo_baseline
   test_append_unique_line_uses_worktree_for_new_spec_files
   test_append_unique_line_prefers_repo_for_reviewer_owned_baseline
+  test_append_unique_line_uses_worktree_for_changed_reviewer_owned_baseline
   test_append_unique_line_uses_worktree_for_new_reviewer_owned_baseline
   test_origin_url_to_https_normalizes_github_ssh_urls
   test_fetch_origin_tracking_ref_falls_back_to_https_when_ssh_fetch_fails
@@ -1544,6 +1614,7 @@ main() {
   test_collect_context_docs_includes_branch_todo_when_present
   test_build_review_prompt_includes_spec_upgrade_for_mixed_profile
   test_build_review_prompt_prefers_repo_review_baseline_files
+  test_build_review_prompt_uses_worktree_review_baseline_files_when_changed
   test_assert_required_review_context_available_accepts_repo_only_review_summaries
   test_assert_required_review_context_available_accepts_worktree_only_new_review_summaries
   test_assert_required_review_context_available_fails_when_required_baseline_missing_everywhere
