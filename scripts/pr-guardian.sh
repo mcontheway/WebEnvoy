@@ -162,13 +162,28 @@ list_changed_files() {
 
 classify_review_profile() {
   local changed_files_file="$1"
+  local has_formal_spec_changes=0
+  local has_high_risk_impl_changes=0
 
   if grep -Eq '^(docs/dev/specs/|docs/dev/architecture/|vision\.md$|AGENTS\.md$|docs/dev/AGENTS\.md$|code_review\.md$|spec_review\.md$)' "${changed_files_file}"; then
+    has_formal_spec_changes=1
+  fi
+
+  if grep -Eq '^(scripts/|\.github/workflows/|src/|extension/|tests/)' "${changed_files_file}"; then
+    has_high_risk_impl_changes=1
+  fi
+
+  if [[ "${has_formal_spec_changes}" == "1" && "${has_high_risk_impl_changes}" == "1" ]]; then
+    printf '%s\n' "mixed_high_risk_spec_profile"
+    return
+  fi
+
+  if [[ "${has_formal_spec_changes}" == "1" ]]; then
     printf '%s\n' "spec_review_profile"
     return
   fi
 
-  if grep -Eq '^(scripts/|\.github/workflows/|src/|extension/|tests/)' "${changed_files_file}"; then
+  if [[ "${has_high_risk_impl_changes}" == "1" ]]; then
     printf '%s\n' "high_risk_impl_profile"
     return
   fi
@@ -334,7 +349,19 @@ collect_spec_review_docs() {
     if grep -Fxq -- "${fr_dir}/risks.md" "${changed_files_file}"; then
       append_unique_line "${REPO_ROOT}/${fr_dir}/risks.md" "${output_file}"
     fi
+    if grep -Fxq -- "${fr_dir}/research.md" "${changed_files_file}"; then
+      append_unique_line "${REPO_ROOT}/${fr_dir}/research.md" "${output_file}"
+    fi
   done < "${fr_dirs_file}"
+
+  while IFS= read -r changed_file; do
+    [[ -n "${changed_file}" ]] || continue
+    case "${changed_file}" in
+      docs/dev/architecture/*|docs/dev/specs/*)
+        append_unique_line "${REPO_ROOT}/${changed_file}" "${output_file}"
+        ;;
+    esac
+  done < "${changed_files_file}"
 }
 
 collect_context_docs() {
@@ -354,6 +381,10 @@ collect_context_docs() {
       ;;
     spec_review_profile)
       collect_spec_review_docs "${changed_files_file}" "${output_file}"
+      ;;
+    mixed_high_risk_spec_profile)
+      collect_spec_review_docs "${changed_files_file}" "${output_file}"
+      collect_high_risk_architecture_docs "${changed_files_file}" "${output_file}"
       ;;
     *)
       die "未知审查 profile: ${REVIEW_PROFILE}"

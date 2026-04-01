@@ -462,6 +462,45 @@ test_append_unique_line_uses_worktree_for_new_spec_files() {
   export REPO_ROOT
 }
 
+test_mixed_spec_and_impl_changes_use_mixed_profile() {
+  setup_case_dir "mixed-profile"
+
+  local changed_files_file="${TMP_DIR}/changed-files.txt"
+
+  printf '%s\n' 'docs/dev/specs/FR-0001-runtime-cli-entry/spec.md' > "${changed_files_file}"
+  printf '%s\n' 'scripts/pr-guardian.sh' >> "${changed_files_file}"
+
+  if [[ "$(classify_review_profile "${changed_files_file}")" != "mixed_high_risk_spec_profile" ]]; then
+    echo "expected mixed spec and impl changes to be treated as mixed high-risk spec profile" >&2
+    exit 1
+  fi
+}
+
+test_collect_spec_review_docs_includes_changed_architecture_and_research() {
+  setup_case_dir "spec-review-extra-docs"
+
+  REVIEW_PROFILE="spec_review_profile"
+  export REVIEW_PROFILE
+
+  mkdir -p "${REPO_ROOT}/docs/dev/specs/FR-0002-extra-docs"
+  touch "${REPO_ROOT}/docs/dev/specs/FR-0002-extra-docs/spec.md"
+  touch "${REPO_ROOT}/docs/dev/specs/FR-0002-extra-docs/TODO.md"
+  touch "${REPO_ROOT}/docs/dev/specs/FR-0002-extra-docs/plan.md"
+  touch "${REPO_ROOT}/docs/dev/specs/FR-0002-extra-docs/research.md"
+  touch "${REPO_ROOT}/docs/dev/architecture/system-design/execution.md"
+
+  local changed_files_file="${TMP_DIR}/changed-files.txt"
+  local output_file="${TMP_DIR}/context-docs.txt"
+  printf '%s\n' 'docs/dev/specs/FR-0002-extra-docs/spec.md' > "${changed_files_file}"
+  printf '%s\n' 'docs/dev/specs/FR-0002-extra-docs/research.md' >> "${changed_files_file}"
+  printf '%s\n' 'docs/dev/architecture/system-design/execution.md' >> "${changed_files_file}"
+
+  collect_context_docs "${changed_files_file}" "${output_file}"
+
+  assert_file_contains "${output_file}" "${REPO_ROOT}/docs/dev/specs/FR-0002-extra-docs/research.md"
+  assert_file_contains "${output_file}" "${REPO_ROOT}/docs/dev/architecture/system-design/execution.md"
+}
+
 test_run_codex_review_uses_context_budget_prompt_and_schema_exec() {
   setup_case_dir "run-budget-review"
 
@@ -952,6 +991,8 @@ main() {
   test_slim_pr_body_keeps_only_review_relevant_sections
   test_collect_spec_review_docs_includes_todo_baseline
   test_append_unique_line_uses_worktree_for_new_spec_files
+  test_mixed_spec_and_impl_changes_use_mixed_profile
+  test_collect_spec_review_docs_includes_changed_architecture_and_research
   test_run_codex_review_uses_context_budget_prompt_and_schema_exec
 
   assert_pass run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'
