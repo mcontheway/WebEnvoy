@@ -207,6 +207,8 @@ prepare_pr_workspace() {
 
   WORKTREE_DIR="${TMP_DIR}/worktree"
   git -C "${REPO_ROOT}" worktree add --detach "${WORKTREE_DIR}" "origin/pr/${pr_number}" >/dev/null
+  MERGE_BASE_SHA="$(git -C "${WORKTREE_DIR}" merge-base HEAD "origin/${BASE_REF}" 2>/dev/null || true)"
+  [[ -n "${MERGE_BASE_SHA}" ]] || die "无法计算 PR 与 ${BASE_REF} 的 merge-base，无法准备审查上下文。"
   hydrate_worktree_dependencies
 
   list_changed_files > "${CHANGED_FILES_FILE}"
@@ -351,7 +353,7 @@ resolve_review_path() {
         return 0
       fi
 
-      if ! path_changed_in_pr "${value}" && [[ -f "${worktree_path}" ]]; then
+      if [[ -f "${worktree_path}" ]]; then
         printf '%s\n' "${worktree_path}"
       fi
       return 0
@@ -402,10 +404,16 @@ materialize_base_snapshot_path() {
     snapshot_path=""
   fi
 
-  [[ -n "${BASE_REF:-}" && -n "${snapshot_path}" ]] || return 0
+  [[ -n "${snapshot_path}" ]] || return 0
   mkdir -p "$(dirname "${snapshot_path}")"
 
-  if git -C "${REPO_ROOT}" cat-file -e "origin/${BASE_REF}:${relative_path}" 2>/dev/null; then
+  if [[ -n "${MERGE_BASE_SHA:-}" ]] && git -C "${REPO_ROOT}" cat-file -e "${MERGE_BASE_SHA}:${relative_path}" 2>/dev/null; then
+    git -C "${REPO_ROOT}" show "${MERGE_BASE_SHA}:${relative_path}" > "${snapshot_path}"
+    printf '%s\n' "${snapshot_path}"
+    return 0
+  fi
+
+  if [[ -n "${BASE_REF:-}" ]] && git -C "${REPO_ROOT}" cat-file -e "origin/${BASE_REF}:${relative_path}" 2>/dev/null; then
     git -C "${REPO_ROOT}" show "origin/${BASE_REF}:${relative_path}" > "${snapshot_path}"
     printf '%s\n' "${snapshot_path}"
   fi

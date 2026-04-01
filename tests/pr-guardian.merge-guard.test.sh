@@ -682,7 +682,12 @@ test_append_unique_line_uses_worktree_for_new_spec_files() {
 
   REPO_ROOT="${fake_repo_root}"
   WORKTREE_DIR="${fake_worktree_dir}"
-  export REPO_ROOT WORKTREE_DIR
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  printf '%s\n' 'docs/dev/specs/FR-9999-new-spec/spec.md' > "${CHANGED_FILES_FILE}"
+  printf '%s\n' 'docs/dev/specs/FR-9999-new-spec/TODO.md' >> "${CHANGED_FILES_FILE}"
+  printf '%s\n' 'docs/dev/specs/FR-9999-new-spec/plan.md' >> "${CHANGED_FILES_FILE}"
+  printf '%s\n' 'docs/dev/specs/FR-9999-new-spec/contracts/runtime.json' >> "${CHANGED_FILES_FILE}"
+  export REPO_ROOT WORKTREE_DIR CHANGED_FILES_FILE
 
   touch "${WORKTREE_DIR}/docs/dev/specs/FR-9999-new-spec/spec.md"
   touch "${WORKTREE_DIR}/docs/dev/specs/FR-9999-new-spec/TODO.md"
@@ -699,6 +704,46 @@ test_append_unique_line_uses_worktree_for_new_spec_files() {
   assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-9999-new-spec/plan.md"
   assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-9999-new-spec/contracts/runtime.json"
 
+  restore_test_repo_root
+}
+
+test_materialize_base_snapshot_path_prefers_merge_base_commit() {
+  setup_case_dir "materialize-merge-base-snapshot"
+
+  local fake_repo_root="${TMP_DIR}/repo"
+  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
+  local materialized_path=""
+  mkdir -p "${fake_repo_root}" "${baseline_snapshot_root}"
+
+  REPO_ROOT="${fake_repo_root}"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
+  BASE_REF="main"
+  MERGE_BASE_SHA="merge-base-sha"
+  export REPO_ROOT BASELINE_SNAPSHOT_ROOT BASE_REF MERGE_BASE_SHA
+
+  git() {
+    if [[ "${1:-}" == "-C" && "${3:-}" == "cat-file" && "${4:-}" == "-e" && "${5:-}" == "merge-base-sha:docs/dev/architecture/system-design.md" ]]; then
+      return 0
+    fi
+    if [[ "${1:-}" == "-C" && "${3:-}" == "show" && "${4:-}" == "merge-base-sha:docs/dev/architecture/system-design.md" ]]; then
+      printf '%s\n' 'merge-base snapshot'
+      return 0
+    fi
+    if [[ "${1:-}" == "-C" && "${3:-}" == "cat-file" && "${4:-}" == "-e" && "${5:-}" == "origin/main:docs/dev/architecture/system-design.md" ]]; then
+      return 0
+    fi
+    if [[ "${1:-}" == "-C" && "${3:-}" == "show" && "${4:-}" == "origin/main:docs/dev/architecture/system-design.md" ]]; then
+      printf '%s\n' 'base branch snapshot'
+      return 0
+    fi
+    command git "$@"
+  }
+
+  materialized_path="$(materialize_base_snapshot_path "${REPO_ROOT}/docs/dev/architecture/system-design.md")"
+  assert_file_contains "${materialized_path}" "merge-base snapshot"
+  assert_file_not_contains "${materialized_path}" "base branch snapshot"
+
+  unset -f git
   restore_test_repo_root
 }
 
@@ -2214,6 +2259,7 @@ main() {
   test_fetch_issue_summary_warns_when_declared_issue_cannot_be_loaded
   test_collect_spec_review_docs_includes_todo_baseline
   test_append_unique_line_uses_worktree_for_new_spec_files
+  test_materialize_base_snapshot_path_prefers_merge_base_commit
   test_append_unique_line_prefers_base_snapshot_for_reviewer_owned_baseline
   test_append_unique_line_prefers_base_snapshot_for_changed_reviewer_owned_baseline
   test_append_unique_line_uses_base_snapshot_for_deleted_changed_reviewer_owned_baseline
