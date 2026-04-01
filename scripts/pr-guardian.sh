@@ -188,6 +188,16 @@ append_unique_line() {
   fi
 }
 
+append_required_review_baseline() {
+  local output_file="$1"
+
+  append_unique_line "${REPO_ROOT}/vision.md" "${output_file}"
+  append_unique_line "${REPO_ROOT}/AGENTS.md" "${output_file}"
+  append_unique_line "${REPO_ROOT}/docs/dev/AGENTS.md" "${output_file}"
+  append_unique_line "${REPO_ROOT}/docs/dev/roadmap.md" "${output_file}"
+  append_unique_line "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${output_file}"
+}
+
 extract_issue_number_from_pr_body() {
   printf '%s\n' "${PR_BODY}" | perl -ne '
     if (/-\s*Issue:\s*#(\d+)/i) {
@@ -322,6 +332,7 @@ collect_context_docs() {
   local output_file="$2"
 
   : > "${output_file}"
+  append_required_review_baseline "${output_file}"
   append_unique_line "${REVIEW_ADDENDUM_FILE}" "${output_file}"
   append_unique_line "${CODE_REVIEW_FILE}" "${output_file}"
 
