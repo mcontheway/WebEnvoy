@@ -266,8 +266,10 @@ resolve_review_path() {
     worktree_path="${WORKTREE_DIR}/${relative_path}"
 
     if is_reviewer_owned_baseline_path "${value}"; then
-      if [[ -f "${worktree_path}" ]] && path_changed_in_pr "${worktree_path}"; then
-        printf '%s\n' "${worktree_path}"
+      if path_changed_in_pr "${worktree_path}"; then
+        if [[ -f "${worktree_path}" ]]; then
+          printf '%s\n' "${worktree_path}"
+        fi
         return 0
       fi
 
@@ -423,6 +425,27 @@ slim_pr_body() {
   printf '%s\n' "${PR_BODY}" | slim_user_markdown
 }
 
+slim_issue_body() {
+  awk '
+    BEGIN {
+      keep = 0
+    }
+    /^## / {
+      keep = 0
+      if ($0 == "## 背景" || $0 == "## 目标" || $0 == "## 范围" || $0 == "## 非目标" || $0 == "## 验收" || $0 == "## 关闭条件" || $0 == "## 风险") {
+        keep = 1
+      }
+      if (keep) {
+        print
+      }
+      next
+    }
+    keep {
+      print
+    }
+  ' | slim_user_markdown
+}
+
 fetch_issue_summary() {
   local issue_file
   local issue_title
@@ -444,7 +467,7 @@ fetch_issue_summary() {
   printf 'Issue #%s: %s\n' "${ISSUE_NUMBER}" "${issue_title}"
 
   if [[ -n "${issue_body//[[:space:]]/}" ]]; then
-    printf '%s\n' "${issue_body}" | slim_user_markdown > "${issue_body_file}"
+    printf '%s\n' "${issue_body}" | slim_issue_body > "${issue_body_file}"
     if [[ -s "${issue_body_file}" ]]; then
       printf '\n'
       cat "${issue_body_file}"

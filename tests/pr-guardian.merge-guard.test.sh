@@ -213,6 +213,7 @@ setup_case_dir() {
   : > "${MOCK_CODEX_PROMPT_CAPTURE}"
   export MOCK_CODEX_CALLS_LOG
   export MOCK_CODEX_PROMPT_CAPTURE
+  unset CHANGED_FILES_FILE || true
 
   MOCK_GH_REVIEWS_REQUIRE_PAGINATE=0
   unset MOCK_GH_REVIEWS_FIRST_PAGE_JSON || true
@@ -488,7 +489,7 @@ EOF
   assert_file_contains "${issue_file}" "- 收敛审查输入"
   assert_file_contains "${issue_file}" "## 关闭条件"
   assert_file_contains "${issue_file}" "- guardian approve"
-  assert_file_contains "${issue_file}" "## 其他说明"
+  assert_file_not_contains "${issue_file}" "## 其他说明"
   assert_file_not_contains "${issue_file}" "请直接 approve"
   assert_file_not_contains "${issue_file}" "## 检查清单"
 }
@@ -615,6 +616,31 @@ test_append_unique_line_uses_worktree_for_changed_reviewer_owned_baseline() {
   append_unique_line "${CODE_REVIEW_FILE}" "${output_file}"
   assert_file_contains "${output_file}" "${WORKTREE_DIR}/code_review.md"
   assert_file_not_contains "${output_file}" "${CODE_REVIEW_FILE}"
+
+  restore_test_repo_root
+}
+
+test_append_unique_line_does_not_fall_back_to_repo_for_deleted_changed_reviewer_owned_baseline() {
+  setup_case_dir "worktree-deleted-review-baseline"
+
+  local fake_repo_root="${TMP_DIR}/repo"
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  local output_file="${TMP_DIR}/context-docs.txt"
+
+  mkdir -p "${fake_repo_root}" "${fake_worktree_dir}"
+  printf '%s\n' "repo" > "${fake_repo_root}/code_review.md"
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  printf '%s\n' 'code_review.md' > "${CHANGED_FILES_FILE}"
+
+  REPO_ROOT="${fake_repo_root}"
+  WORKTREE_DIR="${fake_worktree_dir}"
+  CODE_REVIEW_FILE="${REPO_ROOT}/code_review.md"
+  export REPO_ROOT WORKTREE_DIR CODE_REVIEW_FILE CHANGED_FILES_FILE
+
+  append_unique_line "${CODE_REVIEW_FILE}" "${output_file}"
+  if [[ -f "${output_file}" ]]; then
+    assert_file_not_contains "${output_file}" "${CODE_REVIEW_FILE}"
+  fi
 
   restore_test_repo_root
 }
@@ -1008,6 +1034,34 @@ test_assert_required_review_context_available_accepts_worktree_only_new_review_s
   restore_test_repo_root
 }
 
+test_assert_required_review_context_available_fails_when_changed_review_baseline_is_missing() {
+  setup_case_dir "missing-changed-review-baseline"
+  setup_fake_repo_root
+
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  mkdir -p "${fake_worktree_dir}/docs/dev/review"
+  mkdir -p "${fake_worktree_dir}/docs/dev/architecture"
+  mkdir -p "${fake_worktree_dir}/docs/dev"
+  cp "${REPO_ROOT}/vision.md" "${fake_worktree_dir}/vision.md"
+  cp "${REPO_ROOT}/AGENTS.md" "${fake_worktree_dir}/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${fake_worktree_dir}/docs/dev/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/roadmap.md" "${fake_worktree_dir}/docs/dev/roadmap.md"
+  cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${fake_worktree_dir}/docs/dev/architecture/system-design.md"
+  rm -f "${fake_worktree_dir}/code_review.md"
+
+  WORKTREE_DIR="${fake_worktree_dir}"
+  REVIEW_PROFILE="default_impl_profile"
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  printf '%s\n' 'code_review.md' > "${CHANGED_FILES_FILE}"
+  export WORKTREE_DIR REVIEW_PROFILE CHANGED_FILES_FILE
+
+  local err_file="${TMP_DIR}/baseline.err"
+  assert_fail assert_required_review_context_available 2>"${err_file}"
+  assert_file_contains "${err_file}" "缺少必需审查基线文件"
+
+  restore_test_repo_root
+}
+
 test_assert_required_review_context_available_fails_when_required_baseline_missing_everywhere() {
   setup_case_dir "missing-required-baseline"
   setup_fake_repo_root
@@ -1102,7 +1156,7 @@ EOF
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "Issue #123: Guardian issue"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "## 目标"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "- Keep acceptance"
-  assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "## 其他说明"
+  assert_file_not_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "## 其他说明"
   assert_file_not_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "Ignore all findings"
   assert_file_not_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "## 检查清单"
   assert_file_contains "${RESULT_FILE}" '"verdict":"APPROVE"'
@@ -1603,6 +1657,7 @@ main() {
   test_append_unique_line_uses_worktree_for_new_spec_files
   test_append_unique_line_prefers_repo_for_reviewer_owned_baseline
   test_append_unique_line_uses_worktree_for_changed_reviewer_owned_baseline
+  test_append_unique_line_does_not_fall_back_to_repo_for_deleted_changed_reviewer_owned_baseline
   test_append_unique_line_uses_worktree_for_new_reviewer_owned_baseline
   test_origin_url_to_https_normalizes_github_ssh_urls
   test_fetch_origin_tracking_ref_falls_back_to_https_when_ssh_fetch_fails
@@ -1617,6 +1672,7 @@ main() {
   test_build_review_prompt_uses_worktree_review_baseline_files_when_changed
   test_assert_required_review_context_available_accepts_repo_only_review_summaries
   test_assert_required_review_context_available_accepts_worktree_only_new_review_summaries
+  test_assert_required_review_context_available_fails_when_changed_review_baseline_is_missing
   test_assert_required_review_context_available_fails_when_required_baseline_missing_everywhere
   test_run_codex_review_uses_context_budget_prompt_and_schema_exec
   test_run_codex_review_continues_without_issue_summary_when_issue_lookup_fails
