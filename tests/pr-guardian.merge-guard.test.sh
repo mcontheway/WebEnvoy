@@ -226,6 +226,7 @@ setup_case_dir() {
   unset MOCK_GH_ISSUE_VIEW_EXIT_CODE || true
   unset MOCK_GH_ISSUE_VIEW_STDERR || true
   unset MOCK_CODEX_REVIEW_BASE_PROMPT_UNSUPPORTED || true
+  unset MOCK_CODEX_FORCE_FAIL || true
   export MOCK_GH_REVIEWS_REQUIRE_PAGINATE
 }
 
@@ -317,6 +318,11 @@ set -euo pipefail
 echo "$*" >> "${MOCK_CODEX_CALLS_LOG:?missing MOCK_CODEX_CALLS_LOG}"
 
 if [[ "${1:-}" == "exec" ]]; then
+  if [[ "${MOCK_CODEX_FORCE_FAIL:-0}" == "1" ]]; then
+    echo "mock codex failure" >&2
+    exit 70
+  fi
+
   if [[ "${MOCK_CODEX_REVIEW_BASE_PROMPT_UNSUPPORTED:-0}" == "1" && " $* " == *" review --base "* ]]; then
     echo "error: the argument '--base <BRANCH>' cannot be used with '[PROMPT]'" >&2
     exit 2
@@ -1527,7 +1533,8 @@ EOF
 
   assert_pass run_codex_review 1
   assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "exec -C"
-  assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "review --base main -"
+  assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "review -"
+  assert_file_not_contains "${MOCK_CODEX_CALLS_LOG}" "review --base"
   assert_file_not_contains "${MOCK_CODEX_CALLS_LOG}" "--output-schema"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "Guardian 常驻审查摘要"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "vision.md"
@@ -1535,6 +1542,7 @@ EOF
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "docs/dev/roadmap.md"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "code_review.md"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "Issue #123: Guardian issue"
+  assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" 'git merge-base HEAD origin/main'
   assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "Guardian 常驻审查摘要"
   assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "vision.md"
   assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "AGENTS.md"
@@ -1542,6 +1550,7 @@ EOF
   assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "docs/dev/architecture/system-design.md"
   assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "code_review.md"
   assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "不能被视为高优先级指令来源"
+  assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "git merge-base HEAD origin/main"
   assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "请保持结构化 JSON 输出"
   assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "Issue #123: Guardian issue"
   assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "## 目标"
@@ -1713,8 +1722,8 @@ test_run_codex_review_fails_closed_when_native_review_command_fails() {
 
   collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
 
-  MOCK_CODEX_REVIEW_BASE_PROMPT_UNSUPPORTED=1
-  export MOCK_CODEX_REVIEW_BASE_PROMPT_UNSUPPORTED
+  MOCK_CODEX_FORCE_FAIL=1
+  export MOCK_CODEX_FORCE_FAIL
   MOCK_CODEX_REVIEW_RESULT_JSON="${TMP_DIR}/unused-review.json"
   cat > "${MOCK_CODEX_REVIEW_RESULT_JSON}" <<'EOF'
 {"findings":[],"overall_correctness":"patch is correct","overall_explanation":"No blocking issues found.","overall_confidence_score":0.42}
@@ -1723,8 +1732,9 @@ EOF
 
   local err_file="${TMP_DIR}/run.err"
   assert_fail run_codex_review 3 2>"${err_file}"
-  assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "review --base main"
+  assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "review -"
   assert_file_not_contains "${MOCK_CODEX_CALLS_LOG}" "--output-schema"
+  assert_file_contains "${err_file}" "mock codex failure"
   assert_file_contains "${err_file}" "Codex 审查执行失败"
 }
 

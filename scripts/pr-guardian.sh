@@ -745,7 +745,8 @@ build_review_prompt() {
       done < "${CONTEXT_DOCS_FILE}"
     fi
 
-    printf '\n请在当前仓库工作树中完成审查，比较当前分支与 origin/%s 的差异。\n' "${BASE_REF}"
+    printf '\n请在当前仓库工作树中完成审查，并将当前分支相对 origin/%s 的差异视为唯一审查目标。\n' "${BASE_REF}"
+    printf '请先执行 `git merge-base HEAD origin/%s` 找到合并基点，再基于该提交运行 `git diff` 审查将要合入的改动。\n' "${BASE_REF}"
     printf '请保持结构化 JSON 输出；guardian 会在本地校验并在需要时转换为仓库 schema。\n'
   } > "${PROMPT_RUN_FILE}"
 
@@ -1073,7 +1074,6 @@ run_codex_review() {
     -s read-only \
     -o "${RAW_RESULT_FILE}" \
     review \
-    --base "${BASE_REF}" \
     - < "${PROMPT_RUN_FILE}" >/dev/null 2>"${native_error_file}"; then
     normalize_native_review_result "${RAW_RESULT_FILE}" "${RESULT_FILE}"
     validate_review_result_shape "${RESULT_FILE}"
