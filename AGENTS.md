@@ -200,6 +200,48 @@ spec review 的执行约束：
 
 - 实现闭环并在本 PR 合入后应关闭 issue：使用 `Fixes #<issue-number>`
 - Spike、规约、研究或仅部分完成闭环：使用 `Refs #<issue-number>`，不要提前关闭
+- 若 PR 声称完成真实 runtime / 真实页面交互 / 真实 live read-write 闭环，只有 latest head 上的新鲜有效 live evidence 已齐备，才允许使用 `Fixes #<issue-number>`；否则一律使用 `Refs #<issue-number>`
+
+## 真实 Live Evidence 专项门禁
+
+以下门禁不是所有 PR 的统一要求，只适用于满足任一条件的 PR：
+
+- 声称完成 official runtime 闭环
+- 声称完成真实页面交互或真实 live read/write 闭环
+- 把 live evidence 作为关闭 issue、判定“已完成”或请求 merge 放行的核心依据
+
+以下 PR 不适用本专项门禁：
+
+- 纯文档、纯重构、普通单测补强
+- 非 live 路径的小修复
+- 不把真实 live evidence 作为关闭依据的治理、研究、spec 或实现前置 PR
+
+专项门禁下，有效证据必须同时满足：
+
+- 来自当前 PR latest head 的重新复验，历史 run 或旧 head 证据不能替代 latest head evidence
+- 来自真实浏览器执行面，而不是 repo-owned native host stub、本地 fake host 或其他仓库自带替身路径
+- 能证明真实页面交互或真实闭环结果，而不只是控制面存活
+
+专项门禁下，以下证据默认无效，不能用于放行：
+
+- 仅有 `runtime.ping` 成功
+- 仅有 `runtime.bootstrap` ack
+- 仅能证明 stub/fake host 成功、但不能证明 official Chrome 或真实浏览器执行面成功
+- merged 前旧 run、旧日志、旧 artifact 被直接复用为 latest head evidence
+
+专项门禁 PR 的描述必须显式提供 live evidence 区块，至少包含：
+
+- `profile`
+- `browser/channel`
+- `page URL`
+- `target_tab_id`
+- `run_id`
+- `relay_path`
+- `editor_locator` 或等价交互定位
+- `success_signals`
+- `minimum_replay`
+- `artifact/log` 引用
+- 若失败，必须写明失败原因与阻断层级
 
 ## Review 与合并底线
 
@@ -214,6 +256,7 @@ spec review 的执行约束：
 3. merge 前必须同时满足：
    - latest guardian verdict 为 `APPROVE`
    - GitHub checks 全绿（不是只看 required checks）
+   - 若 PR 落入“真实 Live Evidence 专项门禁”，则 latest head 上的新鲜有效 live evidence 已在 PR 中完整给出，且 reviewer / guardian 未标记 evidence 缺失、失效或边界不符
 4. 在 private free repo 下，不得把 GitHub Required Checks 视为唯一硬门禁；必须保留 guardian + GitHub checks 双门禁。
 
 ## Review guidelines
@@ -227,6 +270,7 @@ spec review 的执行约束：
 - 如果对应 GitHub Issue 已存在，PR 描述应显式包含正确的关闭语义：
   - 完整实现闭环使用 `Fixes #<issue-number>`
   - Spike、规约、研究或部分完成场景使用 `Refs #<issue-number>`
+- 若 PR 落入“真实 Live Evidence 专项门禁”，缺少 latest head 重新复验、证据来自 stub/fake host、或只给出 `runtime.ping` / `runtime.bootstrap` 等控制面信号时，reviewer 必须直接阻断，不按“建议补充”处理
 - `docs/dev/specs/` 是正式契约区，不应把 backlog 草稿、未确认需求或本地进度真相源写入其中。
 
 ## AI 执行职责
