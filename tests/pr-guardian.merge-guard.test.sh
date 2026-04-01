@@ -1252,11 +1252,11 @@ test_collect_context_docs_includes_branch_todo_when_present() {
   restore_test_repo_root
 }
 
-test_collect_context_docs_includes_changed_spec_review_summary_for_high_risk_profile() {
+test_collect_context_docs_includes_changed_spec_review_summary_for_mixed_profile() {
   setup_case_dir "changed-spec-summary-context"
   setup_fake_repo_root
 
-  REVIEW_PROFILE="high_risk_impl_profile"
+  REVIEW_PROFILE="mixed_high_risk_spec_profile"
   export REVIEW_PROFILE
 
   local changed_files_file="${TMP_DIR}/changed-files.txt"
@@ -1266,6 +1266,40 @@ test_collect_context_docs_includes_changed_spec_review_summary_for_high_risk_pro
   collect_context_docs "${changed_files_file}" "${output_file}"
 
   assert_file_contains "${output_file}" "${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+
+  restore_test_repo_root
+}
+
+test_collect_context_docs_includes_proposed_changed_guardian_summaries() {
+  setup_case_dir "changed-guardian-summary-context"
+  setup_fake_repo_root
+
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
+  local changed_files_file="${TMP_DIR}/changed-files.txt"
+  local output_file="${TMP_DIR}/context-docs.txt"
+
+  mkdir -p "${fake_worktree_dir}/docs/dev/review"
+  mkdir -p "${baseline_snapshot_root}/docs/dev/review"
+  printf '%s\n' "base addendum" > "${baseline_snapshot_root}/docs/dev/review/guardian-review-addendum.md"
+  printf '%s\n' "base spec summary" > "${baseline_snapshot_root}/docs/dev/review/guardian-spec-review-summary.md"
+  printf '%s\n' "worktree addendum" > "${fake_worktree_dir}/docs/dev/review/guardian-review-addendum.md"
+  printf '%s\n' "worktree spec summary" > "${fake_worktree_dir}/docs/dev/review/guardian-spec-review-summary.md"
+
+  REVIEW_PROFILE="mixed_high_risk_spec_profile"
+  WORKTREE_DIR="${fake_worktree_dir}"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
+  export REVIEW_PROFILE WORKTREE_DIR BASELINE_SNAPSHOT_ROOT
+
+  printf '%s\n' 'docs/dev/review/guardian-review-addendum.md' > "${changed_files_file}"
+  printf '%s\n' 'docs/dev/review/guardian-spec-review-summary.md' >> "${changed_files_file}"
+
+  collect_context_docs "${changed_files_file}" "${output_file}"
+
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/review/guardian-review-addendum.md"
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+  assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/review/guardian-review-addendum.md"
+  assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/review/guardian-spec-review-summary.md"
 
   restore_test_repo_root
 }
@@ -1297,7 +1331,7 @@ test_build_review_prompt_includes_spec_upgrade_for_mixed_profile() {
 
   build_review_prompt 312
 
-  assert_file_contains "${PROMPT_RUN_FILE}" "Spec review 升级摘要："
+  assert_file_contains "${PROMPT_RUN_FILE}" "Spec review 升级摘要（trusted baseline）："
   assert_file_contains "${PROMPT_RUN_FILE}" "Review profile: mixed_high_risk_spec_profile"
 }
 
@@ -1367,7 +1401,7 @@ test_build_review_prompt_prefers_base_snapshot_review_baseline_files_when_change
   printf '%s\n' "base addendum" > "${baseline_snapshot_root}/docs/dev/review/guardian-review-addendum.md"
   printf '%s\n' "base spec summary" > "${baseline_snapshot_root}/docs/dev/review/guardian-spec-review-summary.md"
 
-  REVIEW_PROFILE="high_risk_impl_profile"
+  REVIEW_PROFILE="mixed_high_risk_spec_profile"
   PR_TITLE="review baseline changed"
   PR_URL="https://example.test/pr/312"
   BASE_REF="main"
@@ -1395,9 +1429,11 @@ test_build_review_prompt_prefers_base_snapshot_review_baseline_files_when_change
   build_review_prompt 312
 
   assert_file_contains "${PROMPT_RUN_FILE}" "base addendum"
+  assert_file_contains "${PROMPT_RUN_FILE}" "当前 PR 提议的 guardian 常驻审查摘要全文"
+  assert_file_contains "${PROMPT_RUN_FILE}" "worktree addendum"
   assert_file_contains "${PROMPT_RUN_FILE}" "- docs/dev/review/guardian-spec-review-summary.md"
-  assert_file_not_contains "${PROMPT_RUN_FILE}" "worktree addendum"
-  assert_file_not_contains "${PROMPT_RUN_FILE}" "worktree spec summary"
+  assert_file_contains "${PROMPT_RUN_FILE}" "当前 PR 提议的 guardian spec review 摘要全文"
+  assert_file_contains "${PROMPT_RUN_FILE}" "worktree spec summary"
   assert_file_not_contains "${PROMPT_RUN_FILE}" "repo addendum"
   assert_file_not_contains "${PROMPT_RUN_FILE}" "repo spec summary"
 
@@ -2364,7 +2400,8 @@ main() {
   test_collect_spec_review_docs_prefers_worktree_for_changed_formal_docs
   test_collect_spec_review_docs_skips_repo_only_changed_file_when_worktree_missing
   test_collect_context_docs_includes_branch_todo_when_present
-  test_collect_context_docs_includes_changed_spec_review_summary_for_high_risk_profile
+  test_collect_context_docs_includes_changed_spec_review_summary_for_mixed_profile
+  test_collect_context_docs_includes_proposed_changed_guardian_summaries
   test_build_review_prompt_includes_spec_upgrade_for_mixed_profile
   test_build_review_prompt_prefers_base_snapshot_review_baseline_files
   test_build_review_prompt_prefers_base_snapshot_review_baseline_files_when_changed
