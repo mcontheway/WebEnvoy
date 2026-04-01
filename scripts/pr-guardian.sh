@@ -191,7 +191,7 @@ classify_review_profile() {
   printf '%s\n' "default_impl_profile"
 }
 
-is_required_review_context_path() {
+is_reviewer_owned_baseline_path() {
   local value="$1"
 
   case "${value}" in
@@ -220,6 +220,10 @@ resolve_review_path() {
     local worktree_path="${WORKTREE_DIR}/${relative_path}"
     if [[ -f "${worktree_path}" ]]; then
       printf '%s\n' "${worktree_path}"
+      return 0
+    fi
+    if is_reviewer_owned_baseline_path "${value}" && [[ -f "${value}" ]]; then
+      printf '%s\n' "${value}"
       return 0
     fi
     return 0
@@ -344,14 +348,9 @@ slim_pr_body() {
   printf '%s\n' "${PR_BODY}" | slim_user_markdown
 }
 
-slim_issue_body() {
-  slim_user_markdown
-}
-
 fetch_issue_summary() {
   local issue_file
   local issue_title
-  local issue_body
 
   [[ -n "${ISSUE_NUMBER:-}" ]] || return 0
 
@@ -362,13 +361,8 @@ fetch_issue_summary() {
   fi
 
   issue_title="$(jq -r '.title // ""' "${issue_file}")"
-  issue_body="$(jq -r '.body // ""' "${issue_file}")"
 
   printf 'Issue #%s: %s\n' "${ISSUE_NUMBER}" "${issue_title}"
-  if [[ -n "${issue_body}" ]]; then
-    printf '\n'
-    printf '%s\n' "${issue_body}" | slim_issue_body
-  fi
 }
 
 collect_high_risk_architecture_docs() {
