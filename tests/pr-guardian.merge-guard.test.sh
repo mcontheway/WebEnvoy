@@ -532,6 +532,27 @@ test_slim_pr_body_keeps_only_review_relevant_sections() {
   assert_file_not_contains "${slim_file}" "## 检查清单"
 }
 
+test_slim_pr_body_preserves_medium_item_design_note_sections() {
+  setup_case_dir "slim-pr-body-medium-design-note"
+
+  PR_BODY=$'## 摘要\n\n- 变更目的：A\n\n## 背景\n\n这里是背景。\n\n## 目标\n\n这里是目标。\n\n## 范围\n\n这里是范围。\n\n## 非目标\n\n这里是非目标。\n\n## 风险\n\n这里是风险。\n\n## 验证\n\n- 已验证\n'
+  export PR_BODY
+
+  local slim_file="${TMP_DIR}/slim.md"
+  slim_pr_body > "${slim_file}"
+
+  assert_file_contains "${slim_file}" "## 背景"
+  assert_file_contains "${slim_file}" "这里是背景。"
+  assert_file_contains "${slim_file}" "## 目标"
+  assert_file_contains "${slim_file}" "这里是目标。"
+  assert_file_contains "${slim_file}" "## 范围"
+  assert_file_contains "${slim_file}" "这里是范围。"
+  assert_file_contains "${slim_file}" "## 非目标"
+  assert_file_contains "${slim_file}" "这里是非目标。"
+  assert_file_contains "${slim_file}" "## 风险"
+  assert_file_contains "${slim_file}" "这里是风险。"
+}
+
 test_slim_pr_body_preserves_plain_text_in_kept_sections() {
   setup_case_dir "slim-pr-body-paragraphs"
 
@@ -1726,6 +1747,21 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":true'
 }
 
+test_normalize_native_review_result_fails_closed_for_other_than_caveat() {
+  setup_case_dir "normalize-native-text-other-than-caveat"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+No issues found other than the dropped issue context in the prompt builder.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
 test_normalize_native_review_result_fails_closed_for_ambiguous_safe_phrase() {
   setup_case_dir "normalize-native-text-ambiguous-safe-phrase"
 
@@ -2454,6 +2490,7 @@ main() {
 
   test_classify_review_profile_matches_expected_buckets
   test_slim_pr_body_keeps_only_review_relevant_sections
+  test_slim_pr_body_preserves_medium_item_design_note_sections
   test_slim_pr_body_preserves_plain_text_in_kept_sections
   test_slim_pr_body_falls_back_to_plain_text_when_template_headings_are_missing
   test_slim_pr_body_preserves_guardian_acceptance_lines
@@ -2496,6 +2533,7 @@ main() {
   test_normalize_native_review_result_fails_closed_for_unstructured_negative_text
   test_normalize_native_review_result_maps_native_text_approve_to_guardian_schema
   test_normalize_native_review_result_accepts_common_plain_text_approve_phrases
+  test_normalize_native_review_result_fails_closed_for_other_than_caveat
   test_normalize_native_review_result_fails_closed_for_ambiguous_safe_phrase
   test_normalize_native_review_result_fails_closed_for_colon_caveat
   test_normalize_native_review_result_fails_closed_for_unless_caveat

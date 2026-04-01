@@ -649,7 +649,7 @@ extract_list_sections() {
     }
     /^## / {
       keep = 0
-      if (mode == "pr" && ($0 == "## 摘要" || $0 == "## 设计说明" || $0 == "## 关联事项" || $0 == "## 风险级别" || $0 == "## 验证" || $0 == "## 回滚" || $0 == "## 变更文件")) {
+      if (mode == "pr" && ($0 == "## 摘要" || $0 == "## 设计说明" || $0 == "## 背景" || $0 == "## 目标" || $0 == "## 范围" || $0 == "## 非目标" || $0 == "## 风险" || $0 == "## 关联事项" || $0 == "## 风险级别" || $0 == "## 验证" || $0 == "## 回滚" || $0 == "## 变更文件")) {
         keep = 1
       }
       if (mode == "issue" && ($0 == "## 背景" || $0 == "## 目标" || $0 == "## 范围" || $0 == "## 非目标" || $0 == "## 验收" || $0 == "## 关闭条件" || $0 == "## 风险")) {
@@ -1117,7 +1117,7 @@ normalize_native_review_result() {
     def trim:
       sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
     def has_contrast($sentence):
-      ($sentence | ascii_downcase | test("\\b(but|however|although|except|yet|still|though|nevertheless)\\b"));
+      ($sentence | ascii_downcase | test("\\b(but|however|although|except|except for|yet|still|though|nevertheless|aside from|other than)\\b"));
     def has_condition($sentence):
       ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b"));
     def strong_safe_sentence($sentence):
