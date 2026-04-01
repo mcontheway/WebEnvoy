@@ -1,63 +1,66 @@
+import { mkdir, rm } from "node:fs/promises";
+import { createServer } from "node:net";
+import { join } from "node:path";
 import { BRIDGE_PROTOCOL, ensureBridgeRequestEnvelope } from "./protocol.js";
+import { PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME } from "./host.js";
 const DEFAULT_SESSION_ID = "nm-session-001";
 const RELAY_PATH = "host>background>content-script>background>host";
-let readBuffer = Buffer.alloc(0);
+const PROFILE_DIR = process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR?.trim() ?? "";
+const SOCKET_PATH = PROFILE_DIR
+    ? join(PROFILE_DIR, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
+    : null;
+let nativeReadBuffer = Buffer.alloc(0);
 let sessionId = DEFAULT_SESSION_ID;
-let opened = false;
+let extensionOpened = false;
+let shuttingDown = false;
+let socketServer = null;
+const socketBuffers = new WeakMap();
+const pendingSocketResponses = new Map();
+const activeSockets = new Set();
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : {};
 const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
-const writeEnvelope = (envelope, onFlushed) => {
+const isBridgeResponse = (value) => {
+    const record = asRecord(value);
+    return (typeof record.id === "string" &&
+        (record.status === "success" || record.status === "error") &&
+        record.error !== undefined);
+};
+const encodeEnvelope = (envelope) => {
     const payload = Buffer.from(JSON.stringify(envelope), "utf8");
     const header = Buffer.alloc(4);
     header.writeUInt32LE(payload.length, 0);
-    process.stdout.write(Buffer.concat([header, payload]), () => {
+    return Buffer.concat([header, payload]);
+};
+const writeNativeEnvelope = (envelope, onFlushed) => {
+    process.stdout.write(encodeEnvelope(envelope), () => {
         onFlushed?.();
     });
 };
-const writeSuccess = (request, input, onFlushed) => {
-    writeEnvelope({
-        id: request.id,
-        status: "success",
-        summary: input.summary,
-        ...(input.payload ? { payload: input.payload } : {}),
-        error: null
-    }, onFlushed);
-};
-const writeError = (request, input) => {
-    writeEnvelope({
-        id: request.id,
-        status: "error",
-        summary: input.summary ?? {},
-        error: {
-            code: input.code,
-            message: input.message
-        }
-    });
-};
-const handleBridgeOpen = (request) => {
-    opened = true;
-    writeSuccess(request, {
-        summary: {
-            protocol: BRIDGE_PROTOCOL,
-            state: "ready",
-            session_id: sessionId
-        }
-    });
-};
-const handleHeartbeat = (request) => {
-    const requestedSessionId = asString(request.params.session_id);
-    if (requestedSessionId) {
-        sessionId = requestedSessionId;
+const writeSocketEnvelope = (socket, envelope) => {
+    if (socket.destroyed) {
+        return;
     }
-    writeSuccess(request, {
-        summary: {
-            session_id: sessionId
-        }
-    });
+    socket.end(encodeEnvelope(envelope));
 };
-const buildForwardPayload = (request) => {
+const buildErrorEnvelope = (request, input) => ({
+    id: request.id,
+    status: "error",
+    summary: input.summary ?? {},
+    error: {
+        code: input.code,
+        message: input.message
+    }
+});
+const buildSuccessEnvelope = (request, input) => ({
+    id: request.id,
+    status: "success",
+    summary: input.summary,
+    ...(input.payload ? { payload: input.payload } : {}),
+    error: null
+});
+const buildStubForwardPayload = (request) => {
     const command = asString(request.params.command) ?? "runtime.ping";
     const runId = asString(request.params.run_id) ?? request.id;
     const cwd = asString(request.params.cwd) ?? "";
@@ -81,48 +84,241 @@ const buildForwardPayload = (request) => {
         cwd
     };
 };
-const handleBridgeForward = (request) => {
-    if (!opened) {
-        writeError(request, {
-            code: "ERR_TRANSPORT_NOT_READY",
-            message: "bridge.open is required before bridge.forward"
+const writeNativeSuccess = (request, input, onFlushed) => {
+    writeNativeEnvelope(buildSuccessEnvelope(request, input), onFlushed);
+};
+const writeNativeError = (request, input) => {
+    writeNativeEnvelope(buildErrorEnvelope(request, input));
+};
+const failPendingSocketResponses = (input) => {
+    for (const [id, pending] of pendingSocketResponses.entries()) {
+        writeSocketEnvelope(pending.socket, buildErrorEnvelope({
+            id
+        }, {
+            code: input.code,
+            message: input.message,
+            summary: {
+                relay_path: RELAY_PATH
+            }
+        }));
+        pendingSocketResponses.delete(id);
+    }
+};
+const cleanupSocketServer = async () => {
+    const current = socketServer;
+    if (current) {
+        await new Promise((resolve) => {
+            socketServer = null;
+            current.close(() => resolve());
         });
+    }
+    if (SOCKET_PATH) {
+        await rm(SOCKET_PATH, { force: true }).catch(() => undefined);
+    }
+};
+const shutdown = async (code = 0) => {
+    if (shuttingDown) {
         return;
     }
-    const command = asString(request.params.command) ?? "runtime.ping";
-    const requestedSessionId = asString(request.params.session_id);
-    if (requestedSessionId) {
-        sessionId = requestedSessionId;
+    shuttingDown = true;
+    failPendingSocketResponses({
+        code: "ERR_TRANSPORT_DISCONNECTED",
+        message: "native messaging disconnected"
+    });
+    for (const socket of activeSockets) {
+        socket.destroy();
     }
-    writeSuccess(request, {
-        summary: {
-            session_id: sessionId,
-            run_id: asString(request.params.run_id) ?? request.id,
-            command,
-            relay_path: RELAY_PATH
-        },
-        payload: buildForwardPayload(request)
-    }, () => {
-        process.exit(0);
+    await cleanupSocketServer();
+    process.exit(code);
+};
+const ensureSocketServer = async () => {
+    if (!SOCKET_PATH || socketServer) {
+        return;
+    }
+    await mkdir(PROFILE_DIR, { recursive: true });
+    await rm(SOCKET_PATH, { force: true }).catch(() => undefined);
+    socketServer = createServer((socket) => {
+        activeSockets.add(socket);
+        socketBuffers.set(socket, Buffer.alloc(0));
+        socket.on("data", (chunk) => {
+            const next = Buffer.concat([socketBuffers.get(socket) ?? Buffer.alloc(0), chunk]);
+            socketBuffers.set(socket, next);
+            let buffer = next;
+            while (buffer.length >= 4) {
+                const frameLength = buffer.readUInt32LE(0);
+                const frameEnd = 4 + frameLength;
+                if (buffer.length < frameEnd) {
+                    break;
+                }
+                const frame = buffer.subarray(4, frameEnd);
+                buffer = buffer.subarray(frameEnd);
+                socketBuffers.set(socket, buffer);
+                try {
+                    const request = JSON.parse(frame.toString("utf8"));
+                    void handleSocketRequest(socket, request);
+                }
+                catch (error) {
+                    writeSocketEnvelope(socket, buildErrorEnvelope({
+                        id: "invalid-request"
+                    }, {
+                        code: "ERR_TRANSPORT_FORWARD_FAILED",
+                        message: error instanceof Error ? error.message : String(error)
+                    }));
+                    return;
+                }
+            }
+        });
+        socket.on("close", () => {
+            activeSockets.delete(socket);
+            socketBuffers.delete(socket);
+            for (const [id, pending] of pendingSocketResponses.entries()) {
+                if (pending.socket === socket) {
+                    pendingSocketResponses.delete(id);
+                }
+            }
+        });
+        socket.on("error", () => {
+            socket.destroy();
+        });
+    });
+    await new Promise((resolve, reject) => {
+        const server = socketServer;
+        if (!server || !SOCKET_PATH) {
+            resolve();
+            return;
+        }
+        server.once("error", reject);
+        server.listen(SOCKET_PATH, () => {
+            server.removeListener("error", reject);
+            resolve();
+        });
     });
 };
-const handleRequest = (rawRequest) => {
+const handleSocketRequest = async (socket, rawRequest) => {
     try {
         ensureBridgeRequestEnvelope(rawRequest);
         const request = rawRequest;
         if (request.method === "bridge.open") {
-            handleBridgeOpen(request);
+            if (!extensionOpened) {
+                writeSocketEnvelope(socket, buildErrorEnvelope(request, {
+                    code: "ERR_TRANSPORT_HANDSHAKE_FAILED",
+                    message: "extension native bridge is not ready"
+                }));
+                return;
+            }
+            writeSocketEnvelope(socket, buildSuccessEnvelope(request, {
+                summary: {
+                    protocol: BRIDGE_PROTOCOL,
+                    state: "ready",
+                    session_id: sessionId
+                }
+            }));
             return;
         }
         if (request.method === "__ping__") {
-            handleHeartbeat(request);
+            if (!extensionOpened) {
+                writeSocketEnvelope(socket, buildErrorEnvelope(request, {
+                    code: "ERR_TRANSPORT_DISCONNECTED",
+                    message: "extension native bridge is not ready"
+                }));
+                return;
+            }
+            writeSocketEnvelope(socket, buildSuccessEnvelope(request, {
+                summary: {
+                    session_id: sessionId
+                }
+            }));
             return;
         }
-        handleBridgeForward(request);
+        if (!extensionOpened) {
+            writeSocketEnvelope(socket, buildErrorEnvelope(request, {
+                code: "ERR_TRANSPORT_NOT_READY",
+                message: "bridge.open is required before bridge.forward"
+            }));
+            return;
+        }
+        pendingSocketResponses.set(request.id, { socket });
+        writeNativeEnvelope(request);
     }
     catch (error) {
-        const safeRequest = typeof rawRequest === "object" && rawRequest !== null ? asRecord(rawRequest) : {};
-        writeEnvelope({
+        writeSocketEnvelope(socket, buildErrorEnvelope({
+            id: "invalid-request"
+        }, {
+            code: "ERR_TRANSPORT_FORWARD_FAILED",
+            message: error instanceof Error ? error.message : String(error)
+        }));
+    }
+};
+const handleExtensionBridgeOpen = async (request) => {
+    extensionOpened = true;
+    await ensureSocketServer();
+    writeNativeSuccess(request, {
+        summary: {
+            protocol: BRIDGE_PROTOCOL,
+            state: "ready",
+            session_id: sessionId
+        }
+    });
+};
+const handleExtensionHeartbeat = (request) => {
+    const requestedSessionId = asString(request.params.session_id);
+    if (requestedSessionId) {
+        sessionId = requestedSessionId;
+    }
+    writeNativeSuccess(request, {
+        summary: {
+            session_id: sessionId
+        }
+    });
+};
+const handleExtensionRequest = async (request) => {
+    if (request.method === "bridge.open") {
+        await handleExtensionBridgeOpen(request);
+        return;
+    }
+    if (request.method === "__ping__") {
+        handleExtensionHeartbeat(request);
+        return;
+    }
+    if (!SOCKET_PATH && request.method === "bridge.forward") {
+        writeNativeSuccess(request, {
+            summary: {
+                session_id: asString(request.params.session_id) ?? sessionId,
+                run_id: asString(request.params.run_id) ?? request.id,
+                command: asString(request.params.command) ?? "runtime.ping",
+                relay_path: RELAY_PATH
+            },
+            payload: buildStubForwardPayload(request)
+        }, () => {
+            process.exit(0);
+        });
+        return;
+    }
+    writeNativeError(request, {
+        code: "ERR_TRANSPORT_FORWARD_FAILED",
+        message: `unsupported extension request: ${request.method}`
+    });
+};
+const handleExtensionResponse = (response) => {
+    const pending = pendingSocketResponses.get(response.id);
+    if (!pending) {
+        return;
+    }
+    pendingSocketResponses.delete(response.id);
+    writeSocketEnvelope(pending.socket, response);
+};
+const handleNativeInput = async (rawInput) => {
+    if (isBridgeResponse(rawInput)) {
+        handleExtensionResponse(rawInput);
+        return;
+    }
+    try {
+        ensureBridgeRequestEnvelope(rawInput);
+        await handleExtensionRequest(rawInput);
+    }
+    catch (error) {
+        const safeRequest = typeof rawInput === "object" && rawInput !== null ? asRecord(rawInput) : {};
+        writeNativeEnvelope({
             id: asString(safeRequest.id) ?? "unknown-request-id",
             status: "error",
             summary: {},
@@ -134,17 +330,29 @@ const handleRequest = (rawRequest) => {
     }
 };
 process.stdin.on("data", (chunk) => {
-    readBuffer = Buffer.concat([readBuffer, chunk]);
-    while (readBuffer.length >= 4) {
-        const frameLength = readBuffer.readUInt32LE(0);
+    nativeReadBuffer = Buffer.concat([nativeReadBuffer, chunk]);
+    while (nativeReadBuffer.length >= 4) {
+        const frameLength = nativeReadBuffer.readUInt32LE(0);
         const frameEnd = 4 + frameLength;
-        if (readBuffer.length < frameEnd) {
+        if (nativeReadBuffer.length < frameEnd) {
             return;
         }
-        const frame = readBuffer.subarray(4, frameEnd);
-        readBuffer = readBuffer.subarray(frameEnd);
+        const frame = nativeReadBuffer.subarray(4, frameEnd);
+        nativeReadBuffer = nativeReadBuffer.subarray(frameEnd);
         const request = JSON.parse(frame.toString("utf8"));
-        handleRequest(request);
+        void handleNativeInput(request);
     }
+});
+process.stdin.on("end", () => {
+    void shutdown(0);
+});
+process.stdin.on("error", () => {
+    void shutdown(1);
+});
+process.on("SIGINT", () => {
+    void shutdown(130);
+});
+process.on("SIGTERM", () => {
+    void shutdown(143);
 });
 process.stdin.resume();

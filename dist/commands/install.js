@@ -32,6 +32,7 @@ const runtimeInstall = async (context) => {
     const manifestDir = asString(context.params.manifest_dir) ?? undefined;
     const launcherPath = asString(context.params.launcher_path) ?? undefined;
     const hostCommand = asString(context.params.host_command) ?? undefined;
+    const profileDir = asString(context.params.profile_dir) ?? undefined;
     return installNativeHost({
         cwd: context.cwd,
         extensionId,
@@ -39,7 +40,8 @@ const runtimeInstall = async (context) => {
         browserChannel,
         hostCommand,
         manifestDir,
-        launcherPath
+        launcherPath,
+        profileDir
     });
 };
 const runtimeUninstall = async (context) => {

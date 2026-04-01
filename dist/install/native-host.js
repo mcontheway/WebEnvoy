@@ -205,9 +205,12 @@ const buildLauncherScript = (input) => {
     const argv = tokenizeHostCommand(input.command, input.hostCommand)
         .map((token) => quoteShellArgForScript(token))
         .join(" ");
+    const profileDirExport = typeof input.profileDir === "string" && input.profileDir.length > 0
+        ? `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR=${quoteShellArgForScript(input.profileDir)}\n`
+        : "";
     return `#!/usr/bin/env bash
 set -euo pipefail
-exec ${argv} "$@"
+${profileDirExport}exec ${argv} "$@"
 `;
 };
 const resolveControlledInstallRoots = (cwd, browserChannel) => {
@@ -296,7 +299,8 @@ export const installNativeHost = async (input) => {
     await assertNotSymlink("runtime.install", "manifest_path", resolvedPaths.manifestPath);
     await writeFile(resolvedPaths.launcherPath, buildLauncherScript({
         command: "runtime.install",
-        hostCommand
+        hostCommand,
+        profileDir: input.profileDir
     }), "utf8");
     await chmod(resolvedPaths.launcherPath, 0o755);
     const manifest = {

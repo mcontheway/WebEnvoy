@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { connect as connectSocket, type Socket } from "node:net";
 import { access } from "node:fs/promises";
+import { join } from "node:path";
 
 import {
   DEFAULT_TRANSPORT_TIMEOUT_MS,
@@ -9,6 +10,9 @@ import {
   type BridgeResponseEnvelope
 } from "./protocol.js";
 import type { NativeBridgeTransport } from "./transport.js";
+
+export const PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME = "nm.sock";
+const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"] as const;
 
 type TransportCodedError = Error & {
   transportCode?:
@@ -130,6 +134,7 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
   readonly #hostCommand: string | null;
   readonly #hostSpec: { file: string; args: string[] } | null;
   readonly #socketPath: string | null;
+  #activeSocketPath: string | null = null;
   #child: ChildProcessWithoutNullStreams | null = null;
   #stdoutBuffer = Buffer.alloc(0);
   #pending = new Map<string, PendingMessage>();
@@ -202,14 +207,57 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
     return this.#closePromise;
   }
 
-  #send(phase: TransportPhase, request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+  async #send(phase: TransportPhase, request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
     ensureBridgeRequestEnvelope(request);
 
-    if (this.#socketPath) {
-      return this.#sendViaSocket(phase, request);
+    const resolvedSocket = await this.#resolveSocketPath(request);
+    if (resolvedSocket) {
+      return await this.#sendViaSocket(phase, request, resolvedSocket.path);
     }
 
-    return this.#sendViaSpawn(phase, request);
+    return await this.#sendViaSpawn(phase, request);
+  }
+
+  async #resolveSocketPath(
+    request: BridgeRequestEnvelope
+  ): Promise<{ path: string; required: boolean } | null> {
+    if (this.#socketPath) {
+      this.#activeSocketPath = this.#socketPath;
+      return {
+        path: this.#socketPath,
+        required: true
+      };
+    }
+    if (this.#activeSocketPath) {
+      try {
+        await access(this.#activeSocketPath);
+        return {
+          path: this.#activeSocketPath,
+          required: false
+        };
+      } catch {
+        this.#activeSocketPath = null;
+      }
+    }
+    if (typeof request.profile !== "string" || request.profile.trim().length === 0) {
+      return null;
+    }
+    const candidate = join(
+      process.cwd(),
+      ...PROFILE_ROOT_SEGMENTS,
+      request.profile.trim(),
+      PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME
+    );
+    try {
+      await access(candidate);
+      this.#activeSocketPath = candidate;
+      return {
+        path: candidate,
+        required: false
+      };
+    } catch {
+      return null;
+    }
   }
 
   #sendViaSpawn(
@@ -267,13 +315,9 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
 
   async #sendViaSocket(
     phase: TransportPhase,
-    request: BridgeRequestEnvelope
+    request: BridgeRequestEnvelope,
+    socketPath: string
   ): Promise<BridgeResponseEnvelope> {
-    const socketPath = this.#socketPath;
-    if (!socketPath) {
-      throw withTransportCode(new Error("native bridge socket is not configured"), "ERR_TRANSPORT_DISCONNECTED");
-    }
-
     try {
       await access(socketPath);
     } catch {

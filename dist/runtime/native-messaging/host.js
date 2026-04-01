@@ -1,7 +1,10 @@
 import { spawn } from "node:child_process";
 import { connect as connectSocket } from "node:net";
 import { access } from "node:fs/promises";
+import { join } from "node:path";
 import { DEFAULT_TRANSPORT_TIMEOUT_MS, ensureBridgeRequestEnvelope } from "./protocol.js";
+export const PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME = "nm.sock";
+const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 const withTransportCode = (error, code) => Object.assign(error, { transportCode: code });
 const readNativeHostCommand = () => {
     const value = process.env.WEBENVOY_NATIVE_HOST_CMD;
@@ -84,6 +87,7 @@ export class NativeHostBridgeTransport {
     #hostCommand;
     #hostSpec;
     #socketPath;
+    #activeSocketPath = null;
     #child = null;
     #stdoutBuffer = Buffer.alloc(0);
     #pending = new Map();
@@ -138,12 +142,49 @@ export class NativeHostBridgeTransport {
         });
         return this.#closePromise;
     }
-    #send(phase, request) {
+    async #send(phase, request) {
         ensureBridgeRequestEnvelope(request);
-        if (this.#socketPath) {
-            return this.#sendViaSocket(phase, request);
+        const resolvedSocket = await this.#resolveSocketPath(request);
+        if (resolvedSocket) {
+            return await this.#sendViaSocket(phase, request, resolvedSocket.path);
         }
-        return this.#sendViaSpawn(phase, request);
+        return await this.#sendViaSpawn(phase, request);
+    }
+    async #resolveSocketPath(request) {
+        if (this.#socketPath) {
+            this.#activeSocketPath = this.#socketPath;
+            return {
+                path: this.#socketPath,
+                required: true
+            };
+        }
+        if (this.#activeSocketPath) {
+            try {
+                await access(this.#activeSocketPath);
+                return {
+                    path: this.#activeSocketPath,
+                    required: false
+                };
+            }
+            catch {
+                this.#activeSocketPath = null;
+            }
+        }
+        if (typeof request.profile !== "string" || request.profile.trim().length === 0) {
+            return null;
+        }
+        const candidate = join(process.cwd(), ...PROFILE_ROOT_SEGMENTS, request.profile.trim(), PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME);
+        try {
+            await access(candidate);
+            this.#activeSocketPath = candidate;
+            return {
+                path: candidate,
+                required: false
+            };
+        }
+        catch {
+            return null;
+        }
     }
     #sendViaSpawn(phase, request) {
         if (!this.#hostCommand || !this.#hostSpec) {
@@ -185,11 +226,7 @@ export class NativeHostBridgeTransport {
             }
         });
     }
-    async #sendViaSocket(phase, request) {
-        const socketPath = this.#socketPath;
-        if (!socketPath) {
-            throw withTransportCode(new Error("native bridge socket is not configured"), "ERR_TRANSPORT_DISCONNECTED");
-        }
+    async #sendViaSocket(phase, request, socketPath) {
         try {
             await access(socketPath);
         }

@@ -263,14 +263,19 @@ const resolveDefaultManifestDirectory = (browserChannel: BrowserChannel): string
 const buildLauncherScript = (input: {
   command: "runtime.install" | "runtime.uninstall";
   hostCommand: string;
+  profileDir?: string;
 }): string => {
   const argv = tokenizeHostCommand(input.command, input.hostCommand)
     .map((token) => quoteShellArgForScript(token))
     .join(" ");
+  const profileDirExport =
+    typeof input.profileDir === "string" && input.profileDir.length > 0
+      ? `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR=${quoteShellArgForScript(input.profileDir)}\n`
+      : "";
 
   return `#!/usr/bin/env bash
 set -euo pipefail
-exec ${argv} "$@"
+${profileDirExport}exec ${argv} "$@"
 `;
 };
 
@@ -350,6 +355,7 @@ export interface InstallNativeHostInput {
   hostCommand?: string;
   manifestDir?: string;
   launcherPath?: string;
+  profileDir?: string;
 }
 
 export interface UninstallNativeHostInput {
@@ -398,7 +404,8 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
     resolvedPaths.launcherPath,
     buildLauncherScript({
       command: "runtime.install",
-      hostCommand
+      hostCommand,
+      profileDir: input.profileDir
     }),
     "utf8"
   );
