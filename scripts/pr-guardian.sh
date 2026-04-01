@@ -656,7 +656,7 @@ extract_list_sections() {
     }
     /^## / {
       keep = 0
-      if (mode == "pr" && ($0 == "## 摘要" || $0 == "## 关联事项" || $0 == "## 风险级别" || $0 == "## 验证" || $0 == "## 回滚" || $0 == "## 变更文件")) {
+      if (mode == "pr" && ($0 == "## 摘要" || $0 == "## 设计说明" || $0 == "## 关联事项" || $0 == "## 风险级别" || $0 == "## 验证" || $0 == "## 回滚" || $0 == "## 变更文件")) {
         keep = 1
       }
       if (mode == "issue" && ($0 == "## 背景" || $0 == "## 目标" || $0 == "## 范围" || $0 == "## 非目标" || $0 == "## 验收" || $0 == "## 关闭条件" || $0 == "## 风险")) {
@@ -1132,7 +1132,13 @@ normalize_native_review_result() {
       | ($lower | test("did not identify any actionable bugs"))
         or ($lower | test("no blocking issues found"))
         or ($lower | test("patch is correct"))
-        or ($lower | test("no actionable issues"));
+        or ($lower | test("no actionable issues"))
+        or ($lower | test("\\bno issues found\\b"))
+        or ($lower | test("\\bno issues were found\\b"))
+        or ($lower | test("\\bno problems found\\b"))
+        or ($lower | test("\\bi didn.t find any problems\\b"))
+        or ($lower | test("\\bdid not find any problems\\b"))
+        or ($lower | test("\\bno issues detected\\b"));
     def neutral_safe_sentence($sentence):
       ($sentence | ascii_downcase) as $lower
       | ($lower | test("does not affect code paths"))
