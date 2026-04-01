@@ -35,6 +35,50 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "缺少依赖命令: $1"
 }
 
+origin_url_to_https() {
+  local origin_url="$1"
+
+  if [[ "${origin_url}" =~ ^https://github\.com/.+ ]]; then
+    printf '%s\n' "${origin_url}"
+    return 0
+  fi
+
+  if [[ "${origin_url}" =~ ^git@github\.com:(.+)$ ]]; then
+    printf 'https://github.com/%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+
+  if [[ "${origin_url}" =~ ^ssh://git@github\.com/(.+)$ ]]; then
+    printf 'https://github.com/%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+
+  return 1
+}
+
+fetch_origin_tracking_ref() {
+  local source_ref="$1"
+  local target_ref="$2"
+  local refspec="${source_ref}:${target_ref}"
+  local origin_url=""
+  local https_url=""
+
+  if git -C "${REPO_ROOT}" fetch origin "${refspec}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  origin_url="$(git -C "${REPO_ROOT}" remote get-url origin 2>/dev/null || true)"
+  https_url="$(origin_url_to_https "${origin_url}" 2>/dev/null || true)"
+
+  if [[ -z "${https_url}" || "${https_url}" == "${origin_url}" ]]; then
+    git -C "${REPO_ROOT}" fetch origin "${refspec}" >/dev/null
+    return 0
+  fi
+
+  warn "origin SSH 拉取失败，已回退到 HTTPS 继续准备审查上下文: ${source_ref}"
+  git -C "${REPO_ROOT}" fetch "${https_url}" "${refspec}" >/dev/null
+}
+
 check_gh_auth() {
   if ! gh auth status >/dev/null 2>&1; then
     die "GitHub CLI 未登录或凭证失效，请先执行: gh auth login"
@@ -121,8 +165,8 @@ prepare_pr_workspace() {
   PR_BODY="$(jq -r '.body // ""' "${META_FILE}")"
   PR_AUTHOR="$(jq -r '.author.login // ""' "${META_FILE}")"
 
-  git -C "${REPO_ROOT}" fetch origin "${BASE_REF}" >/dev/null
-  git -C "${REPO_ROOT}" fetch origin "pull/${pr_number}/head:refs/remotes/origin/pr/${pr_number}" >/dev/null
+  fetch_origin_tracking_ref "refs/heads/${BASE_REF}" "refs/remotes/origin/${BASE_REF}"
+  fetch_origin_tracking_ref "pull/${pr_number}/head" "refs/remotes/origin/pr/${pr_number}"
 
   WORKTREE_DIR="${TMP_DIR}/worktree"
   git -C "${REPO_ROOT}" worktree add --detach "${WORKTREE_DIR}" "origin/pr/${pr_number}" >/dev/null
@@ -214,17 +258,25 @@ is_reviewer_owned_baseline_path() {
 
 resolve_review_path() {
   local value="$1"
+  local relative_path
+  local worktree_path
 
   if [[ -n "${WORKTREE_DIR:-}" && -d "${WORKTREE_DIR}" ]] && [[ "${value}" == "${REPO_ROOT}/"* ]]; then
+    relative_path="${value#${REPO_ROOT}/}"
+    worktree_path="${WORKTREE_DIR}/${relative_path}"
+
     if is_reviewer_owned_baseline_path "${value}"; then
       if [[ -f "${value}" ]]; then
         printf '%s\n' "${value}"
+        return 0
+      fi
+
+      if [[ -f "${worktree_path}" ]]; then
+        printf '%s\n' "${worktree_path}"
       fi
       return 0
     fi
 
-    local relative_path="${value#${REPO_ROOT}/}"
-    local worktree_path="${WORKTREE_DIR}/${relative_path}"
     if [[ -f "${worktree_path}" ]]; then
       printf '%s\n' "${worktree_path}"
       return 0
@@ -354,6 +406,8 @@ slim_pr_body() {
 fetch_issue_summary() {
   local issue_file
   local issue_title
+  local issue_body
+  local issue_body_file
 
   [[ -n "${ISSUE_NUMBER:-}" ]] || return 0
 
@@ -364,8 +418,18 @@ fetch_issue_summary() {
   fi
 
   issue_title="$(jq -r '.title // ""' "${issue_file}")"
+  issue_body="$(jq -r '.body // ""' "${issue_file}")"
+  issue_body_file="${TMP_DIR}/issue-body.md"
 
   printf 'Issue #%s: %s\n' "${ISSUE_NUMBER}" "${issue_title}"
+
+  if [[ -n "${issue_body//[[:space:]]/}" ]]; then
+    printf '%s\n' "${issue_body}" | slim_user_markdown > "${issue_body_file}"
+    if [[ -s "${issue_body_file}" ]]; then
+      printf '\n'
+      cat "${issue_body_file}"
+    fi
+  fi
 }
 
 collect_high_risk_architecture_docs() {
