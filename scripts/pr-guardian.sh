@@ -169,7 +169,7 @@ classify_review_profile() {
     has_formal_spec_changes=1
   fi
 
-  if grep -Eq '^(scripts/|\.github/workflows/|src/|extension/|tests/)' "${changed_files_file}"; then
+  if grep -Eq '^(scripts/|\.github/workflows/|\.githooks/|src/|extension/|tests/)' "${changed_files_file}"; then
     has_high_risk_impl_changes=1
   fi
 
@@ -284,7 +284,23 @@ slim_pr_body() {
 }
 
 slim_issue_body() {
-  slim_user_markdown
+  awk '
+    BEGIN {
+      keep = 0
+    }
+    /^## / {
+      keep = ($0 == "## 目标" || $0 == "## 边界" || $0 == "## 关闭条件" || $0 == "## 验收标准" || $0 == "## 非目标")
+      if (keep) {
+        print
+      }
+      next
+    }
+    keep {
+      if ($0 ~ /^[-*] / || $0 ~ /^[0-9]+\./ || NF == 0) {
+        print
+      }
+    }
+  ' | trim_blank_lines
 }
 
 fetch_issue_summary() {
