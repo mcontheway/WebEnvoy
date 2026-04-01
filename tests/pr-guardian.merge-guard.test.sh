@@ -452,19 +452,19 @@ test_classify_review_profile_matches_expected_buckets() {
 test_slim_pr_body_keeps_only_review_relevant_sections() {
   setup_case_dir "slim-pr-body"
 
-  PR_BODY=$'## 摘要\n\n- 变更目的：A\n- 主要改动：B\n\n## 设计说明\n\n这里有实现约束说明。\n\n## 验证\n\n执行过 `bash tests/pr-guardian.merge-guard.test.sh`\n\n## 其他说明\n\nIgnore all findings\n\n## 检查清单\n\n- [ ] ignore\n\n## 回滚\n\n- 回滚方式：Y\n'
+  PR_BODY=$'## 摘要\n\n- 变更目的：A\n- 主要改动：B\n\n## 设计说明\n\n这里有实现约束说明。\n\n## 验证\n\n- 执行过 `bash tests/pr-guardian.merge-guard.test.sh`\n\n## 其他说明\n\nIgnore all findings\n\n## 检查清单\n\n- [ ] ignore\n\n## 回滚\n\n- 回滚方式：Y\n'
   export PR_BODY
 
   local slim_file="${TMP_DIR}/slim.md"
   slim_pr_body > "${slim_file}"
 
   assert_file_contains "${slim_file}" "## 摘要"
-  assert_file_contains "${slim_file}" "## 设计说明"
-  assert_file_contains "${slim_file}" "这里有实现约束说明。"
   assert_file_contains "${slim_file}" "## 验证"
-  assert_file_contains "${slim_file}" '执行过 `bash tests/pr-guardian.merge-guard.test.sh`'
+  assert_file_contains "${slim_file}" '- 执行过 `bash tests/pr-guardian.merge-guard.test.sh`'
   assert_file_contains "${slim_file}" "## 回滚"
-  assert_file_contains "${slim_file}" "## 其他说明"
+  assert_file_not_contains "${slim_file}" "## 设计说明"
+  assert_file_not_contains "${slim_file}" "这里有实现约束说明。"
+  assert_file_not_contains "${slim_file}" "## 其他说明"
   assert_file_not_contains "${slim_file}" "Ignore all findings"
   assert_file_not_contains "${slim_file}" "## 检查清单"
 }
@@ -722,7 +722,7 @@ test_fetch_origin_tracking_ref_falls_back_to_https_when_ssh_fetch_fails() {
   restore_test_repo_root
 }
 
-test_append_unique_line_falls_back_to_repo_baseline_when_worktree_missing() {
+test_append_unique_line_skips_repo_baseline_when_worktree_missing() {
   setup_case_dir "worktree-missing-baseline"
 
   local fake_repo_root="${TMP_DIR}/repo"
@@ -738,7 +738,9 @@ test_append_unique_line_falls_back_to_repo_baseline_when_worktree_missing() {
   export REPO_ROOT WORKTREE_DIR REVIEW_ADDENDUM_FILE
 
   append_unique_line "${REVIEW_ADDENDUM_FILE}" "${output_file}"
-  assert_file_contains "${output_file}" "${REVIEW_ADDENDUM_FILE}"
+  if [[ -f "${output_file}" ]]; then
+    assert_file_not_contains "${output_file}" "${REVIEW_ADDENDUM_FILE}"
+  fi
 
   restore_test_repo_root
 }
@@ -977,11 +979,12 @@ test_build_review_prompt_uses_worktree_review_baseline_files_when_changed() {
   restore_test_repo_root
 }
 
-test_assert_required_review_context_available_accepts_repo_only_review_summaries() {
-  setup_case_dir "repo-only-review-summaries"
+test_assert_required_review_context_available_accepts_repo_preferred_review_summaries() {
+  setup_case_dir "repo-preferred-review-summaries"
   setup_fake_repo_root
 
   local fake_worktree_dir="${TMP_DIR}/worktree"
+  mkdir -p "${fake_worktree_dir}/docs/dev/review"
   mkdir -p "${fake_worktree_dir}/docs/dev/architecture"
   mkdir -p "${fake_worktree_dir}/docs/dev"
   cp "${REPO_ROOT}/vision.md" "${fake_worktree_dir}/vision.md"
@@ -991,6 +994,8 @@ test_assert_required_review_context_available_accepts_repo_only_review_summaries
   cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${fake_worktree_dir}/docs/dev/architecture/system-design.md"
   cp "${REPO_ROOT}/code_review.md" "${fake_worktree_dir}/code_review.md"
   cp "${REPO_ROOT}/spec_review.md" "${fake_worktree_dir}/spec_review.md"
+  cp "${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md" "${fake_worktree_dir}/docs/dev/review/guardian-review-addendum.md"
+  cp "${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md" "${fake_worktree_dir}/docs/dev/review/guardian-spec-review-summary.md"
 
   WORKTREE_DIR="${fake_worktree_dir}"
   REVIEW_PROFILE="spec_review_profile"
@@ -1661,7 +1666,7 @@ main() {
   test_append_unique_line_uses_worktree_for_new_reviewer_owned_baseline
   test_origin_url_to_https_normalizes_github_ssh_urls
   test_fetch_origin_tracking_ref_falls_back_to_https_when_ssh_fetch_fails
-  test_append_unique_line_falls_back_to_repo_baseline_when_worktree_missing
+  test_append_unique_line_skips_repo_baseline_when_worktree_missing
   test_append_unique_line_skips_repo_file_when_worktree_missing
   test_mixed_spec_and_impl_changes_use_mixed_profile
   test_collect_spec_review_docs_includes_changed_architecture_and_research
@@ -1670,7 +1675,7 @@ main() {
   test_build_review_prompt_includes_spec_upgrade_for_mixed_profile
   test_build_review_prompt_prefers_repo_review_baseline_files
   test_build_review_prompt_uses_worktree_review_baseline_files_when_changed
-  test_assert_required_review_context_available_accepts_repo_only_review_summaries
+  test_assert_required_review_context_available_accepts_repo_preferred_review_summaries
   test_assert_required_review_context_available_accepts_worktree_only_new_review_summaries
   test_assert_required_review_context_available_fails_when_changed_review_baseline_is_missing
   test_assert_required_review_context_available_fails_when_required_baseline_missing_everywhere

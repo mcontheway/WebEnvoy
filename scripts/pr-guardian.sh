@@ -266,20 +266,12 @@ resolve_review_path() {
     worktree_path="${WORKTREE_DIR}/${relative_path}"
 
     if is_reviewer_owned_baseline_path "${value}"; then
-      if path_changed_in_pr "${worktree_path}"; then
-        if [[ -f "${worktree_path}" ]]; then
-          printf '%s\n' "${worktree_path}"
-        fi
-        return 0
-      fi
-
-      if [[ -f "${value}" ]]; then
-        printf '%s\n' "${value}"
-        return 0
-      fi
-
       if [[ -f "${worktree_path}" ]]; then
-        printf '%s\n' "${worktree_path}"
+        if path_changed_in_pr "${worktree_path}" || [[ ! -f "${value}" ]]; then
+          printf '%s\n' "${worktree_path}"
+        else
+          printf '%s\n' "${value}"
+        fi
       fi
       return 0
     fi
@@ -410,10 +402,10 @@ slim_user_markdown() {
     }
     {
       lower = tolower($0)
-      if (lower ~ /ignore all findings/ || lower ~ /please direct approve/ || lower ~ /please approve this pr/ || lower ~ /always approve/) {
+      if (lower ~ /ignore all findings/ || lower ~ /please direct approve/ || lower ~ /please approve this pr/ || lower ~ /always approve/ || lower ~ /request changes/ || lower ~ /request_changes/ || lower ~ /merge this pr/ || lower ~ /merge directly/ || lower ~ /merge now/ || lower ~ /verdict/) {
         next
       }
-      if ($0 ~ /请直接[[:space:]]*approve/ || $0 ~ /请直接批准/ || $0 ~ /请直接通过/) {
+      if ($0 ~ /请直接[[:space:]]*approve/ || $0 ~ /请直接批准/ || $0 ~ /请直接通过/ || $0 ~ /请直接合并/ || $0 ~ /立即合并/ || $0 ~ /忽略.*(问题|阻断|发现|finding)/) {
         next
       }
       print
@@ -421,18 +413,19 @@ slim_user_markdown() {
   ' | trim_blank_lines
 }
 
-slim_pr_body() {
-  printf '%s\n' "${PR_BODY}" | slim_user_markdown
-}
+extract_list_sections() {
+  local mode="$1"
 
-slim_issue_body() {
-  awk '
+  awk -v mode="${mode}" '
     BEGIN {
       keep = 0
     }
     /^## / {
       keep = 0
-      if ($0 == "## 背景" || $0 == "## 目标" || $0 == "## 范围" || $0 == "## 非目标" || $0 == "## 验收" || $0 == "## 关闭条件" || $0 == "## 风险") {
+      if (mode == "pr" && ($0 == "## 摘要" || $0 == "## 关联事项" || $0 == "## 风险级别" || $0 == "## 验证" || $0 == "## 回滚" || $0 == "## 变更文件")) {
+        keep = 1
+      }
+      if (mode == "issue" && ($0 == "## 背景" || $0 == "## 目标" || $0 == "## 范围" || $0 == "## 非目标" || $0 == "## 验收" || $0 == "## 关闭条件" || $0 == "## 风险")) {
         keep = 1
       }
       if (keep) {
@@ -441,9 +434,23 @@ slim_issue_body() {
       next
     }
     keep {
-      print
+      if ($0 ~ /^[-*][[:space:]]/ || $0 ~ /^[0-9]+\.[[:space:]]/) {
+        print
+        next
+      }
+      if ($0 ~ /^[[:space:]]*$/) {
+        print
+      }
     }
   ' | slim_user_markdown
+}
+
+slim_pr_body() {
+  printf '%s\n' "${PR_BODY}" | extract_list_sections "pr"
+}
+
+slim_issue_body() {
+  extract_list_sections "issue"
 }
 
 fetch_issue_summary() {
