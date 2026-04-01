@@ -455,8 +455,12 @@ slim_user_markdown() {
 
 extract_list_sections() {
   local mode="$1"
+  local input_text
+  local extracted
 
-  awk -v mode="${mode}" '
+  input_text="$(cat)"
+  extracted="$(
+    printf '%s\n' "${input_text}" | awk -v mode="${mode}" '
     BEGIN {
       keep = 0
     }
@@ -477,6 +481,14 @@ extract_list_sections() {
       print
     }
   ' | slim_user_markdown
+  )"
+
+  if [[ -n "${extracted//[[:space:]]/}" ]]; then
+    printf '%s\n' "${extracted}"
+    return
+  fi
+
+  printf '%s\n' "${input_text}" | slim_user_markdown
 }
 
 slim_pr_body() {
@@ -914,6 +926,14 @@ normalize_native_review_result() {
   jq -Rn -c -e --rawfile text "${raw_result_file}" '
     def trim:
       sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
+    def looks_like_safe_approve($summary):
+      ($summary | ascii_downcase) as $lower
+      | ($lower | test("did not identify any actionable bugs"))
+        or ($lower | test("no blocking issues found"))
+        or ($lower | test("patch is correct"))
+        or ($lower | test("no actionable issues"))
+        or ($lower | test("does not affect code paths"))
+        or ($lower | test("does not modify executable code or behavior"));
     def priority_num:
       if . == "P0" then 0
       elif . == "P1" then 1
@@ -933,7 +953,7 @@ normalize_native_review_result() {
       else
         (($parts.summary // "") | gsub("[[:space:]]+"; " ") | trim) as $summary
         | [
-            (($parts.comments // "") | match("(?m)^- \\[(?<priority_tag>P[0-3])\\] (?<title>.+?) [—-] (?<path>.+?):(?<start>[0-9]+)(?:-(?<end>[0-9]+))?\n(?<body>(?:  .*?(?:\n|$))*)"; "g"))
+            ($raw | match("(?m)(?:^|[[:space:]])- \\[(?<priority_tag>P[0-3])\\] (?<title>.+?) [—-] (?<path>.+?):(?<start>[0-9]+)(?:-(?<end>[0-9]+))?\n(?<body>(?:  .*?(?:\n|$))*)"; "g"))
             | (reduce .captures[] as $capture ({}; . + {($capture.name): $capture.string})) as $finding
             | ($finding.priority_tag | priority_num) as $priority
             | (($finding.body // "") | gsub("(?m)^  "; "") | gsub("[[:space:]]+"; " ") | trim) as $details
@@ -953,8 +973,19 @@ normalize_native_review_result() {
               }
           ] as $normalized_findings
         | {
-            verdict: (if ($normalized_findings | length) == 0 then "APPROVE" else "REQUEST_CHANGES" end),
-            safe_to_merge: (($normalized_findings | length) == 0),
+            verdict: (
+              if ($normalized_findings | length) > 0 then
+                "REQUEST_CHANGES"
+              elif looks_like_safe_approve($summary) then
+                "APPROVE"
+              else
+                "REQUEST_CHANGES"
+              end
+            ),
+            safe_to_merge: (
+              ($normalized_findings | length) == 0
+              and looks_like_safe_approve($summary)
+            ),
             summary: (
               if ($summary | length) > 0 then
                 $summary

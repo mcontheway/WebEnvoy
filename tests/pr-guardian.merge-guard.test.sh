@@ -530,6 +530,19 @@ test_slim_pr_body_preserves_plain_text_in_kept_sections() {
   assert_file_contains "${slim_file}" "回滚时直接 revert 当前 PR。"
 }
 
+test_slim_pr_body_falls_back_to_plain_text_when_template_headings_are_missing() {
+  setup_case_dir "slim-pr-body-fallback"
+
+  PR_BODY=$'这是一段没有模板标题的 PR 说明。\n\n包含验收背景和验证线索。\n'
+  export PR_BODY
+
+  local slim_file="${TMP_DIR}/slim.md"
+  slim_pr_body > "${slim_file}"
+
+  assert_file_contains "${slim_file}" "这是一段没有模板标题的 PR 说明。"
+  assert_file_contains "${slim_file}" "包含验收背景和验证线索。"
+}
+
 test_fetch_issue_summary_keeps_body_without_checklist() {
   setup_case_dir "issue-summary"
 
@@ -572,6 +585,25 @@ EOF
 
   assert_file_contains "${issue_file}" "这里是一段背景正文。"
   assert_file_contains "${issue_file}" "需要保留这段验收说明。"
+}
+
+test_fetch_issue_summary_falls_back_to_plain_text_when_template_headings_are_missing() {
+  setup_case_dir "issue-summary-fallback"
+
+  ISSUE_NUMBER="123"
+  export ISSUE_NUMBER
+
+  MOCK_GH_ISSUE_VIEW_JSON="${TMP_DIR}/issue-view.json"
+  export MOCK_GH_ISSUE_VIEW_JSON
+  cat > "${MOCK_GH_ISSUE_VIEW_JSON}" <<'EOF'
+{"number":123,"title":"Guardian issue","body":"这是旧 issue 的纯正文描述。\n\n这里还有一段关闭线索。"}
+EOF
+
+  local issue_file="${TMP_DIR}/issue-summary.md"
+  fetch_issue_summary > "${issue_file}"
+
+  assert_file_contains "${issue_file}" "这是旧 issue 的纯正文描述。"
+  assert_file_contains "${issue_file}" "这里还有一段关闭线索。"
 }
 
 test_fetch_issue_summary_warns_when_declared_issue_cannot_be_loaded() {
@@ -1282,6 +1314,21 @@ EOF
   assert_file_contains "${result_file}" '"absolute_file_path":"/tmp/worktree/app.js"'
   assert_file_contains "${result_file}" '"start":2'
   assert_file_contains "${result_file}" '"end":2'
+}
+
+test_normalize_native_review_result_fails_closed_for_unstructured_negative_text() {
+  setup_case_dir "normalize-native-text-fail-closed"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+The new guardian path has a fail-open approval case for unstructured plain-text native reviews, and it can silently discard PR/Issue review context unless bodies match a narrow template. Either problem can lead to incorrect review outcomes on real PRs. Full review comments: - [P1] Fail closed when plain-text native reviews lack parsed findings — /tmp/worktree/scripts/pr-guardian.sh:956-957 If `codex review` falls back to plain text and the rejection does not include the exact `Review comment:` bullet format expected above, `$normalized_findings` stays empty and this branch converts the result to `APPROVE`.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
 }
 
 test_normalize_native_review_result_maps_native_text_approve_to_guardian_schema() {
@@ -2046,8 +2093,10 @@ main() {
   test_classify_review_profile_matches_expected_buckets
   test_slim_pr_body_keeps_only_review_relevant_sections
   test_slim_pr_body_preserves_plain_text_in_kept_sections
+  test_slim_pr_body_falls_back_to_plain_text_when_template_headings_are_missing
   test_fetch_issue_summary_keeps_body_without_checklist
   test_fetch_issue_summary_preserves_plain_text_in_kept_sections
+  test_fetch_issue_summary_falls_back_to_plain_text_when_template_headings_are_missing
   test_fetch_issue_summary_warns_when_declared_issue_cannot_be_loaded
   test_collect_spec_review_docs_includes_todo_baseline
   test_append_unique_line_uses_worktree_for_new_spec_files
@@ -2074,6 +2123,7 @@ main() {
   test_assert_required_review_context_available_fails_when_required_baseline_missing_everywhere
   test_normalize_native_review_result_maps_native_schema_to_guardian_schema
   test_normalize_native_review_result_maps_native_text_findings_to_guardian_schema
+  test_normalize_native_review_result_fails_closed_for_unstructured_negative_text
   test_normalize_native_review_result_maps_native_text_approve_to_guardian_schema
   test_run_codex_review_uses_context_budget_prompt_and_native_review_engine
   test_run_codex_review_accepts_plain_text_native_review_output
