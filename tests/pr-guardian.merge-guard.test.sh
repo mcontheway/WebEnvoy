@@ -569,7 +569,7 @@ test_append_unique_line_uses_worktree_for_new_spec_files() {
   restore_test_repo_root
 }
 
-test_append_unique_line_prefers_worktree_for_existing_repo_file() {
+test_append_unique_line_prefers_repo_for_reviewer_owned_baseline() {
   setup_case_dir "worktree-existing-file"
 
   local fake_repo_root="${TMP_DIR}/repo"
@@ -582,11 +582,12 @@ test_append_unique_line_prefers_worktree_for_existing_repo_file() {
 
   REPO_ROOT="${fake_repo_root}"
   WORKTREE_DIR="${fake_worktree_dir}"
-  export REPO_ROOT WORKTREE_DIR
+  CODE_REVIEW_FILE="${REPO_ROOT}/code_review.md"
+  export REPO_ROOT WORKTREE_DIR CODE_REVIEW_FILE
 
-  append_unique_line "${REPO_ROOT}/code_review.md" "${output_file}"
-  assert_file_contains "${output_file}" "${WORKTREE_DIR}/code_review.md"
-  assert_file_not_contains "${output_file}" "${REPO_ROOT}/code_review.md"
+  append_unique_line "${CODE_REVIEW_FILE}" "${output_file}"
+  assert_file_contains "${output_file}" "${CODE_REVIEW_FILE}"
+  assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/code_review.md"
 
   restore_test_repo_root
 }
@@ -759,7 +760,7 @@ test_build_review_prompt_includes_spec_upgrade_for_mixed_profile() {
   assert_file_contains "${PROMPT_RUN_FILE}" "Review profile: mixed_high_risk_spec_profile"
 }
 
-test_build_review_prompt_prefers_worktree_review_baseline_files() {
+test_build_review_prompt_prefers_repo_review_baseline_files() {
   setup_case_dir "worktree-review-baseline"
   setup_fake_repo_root
 
@@ -794,20 +795,19 @@ test_build_review_prompt_prefers_worktree_review_baseline_files() {
 
   build_review_prompt 312
 
-  assert_file_contains "${PROMPT_RUN_FILE}" "worktree addendum"
-  assert_file_contains "${PROMPT_RUN_FILE}" "worktree spec summary"
-  assert_file_not_contains "${PROMPT_RUN_FILE}" "repo addendum"
-  assert_file_not_contains "${PROMPT_RUN_FILE}" "repo spec summary"
+  assert_file_contains "${PROMPT_RUN_FILE}" "repo addendum"
+  assert_file_contains "${PROMPT_RUN_FILE}" "repo spec summary"
+  assert_file_not_contains "${PROMPT_RUN_FILE}" "worktree addendum"
+  assert_file_not_contains "${PROMPT_RUN_FILE}" "worktree spec summary"
 
   restore_test_repo_root
 }
 
-test_assert_required_review_context_available_accepts_worktree_only_review_summaries() {
-  setup_case_dir "worktree-only-review-summaries"
+test_assert_required_review_context_available_accepts_repo_only_review_summaries() {
+  setup_case_dir "repo-only-review-summaries"
   setup_fake_repo_root
 
   local fake_worktree_dir="${TMP_DIR}/worktree"
-  mkdir -p "${fake_worktree_dir}/docs/dev/review"
   mkdir -p "${fake_worktree_dir}/docs/dev/architecture"
   mkdir -p "${fake_worktree_dir}/docs/dev"
   cp "${REPO_ROOT}/vision.md" "${fake_worktree_dir}/vision.md"
@@ -817,11 +817,6 @@ test_assert_required_review_context_available_accepts_worktree_only_review_summa
   cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${fake_worktree_dir}/docs/dev/architecture/system-design.md"
   cp "${REPO_ROOT}/code_review.md" "${fake_worktree_dir}/code_review.md"
   cp "${REPO_ROOT}/spec_review.md" "${fake_worktree_dir}/spec_review.md"
-  rm -f "${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
-  rm -f "${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
-
-  printf '%s\n' "worktree addendum" > "${fake_worktree_dir}/docs/dev/review/guardian-review-addendum.md"
-  printf '%s\n' "worktree spec summary" > "${fake_worktree_dir}/docs/dev/review/guardian-spec-review-summary.md"
 
   WORKTREE_DIR="${fake_worktree_dir}"
   REVIEW_PROFILE="spec_review_profile"
@@ -1426,7 +1421,7 @@ main() {
   test_fetch_issue_summary_warns_when_declared_issue_cannot_be_loaded
   test_collect_spec_review_docs_includes_todo_baseline
   test_append_unique_line_uses_worktree_for_new_spec_files
-  test_append_unique_line_prefers_worktree_for_existing_repo_file
+  test_append_unique_line_prefers_repo_for_reviewer_owned_baseline
   test_append_unique_line_falls_back_to_repo_baseline_when_worktree_missing
   test_append_unique_line_skips_repo_file_when_worktree_missing
   test_mixed_spec_and_impl_changes_use_mixed_profile
@@ -1434,8 +1429,8 @@ main() {
   test_collect_spec_review_docs_skips_repo_only_changed_file_when_worktree_missing
   test_collect_context_docs_includes_branch_todo_when_present
   test_build_review_prompt_includes_spec_upgrade_for_mixed_profile
-  test_build_review_prompt_prefers_worktree_review_baseline_files
-  test_assert_required_review_context_available_accepts_worktree_only_review_summaries
+  test_build_review_prompt_prefers_repo_review_baseline_files
+  test_assert_required_review_context_available_accepts_repo_only_review_summaries
   test_assert_required_review_context_available_fails_when_required_baseline_missing_everywhere
   test_run_codex_review_uses_context_budget_prompt_and_schema_exec
   test_run_codex_review_continues_without_issue_summary_when_issue_lookup_fails

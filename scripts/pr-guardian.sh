@@ -216,14 +216,17 @@ resolve_review_path() {
   local value="$1"
 
   if [[ -n "${WORKTREE_DIR:-}" && -d "${WORKTREE_DIR}" ]] && [[ "${value}" == "${REPO_ROOT}/"* ]]; then
+    if is_reviewer_owned_baseline_path "${value}"; then
+      if [[ -f "${value}" ]]; then
+        printf '%s\n' "${value}"
+      fi
+      return 0
+    fi
+
     local relative_path="${value#${REPO_ROOT}/}"
     local worktree_path="${WORKTREE_DIR}/${relative_path}"
     if [[ -f "${worktree_path}" ]]; then
       printf '%s\n' "${worktree_path}"
-      return 0
-    fi
-    if is_reviewer_owned_baseline_path "${value}" && [[ -f "${value}" ]]; then
-      printf '%s\n' "${value}"
       return 0
     fi
     return 0
