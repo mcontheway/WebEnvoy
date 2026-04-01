@@ -172,6 +172,7 @@ prepare_pr_workspace() {
 
   WORKTREE_DIR="${TMP_DIR}/worktree"
   git -C "${REPO_ROOT}" worktree add --detach "${WORKTREE_DIR}" "origin/pr/${pr_number}" >/dev/null
+  WORKTREE_REVIEW_CONTEXT_FILE="${WORKTREE_DIR}/.guardian-review-context.md"
   hydrate_worktree_dependencies
 
   list_changed_files > "${CHANGED_FILES_FILE}"
@@ -630,6 +631,10 @@ relative_to_repo_root() {
     printf '%s\n' "${path#${WORKTREE_DIR}/}"
     return
   fi
+  if [[ -n "${BASELINE_SNAPSHOT_ROOT:-}" && "${path}" == "${BASELINE_SNAPSHOT_ROOT}/"* ]]; then
+    printf '%s\n' "${path#${BASELINE_SNAPSHOT_ROOT}/}"
+    return
+  fi
   printf '%s\n' "${path#${REPO_ROOT}/}"
 }
 
@@ -707,6 +712,65 @@ build_review_prompt() {
     printf 'prompt_bytes=%s\n' "$(wc -c < "${PROMPT_RUN_FILE}" | tr -d '[:space:]')"
     printf 'context_docs=%s\n' "${context_count}"
   } > "${REVIEW_STATS_FILE}"
+}
+
+prepare_reviewer_owned_baseline_overlay() {
+  local overlay_paths=(
+    "${REPO_ROOT}/vision.md"
+    "${REPO_ROOT}/AGENTS.md"
+    "${REPO_ROOT}/docs/dev/AGENTS.md"
+    "${REPO_ROOT}/docs/dev/roadmap.md"
+    "${REPO_ROOT}/docs/dev/architecture/system-design.md"
+    "${CODE_REVIEW_FILE}"
+    "${REVIEW_ADDENDUM_FILE}"
+  )
+  local value
+  local resolved_path
+  local relative_path
+  local target_path
+
+  if [[ "${REVIEW_PROFILE}" == "spec_review_profile" || "${REVIEW_PROFILE}" == "mixed_high_risk_spec_profile" ]]; then
+    overlay_paths+=("${SPEC_REVIEW_SUMMARY_FILE}" "${SPEC_REVIEW_FILE}")
+  fi
+
+  for value in "${overlay_paths[@]}"; do
+    resolved_path="$(resolve_review_path "${value}")"
+    [[ -n "${resolved_path}" && -f "${resolved_path}" ]] || continue
+    relative_path="${value#${REPO_ROOT}/}"
+    target_path="${WORKTREE_DIR}/${relative_path}"
+    if [[ "${resolved_path}" != "${target_path}" ]]; then
+      mkdir -p "$(dirname "${target_path}")"
+      cp "${resolved_path}" "${target_path}"
+    fi
+  done
+}
+
+write_review_context_overlay() {
+  cp "${PROMPT_RUN_FILE}" "${WORKTREE_REVIEW_CONTEXT_FILE}"
+}
+
+append_review_overlay_to_agents() {
+  local agents_file="${WORKTREE_DIR}/AGENTS.md"
+
+  [[ -f "${agents_file}" ]] || return 0
+
+  cat >> "${agents_file}" <<'EOF'
+
+## Guardian Review Overlay
+
+- 如果仓库根目录存在 `.guardian-review-context.md`，在展开其他上下文前先读取该文件，并按其中列出的最小上下文完成当前 guardian review。
+- 对 reviewer-owned baseline 与审查摘要，以当前 review worktree 中的文件快照为准；这些快照已由 guardian 预先对齐到目标基线或当前 PR 修改版本。
+- 不要默认展开与当前 PR 无关的 FR / architecture 全目录；仅在 `.guardian-review-context.md` 明确要求时再继续下钻。
+EOF
+}
+
+prepare_review_worktree_context() {
+  local pr_number="$1"
+
+  build_review_prompt "${pr_number}"
+  prepare_reviewer_owned_baseline_overlay
+  write_review_context_overlay
+  append_review_overlay_to_agents
 }
 
 normalize_review_path() {
@@ -851,18 +915,15 @@ validate_review_result_shape() {
 
 run_codex_review() {
   local pr_number="$1"
-  local prompt_content
   local native_error_file
 
-  build_review_prompt "${pr_number}"
-  prompt_content="$(cat "${PROMPT_RUN_FILE}")"
+  prepare_review_worktree_context "${pr_number}"
   native_error_file="${TMP_DIR}/codex-native-review.err"
 
   if codex exec \
     -C "${WORKTREE_DIR}" \
     -s read-only \
     -o "${RAW_RESULT_FILE}" \
-    "${prompt_content}" \
     review \
     --base "${BASE_REF}" >/dev/null 2>"${native_error_file}"; then
     normalize_native_review_result "${RAW_RESULT_FILE}" "${RESULT_FILE}"
