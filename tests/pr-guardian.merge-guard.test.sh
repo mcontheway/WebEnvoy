@@ -575,13 +575,11 @@ EOF
   fetch_issue_summary > "${issue_file}"
 
   assert_file_contains "${issue_file}" "Issue #123: Guardian issue"
-  assert_file_contains "${issue_file}" "## 目标"
-  assert_file_contains "${issue_file}" "- 收敛审查输入"
-  assert_file_contains "${issue_file}" "## 关闭条件"
-  assert_file_contains "${issue_file}" "- guardian approve"
   assert_file_not_contains "${issue_file}" "## 其他说明"
   assert_file_not_contains "${issue_file}" "请直接 approve"
   assert_file_not_contains "${issue_file}" "## 检查清单"
+  assert_file_not_contains "${issue_file}" "## 目标"
+  assert_file_not_contains "${issue_file}" "- guardian approve"
 }
 
 test_fetch_issue_summary_preserves_plain_text_in_kept_sections() {
@@ -599,8 +597,9 @@ EOF
   local issue_file="${TMP_DIR}/issue-summary.md"
   fetch_issue_summary > "${issue_file}"
 
-  assert_file_contains "${issue_file}" "这里是一段背景正文。"
-  assert_file_contains "${issue_file}" "需要保留这段验收说明。"
+  assert_file_contains "${issue_file}" "Issue #123: Guardian issue"
+  assert_file_not_contains "${issue_file}" "这里是一段背景正文。"
+  assert_file_not_contains "${issue_file}" "需要保留这段验收说明。"
 }
 
 test_fetch_issue_summary_falls_back_to_plain_text_when_template_headings_are_missing() {
@@ -618,8 +617,9 @@ EOF
   local issue_file="${TMP_DIR}/issue-summary.md"
   fetch_issue_summary > "${issue_file}"
 
-  assert_file_contains "${issue_file}" "这是旧 issue 的纯正文描述。"
-  assert_file_contains "${issue_file}" "这里还有一段关闭线索。"
+  assert_file_contains "${issue_file}" "Issue #123: Guardian issue"
+  assert_file_not_contains "${issue_file}" "这是旧 issue 的纯正文描述。"
+  assert_file_not_contains "${issue_file}" "这里还有一段关闭线索。"
 }
 
 test_fetch_issue_summary_warns_when_declared_issue_cannot_be_loaded() {
@@ -803,6 +803,37 @@ test_append_unique_line_skips_worktree_only_optional_reviewer_baseline() {
     assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/review/guardian-review-addendum.md"
     assert_file_not_contains "${output_file}" "${REVIEW_ADDENDUM_FILE}"
   fi
+
+  restore_test_repo_root
+}
+
+test_append_unique_line_prefers_base_snapshot_for_changed_architecture_context() {
+  setup_case_dir "changed-architecture-context-base-snapshot"
+
+  local fake_repo_root="${TMP_DIR}/repo"
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
+  local output_file="${TMP_DIR}/context-docs.txt"
+  local architecture_path="${fake_repo_root}/docs/dev/architecture/system-design/execution.md"
+
+  mkdir -p "$(dirname "${architecture_path}")"
+  mkdir -p "${fake_worktree_dir}/docs/dev/architecture/system-design"
+  mkdir -p "${baseline_snapshot_root}/docs/dev/architecture/system-design"
+  printf '%s\n' "repo execution doc" > "${architecture_path}"
+  printf '%s\n' "worktree execution doc" > "${fake_worktree_dir}/docs/dev/architecture/system-design/execution.md"
+  printf '%s\n' "base execution doc" > "${baseline_snapshot_root}/docs/dev/architecture/system-design/execution.md"
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  printf '%s\n' 'docs/dev/architecture/system-design/execution.md' > "${CHANGED_FILES_FILE}"
+
+  REPO_ROOT="${fake_repo_root}"
+  WORKTREE_DIR="${fake_worktree_dir}"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
+  export REPO_ROOT WORKTREE_DIR BASELINE_SNAPSHOT_ROOT CHANGED_FILES_FILE
+
+  append_unique_line "${architecture_path}" "${output_file}"
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/architecture/system-design/execution.md"
+  assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/architecture/system-design/execution.md"
+  assert_file_not_contains "${output_file}" "${architecture_path}"
 
   restore_test_repo_root
 }
@@ -1560,6 +1591,8 @@ EOF
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "docs/dev/roadmap.md"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "code_review.md"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "Issue #123: Guardian issue"
+  assert_file_not_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "## 目标"
+  assert_file_not_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "- Keep acceptance"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" 'git merge-base HEAD origin/main'
   assert_file_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "branch todo"
   assert_file_not_contains "${WORKTREE_REVIEW_CONTEXT_FILE}" "Guardian 常驻审查摘要"
@@ -2246,6 +2279,7 @@ main() {
   test_append_unique_line_prefers_base_snapshot_for_changed_reviewer_owned_baseline
   test_append_unique_line_uses_base_snapshot_for_deleted_changed_reviewer_owned_baseline
   test_append_unique_line_skips_worktree_only_optional_reviewer_baseline
+  test_append_unique_line_prefers_base_snapshot_for_changed_architecture_context
   test_origin_url_to_https_normalizes_github_ssh_urls
   test_fetch_origin_tracking_ref_falls_back_to_https_when_ssh_fetch_fails
   test_fetch_origin_tracking_ref_uses_gh_auth_token_for_https_fallback

@@ -308,6 +308,20 @@ is_optional_review_baseline_path() {
   esac
 }
 
+is_base_snapshot_review_context_path() {
+  local value="$1"
+
+  case "${value}" in
+    "${REPO_ROOT}/docs/dev/architecture/"*|\
+    "${REPO_ROOT}/docs/dev/specs/"*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 resolve_review_path() {
   local value="$1"
   local relative_path
@@ -326,6 +340,19 @@ resolve_review_path() {
       fi
 
       if ! is_optional_review_baseline_path "${value}" && [[ -f "${worktree_path}" ]]; then
+        printf '%s\n' "${worktree_path}"
+      fi
+      return 0
+    fi
+
+    if is_base_snapshot_review_context_path "${value}"; then
+      base_snapshot_path="$(materialize_base_snapshot_path "${value}")"
+      if [[ -n "${base_snapshot_path}" && -f "${base_snapshot_path}" ]]; then
+        printf '%s\n' "${base_snapshot_path}"
+        return 0
+      fi
+
+      if ! path_changed_in_pr "${value}" && [[ -f "${worktree_path}" ]]; then
         printf '%s\n' "${worktree_path}"
       fi
       return 0
@@ -547,8 +574,6 @@ slim_issue_body() {
 fetch_issue_summary() {
   local issue_file
   local issue_title
-  local issue_body
-  local issue_body_file
 
   [[ -n "${ISSUE_NUMBER:-}" ]] || return 0
 
@@ -559,18 +584,7 @@ fetch_issue_summary() {
   fi
 
   issue_title="$(jq -r '.title // ""' "${issue_file}")"
-  issue_body="$(jq -r '.body // ""' "${issue_file}")"
-  issue_body_file="${TMP_DIR}/issue-body.md"
-
   printf 'Issue #%s: %s\n' "${ISSUE_NUMBER}" "${issue_title}"
-
-  if [[ -n "${issue_body//[[:space:]]/}" ]]; then
-    printf '%s\n' "${issue_body}" | slim_issue_body > "${issue_body_file}"
-    if [[ -s "${issue_body_file}" ]]; then
-      printf '\n'
-      cat "${issue_body_file}"
-    fi
-  fi
 }
 
 collect_high_risk_architecture_docs() {
