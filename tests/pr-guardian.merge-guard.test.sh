@@ -216,6 +216,44 @@ setup_case_dir() {
   export MOCK_GH_REVIEWS_REQUIRE_PAGINATE
 }
 
+setup_fake_repo_root() {
+  local fake_repo_root="${TMP_DIR}/repo"
+
+  mkdir -p "${fake_repo_root}/docs/dev/review"
+  mkdir -p "${fake_repo_root}/docs/dev/architecture/system-design"
+  mkdir -p "${fake_repo_root}/docs/dev/specs"
+  mkdir -p "${fake_repo_root}/scripts"
+
+  cp "${TEST_REPO_ROOT}/vision.md" "${fake_repo_root}/vision.md"
+  cp "${TEST_REPO_ROOT}/AGENTS.md" "${fake_repo_root}/AGENTS.md"
+  cp "${TEST_REPO_ROOT}/docs/dev/AGENTS.md" "${fake_repo_root}/docs/dev/AGENTS.md"
+  cp "${TEST_REPO_ROOT}/docs/dev/roadmap.md" "${fake_repo_root}/docs/dev/roadmap.md"
+  cp "${TEST_REPO_ROOT}/docs/dev/architecture/system-design.md" "${fake_repo_root}/docs/dev/architecture/system-design.md"
+  cp "${TEST_REPO_ROOT}/docs/dev/review/guardian-review-addendum.md" "${fake_repo_root}/docs/dev/review/guardian-review-addendum.md"
+  cp "${TEST_REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md" "${fake_repo_root}/docs/dev/review/guardian-spec-review-summary.md"
+  cp "${TEST_REPO_ROOT}/code_review.md" "${fake_repo_root}/code_review.md"
+  cp "${TEST_REPO_ROOT}/spec_review.md" "${fake_repo_root}/spec_review.md"
+  cp "${TEST_REPO_ROOT}/scripts/pr-review-result.schema.json" "${fake_repo_root}/scripts/pr-review-result.schema.json"
+
+  REPO_ROOT="${fake_repo_root}"
+  SCHEMA_FILE="${REPO_ROOT}/scripts/pr-review-result.schema.json"
+  CODE_REVIEW_FILE="${REPO_ROOT}/code_review.md"
+  SPEC_REVIEW_FILE="${REPO_ROOT}/spec_review.md"
+  REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
+  SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+  export REPO_ROOT SCHEMA_FILE CODE_REVIEW_FILE SPEC_REVIEW_FILE REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE
+}
+
+restore_test_repo_root() {
+  REPO_ROOT="${TEST_REPO_ROOT}"
+  SCHEMA_FILE="${REPO_ROOT}/scripts/pr-review-result.schema.json"
+  CODE_REVIEW_FILE="${REPO_ROOT}/code_review.md"
+  SPEC_REVIEW_FILE="${REPO_ROOT}/spec_review.md"
+  REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
+  SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+  export REPO_ROOT SCHEMA_FILE CODE_REVIEW_FILE SPEC_REVIEW_FILE REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE
+}
+
 setup_mock_npm() {
   local mock_bin="${TEST_TMP_DIR}/bin"
 
@@ -458,8 +496,7 @@ test_append_unique_line_uses_worktree_for_new_spec_files() {
   assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-9999-new-spec/plan.md"
   assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-9999-new-spec/contracts/runtime.json"
 
-  REPO_ROOT="${TEST_REPO_ROOT}"
-  export REPO_ROOT
+  restore_test_repo_root
 }
 
 test_mixed_spec_and_impl_changes_use_mixed_profile() {
@@ -478,6 +515,7 @@ test_mixed_spec_and_impl_changes_use_mixed_profile() {
 
 test_collect_spec_review_docs_includes_changed_architecture_and_research() {
   setup_case_dir "spec-review-extra-docs"
+  setup_fake_repo_root
 
   REVIEW_PROFILE="spec_review_profile"
   export REVIEW_PROFILE
@@ -499,6 +537,38 @@ test_collect_spec_review_docs_includes_changed_architecture_and_research() {
 
   assert_file_contains "${output_file}" "${REPO_ROOT}/docs/dev/specs/FR-0002-extra-docs/research.md"
   assert_file_contains "${output_file}" "${REPO_ROOT}/docs/dev/architecture/system-design/execution.md"
+
+  restore_test_repo_root
+}
+
+test_build_review_prompt_includes_spec_upgrade_for_mixed_profile() {
+  setup_case_dir "mixed-profile-prompt"
+
+  REVIEW_PROFILE="mixed_high_risk_spec_profile"
+  PR_TITLE="mixed review prompt"
+  PR_URL="https://example.test/pr/312"
+  BASE_REF="main"
+  HEAD_SHA="abc123"
+  export REVIEW_PROFILE PR_TITLE PR_URL BASE_REF HEAD_SHA
+
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
+  REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE
+
+  printf '%s\n' 'docs/dev/specs/FR-0001-runtime-cli-entry/spec.md' > "${CHANGED_FILES_FILE}"
+  printf '%s\n' 'scripts/pr-guardian.sh' >> "${CHANGED_FILES_FILE}"
+  printf '%s\n' "${REVIEW_ADDENDUM_FILE}" > "${CONTEXT_DOCS_FILE}"
+  : > "${SLIM_PR_FILE}"
+  : > "${ISSUE_SUMMARY_FILE}"
+
+  build_review_prompt 312
+
+  assert_file_contains "${PROMPT_RUN_FILE}" "Spec review 升级摘要："
+  assert_file_contains "${PROMPT_RUN_FILE}" "Review profile: mixed_high_risk_spec_profile"
 }
 
 test_run_codex_review_uses_context_budget_prompt_and_schema_exec() {
@@ -993,6 +1063,7 @@ main() {
   test_append_unique_line_uses_worktree_for_new_spec_files
   test_mixed_spec_and_impl_changes_use_mixed_profile
   test_collect_spec_review_docs_includes_changed_architecture_and_research
+  test_build_review_prompt_includes_spec_upgrade_for_mixed_profile
   test_run_codex_review_uses_context_budget_prompt_and_schema_exec
 
   assert_pass run_all_checks_pass_with_payload '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'

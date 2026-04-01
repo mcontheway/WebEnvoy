@@ -415,7 +415,7 @@ build_review_prompt() {
     cat "${REVIEW_ADDENDUM_FILE}"
     printf '\n'
 
-    if [[ "${REVIEW_PROFILE}" == "spec_review_profile" ]]; then
+    if [[ "${REVIEW_PROFILE}" == "spec_review_profile" || "${REVIEW_PROFILE}" == "mixed_high_risk_spec_profile" ]]; then
       printf 'Spec review 升级摘要：\n'
       cat "${SPEC_REVIEW_SUMMARY_FILE}"
       printf '\n'
