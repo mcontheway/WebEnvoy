@@ -819,8 +819,10 @@ validate_review_result_shape() {
 
 run_codex_review() {
   local pr_number="$1"
+  local prompt_content
 
   build_review_prompt "${pr_number}"
+  prompt_content="$(cat "${PROMPT_RUN_FILE}")"
 
   codex exec \
     -C "${WORKTREE_DIR}" \
@@ -828,7 +830,7 @@ run_codex_review() {
     -o "${RAW_RESULT_FILE}" \
     review \
     --base "${BASE_REF}" \
-    - < "${PROMPT_RUN_FILE}" >/dev/null
+    "${prompt_content}" >/dev/null
 
   normalize_native_review_result "${RAW_RESULT_FILE}" "${RESULT_FILE}"
   validate_review_result_shape "${RESULT_FILE}"

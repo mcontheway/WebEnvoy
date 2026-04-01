@@ -314,7 +314,11 @@ echo "$*" >> "${MOCK_CODEX_CALLS_LOG:?missing MOCK_CODEX_CALLS_LOG}"
 
 if [[ "${1:-}" == "exec" ]]; then
   prompt_file="${MOCK_CODEX_PROMPT_CAPTURE:?missing MOCK_CODEX_PROMPT_CAPTURE}"
-  cat > "${prompt_file}"
+  if [[ $# -gt 0 ]]; then
+    printf '%s' "${!#}" > "${prompt_file}"
+  else
+    : > "${prompt_file}"
+  fi
 
   output_file=""
   while [[ $# -gt 0 ]]; do
@@ -1197,7 +1201,7 @@ EOF
 
   assert_pass run_codex_review 1
   assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "exec -C"
-  assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "review --base main -"
+  assert_file_contains "${MOCK_CODEX_CALLS_LOG}" "review --base main"
   assert_file_not_contains "${MOCK_CODEX_CALLS_LOG}" "--output-schema"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "Guardian 常驻审查摘要"
   assert_file_contains "${MOCK_CODEX_PROMPT_CAPTURE}" "vision.md"
