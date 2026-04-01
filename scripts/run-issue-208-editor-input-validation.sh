@@ -8,6 +8,10 @@ VALIDATION_TEXT="${WEBENVOY_208_VALIDATION_TEXT:-WebEnvoy editor_input validatio
 APPROVER="${WEBENVOY_208_APPROVER:-qa-reviewer}"
 APPROVED_AT="${WEBENVOY_208_APPROVED_AT:-2026-03-30T00:00:00Z}"
 
+json_quote() {
+  node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$1"
+}
+
 if [[ -z "${TAB_ID}" ]]; then
   echo "WEBENVOY_208_TAB_ID is required" >&2
   exit 1
@@ -30,11 +34,11 @@ PARAMS=$(cat <<JSON
     "requested_execution_mode": "live_write",
     "risk_state": "allowed",
     "validation_action": "editor_input",
-    "validation_text": ${VALIDATION_TEXT@Q},
+    "validation_text": $(json_quote "${VALIDATION_TEXT}"),
     "approval_record": {
       "approved": true,
-      "approver": ${APPROVER@Q},
-      "approved_at": ${APPROVED_AT@Q},
+      "approver": $(json_quote "${APPROVER}"),
+      "approved_at": $(json_quote "${APPROVED_AT}"),
       "checks": {
         "target_domain_confirmed": true,
         "target_tab_confirmed": true,

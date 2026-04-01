@@ -200,7 +200,7 @@ describe("prepareOfficialChromeRuntime", () => {
     );
   });
 
-  it("keeps readiness pending when bridge reports not_connected before bootstrap confirmation", async () => {
+  it("fails with explicit diagnostics when bridge readiness omits execution-surface signals", async () => {
     const readStatus = vi
       .fn()
       .mockResolvedValueOnce({
@@ -210,8 +210,8 @@ describe("prepareOfficialChromeRuntime", () => {
         profileState: "ready",
         runtimeReadiness: "pending",
         identityBindingState: "bound",
-        bootstrapState: "pending",
-        transportState: "ready",
+        bootstrapState: "not_started",
+        transportState: "not_connected",
         lockHeld: true
       })
       .mockResolvedValueOnce({
@@ -221,25 +221,18 @@ describe("prepareOfficialChromeRuntime", () => {
         profileState: "ready",
         runtimeReadiness: "pending",
         identityBindingState: "bound",
-        bootstrapState: "pending",
-        transportState: "ready",
+        bootstrapState: "not_started",
+        transportState: "not_connected",
         lockHeld: true
       });
     const bridge = {
       runCommand: vi.fn()
-        .mockResolvedValueOnce({
-          ok: false,
-          error: {
-            code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
-            message: "runtime bootstrap 尚未获得执行面确认"
-          }
-        })
         .mockResolvedValue({
           ok: true,
           payload: {
-            transport_state: "not_connected",
-            bootstrap_state: "not_started"
+            message: "pong"
           },
+          relay_path: "host>background>content-script>background>host",
           error: null
         })
     };
@@ -265,13 +258,16 @@ describe("prepareOfficialChromeRuntime", () => {
       code: "ERR_RUNTIME_UNAVAILABLE",
       details: {
         ability_id: "xhs.search",
-        runtime_readiness: "pending",
-        identity_binding_state: "bound",
-        bootstrap_state: "not_started",
-        transport_state: "not_connected",
-        reason: "ERR_RUNTIME_TRANSPORT_NOT_READY"
+        reason: "ERR_RUNTIME_READINESS_SIGNAL_MISSING",
+        relay_path: "host>background>content-script>background>host"
       }
     });
+    expect(bridge.runCommand).toHaveBeenCalledTimes(1);
+    expect(bridge.runCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "runtime.readiness"
+      })
+    );
   });
 
   it.each([

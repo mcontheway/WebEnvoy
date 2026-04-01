@@ -144,6 +144,31 @@ const readOfficialChromeRuntimeReadinessViaBridge = async (input: {
   }
 
   const payload = asObject(readinessResult.payload);
+  const hasTransportState =
+    payload?.transport_state === "disconnected" ||
+    payload?.transport_state === "ready" ||
+    payload?.transport_state === "not_connected";
+  const hasBootstrapState =
+    payload?.bootstrap_state === "not_started" ||
+    payload?.bootstrap_state === "pending" ||
+    payload?.bootstrap_state === "ready" ||
+    payload?.bootstrap_state === "stale" ||
+    payload?.bootstrap_state === "failed";
+  if (!hasTransportState && !hasBootstrapState) {
+    throw new CliError(
+      "ERR_RUNTIME_UNAVAILABLE",
+      "official Chrome runtime readiness 缺少执行面信号",
+      {
+        retryable: true,
+        details: {
+          ability_id: input.consumerId,
+          stage: "execution",
+          reason: "ERR_RUNTIME_READINESS_SIGNAL_MISSING",
+          relay_path: readinessResult.relay_path
+        }
+      }
+    );
+  }
   const transportState =
     payload?.transport_state === "disconnected"
       ? "disconnected"
@@ -383,6 +408,35 @@ export const prepareOfficialChromeRuntime = async (input: {
       },
       retryable: false
     });
+  }
+
+  if (
+    lockHeld &&
+    identityBindingState === "bound" &&
+    runtimeReadiness !== "ready" &&
+    bootstrapState !== "stale" &&
+    transportState !== "ready"
+  ) {
+    const bridgedReadiness = await readOfficialChromeRuntimeReadinessViaBridge({
+      lockHeld,
+      context: input.context,
+      bridge: input.bridge,
+      consumerId: input.consumerId,
+      identityBindingState
+    });
+    runtimeReadiness = bridgedReadiness.runtimeReadiness;
+    identityBindingState = bridgedReadiness.identityBindingState;
+    bootstrapState = bridgedReadiness.bootstrapState;
+    transportState = bridgedReadiness.transportState;
+    if (runtimeReadiness === "ready") {
+      return applyReadinessToStatus(status, {
+        runtimeReadiness,
+        identityBindingState,
+        bootstrapState,
+        transportState,
+        lockHeld
+      });
+    }
   }
 
   if (
