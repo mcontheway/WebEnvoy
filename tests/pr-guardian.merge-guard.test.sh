@@ -1357,6 +1357,50 @@ test_collect_context_docs_includes_proposed_changed_trusted_baselines() {
   restore_test_repo_root
 }
 
+test_build_review_prompt_surfaces_deleted_trusted_baselines() {
+  setup_case_dir "deleted-trusted-baseline-prompt"
+  setup_fake_repo_root
+
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
+  mkdir -p "${fake_worktree_dir}/docs/dev/review"
+  mkdir -p "${baseline_snapshot_root}/docs/dev/review"
+
+  printf '%s\n' "base code review" > "${baseline_snapshot_root}/code_review.md"
+  printf '%s\n' "base spec summary" > "${baseline_snapshot_root}/docs/dev/review/guardian-spec-review-summary.md"
+
+  REVIEW_PROFILE="mixed_high_risk_spec_profile"
+  PR_TITLE="deleted baseline"
+  PR_URL="https://example.test/pr/312"
+  BASE_REF="main"
+  HEAD_SHA="abc123"
+  WORKTREE_DIR="${fake_worktree_dir}"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
+  export REVIEW_PROFILE PR_TITLE PR_URL BASE_REF HEAD_SHA WORKTREE_DIR BASELINE_SNAPSHOT_ROOT
+
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
+  REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE
+
+  printf '%s\n' 'code_review.md' > "${CHANGED_FILES_FILE}"
+  printf '%s\n' 'docs/dev/review/guardian-spec-review-summary.md' >> "${CHANGED_FILES_FILE}"
+  collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
+  : > "${SLIM_PR_FILE}"
+  : > "${ISSUE_SUMMARY_FILE}"
+
+  build_review_prompt 312
+
+  assert_file_contains "${PROMPT_RUN_FILE}" "当前 PR 删除了以下审查基线文档"
+  assert_file_contains "${PROMPT_RUN_FILE}" "- code_review.md"
+  assert_file_contains "${PROMPT_RUN_FILE}" "- docs/dev/review/guardian-spec-review-summary.md"
+
+  restore_test_repo_root
+}
+
 test_build_review_prompt_includes_spec_upgrade_for_mixed_profile() {
   setup_case_dir "mixed-profile-prompt"
 
@@ -1755,6 +1799,21 @@ test_normalize_native_review_result_fails_closed_for_colon_caveat() {
   local result_file="${TMP_DIR}/guardian-review.json"
   cat > "${raw_file}" <<'EOF'
 I did not identify any actionable bugs in the docs: the merge guard still approves an ambiguous native review and should not be merged.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
+test_normalize_native_review_result_fails_closed_for_unless_caveat() {
+  setup_case_dir "normalize-native-text-unless-caveat"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+The patch does not affect code paths unless the review baseline file is deleted, in which case guardian may approve against stale rules.
 EOF
 
   assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
@@ -2486,6 +2545,7 @@ main() {
   test_collect_context_docs_includes_changed_spec_review_summary_for_mixed_profile
   test_collect_context_docs_includes_proposed_changed_guardian_summaries
   test_collect_context_docs_includes_proposed_changed_trusted_baselines
+  test_build_review_prompt_surfaces_deleted_trusted_baselines
   test_build_review_prompt_includes_spec_upgrade_for_mixed_profile
   test_build_review_prompt_sanitizes_pr_title
   test_build_review_prompt_prefers_base_snapshot_review_baseline_files
@@ -2501,6 +2561,7 @@ main() {
   test_normalize_native_review_result_maps_native_text_approve_to_guardian_schema
   test_normalize_native_review_result_fails_closed_for_ambiguous_safe_phrase
   test_normalize_native_review_result_fails_closed_for_colon_caveat
+  test_normalize_native_review_result_fails_closed_for_unless_caveat
   test_add_fallback_finding_for_unstructured_rejection_creates_actionable_output
   test_run_codex_review_uses_context_budget_prompt_and_native_review_engine
   test_run_codex_review_accepts_plain_text_native_review_output

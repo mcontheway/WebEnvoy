@@ -524,6 +524,36 @@ append_changed_proposed_review_line() {
   append_proposed_review_line "${value}" "${output_file}"
 }
 
+collect_changed_trusted_baseline_paths() {
+  local output_file="$1"
+  local changed_files_file="${2:-${CHANGED_FILES_FILE:-}}"
+  local trusted_baseline_paths=(
+    "${REPO_ROOT}/vision.md"
+    "${REPO_ROOT}/AGENTS.md"
+    "${REPO_ROOT}/docs/dev/AGENTS.md"
+    "${REPO_ROOT}/docs/dev/roadmap.md"
+    "${REPO_ROOT}/docs/dev/architecture/system-design.md"
+    "${REVIEW_ADDENDUM_FILE}"
+    "${CODE_REVIEW_FILE}"
+  )
+  local baseline_path
+  local relative_path
+
+  : > "${output_file}"
+  [[ -n "${changed_files_file}" && -f "${changed_files_file}" ]] || return 0
+
+  if [[ "${REVIEW_PROFILE}" == "spec_review_profile" || "${REVIEW_PROFILE}" == "mixed_high_risk_spec_profile" ]]; then
+    trusted_baseline_paths+=("${SPEC_REVIEW_SUMMARY_FILE}" "${SPEC_REVIEW_FILE}")
+  fi
+
+  for baseline_path in "${trusted_baseline_paths[@]}"; do
+    [[ "${baseline_path}" == "${REPO_ROOT}/"* ]] || continue
+    relative_path="${baseline_path#${REPO_ROOT}/}"
+    grep -Fxq -- "${relative_path}" "${changed_files_file}" || continue
+    printf '%s\n' "${baseline_path}" >> "${output_file}"
+  done
+}
+
 append_required_review_baseline() {
   local output_file="$1"
 
@@ -800,15 +830,7 @@ collect_spec_review_docs() {
 collect_context_docs() {
   local changed_files_file="$1"
   local output_file="$2"
-  local trusted_baseline_paths=(
-    "${REPO_ROOT}/vision.md"
-    "${REPO_ROOT}/AGENTS.md"
-    "${REPO_ROOT}/docs/dev/AGENTS.md"
-    "${REPO_ROOT}/docs/dev/roadmap.md"
-    "${REPO_ROOT}/docs/dev/architecture/system-design.md"
-    "${REVIEW_ADDENDUM_FILE}"
-    "${CODE_REVIEW_FILE}"
-  )
+  local changed_trusted_baselines_file="${TMP_DIR}/changed-trusted-baselines.txt"
   local baseline_path
 
   : > "${output_file}"
@@ -816,14 +838,11 @@ collect_context_docs() {
   append_unique_line "${REVIEW_ADDENDUM_FILE}" "${output_file}"
   append_unique_line "${CODE_REVIEW_FILE}" "${output_file}"
   append_unique_line "${SPEC_REVIEW_SUMMARY_FILE}" "${output_file}"
-
-  if [[ "${REVIEW_PROFILE}" == "spec_review_profile" || "${REVIEW_PROFILE}" == "mixed_high_risk_spec_profile" ]]; then
-    trusted_baseline_paths+=("${SPEC_REVIEW_SUMMARY_FILE}" "${SPEC_REVIEW_FILE}")
-  fi
-
-  for baseline_path in "${trusted_baseline_paths[@]}"; do
+  collect_changed_trusted_baseline_paths "${changed_trusted_baselines_file}" "${changed_files_file}"
+  while IFS= read -r baseline_path; do
+    [[ -n "${baseline_path}" ]] || continue
     append_changed_proposed_review_line "${baseline_path}" "${output_file}" "${changed_files_file}"
-  done
+  done < "${changed_trusted_baselines_file}"
 
   case "${REVIEW_PROFILE}" in
     default_impl_profile)
@@ -852,6 +871,11 @@ build_review_prompt() {
   local spec_review_summary_path
   local proposed_review_addendum_path=""
   local proposed_spec_review_summary_path=""
+  local changed_trusted_baselines_file="${TMP_DIR}/changed-trusted-baselines.txt"
+  local deleted_trusted_baselines_file="${TMP_DIR}/deleted-trusted-baselines.txt"
+  local changed_baseline_path
+  local changed_baseline_relative_path
+  local changed_baseline_worktree_path
 
   context_count="$(grep -c . "${CONTEXT_DOCS_FILE}" 2>/dev/null || true)"
   safe_pr_title="$(sanitize_user_prompt_line "${PR_TITLE}")"
@@ -863,6 +887,17 @@ build_review_prompt() {
   if path_changed_in_pr "${SPEC_REVIEW_SUMMARY_FILE}"; then
     proposed_spec_review_summary_path="$(resolve_proposed_review_path "${SPEC_REVIEW_SUMMARY_FILE}")"
   fi
+  collect_changed_trusted_baseline_paths "${changed_trusted_baselines_file}" "${CHANGED_FILES_FILE}"
+  : > "${deleted_trusted_baselines_file}"
+  while IFS= read -r changed_baseline_path; do
+    [[ -n "${changed_baseline_path}" ]] || continue
+    [[ "${changed_baseline_path}" == "${REPO_ROOT}/"* ]] || continue
+    changed_baseline_relative_path="${changed_baseline_path#${REPO_ROOT}/}"
+    changed_baseline_worktree_path="${WORKTREE_DIR:-}/${changed_baseline_relative_path}"
+    if [[ ! -f "${changed_baseline_worktree_path}" ]]; then
+      printf '%s\n' "${changed_baseline_relative_path}" >> "${deleted_trusted_baselines_file}"
+    fi
+  done < "${changed_trusted_baselines_file}"
 
   {
     printf '你正在为 WebEnvoy 仓库审查 PR #%s。\n' "${pr_number}"
@@ -934,6 +969,14 @@ build_review_prompt() {
         [[ -n "${context_doc}" ]] || continue
         printf -- '- %s\n' "$(format_review_context_reference "${context_doc}")"
       done < "${CONTEXT_DOCS_FILE}"
+    fi
+
+    if [[ -s "${deleted_trusted_baselines_file}" ]]; then
+      printf '\n当前 PR 删除了以下审查基线文档；不存在 proposed full doc，删除本身必须被视为被审改动：\n'
+      while IFS= read -r deleted_baseline; do
+        [[ -n "${deleted_baseline}" ]] || continue
+        printf -- '- %s\n' "${deleted_baseline}"
+      done < "${deleted_trusted_baselines_file}"
     fi
 
     printf '\n请在当前仓库工作树中完成审查，并将当前分支相对 origin/%s 的差异视为唯一审查目标。\n' "${BASE_REF}"
@@ -1105,6 +1148,8 @@ normalize_native_review_result() {
       sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
     def has_contrast($sentence):
       ($sentence | ascii_downcase | test("\\b(but|however|although|except|yet|still|though|nevertheless)\\b"));
+    def has_condition($sentence):
+      ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b"));
     def strong_safe_sentence($sentence):
       ($sentence | ascii_downcase) as $lower
       | ($lower | test("did not identify any actionable bugs"))
@@ -1122,6 +1167,7 @@ normalize_native_review_result() {
           true
         else
           ((has_contrast($trimmed) | not)
+          and (has_condition($trimmed) | not)
           and (strong_safe_sentence($trimmed) or neutral_safe_sentence($trimmed)))
         end;
     def looks_like_safe_approve($summary):
