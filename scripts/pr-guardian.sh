@@ -1244,11 +1244,16 @@ normalize_native_review_result() {
       ($sentence | ascii_downcase) as $lower
       | ($lower | test("did not identify any actionable bugs"))
         or ($lower | test("no blocking issues found"))
+        or ($lower | test("no merge blockers? found"))
+        or ($lower | test("don.t see any merge blockers?"))
+        or ($lower | test("do not see any merge blockers?"))
         or ($lower | test("patch is correct"))
         or ($lower | test("no actionable issues"))
         or ($lower | test("\\bno issues found\\b"))
         or ($lower | test("\\bno issues were found\\b"))
         or ($lower | test("\\bno problems found\\b"))
+        or ($lower | test("\\blgtm\\b"))
+        or ($lower | test("looks good to me"))
         or ($lower | test("\\bi didn.t find any problems\\b"))
         or ($lower | test("\\bdid not find any problems\\b"))
         or ($lower | test("\\bno issues detected\\b"));

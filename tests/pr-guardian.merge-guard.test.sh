@@ -1955,6 +1955,36 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":true'
 }
 
+test_normalize_native_review_result_accepts_merge_blocker_free_approve_phrase() {
+  setup_case_dir "normalize-native-text-approve-merge-blockers"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+I don't see any merge blockers.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
+test_normalize_native_review_result_accepts_lgtm_phrase() {
+  setup_case_dir "normalize-native-text-approve-lgtm"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+LGTM.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
 test_normalize_native_review_result_fails_closed_for_other_than_caveat() {
   setup_case_dir "normalize-native-text-other-than-caveat"
 
@@ -2748,6 +2778,8 @@ main() {
   test_normalize_native_review_result_fails_closed_for_unstructured_negative_text
   test_normalize_native_review_result_maps_native_text_approve_to_guardian_schema
   test_normalize_native_review_result_accepts_common_plain_text_approve_phrases
+  test_normalize_native_review_result_accepts_merge_blocker_free_approve_phrase
+  test_normalize_native_review_result_accepts_lgtm_phrase
   test_normalize_native_review_result_fails_closed_for_other_than_caveat
   test_normalize_native_review_result_fails_closed_for_ambiguous_safe_phrase
   test_normalize_native_review_result_fails_closed_for_colon_caveat
