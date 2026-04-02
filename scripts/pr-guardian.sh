@@ -57,6 +57,12 @@ origin_url_to_https() {
   return 1
 }
 
+build_noninteractive_ssh_command() {
+  local ssh_command="${GIT_SSH_COMMAND:-ssh}"
+
+  printf '%s -o BatchMode=yes -o StrictHostKeyChecking=accept-new\n' "${ssh_command}"
+}
+
 fetch_origin_tracking_ref() {
   local source_ref="$1"
   local target_ref="$2"
@@ -73,7 +79,7 @@ fetch_origin_tracking_ref() {
   fi
   fetch_cmd+=(origin "${refspec}")
 
-  if GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new}" \
+  if GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="$(build_noninteractive_ssh_command)" \
     "${fetch_cmd[@]}" >/dev/null 2>&1; then
     return 0
   fi
@@ -461,11 +467,6 @@ resolve_review_path() {
         printf '%s\n' "${base_snapshot_path}"
         return 0
       fi
-
-      if ! path_changed_in_pr "${value}" && [[ -f "${value}" ]]; then
-        printf '%s\n' "${value}"
-      fi
-
       return 0
     fi
 
@@ -513,6 +514,7 @@ materialize_base_snapshot_path() {
   local value="$1"
   local relative_path
   local snapshot_path
+  local base_branch_ref=""
 
   [[ "${value}" == "${REPO_ROOT}/"* ]] || return 0
   relative_path="${value#${REPO_ROOT}/}"
@@ -532,6 +534,13 @@ materialize_base_snapshot_path() {
 
   if [[ -n "${MERGE_BASE_SHA:-}" ]] && git -C "${REPO_ROOT}" cat-file -e "${MERGE_BASE_SHA}:${relative_path}" 2>/dev/null; then
     git -C "${REPO_ROOT}" show "${MERGE_BASE_SHA}:${relative_path}" > "${snapshot_path}"
+    printf '%s\n' "${snapshot_path}"
+    return 0
+  fi
+
+  base_branch_ref="origin/${BASE_REF:-}"
+  if [[ -n "${BASE_REF:-}" ]] && git -C "${REPO_ROOT}" cat-file -e "${base_branch_ref}:${relative_path}" 2>/dev/null; then
+    git -C "${REPO_ROOT}" show "${base_branch_ref}:${relative_path}" > "${snapshot_path}"
     printf '%s\n' "${snapshot_path}"
     return 0
   fi
@@ -724,7 +733,34 @@ extract_issue_number_from_pr_body() {
 extract_issue_numbers_from_pr_body() {
   local explicit_issue=""
 
-  printf '%s\n' "${PR_BODY}" | perl -0ne '
+  {
+    printf '%s\n' "${PR_BODY}" | awk '
+      BEGIN {
+        keep = 0
+        saw_issue_section = 0
+      }
+      /^## / {
+        keep = ($0 == "## 关联事项")
+        if (keep) {
+          saw_issue_section = 1
+          print
+        }
+        next
+      }
+      keep {
+        print
+      }
+      END {
+        if (saw_issue_section != 1) {
+          exit 1
+        }
+      }
+    ' || slim_pr_body
+  } | perl -0ne '
+    s/<!--.*?-->//sg;
+    s/^```.*?^```[ \t]*\r?\n?//msg;
+    s/^\s*>.*\n?//mg;
+
     my %seen;
     my @ordered;
 
@@ -1845,11 +1881,14 @@ normalize_native_review_result() {
     | if $parts == null then
         error("native review text parse failed")
       else
-        (($parts.summary // "") | gsub("[[:space:]]+"; " ") | trim) as $summary
-        | (($parts.comments // "") | trim) as $comments
+        (($parts.summary // "") | trim) as $summary_block
+        | (($summary_block | capture("(?s)^(?<summary>.*?)(?:[[:space:]]+Full review comments:[[:space:]]*(?<inline_comments>(?:[-*]|[0-9]+\\.).*))?$")?) // {summary: $summary_block, inline_comments: ""}) as $summary_parts
+        | (($summary_parts.summary // "") | gsub("[[:space:]]+"; " ") | trim) as $summary
+        | ([($parts.comments // ""), ($summary_parts.inline_comments // "")] | map(trim) | map(select(length > 0)) | join("\n")) as $comments
         | ([($comments | match("(?m)^(?:[-*]|[0-9]+\\.) \\[(?<priority_tag>P[0-3])\\] (?<title>.+?) [—-] (?<path>.+?):(?<start>[0-9]+)(?:-(?<end>[0-9]+))?\n(?<body>(?:  .*?(?:\n|$))*)"; "g"))] | length) as $strict_priority_finding_count
         | (($comments | test("(?m)^(?:[-*]|[0-9]+\\.) \\[(P[0-3])\\] ")) and ($strict_priority_finding_count == 0)) as $has_unparsed_priority_bullets
-        | [
+        | (
+            [
             ($comments | match("(?m)^(?:[-*]|[0-9]+\\.) \\[(?<priority_tag>P[0-3])\\] (?<title>.+?) [—-] (?<path>.+?):(?<start>[0-9]+)(?:-(?<end>[0-9]+))?\n(?<body>(?:  .*?(?:\n|$))*)"; "g"))
             | (reduce .captures[] as $capture ({}; . + {($capture.name): $capture.string})) as $finding
             | ($finding.priority_tag | priority_num) as $priority
@@ -1868,7 +1907,29 @@ normalize_native_review_result() {
                 confidence_score: 0.5,
                 priority: $priority
               }
-          ] as $normalized_findings
+          ] +
+          [
+            ($comments | match("(?m)(?:^|[[:space:]])(?:[-*]|[0-9]+\\.) \\[(?<priority_tag>P[0-3])\\] (?<title>.+?) [—-] (?<path>.+?):(?<start>[0-9]+)(?:-(?<end>[0-9]+))? (?<body>.*?)(?=(?:[[:space:]]+(?:[-*]|[0-9]+\\.) \\[P[0-3]\\] )|$)"; "g"))
+            | (reduce .captures[] as $capture ({}; . + {($capture.name): $capture.string})) as $finding
+            | ($finding.priority_tag | priority_num) as $priority
+            | (($finding.body // "") | gsub("[[:space:]]+"; " ") | trim) as $details
+            | {
+                severity: severity_for($priority),
+                title: ($finding.title // "" | trim),
+                details: (if ($details | length) > 0 then $details else ($finding.title // "" | trim) end),
+                code_location: {
+                  absolute_file_path: ($finding.path // "" | trim),
+                  line_range: {
+                    start: (($finding.start // "1") | tonumber),
+                    end: (($finding.end // $finding.start // "1") | tonumber)
+                  }
+                },
+                confidence_score: 0.5,
+                priority: $priority
+              }
+          ]
+          ) as $raw_normalized_findings
+        | ($raw_normalized_findings | unique_by(.title, .code_location.absolute_file_path, .code_location.line_range.start, .code_location.line_range.end)) as $normalized_findings
         | (($comments | length) > 0 and ($normalized_findings | length) == 0) as $has_unparsed_review_comments
         | {
             verdict: (

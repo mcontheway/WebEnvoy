@@ -770,6 +770,21 @@ test_extract_issue_number_from_pr_body_supports_direct_closing_field() {
   fi
 }
 
+test_extract_issue_number_from_pr_body_ignores_example_references_in_code_blocks_and_comments() {
+  setup_case_dir "extract-issue-number-ignores-examples"
+
+  PR_BODY=$'## 摘要\n\n- 只做 guardian 改造\n\n## 关联事项\n\n<!-- Fixes #111 -->\n```md\nFixes #222\nRefs #333\n```\n> Refs #444\n- Closing: #123\n'
+  export PR_BODY
+
+  local extracted
+  extracted="$(extract_issue_number_from_pr_body)"
+
+  if [[ "${extracted}" != "123" ]]; then
+    echo "expected sanitized linkage extraction to ignore example refs and return 123, got '${extracted}'" >&2
+    exit 1
+  fi
+}
+
 test_extract_issue_number_from_pr_body_returns_empty_for_ambiguous_links() {
   setup_case_dir "extract-issue-number-ambiguous"
 
@@ -909,8 +924,8 @@ test_materialize_base_snapshot_path_prefers_merge_base_commit() {
   restore_test_repo_root
 }
 
-test_materialize_base_snapshot_path_does_not_fall_back_to_base_head() {
-  setup_case_dir "materialize-no-base-head-fallback"
+test_materialize_base_snapshot_path_falls_back_to_base_head_when_merge_base_lacks_file() {
+  setup_case_dir "materialize-base-head-fallback"
 
   local fake_repo_root="${TMP_DIR}/repo"
   local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
@@ -938,10 +953,7 @@ test_materialize_base_snapshot_path_does_not_fall_back_to_base_head() {
   }
 
   materialized_path="$(materialize_base_snapshot_path "${REPO_ROOT}/docs/dev/architecture/system-design.md")"
-  if [[ -n "${materialized_path}" ]]; then
-    echo "expected no materialized trusted snapshot when merge-base lacks the file, got ${materialized_path}" >&2
-    exit 1
-  fi
+  assert_file_contains "${materialized_path}" "base branch snapshot"
 
   unset -f git
   restore_test_repo_root
@@ -1197,6 +1209,35 @@ test_fetch_origin_tracking_ref_falls_back_to_https_when_ssh_fetch_fails() {
   restore_test_repo_root
 }
 
+test_fetch_origin_tracking_ref_forces_batch_mode_even_with_custom_ssh_command() {
+  setup_case_dir "fetch-origin-custom-ssh-command"
+
+  local git_calls_log="${TMP_DIR}/git.calls.log"
+  : > "${git_calls_log}"
+  REPO_ROOT="${TMP_DIR}/repo"
+  mkdir -p "${REPO_ROOT}"
+  export REPO_ROOT
+  export GIT_SSH_COMMAND="ssh -i /tmp/test-key"
+
+  git() {
+    printf 'env GIT_TERMINAL_PROMPT=%s GIT_SSH_COMMAND=%s :: %s\n' "${GIT_TERMINAL_PROMPT:-}" "${GIT_SSH_COMMAND:-}" "$*" >> "${git_calls_log}"
+
+    if [[ "${1:-}" == "-C" && "${3:-}" == "fetch" && "${4:-}" == "origin" ]]; then
+      return 0
+    fi
+
+    command git "$@"
+  }
+
+  assert_pass fetch_origin_tracking_ref "refs/heads/main" "refs/remotes/origin/main"
+  assert_file_contains "${git_calls_log}" "env GIT_TERMINAL_PROMPT=0"
+  assert_file_contains "${git_calls_log}" "GIT_SSH_COMMAND=ssh -i /tmp/test-key -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+
+  unset GIT_SSH_COMMAND
+  unset -f git
+  restore_test_repo_root
+}
+
 test_fetch_origin_tracking_ref_passes_extra_fetch_args() {
   setup_case_dir "fetch-origin-extra-args"
 
@@ -1407,7 +1448,7 @@ test_cleanup_registered_secret_tmp_dirs_removes_registered_paths() {
   fi
 }
 
-test_append_unique_line_uses_repo_baseline_when_snapshot_is_unavailable_and_path_unchanged() {
+test_append_unique_line_skips_repo_baseline_when_trusted_snapshot_is_unavailable() {
   setup_case_dir "worktree-missing-baseline"
 
   local fake_repo_root="${TMP_DIR}/repo"
@@ -1423,7 +1464,9 @@ test_append_unique_line_uses_repo_baseline_when_snapshot_is_unavailable_and_path
   export REPO_ROOT WORKTREE_DIR REVIEW_ADDENDUM_FILE
 
   append_unique_line "${REVIEW_ADDENDUM_FILE}" "${output_file}"
-  assert_file_contains "${output_file}" "${REVIEW_ADDENDUM_FILE}"
+  if [[ -f "${output_file}" ]]; then
+    assert_file_not_contains "${output_file}" "${REVIEW_ADDENDUM_FILE}"
+  fi
 
   restore_test_repo_root
 }
@@ -2256,6 +2299,14 @@ test_assert_required_review_context_available_accepts_base_snapshot_review_summa
   mkdir -p "${fake_worktree_dir}/docs/dev/architecture"
   mkdir -p "${fake_worktree_dir}/docs/dev"
   mkdir -p "${baseline_snapshot_root}/docs/dev/review"
+  mkdir -p "${baseline_snapshot_root}/docs/dev/architecture"
+  cp "${REPO_ROOT}/vision.md" "${baseline_snapshot_root}/vision.md"
+  cp "${REPO_ROOT}/AGENTS.md" "${baseline_snapshot_root}/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${baseline_snapshot_root}/docs/dev/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/roadmap.md" "${baseline_snapshot_root}/docs/dev/roadmap.md"
+  cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${baseline_snapshot_root}/docs/dev/architecture/system-design.md"
+  cp "${REPO_ROOT}/code_review.md" "${baseline_snapshot_root}/code_review.md"
+  cp "${REPO_ROOT}/spec_review.md" "${baseline_snapshot_root}/spec_review.md"
   cp "${REPO_ROOT}/vision.md" "${fake_worktree_dir}/vision.md"
   cp "${REPO_ROOT}/AGENTS.md" "${fake_worktree_dir}/AGENTS.md"
   cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${fake_worktree_dir}/docs/dev/AGENTS.md"
@@ -2283,9 +2334,18 @@ test_assert_required_review_context_available_accepts_new_guardian_summaries_wit
   setup_fake_repo_root
 
   local fake_worktree_dir="${TMP_DIR}/worktree"
+  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
   mkdir -p "${fake_worktree_dir}/docs/dev/review"
   mkdir -p "${fake_worktree_dir}/docs/dev/architecture"
   mkdir -p "${fake_worktree_dir}/docs/dev"
+  mkdir -p "${baseline_snapshot_root}/docs/dev/architecture"
+  cp "${REPO_ROOT}/vision.md" "${baseline_snapshot_root}/vision.md"
+  cp "${REPO_ROOT}/AGENTS.md" "${baseline_snapshot_root}/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${baseline_snapshot_root}/docs/dev/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/roadmap.md" "${baseline_snapshot_root}/docs/dev/roadmap.md"
+  cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${baseline_snapshot_root}/docs/dev/architecture/system-design.md"
+  cp "${REPO_ROOT}/code_review.md" "${baseline_snapshot_root}/code_review.md"
+  cp "${REPO_ROOT}/spec_review.md" "${baseline_snapshot_root}/spec_review.md"
   cp "${REPO_ROOT}/vision.md" "${fake_worktree_dir}/vision.md"
   cp "${REPO_ROOT}/AGENTS.md" "${fake_worktree_dir}/AGENTS.md"
   cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${fake_worktree_dir}/docs/dev/AGENTS.md"
@@ -2300,12 +2360,13 @@ test_assert_required_review_context_available_accepts_new_guardian_summaries_wit
 
   WORKTREE_DIR="${fake_worktree_dir}"
   REVIEW_PROFILE="spec_review_profile"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
   CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
   printf '%s\n' 'docs/dev/review/guardian-review-addendum.md' > "${CHANGED_FILES_FILE}"
   printf '%s\n' 'docs/dev/review/guardian-spec-review-summary.md' >> "${CHANGED_FILES_FILE}"
   REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
   SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
-  export WORKTREE_DIR REVIEW_PROFILE CHANGED_FILES_FILE REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE
+  export WORKTREE_DIR REVIEW_PROFILE BASELINE_SNAPSHOT_ROOT CHANGED_FILES_FILE REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE
 
   assert_pass assert_required_review_context_available
 
@@ -2317,9 +2378,18 @@ test_assert_required_review_context_available_fails_when_review_summaries_are_mi
   setup_fake_repo_root
 
   local fake_worktree_dir="${TMP_DIR}/worktree"
+  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
   mkdir -p "${fake_worktree_dir}/docs/dev/review"
   mkdir -p "${fake_worktree_dir}/docs/dev/architecture"
   mkdir -p "${fake_worktree_dir}/docs/dev"
+  mkdir -p "${baseline_snapshot_root}/docs/dev/architecture"
+  cp "${REPO_ROOT}/vision.md" "${baseline_snapshot_root}/vision.md"
+  cp "${REPO_ROOT}/AGENTS.md" "${baseline_snapshot_root}/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${baseline_snapshot_root}/docs/dev/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/roadmap.md" "${baseline_snapshot_root}/docs/dev/roadmap.md"
+  cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${baseline_snapshot_root}/docs/dev/architecture/system-design.md"
+  cp "${REPO_ROOT}/code_review.md" "${baseline_snapshot_root}/code_review.md"
+  cp "${REPO_ROOT}/spec_review.md" "${baseline_snapshot_root}/spec_review.md"
   cp "${REPO_ROOT}/vision.md" "${fake_worktree_dir}/vision.md"
   cp "${REPO_ROOT}/AGENTS.md" "${fake_worktree_dir}/AGENTS.md"
   cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${fake_worktree_dir}/docs/dev/AGENTS.md"
@@ -2334,9 +2404,10 @@ test_assert_required_review_context_available_fails_when_review_summaries_are_mi
 
   WORKTREE_DIR="${fake_worktree_dir}"
   REVIEW_PROFILE="spec_review_profile"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
   REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
   SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
-  export WORKTREE_DIR REVIEW_PROFILE REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE
+  export WORKTREE_DIR REVIEW_PROFILE BASELINE_SNAPSHOT_ROOT REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE
 
   local err_file="${TMP_DIR}/baseline.err"
   assert_fail assert_required_review_context_available 2>"${err_file}"
@@ -2406,9 +2477,19 @@ test_assert_required_review_context_available_fails_when_high_risk_security_base
   setup_fake_repo_root
 
   local fake_worktree_dir="${TMP_DIR}/worktree"
+  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
   mkdir -p "${fake_worktree_dir}/docs/dev/review"
   mkdir -p "${fake_worktree_dir}/docs/dev/architecture/system-design"
   mkdir -p "${fake_worktree_dir}/docs/dev"
+  mkdir -p "${baseline_snapshot_root}/docs/dev/architecture"
+  mkdir -p "${baseline_snapshot_root}/docs/dev/review"
+  cp "${REPO_ROOT}/vision.md" "${baseline_snapshot_root}/vision.md"
+  cp "${REPO_ROOT}/AGENTS.md" "${baseline_snapshot_root}/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${baseline_snapshot_root}/docs/dev/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/roadmap.md" "${baseline_snapshot_root}/docs/dev/roadmap.md"
+  cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${baseline_snapshot_root}/docs/dev/architecture/system-design.md"
+  cp "${REPO_ROOT}/code_review.md" "${baseline_snapshot_root}/code_review.md"
+  cp "${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md" "${baseline_snapshot_root}/docs/dev/review/guardian-review-addendum.md"
   cp "${REPO_ROOT}/vision.md" "${fake_worktree_dir}/vision.md"
   cp "${REPO_ROOT}/AGENTS.md" "${fake_worktree_dir}/AGENTS.md"
   cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${fake_worktree_dir}/docs/dev/AGENTS.md"
@@ -2423,7 +2504,8 @@ test_assert_required_review_context_available_fails_when_high_risk_security_base
 
   WORKTREE_DIR="${fake_worktree_dir}"
   REVIEW_PROFILE="high_risk_impl_profile"
-  export WORKTREE_DIR REVIEW_PROFILE
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
+  export WORKTREE_DIR REVIEW_PROFILE BASELINE_SNAPSHOT_ROOT
 
   local err_file="${TMP_DIR}/baseline.err"
   assert_fail assert_required_review_context_available 2>"${err_file}"
@@ -3003,6 +3085,23 @@ EOF
   assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
   assert_file_contains "${result_file}" '"title":"Keep fallback path fail-closed"'
   assert_file_contains "${result_file}" '"absolute_file_path":"/tmp/worktree/scripts/pr-guardian.sh"'
+}
+
+test_normalize_native_review_result_maps_full_review_comments_embedded_in_summary() {
+  setup_case_dir "normalize-native-text-full-review-comments-summary"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+The new guardian context-loading flow is directionally good. Full review comments: - [P2] Stop treating the caller's checkout as a trusted baseline — /tmp/worktree/scripts/pr-guardian.sh:465-466 When merge-base lacks the file, the code still falls back to the local checkout. - [P2] Force non-interactive SSH even with a custom GIT_SSH_COMMAND — /tmp/worktree/scripts/pr-guardian.sh:76-77 Existing custom SSH commands can still prompt instead of failing over cleanly.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"summary":"The new guardian context-loading flow is directionally good."'
+  assert_file_contains "${result_file}" '"title":"Stop treating the caller'\''s checkout as a trusted baseline"'
+  assert_file_contains "${result_file}" '"title":"Force non-interactive SSH even with a custom GIT_SSH_COMMAND"'
 }
 
 test_normalize_native_review_result_fails_closed_for_unparsed_review_comment_block() {
@@ -3792,12 +3891,13 @@ main() {
   test_extract_issue_number_from_pr_body_supports_refs_only_linkage
   test_extract_issue_number_from_pr_body_prefers_explicit_issue_field
   test_extract_issue_number_from_pr_body_supports_direct_closing_field
+  test_extract_issue_number_from_pr_body_ignores_example_references_in_code_blocks_and_comments
   test_extract_issue_number_from_pr_body_returns_empty_for_ambiguous_links
   test_resolve_linked_issue_numbers_merges_pr_and_metadata_links
   test_collect_spec_review_docs_includes_todo_baseline
   test_append_unique_line_uses_worktree_for_new_spec_files
   test_materialize_base_snapshot_path_prefers_merge_base_commit
-  test_materialize_base_snapshot_path_does_not_fall_back_to_base_head
+  test_materialize_base_snapshot_path_falls_back_to_base_head_when_merge_base_lacks_file
   test_ensure_merge_base_available_deepens_shallow_history
   test_append_unique_line_prefers_base_snapshot_for_reviewer_owned_baseline
   test_append_unique_line_prefers_base_snapshot_for_changed_reviewer_owned_baseline
@@ -3806,13 +3906,14 @@ main() {
   test_append_unique_line_prefers_base_snapshot_for_changed_architecture_context
   test_origin_url_to_https_normalizes_github_ssh_urls
   test_fetch_origin_tracking_ref_falls_back_to_https_when_ssh_fetch_fails
+  test_fetch_origin_tracking_ref_forces_batch_mode_even_with_custom_ssh_command
   test_fetch_origin_tracking_ref_passes_extra_fetch_args
   test_fetch_origin_tracking_ref_uses_gh_auth_token_for_https_fallback
   test_fetch_origin_tracking_ref_uses_gh_auth_token_when_origin_is_already_https
   test_fetch_github_https_ref_without_gh_token_stays_non_interactive
   test_fetch_origin_tracking_ref_without_normalizable_origin_stays_non_interactive
   test_cleanup_registered_secret_tmp_dirs_removes_registered_paths
-  test_append_unique_line_uses_repo_baseline_when_snapshot_is_unavailable_and_path_unchanged
+  test_append_unique_line_skips_repo_baseline_when_trusted_snapshot_is_unavailable
   test_append_unique_line_skips_repo_file_when_worktree_missing
   test_mixed_spec_and_impl_changes_use_mixed_profile
   test_collect_spec_review_docs_includes_changed_architecture_and_research
@@ -3872,6 +3973,7 @@ main() {
   test_normalize_native_review_result_fails_closed_for_other_than_caveat
   test_normalize_native_review_result_fails_closed_for_unparsed_priority_bullet
   test_normalize_native_review_result_maps_numbered_review_comment_findings
+  test_normalize_native_review_result_maps_full_review_comments_embedded_in_summary
   test_normalize_native_review_result_fails_closed_for_unparsed_review_comment_block
   test_normalize_native_review_result_fails_closed_for_ambiguous_safe_phrase
   test_normalize_native_review_result_fails_closed_for_colon_caveat
