@@ -2071,9 +2071,11 @@ run_codex_review() {
   local pr_number="$1"
   local native_error_file
   local legacy_error_file
+  local native_text_result_file
 
   prepare_review_worktree_context "${pr_number}"
   native_error_file="${TMP_DIR}/codex-native-review.err"
+  native_text_result_file="${TMP_DIR}/review.native-text.json"
 
   if codex exec \
     -C "${WORKTREE_DIR}" \
@@ -2085,6 +2087,9 @@ run_codex_review() {
     if PR_GUARDIAN_REQUIRE_STRUCTURED_NATIVE_JSON=1 \
       normalize_native_review_result "${RAW_RESULT_FILE}" "${RESULT_FILE}"; then
       :
+    elif normalize_native_review_result "${RAW_RESULT_FILE}" "${native_text_result_file}" \
+      && jq -e '.verdict == "REQUEST_CHANGES"' "${native_text_result_file}" >/dev/null 2>&1; then
+      mv "${native_text_result_file}" "${RESULT_FILE}"
     else
       warn "原生 review 未返回可接受的结构化结果，已回退到 guardian schema 审查路径。"
       legacy_error_file="${TMP_DIR}/codex-legacy-review.err"

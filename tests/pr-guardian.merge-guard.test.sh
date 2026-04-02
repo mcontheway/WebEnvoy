@@ -3408,6 +3408,77 @@ EOF
   unset -f codex
 }
 
+test_run_codex_review_preserves_plain_text_rejection_without_schema_rerun() {
+  setup_case_dir "run-plain-text-reject-review"
+
+  BASE_REF="main"
+  HEAD_SHA="head-sha-401"
+  PR_TITLE="plain text reject review"
+  PR_URL="https://example.test/pr/41"
+  PR_BODY=$'## 摘要\n\n- 变更目的：Guardian\n'
+  PR_AUTHOR="author"
+  REVIEW_PROFILE="default_impl_profile"
+  export BASE_REF HEAD_SHA PR_TITLE PR_URL PR_BODY PR_AUTHOR REVIEW_PROFILE
+
+  WORKTREE_DIR="${TMP_DIR}/worktree"
+  mkdir -p "${WORKTREE_DIR}/docs/dev/review"
+  mkdir -p "${WORKTREE_DIR}/docs/dev/architecture"
+  mkdir -p "${WORKTREE_DIR}/docs/dev"
+  export WORKTREE_DIR
+
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
+  REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
+  RAW_RESULT_FILE="${TMP_DIR}/review.raw.txt"
+  RESULT_FILE="${TMP_DIR}/review.json"
+  REVIEW_MD_FILE="${TMP_DIR}/review.md"
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RAW_RESULT_FILE RESULT_FILE REVIEW_MD_FILE
+
+  printf '%s\n' 'scripts/pr-guardian.sh' > "${CHANGED_FILES_FILE}"
+  slim_pr_body > "${SLIM_PR_FILE}"
+  cp "${REPO_ROOT}/vision.md" "${WORKTREE_DIR}/vision.md"
+  cp "${REPO_ROOT}/AGENTS.md" "${WORKTREE_DIR}/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${WORKTREE_DIR}/docs/dev/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/roadmap.md" "${WORKTREE_DIR}/docs/dev/roadmap.md"
+  cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${WORKTREE_DIR}/docs/dev/architecture/system-design.md"
+  cp "${REPO_ROOT}/code_review.md" "${WORKTREE_DIR}/code_review.md"
+  cp "${REVIEW_ADDENDUM_FILE}" "${WORKTREE_DIR}/docs/dev/review/guardian-review-addendum.md"
+
+  collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
+
+  local codex_calls="${TMP_DIR}/codex.calls.log"
+
+  codex() {
+    printf '%s\n' "$*" >> "${codex_calls}"
+    cat > /dev/null
+    if [[ "$*" == *" review -"* && "$*" != *"--output-schema"* ]]; then
+      cat > "${RAW_RESULT_FILE}" <<'EOF'
+I found a blocking issue in the current patch.
+
+Review comment:
+
+- [P1] Keep native rejection semantics — /tmp/worktree/scripts/pr-guardian.sh:2085-2097
+  The current flow can discard a blocking native rejection if it always reruns schema review.
+EOF
+      return 0
+    fi
+    echo "unexpected codex call: $*" >&2
+    return 64
+  }
+
+  assert_pass run_codex_review 41
+  assert_file_contains "${codex_calls}" "review -"
+  assert_file_not_contains "${codex_calls}" "--output-schema"
+  assert_file_contains "${RESULT_FILE}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${RESULT_FILE}" '"title":"Keep native rejection semantics"'
+  assert_file_contains "${REVIEW_MD_FILE}" "**结论**: REQUEST_CHANGES"
+
+  unset -f codex
+}
+
 test_run_codex_review_adds_fallback_finding_for_structured_reject_without_findings() {
   setup_case_dir "run-structured-reject-without-findings"
 
@@ -4142,6 +4213,7 @@ main() {
   test_run_codex_review_uses_context_budget_prompt_and_native_review_engine
   test_run_codex_review_accepts_code_fenced_native_json_output
   test_run_codex_review_falls_back_when_native_review_output_is_plain_text
+  test_run_codex_review_preserves_plain_text_rejection_without_schema_rerun
   test_run_codex_review_adds_fallback_finding_for_structured_reject_without_findings
   test_run_codex_review_fails_closed_when_native_review_command_fails
   test_main_review_mode_does_not_fail_on_mode_expansion_after_summary
