@@ -2043,6 +2043,90 @@ add_fallback_finding_for_unstructured_rejection() {
   mv "${temp_file}" "${result_file}"
 }
 
+harmonize_safe_schema_fallback_result() {
+  local result_file="$1"
+  local temp_file="${result_file}.tmp"
+
+  jq -c '
+    def trim:
+      sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
+    def has_followup($sentence):
+      ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should|missing|lacks?)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
+    def has_contrast($sentence):
+      ($sentence | ascii_downcase | test("\\b(but|however|although|except|except for|yet|still|though|nevertheless|aside from|other than)\\b|但是|但|不过|然而|只是|除外|除此之外"));
+    def has_condition($sentence):
+      ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|当"));
+    def strong_safe_sentence($sentence):
+      ($sentence | trim) as $trimmed
+      | ($trimmed | ascii_downcase) as $lower
+      | ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$"))
+        or ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$"))
+        or ($lower | test("^(?:i )?did not identify any issues that clearly block merge[.!]?$"))
+        or ($lower | test("^no blocking issues found[.!]?$"))
+        or ($lower | test("^no blockers(?: found)?[.!]?$"))
+        or ($lower | test("^(?:i don.t|i do not|don.t|do not) see any merge blockers[.!]?$"))
+        or ($lower | test("^(?:the )?patch is correct[.!]?$"))
+        or ($lower | test("^no actionable issues[.!]?$"))
+        or ($lower | test("^no issues found[.!]?$"))
+        or ($lower | test("^no issues were found[.!]?$"))
+        or ($lower | test("^no problems found[.!]?$"))
+        or ($lower | test("^lgtm[.!]?$"))
+        or ($lower | test("^looks good to me[.!]?$"))
+        or ($lower | test("^looks fine to me[.!]?$"))
+        or ($lower | test("^(?:i didn.t|i did not|did not) find any problems(?: with this patch)?[.!]?$"))
+        or ($lower | test("^no issues detected[.!]?$"))
+        or ($trimmed | test("^未发现新的阻断性问题[。！!]*$"))
+        or ($trimmed | test("^未发现阻断性问题[。！!]*$"))
+        or ($trimmed | test("^没有发现阻断性问题[。！!]*$"))
+        or ($trimmed | test("^未发现阻断问题[。！!]*$"))
+        or ($trimmed | test("^没有发现阻断问题[。！!]*$"))
+        or ($trimmed | test("^没有合并阻断[。！!]*$"))
+        or ($trimmed | test("^可以合并[。！!]*$"))
+        or ($trimmed | test("^可合并[。！!]*$"))
+        or ($trimmed | test("^可以批准[。！!]*$"))
+        or ($trimmed | test("^建议批准[。！!]*$"))
+        or ($trimmed | test("^审查通过[。！!]*$"));
+    def neutral_safe_sentence($sentence):
+      ($sentence | ascii_downcase) as $lower
+      | ($lower | test("does not affect code paths"))
+        or ($lower | test("does not modify executable code or behavior"))
+        or ($lower | test("does not affect .*runtime behavior"))
+        or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"));
+    def harmless_tail_sentence($sentence):
+      ($sentence | ascii_downcase | trim) as $lower
+      | ($lower | test("^(thanks|thank you|thx)[.!]?$"))
+        or ($lower | test("^ship it[.!]?$"))
+        or ($lower | test("^nice work[.!]?$"))
+        or ($sentence | trim | test("^(谢谢|谢了|辛苦了)[。！!]?$"));
+    def looks_like_safe_sentence($sentence):
+      ($sentence | trim) as $trimmed
+      | if ($trimmed | length) == 0 then
+          true
+        else
+          ((has_contrast($trimmed) | not)
+          and (has_condition($trimmed) | not)
+          and (has_followup($trimmed) | not)
+          and (strong_safe_sentence($trimmed) or neutral_safe_sentence($trimmed) or harmless_tail_sentence($trimmed)))
+        end;
+    def looks_like_safe_approve($summary):
+      ($summary | gsub("[[:space:]]+"; " ") | trim) as $collapsed
+      | ($collapsed | gsub("(?:[。！？；：]|[.!?;:](?:[[:space:]]+|$))"; "\n") | split("\n")) as $sentences
+      | any($sentences[]; strong_safe_sentence(.))
+        and all($sentences[]; looks_like_safe_sentence(.));
+    if .verdict == "REQUEST_CHANGES"
+      and (.findings | length) == 0
+      and (.required_actions | length) == 0
+      and looks_like_safe_approve((.summary // ""))
+    then
+      .verdict = "APPROVE"
+      | .safe_to_merge = true
+    else
+      .
+    end
+  ' "${result_file}" > "${temp_file}"
+  mv "${temp_file}" "${result_file}"
+}
+
 validate_review_result_shape() {
   local result_file="$1"
 
@@ -2104,6 +2188,7 @@ run_codex_review() {
         sed 's/^/  /' "${legacy_error_file}" >&2 || true
         die "Codex 审查执行失败。"
       fi
+      harmonize_safe_schema_fallback_result "${RESULT_FILE}"
     fi
     add_fallback_finding_for_unstructured_rejection "${RESULT_FILE}"
     validate_review_result_shape "${RESULT_FILE}"

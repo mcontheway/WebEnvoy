@@ -3479,6 +3479,78 @@ EOF
   unset -f codex
 }
 
+test_run_codex_review_accepts_safe_schema_fallback_without_findings() {
+  setup_case_dir "run-safe-schema-fallback-review"
+
+  BASE_REF="main"
+  HEAD_SHA="head-sha-402"
+  PR_TITLE="safe schema fallback review"
+  PR_URL="https://example.test/pr/42"
+  PR_BODY=$'## 摘要\n\n- 变更目的：Guardian\n'
+  PR_AUTHOR="author"
+  REVIEW_PROFILE="default_impl_profile"
+  export BASE_REF HEAD_SHA PR_TITLE PR_URL PR_BODY PR_AUTHOR REVIEW_PROFILE
+
+  WORKTREE_DIR="${TMP_DIR}/worktree"
+  mkdir -p "${WORKTREE_DIR}/docs/dev/review"
+  mkdir -p "${WORKTREE_DIR}/docs/dev/architecture"
+  mkdir -p "${WORKTREE_DIR}/docs/dev"
+  export WORKTREE_DIR
+
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
+  REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
+  RAW_RESULT_FILE="${TMP_DIR}/review.raw.txt"
+  RESULT_FILE="${TMP_DIR}/review.json"
+  REVIEW_MD_FILE="${TMP_DIR}/review.md"
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RAW_RESULT_FILE RESULT_FILE REVIEW_MD_FILE
+
+  printf '%s\n' 'scripts/pr-guardian.sh' > "${CHANGED_FILES_FILE}"
+  slim_pr_body > "${SLIM_PR_FILE}"
+  cp "${REPO_ROOT}/vision.md" "${WORKTREE_DIR}/vision.md"
+  cp "${REPO_ROOT}/AGENTS.md" "${WORKTREE_DIR}/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${WORKTREE_DIR}/docs/dev/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/roadmap.md" "${WORKTREE_DIR}/docs/dev/roadmap.md"
+  cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${WORKTREE_DIR}/docs/dev/architecture/system-design.md"
+  cp "${REPO_ROOT}/code_review.md" "${WORKTREE_DIR}/code_review.md"
+  cp "${REVIEW_ADDENDUM_FILE}" "${WORKTREE_DIR}/docs/dev/review/guardian-review-addendum.md"
+
+  collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
+
+  local codex_calls="${TMP_DIR}/codex.calls.log"
+
+  codex() {
+    printf '%s\n' "$*" >> "${codex_calls}"
+    cat > /dev/null
+    if [[ "$*" == *" review -"* && "$*" != *"--output-schema"* ]]; then
+      cat > "${RAW_RESULT_FILE}" <<'EOF'
+The patch only adds a small wording tweak to README.md and does not affect code paths, tests, or runtime behavior. I did not identify any actionable bugs introduced by this change.
+EOF
+      return 0
+    fi
+    if [[ "${1:-}" == "exec" && "$*" == *"--output-schema"* ]]; then
+      cat > "${RESULT_FILE}" <<'EOF'
+{"verdict":"REQUEST_CHANGES","safe_to_merge":false,"summary":"No blocking issues found.","findings":[],"required_actions":[]}
+EOF
+      return 0
+    fi
+    echo "unexpected codex call: $*" >&2
+    return 64
+  }
+
+  assert_pass run_codex_review 42
+  assert_file_contains "${codex_calls}" "review -"
+  assert_file_contains "${codex_calls}" "--output-schema ${SCHEMA_FILE}"
+  assert_file_contains "${RESULT_FILE}" '"verdict":"APPROVE"'
+  assert_file_not_contains "${RESULT_FILE}" '"title":"Clarify native review rejection"'
+  assert_file_contains "${REVIEW_MD_FILE}" "**结论**: APPROVE"
+
+  unset -f codex
+}
+
 test_run_codex_review_adds_fallback_finding_for_structured_reject_without_findings() {
   setup_case_dir "run-structured-reject-without-findings"
 
@@ -4214,6 +4286,7 @@ main() {
   test_run_codex_review_accepts_code_fenced_native_json_output
   test_run_codex_review_falls_back_when_native_review_output_is_plain_text
   test_run_codex_review_preserves_plain_text_rejection_without_schema_rerun
+  test_run_codex_review_accepts_safe_schema_fallback_without_findings
   test_run_codex_review_adds_fallback_finding_for_structured_reject_without_findings
   test_run_codex_review_fails_closed_when_native_review_command_fails
   test_main_review_mode_does_not_fail_on_mode_expansion_after_summary
