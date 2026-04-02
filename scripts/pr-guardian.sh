@@ -774,13 +774,45 @@ trim_blank_lines() {
   '
 }
 
+sanitize_prompt_control_markdown() {
+  awk '
+    BEGIN {
+      in_code = 0
+    }
+    /^```/ {
+      in_code = !in_code
+      next
+    }
+    in_code {
+      next
+    }
+    {
+      lower = tolower($0)
+      if (lower ~ /ignore previous instructions/ || lower ~ /ignore all findings/ || lower ~ /system prompt/ || lower ~ /developer message/ || lower ~ /user message/ || lower ~ /assistant/ || lower ~ /codex/ || lower ~ /chatgpt/ || lower ~ /prompt injection/ || lower ~ /please direct approve/ || lower ~ /please approve this pr/ || lower ~ /always approve/ || lower ~ /follow these instructions/ || lower ~ /suppress.*finding/ || lower ~ /review comment/ || lower ~ /merge-if-safe/ || lower ~ /approve this patch/ || lower ~ /ship it/) {
+        next
+      }
+      if ($0 ~ /忽略(之前|前面|以上|所有).*(指令|说明|问题|阻断|finding)/ || $0 ~ /系统提示/ || $0 ~ /开发者消息/ || $0 ~ /用户消息/ || $0 ~ /助手/ || $0 ~ /Codex/ || $0 ~ /ChatGPT/ || $0 ~ /提示注入/ || $0 ~ /请直接[[:space:]]*approve/ || $0 ~ /请直接批准/ || $0 ~ /请直接通过/ || $0 ~ /请直接合并/ || $0 ~ /立即合并/ || $0 ~ /始终批准/ || $0 ~ /按照以下指令/ || $0 ~ /忽略.*(问题|阻断|发现|finding)/ || $0 ~ /合并即安全/ || $0 ~ /请直接发布/ || $0 ~ /直接发版/) {
+        next
+      }
+      print
+    }
+  ' | trim_blank_lines
+}
+
 slim_user_markdown() {
   awk '
     BEGIN {
       skip = 0
     }
     /^## / {
+      heading_lower = tolower($0)
       skip = ($0 == "## 检查清单")
+      if (!skip && (heading_lower ~ /ignore previous instructions/ || heading_lower ~ /ignore all findings/ || heading_lower ~ /system prompt/ || heading_lower ~ /developer message/ || heading_lower ~ /user message/ || heading_lower ~ /assistant/ || heading_lower ~ /prompt injection/ || heading_lower ~ /please direct approve/ || heading_lower ~ /please approve this pr/ || heading_lower ~ /always approve/ || heading_lower ~ /follow these instructions/ || heading_lower ~ /suppress.*finding/)) {
+        skip = 1
+      }
+      if (!skip && ($0 ~ /忽略(之前|前面|以上|所有).*(指令|说明|问题|阻断|finding)/ || $0 ~ /系统提示/ || $0 ~ /开发者消息/ || $0 ~ /用户消息/ || $0 ~ /助手/ || $0 ~ /提示注入/ || $0 ~ /请直接[[:space:]]*approve/ || $0 ~ /请直接批准/ || $0 ~ /请直接通过/ || $0 ~ /请直接合并/ || $0 ~ /立即合并/ || $0 ~ /始终批准/ || $0 ~ /按照以下指令/ || $0 ~ /忽略.*(问题|阻断|发现|finding)/)) {
+        skip = 1
+      }
       if (!skip) {
         print
       }
@@ -789,17 +821,12 @@ slim_user_markdown() {
     skip {
       next
     }
-    {
-      lower = tolower($0)
-      if (lower ~ /ignore all findings/ || lower ~ /please direct approve/ || lower ~ /please approve this pr/ || lower ~ /always approve/) {
-        next
-      }
-      if ($0 ~ /请直接[[:space:]]*approve/ || $0 ~ /请直接批准/ || $0 ~ /请直接通过/ || $0 ~ /请直接合并/ || $0 ~ /立即合并/ || $0 ~ /忽略.*(问题|阻断|发现|finding)/) {
-        next
-      }
-      print
-    }
-  ' | trim_blank_lines
+    { print }
+  ' | sanitize_prompt_control_markdown
+}
+
+sanitize_issue_context_markdown() {
+  sanitize_prompt_control_markdown
 }
 
 sanitize_user_prompt_line() {
@@ -809,6 +836,19 @@ sanitize_user_prompt_line() {
   sanitized="$(
     printf '%s\n' "${value}" \
       | slim_user_markdown \
+      | awk 'NF { print; exit }'
+  )"
+
+  printf '%s\n' "${sanitized}"
+}
+
+sanitize_issue_prompt_line() {
+  local value="$1"
+  local sanitized
+
+  sanitized="$(
+    printf '%s\n' "${value}" \
+      | sanitize_issue_context_markdown \
       | awk 'NF { print; exit }'
   )"
 
@@ -866,9 +906,11 @@ slim_issue_body() {
     printf '%s\n' "${input_text}" | awk '
     BEGIN {
       keep = 0
+      prose_lines = 0
     }
     /^## / {
       keep = 0
+      prose_lines = 0
       if ($0 == "## 背景" || $0 == "## 目标" || $0 == "## 范围" || $0 == "## 非目标" || $0 == "## 验收" || $0 == "## 关闭条件" || $0 == "## 风险") {
         keep = 1
       }
@@ -878,9 +920,16 @@ slim_issue_body() {
       next
     }
     keep {
-      print
+      if ($0 ~ /^[-*][[:space:]]+/ || $0 ~ /^[0-9]+[.)][[:space:]]+/) {
+        print
+        next
+      }
+      if (NF && prose_lines < 1) {
+        print
+        prose_lines += 1
+      }
     }
-  ' | slim_user_markdown
+  ' | sanitize_issue_context_markdown | awk 'NR <= 24 { print }'
   )"
 
   if [[ -n "${structured//[[:space:]]/}" ]]; then
@@ -889,8 +938,26 @@ slim_issue_body() {
   fi
 
   printf '%s\n' "${input_text}" \
-    | slim_user_markdown \
-    | awk 'NR <= 40 { print }'
+    | sanitize_issue_context_markdown \
+    | awk '
+      BEGIN {
+        prose_lines = 0
+      }
+      /^## / {
+        print
+        prose_lines = 0
+        next
+      }
+      /^[-*][[:space:]]+/ || /^[0-9]+[.)][[:space:]]+/ {
+        print
+        next
+      }
+      NF && prose_lines < 1 {
+        print
+        prose_lines += 1
+      }
+    ' \
+    | awk 'NR <= 24 { print }'
 }
 
 fetch_issue_summary() {
@@ -915,7 +982,7 @@ fetch_issue_summary() {
     fi
 
     issue_title="$(jq -r '.title // ""' "${issue_file}")"
-    safe_issue_title="$(sanitize_user_prompt_line "${issue_title}")"
+    safe_issue_title="$(sanitize_issue_prompt_line "${issue_title}")"
     issue_body="$(jq -r '.body // ""' "${issue_file}")"
     issue_body_file="${TMP_DIR}/issue-${issue_number}-body.md"
     if [[ -n "${safe_issue_title//[[:space:]]/}" ]]; then
