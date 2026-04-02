@@ -328,6 +328,7 @@ const resolveInstallPaths = (input) => {
         installScope: roots.installScope,
         installKey: roots.installKey,
         channelRoot: roots.channelRoot,
+        worktreePath: roots.worktreePath,
         manifestRoot,
         manifestDir,
         manifestPath,
@@ -344,12 +345,11 @@ const resolveProfileDirForLauncher = (input) => {
     if (typeof input.profileDir !== "string" || input.profileDir.trim().length === 0) {
         return undefined;
     }
-    const profileRoot = resolveProfileRoot(input.cwd);
     const normalizedProfileDir = asAbsolutePath(input.cwd, input.profileDir.trim());
-    if (!isPathInside(profileRoot, normalizedProfileDir)) {
+    if (!isPathInside(input.profileRoot, normalizedProfileDir)) {
         throw nativeHostPathError("runtime.install", "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT", {
             field: "profile_dir",
-            allowed_root: profileRoot,
+            allowed_root: input.profileRoot,
             received_path: normalizedProfileDir
         });
     }
@@ -364,10 +364,11 @@ export const installNativeHost = async (input) => {
         manifestDir: input.manifestDir,
         launcherPath: input.launcherPath
     });
-    const profileRoot = resolveProfileRoot(input.cwd);
+    const profileRoot = resolveProfileRoot(resolvedPaths.worktreePath);
     const allowedOrigin = `chrome-extension://${input.extensionId}/`;
     const profileDir = resolveProfileDirForLauncher({
         cwd: input.cwd,
+        profileRoot,
         profileDir: input.profileDir
     });
     await assertNoSymlinkAncestorBetween({
@@ -407,6 +408,7 @@ export const installNativeHost = async (input) => {
         ? "explicit"
         : "repo_owned_default";
     const bundledEntryPath = hostCommandSource === "explicit" ? null : await ensureBundledNativeHostRuntime(resolvedPaths.channelRoot);
+    const bundleRuntimeWritten = bundledEntryPath !== null;
     const hostCommand = hostCommandSource === "explicit"
         ? input.hostCommand.trim()
         : `${quoteShellToken(process.execPath)} ${quoteShellToken(bundledEntryPath)}`;
@@ -458,12 +460,12 @@ export const installNativeHost = async (input) => {
         write_result: {
             manifest: manifestExisted ? "overwritten" : "created",
             launcher: launcherExisted ? "overwritten" : "created",
-            bundle_runtime: bundleRuntimeExisted ? "overwritten" : "created"
+            bundle_runtime: bundleRuntimeWritten ? (bundleRuntimeExisted ? "overwritten" : "created") : "unchanged"
         },
         created: {
             manifest: true,
             launcher: true,
-            bundle_runtime: true
+            bundle_runtime: bundleRuntimeWritten
         }
     };
 };

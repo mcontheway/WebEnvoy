@@ -89,4 +89,25 @@ describe("native-host-install-root", () => {
       runtimeRoot: linkedRoots.runtimeRoot
     });
   });
+
+  it("treats the non-git fallback layout as a managed install", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-native-host-install-fallback-"));
+    tempDirs.push(cwd);
+    const fallbackLauncherPath = join(
+      cwd,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "bin",
+      "com.webenvoy.host-launcher"
+    );
+
+    expect(inspectManagedNativeHostInstall(fallbackLauncherPath)).toMatchObject({
+      installScope: "worktree_scoped_bundle",
+      installKey: null,
+      channelRoot: join(cwd, ".webenvoy", "native-host-install", "chrome"),
+      launcherRoot: join(cwd, ".webenvoy", "native-host-install", "chrome", "bin"),
+      runtimeRoot: join(cwd, ".webenvoy", "native-host-install", "chrome", "runtime")
+    });
+  });
 });

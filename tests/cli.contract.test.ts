@@ -3096,12 +3096,12 @@ process.stdin.on("data", (chunk) => {
         write_result: {
           manifest: "created",
           launcher: "created",
-          bundle_runtime: "created"
+          bundle_runtime: "unchanged"
         },
         created: {
           manifest: true,
           launcher: true,
-          bundle_runtime: true
+          bundle_runtime: false
         }
       }
     });
@@ -3121,6 +3121,14 @@ process.stdin.on("data", (chunk) => {
     expect(launcherRaw).toContain("set -euo pipefail");
     expect(launcherRaw).toContain('exec ');
     expect(launcherRaw).toContain(' "$@"');
+    await expect(
+      readFile(
+        path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "runtime", "native-messaging", "native-host-entry.js"),
+        "utf8"
+      )
+    ).rejects.toMatchObject({
+      code: "ENOENT"
+    });
     const launcherMode = (await stat(launcherPath)).mode & 0o777;
     expect(launcherMode).toBe(0o755);
   });
@@ -3209,6 +3217,71 @@ process.stdin.on("data", (chunk) => {
     await expect(readFile(defaultBundledEntryPath, "utf8")).resolves.toContain(
       "process.stdin.resume()"
     );
+  });
+
+  it("removes bundled runtime when runtime.uninstall uses default non-git fallback paths", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const installRoot = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome");
+    const bundledEntryPath = path.join(
+      installRoot,
+      "runtime",
+      "native-messaging",
+      "native-host-entry.js"
+    );
+
+    const install = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-default-uninstall-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome"
+        })
+      ],
+      runtimeCwd
+    );
+    expect(install.status).toBe(0);
+    await expect(readFile(bundledEntryPath, "utf8")).resolves.toContain("process.stdin.resume()");
+
+    const uninstall = runCli(
+      [
+        "runtime.uninstall",
+        "--run-id",
+        "run-contract-uninstall-default-fallback-001",
+        "--params",
+        JSON.stringify({
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host"
+        })
+      ],
+      runtimeCwd
+    );
+    expect(uninstall.status).toBe(0);
+    expect(parseSingleJsonLine(uninstall.stdout)).toMatchObject({
+      command: "runtime.uninstall",
+      status: "success",
+      summary: {
+        install_scope: "worktree_scoped_bundle",
+        install_key: null,
+        install_root: installRoot,
+        launcher_path_source: "repo_owned_default",
+        removed: {
+          manifest: true,
+          launcher: true,
+          bundle_runtime: true
+        },
+        remove_result: {
+          manifest: "removed",
+          launcher: "removed",
+          bundle_runtime: "removed"
+        }
+      }
+    });
+    await expect(readFile(bundledEntryPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
   });
 
   it("uses repo-owned native host entry as default runtime.install host_command", async () => {
@@ -3816,6 +3889,7 @@ process.stdin.on("data", (chunk) => {
         install_key: firstSummary.install_key,
         install_root: firstSummary.install_root,
         launcher_path: firstSummary.launcher_path,
+        profile_root: path.join(repositoryCwd, ".webenvoy", "profiles"),
         existed_before: {
           manifest: true,
           launcher: true,

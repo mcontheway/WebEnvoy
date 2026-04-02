@@ -73,12 +73,24 @@ export const inspectManagedNativeHostInstall = (launcherPath) => {
         return null;
     }
     const channelRoot = dirname(launcherRoot);
+    const nativeHostInstallDir = dirname(channelRoot);
+    const directFallbackWebEnvoyDir = dirname(nativeHostInstallDir);
+    if (basename(nativeHostInstallDir) === "native-host-install" &&
+        basename(directFallbackWebEnvoyDir) === ".webenvoy") {
+        return {
+            installScope: "worktree_scoped_bundle",
+            installKey: null,
+            channelRoot,
+            launcherRoot,
+            runtimeRoot: join(channelRoot, "runtime")
+        };
+    }
     const installKeyDir = dirname(channelRoot);
     const worktreesDir = dirname(installKeyDir);
-    const nativeHostInstallDir = dirname(worktreesDir);
-    const webEnvoyDir = dirname(nativeHostInstallDir);
+    const keyedNativeHostInstallDir = dirname(worktreesDir);
+    const webEnvoyDir = dirname(keyedNativeHostInstallDir);
     if (basename(worktreesDir) !== "worktrees" ||
-        basename(nativeHostInstallDir) !== "native-host-install" ||
+        basename(keyedNativeHostInstallDir) !== "native-host-install" ||
         basename(webEnvoyDir) !== ".webenvoy") {
         return null;
     }
