@@ -173,6 +173,8 @@ const tokenizeHostCommand = (command, hostCommand) => {
 };
 export const resolveRepoOwnedNativeHostEntryPath = () => fileURLToPath(new URL("../runtime/native-messaging/native-host-entry.js", import.meta.url));
 export const resolveRepoOwnedNativeHostCommand = () => `${quoteShellToken(process.execPath)} ${quoteShellToken(resolveRepoOwnedNativeHostEntryPath())}`;
+export const resolveProfileRoot = (cwd) => resolve(cwd, ".webenvoy", "profiles");
+export const resolveProfileScopedNativeBridgeSocketPath = (profileDir) => join(profileDir, "__webenvoy_native_bridge.sock");
 export const isBrowserChannel = (value) => BROWSER_CHANNELS.includes(value);
 export const isValidExtensionId = (value) => EXTENSION_ID_PATTERN.test(value);
 export const isValidNativeHostName = (value) => NATIVE_HOST_NAME_PATTERN.test(value);
@@ -213,7 +215,7 @@ set -euo pipefail
 ${profileDirExport}exec ${argv} "$@"
 `;
 };
-const resolveControlledInstallRoots = (cwd, browserChannel) => {
+export const resolveControlledInstallRoots = (cwd, browserChannel) => {
     const channelRoot = resolve(cwd, ".webenvoy", "native-host-install", browserChannel);
     return {
         channelRoot,
@@ -221,6 +223,8 @@ const resolveControlledInstallRoots = (cwd, browserChannel) => {
         launcherRoot: join(channelRoot, "bin")
     };
 };
+export const resolveRepoOwnedManifestPath = (cwd, browserChannel, nativeHostName) => join(resolveControlledInstallRoots(cwd, browserChannel).manifestRoot, `${nativeHostName}.json`);
+export const resolveRepoOwnedLauncherPath = (cwd, browserChannel, nativeHostName) => join(resolveControlledInstallRoots(cwd, browserChannel).launcherRoot, `${nativeHostName}-launcher`);
 const normalizePathForBoundaryCheck = (input) => {
     const normalized = resolve(input);
     return normalized.startsWith("/private/var/") ? normalized.slice("/private".length) : normalized;
@@ -231,11 +235,12 @@ const isPathInside = (baseDir, targetPath) => {
     const rel = relative(normalizedBase, normalizedTarget);
     return (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel)));
 };
+const normalizePathForOutput = (input) => typeof input === "string" ? normalizePathForBoundaryCheck(input) : null;
 const resolveInstallPaths = (input) => {
     const roots = resolveControlledInstallRoots(input.cwd, input.browserChannel);
     const manifestDir = typeof input.manifestDir === "string" && input.manifestDir.length > 0
         ? asAbsolutePath(input.cwd, input.manifestDir)
-        : resolveDefaultManifestDirectory(input.browserChannel);
+        : roots.manifestRoot;
     const hasCustomManifestDir = typeof input.manifestDir === "string" && input.manifestDir.length > 0;
     if (hasCustomManifestDir && !isPathInside(roots.manifestRoot, manifestDir)) {
         throw nativeHostPathError(input.command, "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT", {
@@ -247,7 +252,7 @@ const resolveInstallPaths = (input) => {
     const manifestPath = join(manifestDir, `${input.nativeHostName}.json`);
     const launcherPath = typeof input.launcherPath === "string" && input.launcherPath.length > 0
         ? asAbsolutePath(input.cwd, input.launcherPath)
-        : join(manifestDir, `${input.nativeHostName}-launcher`);
+        : resolveRepoOwnedLauncherPath(input.cwd, input.browserChannel, input.nativeHostName);
     const hasCustomLauncherPath = typeof input.launcherPath === "string" && input.launcherPath.length > 0;
     if (hasCustomLauncherPath && !isPathInside(roots.launcherRoot, launcherPath)) {
         throw nativeHostPathError(input.command, "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT", {
@@ -257,12 +262,30 @@ const resolveInstallPaths = (input) => {
         });
     }
     return {
+        channelRoot: roots.channelRoot,
         manifestDir,
         manifestPath,
         launcherPath,
         hasCustomManifestDir,
-        hasCustomLauncherPath
+        hasCustomLauncherPath,
+        manifestPathSource: hasCustomManifestDir ? "custom" : "repo_owned_default",
+        launcherPathSource: hasCustomLauncherPath ? "custom" : "repo_owned_default"
     };
+};
+const resolveProfileDirForLauncher = (input) => {
+    if (typeof input.profileDir !== "string" || input.profileDir.trim().length === 0) {
+        return undefined;
+    }
+    const normalizedProfileDir = asAbsolutePath(input.cwd, input.profileDir.trim());
+    const profileRoot = resolveProfileRoot(input.cwd);
+    if (!isPathInside(profileRoot, normalizedProfileDir)) {
+        throw nativeHostPathError("runtime.install", "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT", {
+            field: "profile_dir",
+            allowed_root: profileRoot,
+            received_path: normalizedProfileDir
+        });
+    }
+    return normalizedProfileDir;
 };
 export const installNativeHost = async (input) => {
     const resolvedPaths = resolveInstallPaths({
@@ -277,6 +300,13 @@ export const installNativeHost = async (input) => {
     const hostCommand = typeof input.hostCommand === "string" && input.hostCommand.trim().length > 0
         ? input.hostCommand.trim()
         : resolveRepoOwnedNativeHostCommand();
+    const hostCommandSource = typeof input.hostCommand === "string" && input.hostCommand.trim().length > 0
+        ? "explicit"
+        : "repo_owned_default";
+    const profileDir = resolveProfileDirForLauncher({
+        cwd: input.cwd,
+        profileDir: input.profileDir
+    });
     if (resolvedPaths.hasCustomManifestDir) {
         await assertNoSymlinkAncestorBetween({
             command: "runtime.install",
@@ -293,6 +323,16 @@ export const installNativeHost = async (input) => {
             targetDir: dirname(resolvedPaths.launcherPath)
         });
     }
+    if (profileDir) {
+        await assertNoSymlinkAncestorBetween({
+            command: "runtime.install",
+            field: "profile_dir",
+            fromDir: resolveProfileRoot(input.cwd),
+            targetDir: profileDir
+        });
+    }
+    const manifestExisted = await pathExists(resolvedPaths.manifestPath);
+    const launcherExisted = await pathExists(resolvedPaths.launcherPath);
     await mkdir(resolvedPaths.manifestDir, { recursive: true });
     await mkdir(dirname(resolvedPaths.launcherPath), { recursive: true });
     await assertNotSymlink("runtime.install", "launcher_path", resolvedPaths.launcherPath);
@@ -300,7 +340,7 @@ export const installNativeHost = async (input) => {
     await writeFile(resolvedPaths.launcherPath, buildLauncherScript({
         command: "runtime.install",
         hostCommand,
-        profileDir: input.profileDir
+        profileDir
     }), "utf8");
     await chmod(resolvedPaths.launcherPath, 0o755);
     const manifest = {
@@ -316,10 +356,32 @@ export const installNativeHost = async (input) => {
         native_host_name: input.nativeHostName,
         browser_channel: input.browserChannel,
         extension_id: input.extensionId,
-        manifest_path: resolvedPaths.manifestPath,
-        launcher_path: resolvedPaths.launcherPath,
+        install_root: normalizePathForOutput(resolvedPaths.channelRoot),
+        manifest_dir: normalizePathForOutput(resolvedPaths.manifestDir),
+        manifest_path: normalizePathForOutput(resolvedPaths.manifestPath),
+        manifest_path_source: resolvedPaths.manifestPathSource,
+        launcher_dir: normalizePathForOutput(dirname(resolvedPaths.launcherPath)),
+        launcher_path: normalizePathForOutput(resolvedPaths.launcherPath),
+        launcher_path_source: resolvedPaths.launcherPathSource,
         host_command: hostCommand,
+        host_command_source: hostCommandSource,
+        profile_dir: normalizePathForOutput(profileDir),
+        profile_scoped_bridge_socket_path: normalizePathForOutput(profileDir ? resolveProfileScopedNativeBridgeSocketPath(profileDir) : null),
         allowed_origins: [allowedOrigin],
+        persistent_extension_identity: {
+            extension_id: input.extensionId,
+            native_host_name: input.nativeHostName,
+            browser_channel: input.browserChannel,
+            manifest_path: normalizePathForOutput(resolvedPaths.manifestPath)
+        },
+        existed_before: {
+            manifest: manifestExisted,
+            launcher: launcherExisted
+        },
+        write_result: {
+            manifest: manifestExisted ? "overwritten" : "created",
+            launcher: launcherExisted ? "overwritten" : "created"
+        },
         created: {
             manifest: true,
             launcher: true
@@ -361,11 +423,21 @@ export const uninstallNativeHost = async (input) => {
         operation: "uninstall",
         native_host_name: input.nativeHostName,
         browser_channel: input.browserChannel,
-        manifest_path: resolvedPaths.manifestPath,
-        launcher_path: resolvedPaths.launcherPath,
+        install_root: normalizePathForOutput(resolvedPaths.channelRoot),
+        manifest_dir: normalizePathForOutput(resolvedPaths.manifestDir),
+        manifest_path: normalizePathForOutput(resolvedPaths.manifestPath),
+        manifest_path_source: resolvedPaths.manifestPathSource,
+        launcher_dir: normalizePathForOutput(dirname(resolvedPaths.launcherPath)),
+        launcher_path: normalizePathForOutput(resolvedPaths.launcherPath),
+        launcher_path_source: resolvedPaths.launcherPathSource,
         removed: {
             manifest: manifestExisted,
             launcher: launcherExisted
-        }
+        },
+        remove_result: {
+            manifest: manifestExisted ? "removed" : "already_absent",
+            launcher: launcherExisted ? "removed" : "already_absent"
+        },
+        idempotent: !manifestExisted && !launcherExisted
     };
 };

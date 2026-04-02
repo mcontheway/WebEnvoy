@@ -1,12 +1,15 @@
 import { execFile } from "node:child_process";
 import { access, readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { CliError } from "../core/errors.js";
 import type { JsonObject } from "../core/types.js";
-import { isValidNativeHostName } from "../install/native-host.js";
+import {
+  isValidNativeHostName,
+  resolveRepoOwnedManifestPath
+} from "../install/native-host.js";
 import {
   BrowserLaunchError,
   isUnsupportedBrandedChromeForExtensions,
@@ -16,6 +19,11 @@ import type { ProfileMeta, PersistentExtensionBinding } from "./profile-store.js
 
 export type IdentityBindingState = "not_applicable" | "missing" | "bound" | "mismatch";
 export type RuntimeIdentityMode = "load_extension" | "official_chrome_persistent_extension";
+export type ManifestSource =
+  | "binding"
+  | "repo_owned_default"
+  | "browser_default"
+  | "windows_registry";
 
 interface NativeHostManifest {
   name: string;
@@ -35,6 +43,7 @@ export interface IdentityPreflightResult {
   identityBindingState: IdentityBindingState;
   binding: PersistentExtensionBinding | null;
   manifestPath: string | null;
+  manifestSource: ManifestSource | null;
   expectedOrigin: string | null;
   allowedOrigins: string[];
   blocking: boolean;
@@ -206,12 +215,43 @@ const parseWindowsRegistryDefaultValue = (stdout: string): string | null => {
   return null;
 };
 
+const deriveWorkspaceRootFromProfileDir = (profileDir: string | null): string | null => {
+  if (!profileDir) {
+    return null;
+  }
+  const profilesDir = dirname(resolve(profileDir));
+  const webenvoyDir = dirname(profilesDir);
+  if (basename(profilesDir) !== "profiles" || basename(webenvoyDir) !== ".webenvoy") {
+    return null;
+  }
+  return dirname(webenvoyDir);
+};
+
+const resolveRepoOwnedManifestPathForBinding = (
+  binding: PersistentExtensionBinding,
+  profileDir: string | null
+): string | null => {
+  const workspaceRoot = deriveWorkspaceRootFromProfileDir(profileDir);
+  if (!workspaceRoot) {
+    return null;
+  }
+  return resolveRepoOwnedManifestPath(workspaceRoot, binding.browserChannel, binding.nativeHostName);
+};
+
+interface ResolvedManifestPath {
+  manifestPath: string | null;
+  manifestSource: ManifestSource | null;
+}
+
 const resolveManifestPathForBinding = async (
   binding: PersistentExtensionBinding,
   _profileDir: string | null
-): Promise<string | null> => {
+): Promise<ResolvedManifestPath> => {
   if (binding.manifestPath) {
-    return binding.manifestPath;
+    return {
+      manifestPath: binding.manifestPath,
+      manifestSource: "binding"
+    };
   }
 
   if (identityPreflightAdapters.platform() === "win32") {
@@ -223,17 +263,39 @@ const resolveManifestPathForBinding = async (
         });
         const manifestPath = parseWindowsRegistryDefaultValue(stdout);
         if (manifestPath) {
-          return manifestPath;
+          return {
+            manifestPath,
+            manifestSource: "windows_registry"
+          };
         }
       } catch {
         // Windows Native Messaging discovery is registry-based; without a registered key
         // there is no stable manifest path we can trust as the official install.
       }
     }
-    return null;
+    return {
+      manifestPath: null,
+      manifestSource: null
+    };
   }
 
-  return resolveManifestPathForChannel(binding.browserChannel, binding.nativeHostName);
+  const repoOwnedManifestPath = resolveRepoOwnedManifestPathForBinding(binding, _profileDir);
+  if (repoOwnedManifestPath) {
+    try {
+      await access(repoOwnedManifestPath);
+      return {
+        manifestPath: repoOwnedManifestPath,
+        manifestSource: "repo_owned_default"
+      };
+    } catch {
+      // fall through to browser default candidate for legacy installs
+    }
+  }
+
+  return {
+    manifestPath: resolveManifestPathForChannel(binding.browserChannel, binding.nativeHostName),
+    manifestSource: "browser_default"
+  };
 };
 
 const parsePersistentExtensionBindingFromParams = (
@@ -491,6 +553,7 @@ export const buildIdentityPreflightError = (
     native_host_name: result.binding?.nativeHostName ?? null,
     browser_channel: result.binding?.browserChannel ?? null,
     manifest_path: result.manifestPath,
+    manifest_source: result.manifestSource,
     expected_origin: result.expectedOrigin,
     allowed_origins: result.allowedOrigins
   };
@@ -539,6 +602,7 @@ export const runIdentityPreflight = async (input: {
         identityBindingState: "not_applicable",
         binding: null,
         manifestPath: null,
+        manifestSource: null,
         expectedOrigin: null,
         allowedOrigins: [],
         blocking: false,
@@ -552,6 +616,7 @@ export const runIdentityPreflight = async (input: {
       identityBindingState: "not_applicable",
       binding: null,
       manifestPath: null,
+      manifestSource: null,
       expectedOrigin: null,
       allowedOrigins: [],
       blocking: false,
@@ -567,6 +632,7 @@ export const runIdentityPreflight = async (input: {
       identityBindingState: "not_applicable",
       binding: null,
       manifestPath: null,
+      manifestSource: null,
       expectedOrigin: null,
       allowedOrigins: [],
       blocking: false,
@@ -585,6 +651,7 @@ export const runIdentityPreflight = async (input: {
       identityBindingState: "missing",
       binding: null,
       manifestPath: null,
+      manifestSource: null,
       expectedOrigin: null,
       allowedOrigins: [],
       failureReason: "IDENTITY_BINDING_MISSING"
@@ -606,12 +673,14 @@ export const runIdentityPreflight = async (input: {
       identityBindingState: "mismatch",
       binding,
       manifestPath: binding.manifestPath,
+      manifestSource: binding.manifestPath ? "binding" : null,
       expectedOrigin,
       allowedOrigins: [],
       failureReason: "IDENTITY_BINDING_CONFLICT"
     });
   }
-  const manifestPath = await resolveManifestPathForBinding(binding, profileDir ?? null);
+  const manifestResolution = await resolveManifestPathForBinding(binding, profileDir ?? null);
+  const manifestPath = manifestResolution.manifestPath;
   if (manifestPath === null) {
     return buildBlockingResult({
       mode: "official_chrome_persistent_extension",
@@ -620,6 +689,7 @@ export const runIdentityPreflight = async (input: {
       identityBindingState: "mismatch",
       binding,
       manifestPath: null,
+      manifestSource: manifestResolution.manifestSource,
       expectedOrigin,
       allowedOrigins: [],
       failureReason: "IDENTITY_MANIFEST_MISSING"
@@ -631,15 +701,16 @@ export const runIdentityPreflight = async (input: {
       mode: "official_chrome_persistent_extension",
       browserPath,
       browserVersion,
-      identityBindingState: "mismatch",
-      binding: {
-        ...binding,
-        manifestPath
-      },
-      manifestPath,
-      expectedOrigin,
-      allowedOrigins: [],
-      failureReason: "IDENTITY_MANIFEST_MISSING"
+        identityBindingState: "mismatch",
+        binding: {
+          ...binding,
+          manifestPath
+        },
+        manifestPath,
+        manifestSource: manifestResolution.manifestSource,
+        expectedOrigin,
+        allowedOrigins: [],
+        failureReason: "IDENTITY_MANIFEST_MISSING"
     });
   }
 
@@ -648,15 +719,16 @@ export const runIdentityPreflight = async (input: {
       mode: "official_chrome_persistent_extension",
       browserPath,
       browserVersion,
-      identityBindingState: "mismatch",
-      binding: {
-        ...binding,
-        manifestPath
-      },
-      manifestPath,
-      expectedOrigin,
-      allowedOrigins: manifest.allowed_origins,
-      failureReason: "IDENTITY_NATIVE_HOST_NAME_MISMATCH"
+        identityBindingState: "mismatch",
+        binding: {
+          ...binding,
+          manifestPath
+        },
+        manifestPath,
+        manifestSource: manifestResolution.manifestSource,
+        expectedOrigin,
+        allowedOrigins: manifest.allowed_origins,
+        failureReason: "IDENTITY_NATIVE_HOST_NAME_MISMATCH"
     });
   }
 
@@ -665,15 +737,16 @@ export const runIdentityPreflight = async (input: {
       mode: "official_chrome_persistent_extension",
       browserPath,
       browserVersion,
-      identityBindingState: "mismatch",
-      binding: {
-        ...binding,
-        manifestPath
-      },
-      manifestPath,
-      expectedOrigin,
-      allowedOrigins: manifest.allowed_origins,
-      failureReason: "IDENTITY_ALLOWED_ORIGIN_MISSING"
+        identityBindingState: "mismatch",
+        binding: {
+          ...binding,
+          manifestPath
+        },
+        manifestPath,
+        manifestSource: manifestResolution.manifestSource,
+        expectedOrigin,
+        allowedOrigins: manifest.allowed_origins,
+        failureReason: "IDENTITY_ALLOWED_ORIGIN_MISSING"
     });
   }
 
@@ -684,15 +757,16 @@ export const runIdentityPreflight = async (input: {
         mode: "official_chrome_persistent_extension",
         browserPath,
         browserVersion,
-        identityBindingState: "missing",
-        binding: {
-          ...binding,
-          manifestPath
-        },
-        manifestPath,
-        expectedOrigin,
-        allowedOrigins: manifest.allowed_origins,
-        failureReason: "IDENTITY_BINDING_MISSING"
+          identityBindingState: "missing",
+          binding: {
+            ...binding,
+            manifestPath
+          },
+          manifestPath,
+          manifestSource: manifestResolution.manifestSource,
+          expectedOrigin,
+          allowedOrigins: manifest.allowed_origins,
+          failureReason: "IDENTITY_BINDING_MISSING"
       });
     }
   }
@@ -707,6 +781,7 @@ export const runIdentityPreflight = async (input: {
       manifestPath
     },
     manifestPath,
+    manifestSource: manifestResolution.manifestSource,
     expectedOrigin,
     allowedOrigins: manifest.allowed_origins,
     blocking: false,

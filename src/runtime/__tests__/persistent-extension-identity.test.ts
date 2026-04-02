@@ -441,10 +441,97 @@ describe("runIdentityPreflight", () => {
       identityBindingState: "bound",
       failureReason: "IDENTITY_PREFLIGHT_PASSED",
       manifestPath,
+      manifestSource: "browser_default",
       expectedOrigin: `chrome-extension://${EXTENSION_ID}/`,
       allowedOrigins: [`chrome-extension://${EXTENSION_ID}/`]
     });
     expect(result.manifestPath?.startsWith(profileDir)).toBe(false);
+  });
+
+  it("prefers repo-owned install manifest when binding omits manifestPath and workspace profileDir is known", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-repo-owned-"));
+    const profileDir = join(baseDir, ".webenvoy", "profiles", "identity-profile");
+    const repoOwnedManifestPath = join(
+      baseDir,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "manifests",
+      "com.webenvoy.host.json"
+    );
+    const fakeHome = await mkdtemp(join(tmpdir(), "webenvoy-native-host-home-repo-owned-"));
+    const browserDefaultManifestPath = join(
+      fakeHome,
+      "Library",
+      "Application Support",
+      "Google",
+      "Chrome",
+      "NativeMessagingHosts",
+      "com.webenvoy.host.json"
+    );
+    vi.stubEnv("HOME", fakeHome);
+    await mkdir(dirname(repoOwnedManifestPath), { recursive: true });
+    await mkdir(dirname(browserDefaultManifestPath), { recursive: true });
+    await writeFile(
+      repoOwnedManifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          allowed_origins: [`chrome-extension://${EXTENSION_ID}/`]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeFile(
+      browserDefaultManifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          allowed_origins: ["chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/"]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeProfileExtensionPreferences({
+      profileDir,
+      extensionId: EXTENSION_ID,
+      state: 1
+    });
+    await writeInstalledProfileExtension({
+      profileDir,
+      extensionId: EXTENSION_ID
+    });
+
+    setIdentityPreflightAdaptersForTests({
+      resolvePreferredBrowserVersionTruthSource: vi.fn().mockResolvedValue({
+        executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        browserVersion: "Google Chrome 146.0.7680.154"
+      }),
+      isUnsupportedBrandedChromeForExtensions: vi.fn().mockReturnValue(true),
+      platform: () => "darwin"
+    });
+
+    const result = await runIdentityPreflight({
+      params: {
+        persistent_extension_identity: {
+          extension_id: EXTENSION_ID
+        }
+      },
+      meta: createProfileMeta(profileDir),
+      profileDir
+    });
+
+    expect(result).toMatchObject({
+      identityBindingState: "bound",
+      failureReason: "IDENTITY_PREFLIGHT_PASSED",
+      manifestPath: repoOwnedManifestPath,
+      manifestSource: "repo_owned_default",
+      expectedOrigin: `chrome-extension://${EXTENSION_ID}/`
+    });
   });
 
   it("treats developer-mode unpacked extension path as enabled when profile Extensions dir is absent", async () => {

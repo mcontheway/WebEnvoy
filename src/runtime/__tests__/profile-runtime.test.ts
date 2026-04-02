@@ -1752,6 +1752,76 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
+  it("falls back to blocked identity diagnostics after repo-owned install manifest is removed", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-install-recovery-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const profileName = "identity_repo_owned_recovery_profile";
+    const repoOwnedManifestPath = join(
+      baseDir,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "manifests",
+      "com.webenvoy.host.json"
+    );
+    await mkdir(join(baseDir, ".webenvoy", "native-host-install", "chrome", "manifests"), {
+      recursive: true
+    });
+    await writeFile(
+      repoOwnedManifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          allowed_origins: [`chrome-extension://${PERSISTENT_EXTENSION_ID}/`]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: profileName
+    });
+    const service = createTestService();
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: profileName,
+        runId: "run-runtime-install-recovery-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: PERSISTENT_EXTENSION_ID
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      identityBindingState: "bound"
+    });
+
+    await rm(repoOwnedManifestPath, { force: true });
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile: profileName,
+        runId: "run-runtime-install-recovery-001",
+        params: {}
+      })
+    ).resolves.toMatchObject({
+      identityBindingState: "mismatch",
+      runtimeReadiness: "blocked",
+      identityPreflight: {
+        manifestPath: repoOwnedManifestPath,
+        manifestSource: "binding",
+        failureReason: "IDENTITY_MANIFEST_MISSING"
+      }
+    });
+  });
+
   it("does not report lockHeld or ready runtimeReadiness for a non-owner status query", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-status-non-owner-"));
     tempDirs.push(baseDir);
