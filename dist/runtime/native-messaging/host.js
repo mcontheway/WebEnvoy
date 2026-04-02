@@ -3,8 +3,8 @@ import { connect as connectSocket } from "node:net";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_TRANSPORT_TIMEOUT_MS, ensureBridgeRequestEnvelope } from "./protocol.js";
-import { resolveRepositoryProfileRoot } from "../repository-root.js";
 export const PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME = "nm.sock";
+const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 const withTransportCode = (error, code) => Object.assign(error, { transportCode: code });
 const readNativeHostCommand = () => {
     const value = process.env.WEBENVOY_NATIVE_HOST_CMD;
@@ -173,7 +173,7 @@ export class NativeHostBridgeTransport {
         if (typeof request.profile !== "string" || request.profile.trim().length === 0) {
             return null;
         }
-        const candidate = join(resolveRepositoryProfileRoot(process.cwd()), request.profile.trim(), PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME);
+        const candidate = join(process.cwd(), ...PROFILE_ROOT_SEGMENTS, request.profile.trim(), PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME);
         try {
             await access(candidate);
             this.#activeSocketPath = candidate;

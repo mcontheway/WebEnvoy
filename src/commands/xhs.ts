@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 import { CliError } from "../core/errors.js";
 import type { CommandDefinition, CommandExecutionResult, JsonObject, RuntimeContext } from "../core/types.js";
 import {
@@ -11,7 +13,6 @@ import { ProfileStore } from "../runtime/profile-store.js";
 import {
   prepareOfficialChromeRuntime
 } from "../runtime/official-chrome-runtime.js";
-import { resolveRepositoryProfileRoot } from "../runtime/repository-root.js";
 
 export { buildOfficialChromeRuntimeStatusParams } from "../runtime/official-chrome-runtime.js";
 
@@ -416,7 +417,7 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
   }
 
   const bridge = resolveRuntimeBridge();
-  const profileStore = new ProfileStore(resolveRepositoryProfileRoot(context.cwd));
+  const profileStore = new ProfileStore(join(context.cwd, ".webenvoy", "profiles"));
   const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
   const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
     requestedExecutionMode: gate.requestedExecutionMode

@@ -10,9 +10,9 @@ import {
   type BridgeResponseEnvelope
 } from "./protocol.js";
 import type { NativeBridgeTransport } from "./transport.js";
-import { resolveRepositoryProfileRoot } from "../repository-root.js";
 
 export const PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME = "nm.sock";
+const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"] as const;
 
 type TransportCodedError = Error & {
   transportCode?:
@@ -243,7 +243,8 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
       return null;
     }
     const candidate = join(
-      resolveRepositoryProfileRoot(process.cwd()),
+      process.cwd(),
+      ...PROFILE_ROOT_SEGMENTS,
       request.profile.trim(),
       PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME
     );

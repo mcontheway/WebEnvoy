@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { access, readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { CliError } from "../core/errors.js";
 import { isValidNativeHostName } from "../install/native-host.js";
@@ -17,6 +17,10 @@ const DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS = {
     platform: () => process.platform
 };
 let identityPreflightAdapters = DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS;
+const EMPTY_INSTALL_DIAGNOSTICS = {
+    launcherPath: null,
+    launcherExists: null
+};
 export const setIdentityPreflightAdaptersForTests = (overrides) => {
     identityPreflightAdapters = {
         ...DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS,
@@ -251,6 +255,7 @@ const readNativeHostManifest = async (manifestPath) => {
         const raw = await readFile(manifestPath, "utf8");
         const parsed = JSON.parse(raw);
         const name = asNonEmptyString(parsed.name);
+        const launcherPath = asNonEmptyString(parsed.path);
         const allowedOrigins = Array.isArray(parsed.allowed_origins)
             ? parsed.allowed_origins.filter((entry) => typeof entry === "string")
             : [];
@@ -259,11 +264,30 @@ const readNativeHostManifest = async (manifestPath) => {
         }
         return {
             name,
-            allowed_origins: allowedOrigins
+            allowed_origins: allowedOrigins,
+            path: launcherPath ? (isAbsolute(launcherPath) ? launcherPath : resolve(dirname(manifestPath), launcherPath)) : null
         };
     }
     catch {
         return null;
+    }
+};
+const resolveInstallDiagnostics = async (manifest) => {
+    if (!manifest?.path) {
+        return EMPTY_INSTALL_DIAGNOSTICS;
+    }
+    try {
+        await access(manifest.path);
+        return {
+            launcherPath: manifest.path,
+            launcherExists: true
+        };
+    }
+    catch {
+        return {
+            launcherPath: manifest.path,
+            launcherExists: false
+        };
     }
 };
 const readProfileExtensionStateFromPreferences = (input, extensionId) => {
@@ -369,7 +393,9 @@ export const buildIdentityPreflightError = (result) => {
         manifest_path: result.manifestPath,
         manifest_source: result.manifestSource,
         expected_origin: result.expectedOrigin,
-        allowed_origins: result.allowedOrigins
+        allowed_origins: result.allowedOrigins,
+        launcher_path: result.installDiagnostics.launcherPath,
+        launcher_exists: result.installDiagnostics.launcherExists
     };
     if (result.failureReason === "BOOTSTRAP_PENDING") {
         return new CliError("ERR_RUNTIME_BOOTSTRAP_PENDING", "identity preflight 已通过，但 persistent extension bootstrap 尚未实现", { details, retryable: false });
@@ -399,6 +425,7 @@ export const runIdentityPreflight = async (input) => {
                 manifestSource: null,
                 expectedOrigin: null,
                 allowedOrigins: [],
+                installDiagnostics: EMPTY_INSTALL_DIAGNOSTICS,
                 blocking: false,
                 failureReason: "IDENTITY_PREFLIGHT_NOT_REQUIRED"
             };
@@ -413,6 +440,7 @@ export const runIdentityPreflight = async (input) => {
             manifestSource: null,
             expectedOrigin: null,
             allowedOrigins: [],
+            installDiagnostics: EMPTY_INSTALL_DIAGNOSTICS,
             blocking: false,
             failureReason: "IDENTITY_PREFLIGHT_NOT_REQUIRED"
         };
@@ -428,6 +456,7 @@ export const runIdentityPreflight = async (input) => {
             manifestSource: null,
             expectedOrigin: null,
             allowedOrigins: [],
+            installDiagnostics: EMPTY_INSTALL_DIAGNOSTICS,
             blocking: false,
             failureReason: "IDENTITY_PREFLIGHT_NOT_REQUIRED"
         };
@@ -445,6 +474,7 @@ export const runIdentityPreflight = async (input) => {
             manifestSource: null,
             expectedOrigin: null,
             allowedOrigins: [],
+            installDiagnostics: EMPTY_INSTALL_DIAGNOSTICS,
             failureReason: "IDENTITY_BINDING_MISSING"
         });
     }
@@ -465,6 +495,7 @@ export const runIdentityPreflight = async (input) => {
             manifestSource: binding.manifestPath ? "binding" : null,
             expectedOrigin,
             allowedOrigins: [],
+            installDiagnostics: EMPTY_INSTALL_DIAGNOSTICS,
             failureReason: "IDENTITY_BINDING_CONFLICT"
         });
     }
@@ -481,10 +512,12 @@ export const runIdentityPreflight = async (input) => {
             manifestSource: manifestResolution.manifestSource,
             expectedOrigin,
             allowedOrigins: [],
+            installDiagnostics: EMPTY_INSTALL_DIAGNOSTICS,
             failureReason: "IDENTITY_MANIFEST_MISSING"
         });
     }
     const manifest = await readNativeHostManifest(manifestPath);
+    const installDiagnostics = await resolveInstallDiagnostics(manifest);
     if (!manifest) {
         return buildBlockingResult({
             mode: "official_chrome_persistent_extension",
@@ -499,6 +532,7 @@ export const runIdentityPreflight = async (input) => {
             manifestSource: manifestResolution.manifestSource,
             expectedOrigin,
             allowedOrigins: [],
+            installDiagnostics,
             failureReason: "IDENTITY_MANIFEST_MISSING"
         });
     }
@@ -516,6 +550,7 @@ export const runIdentityPreflight = async (input) => {
             manifestSource: manifestResolution.manifestSource,
             expectedOrigin,
             allowedOrigins: manifest.allowed_origins,
+            installDiagnostics,
             failureReason: "IDENTITY_NATIVE_HOST_NAME_MISMATCH"
         });
     }
@@ -533,6 +568,7 @@ export const runIdentityPreflight = async (input) => {
             manifestSource: manifestResolution.manifestSource,
             expectedOrigin,
             allowedOrigins: manifest.allowed_origins,
+            installDiagnostics,
             failureReason: "IDENTITY_ALLOWED_ORIGIN_MISSING"
         });
     }
@@ -552,6 +588,7 @@ export const runIdentityPreflight = async (input) => {
                 manifestSource: manifestResolution.manifestSource,
                 expectedOrigin,
                 allowedOrigins: manifest.allowed_origins,
+                installDiagnostics,
                 failureReason: "IDENTITY_BINDING_MISSING"
             });
         }
@@ -569,6 +606,7 @@ export const runIdentityPreflight = async (input) => {
         manifestSource: manifestResolution.manifestSource,
         expectedOrigin,
         allowedOrigins: manifest.allowed_origins,
+        installDiagnostics,
         blocking: false,
         failureReason: "IDENTITY_PREFLIGHT_PASSED"
     };

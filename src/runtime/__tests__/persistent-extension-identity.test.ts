@@ -76,6 +76,28 @@ const writeInstalledProfileExtension = async (input: {
   await writeFile(join(extensionDir, "manifest.json"), "{\n  \"manifest_version\": 3\n}\n", "utf8");
 };
 
+const createNativeHostManifest = async (input: {
+  profileDir: string;
+  allowedOrigins: string[];
+  launcherPath?: string;
+}): Promise<string> => {
+  const manifestPath = join(input.profileDir, "com.webenvoy.host.json");
+  await writeFile(
+    manifestPath,
+    `${JSON.stringify(
+      {
+        name: "com.webenvoy.host",
+        path: input.launcherPath ?? "/mock/webenvoy-host",
+        allowed_origins: input.allowedOrigins
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+  return manifestPath;
+};
+
 afterEach(() => {
   resetIdentityPreflightAdaptersForTests();
   vi.unstubAllEnvs();
@@ -500,6 +522,52 @@ describe("runIdentityPreflight", () => {
       manifestPath,
       manifestSource: "browser_default",
       expectedOrigin: `chrome-extension://${EXTENSION_ID}/`
+    });
+  });
+
+  it("surfaces install diagnostics when the registered launcher path is missing", async () => {
+    const profileDir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-profile-missing-launcher-"));
+    const manifestPath = await createNativeHostManifest({
+      profileDir,
+      allowedOrigins: [`chrome-extension://${EXTENSION_ID}/`],
+      launcherPath: join(profileDir, "missing-launcher.sh")
+    });
+    await writeProfileExtensionPreferences({
+      profileDir,
+      extensionId: EXTENSION_ID,
+      state: 1
+    });
+    await writeInstalledProfileExtension({
+      profileDir,
+      extensionId: EXTENSION_ID
+    });
+
+    setIdentityPreflightAdaptersForTests({
+      resolvePreferredBrowserVersionTruthSource: vi.fn().mockResolvedValue({
+        executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        browserVersion: "Google Chrome 146.0.7680.154"
+      }),
+      isUnsupportedBrandedChromeForExtensions: vi.fn().mockReturnValue(true)
+    });
+
+    const result = await runIdentityPreflight({
+      params: {
+        persistent_extension_identity: {
+          extension_id: EXTENSION_ID,
+          manifest_path: manifestPath
+        }
+      },
+      meta: createProfileMeta(profileDir),
+      profileDir
+    });
+
+    expect(result).toMatchObject({
+      identityBindingState: "bound",
+      failureReason: "IDENTITY_PREFLIGHT_PASSED",
+      installDiagnostics: {
+        launcherPath: join(profileDir, "missing-launcher.sh"),
+        launcherExists: false
+      }
     });
   });
 

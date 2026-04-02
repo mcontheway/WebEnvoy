@@ -138,6 +138,47 @@ const runCli = (
 const createNativeHostCommand = (scriptPath: string): string =>
   `"${process.execPath}" "${scriptPath}"`;
 
+const runGit = (cwd: string, args: string[]) => {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8"
+  });
+  expect(result.status).toBe(0);
+  return result.stdout.trim();
+};
+
+const createGitWorktreePair = async (): Promise<{
+  repositoryCwd: string;
+  linkedWorktreeCwd: string;
+  sharedManifestRoot: string;
+}> => {
+  const baseDir = await mkdtemp(path.join(tmpdir(), "webenvoy-cli-worktree-"));
+  tempDirs.push(baseDir);
+  const repositoryCwd = path.join(baseDir, "repo");
+  const linkedWorktreeCwd = path.join(baseDir, "repo-feature");
+  const sharedManifestRoot = path.join(baseDir, "shared-manifests");
+  await mkdir(repositoryCwd, { recursive: true });
+  await mkdir(sharedManifestRoot, { recursive: true });
+  runGit(repositoryCwd, ["init"]);
+  await writeFile(path.join(repositoryCwd, "README.md"), "# temp repo\n", "utf8");
+  runGit(repositoryCwd, ["add", "README.md"]);
+  runGit(repositoryCwd, [
+    "-c",
+    "user.name=WebEnvoy Test",
+    "-c",
+    "user.email=test@example.com",
+    "commit",
+    "-m",
+    "init"
+  ]);
+  runGit(repositoryCwd, ["worktree", "add", "-b", "feat/test-cli-worktree", linkedWorktreeCwd]);
+  return {
+    repositoryCwd,
+    linkedWorktreeCwd,
+    sharedManifestRoot
+  };
+};
+
 const runCliAsync = (
   args: string[],
   cwd: string = repoRoot,
@@ -3026,6 +3067,8 @@ process.stdin.on("data", (chunk) => {
         native_host_name: "com.webenvoy.host",
         browser_channel: "chrome",
         extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        install_scope: "worktree_scoped_bundle",
+        install_key: null,
         install_root: path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome"),
         manifest_dir: manifestDir,
         manifest_path: path.join(manifestDir, "com.webenvoy.host.json"),
@@ -3035,6 +3078,7 @@ process.stdin.on("data", (chunk) => {
         launcher_path_source: "custom",
         host_command: hostCommand,
         host_command_source: "explicit",
+        profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
         profile_dir: null,
         profile_scoped_bridge_socket_path: null,
         allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"],
@@ -3046,15 +3090,18 @@ process.stdin.on("data", (chunk) => {
         },
         existed_before: {
           manifest: false,
-          launcher: false
+          launcher: false,
+          bundle_runtime: false
         },
         write_result: {
           manifest: "created",
-          launcher: "created"
+          launcher: "created",
+          bundle_runtime: "created"
         },
         created: {
           manifest: true,
-          launcher: true
+          launcher: true,
+          bundle_runtime: true
         }
       }
     });
@@ -3125,6 +3172,8 @@ process.stdin.on("data", (chunk) => {
       command: "runtime.install",
       status: "success",
       summary: {
+        install_scope: "worktree_scoped_bundle",
+        install_key: null,
         install_root: path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome"),
         manifest_dir: path.dirname(defaultManifestPath),
         manifest_path: defaultManifestPath,
@@ -3133,9 +3182,11 @@ process.stdin.on("data", (chunk) => {
         launcher_path: defaultLauncherPath,
         launcher_path_source: "repo_owned_default",
         host_command_source: "repo_owned_default",
+        profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
         write_result: {
           manifest: "created",
-          launcher: "created"
+          launcher: "created",
+          bundle_runtime: "created"
         }
       }
     });
@@ -3275,6 +3326,37 @@ process.stdin.on("data", (chunk) => {
     expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
     expect(launcherRaw).toContain('exec ');
     expect(launcherRaw).toContain(' "$@"');
+  });
+
+  it("resolves relative profile_dir against the current worktree", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const relativeProfileDir = path.join(".webenvoy", "profiles", "xhs_relative_probe");
+
+    const result = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-profile-dir-relative-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          profile_dir: relativeProfileDir
+        })
+      ],
+      runtimeCwd
+    );
+
+    expect(result.status).toBe(0);
+    expect(parseSingleJsonLine(result.stdout)).toMatchObject({
+      command: "runtime.install",
+      status: "success",
+      summary: {
+        profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
+        profile_dir: path.join(runtimeCwd, relativeProfileDir),
+        profile_scoped_bridge_socket_path: path.join(runtimeCwd, relativeProfileDir, "nm.sock")
+      }
+    });
   });
 
   it("rejects runtime.install when profile_dir escapes controlled profile root", async () => {
@@ -3418,6 +3500,8 @@ process.stdin.on("data", (chunk) => {
         operation: "uninstall",
         native_host_name: "com.webenvoy.host",
         browser_channel: "chrome",
+        install_scope: "worktree_scoped_bundle",
+        install_key: null,
         install_root: path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome"),
         manifest_dir: manifestDir,
         manifest_path: path.join(manifestDir, "com.webenvoy.host.json"),
@@ -3427,11 +3511,13 @@ process.stdin.on("data", (chunk) => {
         launcher_path_source: "custom",
         removed: {
           manifest: true,
-          launcher: true
+          launcher: true,
+          bundle_runtime: false
         },
         remove_result: {
           manifest: "removed",
-          launcher: "removed"
+          launcher: "removed",
+          bundle_runtime: "already_absent"
         },
         idempotent: false
       }
@@ -3535,18 +3621,18 @@ process.stdin.on("data", (chunk) => {
         manifest_dir: manifestDir,
         manifest_path: manifestPath,
         manifest_path_source: "browser_default",
-        launcher_path: repoOwnedLauncherPath,
-        launcher_path_source: "repo_owned_default",
-        legacy_launcher_path: legacyLauncherPath,
+        launcher_path: legacyLauncherPath,
+        launcher_path_source: "browser_default",
+        legacy_launcher_path: null,
         removed: {
           manifest: true,
-          launcher: false,
-          legacy_launcher: true
+          launcher: true,
+          legacy_launcher: false
         },
         remove_result: {
           manifest: "removed",
-          launcher: "already_absent",
-          legacy_launcher: "removed"
+          launcher: "removed",
+          legacy_launcher: "already_absent"
         },
         idempotent: false
       }
@@ -3555,6 +3641,9 @@ process.stdin.on("data", (chunk) => {
       code: "ENOENT"
     });
     await expect(readFile(legacyLauncherPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(readFile(repoOwnedLauncherPath, "utf8")).rejects.toMatchObject({
       code: "ENOENT"
     });
   });
@@ -3610,6 +3699,150 @@ process.stdin.on("data", (chunk) => {
           launcher: "overwritten"
         }
       }
+    });
+  });
+
+  it("keeps default native-host bundles isolated per worktree while replacing the shared registration", async () => {
+    const { repositoryCwd, linkedWorktreeCwd, sharedManifestRoot } = await createGitWorktreePair();
+    const installArgs = [
+      "runtime.install",
+      "--run-id",
+      "run-contract-install-worktree-shared-001",
+      "--params",
+      JSON.stringify({
+        extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        browser_channel: "chrome"
+      })
+    ];
+
+    const firstInstall = runCli(installArgs, repositoryCwd, {
+      WEBENVOY_NATIVE_HOST_MANIFEST_DIR: sharedManifestRoot
+    });
+    expect(firstInstall.status).toBe(0);
+    const firstSummary = parseSingleJsonLine(firstInstall.stdout).summary as Record<string, unknown>;
+    const firstInstallKey = String(firstSummary.install_key);
+    const firstInstallRoot = String(firstSummary.install_root);
+    const firstLauncherPath = String(firstSummary.launcher_path);
+
+    const secondInstall = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-worktree-shared-002",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome"
+        })
+      ],
+      linkedWorktreeCwd,
+      {
+        WEBENVOY_NATIVE_HOST_MANIFEST_DIR: sharedManifestRoot
+      }
+    );
+    expect(secondInstall.status).toBe(0);
+    const secondSummary = parseSingleJsonLine(secondInstall.stdout).summary as Record<string, unknown>;
+    const secondInstallKey = String(secondSummary.install_key);
+    const secondLauncherPath = String(secondSummary.launcher_path);
+
+    expect(firstSummary.install_scope).toBe("worktree_scoped_bundle");
+    expect(secondSummary.install_scope).toBe("worktree_scoped_bundle");
+    expect(firstInstallKey).not.toBe("null");
+    expect(secondInstallKey).not.toBe("null");
+    expect(secondInstallKey).not.toBe(firstInstallKey);
+    expect(secondLauncherPath).not.toBe(firstLauncherPath);
+    expect(firstInstallRoot).toContain(path.join(".webenvoy", "native-host-install", "worktrees", firstInstallKey));
+    expect(String(secondSummary.install_root)).toContain(
+      path.join(".webenvoy", "native-host-install", "worktrees", secondInstallKey)
+    );
+
+    const manifest = JSON.parse(
+      await readFile(path.join(sharedManifestRoot, "com.webenvoy.host.json"), "utf8")
+    ) as Record<string, unknown>;
+    expect(manifest.path).toBe(await realpath(secondLauncherPath));
+    await expect(readFile(firstLauncherPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(
+      readFile(path.join(firstInstallRoot, "runtime", "native-messaging", "native-host-entry.js"), "utf8")
+    ).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
+  it("removes the currently registered managed launcher from another cwd when runtime.uninstall omits launcher_path", async () => {
+    const { repositoryCwd, linkedWorktreeCwd, sharedManifestRoot } = await createGitWorktreePair();
+    const install = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-cross-cwd-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome"
+        })
+      ],
+      linkedWorktreeCwd,
+      {
+        WEBENVOY_NATIVE_HOST_MANIFEST_DIR: sharedManifestRoot
+      }
+    );
+    expect(install.status).toBe(0);
+    const installSummary = parseSingleJsonLine(install.stdout).summary as Record<string, unknown>;
+    const linkedLauncherPath = String(installSummary.launcher_path);
+    const linkedInstallRoot = String(installSummary.install_root);
+    const linkedInstallKey = String(installSummary.install_key);
+
+    const uninstall = runCli(
+      [
+        "runtime.uninstall",
+        "--run-id",
+        "run-contract-uninstall-cross-cwd-001",
+        "--params",
+        JSON.stringify({
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host"
+        })
+      ],
+      repositoryCwd,
+      {
+        WEBENVOY_NATIVE_HOST_MANIFEST_DIR: sharedManifestRoot
+      }
+    );
+    expect(uninstall.status).toBe(0);
+    expect(parseSingleJsonLine(uninstall.stdout)).toMatchObject({
+      command: "runtime.uninstall",
+      status: "success",
+      summary: {
+        install_scope: "worktree_scoped_bundle",
+        install_key: linkedInstallKey,
+        install_root: linkedInstallRoot,
+        manifest_dir: sharedManifestRoot,
+        launcher_path: linkedLauncherPath,
+        launcher_path_source: "repo_owned_default",
+        removed: {
+          manifest: true,
+          launcher: true,
+          bundle_runtime: true
+        },
+        remove_result: {
+          manifest: "removed",
+          launcher: "removed",
+          bundle_runtime: "removed"
+        }
+      }
+    });
+    await expect(readFile(path.join(sharedManifestRoot, "com.webenvoy.host.json"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(readFile(linkedLauncherPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(
+      readFile(path.join(linkedInstallRoot, "runtime", "native-messaging", "native-host-entry.js"), "utf8")
+    ).rejects.toMatchObject({
+      code: "ENOENT"
     });
   });
 
@@ -3870,7 +4103,12 @@ process.stdin.on("data", (chunk) => {
       summary: {
         identityBindingState: "bound",
         bootstrapState: "not_started",
-        runtimeReadiness: "recoverable"
+        runtimeReadiness: "recoverable",
+        identityPreflight: {
+          installDiagnostics: {
+            launcherExists: true
+          }
+        }
       }
     });
     await seedInstalledPersistentExtension({
@@ -4062,7 +4300,12 @@ process.stdin.on("data", (chunk) => {
         browserState: "ready",
         identityBindingState: "missing",
         bootstrapState: "not_started",
-        runtimeReadiness: "blocked"
+        runtimeReadiness: "blocked",
+        identityPreflight: {
+          installDiagnostics: {
+            launcherExists: null
+          }
+        }
       }
     });
 
@@ -4082,7 +4325,12 @@ process.stdin.on("data", (chunk) => {
         browserState: "logging_in",
         identityBindingState: "missing",
         bootstrapState: "not_started",
-        runtimeReadiness: "blocked"
+        runtimeReadiness: "blocked",
+        identityPreflight: {
+          installDiagnostics: {
+            launcherExists: null
+          }
+        }
       }
     });
   });
