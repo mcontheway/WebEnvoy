@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { CliError } from "../core/errors.js";
 import { PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME } from "../runtime/native-messaging/host.js";
+import { resolveRepositoryProfileRoot, resolveRepositoryRoot } from "../runtime/repository-root.js";
 
 export const DEFAULT_NATIVE_HOST_NAME = "com.webenvoy.host";
 export const DEFAULT_BROWSER_CHANNEL = "chrome";
@@ -221,7 +222,7 @@ export const resolveRepoOwnedNativeHostEntryPath = (): string =>
 export const resolveRepoOwnedNativeHostCommand = (): string =>
   `${quoteShellToken(process.execPath)} ${quoteShellToken(resolveRepoOwnedNativeHostEntryPath())}`;
 
-export const resolveProfileRoot = (cwd: string): string => resolve(cwd, ".webenvoy", "profiles");
+export const resolveProfileRoot = (cwd: string): string => resolveRepositoryProfileRoot(cwd);
 export const resolveProfileScopedNativeBridgeSocketPath = (profileDir: string): string =>
   join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME);
 
@@ -298,7 +299,7 @@ ${profileRootExport}exec ${argv} "$@"
 };
 
 export const resolveControlledInstallRoots = (cwd: string, browserChannel: BrowserChannel) => {
-  const channelRoot = resolve(cwd, ".webenvoy", "native-host-install", browserChannel);
+  const channelRoot = resolve(resolveRepositoryRoot(cwd), ".webenvoy", "native-host-install", browserChannel);
   return {
     channelRoot,
     manifestRoot: join(channelRoot, "manifests"),
@@ -481,7 +482,7 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
     buildLauncherScript({
       command: "runtime.install",
       hostCommand,
-      profileRoot: profileDir ? resolveProfileRoot(input.cwd) : undefined
+      profileRoot: resolveProfileRoot(input.cwd)
     }),
     "utf8"
   );

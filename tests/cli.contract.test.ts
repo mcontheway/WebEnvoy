@@ -3147,6 +3147,11 @@ process.stdin.on("data", (chunk) => {
     await expect(readFile(defaultLauncherPath, "utf8")).resolves.toContain(
       repoOwnedNativeHostEntryPath
     );
+    await expect(readFile(defaultLauncherPath, "utf8")).resolves.toContain(
+      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${path
+        .join(await realpath(runtimeCwd), ".webenvoy", "profiles")
+        .replace(/'/g, `'\"'\"'`)}'`
+    );
   });
 
   it("uses repo-owned native host entry as default runtime.install host_command", async () => {

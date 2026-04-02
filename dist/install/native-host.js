@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CliError } from "../core/errors.js";
 import { PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME } from "../runtime/native-messaging/host.js";
+import { resolveRepositoryProfileRoot, resolveRepositoryRoot } from "../runtime/repository-root.js";
 export const DEFAULT_NATIVE_HOST_NAME = "com.webenvoy.host";
 export const DEFAULT_BROWSER_CHANNEL = "chrome";
 const NATIVE_HOST_DESCRIPTION = "WebEnvoy CLI ↔ Extension bridge";
@@ -174,7 +175,7 @@ const tokenizeHostCommand = (command, hostCommand) => {
 };
 export const resolveRepoOwnedNativeHostEntryPath = () => fileURLToPath(new URL("../runtime/native-messaging/native-host-entry.js", import.meta.url));
 export const resolveRepoOwnedNativeHostCommand = () => `${quoteShellToken(process.execPath)} ${quoteShellToken(resolveRepoOwnedNativeHostEntryPath())}`;
-export const resolveProfileRoot = (cwd) => resolve(cwd, ".webenvoy", "profiles");
+export const resolveProfileRoot = (cwd) => resolveRepositoryProfileRoot(cwd);
 export const resolveProfileScopedNativeBridgeSocketPath = (profileDir) => join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME);
 export const isBrowserChannel = (value) => BROWSER_CHANNELS.includes(value);
 export const isValidExtensionId = (value) => EXTENSION_ID_PATTERN.test(value);
@@ -225,7 +226,7 @@ ${profileRootExport}exec ${argv} "$@"
 `;
 };
 export const resolveControlledInstallRoots = (cwd, browserChannel) => {
-    const channelRoot = resolve(cwd, ".webenvoy", "native-host-install", browserChannel);
+    const channelRoot = resolve(resolveRepositoryRoot(cwd), ".webenvoy", "native-host-install", browserChannel);
     return {
         channelRoot,
         manifestRoot: join(channelRoot, "manifests"),
@@ -350,7 +351,7 @@ export const installNativeHost = async (input) => {
     await writeFile(resolvedPaths.launcherPath, buildLauncherScript({
         command: "runtime.install",
         hostCommand,
-        profileRoot: profileDir ? resolveProfileRoot(input.cwd) : undefined
+        profileRoot: resolveProfileRoot(input.cwd)
     }), "utf8");
     await chmod(resolvedPaths.launcherPath, 0o755);
     const manifest = {
