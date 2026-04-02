@@ -348,6 +348,20 @@ is_reviewer_owned_baseline_path() {
   esac
 }
 
+is_guardian_summary_path() {
+  local value="$1"
+
+  case "${value}" in
+    "${REVIEW_ADDENDUM_FILE}"|\
+    "${SPEC_REVIEW_SUMMARY_FILE}")
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 is_optional_review_baseline_path() {
   return 1
 }
@@ -463,6 +477,26 @@ materialize_base_snapshot_path() {
   fi
 }
 
+has_trusted_review_baseline_snapshot() {
+  local value="$1"
+  local snapshot_path=""
+
+  snapshot_path="$(materialize_base_snapshot_path "${value}")"
+  [[ -n "${snapshot_path}" && -f "${snapshot_path}" ]]
+}
+
+can_use_proposed_only_guardian_summary() {
+  local value="$1"
+  local proposed_path=""
+
+  is_guardian_summary_path "${value}" || return 1
+  path_changed_in_pr "${value}" || return 1
+  has_trusted_review_baseline_snapshot "${value}" && return 1
+
+  proposed_path="$(resolve_proposed_review_path "${value}")"
+  [[ -n "${proposed_path}" && -f "${proposed_path}" ]]
+}
+
 assert_required_review_context_available() {
   local required_paths=(
     "${REPO_ROOT}/vision.md"
@@ -489,7 +523,13 @@ assert_required_review_context_available() {
 
   for path in "${required_paths[@]}"; do
     resolved_path="$(resolve_review_path "${path}")"
-    [[ -n "${resolved_path}" && -f "${resolved_path}" ]] || die "缺少必需审查基线文件: ${path}"
+    if [[ -n "${resolved_path}" && -f "${resolved_path}" ]]; then
+      continue
+    fi
+    if can_use_proposed_only_guardian_summary "${path}"; then
+      continue
+    fi
+    die "缺少必需审查基线文件: ${path}"
   done
 }
 
@@ -1032,6 +1072,8 @@ build_review_prompt() {
   local spec_review_summary_path
   local proposed_review_addendum_path=""
   local proposed_spec_review_summary_path=""
+  local review_addendum_has_trusted_baseline=0
+  local spec_review_summary_has_trusted_baseline=0
   local changed_trusted_baselines_file="${TMP_DIR}/changed-trusted-baselines.txt"
   local deleted_trusted_baselines_file="${TMP_DIR}/deleted-trusted-baselines.txt"
   local changed_baseline_path
@@ -1044,6 +1086,12 @@ build_review_prompt() {
   safe_pr_title="$(sanitize_user_prompt_line "${PR_TITLE}")"
   review_addendum_path="$(resolve_review_path "${REVIEW_ADDENDUM_FILE}")"
   spec_review_summary_path="$(resolve_review_path "${SPEC_REVIEW_SUMMARY_FILE}")"
+  if has_trusted_review_baseline_snapshot "${REVIEW_ADDENDUM_FILE}" || { ! path_changed_in_pr "${REVIEW_ADDENDUM_FILE}" && [[ -n "${review_addendum_path}" && -f "${review_addendum_path}" ]]; }; then
+    review_addendum_has_trusted_baseline=1
+  fi
+  if has_trusted_review_baseline_snapshot "${SPEC_REVIEW_SUMMARY_FILE}" || { ! path_changed_in_pr "${SPEC_REVIEW_SUMMARY_FILE}" && [[ -n "${spec_review_summary_path}" && -f "${spec_review_summary_path}" ]]; }; then
+    spec_review_summary_has_trusted_baseline=1
+  fi
   if path_changed_in_pr "${REVIEW_ADDENDUM_FILE}"; then
     proposed_review_addendum_path="$(resolve_proposed_review_path "${REVIEW_ADDENDUM_FILE}")"
   fi
@@ -1079,27 +1127,39 @@ build_review_prompt() {
     printf '你正在为 WebEnvoy 仓库审查 PR #%s。\n' "${pr_number}"
     printf '只报告当前 PR 引入、且真正影响是否合并的可操作问题。\n\n'
 
-    printf '常驻仓库审查摘要（trusted baseline）：\n'
-    if [[ -n "${review_addendum_path}" && -f "${review_addendum_path}" ]]; then
+    if [[ "${review_addendum_has_trusted_baseline}" == "1" ]]; then
+      printf '常驻仓库审查摘要（trusted baseline）：\n'
       cat "${review_addendum_path}"
+    else
+      printf '常驻仓库审查摘要：当前 PR 首次引入该 guardian 摘要，不存在 trusted baseline；请将下面的 proposed full doc 视为被审改动，并继续以 `code_review.md` 与其他正式基线为准。\n'
     fi
     printf '\n'
 
-    if [[ -n "${proposed_review_addendum_path}" && -f "${proposed_review_addendum_path}" && "${proposed_review_addendum_path}" != "${review_addendum_path}" ]]; then
-      printf '当前 PR 提议的 guardian 常驻审查摘要全文（作为被审文档，不替代 trusted baseline）：\n'
+    if [[ -n "${proposed_review_addendum_path}" && -f "${proposed_review_addendum_path}" && ("${review_addendum_has_trusted_baseline}" != "1" || "${proposed_review_addendum_path}" != "${review_addendum_path}") ]]; then
+      if [[ "${review_addendum_has_trusted_baseline}" == "1" ]]; then
+        printf '当前 PR 提议的 guardian 常驻审查摘要全文（作为被审文档，不替代 trusted baseline）：\n'
+      else
+        printf '当前 PR 引入的 guardian 常驻审查摘要全文（当前无 trusted baseline）：\n'
+      fi
       cat "${proposed_review_addendum_path}"
       printf '\n'
     fi
 
     if [[ "${REVIEW_PROFILE}" == "spec_review_profile" || "${REVIEW_PROFILE}" == "mixed_high_risk_spec_profile" ]]; then
-      printf 'Spec review 升级摘要（trusted baseline）：\n'
-      if [[ -n "${spec_review_summary_path}" && -f "${spec_review_summary_path}" ]]; then
+      if [[ "${spec_review_summary_has_trusted_baseline}" == "1" ]]; then
+        printf 'Spec review 升级摘要（trusted baseline）：\n'
         cat "${spec_review_summary_path}"
+      else
+        printf 'Spec review 升级摘要：当前 PR 首次引入该 guardian spec review 摘要，不存在 trusted baseline；请将下面的 proposed full doc 视为被审改动，并继续以 `spec_review.md` 与正式 FR / 架构基线为准。\n'
       fi
       printf '\n'
 
-      if [[ -n "${proposed_spec_review_summary_path}" && -f "${proposed_spec_review_summary_path}" && "${proposed_spec_review_summary_path}" != "${spec_review_summary_path}" ]]; then
-        printf '当前 PR 提议的 guardian spec review 摘要全文（作为被审文档，不替代 trusted baseline）：\n'
+      if [[ -n "${proposed_spec_review_summary_path}" && -f "${proposed_spec_review_summary_path}" && ("${spec_review_summary_has_trusted_baseline}" != "1" || "${proposed_spec_review_summary_path}" != "${spec_review_summary_path}") ]]; then
+        if [[ "${spec_review_summary_has_trusted_baseline}" == "1" ]]; then
+          printf '当前 PR 提议的 guardian spec review 摘要全文（作为被审文档，不替代 trusted baseline）：\n'
+        else
+          printf '当前 PR 引入的 guardian spec review 摘要全文（当前无 trusted baseline）：\n'
+        fi
         cat "${proposed_spec_review_summary_path}"
         printf '\n'
       fi

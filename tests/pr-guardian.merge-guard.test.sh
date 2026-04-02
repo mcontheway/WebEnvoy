@@ -1950,6 +1950,54 @@ test_build_review_prompt_prefers_base_snapshot_review_baseline_files_when_change
   restore_test_repo_root
 }
 
+test_build_review_prompt_surfaces_new_guardian_review_summaries_without_trusted_baseline() {
+  setup_case_dir "new-review-summaries-without-trusted-baseline"
+  setup_fake_repo_root
+
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  mkdir -p "${fake_worktree_dir}/docs/dev/review"
+  mkdir -p "${fake_worktree_dir}/docs/dev/architecture"
+  mkdir -p "${fake_worktree_dir}/docs/dev"
+
+  printf '%s\n' "worktree addendum" > "${fake_worktree_dir}/docs/dev/review/guardian-review-addendum.md"
+  printf '%s\n' "worktree spec summary" > "${fake_worktree_dir}/docs/dev/review/guardian-spec-review-summary.md"
+  rm -f "${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
+  rm -f "${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+
+  REVIEW_PROFILE="mixed_high_risk_spec_profile"
+  PR_TITLE="review baseline introduced"
+  PR_URL="https://example.test/pr/312"
+  BASE_REF="main"
+  HEAD_SHA="abc123"
+  WORKTREE_DIR="${fake_worktree_dir}"
+  export REVIEW_PROFILE PR_TITLE PR_URL BASE_REF HEAD_SHA WORKTREE_DIR
+
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
+  REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE
+
+  printf '%s\n' 'docs/dev/review/guardian-review-addendum.md' > "${CHANGED_FILES_FILE}"
+  printf '%s\n' 'docs/dev/review/guardian-spec-review-summary.md' >> "${CHANGED_FILES_FILE}"
+  collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
+  : > "${SLIM_PR_FILE}"
+  : > "${ISSUE_SUMMARY_FILE}"
+
+  build_review_prompt 312
+
+  assert_file_contains "${PROMPT_RUN_FILE}" "当前 PR 首次引入该 guardian 摘要，不存在 trusted baseline"
+  assert_file_contains "${PROMPT_RUN_FILE}" "当前 PR 引入的 guardian 常驻审查摘要全文（当前无 trusted baseline）"
+  assert_file_contains "${PROMPT_RUN_FILE}" "worktree addendum"
+  assert_file_contains "${PROMPT_RUN_FILE}" "当前 PR 首次引入该 guardian spec review 摘要，不存在 trusted baseline"
+  assert_file_contains "${PROMPT_RUN_FILE}" "当前 PR 引入的 guardian spec review 摘要全文（当前无 trusted baseline）"
+  assert_file_contains "${PROMPT_RUN_FILE}" "worktree spec summary"
+
+  restore_test_repo_root
+}
+
 test_assert_required_review_context_available_accepts_base_snapshot_review_summaries() {
   setup_case_dir "base-snapshot-review-summaries"
   setup_fake_repo_root
@@ -1976,6 +2024,40 @@ test_assert_required_review_context_available_accepts_base_snapshot_review_summa
   REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
   SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
   export WORKTREE_DIR REVIEW_PROFILE BASELINE_SNAPSHOT_ROOT REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE
+
+  assert_pass assert_required_review_context_available
+
+  restore_test_repo_root
+}
+
+test_assert_required_review_context_available_accepts_new_guardian_summaries_without_trusted_baseline() {
+  setup_case_dir "new-review-summaries-without-trusted-baseline-allowed"
+  setup_fake_repo_root
+
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  mkdir -p "${fake_worktree_dir}/docs/dev/review"
+  mkdir -p "${fake_worktree_dir}/docs/dev/architecture"
+  mkdir -p "${fake_worktree_dir}/docs/dev"
+  cp "${REPO_ROOT}/vision.md" "${fake_worktree_dir}/vision.md"
+  cp "${REPO_ROOT}/AGENTS.md" "${fake_worktree_dir}/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${fake_worktree_dir}/docs/dev/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/roadmap.md" "${fake_worktree_dir}/docs/dev/roadmap.md"
+  cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${fake_worktree_dir}/docs/dev/architecture/system-design.md"
+  cp "${REPO_ROOT}/code_review.md" "${fake_worktree_dir}/code_review.md"
+  cp "${REPO_ROOT}/spec_review.md" "${fake_worktree_dir}/spec_review.md"
+  printf '%s\n' "worktree addendum" > "${fake_worktree_dir}/docs/dev/review/guardian-review-addendum.md"
+  printf '%s\n' "worktree spec summary" > "${fake_worktree_dir}/docs/dev/review/guardian-spec-review-summary.md"
+  rm -f "${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
+  rm -f "${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+
+  WORKTREE_DIR="${fake_worktree_dir}"
+  REVIEW_PROFILE="spec_review_profile"
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  printf '%s\n' 'docs/dev/review/guardian-review-addendum.md' > "${CHANGED_FILES_FILE}"
+  printf '%s\n' 'docs/dev/review/guardian-spec-review-summary.md' >> "${CHANGED_FILES_FILE}"
+  REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
+  SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+  export WORKTREE_DIR REVIEW_PROFILE CHANGED_FILES_FILE REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE
 
   assert_pass assert_required_review_context_available
 
@@ -3341,7 +3423,9 @@ main() {
   test_build_review_prompt_sanitizes_pr_title
   test_build_review_prompt_prefers_base_snapshot_review_baseline_files
   test_build_review_prompt_prefers_base_snapshot_review_baseline_files_when_changed
+  test_build_review_prompt_surfaces_new_guardian_review_summaries_without_trusted_baseline
   test_assert_required_review_context_available_accepts_base_snapshot_review_summaries
+  test_assert_required_review_context_available_accepts_new_guardian_summaries_without_trusted_baseline
   test_assert_required_review_context_available_fails_when_review_summaries_are_missing
   test_assert_required_review_context_available_fails_when_changed_review_baseline_is_missing
   test_assert_required_review_context_available_fails_when_required_baseline_missing_everywhere
