@@ -2778,6 +2778,22 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":true'
 }
 
+test_normalize_native_review_result_accepts_live_plain_text_approve_summary() {
+  setup_case_dir "normalize-native-text-approve-live-summary"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+I did not identify any current-PR-introduced issues that clearly block merge. The new guardian context-loading and review normalization logic appears internally consistent with the added test coverage and repository review baselines.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+  assert_file_contains "${result_file}" '"findings":[]'
+}
+
 test_normalize_native_review_result_accepts_polite_plain_text_approve_phrase() {
   setup_case_dir "normalize-native-text-approve-polite"
 
@@ -3724,6 +3740,7 @@ main() {
   test_normalize_native_review_result_maps_native_text_approve_to_guardian_schema
   test_normalize_native_review_result_accepts_chinese_plain_text_approve
   test_normalize_native_review_result_accepts_common_plain_text_approve_phrases
+  test_normalize_native_review_result_accepts_live_plain_text_approve_summary
   test_normalize_native_review_result_accepts_polite_plain_text_approve_phrase
   test_normalize_native_review_result_fails_closed_for_polite_plain_text_with_followup
   test_normalize_native_review_result_accepts_merge_blocker_free_approve_phrase

@@ -1627,6 +1627,8 @@ normalize_native_review_result() {
         ($sentence | trim_text) as $trimmed
         | ($trimmed | ascii_downcase) as $lower
         | ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$"))
+          or ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$"))
+          or ($lower | test("^(?:i )?did not identify any issues that clearly block merge[.!]?$"))
           or ($lower | test("^no blocking issues found[.!]?$"))
           or ($lower | test("^no blockers(?: found)?[.!]?$"))
           or ($lower | test("^(?:i don.t|i do not|don.t|do not) see any merge blockers[.!]?$"))
@@ -1655,7 +1657,8 @@ normalize_native_review_result() {
         ($sentence | ascii_downcase) as $lower
         | ($lower | test("does not affect code paths"))
           or ($lower | test("does not modify executable code or behavior"))
-          or ($lower | test("does not affect .*runtime behavior"));
+          or ($lower | test("does not affect .*runtime behavior"))
+          or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"));
       def harmless_tail_sentence($sentence):
         ($sentence | ascii_downcase | trim_text) as $lower
         | ($lower | test("^(thanks|thank you|thx)[.!]?$"))
@@ -1767,6 +1770,8 @@ normalize_native_review_result() {
       ($sentence | trim) as $trimmed
       | ($trimmed | ascii_downcase) as $lower
       | ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$"))
+        or ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$"))
+        or ($lower | test("^(?:i )?did not identify any issues that clearly block merge[.!]?$"))
         or ($lower | test("^no blocking issues found[.!]?$"))
         or ($lower | test("^no blockers(?: found)?[.!]?$"))
         or ($lower | test("^(?:i don.t|i do not|don.t|do not) see any merge blockers[.!]?$"))
@@ -1795,7 +1800,8 @@ normalize_native_review_result() {
       ($sentence | ascii_downcase) as $lower
       | ($lower | test("does not affect code paths"))
         or ($lower | test("does not modify executable code or behavior"))
-        or ($lower | test("does not affect .*runtime behavior"));
+        or ($lower | test("does not affect .*runtime behavior"))
+        or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"));
     def harmless_tail_sentence($sentence):
       ($sentence | ascii_downcase | trim) as $lower
       | ($lower | test("^(thanks|thank you|thx)[.!]?$"))
