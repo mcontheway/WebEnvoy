@@ -135,6 +135,62 @@ const runCli = (
   });
 };
 
+const expectBundledNativeHostStarts = async (
+  entryPath: string,
+  env?: Record<string, string>
+): Promise<void> => {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(process.execPath, [entryPath], {
+      env: {
+        ...process.env,
+        ...env
+      },
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    let stderr = "";
+    let settled = false;
+
+    const settle = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(startedTimer);
+      clearTimeout(forceKillTimer);
+      callback();
+    };
+
+    const startedTimer = setTimeout(() => {
+      child.kill("SIGTERM");
+      settle(resolve);
+    }, 250);
+    startedTimer.unref?.();
+
+    const forceKillTimer = setTimeout(() => {
+      child.kill("SIGKILL");
+    }, 1000);
+    forceKillTimer.unref?.();
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+
+    child.once("error", (error) => {
+      settle(() => reject(error));
+    });
+
+    child.once("exit", (code, signal) => {
+      settle(() =>
+        reject(
+          new Error(
+            `bundled native host exited before startup timeout (code=${String(code)}, signal=${String(signal)}): ${stderr.trim()}`
+          )
+        )
+      );
+    });
+  });
+};
+
 const createNativeHostCommand = (scriptPath: string): string =>
   `"${process.execPath}" "${scriptPath}"`;
 
@@ -3217,6 +3273,15 @@ process.stdin.on("data", (chunk) => {
     await expect(readFile(defaultBundledEntryPath, "utf8")).resolves.toContain(
       "process.stdin.resume()"
     );
+    await expect(
+      readFile(path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "runtime", "worktree-root.js"), "utf8")
+    ).resolves.toContain("resolveRuntimeProfileRoot");
+    await expect(
+      readFile(path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "runtime", "package.json"), "utf8")
+    ).resolves.toBe('{\n  "type": "module"\n}\n');
+    await expectBundledNativeHostStarts(defaultBundledEntryPath, {
+      WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT: path.join(await realpath(runtimeCwd), ".webenvoy", "profiles")
+    });
   });
 
   it("removes bundled runtime when runtime.uninstall uses default non-git fallback paths", async () => {
@@ -3833,6 +3898,12 @@ process.stdin.on("data", (chunk) => {
       await readFile(path.join(sharedManifestRoot, "com.webenvoy.host.json"), "utf8")
     ) as Record<string, unknown>;
     expect(manifest.path).toBe(await realpath(secondLauncherPath));
+    await expect(
+      readFile(path.join(String(secondSummary.install_root), "runtime", "worktree-root.js"), "utf8")
+    ).resolves.toContain("resolveRuntimeProfileRoot");
+    await expect(
+      readFile(path.join(String(secondSummary.install_root), "runtime", "package.json"), "utf8")
+    ).resolves.toBe('{\n  "type": "module"\n}\n');
     await expect(readFile(firstLauncherPath, "utf8")).rejects.toMatchObject({
       code: "ENOENT"
     });

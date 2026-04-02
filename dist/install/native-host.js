@@ -179,15 +179,19 @@ const resolveCurrentBuildNativeHostRuntimePaths = () => {
     return {
         entryPath: join(distRuntimeDir, "native-messaging", "native-host-entry.js"),
         protocolPath: join(distRuntimeDir, "native-messaging", "protocol.js"),
-        hostPath: join(distRuntimeDir, "native-messaging", "host.js")
+        hostPath: join(distRuntimeDir, "native-messaging", "host.js"),
+        worktreeRootPath: join(distRuntimeDir, "worktree-root.js")
     };
 };
 const resolveBundledNativeHostRuntimePaths = (channelRoot) => {
     const runtimeRoot = join(channelRoot, "runtime");
     return {
+        runtimeRoot,
         entryPath: join(runtimeRoot, "native-messaging", "native-host-entry.js"),
         protocolPath: join(runtimeRoot, "native-messaging", "protocol.js"),
-        hostPath: join(runtimeRoot, "native-messaging", "host.js")
+        hostPath: join(runtimeRoot, "native-messaging", "host.js"),
+        worktreeRootPath: join(runtimeRoot, "worktree-root.js"),
+        packageJsonPath: join(runtimeRoot, "package.json")
     };
 };
 const ensureBundledNativeHostRuntime = async (channelRoot) => {
@@ -197,6 +201,8 @@ const ensureBundledNativeHostRuntime = async (channelRoot) => {
     await copyFile(source.entryPath, target.entryPath);
     await copyFile(source.protocolPath, target.protocolPath);
     await copyFile(source.hostPath, target.hostPath);
+    await copyFile(source.worktreeRootPath, target.worktreeRootPath);
+    await writeFile(target.packageJsonPath, `${JSON.stringify({ type: "module" }, null, 2)}\n`, "utf8");
     return target.entryPath;
 };
 export const resolveRepoOwnedNativeHostEntryPath = () => resolveCurrentBuildNativeHostRuntimePaths().entryPath;
