@@ -869,6 +869,60 @@ test_materialize_base_snapshot_path_does_not_fall_back_to_base_head() {
   restore_test_repo_root
 }
 
+test_ensure_merge_base_available_deepens_shallow_history() {
+  setup_case_dir "ensure-merge-base-deepens-shallow-history"
+
+  REPO_ROOT="${TMP_DIR}/repo"
+  WORKTREE_DIR="${TMP_DIR}/worktree"
+  BASE_REF="main"
+  MERGE_BASE_SHA=""
+  mkdir -p "${REPO_ROOT}" "${WORKTREE_DIR}"
+  export REPO_ROOT WORKTREE_DIR BASE_REF MERGE_BASE_SHA
+
+  local fetch_calls="${TMP_DIR}/fetch.calls.log"
+  : > "${fetch_calls}"
+  local merge_base_attempts_file="${TMP_DIR}/merge-base-attempts"
+  printf '%s\n' '0' > "${merge_base_attempts_file}"
+
+  fetch_origin_tracking_ref() {
+    printf '%s\n' "$*" >> "${fetch_calls}"
+  }
+
+  git() {
+    if [[ "${1:-}" == "-C" && "${2:-}" == "${WORKTREE_DIR}" && "${3:-}" == "merge-base" ]]; then
+      local attempts
+      attempts="$(cat "${merge_base_attempts_file}")"
+      attempts=$((attempts + 1))
+      printf '%s\n' "${attempts}" > "${merge_base_attempts_file}"
+      if [[ "${attempts}" -lt 2 ]]; then
+        return 1
+      fi
+      printf '%s\n' 'merge-base-sha'
+      return 0
+    fi
+    if [[ "${1:-}" == "-C" && "${2:-}" == "${REPO_ROOT}" && "${3:-}" == "rev-parse" && "${4:-}" == "--is-shallow-repository" ]]; then
+      printf '%s\n' 'true'
+      return 0
+    fi
+    command git "$@"
+  }
+
+  if ! ensure_merge_base_available 312; then
+    echo "expected ensure_merge_base_available to recover merge-base in shallow history" >&2
+    exit 1
+  fi
+  if [[ "${MERGE_BASE_SHA}" != "merge-base-sha" ]]; then
+    echo "expected MERGE_BASE_SHA to be merge-base-sha, got '${MERGE_BASE_SHA}'" >&2
+    exit 1
+  fi
+  assert_file_contains "${fetch_calls}" "refs/heads/main refs/remotes/origin/main --deepen=200"
+  assert_file_contains "${fetch_calls}" "pull/312/head refs/remotes/origin/pr/312 --deepen=200"
+
+  unset -f git
+  load_guardian_without_main
+  restore_test_repo_root
+}
+
 test_append_unique_line_prefers_base_snapshot_for_reviewer_owned_baseline() {
   setup_case_dir "base-snapshot-review-baseline"
 
@@ -1060,6 +1114,30 @@ test_fetch_origin_tracking_ref_falls_back_to_https_when_ssh_fetch_fails() {
   assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} fetch origin refs/heads/main:refs/remotes/origin/main"
   assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} remote get-url origin"
   assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} -c credential.helper= fetch https://github.com/mcontheway/WebEnvoy.git refs/heads/main:refs/remotes/origin/main"
+
+  unset -f git
+  restore_test_repo_root
+}
+
+test_fetch_origin_tracking_ref_passes_extra_fetch_args() {
+  setup_case_dir "fetch-origin-extra-args"
+
+  local git_calls_log="${TMP_DIR}/git.calls.log"
+  : > "${git_calls_log}"
+  REPO_ROOT="${TMP_DIR}/repo"
+  mkdir -p "${REPO_ROOT}"
+  export REPO_ROOT
+
+  git() {
+    printf '%s\n' "$*" >> "${git_calls_log}"
+    if [[ "${1:-}" == "-C" && "${2:-}" == "${REPO_ROOT}" && "${3:-}" == "fetch" && "${4:-}" == "--deepen=200" && "${5:-}" == "origin" ]]; then
+      return 0
+    fi
+    command git "$@"
+  }
+
+  assert_pass fetch_origin_tracking_ref "refs/heads/main" "refs/remotes/origin/main" "--deepen=200"
+  assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} fetch --deepen=200 origin refs/heads/main:refs/remotes/origin/main"
 
   unset -f git
   restore_test_repo_root
@@ -3518,6 +3596,7 @@ main() {
   test_append_unique_line_uses_worktree_for_new_spec_files
   test_materialize_base_snapshot_path_prefers_merge_base_commit
   test_materialize_base_snapshot_path_does_not_fall_back_to_base_head
+  test_ensure_merge_base_available_deepens_shallow_history
   test_append_unique_line_prefers_base_snapshot_for_reviewer_owned_baseline
   test_append_unique_line_prefers_base_snapshot_for_changed_reviewer_owned_baseline
   test_append_unique_line_uses_base_snapshot_for_deleted_changed_reviewer_owned_baseline
@@ -3525,6 +3604,7 @@ main() {
   test_append_unique_line_prefers_base_snapshot_for_changed_architecture_context
   test_origin_url_to_https_normalizes_github_ssh_urls
   test_fetch_origin_tracking_ref_falls_back_to_https_when_ssh_fetch_fails
+  test_fetch_origin_tracking_ref_passes_extra_fetch_args
   test_fetch_origin_tracking_ref_uses_gh_auth_token_for_https_fallback
   test_fetch_origin_tracking_ref_uses_gh_auth_token_when_origin_is_already_https
   test_fetch_github_https_ref_without_gh_token_stays_non_interactive

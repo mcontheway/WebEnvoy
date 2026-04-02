@@ -60,12 +60,21 @@ origin_url_to_https() {
 fetch_origin_tracking_ref() {
   local source_ref="$1"
   local target_ref="$2"
+  shift 2
+  local fetch_args=("$@")
   local refspec="${source_ref}:${target_ref}"
   local origin_url=""
   local https_url=""
+  local fetch_cmd=()
  
+  fetch_cmd=(git -C "${REPO_ROOT}" fetch)
+  if ((${#fetch_args[@]})); then
+    fetch_cmd+=("${fetch_args[@]}")
+  fi
+  fetch_cmd+=(origin "${refspec}")
+
   if GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new}" \
-    git -C "${REPO_ROOT}" fetch origin "${refspec}" >/dev/null 2>&1; then
+    "${fetch_cmd[@]}" >/dev/null 2>&1; then
     return 0
   fi
 
@@ -73,7 +82,12 @@ fetch_origin_tracking_ref() {
   https_url="$(origin_url_to_https "${origin_url}" 2>/dev/null || true)"
 
   if [[ -z "${https_url}" ]]; then
-    if GIT_TERMINAL_PROMPT=0 git -C "${REPO_ROOT}" -c credential.helper= fetch origin "${refspec}" >/dev/null; then
+    fetch_cmd=(git -C "${REPO_ROOT}" -c credential.helper= fetch)
+    if ((${#fetch_args[@]})); then
+      fetch_cmd+=("${fetch_args[@]}")
+    fi
+    fetch_cmd+=(origin "${refspec}")
+    if GIT_TERMINAL_PROMPT=0 "${fetch_cmd[@]}" >/dev/null; then
       return 0
     fi
     return 1
@@ -85,16 +99,23 @@ fetch_origin_tracking_ref() {
     warn "origin SSH 拉取失败，已回退到 HTTPS 继续准备审查上下文: ${source_ref}"
   fi
 
-  fetch_github_https_ref "${https_url}" "${refspec}"
+  if ((${#fetch_args[@]})); then
+    fetch_github_https_ref "${https_url}" "${refspec}" "${fetch_args[@]}"
+  else
+    fetch_github_https_ref "${https_url}" "${refspec}"
+  fi
 }
 
 fetch_github_https_ref() {
   local https_url="$1"
   local refspec="$2"
+  shift 2
+  local fetch_args=("$@")
   local gh_token=""
   local secret_tmp_dir=""
   local askpass_script=""
   local token_file=""
+  local fetch_cmd=()
 
   gh_token="$(gh auth token 2>/dev/null || true)"
   if [[ -n "${gh_token}" ]]; then
@@ -113,8 +134,13 @@ case "\${1:-}" in
 esac
 EOF
     chmod 700 "${askpass_script}"
+    fetch_cmd=(git -C "${REPO_ROOT}" -c credential.helper= fetch)
+    if ((${#fetch_args[@]})); then
+      fetch_cmd+=("${fetch_args[@]}")
+    fi
+    fetch_cmd+=("${https_url}" "${refspec}")
     if GIT_TERMINAL_PROMPT=0 GIT_ASKPASS="${askpass_script}" \
-      git -C "${REPO_ROOT}" -c credential.helper= fetch "${https_url}" "${refspec}" >/dev/null; then
+      "${fetch_cmd[@]}" >/dev/null; then
       rm -rf "${secret_tmp_dir}"
       unregister_secret_tmp_dir "${secret_tmp_dir}"
       return 0
@@ -124,9 +150,49 @@ EOF
     return 1
   fi
 
-  if GIT_TERMINAL_PROMPT=0 git -C "${REPO_ROOT}" -c credential.helper= fetch "${https_url}" "${refspec}" >/dev/null; then
+  fetch_cmd=(git -C "${REPO_ROOT}" -c credential.helper= fetch)
+  if ((${#fetch_args[@]})); then
+    fetch_cmd+=("${fetch_args[@]}")
+  fi
+  fetch_cmd+=("${https_url}" "${refspec}")
+  if GIT_TERMINAL_PROMPT=0 "${fetch_cmd[@]}" >/dev/null; then
     return 0
   fi
+  return 1
+}
+
+compute_merge_base_sha() {
+  git -C "${WORKTREE_DIR}" merge-base HEAD "origin/${BASE_REF}" 2>/dev/null || true
+}
+
+ensure_merge_base_available() {
+  local pr_number="$1"
+  local fetch_arg=""
+  local is_shallow=""
+
+  MERGE_BASE_SHA="$(compute_merge_base_sha)"
+  [[ -n "${MERGE_BASE_SHA}" ]] && return 0
+
+  is_shallow="$(git -C "${REPO_ROOT}" rev-parse --is-shallow-repository 2>/dev/null || printf 'false\n')"
+  [[ "${is_shallow}" == "true" ]] || return 1
+
+  for fetch_arg in "--deepen=200" "--deepen=1000"; do
+    warn "检测到浅历史且缺少 merge-base，正在尝试补齐提交历史: ${fetch_arg}"
+    fetch_origin_tracking_ref "refs/heads/${BASE_REF}" "refs/remotes/origin/${BASE_REF}" "${fetch_arg}" || true
+    fetch_origin_tracking_ref "pull/${pr_number}/head" "refs/remotes/origin/pr/${pr_number}" "${fetch_arg}" || true
+    MERGE_BASE_SHA="$(compute_merge_base_sha)"
+    [[ -n "${MERGE_BASE_SHA}" ]] && return 0
+  done
+
+  is_shallow="$(git -C "${REPO_ROOT}" rev-parse --is-shallow-repository 2>/dev/null || printf 'false\n')"
+  if [[ "${is_shallow}" == "true" ]]; then
+    warn "浅历史补齐后仍缺少 merge-base，正在尝试完整拉取历史。"
+    fetch_origin_tracking_ref "refs/heads/${BASE_REF}" "refs/remotes/origin/${BASE_REF}" "--unshallow" || true
+    fetch_origin_tracking_ref "pull/${pr_number}/head" "refs/remotes/origin/pr/${pr_number}" "--unshallow" || true
+    MERGE_BASE_SHA="$(compute_merge_base_sha)"
+    [[ -n "${MERGE_BASE_SHA}" ]] && return 0
+  fi
+
   return 1
 }
 
@@ -255,8 +321,7 @@ prepare_pr_workspace() {
 
   WORKTREE_DIR="${TMP_DIR}/worktree"
   git -C "${REPO_ROOT}" worktree add --detach "${WORKTREE_DIR}" "origin/pr/${pr_number}" >/dev/null
-  MERGE_BASE_SHA="$(git -C "${WORKTREE_DIR}" merge-base HEAD "origin/${BASE_REF}" 2>/dev/null || true)"
-  [[ -n "${MERGE_BASE_SHA}" ]] || die "无法计算 PR 与 ${BASE_REF} 的 merge-base，无法准备审查上下文。"
+  ensure_merge_base_available "${pr_number}" || die "无法计算 PR 与 ${BASE_REF} 的 merge-base，无法准备审查上下文。"
   hydrate_worktree_dependencies
 
   list_changed_files > "${CHANGED_FILES_FILE}"
@@ -2245,6 +2310,7 @@ main() {
   require_cmd git
   require_cmd gh
   require_cmd jq
+  require_cmd perl
   require_cmd codex
   [[ -f "${SCHEMA_FILE}" ]] || die "缺少 Schema 文件: ${SCHEMA_FILE}"
 
