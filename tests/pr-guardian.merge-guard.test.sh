@@ -647,6 +647,21 @@ test_extract_issue_number_from_pr_body_supports_refs_only_linkage() {
   fi
 }
 
+test_extract_issue_number_from_pr_body_prefers_explicit_issue_field() {
+  setup_case_dir "extract-issue-number-explicit-issue"
+
+  PR_BODY=$'## 摘要\n\n- 只做 guardian 改造\n\n## 关联事项\n\n- Issue: #123\n- Closing: Refs #123\n'
+  export PR_BODY
+
+  local extracted
+  extracted="$(extract_issue_number_from_pr_body)"
+
+  if [[ "${extracted}" != "123" ]]; then
+    echo "expected explicit issue linkage to return 123 exactly once, got '${extracted}'" >&2
+    exit 1
+  fi
+}
+
 test_extract_issue_number_from_pr_body_returns_empty_for_ambiguous_links() {
   setup_case_dir "extract-issue-number-ambiguous"
 
@@ -2734,6 +2749,7 @@ main() {
   test_fetch_issue_summary_loads_linked_issue_body
   test_fetch_issue_summary_skips_when_issue_number_missing
   test_extract_issue_number_from_pr_body_supports_refs_only_linkage
+  test_extract_issue_number_from_pr_body_prefers_explicit_issue_field
   test_extract_issue_number_from_pr_body_returns_empty_for_ambiguous_links
   test_collect_spec_review_docs_includes_todo_baseline
   test_append_unique_line_uses_worktree_for_new_spec_files

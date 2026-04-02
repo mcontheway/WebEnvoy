@@ -569,12 +569,21 @@ append_required_review_baseline() {
 }
 
 extract_issue_number_from_pr_body() {
-  printf '%s\n' "${PR_BODY}" | perl -ne '
+  local explicit_issue=""
+
+  explicit_issue="$(
+    printf '%s\n' "${PR_BODY}" | perl -ne '
     if (/-\s*Issue:\s*#(\d+)/i) {
       print "$1\n";
       exit;
     }
   ' || return 0
+  )"
+
+  if [[ -n "${explicit_issue}" ]]; then
+    printf '%s\n' "${explicit_issue}"
+    return 0
+  fi
 
   printf '%s\n' "${PR_BODY}" | perl -0ne '
     my %seen;
