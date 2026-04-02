@@ -98,6 +98,10 @@ if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
     fi
     exit "${issue_exit_code}"
   fi
+  if [[ -n "${MOCK_GH_ISSUE_VIEW_SEQUENCE_FILE:-}" && -s "${MOCK_GH_ISSUE_VIEW_SEQUENCE_FILE}" ]]; then
+    pop_sequence_response_line "${MOCK_GH_ISSUE_VIEW_SEQUENCE_FILE}"
+    exit 0
+  fi
   cat "${MOCK_GH_ISSUE_VIEW_JSON:?missing MOCK_GH_ISSUE_VIEW_JSON}"
   exit 0
 fi
@@ -618,10 +622,36 @@ EOF
   assert_file_contains "${MOCK_GH_CALLS_LOG}" "issue view 123 --json number,title,body"
 }
 
+test_fetch_issue_summary_loads_multiple_linked_issue_bodies() {
+  setup_case_dir "issue-summary-multiple"
+
+  LINKED_ISSUES_FILE="${TMP_DIR}/linked-issues.txt"
+  printf '%s\n%s\n' "123" "456" > "${LINKED_ISSUES_FILE}"
+  export LINKED_ISSUES_FILE
+
+  MOCK_GH_ISSUE_VIEW_SEQUENCE_FILE="${TMP_DIR}/issue-view-seq.txt"
+  export MOCK_GH_ISSUE_VIEW_SEQUENCE_FILE
+  cat > "${MOCK_GH_ISSUE_VIEW_SEQUENCE_FILE}" <<'EOF'
+{"number":123,"title":"Guardian issue","body":"## 目标\n\n- 收敛审查输入\n"}
+{"number":456,"title":"Follow-up issue","body":"## 风险\n\n- 补齐 issue 上下文\n"}
+EOF
+
+  local issue_file="${TMP_DIR}/issue-summary.md"
+  fetch_issue_summary > "${issue_file}"
+
+  assert_file_contains "${issue_file}" "Issue #123: Guardian issue"
+  assert_file_contains "${issue_file}" "- 收敛审查输入"
+  assert_file_contains "${issue_file}" "Issue #456: Follow-up issue"
+  assert_file_contains "${issue_file}" "- 补齐 issue 上下文"
+  assert_file_contains "${MOCK_GH_CALLS_LOG}" "issue view 123 --json number,title,body"
+  assert_file_contains "${MOCK_GH_CALLS_LOG}" "issue view 456 --json number,title,body"
+}
+
 test_fetch_issue_summary_skips_when_issue_number_missing() {
   setup_case_dir "issue-summary-missing"
 
   unset ISSUE_NUMBER || true
+  unset LINKED_ISSUES_FILE || true
 
   local issue_file="${TMP_DIR}/issue-summary.md"
   fetch_issue_summary > "${issue_file}"
@@ -673,6 +703,26 @@ test_extract_issue_number_from_pr_body_returns_empty_for_ambiguous_links() {
 
   if [[ -n "${extracted}" ]]; then
     echo "expected ambiguous issue linkage to return empty, got '${extracted}'" >&2
+    exit 1
+  fi
+}
+
+test_resolve_linked_issue_numbers_merges_pr_and_metadata_links() {
+  setup_case_dir "resolve-linked-issues"
+
+  PR_BODY=$'## 关联事项\n\n- Issue: #123\nRefs #456\nFixes #789\n'
+  export PR_BODY
+  META_FILE="${TMP_DIR}/pr.json"
+  export META_FILE
+  cat > "${META_FILE}" <<'EOF'
+{"closingIssuesReferences":[{"number":456},{"number":999}]}
+EOF
+
+  local resolved_file="${TMP_DIR}/issues.txt"
+  resolve_linked_issue_numbers > "${resolved_file}"
+
+  if [[ "$(cat "${resolved_file}")" != $'123\n456\n789\n999' ]]; then
+    echo "expected merged issue list to preserve PR order and append metadata uniques, got: $(cat "${resolved_file}")" >&2
     exit 1
   fi
 }
@@ -1163,7 +1213,7 @@ test_cleanup_registered_secret_tmp_dirs_removes_registered_paths() {
   fi
 }
 
-test_append_unique_line_skips_repo_baseline_when_worktree_missing() {
+test_append_unique_line_uses_repo_baseline_when_snapshot_is_unavailable_and_path_unchanged() {
   setup_case_dir "worktree-missing-baseline"
 
   local fake_repo_root="${TMP_DIR}/repo"
@@ -1179,9 +1229,7 @@ test_append_unique_line_skips_repo_baseline_when_worktree_missing() {
   export REPO_ROOT WORKTREE_DIR REVIEW_ADDENDUM_FILE
 
   append_unique_line "${REVIEW_ADDENDUM_FILE}" "${output_file}"
-  if [[ -f "${output_file}" ]]; then
-    assert_file_not_contains "${output_file}" "${REVIEW_ADDENDUM_FILE}"
-  fi
+  assert_file_contains "${output_file}" "${REVIEW_ADDENDUM_FILE}"
 
   restore_test_repo_root
 }
@@ -1934,8 +1982,8 @@ test_assert_required_review_context_available_accepts_base_snapshot_review_summa
   restore_test_repo_root
 }
 
-test_assert_required_review_context_available_accepts_missing_optional_review_summaries() {
-  setup_case_dir "missing-optional-review-summaries"
+test_assert_required_review_context_available_fails_when_review_summaries_are_missing() {
+  setup_case_dir "missing-review-summaries"
   setup_fake_repo_root
 
   local fake_worktree_dir="${TMP_DIR}/worktree"
@@ -1960,7 +2008,9 @@ test_assert_required_review_context_available_accepts_missing_optional_review_su
   SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
   export WORKTREE_DIR REVIEW_PROFILE REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE
 
-  assert_pass assert_required_review_context_available
+  local err_file="${TMP_DIR}/baseline.err"
+  assert_fail assert_required_review_context_available 2>"${err_file}"
+  assert_file_contains "${err_file}" "缺少必需审查基线文件: ${REVIEW_ADDENDUM_FILE}"
 
   restore_test_repo_root
 }
@@ -2173,6 +2223,22 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":true'
 }
 
+test_normalize_native_review_result_fails_closed_for_inconsistent_guardian_schema_json() {
+  setup_case_dir "normalize-guardian-schema-json-inconsistent"
+
+  local raw_file="${TMP_DIR}/guardian-review.json"
+  local result_file="${TMP_DIR}/normalized-review.json"
+  cat > "${raw_file}" <<'EOF'
+{"verdict":"APPROVE","safe_to_merge":true,"summary":"未发现新的阻断性问题。","findings":[{"severity":"high","title":"Dropped issue context","details":"The review still skips linked issue context on multi-issue PRs.","code_location":{"absolute_file_path":"/tmp/worktree/scripts/pr-guardian.sh","line_range":{"start":263,"end":265}}}],"required_actions":[]}
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+  assert_file_contains "${result_file}" '"required_actions":["修复：Dropped issue context"]'
+}
+
 test_normalize_native_review_result_accepts_code_fenced_native_schema_json() {
   setup_case_dir "normalize-native-review-code-fenced-json"
 
@@ -2221,6 +2287,21 @@ EOF
   assert_pass validate_review_result_shape "${result_file}"
   assert_file_contains "${result_file}" '"verdict":"APPROVE"'
   assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
+test_normalize_native_review_result_fails_closed_for_legacy_schema_explanation_caveat() {
+  setup_case_dir "normalize-native-schema-explanation-caveat"
+
+  local raw_file="${TMP_DIR}/native-review.json"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+{"findings":[],"overall_correctness":"The patch is correct.","overall_explanation":"Looks good to me, but the fallback path still drops issue context and should not be merged.","overall_confidence_score":0.74}
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
 }
 
 test_normalize_native_review_result_accepts_brace_bearing_preamble_json() {
@@ -2362,6 +2443,21 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":true'
 }
 
+test_normalize_native_review_result_fails_closed_for_polite_plain_text_with_followup() {
+  setup_case_dir "normalize-native-text-approve-followup"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+Looks good to me, please re-check the fallback path.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
 test_normalize_native_review_result_accepts_merge_blocker_free_approve_phrase() {
   setup_case_dir "normalize-native-text-approve-merge-blockers"
 
@@ -2422,6 +2518,21 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":false'
 }
 
+test_normalize_native_review_result_fails_closed_for_chinese_followup() {
+  setup_case_dir "normalize-native-text-chinese-followup"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+可以合并，建议后续补齐回归测试。
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
 test_normalize_native_review_result_fails_closed_for_other_than_caveat() {
   setup_case_dir "normalize-native-text-other-than-caveat"
 
@@ -2429,6 +2540,25 @@ test_normalize_native_review_result_fails_closed_for_other_than_caveat() {
   local result_file="${TMP_DIR}/guardian-review.json"
   cat > "${raw_file}" <<'EOF'
 No issues found other than the dropped issue context in the prompt builder.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
+test_normalize_native_review_result_fails_closed_for_unparsed_priority_bullet() {
+  setup_case_dir "normalize-native-text-unparsed-priority-bullet"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+Looks good to me.
+
+Review comment:
+
+- [P1] Please revisit the fallback path
 EOF
 
   assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
@@ -3169,10 +3299,12 @@ main() {
   test_slim_pr_body_falls_back_to_plain_text_when_template_headings_are_missing
   test_slim_pr_body_preserves_guardian_acceptance_lines
   test_fetch_issue_summary_loads_linked_issue_body
+  test_fetch_issue_summary_loads_multiple_linked_issue_bodies
   test_fetch_issue_summary_skips_when_issue_number_missing
   test_extract_issue_number_from_pr_body_supports_refs_only_linkage
   test_extract_issue_number_from_pr_body_prefers_explicit_issue_field
   test_extract_issue_number_from_pr_body_returns_empty_for_ambiguous_links
+  test_resolve_linked_issue_numbers_merges_pr_and_metadata_links
   test_collect_spec_review_docs_includes_todo_baseline
   test_append_unique_line_uses_worktree_for_new_spec_files
   test_materialize_base_snapshot_path_prefers_merge_base_commit
@@ -3188,7 +3320,7 @@ main() {
   test_fetch_github_https_ref_without_gh_token_stays_non_interactive
   test_fetch_origin_tracking_ref_without_normalizable_origin_stays_non_interactive
   test_cleanup_registered_secret_tmp_dirs_removes_registered_paths
-  test_append_unique_line_skips_repo_baseline_when_worktree_missing
+  test_append_unique_line_uses_repo_baseline_when_snapshot_is_unavailable_and_path_unchanged
   test_append_unique_line_skips_repo_file_when_worktree_missing
   test_mixed_spec_and_impl_changes_use_mixed_profile
   test_collect_spec_review_docs_includes_changed_architecture_and_research
@@ -3210,16 +3342,18 @@ main() {
   test_build_review_prompt_prefers_base_snapshot_review_baseline_files
   test_build_review_prompt_prefers_base_snapshot_review_baseline_files_when_changed
   test_assert_required_review_context_available_accepts_base_snapshot_review_summaries
-  test_assert_required_review_context_available_accepts_missing_optional_review_summaries
+  test_assert_required_review_context_available_fails_when_review_summaries_are_missing
   test_assert_required_review_context_available_fails_when_changed_review_baseline_is_missing
   test_assert_required_review_context_available_fails_when_required_baseline_missing_everywhere
   test_assert_required_review_context_available_fails_when_high_risk_security_baselines_are_missing
   test_line_range_reviewable_uses_merge_base_diff
   test_add_fallback_finding_for_unstructured_rejection_uses_merge_base_diff
   test_normalize_native_review_result_accepts_guardian_schema_json
+  test_normalize_native_review_result_fails_closed_for_inconsistent_guardian_schema_json
   test_normalize_native_review_result_accepts_code_fenced_native_schema_json
   test_normalize_native_review_result_accepts_preamble_guardian_schema_json
   test_normalize_native_review_result_accepts_relaxed_native_schema_correctness_phrase
+  test_normalize_native_review_result_fails_closed_for_legacy_schema_explanation_caveat
   test_normalize_native_review_result_accepts_brace_bearing_preamble_json
   test_normalize_native_review_result_accepts_second_fenced_json_block
   test_normalize_native_review_result_maps_native_schema_to_guardian_schema
@@ -3230,11 +3364,14 @@ main() {
   test_normalize_native_review_result_accepts_chinese_plain_text_approve
   test_normalize_native_review_result_accepts_common_plain_text_approve_phrases
   test_normalize_native_review_result_accepts_polite_plain_text_approve_phrase
+  test_normalize_native_review_result_fails_closed_for_polite_plain_text_with_followup
   test_normalize_native_review_result_accepts_merge_blocker_free_approve_phrase
   test_normalize_native_review_result_accepts_lgtm_phrase
   test_normalize_native_review_result_fails_closed_for_chinese_caveat
   test_normalize_native_review_result_fails_closed_for_chinese_condition
+  test_normalize_native_review_result_fails_closed_for_chinese_followup
   test_normalize_native_review_result_fails_closed_for_other_than_caveat
+  test_normalize_native_review_result_fails_closed_for_unparsed_priority_bullet
   test_normalize_native_review_result_fails_closed_for_ambiguous_safe_phrase
   test_normalize_native_review_result_fails_closed_for_colon_caveat
   test_normalize_native_review_result_fails_closed_for_unless_caveat

@@ -235,6 +235,7 @@ prepare_pr_workspace() {
   CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
   SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
   ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  LINKED_ISSUES_FILE="${TMP_DIR}/linked-issues.txt"
   REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
   BASELINE_SNAPSHOT_ROOT="${TMP_DIR}/baseline-snapshot"
 
@@ -260,9 +261,11 @@ prepare_pr_workspace() {
 
   list_changed_files > "${CHANGED_FILES_FILE}"
   REVIEW_PROFILE="$(classify_review_profile "${CHANGED_FILES_FILE}")"
-  ISSUE_NUMBER="$(extract_issue_number_from_pr_body)"
-  if [[ -z "${ISSUE_NUMBER}" ]]; then
-    ISSUE_NUMBER="$(jq -r 'if (.closingIssuesReferences | length) == 1 then (.closingIssuesReferences[0].number // "") else "" end' "${META_FILE}")"
+  resolve_linked_issue_numbers > "${LINKED_ISSUES_FILE}"
+  if [[ "$(grep -c . "${LINKED_ISSUES_FILE}" 2>/dev/null || true)" == "1" ]]; then
+    ISSUE_NUMBER="$(awk 'NF { print; exit }' "${LINKED_ISSUES_FILE}")"
+  else
+    ISSUE_NUMBER=""
   fi
   slim_pr_body > "${SLIM_PR_FILE}"
   fetch_issue_summary > "${ISSUE_SUMMARY_FILE}"
@@ -346,17 +349,7 @@ is_reviewer_owned_baseline_path() {
 }
 
 is_optional_review_baseline_path() {
-  local value="$1"
-
-  case "${value}" in
-    "${REVIEW_ADDENDUM_FILE}"|\
-    "${SPEC_REVIEW_SUMMARY_FILE}")
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
+  return 1
 }
 
 is_base_snapshot_review_context_path() {
@@ -390,9 +383,10 @@ resolve_review_path() {
         return 0
       fi
 
-      if ! is_optional_review_baseline_path "${value}" && [[ -f "${worktree_path}" ]]; then
-        printf '%s\n' "${worktree_path}"
+      if ! path_changed_in_pr "${value}" && [[ -f "${value}" ]]; then
+        printf '%s\n' "${value}"
       fi
+
       return 0
     fi
 
@@ -494,9 +488,6 @@ assert_required_review_context_available() {
   fi
 
   for path in "${required_paths[@]}"; do
-    if is_optional_review_baseline_path "${path}"; then
-      continue
-    fi
     resolved_path="$(resolve_review_path "${path}")"
     [[ -n "${resolved_path}" && -f "${resolved_path}" ]] || die "缺少必需审查基线文件: ${path}"
   done
@@ -616,32 +607,57 @@ append_required_review_baseline() {
 }
 
 extract_issue_number_from_pr_body() {
-  local explicit_issue=""
+  local issues_file
+  local issue_count
 
-  explicit_issue="$(
-    printf '%s\n' "${PR_BODY}" | perl -ne '
-    if (/-\s*Issue:\s*#(\d+)/i) {
-      print "$1\n";
-      exit;
-    }
-  ' || return 0
-  )"
+  issues_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-pr-guardian.issue-body.XXXXXX")"
+  extract_issue_numbers_from_pr_body > "${issues_file}"
+  issue_count="$(grep -c . "${issues_file}" 2>/dev/null || true)"
 
-  if [[ -n "${explicit_issue}" ]]; then
-    printf '%s\n' "${explicit_issue}"
-    return 0
+  if [[ "${issue_count}" == "1" ]]; then
+    awk 'NF { print; exit }' "${issues_file}"
   fi
+
+  rm -f "${issues_file}"
+}
+
+extract_issue_numbers_from_pr_body() {
+  local explicit_issue=""
 
   printf '%s\n' "${PR_BODY}" | perl -0ne '
     my %seen;
+    my @ordered;
+
+    while (/(?:^|\n)\s*(?:-\s*)?Issue\s*:\s*#(\d+)/img) {
+      next if $seen{$1}++;
+      push @ordered, $1;
+    }
+
     while (/(?:^|[[:space:][:punct:]])(?:refs?|fix(?:e[sd]?|es)|close[sd]?|resolve[sd]?)\s*#(\d+)/ig) {
-      $seen{$1} = 1;
+      next if $seen{$1}++;
+      push @ordered, $1;
     }
-    my @issues = sort { $a <=> $b } keys %seen;
-    if (@issues == 1) {
-      print "$issues[0]\n";
-    }
+
+    print "$_\n" for @ordered;
   '
+}
+
+resolve_linked_issue_numbers() {
+  {
+    extract_issue_numbers_from_pr_body
+    jq -r '.closingIssuesReferences[]?.number // empty' "${META_FILE}"
+  } | awk 'NF && !seen[$0]++ { print }'
+}
+
+list_linked_issue_numbers() {
+  if [[ -n "${LINKED_ISSUES_FILE:-}" && -s "${LINKED_ISSUES_FILE}" ]]; then
+    cat "${LINKED_ISSUES_FILE}"
+    return 0
+  fi
+
+  if [[ -n "${ISSUE_NUMBER:-}" ]]; then
+    printf '%s\n' "${ISSUE_NUMBER}"
+  fi
 }
 
 trim_blank_lines() {
@@ -779,35 +795,45 @@ slim_issue_body() {
 
 fetch_issue_summary() {
   local issue_file
+  local issue_number
   local issue_title
   local safe_issue_title
   local issue_body
   local issue_body_file
+  local printed_any=0
 
-  [[ -n "${ISSUE_NUMBER:-}" ]] || return 0
+  while IFS= read -r issue_number; do
+    [[ -n "${issue_number}" ]] || continue
 
-  issue_file="${TMP_DIR}/issue.json"
-  if ! gh issue view "${ISSUE_NUMBER}" --json number,title,body > "${issue_file}" 2>/dev/null; then
-    die "关联 Issue 拉取失败，无法按仓库要求补齐审查上下文: #${ISSUE_NUMBER}"
-  fi
-
-  issue_title="$(jq -r '.title // ""' "${issue_file}")"
-  safe_issue_title="$(sanitize_user_prompt_line "${issue_title}")"
-  issue_body="$(jq -r '.body // ""' "${issue_file}")"
-  issue_body_file="${TMP_DIR}/issue-body.md"
-  if [[ -n "${safe_issue_title//[[:space:]]/}" ]]; then
-    printf 'Issue #%s: %s\n' "${ISSUE_NUMBER}" "${safe_issue_title}"
-  else
-    printf 'Issue #%s\n' "${ISSUE_NUMBER}"
-  fi
-
-  if [[ -n "${issue_body//[[:space:]]/}" ]]; then
-    printf '%s\n' "${issue_body}" | slim_issue_body > "${issue_body_file}"
-    if [[ -s "${issue_body_file}" ]]; then
-      printf '\n'
-      cat "${issue_body_file}"
+    issue_file="${TMP_DIR}/issue-${issue_number}.json"
+    if ! gh issue view "${issue_number}" --json number,title,body > "${issue_file}" 2>/dev/null; then
+      die "关联 Issue 拉取失败，无法按仓库要求补齐审查上下文: #${issue_number}"
     fi
-  fi
+
+    if [[ "${printed_any}" == "1" ]]; then
+      printf '\n\n'
+    fi
+
+    issue_title="$(jq -r '.title // ""' "${issue_file}")"
+    safe_issue_title="$(sanitize_user_prompt_line "${issue_title}")"
+    issue_body="$(jq -r '.body // ""' "${issue_file}")"
+    issue_body_file="${TMP_DIR}/issue-${issue_number}-body.md"
+    if [[ -n "${safe_issue_title//[[:space:]]/}" ]]; then
+      printf 'Issue #%s: %s\n' "${issue_number}" "${safe_issue_title}"
+    else
+      printf 'Issue #%s\n' "${issue_number}"
+    fi
+
+    if [[ -n "${issue_body//[[:space:]]/}" ]]; then
+      printf '%s\n' "${issue_body}" | slim_issue_body > "${issue_body_file}"
+      if [[ -s "${issue_body_file}" ]]; then
+        printf '\n'
+        cat "${issue_body_file}"
+      fi
+    fi
+
+    printed_any=1
+  done < <(list_linked_issue_numbers)
 }
 
 collect_high_risk_architecture_docs() {
@@ -1292,7 +1318,78 @@ normalize_native_review_result() {
     and (.findings? | type == "array")
     and (.required_actions? | type == "array")
   ' "${json_source_file}" >/dev/null 2>&1; then
-    jq -c '.' "${json_source_file}" > "${normalized_result_file}" \
+    jq -c -e --arg fallback_path "${fallback_path}" '
+      def trim_text:
+        gsub("[[:space:]]+"; " ") | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
+      def inferred_priority:
+        if (.priority // null) != null then .priority
+        elif ((.title // "") | test("^\\[P0\\]")) then 0
+        elif ((.title // "") | test("^\\[P1\\]")) then 1
+        elif ((.title // "") | test("^\\[P2\\]")) then 2
+        elif ((.title // "") | test("^\\[P3\\]")) then 3
+        else 2
+        end;
+      def severity_for($priority):
+        if $priority == 0 then "critical"
+        elif $priority == 1 then "high"
+        elif $priority == 2 then "medium"
+        else "low"
+        end;
+      def normalized_title:
+        (.title // "" | sub("^\\[P[0-3]\\][[:space:]]*"; "") | trim_text);
+      def normalized_details:
+        ((.details // .body // "") | trim_text) as $details
+        | if ($details | length) > 0 then $details else normalized_title end;
+      ((.findings // [])
+        | map(
+            (inferred_priority) as $priority
+            | {
+                severity: ((.severity // "") | if length > 0 then . else severity_for($priority) end),
+                title: normalized_title,
+                details: normalized_details,
+                code_location: {
+                  absolute_file_path: (.code_location.absolute_file_path // $fallback_path),
+                  line_range: {
+                    start: (.code_location.line_range.start // 1),
+                    end: (.code_location.line_range.end // (.code_location.line_range.start // 1))
+                  }
+                },
+                confidence_score: (.confidence_score // 0.5),
+                priority: $priority
+              }
+          )) as $findings
+      | ((.required_actions // []) | map(tostring | trim_text) | map(select(length > 0))) as $required_actions
+      | ((.summary // "") | trim_text) as $summary
+      | ((.verdict // "") == "APPROVE") as $native_approve
+      | (.safe_to_merge == true) as $native_safe
+      | {
+          verdict: (
+            if ($findings | length) == 0 and $native_approve and $native_safe
+            then "APPROVE"
+            else "REQUEST_CHANGES"
+            end
+          ),
+          safe_to_merge: (
+            ($findings | length) == 0 and $native_approve and $native_safe
+          ),
+          summary: (
+            if ($summary | length) > 0 then
+              $summary
+            elif ($findings | length) == 0 then
+              "未发现新的阻断性问题。"
+            else
+              "发现会阻止当前 PR 合并的阻断性问题。"
+            end
+          ),
+          findings: $findings,
+          required_actions: (
+            ($required_actions + (if ($findings | length) > 0 then ($findings | map("修复：" + (.title // "未命名问题"))) else [] end))
+            | map(trim_text)
+            | map(select(length > 0))
+            | unique
+          )
+        }
+    ' "${json_source_file}" > "${normalized_result_file}" \
       || die "guardian 审查 JSON 输出无法直接读取。"
     return
   fi
@@ -1303,6 +1400,68 @@ normalize_native_review_result() {
     and (.overall_correctness? | type == "string")
   ' "${json_source_file}" >/dev/null 2>&1; then
     jq -c -e --arg fallback_path "${fallback_path}" '
+      def trim_text:
+        gsub("[[:space:]]+"; " ") | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
+      def has_contrast($sentence):
+        ($sentence | ascii_downcase | test("\\b(but|however|although|except|except for|yet|still|though|nevertheless|aside from|other than)\\b|但是|但|不过|然而|只是|除外|除此之外"));
+      def has_condition($sentence):
+        ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|当"));
+      def has_followup($sentence):
+        ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should|missing|lacks?)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
+      def strong_safe_sentence($sentence):
+        ($sentence | trim_text) as $trimmed
+        | ($trimmed | ascii_downcase) as $lower
+        | ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$"))
+          or ($lower | test("^no blocking issues found[.!]?$"))
+          or ($lower | test("^no blockers(?: found)?[.!]?$"))
+          or ($lower | test("^(?:i don.t|i do not|don.t|do not) see any merge blockers[.!]?$"))
+          or ($lower | test("^(?:the )?patch is correct[.!]?$"))
+          or ($lower | test("^no actionable issues[.!]?$"))
+          or ($lower | test("^no issues found[.!]?$"))
+          or ($lower | test("^no issues were found[.!]?$"))
+          or ($lower | test("^no problems found[.!]?$"))
+          or ($lower | test("^lgtm[.!]?$"))
+          or ($lower | test("^looks good to me[.!]?$"))
+          or ($lower | test("^looks fine to me[.!]?$"))
+          or ($lower | test("^(?:i didn.t|i did not|did not) find any problems(?: with this patch)?[.!]?$"))
+          or ($lower | test("^no issues detected[.!]?$"))
+          or ($trimmed | test("^未发现新的阻断性问题[。！!]*$"))
+          or ($trimmed | test("^未发现阻断性问题[。！!]*$"))
+          or ($trimmed | test("^没有发现阻断性问题[。！!]*$"))
+          or ($trimmed | test("^未发现阻断问题[。！!]*$"))
+          or ($trimmed | test("^没有发现阻断问题[。！!]*$"))
+          or ($trimmed | test("^没有合并阻断[。！!]*$"))
+          or ($trimmed | test("^可以合并[。！!]*$"))
+          or ($trimmed | test("^可合并[。！!]*$"))
+          or ($trimmed | test("^可以批准[。！!]*$"))
+          or ($trimmed | test("^建议批准[。！!]*$"))
+          or ($trimmed | test("^审查通过[。！!]*$"));
+      def neutral_safe_sentence($sentence):
+        ($sentence | ascii_downcase) as $lower
+        | ($lower | test("does not affect code paths"))
+          or ($lower | test("does not modify executable code or behavior"))
+          or ($lower | test("does not affect .*runtime behavior"));
+      def harmless_tail_sentence($sentence):
+        ($sentence | ascii_downcase | trim_text) as $lower
+        | ($lower | test("^(thanks|thank you|thx)[.!]?$"))
+          or ($lower | test("^ship it[.!]?$"))
+          or ($lower | test("^nice work[.!]?$"))
+          or (($sentence | trim_text) | test("^(谢谢|谢了|辛苦了)[。！!]?$"));
+      def looks_like_safe_sentence($sentence):
+        ($sentence | trim_text) as $trimmed
+        | if ($trimmed | length) == 0 then
+            true
+          else
+            ((has_contrast($trimmed) | not)
+            and (has_condition($trimmed) | not)
+            and (has_followup($trimmed) | not)
+            and (strong_safe_sentence($trimmed) or neutral_safe_sentence($trimmed) or harmless_tail_sentence($trimmed)))
+          end;
+      def looks_like_safe_approve($summary):
+        ($summary | trim_text) as $collapsed
+        | ($collapsed | gsub("(?:[。！？；：]|[.!?;:](?:[[:space:]]+|$))"; "\n") | split("\n")) as $sentences
+        | any($sentences[]; strong_safe_sentence(.))
+          and all($sentences[]; looks_like_safe_sentence(.));
       def inferred_priority:
         if (.priority // null) != null then .priority
         elif ((.title // "") | test("^\\[P0\\]")) then 0
@@ -1342,24 +1501,24 @@ normalize_native_review_result() {
               }
           );
       def overall_correct:
-        ((.overall_correctness // "") | ascii_downcase | gsub("[[:space:]]+"; " ") | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "")) as $correctness
+        ((.overall_correctness // "") | ascii_downcase | trim_text) as $correctness
         | ($correctness | test("^((the )?patch is correct)[.!]?$"))
           or ($correctness | test("^补丁(是)?正确的?[。！!]?$"))
           or ($correctness | test("^当前补丁正确[。！!]?$"));
-      (normalized_findings) as $normalized_findings
+      ((.overall_explanation // "") | trim_text) as $explanation
+      | (normalized_findings) as $normalized_findings
       | {
           verdict: (
-            if (overall_correct and ($normalized_findings | length) == 0)
+            if (overall_correct and ($normalized_findings | length) == 0 and (($explanation | length) == 0 or looks_like_safe_approve($explanation)))
             then "APPROVE"
             else "REQUEST_CHANGES"
             end
           ),
           safe_to_merge: (
-            overall_correct and ($normalized_findings | length) == 0
+            overall_correct and ($normalized_findings | length) == 0 and (($explanation | length) == 0 or looks_like_safe_approve($explanation))
           ),
           summary: (
-            ((.overall_explanation // "") | gsub("[[:space:]]+"; " ") | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "")) as $explanation
-            | if ($explanation | length) > 0 then
+            if ($explanation | length) > 0 then
                 $explanation
               elif ($normalized_findings | length) == 0 then
                 "未发现新的阻断性问题。"
@@ -1382,40 +1541,40 @@ normalize_native_review_result() {
   jq -Rn -c -e --rawfile text "${raw_result_file}" '
     def trim:
       sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
+    def has_followup($sentence):
+      ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should|missing|lacks?)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
     def has_contrast($sentence):
       ($sentence | ascii_downcase | test("\\b(but|however|although|except|except for|yet|still|though|nevertheless|aside from|other than)\\b|但是|但|不过|然而|只是|除外|除此之外"));
     def has_condition($sentence):
       ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|当"));
     def strong_safe_sentence($sentence):
-      ($sentence | ascii_downcase) as $lower
-      | ($lower | test("did not identify any actionable bugs"))
-        or ($lower | test("no blocking issues found"))
-        or ($lower | test("\\bno blockers\\b"))
-        or ($lower | test("no merge blockers? found"))
-        or ($lower | test("don.t see any merge blockers?"))
-        or ($lower | test("do not see any merge blockers?"))
-        or ($lower | test("patch is correct"))
-        or ($lower | test("no actionable issues"))
-        or ($lower | test("\\bno issues found\\b"))
-        or ($lower | test("\\bno issues were found\\b"))
-        or ($lower | test("\\bno problems found\\b"))
-        or ($lower | test("\\blgtm\\b"))
-        or ($lower | test("looks good to me"))
-        or ($lower | test("looks fine to me"))
-        or ($lower | test("\\bi didn.t find any problems\\b"))
-        or ($lower | test("\\bdid not find any problems\\b"))
-        or ($lower | test("\\bno issues detected\\b"))
-        or ($lower | test("未发现新的阻断性问题"))
-        or ($lower | test("未发现阻断性问题"))
-        or ($lower | test("没有发现阻断性问题"))
-        or ($lower | test("未发现阻断问题"))
-        or ($lower | test("没有发现阻断问题"))
-        or ($lower | test("没有合并阻断"))
-        or ($lower | test("可以合并"))
-        or ($lower | test("可合并"))
-        or ($lower | test("可以批准"))
-        or ($lower | test("建议批准"))
-        or ($lower | test("审查通过"));
+      ($sentence | trim) as $trimmed
+      | ($trimmed | ascii_downcase) as $lower
+      | ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$"))
+        or ($lower | test("^no blocking issues found[.!]?$"))
+        or ($lower | test("^no blockers(?: found)?[.!]?$"))
+        or ($lower | test("^(?:i don.t|i do not|don.t|do not) see any merge blockers[.!]?$"))
+        or ($lower | test("^(?:the )?patch is correct[.!]?$"))
+        or ($lower | test("^no actionable issues[.!]?$"))
+        or ($lower | test("^no issues found[.!]?$"))
+        or ($lower | test("^no issues were found[.!]?$"))
+        or ($lower | test("^no problems found[.!]?$"))
+        or ($lower | test("^lgtm[.!]?$"))
+        or ($lower | test("^looks good to me[.!]?$"))
+        or ($lower | test("^looks fine to me[.!]?$"))
+        or ($lower | test("^(?:i didn.t|i did not|did not) find any problems(?: with this patch)?[.!]?$"))
+        or ($lower | test("^no issues detected[.!]?$"))
+        or ($trimmed | test("^未发现新的阻断性问题[。！!]*$"))
+        or ($trimmed | test("^未发现阻断性问题[。！!]*$"))
+        or ($trimmed | test("^没有发现阻断性问题[。！!]*$"))
+        or ($trimmed | test("^未发现阻断问题[。！!]*$"))
+        or ($trimmed | test("^没有发现阻断问题[。！!]*$"))
+        or ($trimmed | test("^没有合并阻断[。！!]*$"))
+        or ($trimmed | test("^可以合并[。！!]*$"))
+        or ($trimmed | test("^可合并[。！!]*$"))
+        or ($trimmed | test("^可以批准[。！!]*$"))
+        or ($trimmed | test("^建议批准[。！!]*$"))
+        or ($trimmed | test("^审查通过[。！!]*$"));
     def neutral_safe_sentence($sentence):
       ($sentence | ascii_downcase) as $lower
       | ($lower | test("does not affect code paths"))
@@ -1434,11 +1593,12 @@ normalize_native_review_result() {
         else
           ((has_contrast($trimmed) | not)
           and (has_condition($trimmed) | not)
+          and (has_followup($trimmed) | not)
           and (strong_safe_sentence($trimmed) or neutral_safe_sentence($trimmed) or harmless_tail_sentence($trimmed)))
         end;
     def looks_like_safe_approve($summary):
       ($summary | gsub("[[:space:]]+"; " ") | trim) as $collapsed
-      | ($collapsed | gsub("[.!?;:。！？；：]([[:space:]]+|$)"; "\n") | split("\n")) as $sentences
+      | ($collapsed | gsub("(?:[。！？；：]|[.!?;:](?:[[:space:]]+|$))"; "\n") | split("\n")) as $sentences
       | any($sentences[]; strong_safe_sentence(.))
         and all($sentences[]; looks_like_safe_sentence(.));
     def priority_num:
@@ -1459,6 +1619,8 @@ normalize_native_review_result() {
         error("native review text parse failed")
       else
         (($parts.summary // "") | gsub("[[:space:]]+"; " ") | trim) as $summary
+        | ([($raw | match("(?m)(?:^|[[:space:]])- \\[(?<priority_tag>P[0-3])\\] (?<title>.+?) [—-] (?<path>.+?):(?<start>[0-9]+)(?:-(?<end>[0-9]+))?\n(?<body>(?:  .*?(?:\n|$))*)"; "g"))] | length) as $strict_priority_finding_count
+        | ((($parts.comments // "") | test("(?m)^- \\[(P[0-3])\\] ")) and ($strict_priority_finding_count == 0)) as $has_unparsed_priority_bullets
         | [
             ($raw | match("(?m)(?:^|[[:space:]])- \\[(?<priority_tag>P[0-3])\\] (?<title>.+?) [—-] (?<path>.+?):(?<start>[0-9]+)(?:-(?<end>[0-9]+))?\n(?<body>(?:  .*?(?:\n|$))*)"; "g"))
             | (reduce .captures[] as $capture ({}; . + {($capture.name): $capture.string})) as $finding
@@ -1483,6 +1645,8 @@ normalize_native_review_result() {
             verdict: (
               if ($normalized_findings | length) > 0 then
                 "REQUEST_CHANGES"
+              elif $has_unparsed_priority_bullets then
+                "REQUEST_CHANGES"
               elif looks_like_safe_approve($summary) then
                 "APPROVE"
               else
@@ -1491,6 +1655,7 @@ normalize_native_review_result() {
             ),
             safe_to_merge: (
               ($normalized_findings | length) == 0
+              and ($has_unparsed_priority_bullets | not)
               and looks_like_safe_approve($summary)
             ),
             summary: (
