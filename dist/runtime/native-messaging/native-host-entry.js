@@ -1,6 +1,6 @@
 import { mkdir, rm } from "node:fs/promises";
 import { createServer } from "node:net";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { BRIDGE_PROTOCOL, ensureBridgeRequestEnvelope } from "./protocol.js";
 import { PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME } from "./host.js";
 const DEFAULT_SESSION_ID = "nm-session-001";
@@ -20,6 +20,12 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : {};
 const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
+const isPathInside = (baseDir, targetPath) => {
+    const normalizedBase = resolve(baseDir);
+    const normalizedTarget = resolve(targetPath);
+    const rel = relative(normalizedBase, normalizedTarget);
+    return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+};
 const resolveSocketTarget = (request) => {
     if (!PROFILE_ROOT) {
         return null;
@@ -28,7 +34,11 @@ const resolveSocketTarget = (request) => {
     if (!profileName) {
         return null;
     }
-    const profileDir = join(PROFILE_ROOT, profileName);
+    const profileRoot = resolve(PROFILE_ROOT);
+    const profileDir = resolve(profileRoot, profileName);
+    if (!isPathInside(profileRoot, profileDir)) {
+        throw new Error("native bridge profile escapes controlled root");
+    }
     return {
         profileDir,
         socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
@@ -273,8 +283,9 @@ const handleSocketRequest = async (socket, rawRequest) => {
     }
 };
 const handleExtensionBridgeOpen = async (request) => {
+    const socketTarget = resolveSocketTarget(request);
     extensionOpened = true;
-    await ensureSocketServer(resolveSocketTarget(request));
+    await ensureSocketServer(socketTarget);
     writeNativeSuccess(request, {
         summary: {
             protocol: BRIDGE_PROTOCOL,
@@ -296,7 +307,15 @@ const handleExtensionHeartbeat = (request) => {
 };
 const handleExtensionRequest = async (request) => {
     if (request.method === "bridge.open") {
-        await handleExtensionBridgeOpen(request);
+        try {
+            await handleExtensionBridgeOpen(request);
+        }
+        catch (error) {
+            writeNativeError(request, {
+                code: "ERR_TRANSPORT_FORWARD_FAILED",
+                message: error instanceof Error ? error.message : String(error)
+            });
+        }
         return;
     }
     if (request.method === "__ping__") {

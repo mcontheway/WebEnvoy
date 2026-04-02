@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { CliError } from "../core/errors.js";
+import { PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME } from "../runtime/native-messaging/host.js";
 
 export const DEFAULT_NATIVE_HOST_NAME = "com.webenvoy.host";
 export const DEFAULT_BROWSER_CHANNEL = "chrome";
@@ -222,7 +223,7 @@ export const resolveRepoOwnedNativeHostCommand = (): string =>
 
 export const resolveProfileRoot = (cwd: string): string => resolve(cwd, ".webenvoy", "profiles");
 export const resolveProfileScopedNativeBridgeSocketPath = (profileDir: string): string =>
-  join(profileDir, "__webenvoy_native_bridge.sock");
+  join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME);
 
 export const isBrowserChannel = (value: string): value is BrowserChannel =>
   BROWSER_CHANNELS.includes(value as BrowserChannel);

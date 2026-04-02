@@ -1,6 +1,6 @@
 import { mkdir, rm } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 import {
   BRIDGE_PROTOCOL,
@@ -38,6 +38,13 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
 
+const isPathInside = (baseDir: string, targetPath: string): boolean => {
+  const normalizedBase = resolve(baseDir);
+  const normalizedTarget = resolve(targetPath);
+  const rel = relative(normalizedBase, normalizedTarget);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+};
+
 const resolveSocketTarget = (
   request: Pick<BridgeRequestEnvelope, "profile">
 ): { profileDir: string; socketPath: string } | null => {
@@ -48,7 +55,11 @@ const resolveSocketTarget = (
   if (!profileName) {
     return null;
   }
-  const profileDir = join(PROFILE_ROOT, profileName);
+  const profileRoot = resolve(PROFILE_ROOT);
+  const profileDir = resolve(profileRoot, profileName);
+  if (!isPathInside(profileRoot, profileDir)) {
+    throw new Error("native bridge profile escapes controlled root");
+  }
   return {
     profileDir,
     socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
@@ -392,8 +403,9 @@ const handleSocketRequest = async (socket: Socket, rawRequest: unknown): Promise
 };
 
 const handleExtensionBridgeOpen = async (request: BridgeRequestEnvelope): Promise<void> => {
+  const socketTarget = resolveSocketTarget(request);
   extensionOpened = true;
-  await ensureSocketServer(resolveSocketTarget(request));
+  await ensureSocketServer(socketTarget);
   writeNativeSuccess(request, {
     summary: {
       protocol: BRIDGE_PROTOCOL,
@@ -417,7 +429,14 @@ const handleExtensionHeartbeat = (request: BridgeRequestEnvelope): void => {
 
 const handleExtensionRequest = async (request: BridgeRequestEnvelope): Promise<void> => {
   if (request.method === "bridge.open") {
-    await handleExtensionBridgeOpen(request);
+    try {
+      await handleExtensionBridgeOpen(request);
+    } catch (error) {
+      writeNativeError(request, {
+        code: "ERR_TRANSPORT_FORWARD_FAILED",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
     return;
   }
 
