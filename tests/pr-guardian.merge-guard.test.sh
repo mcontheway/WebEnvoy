@@ -903,7 +903,7 @@ test_fetch_origin_tracking_ref_falls_back_to_https_when_ssh_fetch_fails() {
   export REPO_ROOT
 
   git() {
-    printf '%s\n' "$*" >> "${git_calls_log}"
+    printf 'env GIT_TERMINAL_PROMPT=%s GIT_SSH_COMMAND=%s :: %s\n' "${GIT_TERMINAL_PROMPT:-}" "${GIT_SSH_COMMAND:-}" "$*" >> "${git_calls_log}"
 
     if [[ "${1:-}" == "-C" && "${3:-}" == "fetch" && "${4:-}" == "origin" ]]; then
       return 1
@@ -922,6 +922,8 @@ test_fetch_origin_tracking_ref_falls_back_to_https_when_ssh_fetch_fails() {
   }
 
   assert_pass fetch_origin_tracking_ref "refs/heads/main" "refs/remotes/origin/main"
+  assert_file_contains "${git_calls_log}" "env GIT_TERMINAL_PROMPT=0"
+  assert_file_contains "${git_calls_log}" "BatchMode=yes"
   assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} fetch origin refs/heads/main:refs/remotes/origin/main"
   assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} remote get-url origin"
   assert_file_contains "${git_calls_log}" "-C ${REPO_ROOT} fetch https://github.com/mcontheway/WebEnvoy.git refs/heads/main:refs/remotes/origin/main"
@@ -1214,6 +1216,57 @@ test_collect_spec_review_docs_skips_repo_only_changed_file_when_worktree_missing
   assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0003-legacy-doc/spec.md"
   assert_file_not_contains "${output_file}" "${REPO_ROOT}/docs/dev/specs/FR-0003-legacy-doc/research.md"
   assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0003-legacy-doc/research.md"
+}
+
+test_collect_spec_review_docs_uses_baseline_for_unchanged_fr_companion_docs() {
+  setup_case_dir "spec-review-baseline-companion-docs"
+
+  local fake_repo_root="${TMP_DIR}/repo"
+  local fake_worktree_dir="${TMP_DIR}/worktree"
+  local baseline_snapshot_root="${TMP_DIR}/baseline-snapshot"
+  local changed_files_file="${TMP_DIR}/changed-files.txt"
+  local output_file="${TMP_DIR}/context-docs.txt"
+
+  mkdir -p "${fake_repo_root}/docs/dev/specs/FR-0005-contract-only/contracts"
+  mkdir -p "${fake_worktree_dir}/docs/dev/specs/FR-0005-contract-only/contracts"
+  mkdir -p "${baseline_snapshot_root}/docs/dev/specs/FR-0005-contract-only/contracts"
+  mkdir -p "${fake_worktree_dir}/docs/dev/review"
+
+  printf '%s\n' "repo spec stale" > "${fake_repo_root}/docs/dev/specs/FR-0005-contract-only/spec.md"
+  printf '%s\n' "repo todo stale" > "${fake_repo_root}/docs/dev/specs/FR-0005-contract-only/TODO.md"
+  printf '%s\n' "repo plan stale" > "${fake_repo_root}/docs/dev/specs/FR-0005-contract-only/plan.md"
+  printf '%s\n' "repo contract" > "${fake_repo_root}/docs/dev/specs/FR-0005-contract-only/contracts/runtime.json"
+
+  printf '%s\n' "worktree spec stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0005-contract-only/spec.md"
+  printf '%s\n' "worktree todo stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0005-contract-only/TODO.md"
+  printf '%s\n' "worktree plan stale" > "${fake_worktree_dir}/docs/dev/specs/FR-0005-contract-only/plan.md"
+  printf '%s\n' "worktree contract changed" > "${fake_worktree_dir}/docs/dev/specs/FR-0005-contract-only/contracts/runtime.json"
+
+  printf '%s\n' "snapshot spec current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0005-contract-only/spec.md"
+  printf '%s\n' "snapshot todo current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0005-contract-only/TODO.md"
+  printf '%s\n' "snapshot plan current" > "${baseline_snapshot_root}/docs/dev/specs/FR-0005-contract-only/plan.md"
+
+  REPO_ROOT="${fake_repo_root}"
+  WORKTREE_DIR="${fake_worktree_dir}"
+  BASELINE_SNAPSHOT_ROOT="${baseline_snapshot_root}"
+  CHANGED_FILES_FILE="${changed_files_file}"
+  REVIEW_PROFILE="spec_review_profile"
+  REVIEW_ADDENDUM_FILE="${REPO_ROOT}/docs/dev/review/guardian-review-addendum.md"
+  SPEC_REVIEW_SUMMARY_FILE="${REPO_ROOT}/docs/dev/review/guardian-spec-review-summary.md"
+  SPEC_REVIEW_FILE="${REPO_ROOT}/spec_review.md"
+  export REPO_ROOT WORKTREE_DIR BASELINE_SNAPSHOT_ROOT CHANGED_FILES_FILE REVIEW_PROFILE REVIEW_ADDENDUM_FILE SPEC_REVIEW_SUMMARY_FILE SPEC_REVIEW_FILE
+
+  printf '%s\n' 'docs/dev/specs/FR-0005-contract-only/contracts/runtime.json' > "${changed_files_file}"
+
+  collect_spec_review_docs "${changed_files_file}" "${output_file}"
+
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0005-contract-only/spec.md"
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0005-contract-only/TODO.md"
+  assert_file_contains "${output_file}" "${BASELINE_SNAPSHOT_ROOT}/docs/dev/specs/FR-0005-contract-only/plan.md"
+  assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0005-contract-only/spec.md"
+  assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0005-contract-only/TODO.md"
+  assert_file_not_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0005-contract-only/plan.md"
+  assert_file_contains "${output_file}" "${WORKTREE_DIR}/docs/dev/specs/FR-0005-contract-only/contracts/runtime.json"
 }
 
 test_collect_context_docs_includes_branch_todo_when_present() {
@@ -2603,6 +2656,7 @@ main() {
   test_collect_spec_review_docs_includes_changed_architecture_and_research
   test_collect_spec_review_docs_prefers_worktree_for_changed_formal_docs
   test_collect_spec_review_docs_skips_repo_only_changed_file_when_worktree_missing
+  test_collect_spec_review_docs_uses_baseline_for_unchanged_fr_companion_docs
   test_collect_context_docs_includes_branch_todo_when_present
   test_collect_context_docs_skips_spec_review_summary_for_default_profile
   test_collect_context_docs_includes_changed_spec_review_summary_for_mixed_profile

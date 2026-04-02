@@ -63,7 +63,8 @@ fetch_origin_tracking_ref() {
   local origin_url=""
   local https_url=""
  
-  if git -C "${REPO_ROOT}" fetch origin "${refspec}" >/dev/null 2>&1; then
+  if GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new}" \
+    git -C "${REPO_ROOT}" fetch origin "${refspec}" >/dev/null 2>&1; then
     return 0
   fi
 
@@ -791,9 +792,15 @@ collect_spec_review_docs() {
 
   while IFS= read -r fr_dir; do
     [[ -n "${fr_dir}" ]] || continue
-    append_proposed_review_line "${REPO_ROOT}/${fr_dir}/spec.md" "${output_file}"
-    append_proposed_review_line "${REPO_ROOT}/${fr_dir}/TODO.md" "${output_file}"
-    append_proposed_review_line "${REPO_ROOT}/${fr_dir}/plan.md" "${output_file}"
+    if grep -Eq "^${fr_dir}/(spec\.md|TODO\.md|plan\.md)$" "${changed_files_file}"; then
+      append_proposed_review_line "${REPO_ROOT}/${fr_dir}/spec.md" "${output_file}"
+      append_proposed_review_line "${REPO_ROOT}/${fr_dir}/TODO.md" "${output_file}"
+      append_proposed_review_line "${REPO_ROOT}/${fr_dir}/plan.md" "${output_file}"
+    else
+      append_unique_line "${REPO_ROOT}/${fr_dir}/spec.md" "${output_file}"
+      append_unique_line "${REPO_ROOT}/${fr_dir}/TODO.md" "${output_file}"
+      append_unique_line "${REPO_ROOT}/${fr_dir}/plan.md" "${output_file}"
+    fi
     if grep -Eq "^${fr_dir}/contracts/" "${changed_files_file}"; then
       while IFS= read -r contract_file; do
         append_proposed_review_line "${REPO_ROOT}/${contract_file}" "${output_file}"
