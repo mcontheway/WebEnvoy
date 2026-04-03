@@ -326,6 +326,54 @@ const parseSingleJsonLine = (stdout: string) => {
   return JSON.parse(lines[0]) as Record<string, unknown>;
 };
 
+const encodeNativeBridgeEnvelope = (envelope: Record<string, unknown>): Buffer => {
+  const body = Buffer.from(JSON.stringify(envelope), "utf8");
+  const header = Buffer.alloc(4);
+  header.writeUInt32LE(body.length, 0);
+  return Buffer.concat([header, body]);
+};
+
+const readSingleNativeBridgeEnvelope = async (
+  stream: NodeJS.ReadableStream
+): Promise<Record<string, unknown>> =>
+  new Promise((resolve, reject) => {
+    let buffer = Buffer.alloc(0);
+
+    const cleanup = () => {
+      stream.off("data", onData);
+      stream.off("error", onError);
+      stream.off("end", onEnd);
+    };
+
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+
+    const onEnd = () => {
+      cleanup();
+      reject(new Error("native bridge stdout ended before a framed response"));
+    };
+
+    const onData = (chunk: Buffer | string) => {
+      buffer = Buffer.concat([buffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+      if (buffer.length < 4) {
+        return;
+      }
+      const frameLength = buffer.readUInt32LE(0);
+      const frameEnd = 4 + frameLength;
+      if (buffer.length < frameEnd) {
+        return;
+      }
+      cleanup();
+      resolve(JSON.parse(buffer.subarray(4, frameEnd).toString("utf8")) as Record<string, unknown>);
+    };
+
+    stream.on("data", onData);
+    stream.on("error", onError);
+    stream.on("end", onEnd);
+  });
+
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -3660,7 +3708,7 @@ process.stdin.on("data", (chunk) => {
         native_bridge_launcher_contract: "dual_env_launcher_only",
         profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
         profile_dir: profileDir,
-        profile_root_bridge_socket_path: null,
+        profile_root_bridge_socket_path: path.join(runtimeCwd, ".webenvoy", "profiles", "nm.sock"),
         profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
       }
     });
@@ -3769,7 +3817,7 @@ process.stdin.on("data", (chunk) => {
         native_bridge_launcher_contract: "dual_env_launcher_only",
         profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
         profile_dir: profileDir,
-        profile_root_bridge_socket_path: null,
+        profile_root_bridge_socket_path: path.join(runtimeCwd, ".webenvoy", "profiles", "nm.sock"),
         profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
       }
     });
@@ -3837,19 +3885,59 @@ process.stdin.on("data", (chunk) => {
       profileDir
     });
     const expectedProfileRootSummary = path.join(runtimeCwd, ".webenvoy", "profiles");
+    const installBody = parseSingleJsonLine(install.stdout);
+    const installSummary = asRecord(installBody.summary);
+    expect(installSummary).not.toBeNull();
 
-    expect(parseSingleJsonLine(install.stdout)).toMatchObject({
+    expect(installBody).toMatchObject({
       command: "runtime.install",
       status: "success",
       summary: {
         host_command_source: "explicit",
         native_bridge_launcher_contract: "dual_env_launcher_only",
         profile_root: expectedProfileRootSummary,
-        profile_root_bridge_socket_path: null,
+        profile_root_bridge_socket_path: path.join(expectedProfileRootSummary, "nm.sock"),
         profile_dir: profileDir,
         profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
       }
     });
+
+    const profileRootBridgeSocketPath = String(
+      installSummary?.profile_root_bridge_socket_path ?? ""
+    );
+    expect(profileRootBridgeSocketPath).toBe(path.join(expectedProfileRootSummary, "nm.sock"));
+
+    const child = spawn(launcherPath, [], {
+      cwd: runtimeCwd,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    try {
+      const responsePromise = readSingleNativeBridgeEnvelope(child.stdout);
+      child.stdin.write(
+        encodeNativeBridgeEnvelope({
+          id: "open-install-summary-root-socket-001",
+          method: "bridge.open",
+          profile: null,
+          params: {},
+          timeout_ms: 100
+        })
+      );
+      await expect(responsePromise).resolves.toMatchObject({
+        status: "success",
+        summary: {
+          protocol: "webenvoy.native-bridge.v1",
+          state: "ready"
+        }
+      });
+      await expect(stat(profileRootBridgeSocketPath)).resolves.toMatchObject({
+        size: expect.any(Number)
+      });
+    } finally {
+      child.kill("SIGTERM");
+      await new Promise<void>((resolve) => {
+        child.once("close", () => resolve());
+      });
+    }
   });
 
   it("keeps explicit shell wrappers on the dual-env root-preferred launcher contract", async () => {
@@ -3920,7 +4008,7 @@ process.stdin.on("data", (chunk) => {
         host_command_source: "explicit",
         native_bridge_launcher_contract: "dual_env_launcher_only",
         profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
-        profile_root_bridge_socket_path: null,
+        profile_root_bridge_socket_path: path.join(runtimeCwd, ".webenvoy", "profiles", "nm.sock"),
         profile_dir: profileDir,
         profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
       }
@@ -4013,7 +4101,7 @@ process.stdin.on("data", (chunk) => {
         host_command_source: "explicit",
         native_bridge_launcher_contract: "dual_env_launcher_only",
         profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
-        profile_root_bridge_socket_path: null,
+        profile_root_bridge_socket_path: path.join(runtimeCwd, ".webenvoy", "profiles", "nm.sock"),
         profile_dir: profileDir,
         profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
       }

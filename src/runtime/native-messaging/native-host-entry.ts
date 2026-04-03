@@ -68,10 +68,10 @@ const resolvePinnedExplicitProfile = (): {
     return null;
   }
 
-  const profileRoot = resolve(PROFILE_ROOT);
-  const profileDir = resolve(LEGACY_PROFILE_DIR);
-  const normalizedProfileRoot = normalizePathForRouting(profileRoot);
-  const normalizedProfileDir = normalizePathForRouting(profileDir);
+  const profileRoot = normalizePathForRouting(PROFILE_ROOT);
+  const profileDir = normalizePathForRouting(LEGACY_PROFILE_DIR);
+  const normalizedProfileRoot = profileRoot;
+  const normalizedProfileDir = profileDir;
   if (!isPathInside(profileRoot, profileDir)) {
     return null;
   }
@@ -94,7 +94,7 @@ const resolveProfileRootSocketTarget = (
   const profileName = asString(request.profile);
 
   if (PROFILE_ROOT) {
-    const profileRoot = resolve(PROFILE_ROOT);
+    const profileRoot = normalizePathForRouting(PROFILE_ROOT);
     const pinnedExplicitProfile = resolvePinnedExplicitProfile();
     if (profileName) {
       const profileDir = resolve(profileRoot, profileName);
@@ -131,7 +131,7 @@ const resolveSocketTarget = (
   }
 
   if (LEGACY_PROFILE_DIR) {
-    const profileDir = resolve(LEGACY_PROFILE_DIR);
+    const profileDir = normalizePathForRouting(LEGACY_PROFILE_DIR);
     return {
       profileDir,
       socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
