@@ -87,8 +87,8 @@
 
 ### not_applicable
 
-- PR 明确不以真实 live evidence 作为关闭或放行依据
 - PR 属于 formal spec / 治理前置 / 纯文档 / 纯研究范围
+- PR 明确不以真实 live evidence 作为 issue 关闭、完成判定或 merge 放行依据；一旦命中任一触发原因，就必须回到 `in_scope=true`，不得仅凭文档 / 研究 / 规约属性判为 `not_applicable`
 
 ## 最小恢复路径
 
