@@ -1699,7 +1699,13 @@ normalize_native_review_result() {
         | ($lower | test("does not affect code paths"))
           or ($lower | test("does not modify executable code or behavior"))
           or ($lower | test("does not affect .*runtime behavior"))
-          or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"));
+          or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"))
+          or ($lower | test("cleanly reverts? "))
+          or ($lower | test("matches the parent .* exactly"))
+          or ($lower | test("restores? .* to (?:the )?pre-merge state"))
+          or (($sentence | trim_text) | test("干净回滚"))
+          or (($sentence | trim_text) | test("没有残留差异"))
+          or (($sentence | trim_text) | test("准确恢复到.+状态"));
       def harmless_tail_sentence($sentence):
         ($sentence | ascii_downcase | trim_text) as $lower
         | ($lower | test("^(thanks|thank you|thx)[.!]?$"))
@@ -1842,7 +1848,13 @@ normalize_native_review_result() {
       | ($lower | test("does not affect code paths"))
         or ($lower | test("does not modify executable code or behavior"))
         or ($lower | test("does not affect .*runtime behavior"))
-        or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"));
+        or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"))
+        or ($lower | test("cleanly reverts? "))
+        or ($lower | test("matches the parent .* exactly"))
+        or ($lower | test("restores? .* to (?:the )?pre-merge state"))
+        or ($sentence | trim | test("干净回滚"))
+        or ($sentence | trim | test("没有残留差异"))
+        or ($sentence | trim | test("准确恢复到.+状态"));
     def harmless_tail_sentence($sentence):
       ($sentence | ascii_downcase | trim) as $lower
       | ($lower | test("^(thanks|thank you|thx)[.!]?$"))

@@ -2896,6 +2896,21 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":true'
 }
 
+test_normalize_native_review_result_accepts_revert_summary_without_blockers() {
+  setup_case_dir "normalize-native-text-approve-revert-summary"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+该 PR 是对 `3119245` 的干净回滚；将 `HEAD` 与该提交的父提交比较后没有残留差异，说明它准确恢复到了 #316 合入前的仓库状态。我没有在相对 `origin/main` 的这次变更中发现新的阻断性问题。
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
 test_normalize_native_review_result_accepts_common_plain_text_approve_phrases() {
   setup_case_dir "normalize-native-text-approve-common-phrases"
 
@@ -3311,6 +3326,58 @@ EOF
   export MOCK_CODEX_REVIEW_RESULT_JSON
 
   assert_pass run_codex_review 4
+  assert_file_contains "${RESULT_FILE}" '"verdict":"APPROVE"'
+  assert_file_contains "${REVIEW_MD_FILE}" "**结论**: APPROVE"
+}
+
+test_run_codex_review_accepts_revert_summary_native_review_output() {
+  setup_case_dir "run-revert-summary-review"
+
+  BASE_REF="main"
+  HEAD_SHA="head-sha-654"
+  PR_TITLE="revert summary review"
+  PR_URL="https://example.test/pr/5"
+  PR_BODY=$'## 摘要\n\n- 变更目的：Revert PR\n'
+  PR_AUTHOR="author"
+  REVIEW_PROFILE="default_impl_profile"
+  export BASE_REF HEAD_SHA PR_TITLE PR_URL PR_BODY PR_AUTHOR REVIEW_PROFILE
+
+  WORKTREE_DIR="${TMP_DIR}/worktree"
+  mkdir -p "${WORKTREE_DIR}/docs/dev/review"
+  mkdir -p "${WORKTREE_DIR}/docs/dev/architecture"
+  mkdir -p "${WORKTREE_DIR}/docs/dev"
+  export WORKTREE_DIR
+
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
+  REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
+  RAW_RESULT_FILE="${TMP_DIR}/review.raw.txt"
+  RESULT_FILE="${TMP_DIR}/review.json"
+  REVIEW_MD_FILE="${TMP_DIR}/review.md"
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RAW_RESULT_FILE RESULT_FILE REVIEW_MD_FILE
+
+  printf '%s\n' 'dist/commands/runtime.js' > "${CHANGED_FILES_FILE}"
+  slim_pr_body > "${SLIM_PR_FILE}"
+  cp "${REPO_ROOT}/vision.md" "${WORKTREE_DIR}/vision.md"
+  cp "${REPO_ROOT}/AGENTS.md" "${WORKTREE_DIR}/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${WORKTREE_DIR}/docs/dev/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/roadmap.md" "${WORKTREE_DIR}/docs/dev/roadmap.md"
+  cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${WORKTREE_DIR}/docs/dev/architecture/system-design.md"
+  cp "${REPO_ROOT}/code_review.md" "${WORKTREE_DIR}/code_review.md"
+  cp "${REVIEW_ADDENDUM_FILE}" "${WORKTREE_DIR}/docs/dev/review/guardian-review-addendum.md"
+
+  collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
+
+  MOCK_CODEX_REVIEW_RESULT_JSON="${TMP_DIR}/native-review.txt"
+  cat > "${MOCK_CODEX_REVIEW_RESULT_JSON}" <<'EOF'
+该 PR 是对 `3119245` 的干净回滚；将 `HEAD` 与该提交的父提交比较后没有残留差异，说明它准确恢复到了 #316 合入前的仓库状态。我没有在相对 `origin/main` 的这次变更中发现新的阻断性问题。
+EOF
+  export MOCK_CODEX_REVIEW_RESULT_JSON
+
+  assert_pass run_codex_review 5
   assert_file_contains "${RESULT_FILE}" '"verdict":"APPROVE"'
   assert_file_contains "${REVIEW_MD_FILE}" "**结论**: APPROVE"
 }
