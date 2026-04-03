@@ -264,13 +264,21 @@ const isInspectableWrapperScriptPath = (filePath) => basename(filePath) === NATI
     INSPECTABLE_NODE_WRAPPER_SCRIPT_EXTENSIONS.has(extname(filePath).toLowerCase());
 const isJavascriptWrapperScriptPath = (filePath) => INSPECTABLE_NODE_WRAPPER_SCRIPT_EXTENSIONS.has(extname(filePath).toLowerCase());
 const parseLiteralShellAssignment = (line) => {
-    const match = line.trim().match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(['"])(.*)\2$/);
-    if (!match) {
+    const trimmed = line.trim();
+    const quotedMatch = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(['"])(.*)\2$/);
+    if (quotedMatch) {
+        return {
+            name: quotedMatch[1],
+            value: quotedMatch[3]
+        };
+    }
+    const unquotedMatch = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=([^\s"'`;|&<>()]+)$/);
+    if (!unquotedMatch) {
         return null;
     }
     return {
-        name: match[1],
-        value: match[3]
+        name: unquotedMatch[1],
+        value: unquotedMatch[2]
     };
 };
 const parseWrapperDirectoryAssignment = (line, wrapperScriptPath) => {
@@ -279,7 +287,13 @@ const parseWrapperDirectoryAssignment = (line, wrapperScriptPath) => {
         return null;
     }
     const valueExpression = match[2];
-    if (!/\bdirname\b/.test(valueExpression) ||
+    const dirnameSourcePattern = '(?:\\$0|\\$\\{0\\}|\\$\\{BASH_SOURCE\\[0\\]\\})';
+    const dirnamePath = dirname(wrapperScriptPath);
+    const normalizedExpression = valueExpression.replace(/^['"]|['"]$/g, "");
+    const replacedExpression = normalizedExpression
+        .replace(new RegExp(`\\$\\(\\s*cd\\s+["']?\\$\\(\\s*dirname\\s+["']?${dirnameSourcePattern}["']?\\s*\\)["']?\\s*&&\\s*pwd\\s*\\)`, "g"), dirnamePath)
+        .replace(new RegExp(`\\$\\(\\s*dirname\\s+["']?${dirnameSourcePattern}["']?\\s*\\)`, "g"), dirnamePath);
+    if (replacedExpression === normalizedExpression ||
         (!valueExpression.includes("$0") &&
             !valueExpression.includes("${0}") &&
             !valueExpression.includes("${BASH_SOURCE[0]}"))) {
@@ -287,7 +301,9 @@ const parseWrapperDirectoryAssignment = (line, wrapperScriptPath) => {
     }
     return {
         name: match[1],
-        value: dirname(wrapperScriptPath)
+        value: isAbsolute(replacedExpression)
+            ? resolve(replacedExpression)
+            : resolve(dirnamePath, replacedExpression)
     };
 };
 const substituteKnownShellVariables = (value, variables) => (variables.get("BASH_SOURCE[0]")
@@ -687,7 +703,7 @@ const extractJavascriptArrayItems = (expression) => {
     }
     return splitTopLevelJavascriptExpressions(trimmed.slice(1, -1)).filter((item) => !item.startsWith("..."));
 };
-const extractJavascriptExecutionCandidates = (line, variables, currentScriptDir) => {
+const extractJavascriptExecutionCandidates = (line, variables, arrayVariables, currentScriptDir) => {
     const candidates = new Set();
     const addExpression = (expression) => {
         if (!expression) {
@@ -715,7 +731,15 @@ const extractJavascriptExecutionCandidates = (line, variables, currentScriptDir)
     if (spawnArgs) {
         addExpression(spawnArgs[0]);
         if (spawnArgs.length > 1) {
-            for (const item of extractJavascriptArrayItems(spawnArgs[1])) {
+            const argvExpression = stripBalancedOuterParentheses(stripTrailingJavascriptPunctuation(spawnArgs[1]));
+            const argvItems = arrayVariables.get(argvExpression) ?? extractJavascriptArrayItems(argvExpression);
+            for (const item of argvItems) {
+                if (arrayVariables.has(item)) {
+                    for (const nestedItem of arrayVariables.get(item) ?? []) {
+                        addExpression(nestedItem);
+                    }
+                    continue;
+                }
                 addExpression(item);
             }
         }
@@ -724,6 +748,7 @@ const extractJavascriptExecutionCandidates = (line, variables, currentScriptDir)
 };
 const javascriptTextReferencesRepoOwnedNativeHost = async (input) => {
     const variables = new Map();
+    const arrayVariables = new Map();
     for (const rawLine of input.text.split(/\r?\n/)) {
         const line = rawLine.trim();
         if (isIgnorableScriptLine(line)) {
@@ -735,8 +760,12 @@ const javascriptTextReferencesRepoOwnedNativeHost = async (input) => {
             if (resolvedAssignment.length === 1) {
                 variables.set(assignment.name, resolvedAssignment[0]);
             }
+            const resolvedArrayItems = extractJavascriptArrayItems(assignment.expression);
+            if (resolvedArrayItems.length > 0) {
+                arrayVariables.set(assignment.name, resolvedArrayItems);
+            }
         }
-        for (const candidate of extractJavascriptExecutionCandidates(line, variables, input.baseDir)) {
+        for (const candidate of extractJavascriptExecutionCandidates(line, variables, arrayVariables, input.baseDir)) {
             if (await candidatePathReferencesRepoOwnedNativeHost({
                 command: input.command,
                 baseDir: input.baseDir,
