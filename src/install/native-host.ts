@@ -658,7 +658,7 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
       ? null
       : normalizePathForOutput(join(profileRoot, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)),
     profile_scoped_bridge_socket_path: usesExplicitProfileContract
-      ? null
+      ? normalizePathForOutput(profileDir ? resolveProfileScopedNativeBridgeSocketPath(profileDir) : null)
       : normalizePathForOutput(profileDir ? resolveProfileScopedNativeBridgeSocketPath(profileDir) : null),
     allowed_origins: [allowedOrigin],
     persistent_extension_identity: {

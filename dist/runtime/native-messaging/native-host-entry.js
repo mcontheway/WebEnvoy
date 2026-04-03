@@ -112,7 +112,6 @@ const buildSuccessEnvelope = (request, input) => ({
 // In that compatibility-only path we preserve the historic local fallback payload shape
 // for low-risk commands, but we must never synthesize execution-surface bootstrap success.
 const buildCompatibilityForwardPayload = (request) => {
-    const command = asString(request.params.command) ?? "runtime.ping";
     const runId = asString(request.params.run_id) ?? request.id;
     const cwd = asString(request.params.cwd) ?? "";
     return {
@@ -352,6 +351,23 @@ const handleExtensionRequest = async (request) => {
             writeNativeError(request, {
                 code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
                 message: "runtime bootstrap 尚未获得执行面确认",
+                summary: {
+                    session_id: asString(request.params.session_id) ?? sessionId,
+                    run_id: asString(request.params.run_id) ?? request.id,
+                    command,
+                    relay_path: RELAY_PATH
+                }
+            }, activeSocketPath
+                ? undefined
+                : () => {
+                    process.exit(0);
+                });
+            return;
+        }
+        if (command !== "runtime.ping") {
+            writeNativeError(request, {
+                code: "ERR_TRANSPORT_FORWARD_FAILED",
+                message: `legacy dual-env launcher requires reinstall before forwarding ${command}`,
                 summary: {
                     session_id: asString(request.params.session_id) ?? sessionId,
                     run_id: asString(request.params.run_id) ?? request.id,

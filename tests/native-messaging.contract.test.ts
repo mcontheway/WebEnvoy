@@ -515,6 +515,78 @@ describe("native messaging contract", () => {
     }
   });
 
+  it("fails actionable forward commands on legacy dual-env stdio compatibility fallback until launcher is reinstalled", async () => {
+    const profileRoot = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-forward-root-"));
+    const legacyProfileDir = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-forward-legacy-"));
+    tempDirs.push(profileRoot, legacyProfileDir);
+    const child = spawn(process.execPath, [repoOwnedNativeHostPath], {
+      cwd: repoRoot,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT: profileRoot,
+        WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR: legacyProfileDir
+      }
+    });
+
+    try {
+      const openResponsePromise = readSingleNativeEnvelope(child.stdout);
+      child.stdin.write(
+        encodeNativeEnvelope({
+          id: "open-dual-env-legacy-forward-guard-001",
+          method: "bridge.open",
+          profile: null,
+          params: {},
+          timeout_ms: 100
+        })
+      );
+      expect(await openResponsePromise).toMatchObject({
+        status: "success",
+        summary: {
+          protocol: "webenvoy.native-bridge.v1",
+          state: "ready"
+        }
+      });
+
+      const forwardResponsePromise = readSingleNativeEnvelope(child.stdout);
+      child.stdin.write(
+        encodeNativeEnvelope({
+          id: "forward-dual-env-legacy-forward-guard-001",
+          method: "bridge.forward",
+          profile: null,
+          params: {
+            session_id: "nm-session-001",
+            run_id: "run-dual-env-legacy-forward-guard-001",
+            command: "xhs.search",
+            command_params: {
+              keyword: "macbook"
+            },
+            cwd: repoRoot
+          },
+          timeout_ms: 100
+        })
+      );
+      expect(await forwardResponsePromise).toMatchObject({
+        status: "error",
+        summary: {
+          session_id: "nm-session-001",
+          run_id: "run-dual-env-legacy-forward-guard-001",
+          command: "xhs.search",
+          relay_path: "host>background>content-script>background>host"
+        },
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: "legacy dual-env launcher requires reinstall before forwarding xhs.search"
+        }
+      });
+    } finally {
+      child.kill("SIGTERM");
+      await new Promise<void>((resolve) => {
+        child.once("close", () => resolve());
+      });
+    }
+  });
+
   it("routes profiled requests through the canonical profile-root socket when dual-env launchers set profile mode", async () => {
     const profileRoot = await mkdtemp(path.join(tmpdir(), "wv-nmr-"));
     const legacyProfileDir = await mkdtemp(path.join(tmpdir(), "wv-nml-"));

@@ -3654,7 +3654,7 @@ process.stdin.on("data", (chunk) => {
         profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
         profile_dir: profileDir,
         profile_root_bridge_socket_path: null,
-        profile_scoped_bridge_socket_path: null
+        profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
       }
     });
     const launcherRaw = await expectDualEnvRootPreferredLauncherContract({
@@ -3758,7 +3758,7 @@ process.stdin.on("data", (chunk) => {
         profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
         profile_dir: profileDir,
         profile_root_bridge_socket_path: null,
-        profile_scoped_bridge_socket_path: null
+        profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
       }
     });
     await expectDualEnvRootPreferredLauncherContract({
@@ -3830,7 +3830,7 @@ process.stdin.on("data", (chunk) => {
         profile_root: expectedProfileRootSummary,
         profile_root_bridge_socket_path: null,
         profile_dir: profileDir,
-        profile_scoped_bridge_socket_path: null
+        profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
       }
     });
   });
@@ -3905,7 +3905,7 @@ process.stdin.on("data", (chunk) => {
         profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
         profile_root_bridge_socket_path: null,
         profile_dir: profileDir,
-        profile_scoped_bridge_socket_path: null
+        profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
       }
     });
     await expectDualEnvRootPreferredLauncherContract({
@@ -3998,7 +3998,7 @@ process.stdin.on("data", (chunk) => {
         profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
         profile_root_bridge_socket_path: null,
         profile_dir: profileDir,
-        profile_scoped_bridge_socket_path: null
+        profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
       }
     });
     await expectDualEnvRootPreferredLauncherContract({
