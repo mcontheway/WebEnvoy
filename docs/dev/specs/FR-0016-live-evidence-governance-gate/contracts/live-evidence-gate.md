@@ -30,6 +30,7 @@
 ```json
 {
   "gate_applicability": {
+    "review_lane": "general_pr",
     "in_scope": true,
     "trigger_reasons": [
       "merge_unblock_by_live_evidence",
@@ -45,6 +46,7 @@
 ```json
 {
   "gate_applicability": {
+    "review_lane": "formal_spec_review_pr",
     "in_scope": false,
     "trigger_reasons": [],
     "n_a_allowed": true
@@ -61,13 +63,20 @@
 - `completion_claim_by_live_evidence`
 - `merge_unblock_by_live_evidence`
 
+`review_lane` 枚举：
+
+- `general_pr`
+- `formal_spec_review_pr`
+- `governance_landing_pr`
+
 约束：
 
-1. `in_scope=true` 时，`trigger_reasons` 必须非空。
-2. `in_scope=true` 时，`n_a_allowed` 必须为 `false`。
-3. `in_scope=false` 时，`trigger_reasons` 必须为空数组。
-4. `in_scope=false` 时，`n_a_allowed` 必须为 `true`，以便 formal spec / 治理前置 / 纯文档 / 纯研究 PR 可以稳定填写 `N/A`，避免被默认值误挡。
-5. 只有在 PR 明确不以真实 live evidence 作为 issue 关闭、完成判定或 merge 放行依据时，才允许 `in_scope=false`；即使 PR 是纯文档、纯研究 / spike 或 formal spec / design input，只要命中任一触发原因，也必须设为 `in_scope=true`。
+1. `review_lane` 必须显式填写，不得依赖 PR 标题、路径或人工上下文推断。
+2. `in_scope=true` 时，`trigger_reasons` 必须非空。
+3. `in_scope=true` 时，`n_a_allowed` 必须为 `false`。
+4. `in_scope=false` 时，`trigger_reasons` 必须为空数组。
+5. `in_scope=false` 时，`n_a_allowed` 必须为 `true`，以便 formal spec / 治理前置 / 纯文档 / 纯研究 PR 可以稳定填写 `N/A`，避免被默认值误挡。
+6. 只有在 PR 明确不以真实 live evidence 作为 issue 关闭、完成判定或 merge 放行依据时，才允许 `in_scope=false`；即使 PR 是纯文档、纯研究 / spike 或 formal spec / design input，只要命中任一触发原因，也必须设为 `in_scope=true`。
 
 ## live_evidence_record
 
@@ -82,8 +91,9 @@
     "execution_surface": "real_browser",
     "page_url": "https://example.com/editor",
     "target_tab_id": 321,
-    "run_id": "run_20260401_001",
+    "run_id": "gha:23953203650:1",
     "evidence_collected_at": "2026-04-01T10:12:33Z",
+    "artifact_identity": "gha:23953203650:1:live-evidence.log",
     "relay_path": "cli->native-messaging->extension->content-script",
     "editor_locator": "[data-testid='editor']",
     "success_signals": [
@@ -117,12 +127,14 @@
 
 1. `latest_head_sha` 必须对应当前 PR latest head。
 2. `execution_surface=real_browser` 才可能成为有效 live evidence；其余枚举默认无效。
-3. `evidence_collected_at` 必须填写当前 latest head 这次 fresh rerun 的 RFC 3339 UTC 时间戳；不得复用同一 head 的历史 artifact 时间戳来冒充新鲜复验。
-4. `run_id`、`evidence_collected_at` 与 `artifact_log_ref` 必须能共同指向当前 latest head 的这次 fresh rerun；若同一 head 上存在多次历史 run，旧 run 的 artifact 仍视为 `stale_head_or_artifact`。
-5. 当 evidence 成功时，`failure_reason` 与 `blocker_level` 必须填写 `N/A`。
-6. 当 evidence 失败或阻断时，`failure_reason` 与 `blocker_level` 必须为非空，且不得用 `N/A` 规避。
-7. `success_signals` 必须描述真实页面交互或真实闭环结果，不能只写控制面存活信号。
-8. 仅当 `gate_applicability.in_scope=true` 或 `gate_applicability.n_a_allowed=false` 时，以上字段约束才对 `live_evidence_record` 生效；`in_scope=false && n_a_allowed=true` 的非适用 PR 可以不提供该对象。
+3. `run_id` 必须是 provider-scoped 的稳定执行标识，格式为 `<provider>:<run-or-session-id>[:<attempt>]`；不得填写临时文案或自由文本标签。
+4. `evidence_collected_at` 必须填写当前 latest head 这次 fresh rerun 的 RFC 3339 UTC 时间戳；不得复用同一 head 的历史 artifact 时间戳来冒充新鲜复验。
+5. `artifact_identity` 必须是 provider-scoped 的稳定 artifact 标识，格式为 `<provider>:<run-or-session-id>[:<attempt>]:<artifact-name-or-id>`；不得填写自由文本描述。
+6. `run_id`、`evidence_collected_at`、`artifact_identity` 与 `artifact_log_ref` 必须能共同指向当前 latest head 的这次 fresh rerun；若同一 head 上存在多次历史 run，旧 run 的 artifact 仍视为 `stale_head_or_artifact`。
+7. 当 evidence 成功时，`failure_reason` 与 `blocker_level` 必须填写 `N/A`。
+8. 当 evidence 失败或阻断时，`failure_reason` 与 `blocker_level` 必须为非空，且不得用 `N/A` 规避。
+9. `success_signals` 必须描述真实页面交互或真实闭环结果，不能只写控制面存活信号。
+10. 仅当 `gate_applicability.in_scope=true` 或 `gate_applicability.n_a_allowed=false` 时，以上字段约束才对 `live_evidence_record` 生效；`in_scope=false && n_a_allowed=true` 的非适用 PR 可以不提供该对象。
 
 ## gate_verdict
 
@@ -170,10 +182,10 @@
 3. `status=ready` 时，`merge_ready=true`，且 `closing_semantics` 可按普通 Issue 闭环语义选择 `refs_only` 或 `fixes_allowed`；live evidence 专项门禁只负责解除“因证据不足而不得使用 `Fixes`”这一层限制，不强制要求作者必须改成 `Fixes`。
 4. `status=not_applicable` 时，`blocking_reasons` 必须为空，`gate_applicability.in_scope=false`，且 `merge_ready=true`；此时 `closing_semantics` 允许为 `n_a`、`refs_only` 或 `fixes_allowed`，具体取值只由普通 Issue 闭环语义决定，不受 live evidence 专项门禁额外收窄。
 5. `merge_ready=true` 只表示 live evidence 专项门禁自身不阻断，不替代普通 review / GitHub checks / guardian 总体合并门禁。
-6. formal spec review 未通过时，治理落库 PR 即使 `gate_applicability.in_scope=false`，也必须在 `blocking_reasons` 中包含 `spec_review_not_completed`，并产出 `status=blocked`。
+6. 只有当 `gate_applicability.review_lane=governance_landing_pr` 且 formal spec review 未通过时，才必须在 `blocking_reasons` 中包含 `spec_review_not_completed`，并产出 `status=blocked`。
 
 ## 兼容性约束
 
 1. 新增触发原因或阻断原因只能追加，不能改变既有语义。
-2. `live_evidence_record` 的最低字段清单只允许追加；不得删除、重命名或降格为可选本契约已冻结的任一字段，包括 `latest_head_sha`、`profile`、`browser_channel`、`execution_surface`、`page_url`、`target_tab_id`、`run_id`、`evidence_collected_at`、`relay_path`、`editor_locator`、`success_signals`、`minimum_replay`、`artifact_log_ref`、`failure_reason`、`blocker_level`。
+2. `live_evidence_record` 的最低字段清单只允许追加；不得删除、重命名或降格为可选本契约已冻结的任一字段，包括 `latest_head_sha`、`profile`、`browser_channel`、`execution_surface`、`page_url`、`target_tab_id`、`run_id`、`evidence_collected_at`、`artifact_identity`、`relay_path`、`editor_locator`、`success_signals`、`minimum_replay`、`artifact_log_ref`、`failure_reason`、`blocker_level`。
 3. 若未来新增自动校验器，也必须消费同一套共享对象，而不是自创另一套触发集合。

@@ -52,6 +52,7 @@
   - 不以真实 live evidence 作为关闭、完成或 merge 放行依据的 formal spec / design input PR
   - 不以真实 live evidence 作为关闭、完成或 merge 放行依据的治理前置 PR
 - 同一套触发条件必须在根级规范、开发区规范、review 基线、guardian 常驻审查摘要与 PR 模板之间保持一致，不允许某一处缩窄或放宽。
+- shared contract 必须显式区分 `general_pr`、`formal_spec_review_pr` 与 `governance_landing_pr` 三类 review lane，避免 reviewer / guardian 依赖 PR 标题或改动路径临时猜测治理落库阻断前提。
 
 ### 2. 有效 / 无效 evidence 边界冻结
 
@@ -78,6 +79,7 @@
   - `target_tab_id`
   - `run_id`
   - `evidence_collected_at`
+  - `artifact_identity`
   - `relay_path`
   - `editor_locator` 或等价交互定位
   - `success_signals`
@@ -87,6 +89,7 @@
   - `blocker_level`
 - 字段命名必须与 `contracts/live-evidence-gate.md` 的 `live_evidence_record` 保持一致；PR 模板可在展示文案中补充中文说明，但不能改出另一套 schema。
 - `evidence_collected_at` 必须能标识当前 latest head 上这次 fresh rerun 的采集时间；不得继续复用同一 head 的历史 artifact 时间戳来冒充新鲜复验。
+- `run_id` 与 `artifact_identity` 必须使用 provider-scoped 的稳定标识，能够让 reviewer / guardian 机器化地区分“当前 latest head 的 fresh rerun”与“同一 head 的历史 artifact”。
 - 若 evidence 成功，`failure_reason` 与 `blocker_level` 必须填写 `N/A`。
 - 若 evidence 失败或阻断，`failure_reason` 与 `blocker_level` 必须填写非空原因和阻断层级，不得用 `N/A` 规避。
 - 只有在 PR 明确不落入专项门禁时，才允许将整块字段写为 `N/A`。
@@ -119,6 +122,7 @@
   - 更新 `docs/dev/review/guardian-review-addendum.md`
   - 更新 `.github/PULL_REQUEST_TEMPLATE.md`
 - 在 formal spec review 通过前，治理落库 PR 不得申报为可合并状态。
+- `spec_review_not_completed` 的阻断必须只对 `governance_landing_pr` 生效，并由 shared contract 内部的结构化 lane 字段判定，而不是依赖 PR 标题、改动路径或人工上下文。
 
 ## GWT 验收场景
 

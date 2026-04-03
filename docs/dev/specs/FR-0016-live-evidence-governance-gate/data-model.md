@@ -12,10 +12,12 @@
 
 - 职责：描述当前 PR 是否落入真实 live evidence 专项门禁，以及 `N/A` 是否允许出现。
 - 关键字段：
+  - `review_lane`
   - `in_scope`
   - `trigger_reasons`
   - `n_a_allowed`
 - 约束：
+  - `review_lane` 必须显式填写，枚举为 `general_pr`、`formal_spec_review_pr`、`governance_landing_pr`。
   - `in_scope=true` 时，`trigger_reasons` 必须非空，且 `n_a_allowed=false`。
   - `in_scope=false` 时，`trigger_reasons=[]`，且 `n_a_allowed=true`。
   - 只有在 PR 不以真实 live evidence 作为 issue 关闭、完成判定或 merge 放行依据时，才允许 `in_scope=false`；纯文档、纯研究 / spike、formal spec / design input 不是无条件豁免项。
@@ -35,6 +37,7 @@
   - `target_tab_id`
   - `run_id`
   - `evidence_collected_at`
+  - `artifact_identity`
   - `relay_path`
   - `editor_locator`
   - `success_signals`
@@ -46,7 +49,9 @@
   - 该对象是条件必选对象：`gate_applicability.in_scope=true` 或 `gate_applicability.n_a_allowed=false` 时必须提供；`in_scope=false && n_a_allowed=true` 时允许省略或置为 `null`。
   - 上述字段均属于已冻结最低字段集，只可追加新字段，不得删除、重命名或降格为可选。
   - `latest_head_sha` 必须对应当前 PR latest head。
+  - `run_id` 必须是 provider-scoped 的稳定执行标识，不得退化为自由文本标签。
   - `evidence_collected_at` 必须记录当前 latest head 这次 fresh rerun 的采集时间；若同一 head 下复用历史 artifact，该对象仍视为 stale。
+  - `artifact_identity` 必须是 provider-scoped 的稳定 artifact 标识，用来区分同一 head 下不同 rerun 的产物身份。
   - 只有 `execution_surface=real_browser` 才可能成为有效 evidence 来源。
   - 成功态下 `failure_reason` / `blocker_level` 必须为 `N/A`；失败或阻断态下二者必须填写非空内容。
 - 生命周期：
@@ -67,7 +72,7 @@
   - `status=ready` 时，`merge_ready=true`，且 `closing_semantics` 可按普通 Issue 闭环语义选择 `refs_only` 或 `fixes_allowed`；live evidence 专项门禁只解除“因证据不足而不得使用 `Fixes`”这一层限制，不强制要求作者必须改成 `Fixes`。
   - `status=not_applicable` 时，`blocking_reasons=[]` 且 `gate_applicability.in_scope=false`，`merge_ready=true`；此时 `closing_semantics` 可按普通 Issue 闭环语义选择 `n_a`、`refs_only` 或 `fixes_allowed`。
   - `merge_ready=true` 只表示 live evidence 专项门禁自身不阻断，不替代普通 review / GitHub checks / guardian 总体合并门禁。
-  - formal spec review 未通过时，治理落库 PR 必须包含 `spec_review_not_completed`，且 `status=blocked`。
+  - 只有 `review_lane=governance_landing_pr` 且 formal spec review 未通过时，才必须包含 `spec_review_not_completed`，且 `status=blocked`。
 - 生命周期：
   - reviewer / guardian 基于当前 PR 描述、latest head 和 formal spec review 状态即时产出。
   - 若 PR head 或 review 前置状态发生变化，旧 verdict 自动过期，必须重新计算。

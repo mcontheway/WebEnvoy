@@ -56,12 +56,13 @@
 3. 规约一致性检查：
   - `spec.md`、`contracts/` 与 `risks.md` 对专项门禁触发条件保持同一集合
   - `Fixes` / `Refs` 与 `merge-ready` 的 live evidence 条件保持一致
-  - `latest_head_sha`、`run_id`、`evidence_collected_at` 与 `artifact_log_ref` 能共同区分“当前 latest head fresh rerun”与“同一 head 的历史 artifact”
+  - `review_lane` 足以机器化地区分 `formal_spec_review_pr`、`governance_landing_pr` 与 `general_pr`
+  - `latest_head_sha`、`run_id`、`evidence_collected_at`、`artifact_identity` 与 `artifact_log_ref` 能共同区分“当前 latest head fresh rerun”与“同一 head 的历史 artifact”
 4. 后续治理落库 PR 的最小验证要求：
   - 根级规范、开发区规范、review 基线与 PR 模板使用同一触发集合
   - guardian 常驻审查摘要 `docs/dev/review/guardian-review-addendum.md` 与上述治理文案使用同一触发集合和阻断口径
   - 最低字段清单必须完整覆盖 `contracts/live-evidence-gate.md` 已冻结的全部 `live_evidence_record` 字段，且只可追加、不可删减或降格为可选
-  - reviewer / guardian 必须能用 `run_id`、`evidence_collected_at` 与 `artifact_log_ref` 排除“同一 latest head 下复用历史 artifact”的假新鲜复验
+  - reviewer / guardian 必须能用 `run_id`、`evidence_collected_at`、`artifact_identity` 与 `artifact_log_ref` 排除“同一 latest head 下复用历史 artifact”的假新鲜复验
   - `N/A` 仅在非适用 PR 中出现
   - review/guardian 文案能直接阻断 stub/fake host、旧 head、`runtime.ping`、`runtime.bootstrap`
 
