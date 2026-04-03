@@ -41,6 +41,7 @@
   - `failure_reason`
   - `blocker_level`
 - 约束：
+  - 该对象是条件必选对象：`gate_applicability.in_scope=true` 或 `gate_applicability.n_a_allowed=false` 时必须提供；`in_scope=false && n_a_allowed=true` 时允许省略或置为 `null`。
   - 上述字段均属于已冻结最低字段集，只可追加新字段，不得删除、重命名或降格为可选。
   - `latest_head_sha` 必须对应当前 PR latest head。
   - 只有 `execution_surface=real_browser` 才可能成为有效 evidence 来源。

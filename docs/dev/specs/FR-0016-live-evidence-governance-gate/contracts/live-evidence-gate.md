@@ -13,11 +13,15 @@
 
 ## 共享对象
 
-门禁共享输出至少包含以下三个对象：
+门禁共享输出至少包含以下对象：
 
 1. `gate_applicability`
-2. `live_evidence_record`
-3. `gate_verdict`
+2. `gate_verdict`
+
+`live_evidence_record` 是条件必选对象：
+
+- 当 `gate_applicability.in_scope=true` 或 `gate_applicability.n_a_allowed=false` 时，必须提供完整 `live_evidence_record`
+- 当 `gate_applicability.in_scope=false` 且 `gate_applicability.n_a_allowed=true` 时，允许省略 `live_evidence_record` 或将其置为 `null`，以对应 PR 模板整块填写 `N/A` 的路径
 
 ## gate_applicability
 
@@ -92,6 +96,14 @@
 }
 ```
 
+非适用 PR 且 `n_a_allowed=true` 时，允许省略该对象，或显式写为：
+
+```json
+{
+  "live_evidence_record": null
+}
+```
+
 `execution_surface` 枚举至少包含：
 
 - `real_browser`
@@ -106,6 +118,7 @@
 3. 当 evidence 成功时，`failure_reason` 与 `blocker_level` 必须填写 `N/A`。
 4. 当 evidence 失败或阻断时，`failure_reason` 与 `blocker_level` 必须为非空，且不得用 `N/A` 规避。
 5. `success_signals` 必须描述真实页面交互或真实闭环结果，不能只写控制面存活信号。
+6. 仅当 `gate_applicability.in_scope=true` 或 `gate_applicability.n_a_allowed=false` 时，以上字段约束才对 `live_evidence_record` 生效；`in_scope=false && n_a_allowed=true` 的非适用 PR 可以不提供该对象。
 
 ## gate_verdict
 

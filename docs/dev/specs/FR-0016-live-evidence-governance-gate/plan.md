@@ -2,7 +2,7 @@
 
 ## 实施目标
 
-本 FR 的实施目标不是继续补写 `#311` 的治理文案，而是先为 `#310` 输出 formal spec review 输入。该输入必须让后续治理落库 PR 可以直接按统一结论更新根级规范、开发区规范、review 基线与 PR 模板，而不再在实现 PR 中临时讨论触发条件、字段清单、阻断规则或关闭语义。
+本 FR 的实施目标不是继续补写 `#311` 的治理文案，而是先为 `#310` 输出 formal spec review 输入。该输入必须让后续治理落库 PR 可以直接按统一结论更新根级规范、开发区规范、review 基线、guardian 常驻审查摘要与 PR 模板，而不再在实现 PR 中临时讨论触发条件、字段清单、阻断规则或关闭语义。
 
 ## 分阶段拆分
 
@@ -52,7 +52,7 @@
   - `bash scripts/spec-guard.sh`
 2. 套件完整性检查：
   - `spec.md`、`plan.md`、`TODO.md` 已补齐
-  - 高风险治理套件已补齐 `contracts/`、`research.md`、`risks.md`
+  - 高风险治理套件已补齐 `contracts/`、`data-model.md`、`research.md`、`risks.md`
 3. 规约一致性检查：
   - `spec.md`、`contracts/` 与 `risks.md` 对专项门禁触发条件保持同一集合
   - `Fixes` / `Refs` 与 `merge-ready` 的 live evidence 条件保持一致
