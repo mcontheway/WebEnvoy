@@ -364,7 +364,7 @@ describe("native messaging contract", () => {
     }
   });
 
-  it("keeps compatibility-only stdio forward fallback after legacy profile-dir bootstrap when both launcher envs are present without profile mode", async () => {
+  it("fails runtime.ping on legacy dual-env stdio compatibility fallback until launcher is reinstalled", async () => {
     const profileRoot = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-boot-root-"));
     const legacyProfileDir = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-boot-legacy-"));
     const rootSocketPath = path.join(profileRoot, "nm.sock");
@@ -420,18 +420,16 @@ describe("native messaging contract", () => {
         })
       );
       expect(await forwardResponsePromise).toMatchObject({
-        status: "success",
+        status: "error",
         summary: {
           session_id: "nm-session-001",
           command: "runtime.ping",
           run_id: "run-dual-env-legacy-bootstrap-001",
           relay_path: "host>background>content-script>background>host"
         },
-        payload: {
-          message: "pong",
-          run_id: "run-dual-env-legacy-bootstrap-001",
-          profile: null,
-          cwd: repoRoot
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: "legacy dual-env launcher requires reinstall before forwarding runtime.ping"
         }
       });
     } finally {

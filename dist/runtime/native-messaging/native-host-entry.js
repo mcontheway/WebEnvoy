@@ -130,19 +130,12 @@ const buildSuccessEnvelope = (request, input) => ({
     ...(input.payload ? { payload: input.payload } : {}),
     error: null
 });
-// Legacy dual-env launchers can still hit direct stdio before socket mode is confirmed.
-// In that compatibility-only path we preserve the historic local fallback payload shape
-// for low-risk commands, but we must never synthesize execution-surface bootstrap success.
-const buildCompatibilityForwardPayload = (request) => {
-    const runId = asString(request.params.run_id) ?? request.id;
-    const cwd = asString(request.params.cwd) ?? "";
-    return {
-        message: "pong",
-        run_id: runId,
-        profile: request.profile ?? null,
-        cwd
-    };
-};
+const buildPingPayload = (request) => ({
+    message: "pong",
+    run_id: asString(request.params.run_id) ?? request.id,
+    profile: request.profile ?? null,
+    cwd: asString(request.params.cwd) ?? ""
+});
 const writeNativeSuccess = (request, input, onFlushed) => {
     writeNativeEnvelope(buildSuccessEnvelope(request, input), onFlushed);
 };
@@ -369,24 +362,24 @@ const handleExtensionRequest = async (request) => {
     }
     if (request.method === "bridge.forward" && (!activeSocketPath || usesLegacyProfileDirRouting())) {
         const command = asString(request.params.command) ?? "runtime.ping";
-        if (command === "runtime.bootstrap") {
-            writeNativeError(request, {
-                code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
-                message: "runtime bootstrap 尚未获得执行面确认",
-                summary: {
-                    session_id: asString(request.params.session_id) ?? sessionId,
-                    run_id: asString(request.params.run_id) ?? request.id,
-                    command,
-                    relay_path: RELAY_PATH
-                }
-            }, activeSocketPath
-                ? undefined
-                : () => {
-                    process.exit(0);
-                });
-            return;
-        }
-        if (command !== "runtime.ping") {
+        if (usesLegacyProfileDirRouting()) {
+            if (command === "runtime.bootstrap") {
+                writeNativeError(request, {
+                    code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+                    message: "runtime bootstrap 尚未获得执行面确认",
+                    summary: {
+                        session_id: asString(request.params.session_id) ?? sessionId,
+                        run_id: asString(request.params.run_id) ?? request.id,
+                        command,
+                        relay_path: RELAY_PATH
+                    }
+                }, activeSocketPath
+                    ? undefined
+                    : () => {
+                        process.exit(0);
+                    });
+                return;
+            }
             writeNativeError(request, {
                 code: "ERR_TRANSPORT_FORWARD_FAILED",
                 message: `legacy dual-env launcher requires reinstall before forwarding ${command}`,
@@ -403,20 +396,20 @@ const handleExtensionRequest = async (request) => {
                 });
             return;
         }
-        writeNativeSuccess(request, {
-            summary: {
-                session_id: asString(request.params.session_id) ?? sessionId,
-                run_id: asString(request.params.run_id) ?? request.id,
-                command,
-                relay_path: RELAY_PATH
-            },
-            payload: buildCompatibilityForwardPayload(request)
-        }, activeSocketPath
-            ? undefined
-            : () => {
+        if (!activeSocketPath && command === "runtime.ping") {
+            writeNativeSuccess(request, {
+                summary: {
+                    session_id: asString(request.params.session_id) ?? sessionId,
+                    run_id: asString(request.params.run_id) ?? request.id,
+                    command,
+                    relay_path: RELAY_PATH
+                },
+                payload: buildPingPayload(request)
+            }, () => {
                 process.exit(0);
             });
-        return;
+            return;
+        }
     }
     writeNativeError(request, {
         code: "ERR_TRANSPORT_FORWARD_FAILED",
