@@ -36,6 +36,18 @@
 }
 ```
 
+非适用 PR 的最小示例：
+
+```json
+{
+  "gate_applicability": {
+    "in_scope": false,
+    "trigger_reasons": [],
+    "n_a_allowed": true
+  }
+}
+```
+
 触发枚举至少包含：
 
 - `real_runtime_claim`
@@ -50,6 +62,7 @@
 1. `in_scope=true` 时，`trigger_reasons` 必须非空。
 2. `in_scope=true` 时，`n_a_allowed` 必须为 `false`。
 3. `in_scope=false` 时，`trigger_reasons` 必须为空数组。
+4. `in_scope=false` 时，`n_a_allowed` 必须为 `true`，以便 formal spec / 治理前置 / 纯文档 / 纯研究 PR 可以稳定填写 `N/A`，避免被默认值误挡。
 
 ## live_evidence_record
 

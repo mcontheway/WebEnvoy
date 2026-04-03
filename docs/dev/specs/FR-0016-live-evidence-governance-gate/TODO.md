@@ -14,7 +14,7 @@
 - [ ] FR-0016 的 spec review 已通过，且 reviewer 明确认可“formal spec PR 与治理落库 PR 分离”。
 - [ ] `contracts/live-evidence-gate.md` 已冻结最低字段、适用范围与无效 evidence 集合，不再依赖口头补充。
 - [ ] 当前 `#311` 已根据 formal 结论做出后续动作：关闭、转 Draft，或拆成新的治理落库 PR；不得继续以“缺 formal 输入”的状态申报可合并。
-- [ ] 后续治理落库 PR 已明确只承接 `.github/PULL_REQUEST_TEMPLATE.md`、`AGENTS.md`、`code_review.md`、`docs/dev/AGENTS.md` 四处同类回写，不混入其他治理事项。
+- [ ] 后续治理落库 PR 已明确只承接 `.github/PULL_REQUEST_TEMPLATE.md`、`AGENTS.md`、`code_review.md`、`docs/dev/AGENTS.md`、`docs/dev/review/guardian-review-addendum.md` 五处同类回写，不混入其他治理事项。
 - [ ] 后续治理落库 PR 的 closing semantics 继续使用 `Refs #310`，直到治理文案实际落库完成。
 
 ## 实现停点

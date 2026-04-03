@@ -19,7 +19,7 @@
 - Issue `#310`
   - 目标是冻结 live evidence 专项门禁，不承接 runtime 实现。
 - PR `#311`
-  - 已回写四处治理文档，但最新 review 仍阻断。
+  - 已回写四处治理文档，但尚未同步 `docs/dev/review/guardian-review-addendum.md`，且最新 review 仍阻断。
 - review 轨迹
   - 第一轮指出触发条件不一致
   - 第二轮指出最低字段缺少 `latest_head_sha` 与 `execution_surface`
@@ -55,13 +55,15 @@
   - `AGENTS.md`
   - `docs/dev/AGENTS.md`
   - `code_review.md`
+  - `docs/dev/review/guardian-review-addendum.md`
   - `.github/PULL_REQUEST_TEMPLATE.md`
 - 观察：
-  - 这四处文档共同定义了同一组输入与判定对象：
+  - 这五处文档/提示共同定义了同一组输入与判定对象：
     - 适用范围
     - 最低 live evidence 字段
     - reviewer / guardian 阻断规则
     - `Fixes` / `Refs` / `merge-ready`
+  - `scripts/pr-guardian.sh` 会把 `docs/dev/review/guardian-review-addendum.md` 注入 review prompt，因此后续治理落库 PR 若漏改该文件，guardian 会继续使用旧摘要口径。
 - 结论：
   - `#310` 不只是文案说明，而是跨载体共享契约，FR 套件中应补 `contracts/`。
 

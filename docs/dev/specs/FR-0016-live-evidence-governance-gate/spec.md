@@ -8,7 +8,7 @@
 - repo-owned native host stub、本地 fake host 或其他替身路径
 - 只证明控制面存活的 `runtime.ping` / `runtime.bootstrap`
 
-当前 `#311` 已把相关条款写入 `AGENTS.md`、`docs/dev/AGENTS.md`、`code_review.md` 与 `.github/PULL_REQUEST_TEMPLATE.md`，并已修正前两轮 review 提出的触发条件不一致和最低字段缺失问题。但最新 guardian/review 结论仍明确阻断：这次改动实质上新增了 review/merge 硬门禁，属于高风险治理基线变更，不能绕过正式 FR/spec review 直接合入。
+当前 `#311` 已把相关条款写入 `AGENTS.md`、`docs/dev/AGENTS.md`、`code_review.md` 与 `.github/PULL_REQUEST_TEMPLATE.md`，并已修正前两轮 review 提出的触发条件不一致和最低字段缺失问题。但最新 guardian/review 结论仍明确阻断：这次改动实质上新增了 review/merge 硬门禁，属于高风险治理基线变更，不能绕过正式 FR/spec review 直接合入；并且 `scripts/pr-guardian.sh` 的常驻提示还会注入 `docs/dev/review/guardian-review-addendum.md`，后续治理落库 PR 不能漏掉这一处同步对象。
 
 因此，本 FR 的职责不是继续润色现有文案，而是为 `#310` 补齐正式治理输入，冻结：
 
@@ -110,6 +110,7 @@
   - 按已通过的 FR 结论更新 `AGENTS.md`
   - 更新 `docs/dev/AGENTS.md`
   - 更新 `code_review.md`
+  - 更新 `docs/dev/review/guardian-review-addendum.md`
   - 更新 `.github/PULL_REQUEST_TEMPLATE.md`
 - 在 formal spec review 通过前，治理落库 PR 不得申报为可合并状态。
 
@@ -193,6 +194,7 @@ And 阻断理由应明确指向“先完成 formal spec review”
   - `AGENTS.md`
   - `docs/dev/AGENTS.md`
   - `code_review.md`
+  - `docs/dev/review/guardian-review-addendum.md`
   - `spec_review.md`
 - 明确不在本 FR 内承接：
   - `#308`

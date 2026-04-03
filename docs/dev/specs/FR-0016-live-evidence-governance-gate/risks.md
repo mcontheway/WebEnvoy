@@ -3,14 +3,14 @@
 ## 风险 1：专项门禁触发集合再次漂移
 
 - 触发条件：
-  - 根级规范、开发区规范、review 基线与 PR 模板对适用范围写出不同集合
+  - 根级规范、开发区规范、review 基线、guardian 常驻审查摘要与 PR 模板对适用范围写出不同集合
   - “以 live evidence 请求 merge 放行”再次被遗漏
 - 影响：
   - 作者、reviewer 与 guardian 会基于不同前提做判断
   - live evidence 门禁再次出现可绕过空间
 - 缓解：
   - formal contract 中显式冻结触发原因枚举
-  - 后续治理落库 PR 必须逐项对照同一集合
+  - 后续治理落库 PR 必须逐项对照同一集合，并同步更新 `docs/dev/review/guardian-review-addendum.md`
 - 回滚：
   - 阻断治理落库 PR，回到 formal spec 层修正 shared contract
 

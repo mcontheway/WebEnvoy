@@ -36,7 +36,7 @@
 
 1. 不得在本 FR 中直接修改 runtime、extension、CLI、tests 或任何 live 验证脚本。
 2. 不得把 live evidence 门禁扩展成适用于所有 PR 的统一门禁。
-3. 不得在 formal spec review PR 中混入 `AGENTS.md`、`docs/dev/AGENTS.md`、`code_review.md` 或 `.github/PULL_REQUEST_TEMPLATE.md` 的治理落库改动。
+3. 不得在 formal spec review PR 中混入 `AGENTS.md`、`docs/dev/AGENTS.md`、`code_review.md`、`docs/dev/review/guardian-review-addendum.md` 或 `.github/PULL_REQUEST_TEMPLATE.md` 的治理落库改动。
 4. 不得允许不同文档对专项门禁适用范围采用不同触发集合。
 5. 不得允许 `N/A` 在落入专项门禁的 PR 中被用作规避披露手段。
 6. 不得把 `#308`、`#309` 的 runtime 或 evidence 产物要求误写成 `#310` 的实现前置。
@@ -57,6 +57,7 @@
   - `Fixes` / `Refs` 与 `merge-ready` 的 live evidence 条件保持一致
 4. 后续治理落库 PR 的最小验证要求：
   - 根级规范、开发区规范、review 基线与 PR 模板使用同一触发集合
+  - guardian 常驻审查摘要 `docs/dev/review/guardian-review-addendum.md` 与上述治理文案使用同一触发集合和阻断口径
   - 最低字段清单至少覆盖 `latest_head_sha` 与 `execution_surface`
   - `N/A` 仅在非适用 PR 中出现
   - review/guardian 文案能直接阻断 stub/fake host、旧 head、`runtime.ping`、`runtime.bootstrap`
@@ -74,7 +75,7 @@
   - 现有 PR / review blocker 对照梳理
 - 串行：
   - 必须先完成 FR-0016 的 spec review，才能继续推进 live evidence 门禁落库 PR。
-  - 必须先冻结 shared contract，才能回写 `AGENTS.md`、`docs/dev/AGENTS.md`、`code_review.md` 与 PR 模板。
+  - 必须先冻结 shared contract，才能回写 `AGENTS.md`、`docs/dev/AGENTS.md`、`code_review.md`、`docs/dev/review/guardian-review-addendum.md` 与 PR 模板。
   - 若当前 `#311` 继续存在，必须先明确其不具备 merge-ready 资格，再决定是关闭、重开为 Draft，还是拆出新的落库 PR。
 - 明确拆开：
   - formal spec review PR 与治理落库 PR 必须拆开。
@@ -84,6 +85,6 @@
 
 1. FR-0016 的 formal spec review 已通过，reviewer 明确认可其足以支撑 `#310` 治理落库。
 2. `contracts/live-evidence-gate.md` 与 `risks.md` 已被 reviewer 认可，能够解释适用范围、最低字段、无效 evidence 与阻断条件。
-3. 后续治理落库 PR 明确只更新 `AGENTS.md`、`docs/dev/AGENTS.md`、`code_review.md` 与 `.github/PULL_REQUEST_TEMPLATE.md`，不混入其他治理或 runtime 改动。
+3. 后续治理落库 PR 明确只更新 `AGENTS.md`、`docs/dev/AGENTS.md`、`code_review.md`、`docs/dev/review/guardian-review-addendum.md` 与 `.github/PULL_REQUEST_TEMPLATE.md`，不混入其他治理或 runtime 改动。
 4. 后续治理落库 PR 使用 `Refs #310`，直到实际治理文案落库完成前不使用 `Fixes #310`。
 5. 在这些条件满足前，当前 `#311` 或其替代 PR 不得申报 `merge-ready`。
