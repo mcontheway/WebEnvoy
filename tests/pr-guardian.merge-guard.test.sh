@@ -2926,6 +2926,21 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":true'
 }
 
+test_normalize_native_review_result_fails_closed_for_bare_clean_revert_sentence() {
+  setup_case_dir "normalize-native-text-bare-clean-revert"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+This PR cleanly reverts #316.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
 test_normalize_native_review_result_fails_closed_for_negated_revert_summary() {
   setup_case_dir "normalize-native-text-revert-negation"
 
@@ -4164,6 +4179,7 @@ main() {
   test_normalize_native_review_result_accepts_chinese_plain_text_approve
   test_normalize_native_review_result_accepts_revert_summary_without_blockers
   test_normalize_native_review_result_accepts_english_revert_summary_without_blockers
+  test_normalize_native_review_result_fails_closed_for_bare_clean_revert_sentence
   test_normalize_native_review_result_fails_closed_for_negated_revert_summary
   test_normalize_native_review_result_accepts_common_plain_text_approve_phrases
   test_normalize_native_review_result_accepts_live_plain_text_approve_summary
