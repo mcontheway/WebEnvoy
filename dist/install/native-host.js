@@ -224,6 +224,7 @@ const INSPECTABLE_WRAPPER_SCRIPT_EXTENSIONS = new Set([
     ".command"
 ]);
 const KNOWN_WRAPPER_INTERPRETER_BASENAMES = new Set(["bash", "sh", "zsh", "env", "node"]);
+const INLINE_SHELL_COMMAND_TOKENS = new Set(["-c", "-lc"]);
 const MAX_HOST_COMMAND_REFERENCE_DEPTH = 4;
 const MAX_INSPECTABLE_SCRIPT_BYTES = 128 * 1024;
 const isEnvironmentAssignmentToken = (token) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
@@ -245,7 +246,10 @@ const parseWrapperDirectoryAssignment = (line, wrapperScriptPath) => {
         return null;
     }
     const valueExpression = match[2];
-    if (!/\bdirname\b/.test(valueExpression) || (!valueExpression.includes("$0") && !valueExpression.includes("${0}"))) {
+    if (!/\bdirname\b/.test(valueExpression) ||
+        (!valueExpression.includes("$0") &&
+            !valueExpression.includes("${0}") &&
+            !valueExpression.includes("${BASH_SOURCE[0]}"))) {
         return null;
     }
     return {
@@ -253,40 +257,52 @@ const parseWrapperDirectoryAssignment = (line, wrapperScriptPath) => {
         value: dirname(wrapperScriptPath)
     };
 };
-const substituteKnownShellVariables = (value, variables) => value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*|0)\}|\$([A-Za-z_][A-Za-z0-9_]*)|\$0/g, (match, braced, bare) => {
+const substituteKnownShellVariables = (value, variables) => (variables.get("BASH_SOURCE[0]")
+    ? value.replace(/\$\{BASH_SOURCE\[0\]\}/g, variables.get("BASH_SOURCE[0]"))
+    : value).replace(/\$\{([A-Za-z_][A-Za-z0-9_]*|0)\}|\$([A-Za-z_][A-Za-z0-9_]*)|\$0/g, (match, braced, bare) => {
     const variableName = typeof braced === "string" && braced.length > 0 ? braced : typeof bare === "string" ? bare : "0";
     return variableName ? (variables.get(variableName) ?? match) : match;
 });
-const looksLikeCommandReference = (value) => {
-    const trimmed = value.trim();
-    if (trimmed.length === 0 || trimmed.startsWith("-") || isEnvironmentAssignmentToken(trimmed)) {
-        return false;
+const splitShellStatements = (line) => {
+    const statements = [];
+    let current = "";
+    let quote = null;
+    for (let index = 0; index < line.length; index += 1) {
+        const char = line[index];
+        if (quote === null && char === ";") {
+            if (current.trim().length > 0) {
+                statements.push(current.trim());
+            }
+            current = "";
+            continue;
+        }
+        if (char === "'" || char === '"') {
+            if (quote === char) {
+                quote = null;
+            }
+            else if (quote === null) {
+                quote = char;
+            }
+        }
+        current += char;
     }
-    return (trimmed.includes("/") ||
-        basename(trimmed) === NATIVE_HOST_ENTRY_BASENAME ||
-        /\.(?:sh|bash|zsh|command|js|mjs|cjs)$/i.test(trimmed));
+    if (current.trim().length > 0) {
+        statements.push(current.trim());
+    }
+    return statements;
 };
-const extractPotentialCommandReferences = (text) => {
-    const references = new Set();
-    const add = (candidate) => {
-        const trimmed = candidate.trim();
-        if (looksLikeCommandReference(trimmed)) {
-            references.add(trimmed);
-        }
-    };
-    for (const match of text.matchAll(/"([^"\r\n]+)"|'([^'\r\n]+)'/g)) {
-        const candidate = typeof match[1] === "string" && match[1].length > 0 ? match[1] : match[2];
-        if (candidate) {
-            add(candidate);
-        }
-    }
-    for (const match of text.matchAll(/(?:^|[\s=])((?:\.{1,2}\/|\/)[^\s"'`;|&<>]+)/g)) {
-        add(match[1]);
-    }
-    for (const match of text.matchAll(/(?:^|[\s=])([A-Za-z0-9._-]+\.(?:sh|bash|zsh|command|js|mjs|cjs)|native-host-entry\.js)(?=$|[\s"'`;|&<>])/g)) {
-        add(match[1]);
-    }
-    return [...references];
+const isIgnorableScriptLine = (line) => {
+    const trimmedLine = line.trim();
+    return (trimmedLine.length === 0 ||
+        trimmedLine.startsWith("#") ||
+        trimmedLine.startsWith("//") ||
+        trimmedLine.startsWith("/*") ||
+        trimmedLine === "*/" ||
+        trimmedLine.startsWith("*"));
+};
+const extractExecCommandText = (line) => {
+    const match = line.match(/^\s*exec\s+(.+)$/);
+    return match ? match[1].trim() : null;
 };
 const readInspectableWrapperScript = async (filePath) => {
     let raw;
@@ -327,6 +343,46 @@ const isRepoOwnedNativeHostEntryPath = async (cwd, filePath) => {
     ]);
     return candidatePath === repoOwnedEntryPath || isManagedNativeHostEntryPath(candidatePath);
 };
+const execCommandReferencesRepoOwnedNativeHost = async (input) => {
+    const tokens = tokenizeHostCommand(input.command, input.commandText);
+    for (const token of tokens) {
+        if (token.length === 0 ||
+            token === "$@" ||
+            token === "${@}" ||
+            token.startsWith("-") ||
+            isEnvironmentAssignmentToken(token) ||
+            token.includes("$")) {
+            continue;
+        }
+        if (await isRepoOwnedNativeHostEntryPath(input.baseDir, token)) {
+            return true;
+        }
+        const comparableCandidatePath = await resolveComparablePath(input.baseDir, token);
+        if (KNOWN_WRAPPER_INTERPRETER_BASENAMES.has(basename(comparableCandidatePath)) &&
+            !isInspectableWrapperScriptPath(comparableCandidatePath)) {
+            continue;
+        }
+        if (input.visitedFiles.has(comparableCandidatePath)) {
+            continue;
+        }
+        const wrapperScript = await readInspectableWrapperScript(comparableCandidatePath);
+        if (!wrapperScript) {
+            continue;
+        }
+        input.visitedFiles.add(comparableCandidatePath);
+        if (await tokenReferencesRepoOwnedNativeHost({
+            command: input.command,
+            baseDir: dirname(comparableCandidatePath),
+            text: wrapperScript,
+            depth: input.depth + 1,
+            visitedFiles: input.visitedFiles,
+            currentScriptPath: comparableCandidatePath
+        })) {
+            return true;
+        }
+    }
+    return false;
+};
 const tokenReferencesRepoOwnedNativeHost = async (input) => {
     if (input.depth > MAX_HOST_COMMAND_REFERENCE_DEPTH) {
         return false;
@@ -334,54 +390,36 @@ const tokenReferencesRepoOwnedNativeHost = async (input) => {
     const variables = new Map();
     if (input.currentScriptPath) {
         variables.set("0", input.currentScriptPath);
+        variables.set("BASH_SOURCE[0]", input.currentScriptPath);
     }
     for (const rawLine of input.text.split(/\r?\n/)) {
-        if (input.currentScriptPath) {
-            const directoryAssignment = parseWrapperDirectoryAssignment(rawLine, input.currentScriptPath);
-            if (directoryAssignment) {
-                variables.set(directoryAssignment.name, directoryAssignment.value);
+        for (const statement of splitShellStatements(rawLine)) {
+            let hasDirectoryAssignment = false;
+            if (input.currentScriptPath) {
+                const directoryAssignment = parseWrapperDirectoryAssignment(statement, input.currentScriptPath);
+                if (directoryAssignment) {
+                    variables.set(directoryAssignment.name, directoryAssignment.value);
+                    hasDirectoryAssignment = true;
+                }
             }
-        }
-        const line = substituteKnownShellVariables(rawLine, variables);
-        const trimmedLine = line.trim();
-        if (trimmedLine.length === 0 ||
-            trimmedLine.startsWith("#") ||
-            trimmedLine.startsWith("//") ||
-            trimmedLine.startsWith("/*") ||
-            trimmedLine === "*/" ||
-            trimmedLine.startsWith("*")) {
-            continue;
-        }
-        const assignment = parseLiteralShellAssignment(line);
-        if (assignment) {
-            variables.set(assignment.name, substituteKnownShellVariables(assignment.value, variables));
-        }
-        for (const candidate of extractPotentialCommandReferences(line)) {
-            if (await isRepoOwnedNativeHostEntryPath(input.baseDir, candidate)) {
-                return true;
-            }
-            if (candidate.includes("$")) {
+            const line = substituteKnownShellVariables(statement, variables);
+            if (isIgnorableScriptLine(line)) {
                 continue;
             }
-            const comparableCandidatePath = await resolveComparablePath(input.baseDir, candidate);
-            if (KNOWN_WRAPPER_INTERPRETER_BASENAMES.has(basename(comparableCandidatePath)) &&
-                !isInspectableWrapperScriptPath(comparableCandidatePath)) {
+            const assignment = hasDirectoryAssignment ? null : parseLiteralShellAssignment(line);
+            if (assignment) {
+                variables.set(assignment.name, substituteKnownShellVariables(assignment.value, variables));
+            }
+            const execCommandText = extractExecCommandText(line);
+            if (!execCommandText) {
                 continue;
             }
-            if (input.visitedFiles.has(comparableCandidatePath)) {
-                continue;
-            }
-            const wrapperScript = await readInspectableWrapperScript(comparableCandidatePath);
-            if (!wrapperScript) {
-                continue;
-            }
-            input.visitedFiles.add(comparableCandidatePath);
-            if (await tokenReferencesRepoOwnedNativeHost({
-                baseDir: dirname(comparableCandidatePath),
-                text: wrapperScript,
-                depth: input.depth + 1,
-                visitedFiles: input.visitedFiles,
-                currentScriptPath: comparableCandidatePath
+            if (await execCommandReferencesRepoOwnedNativeHost({
+                command: input.command,
+                baseDir: input.baseDir,
+                commandText: execCommandText,
+                depth: input.depth,
+                visitedFiles: input.visitedFiles
             })) {
                 return true;
             }
@@ -395,18 +433,49 @@ const shouldExportLegacyProfileDirForExplicitHost = async (input) => {
     }
     const tokens = tokenizeHostCommand(input.command, input.hostCommand);
     const visitedFiles = new Set();
-    for (const token of tokens) {
+    for (const [index, token] of tokens.entries()) {
         if (token.startsWith("-") || isEnvironmentAssignmentToken(token)) {
             continue;
         }
         if (await isRepoOwnedNativeHostEntryPath(input.cwd, token)) {
             return false;
         }
+        const previousToken = index > 0 ? tokens[index - 1] : null;
+        if (previousToken && INLINE_SHELL_COMMAND_TOKENS.has(previousToken)) {
+            if (await tokenReferencesRepoOwnedNativeHost({
+                command: input.command,
+                baseDir: input.cwd,
+                text: token,
+                depth: 0,
+                visitedFiles
+            })) {
+                return false;
+            }
+            continue;
+        }
+        if (token.includes("$")) {
+            continue;
+        }
+        const comparableCandidatePath = await resolveComparablePath(input.cwd, token);
+        if (KNOWN_WRAPPER_INTERPRETER_BASENAMES.has(basename(comparableCandidatePath)) &&
+            !isInspectableWrapperScriptPath(comparableCandidatePath)) {
+            continue;
+        }
+        if (visitedFiles.has(comparableCandidatePath)) {
+            continue;
+        }
+        const wrapperScript = await readInspectableWrapperScript(comparableCandidatePath);
+        if (!wrapperScript) {
+            continue;
+        }
+        visitedFiles.add(comparableCandidatePath);
         if (await tokenReferencesRepoOwnedNativeHost({
-            baseDir: input.cwd,
-            text: token,
-            depth: 0,
-            visitedFiles
+            command: input.command,
+            baseDir: dirname(comparableCandidatePath),
+            text: wrapperScript,
+            depth: 1,
+            visitedFiles,
+            currentScriptPath: comparableCandidatePath
         })) {
             return false;
         }
