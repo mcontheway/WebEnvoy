@@ -54,6 +54,17 @@ const asString = (value: unknown): string | null =>
 const asStringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 
+const cloneFingerprintRuntimeContextWithInjection = (
+  runtime: FingerprintRuntimeContext,
+  injection: Record<string, unknown> | null
+): FingerprintRuntimeContext =>
+  injection
+    ? ({
+        ...runtime,
+        injection: JSON.parse(JSON.stringify(injection))
+      } as FingerprintRuntimeContext)
+    : { ...runtime };
+
 const resolveRequestedExecutionMode = (message: BackgroundToContentMessage): string | null => {
   const topLevelMode = asString(asRecord(message.commandParams)?.requested_execution_mode);
   if (topLevelMode) {
@@ -72,26 +83,21 @@ const resolveAttestedFingerprintRuntimeContext = (
   }
 
   const injection = asRecord(record.injection);
-  const cloneWithInjection = (
-    runtime: FingerprintRuntimeContext
-  ): FingerprintRuntimeContext =>
-    injection
-      ? ({
-          ...runtime,
-          injection: JSON.parse(JSON.stringify(injection))
-        } as FingerprintRuntimeContext)
-      : { ...runtime };
-
   const direct = ensureFingerprintRuntimeContext(record);
   if (direct) {
-    return cloneWithInjection(direct);
+    return cloneFingerprintRuntimeContextWithInjection(direct, injection);
   }
 
   const sanitized = { ...record };
   delete sanitized.injection;
   const normalized = ensureFingerprintRuntimeContext(sanitized);
-  return normalized ? cloneWithInjection(normalized) : null;
+  return normalized ? cloneFingerprintRuntimeContextWithInjection(normalized, injection) : null;
 };
+
+const resolveFingerprintContextFromCommandParams = (
+  commandParams: Record<string, unknown>
+): unknown =>
+  asRecord(commandParams.fingerprint_context) ?? asRecord(commandParams.fingerprint_runtime) ?? null;
 
 const resolveFingerprintContextFromMessage = (
   message: BackgroundToContentMessage
@@ -102,9 +108,7 @@ const resolveFingerprintContextFromMessage = (
   }
 
   const fallback = resolveAttestedFingerprintRuntimeContext(
-    asRecord(message.commandParams)?.fingerprint_context ??
-      asRecord(message.commandParams)?.fingerprint_runtime ??
-      null
+    resolveFingerprintContextFromCommandParams(message.commandParams)
   );
   return fallback ?? null;
 };
@@ -262,6 +266,13 @@ const hashMainWorldEventChannel = (value: string): string => {
 const normalizeMainWorldSecret = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const createMainWorldBootstrapDetail = (
+  channel: MainWorldEventChannel
+): { request_event: string; result_event: string } => ({
+  request_event: channel.requestEvent,
+  result_event: channel.resultEvent
+});
+
 export const resolveMainWorldEventNamesForSecret = (
   secret: string
 ): { requestEvent: string; resultEvent: string } => {
@@ -354,10 +365,7 @@ export const installMainWorldEventChannelSecret = (secret: string | null): boole
     resultEvent: names.resultEvent
   };
   window.dispatchEvent(
-    createWindowEvent(MAIN_WORLD_EVENT_BOOTSTRAP, {
-      request_event: names.requestEvent,
-      result_event: names.resultEvent
-    })
+    createWindowEvent(MAIN_WORLD_EVENT_BOOTSTRAP, createMainWorldBootstrapDetail(mainWorldEventChannel))
   );
   return true;
 };

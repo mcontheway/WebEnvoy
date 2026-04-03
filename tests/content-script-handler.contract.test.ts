@@ -704,6 +704,46 @@ describe("content-script handler contract", () => {
     expect(resolved).toEqual(fingerprintContext);
   });
 
+  it("prefers the top-level fingerprintContext over commandParams fallback", () => {
+    const directFingerprintContext = createFingerprintContext();
+    const fallbackFingerprintContext = {
+      profile: "profile-a",
+      source: "profile_missing" as const,
+      fingerprint_profile_bundle: null,
+      fingerprint_patch_manifest: null,
+      fingerprint_consistency_check: {
+        profile: "profile-a",
+        expected_environment: {
+          os_family: "unknown",
+          os_version: "unknown",
+          arch: "unknown"
+        },
+        actual_environment: {
+          os_family: "linux",
+          os_version: "6.8",
+          arch: "x64"
+        },
+        decision: "mismatch" as const,
+        reason_codes: ["profile_missing"]
+      },
+      execution: {
+        live_allowed: false,
+        live_decision: "dry_run_only" as const,
+        allowed_execution_modes: ["dry_run", "recon"],
+        reason_codes: ["profile_missing"]
+      }
+    };
+
+    const resolved = resolveFingerprintContextForContract({
+      commandParams: {
+        fingerprint_context: fallbackFingerprintContext
+      },
+      fingerprintContext: directFingerprintContext
+    });
+
+    expect(resolved).toEqual(directFingerprintContext);
+  });
+
   it("returns fingerprint_runtime injection status for runtime.ping", async () => {
     await withMockMainWorld(async ({ mockWindow }) => {
       const handler = new ContentScriptHandler();
