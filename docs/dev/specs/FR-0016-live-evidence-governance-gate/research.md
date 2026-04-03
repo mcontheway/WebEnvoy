@@ -29,6 +29,7 @@
   - #322 最新 guardian 继续指出：若 PR 侧元数据没有显式承载 `gate_applicability`，治理落库 PR 仍会被迫回退到标题/路径 heuristics
   - #322 最新 guardian 还指出：若把 `gate_applicability` 变成所有 reviewed PR 的硬要求，就会把专项门禁扩成 repo-wide 元数据；同时 `editor_locator` 过于 write-path-specific
   - #322 最新 guardian 继续指出：仅靠作者自报 `review_lane` 仍可让治理落库 PR 伪装成 `general_pr`，需要冻结可校验的 `governance_scope_targets`
+  - #322 最新 guardian 继续指出：formal spec review PR 与治理落库目标文件重新混线时缺少结构化 blocker，且 formal spec lane 仍需禁止 `Fixes`
   - 最新一轮明确指出：高风险治理基线变更缺 formal spec review
 
 ## 证据梳理
@@ -97,6 +98,7 @@
 | U6 | `gate_applicability` 必须作为 PR 侧结构化元数据显式承载，即使 `live_evidence_record` 为 `N/A` 也不能省略 | `#322` guardian review | review blocker 对照 | M3 | 95% | 若只冻结 `live_evidence_record`，治理落库 PR 仍无法机器化表达 `review_lane/in_scope` |
 | U7 | `gate_applicability` 的显式承载范围必须限制在专项门禁 PR、formal spec review PR 与 governance landing PR，不能扩成 repo-wide PR 元数据 | `#322` guardian review | review blocker 对照 | M3 | 95% | 若要求所有 reviewed PR 都携带该对象，就违背“专项门禁而非全仓统一门禁”的非目标 |
 | U8 | `governance_landing_pr` 必须通过 `governance_scope_targets` 与实际变更目标文件共同校验，不能只靠作者自报 `review_lane` | `#322` guardian review | review blocker 对照 | M3 | 95% | 若没有结构化目标文件集合，治理落库 lane 仍可被自报 `general_pr` 绕过 |
+| U9 | formal spec review PR 与治理落库文件重新混线时必须有结构化 blocker，且 formal spec lane 不得使用 `Fixes` | `#322` guardian review | review blocker 对照 | M3 | 95% | 若缺少 `mixed_spec_and_governance_scope` 与 lane-specific closing semantics，split 规则仍会被实现层绕过 |
 
 ## Gate Status
 

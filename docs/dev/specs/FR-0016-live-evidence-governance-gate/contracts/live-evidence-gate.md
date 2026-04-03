@@ -187,15 +187,17 @@
 - `missing_required_fields`
 - `stale_head_or_artifact`
 - `spec_review_not_completed`
+- `mixed_spec_and_governance_scope`
 
 约束：
 
 1. 只要 `blocking_reasons` 非空，`status` 就必须为 `blocked`；不得因为 `gate_applicability.in_scope=false` 而把 `spec_review_not_completed` 等阻断原因降格为 `not_applicable`。
 2. `status=blocked` 时，`closing_semantics` 必须为 `refs_only`，且 `merge_ready=false`。
 3. `status=ready` 时，`merge_ready=true`，且 `closing_semantics` 可按普通 Issue 闭环语义选择 `refs_only` 或 `fixes_allowed`；live evidence 专项门禁只负责解除“因证据不足而不得使用 `Fixes`”这一层限制，不强制要求作者必须改成 `Fixes`。
-4. `status=not_applicable` 时，`blocking_reasons` 必须为空，`gate_applicability.in_scope=false`，且 `merge_ready=true`；此时 `closing_semantics` 允许为 `n_a`、`refs_only` 或 `fixes_allowed`，具体取值只由普通 Issue 闭环语义决定，不受 live evidence 专项门禁额外收窄。
+4. `status=not_applicable` 时，`blocking_reasons` 必须为空，`gate_applicability.in_scope=false`，且 `merge_ready=true`；此时 `closing_semantics` 默认允许为 `n_a`、`refs_only` 或 `fixes_allowed`，但若 `gate_applicability.review_lane=formal_spec_review_pr`，则只允许为 `n_a` 或 `refs_only`，不得使用 `fixes_allowed` 提前关闭治理落库 issue。
 5. `merge_ready=true` 只表示 live evidence 专项门禁自身不阻断，不替代普通 review / GitHub checks / guardian 总体合并门禁。
 6. 只有当 `gate_applicability.review_lane=governance_landing_pr` 且 formal spec review 未通过时，才必须在 `blocking_reasons` 中包含 `spec_review_not_completed`，并产出 `status=blocked`。
+7. 若同一 PR 同时改动 `docs/dev/specs/FR-0016-live-evidence-governance-gate/**` 与 `governance_scope_targets` 中任一治理落库目标文件，必须在 `blocking_reasons` 中包含 `mixed_spec_and_governance_scope`，并产出 `status=blocked`。
 
 ## 兼容性约束
 

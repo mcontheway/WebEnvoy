@@ -58,6 +58,7 @@
   - `Fixes` / `Refs` 与 `merge-ready` 的 live evidence 条件保持一致
   - `review_lane` 足以机器化地区分 `formal_spec_review_pr`、`governance_landing_pr` 与 `general_pr`
   - `governance_scope_targets` 足以让 reviewer / guardian 机器化校验治理落库 lane，不被自报 `general_pr` 绕过
+  - `mixed_spec_and_governance_scope` 足以让 reviewer / guardian 机器化阻断 spec review PR 与治理落库 PR 的重新混线
   - PR 描述中的结构化元数据必须对专项门禁 PR、formal spec review PR 与 governance landing PR 承载 `gate_applicability`，且对 in-scope PR 额外承载条件化 `live_evidence_record`
   - `latest_head_sha`、`run_id`、`evidence_collected_at`、`artifact_identity` 与 `artifact_log_ref` 能共同区分“当前 latest head fresh rerun”与“同一 head 的历史 artifact”
 4. 后续治理落库 PR 的最小验证要求：
@@ -67,6 +68,7 @@
   - `live_evidence_record` 的最小定位字段必须使用中性命名，不能把 write-flow 专用 locator 冻结成所有 in-scope PR 的统一必填项
   - 最低字段清单必须完整覆盖 `contracts/live-evidence-gate.md` 已冻结的全部 `live_evidence_record` 字段，且只可追加、不可删减或降格为可选
   - reviewer / guardian 必须能用 `run_id`、`evidence_collected_at`、`artifact_identity` 与 `artifact_log_ref` 排除“同一 latest head 下复用历史 artifact”的假新鲜复验
+  - formal spec review PR 不得使用 `Fixes #...` 提前关闭治理落库 issue
   - `N/A` 仅在非适用 PR 中出现
   - review/guardian 文案能直接阻断 stub/fake host、旧 head、`runtime.ping`、`runtime.bootstrap`
 

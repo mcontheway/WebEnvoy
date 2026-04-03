@@ -136,6 +136,7 @@
   - 更新 `.github/PULL_REQUEST_TEMPLATE.md`
 - 在 formal spec review 通过前，治理落库 PR 不得申报为可合并状态。
 - `spec_review_not_completed` 的阻断必须只对 `governance_landing_pr` 生效，并由 shared contract 内部的结构化 lane 字段判定，而不是依赖 PR 标题、改动路径或人工上下文。
+- 若同一 PR 同时改动 `docs/dev/specs/FR-0016-live-evidence-governance-gate/**` 与五处治理落库目标文件，必须作为 `mixed_spec_and_governance_scope` 直接阻断；formal spec review PR 与治理落库 PR 不得在同一条高风险链路重新混线。
 
 ## GWT 验收场景
 
@@ -155,6 +156,7 @@ When 作者填写 PR 模板
 Then `live_evidence_record` 区块可以整体填写 `N/A`
 And `gate_applicability` 仍必须以结构化元数据显式提供
 And reviewer / guardian 不得错误要求其补 runtime live evidence
+And 该 PR 不得使用 `Fixes #...` 提前关闭治理落库 issue
 
 ### 场景 3：stub 或控制面信号不能被当作真实闭环证据
 
