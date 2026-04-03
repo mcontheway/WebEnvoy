@@ -28,6 +28,31 @@ const isPathInside = (baseDir, targetPath) => {
     return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 };
 const resolveSocketTarget = (request) => {
+    const profileName = asString(request.profile);
+    if (PROFILE_ROOT) {
+        const profileRoot = resolve(PROFILE_ROOT);
+        if (profileName) {
+            const profileDir = resolve(profileRoot, profileName);
+            if (!isPathInside(profileRoot, profileDir)) {
+                throw new Error("native bridge profile escapes controlled root");
+            }
+            return {
+                profileDir,
+                socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
+            };
+        }
+        if (LEGACY_PROFILE_DIR) {
+            const legacyProfileDir = resolve(LEGACY_PROFILE_DIR);
+            return {
+                profileDir: legacyProfileDir,
+                socketPath: join(legacyProfileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
+            };
+        }
+        return {
+            profileDir: profileRoot,
+            socketPath: join(profileRoot, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
+        };
+    }
     if (LEGACY_PROFILE_DIR) {
         const profileDir = resolve(LEGACY_PROFILE_DIR);
         return {
@@ -35,27 +60,9 @@ const resolveSocketTarget = (request) => {
             socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
         };
     }
-    if (!PROFILE_ROOT) {
-        return null;
-    }
-    const profileRoot = resolve(PROFILE_ROOT);
-    const profileName = asString(request.profile);
-    if (!profileName) {
-        return {
-            profileDir: profileRoot,
-            socketPath: join(profileRoot, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
-        };
-    }
-    const profileDir = resolve(profileRoot, profileName);
-    if (!isPathInside(profileRoot, profileDir)) {
-        throw new Error("native bridge profile escapes controlled root");
-    }
-    return {
-        profileDir,
-        socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
-    };
+    return null;
 };
-const shouldPromoteToProfileSocket = (request) => typeof request.profile === "string" && request.profile.trim().length > 0 && !LEGACY_PROFILE_DIR && !!PROFILE_ROOT;
+const shouldPromoteToProfileSocket = (request) => typeof request.profile === "string" && request.profile.trim().length > 0 && !!PROFILE_ROOT;
 const isBridgeResponse = (value) => {
     const record = asRecord(value);
     return (typeof record.id === "string" &&

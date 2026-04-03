@@ -3544,7 +3544,7 @@ process.stdin.on("data", (chunk) => {
     expect(launcherRaw).toContain(' "$@"');
   });
 
-  it("keeps fresh explicit host launchers on profile-root routing", async () => {
+  it("exports both profile-root and legacy profile-dir envs for fresh explicit host launchers", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
     const launcherPath = path.join(
@@ -3596,7 +3596,9 @@ process.stdin.on("data", (chunk) => {
     expect(launcherRaw).toContain(
       `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
     );
-    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
+    expect(launcherRaw).toContain(
+      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR='${profileDir.replace(/'/g, `'\"'\"'`)}'`
+    );
 
     const launch = spawnSync(launcherPath, [], {
       cwd: runtimeCwd,
@@ -3606,7 +3608,7 @@ process.stdin.on("data", (chunk) => {
     expect(launch.stderr).toBe("");
     expect(JSON.parse(await readFile(envCapturePath, "utf8"))).toEqual({
       profileRoot: expectedProfileRoot,
-      legacyProfileDir: null
+      legacyProfileDir: profileDir
     });
   });
 

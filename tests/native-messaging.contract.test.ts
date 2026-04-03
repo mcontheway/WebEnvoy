@@ -198,7 +198,7 @@ describe("native messaging contract", () => {
           timeout_ms: 100
         })
       );
-      await expect(responsePromise).resolves.toMatchObject({
+      expect(await responsePromise).toMatchObject({
         status: "success",
         summary: {
           protocol: "webenvoy.native-bridge.v1",
@@ -238,7 +238,7 @@ describe("native messaging contract", () => {
           timeout_ms: 100
         })
       );
-      await expect(responsePromise).resolves.toMatchObject({
+      expect(await responsePromise).toMatchObject({
         status: "success",
         summary: {
           protocol: "webenvoy.native-bridge.v1",
@@ -246,6 +246,91 @@ describe("native messaging contract", () => {
         }
       });
       await expect(access(socketPath)).resolves.toBeUndefined();
+    } finally {
+      child.kill("SIGTERM");
+      await new Promise<void>((resolve) => {
+        child.once("close", () => resolve());
+      });
+    }
+  });
+
+  it("prefers profile-root routing for profiled requests when both launcher envs are present", async () => {
+    const profileRoot = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-root-"));
+    const legacyProfileDir = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-legacy-"));
+    const profileName = "xhs_dual_profile";
+    const profileSocketPath = path.join(profileRoot, profileName, "nm.sock");
+    tempDirs.push(profileRoot, legacyProfileDir);
+    const child = spawn(process.execPath, [repoOwnedNativeHostPath], {
+      cwd: repoRoot,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT: profileRoot,
+        WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR: legacyProfileDir
+      }
+    });
+
+    try {
+      const responsePromise = readSingleNativeEnvelope(child.stdout);
+      child.stdin.write(
+        encodeNativeEnvelope({
+          id: "open-dual-env-profile-root-001",
+          method: "bridge.open",
+          profile: profileName,
+          params: {},
+          timeout_ms: 100
+        })
+      );
+      expect(await responsePromise).toMatchObject({
+        status: "success",
+        summary: {
+          protocol: "webenvoy.native-bridge.v1",
+          state: "ready"
+        }
+      });
+      await expect(access(profileSocketPath)).resolves.toBeUndefined();
+    } finally {
+      child.kill("SIGTERM");
+      await new Promise<void>((resolve) => {
+        child.once("close", () => resolve());
+      });
+    }
+  });
+
+  it("keeps legacy profile-dir handshake when both launcher envs are present without a profile", async () => {
+    const profileRoot = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-boot-root-"));
+    const legacyProfileDir = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-boot-legacy-"));
+    const legacySocketPath = path.join(legacyProfileDir, "nm.sock");
+    tempDirs.push(profileRoot, legacyProfileDir);
+    const child = spawn(process.execPath, [repoOwnedNativeHostPath], {
+      cwd: repoRoot,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT: profileRoot,
+        WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR: legacyProfileDir
+      }
+    });
+
+    try {
+      const responsePromise = readSingleNativeEnvelope(child.stdout);
+      child.stdin.write(
+        encodeNativeEnvelope({
+          id: "open-dual-env-legacy-bootstrap-001",
+          method: "bridge.open",
+          profile: null,
+          params: {},
+          timeout_ms: 100
+        })
+      );
+      expect(await responsePromise).toMatchObject({
+        status: "success",
+        summary: {
+          protocol: "webenvoy.native-bridge.v1",
+          state: "ready"
+        }
+      });
+      await expect(access(legacySocketPath)).resolves.toBeUndefined();
     } finally {
       child.kill("SIGTERM");
       await new Promise<void>((resolve) => {
