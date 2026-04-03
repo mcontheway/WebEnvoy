@@ -58,7 +58,7 @@
 4. 后续治理落库 PR 的最小验证要求：
   - 根级规范、开发区规范、review 基线与 PR 模板使用同一触发集合
   - guardian 常驻审查摘要 `docs/dev/review/guardian-review-addendum.md` 与上述治理文案使用同一触发集合和阻断口径
-  - 最低字段清单至少覆盖 `latest_head_sha` 与 `execution_surface`
+  - 最低字段清单必须完整覆盖 `contracts/live-evidence-gate.md` 已冻结的全部 `live_evidence_record` 字段，且只可追加、不可删减或降格为可选
   - `N/A` 仅在非适用 PR 中出现
   - review/guardian 文案能直接阻断 stub/fake host、旧 head、`runtime.ping`、`runtime.bootstrap`
 

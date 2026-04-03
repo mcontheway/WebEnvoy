@@ -156,5 +156,5 @@
 ## 兼容性约束
 
 1. 新增触发原因或阻断原因只能追加，不能改变既有语义。
-2. 最低字段清单可以追加，但不得删除 `latest_head_sha` 或 `execution_surface`。
+2. `live_evidence_record` 的最低字段清单只允许追加；不得删除、重命名或降格为可选本契约已冻结的任一字段，包括 `latest_head_sha`、`profile`、`browser_channel`、`execution_surface`、`page_url`、`target_tab_id`、`run_id`、`relay_path`、`editor_locator`、`success_signals`、`minimum_replay`、`artifact_log_ref`、`failure_reason`、`blocker_level`。
 3. 若未来新增自动校验器，也必须消费同一套共享对象，而不是自创另一套触发集合。

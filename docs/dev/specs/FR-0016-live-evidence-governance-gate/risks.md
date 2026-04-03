@@ -14,16 +14,17 @@
 - 回滚：
   - 阻断治理落库 PR，回到 formal spec 层修正 shared contract
 
-## 风险 2：最低字段不够支撑 latest head / 执行面复核
+## 风险 2：最低字段全集被删减，无法支撑 latest head / 执行面 / 最小复现 / artifact 复核
 
 - 触发条件：
-  - `latest_head_sha`、`execution_surface` 或等价核心字段被删除、降格或改成可选
+  - `contracts/live-evidence-gate.md` 已冻结的任一 `live_evidence_record` 字段被删除、重命名、降格为可选，或只保留 `latest_head_sha` / `execution_surface` 两个核心字段
 - 影响：
   - reviewer 无法稳定判断 evidence 是否来自当前 latest head
   - guardian 无法稳定判断 evidence 是否来自真实浏览器执行面
+  - 缺少 `profile`、`run_id`、`page_url`、`minimum_replay`、`artifact_log_ref` 等字段时，复核者无法稳定复现或追溯 evidence
 - 缓解：
-  - 在 shared contract 中把这两个字段冻结为最低必填字段
-  - 任何删减都视为阻断性改动
+  - 在 shared contract 中把 `live_evidence_record` 的全部已冻结字段都定义为只可追加、不可删减、不可降格为可选
+  - 任何删减、重命名或降格都视为阻断性改动
 - 回滚：
   - 保持 `refs_only` 与 `merge_ready=false`，直到字段恢复
 
@@ -105,5 +106,5 @@
 
 - 高风险治理落库 PR 仍未经过 formal spec review
 - reviewer / guardian 任一侧缺少统一触发集合
-- 最低字段清单删掉 `latest_head_sha` 或 `execution_surface`
+- 最低字段清单删掉、重命名或降格为可选任一已冻结 `live_evidence_record` 字段
 - `N/A` 仍可被落入专项门禁的 PR 用来规避披露

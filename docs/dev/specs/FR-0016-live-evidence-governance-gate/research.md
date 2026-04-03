@@ -6,7 +6,7 @@
 - Timebox：在 `#311` 合并前完成 formal 边界判断与套件冻结。
 - Primary unknowns：
   - U1：当前专项门禁到底覆盖哪一类 PR，是否包含“以 live evidence 请求 merge 放行”的场景
-  - U2：reviewer / guardian 最低必填字段中，哪些字段是 latest head 与真实执行面复核所必需的
+  - U2：reviewer / guardian 最低必填字段中，哪些字段必须作为不可删减的完整字段集冻结，才能支撑 latest head、真实执行面、最小复现路径与 artifact 复核
   - U3：`#310` 这类高风险治理基线变更是否允许绕过 formal spec review 直接落库
   - U4：formal spec review PR 与治理落库 PR 是否必须拆开
 - Candidate options：
@@ -23,6 +23,7 @@
 - review 轨迹
   - 第一轮指出触发条件不一致
   - 第二轮指出最低字段缺少 `latest_head_sha` 与 `execution_surface`
+  - #322 第一轮 guardian 又指出 contract 兼容规则不能只保护这两个核心字段，必须把已冻结最低字段全集都设为不可删减
   - 最新一轮明确指出：高风险治理基线变更缺 formal spec review
 
 ## 证据梳理
@@ -84,7 +85,7 @@
 | ID | Claim/Unknown | Evidence Artifact | Method | Maturity | Confidence | Notes |
 |---|---|---|---|---|---|---|
 | U1 | 专项门禁必须覆盖“以 live evidence 请求 merge 放行”的场景 | `#311` 前两轮 review + 现有文档回写 | review diff 对照 | M3 | 95% | 已有 reviewer 明确阻断过一次 |
-| U2 | `latest_head_sha` 与 `execution_surface` 是最低必填字段 | `#311` 第三轮 review | review blocker 对照 | M3 | 98% | 缺这两个字段时 reviewer 无法稳定复核 |
+| U2 | `live_evidence_record` 已冻结字段全集都必须保持必填且不可删减，`latest_head_sha` 与 `execution_surface` 是其中两个关键复核字段 | `#311` 第三轮 review + `#322` guardian review | review blocker 对照 | M3 | 98% | 只保护两个字段会把 `profile/run_id/page_url/minimum_replay/artifact_log_ref` 等字段降成可删项 |
 | U3 | `#310` 需要 formal spec review | `#311` 最新 review + `spec_review.md` | 流程基线对照 | M3 | 99% | 已是当前唯一 blocker |
 | U4 | formal spec review PR 与治理落库 PR 必须拆开 | `docs/dev/AGENTS.md` + `spec_review.md` | 高风险事项规则对照 | M2 | 90% | 默认拆分，除非后续 reviewer 明确给例外 |
 
