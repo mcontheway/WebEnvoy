@@ -171,7 +171,9 @@ const buildSuccessEnvelope = (
   error: null
 });
 
-const buildStubForwardPayload = (request: BridgeRequestEnvelope): Record<string, unknown> => {
+// Legacy dual-env launchers can still hit direct stdio before socket mode is confirmed.
+// In that compatibility-only path we preserve the historic local fallback payload shape.
+const buildCompatibilityForwardPayload = (request: BridgeRequestEnvelope): Record<string, unknown> => {
   const command = asString(request.params.command) ?? "runtime.ping";
   const runId = asString(request.params.run_id) ?? request.id;
   const cwd = asString(request.params.cwd) ?? "";
@@ -506,7 +508,7 @@ const handleExtensionRequest = async (request: BridgeRequestEnvelope): Promise<v
           command: asString(request.params.command) ?? "runtime.ping",
           relay_path: RELAY_PATH
         },
-        payload: buildStubForwardPayload(request)
+        payload: buildCompatibilityForwardPayload(request)
       },
       activeSocketPath
         ? undefined

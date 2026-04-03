@@ -108,7 +108,9 @@ const buildSuccessEnvelope = (request, input) => ({
     ...(input.payload ? { payload: input.payload } : {}),
     error: null
 });
-const buildStubForwardPayload = (request) => {
+// Legacy dual-env launchers can still hit direct stdio before socket mode is confirmed.
+// In that compatibility-only path we preserve the historic local fallback payload shape.
+const buildCompatibilityForwardPayload = (request) => {
     const command = asString(request.params.command) ?? "runtime.ping";
     const runId = asString(request.params.run_id) ?? request.id;
     const cwd = asString(request.params.cwd) ?? "";
@@ -364,7 +366,7 @@ const handleExtensionRequest = async (request) => {
                 command: asString(request.params.command) ?? "runtime.ping",
                 relay_path: RELAY_PATH
             },
-            payload: buildStubForwardPayload(request)
+            payload: buildCompatibilityForwardPayload(request)
         }, activeSocketPath
             ? undefined
             : () => {

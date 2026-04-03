@@ -364,7 +364,7 @@ describe("native messaging contract", () => {
     }
   });
 
-  it("keeps stdio forward working after legacy profile-dir bootstrap when both launcher envs are present without profile mode", async () => {
+  it("keeps compatibility-only stdio forward fallback after legacy profile-dir bootstrap when both launcher envs are present without profile mode", async () => {
     const profileRoot = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-boot-root-"));
     const legacyProfileDir = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-boot-legacy-"));
     const rootSocketPath = path.join(profileRoot, "nm.sock");
