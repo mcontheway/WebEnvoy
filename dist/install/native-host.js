@@ -239,8 +239,22 @@ const parseLiteralShellAssignment = (line) => {
         value: match[3]
     };
 };
-const substituteKnownShellVariables = (value, variables) => value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (match, braced, bare) => {
-    const variableName = typeof braced === "string" && braced.length > 0 ? braced : bare;
+const parseWrapperDirectoryAssignment = (line, wrapperScriptPath) => {
+    const match = line.trim().match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.+)$/);
+    if (!match) {
+        return null;
+    }
+    const valueExpression = match[2];
+    if (!/\bdirname\b/.test(valueExpression) || (!valueExpression.includes("$0") && !valueExpression.includes("${0}"))) {
+        return null;
+    }
+    return {
+        name: match[1],
+        value: dirname(wrapperScriptPath)
+    };
+};
+const substituteKnownShellVariables = (value, variables) => value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*|0)\}|\$([A-Za-z_][A-Za-z0-9_]*)|\$0/g, (match, braced, bare) => {
+    const variableName = typeof braced === "string" && braced.length > 0 ? braced : typeof bare === "string" ? bare : "0";
     return variableName ? (variables.get(variableName) ?? match) : match;
 });
 const looksLikeCommandReference = (value) => {
@@ -318,7 +332,16 @@ const tokenReferencesRepoOwnedNativeHost = async (input) => {
         return false;
     }
     const variables = new Map();
+    if (input.currentScriptPath) {
+        variables.set("0", input.currentScriptPath);
+    }
     for (const rawLine of input.text.split(/\r?\n/)) {
+        if (input.currentScriptPath) {
+            const directoryAssignment = parseWrapperDirectoryAssignment(rawLine, input.currentScriptPath);
+            if (directoryAssignment) {
+                variables.set(directoryAssignment.name, directoryAssignment.value);
+            }
+        }
         const line = substituteKnownShellVariables(rawLine, variables);
         const trimmedLine = line.trim();
         if (trimmedLine.length === 0 ||
@@ -357,7 +380,8 @@ const tokenReferencesRepoOwnedNativeHost = async (input) => {
                 baseDir: dirname(comparableCandidatePath),
                 text: wrapperScript,
                 depth: input.depth + 1,
-                visitedFiles: input.visitedFiles
+                visitedFiles: input.visitedFiles,
+                currentScriptPath: comparableCandidatePath
             })) {
                 return true;
             }

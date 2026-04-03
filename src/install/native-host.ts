@@ -301,11 +301,38 @@ const parseLiteralShellAssignment = (
   };
 };
 
+const parseWrapperDirectoryAssignment = (
+  line: string,
+  wrapperScriptPath: string
+): {
+  name: string;
+  value: string;
+} | null => {
+  const match = line.trim().match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.+)$/);
+  if (!match) {
+    return null;
+  }
+
+  const valueExpression = match[2];
+  if (!/\bdirname\b/.test(valueExpression) || (!valueExpression.includes("$0") && !valueExpression.includes("${0}"))) {
+    return null;
+  }
+
+  return {
+    name: match[1],
+    value: dirname(wrapperScriptPath)
+  };
+};
+
 const substituteKnownShellVariables = (value: string, variables: Map<string, string>): string =>
-  value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (match, braced, bare) => {
-    const variableName = typeof braced === "string" && braced.length > 0 ? braced : bare;
-    return variableName ? (variables.get(variableName) ?? match) : match;
-  });
+  value.replace(
+    /\$\{([A-Za-z_][A-Za-z0-9_]*|0)\}|\$([A-Za-z_][A-Za-z0-9_]*)|\$0/g,
+    (match, braced, bare) => {
+      const variableName =
+        typeof braced === "string" && braced.length > 0 ? braced : typeof bare === "string" ? bare : "0";
+      return variableName ? (variables.get(variableName) ?? match) : match;
+    }
+  );
 
 const looksLikeCommandReference = (value: string): boolean => {
   const trimmed = value.trim();
@@ -401,13 +428,23 @@ const tokenReferencesRepoOwnedNativeHost = async (input: {
   text: string;
   depth: number;
   visitedFiles: Set<string>;
+  currentScriptPath?: string;
 }): Promise<boolean> => {
   if (input.depth > MAX_HOST_COMMAND_REFERENCE_DEPTH) {
     return false;
   }
 
   const variables = new Map<string, string>();
+  if (input.currentScriptPath) {
+    variables.set("0", input.currentScriptPath);
+  }
   for (const rawLine of input.text.split(/\r?\n/)) {
+    if (input.currentScriptPath) {
+      const directoryAssignment = parseWrapperDirectoryAssignment(rawLine, input.currentScriptPath);
+      if (directoryAssignment) {
+        variables.set(directoryAssignment.name, directoryAssignment.value);
+      }
+    }
     const line = substituteKnownShellVariables(rawLine, variables);
     const trimmedLine = line.trim();
     if (
@@ -455,7 +492,8 @@ const tokenReferencesRepoOwnedNativeHost = async (input: {
           baseDir: dirname(comparableCandidatePath),
           text: wrapperScript,
           depth: input.depth + 1,
-          visitedFiles: input.visitedFiles
+          visitedFiles: input.visitedFiles,
+          currentScriptPath: comparableCandidatePath
         })
       ) {
         return true;
