@@ -593,6 +593,9 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
       ? input.hostCommand!.trim()
       : `${quoteShellToken(process.execPath)} ${quoteShellToken(bundledEntryPath!)}`;
   const usesExplicitProfileContract = hostCommandSource === "explicit" && !!profileDir;
+  const nativeBridgeLauncherContract = usesExplicitProfileContract
+    ? "dual_env_launcher_only"
+    : "profile_root_only";
   const legacyProfileDir = usesExplicitProfileContract ? profileDir : undefined;
   const profileMode = usesExplicitProfileContract ? PROFILE_MODE_ROOT_PREFERRED : undefined;
   await writeFile(
@@ -648,13 +651,15 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
     launcher_path_source: resolvedPaths.launcherPathSource,
     host_command: hostCommand,
     host_command_source: hostCommandSource,
-    native_bridge_launcher_contract: usesExplicitProfileContract ? "dual_env_root_preferred" : "profile_root_only",
+    native_bridge_launcher_contract: nativeBridgeLauncherContract,
     profile_root: normalizePathForOutput(profileRoot),
     profile_dir: normalizePathForOutput(profileDir),
-    profile_root_bridge_socket_path: normalizePathForOutput(join(profileRoot, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)),
-    profile_scoped_bridge_socket_path: normalizePathForOutput(
-      profileDir ? resolveProfileScopedNativeBridgeSocketPath(profileDir) : null
-    ),
+    profile_root_bridge_socket_path: usesExplicitProfileContract
+      ? null
+      : normalizePathForOutput(join(profileRoot, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)),
+    profile_scoped_bridge_socket_path: usesExplicitProfileContract
+      ? null
+      : normalizePathForOutput(profileDir ? resolveProfileScopedNativeBridgeSocketPath(profileDir) : null),
     allowed_origins: [allowedOrigin],
     persistent_extension_identity: {
       extension_id: input.extensionId,

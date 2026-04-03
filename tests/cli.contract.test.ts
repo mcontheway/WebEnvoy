@@ -3645,6 +3645,18 @@ process.stdin.on("data", (chunk) => {
     );
 
     expect(result.status).toBe(0);
+    expect(parseSingleJsonLine(result.stdout)).toMatchObject({
+      command: "runtime.install",
+      status: "success",
+      summary: {
+        host_command_source: "explicit",
+        native_bridge_launcher_contract: "dual_env_launcher_only",
+        profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
+        profile_dir: profileDir,
+        profile_root_bridge_socket_path: null,
+        profile_scoped_bridge_socket_path: null
+      }
+    });
     const launcherRaw = await expectDualEnvRootPreferredLauncherContract({
       launcherPath,
       runtimeCwd,
@@ -3737,6 +3749,18 @@ process.stdin.on("data", (chunk) => {
     );
 
     expect(result.status).toBe(0);
+    expect(parseSingleJsonLine(result.stdout)).toMatchObject({
+      command: "runtime.install",
+      status: "success",
+      summary: {
+        host_command_source: "explicit",
+        native_bridge_launcher_contract: "dual_env_launcher_only",
+        profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
+        profile_dir: profileDir,
+        profile_root_bridge_socket_path: null,
+        profile_scoped_bridge_socket_path: null
+      }
+    });
     await expectDualEnvRootPreferredLauncherContract({
       launcherPath: managedLauncherPath,
       runtimeCwd,
@@ -3756,7 +3780,7 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
-  it("uses dual-env root-preferred launcher contract for repo-owned explicit launchers", async () => {
+  it("keeps repo-owned explicit launchers on a conservative dual-env launcher-only summary contract", async () => {
     const runtimeCwd = await mkdtemp(path.join(tmpdir(), "wv-explicit-live-"));
     tempDirs.push(runtimeCwd);
     const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
@@ -3802,11 +3826,11 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         host_command_source: "explicit",
-        native_bridge_launcher_contract: "dual_env_root_preferred",
+        native_bridge_launcher_contract: "dual_env_launcher_only",
         profile_root: expectedProfileRootSummary,
-        profile_root_bridge_socket_path: path.join(expectedProfileRootSummary, "nm.sock"),
+        profile_root_bridge_socket_path: null,
         profile_dir: profileDir,
-        profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
+        profile_scoped_bridge_socket_path: null
       }
     });
   });
@@ -3877,11 +3901,11 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         host_command_source: "explicit",
-        native_bridge_launcher_contract: "dual_env_root_preferred",
+        native_bridge_launcher_contract: "dual_env_launcher_only",
         profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
-        profile_root_bridge_socket_path: path.join(runtimeCwd, ".webenvoy", "profiles", "nm.sock"),
+        profile_root_bridge_socket_path: null,
         profile_dir: profileDir,
-        profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
+        profile_scoped_bridge_socket_path: null
       }
     });
     await expectDualEnvRootPreferredLauncherContract({
@@ -3970,11 +3994,11 @@ process.stdin.on("data", (chunk) => {
       status: "success",
       summary: {
         host_command_source: "explicit",
-        native_bridge_launcher_contract: "dual_env_root_preferred",
+        native_bridge_launcher_contract: "dual_env_launcher_only",
         profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
-        profile_root_bridge_socket_path: path.join(runtimeCwd, ".webenvoy", "profiles", "nm.sock"),
+        profile_root_bridge_socket_path: null,
         profile_dir: profileDir,
-        profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
+        profile_scoped_bridge_socket_path: null
       }
     });
     await expectDualEnvRootPreferredLauncherContract({
