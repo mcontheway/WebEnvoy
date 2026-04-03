@@ -164,9 +164,10 @@
 
 1. 只要 `blocking_reasons` 非空，`status` 就必须为 `blocked`；不得因为 `gate_applicability.in_scope=false` 而把 `spec_review_not_completed` 等阻断原因降格为 `not_applicable`。
 2. `status=blocked` 时，`closing_semantics` 必须为 `refs_only`，且 `merge_ready=false`。
-3. 只有 `status=ready` 时，`closing_semantics` 才允许为 `fixes_allowed`。
-4. `status=not_applicable` 时，`blocking_reasons` 必须为空，且 `gate_applicability.in_scope=false`。
-5. formal spec review 未通过时，治理落库 PR 即使 `gate_applicability.in_scope=false`，也必须在 `blocking_reasons` 中包含 `spec_review_not_completed`，并产出 `status=blocked`。
+3. `status=ready` 时，`merge_ready=true`，且 `closing_semantics` 可为 `fixes_allowed`。
+4. `status=not_applicable` 时，`blocking_reasons` 必须为空，`gate_applicability.in_scope=false`，且 `merge_ready=true`；此时 `closing_semantics` 允许为 `n_a`、`refs_only` 或 `fixes_allowed`，具体取值只由普通 Issue 闭环语义决定，不受 live evidence 专项门禁额外收窄。
+5. `merge_ready=true` 只表示 live evidence 专项门禁自身不阻断，不替代普通 review / GitHub checks / guardian 总体合并门禁。
+6. formal spec review 未通过时，治理落库 PR 即使 `gate_applicability.in_scope=false`，也必须在 `blocking_reasons` 中包含 `spec_review_not_completed`，并产出 `status=blocked`。
 
 ## 兼容性约束
 

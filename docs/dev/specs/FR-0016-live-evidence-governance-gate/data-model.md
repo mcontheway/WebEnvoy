@@ -62,8 +62,9 @@
 - 约束：
   - `blocking_reasons` 非空时，`status=blocked`。
   - `status=blocked` 时，`closing_semantics=refs_only` 且 `merge_ready=false`。
-  - 只有 `status=ready` 时，`closing_semantics` 才可为 `fixes_allowed`。
-  - `status=not_applicable` 时，`blocking_reasons=[]` 且 `gate_applicability.in_scope=false`。
+  - `status=ready` 时，`merge_ready=true`，且 `closing_semantics` 可为 `fixes_allowed`。
+  - `status=not_applicable` 时，`blocking_reasons=[]` 且 `gate_applicability.in_scope=false`，`merge_ready=true`；此时 `closing_semantics` 可按普通 Issue 闭环语义选择 `n_a`、`refs_only` 或 `fixes_allowed`。
+  - `merge_ready=true` 只表示 live evidence 专项门禁自身不阻断，不替代普通 review / GitHub checks / guardian 总体合并门禁。
   - formal spec review 未通过时，治理落库 PR 必须包含 `spec_review_not_completed`，且 `status=blocked`。
 - 生命周期：
   - reviewer / guardian 基于当前 PR 描述、latest head 和 formal spec review 状态即时产出。
