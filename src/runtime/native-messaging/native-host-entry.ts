@@ -172,25 +172,12 @@ const buildSuccessEnvelope = (
 });
 
 // Legacy dual-env launchers can still hit direct stdio before socket mode is confirmed.
-// In that compatibility-only path we preserve the historic local fallback payload shape.
+// In that compatibility-only path we preserve the historic local fallback payload shape
+// for low-risk commands, but we must never synthesize execution-surface bootstrap success.
 const buildCompatibilityForwardPayload = (request: BridgeRequestEnvelope): Record<string, unknown> => {
   const command = asString(request.params.command) ?? "runtime.ping";
   const runId = asString(request.params.run_id) ?? request.id;
   const cwd = asString(request.params.cwd) ?? "";
-  const commandParams = asRecord(request.params.command_params);
-  const runtimeContextId = asString(commandParams.runtime_context_id) ?? "runtime-context-001";
-
-  if (command === "runtime.bootstrap") {
-    return {
-      result: {
-        version: asString(commandParams.version) ?? "v1",
-        run_id: runId,
-        runtime_context_id: runtimeContextId,
-        profile: request.profile,
-        status: "ready"
-      }
-    };
-  }
 
   return {
     message: "pong",
@@ -217,9 +204,10 @@ const writeNativeError = (
     code: string;
     message: string;
     summary?: Record<string, unknown>;
-  }
+  },
+  onFlushed?: () => void
 ): void => {
-  writeNativeEnvelope(buildErrorEnvelope(request, input));
+  writeNativeEnvelope(buildErrorEnvelope(request, input), onFlushed);
 };
 
 const failPendingSocketResponses = (input: { code: string; message: string }): void => {
@@ -499,13 +487,37 @@ const handleExtensionRequest = async (request: BridgeRequestEnvelope): Promise<v
   }
 
   if (request.method === "bridge.forward" && (!activeSocketPath || usesLegacyProfileDirRouting())) {
+    const command = asString(request.params.command) ?? "runtime.ping";
+
+    if (command === "runtime.bootstrap") {
+      writeNativeError(
+        request,
+        {
+          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+          message: "runtime bootstrap 尚未获得执行面确认",
+          summary: {
+            session_id: asString(request.params.session_id) ?? sessionId,
+            run_id: asString(request.params.run_id) ?? request.id,
+            command,
+            relay_path: RELAY_PATH
+          }
+        },
+        activeSocketPath
+          ? undefined
+          : () => {
+              process.exit(0);
+            }
+      );
+      return;
+    }
+
     writeNativeSuccess(
       request,
       {
         summary: {
           session_id: asString(request.params.session_id) ?? sessionId,
           run_id: asString(request.params.run_id) ?? request.id,
-          command: asString(request.params.command) ?? "runtime.ping",
+          command,
           relay_path: RELAY_PATH
         },
         payload: buildCompatibilityForwardPayload(request)

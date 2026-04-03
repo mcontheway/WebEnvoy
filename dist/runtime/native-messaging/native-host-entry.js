@@ -109,24 +109,12 @@ const buildSuccessEnvelope = (request, input) => ({
     error: null
 });
 // Legacy dual-env launchers can still hit direct stdio before socket mode is confirmed.
-// In that compatibility-only path we preserve the historic local fallback payload shape.
+// In that compatibility-only path we preserve the historic local fallback payload shape
+// for low-risk commands, but we must never synthesize execution-surface bootstrap success.
 const buildCompatibilityForwardPayload = (request) => {
     const command = asString(request.params.command) ?? "runtime.ping";
     const runId = asString(request.params.run_id) ?? request.id;
     const cwd = asString(request.params.cwd) ?? "";
-    const commandParams = asRecord(request.params.command_params);
-    const runtimeContextId = asString(commandParams.runtime_context_id) ?? "runtime-context-001";
-    if (command === "runtime.bootstrap") {
-        return {
-            result: {
-                version: asString(commandParams.version) ?? "v1",
-                run_id: runId,
-                runtime_context_id: runtimeContextId,
-                profile: request.profile,
-                status: "ready"
-            }
-        };
-    }
     return {
         message: "pong",
         run_id: runId,
@@ -137,8 +125,8 @@ const buildCompatibilityForwardPayload = (request) => {
 const writeNativeSuccess = (request, input, onFlushed) => {
     writeNativeEnvelope(buildSuccessEnvelope(request, input), onFlushed);
 };
-const writeNativeError = (request, input) => {
-    writeNativeEnvelope(buildErrorEnvelope(request, input));
+const writeNativeError = (request, input, onFlushed) => {
+    writeNativeEnvelope(buildErrorEnvelope(request, input), onFlushed);
 };
 const failPendingSocketResponses = (input) => {
     for (const [id, pending] of pendingSocketResponses.entries()) {
@@ -359,11 +347,29 @@ const handleExtensionRequest = async (request) => {
         return;
     }
     if (request.method === "bridge.forward" && (!activeSocketPath || usesLegacyProfileDirRouting())) {
+        const command = asString(request.params.command) ?? "runtime.ping";
+        if (command === "runtime.bootstrap") {
+            writeNativeError(request, {
+                code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+                message: "runtime bootstrap 尚未获得执行面确认",
+                summary: {
+                    session_id: asString(request.params.session_id) ?? sessionId,
+                    run_id: asString(request.params.run_id) ?? request.id,
+                    command,
+                    relay_path: RELAY_PATH
+                }
+            }, activeSocketPath
+                ? undefined
+                : () => {
+                    process.exit(0);
+                });
+            return;
+        }
         writeNativeSuccess(request, {
             summary: {
                 session_id: asString(request.params.session_id) ?? sessionId,
                 run_id: asString(request.params.run_id) ?? request.id,
-                command: asString(request.params.command) ?? "runtime.ping",
+                command,
                 relay_path: RELAY_PATH
             },
             payload: buildCompatibilityForwardPayload(request)

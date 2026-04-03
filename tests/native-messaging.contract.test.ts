@@ -442,6 +442,79 @@ describe("native messaging contract", () => {
     }
   });
 
+  it("does not synthesize runtime.bootstrap readiness on legacy dual-env stdio compatibility fallback", async () => {
+    const profileRoot = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-bootstrap-root-"));
+    const legacyProfileDir = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-bootstrap-legacy-"));
+    tempDirs.push(profileRoot, legacyProfileDir);
+    const child = spawn(process.execPath, [repoOwnedNativeHostPath], {
+      cwd: repoRoot,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT: profileRoot,
+        WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR: legacyProfileDir
+      }
+    });
+
+    try {
+      const openResponsePromise = readSingleNativeEnvelope(child.stdout);
+      child.stdin.write(
+        encodeNativeEnvelope({
+          id: "open-dual-env-legacy-bootstrap-guard-001",
+          method: "bridge.open",
+          profile: null,
+          params: {},
+          timeout_ms: 100
+        })
+      );
+      expect(await openResponsePromise).toMatchObject({
+        status: "success",
+        summary: {
+          protocol: "webenvoy.native-bridge.v1",
+          state: "ready"
+        }
+      });
+
+      const bootstrapResponsePromise = readSingleNativeEnvelope(child.stdout);
+      child.stdin.write(
+        encodeNativeEnvelope({
+          id: "forward-dual-env-legacy-bootstrap-guard-001",
+          method: "bridge.forward",
+          profile: null,
+          params: {
+            session_id: "nm-session-001",
+            run_id: "run-dual-env-legacy-bootstrap-guard-001",
+            command: "runtime.bootstrap",
+            command_params: {
+              version: "v1",
+              runtime_context_id: "runtime-context-legacy-guard-001"
+            },
+            cwd: repoRoot
+          },
+          timeout_ms: 100
+        })
+      );
+      expect(await bootstrapResponsePromise).toMatchObject({
+        status: "error",
+        summary: {
+          session_id: "nm-session-001",
+          run_id: "run-dual-env-legacy-bootstrap-guard-001",
+          command: "runtime.bootstrap",
+          relay_path: "host>background>content-script>background>host"
+        },
+        error: {
+          code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+          message: "runtime bootstrap 尚未获得执行面确认"
+        }
+      });
+    } finally {
+      child.kill("SIGTERM");
+      await new Promise<void>((resolve) => {
+        child.once("close", () => resolve());
+      });
+    }
+  });
+
   it("routes profiled requests through the canonical profile-root socket when dual-env launchers set profile mode", async () => {
     const profileRoot = await mkdtemp(path.join(tmpdir(), "wv-nmr-"));
     const legacyProfileDir = await mkdtemp(path.join(tmpdir(), "wv-nml-"));
