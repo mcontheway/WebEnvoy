@@ -1,10 +1,10 @@
+import { join } from "node:path";
 import { CliError } from "../core/errors.js";
 import { NativeMessagingBridge, NativeMessagingTransportError } from "../runtime/native-messaging/bridge.js";
 import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
 import { appendFingerprintContext, buildFingerprintContextForMeta } from "../runtime/fingerprint-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
-import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import { prepareOfficialChromeRuntime } from "../runtime/official-chrome-runtime.js";
 export { buildOfficialChromeRuntimeStatusParams } from "../runtime/official-chrome-runtime.js";
 const ABILITY_LAYERS = new Set(["L3", "L2", "L1"]);
@@ -21,6 +21,7 @@ const XHS_LIVE_EXECUTION_MODES = new Set([
     "live_read_high_risk",
     "live_write"
 ]);
+const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
@@ -299,7 +300,7 @@ const xhsSearch = async (context) => {
         });
     }
     const bridge = resolveRuntimeBridge();
-    const profileStore = new ProfileStore(resolveRuntimeProfileRoot(context.cwd));
+    const profileStore = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
     const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
     const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
         requestedExecutionMode: gate.requestedExecutionMode

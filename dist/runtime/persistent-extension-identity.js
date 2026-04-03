@@ -1,12 +1,10 @@
 import { execFile } from "node:child_process";
-import { constants as fsConstants } from "node:fs";
 import { access, readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { CliError } from "../core/errors.js";
 import { isValidNativeHostName } from "../install/native-host.js";
-import { inspectManagedNativeHostInstall } from "../install/native-host-install-root.js";
 import { BrowserLaunchError, isUnsupportedBrandedChromeForExtensions, resolvePreferredBrowserVersionTruthSource } from "./browser-launcher.js";
 const DEFAULT_NATIVE_HOST_NAME = "com.webenvoy.host";
 const EXTENSION_ID_PATTERN = /^[a-p]{32}$/;
@@ -19,21 +17,6 @@ const DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS = {
     platform: () => process.platform
 };
 let identityPreflightAdapters = DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS;
-const EMPTY_INSTALL_DIAGNOSTICS = {
-    launcherPath: null,
-    launcherExists: null,
-    launcherExecutable: null,
-    bundleRuntimePath: null,
-    bundleRuntimeExists: null,
-    launcherProfileRoot: null,
-    expectedProfileRoot: null,
-    profileRootMatches: null,
-    legacyLauncherDetected: null
-};
-const normalizePathForComparison = (input) => {
-    const normalized = resolve(input);
-    return normalized.startsWith("/private/var/") ? normalized.slice("/private".length) : normalized;
-};
 export const setIdentityPreflightAdaptersForTests = (overrides) => {
     identityPreflightAdapters = {
         ...DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS,
@@ -59,18 +42,7 @@ const ensureValidNativeHostName = (nativeHostName) => {
         });
     }
 };
-const resolveManifestDirectoryOverride = () => {
-    const override = process.env.WEBENVOY_NATIVE_HOST_MANIFEST_DIR;
-    if (typeof override !== "string" || override.trim().length === 0) {
-        return null;
-    }
-    return resolve(override.trim());
-};
 const resolveManifestPathForChannel = (browserChannel, nativeHostName) => {
-    const manifestDirOverride = resolveManifestDirectoryOverride();
-    if (manifestDirOverride) {
-        return join(manifestDirOverride, `${nativeHostName}.json`);
-    }
     const platform = identityPreflightAdapters.platform();
     if (platform === "darwin") {
         const baseByChannel = {
@@ -141,10 +113,7 @@ const parseWindowsRegistryDefaultValue = (stdout) => {
 };
 const resolveManifestPathForBinding = async (binding, _profileDir) => {
     if (binding.manifestPath) {
-        return {
-            manifestPath: binding.manifestPath,
-            manifestSource: "binding"
-        };
+        return binding.manifestPath;
     }
     if (identityPreflightAdapters.platform() === "win32") {
         const registryKey = resolveWindowsRegistryKeyForChannel(binding.browserChannel, binding.nativeHostName);
@@ -155,10 +124,7 @@ const resolveManifestPathForBinding = async (binding, _profileDir) => {
                 });
                 const manifestPath = parseWindowsRegistryDefaultValue(stdout);
                 if (manifestPath) {
-                    return {
-                        manifestPath,
-                        manifestSource: "windows_registry"
-                    };
+                    return manifestPath;
                 }
             }
             catch {
@@ -166,15 +132,9 @@ const resolveManifestPathForBinding = async (binding, _profileDir) => {
                 // there is no stable manifest path we can trust as the official install.
             }
         }
-        return {
-            manifestPath: null,
-            manifestSource: null
-        };
+        return null;
     }
-    return {
-        manifestPath: resolveManifestPathForChannel(binding.browserChannel, binding.nativeHostName),
-        manifestSource: "browser_default"
-    };
+    return resolveManifestPathForChannel(binding.browserChannel, binding.nativeHostName);
 };
 const parsePersistentExtensionBindingFromParams = (params) => {
     const raw = asRecord(params.persistent_extension_identity) ??
@@ -268,7 +228,6 @@ const readNativeHostManifest = async (manifestPath) => {
         const raw = await readFile(manifestPath, "utf8");
         const parsed = JSON.parse(raw);
         const name = asNonEmptyString(parsed.name);
-        const launcherPath = asNonEmptyString(parsed.path);
         const allowedOrigins = Array.isArray(parsed.allowed_origins)
             ? parsed.allowed_origins.filter((entry) => typeof entry === "string")
             : [];
@@ -277,128 +236,12 @@ const readNativeHostManifest = async (manifestPath) => {
         }
         return {
             name,
-            allowed_origins: allowedOrigins,
-            path: launcherPath ? (isAbsolute(launcherPath) ? launcherPath : resolve(dirname(manifestPath), launcherPath)) : null
+            allowed_origins: allowedOrigins
         };
     }
     catch {
         return null;
     }
-};
-const readManagedInstallMetadata = async (channelRoot) => {
-    try {
-        const raw = await readFile(join(channelRoot, "install-metadata.json"), "utf8");
-        const parsed = JSON.parse(raw);
-        const profileRoot = asNonEmptyString(parsed.profile_root);
-        const bundleRuntimeExpected = typeof parsed.bundle_runtime_expected === "boolean"
-            ? parsed.bundle_runtime_expected
-            : null;
-        return {
-            profileRoot: profileRoot ? normalizePathForComparison(profileRoot) : null,
-            bundleRuntimeExpected
-        };
-    }
-    catch {
-        return {
-            profileRoot: null,
-            bundleRuntimeExpected: null
-        };
-    }
-};
-const managedBundleFilesExist = async (channelRoot) => {
-    const requiredPaths = [
-        join(channelRoot, "runtime", "native-messaging", "native-host-entry.js"),
-        join(channelRoot, "runtime", "native-messaging", "host.js"),
-        join(channelRoot, "runtime", "native-messaging", "protocol.js"),
-        join(channelRoot, "runtime", "worktree-root.js"),
-        join(channelRoot, "runtime", "package.json")
-    ];
-    try {
-        await Promise.all(requiredPaths.map(async (requiredPath) => await access(requiredPath)));
-        return true;
-    }
-    catch {
-        return false;
-    }
-};
-const inferManagedBundleExpectationFromLauncher = async (launcherPath, channelRoot) => {
-    try {
-        const launcherRaw = await readFile(launcherPath, "utf8");
-        const bundledEntryPath = normalizePathForComparison(join(channelRoot, "runtime", "native-messaging", "native-host-entry.js"));
-        return launcherRaw.includes(bundledEntryPath);
-    }
-    catch {
-        return true;
-    }
-};
-const managedLauncherExecutable = async (launcherPath) => {
-    if (identityPreflightAdapters.platform() === "win32") {
-        return true;
-    }
-    try {
-        await access(launcherPath, fsConstants.X_OK);
-        return true;
-    }
-    catch {
-        return false;
-    }
-};
-const resolveInstallDiagnostics = async (manifest, manifestPath, profileDir) => {
-    if (!manifest?.path) {
-        return EMPTY_INSTALL_DIAGNOSTICS;
-    }
-    const managedInstall = inspectManagedNativeHostInstall(manifest.path);
-    const bundleRuntimePath = managedInstall ? join(managedInstall.runtimeRoot, "native-messaging", "native-host-entry.js") : null;
-    const managedInstallMetadata = managedInstall
-        ? await readManagedInstallMetadata(managedInstall.channelRoot)
-        : { profileRoot: null, bundleRuntimeExpected: null };
-    let launcherExists = false;
-    let launcherExecutable = null;
-    let bundleRuntimeExists = null;
-    const expectedProfileRoot = profileDir ? normalizePathForComparison(dirname(profileDir)) : null;
-    const launcherProfileRoot = managedInstallMetadata.profileRoot;
-    const profileRootMatches = expectedProfileRoot === null
-        ? null
-        : managedInstall
-            ? launcherProfileRoot === expectedProfileRoot
-            : launcherProfileRoot === null
-                ? null
-                : launcherProfileRoot === expectedProfileRoot;
-    const legacyLauncherDetected = managedInstall === null &&
-        manifestPath !== null &&
-        normalizePathForComparison(dirname(manifest.path)) === normalizePathForComparison(dirname(manifestPath)) &&
-        manifest.path.endsWith(`${manifest.name}-launcher`);
-    try {
-        await access(manifest.path);
-        launcherExists = true;
-    }
-    catch {
-        launcherExists = false;
-    }
-    if (launcherExists && managedInstall) {
-        launcherExecutable = await managedLauncherExecutable(manifest.path);
-    }
-    if (bundleRuntimePath) {
-        const bundleRuntimeExpected = managedInstallMetadata.bundleRuntimeExpected ??
-            (managedInstall
-                ? await inferManagedBundleExpectationFromLauncher(manifest.path, managedInstall.channelRoot)
-                : null);
-        bundleRuntimeExists =
-            managedInstall && bundleRuntimeExpected === true
-                ? await managedBundleFilesExist(managedInstall.channelRoot)
-                : null;
-    }
-    return {
-        launcherPath: manifest.path,
-        launcherExists,
-        launcherExecutable,
-        bundleRuntimePath,
-        bundleRuntimeExists,
-        launcherProfileRoot,
-        expectedProfileRoot,
-        profileRootMatches,
-        legacyLauncherDetected
-    };
 };
 const readProfileExtensionStateFromPreferences = (input, extensionId) => {
     const extensions = asRecord(input.extensions);
@@ -501,18 +344,8 @@ export const buildIdentityPreflightError = (result) => {
         native_host_name: result.binding?.nativeHostName ?? null,
         browser_channel: result.binding?.browserChannel ?? null,
         manifest_path: result.manifestPath,
-        manifest_source: result.manifestSource,
         expected_origin: result.expectedOrigin,
-        allowed_origins: result.allowedOrigins,
-        launcher_path: result.installDiagnostics.launcherPath,
-        launcher_exists: result.installDiagnostics.launcherExists,
-        launcher_executable: result.installDiagnostics.launcherExecutable,
-        bundle_runtime_path: result.installDiagnostics.bundleRuntimePath,
-        bundle_runtime_exists: result.installDiagnostics.bundleRuntimeExists,
-        launcher_profile_root: result.installDiagnostics.launcherProfileRoot,
-        expected_profile_root: result.installDiagnostics.expectedProfileRoot,
-        profile_root_matches: result.installDiagnostics.profileRootMatches,
-        legacy_launcher_detected: result.installDiagnostics.legacyLauncherDetected
+        allowed_origins: result.allowedOrigins
     };
     if (result.failureReason === "BOOTSTRAP_PENDING") {
         return new CliError("ERR_RUNTIME_BOOTSTRAP_PENDING", "identity preflight 已通过，但 persistent extension bootstrap 尚未实现", { details, retryable: false });
@@ -539,10 +372,8 @@ export const runIdentityPreflight = async (input) => {
                 identityBindingState: "not_applicable",
                 binding: null,
                 manifestPath: null,
-                manifestSource: null,
                 expectedOrigin: null,
                 allowedOrigins: [],
-                installDiagnostics: EMPTY_INSTALL_DIAGNOSTICS,
                 blocking: false,
                 failureReason: "IDENTITY_PREFLIGHT_NOT_REQUIRED"
             };
@@ -554,10 +385,8 @@ export const runIdentityPreflight = async (input) => {
             identityBindingState: "not_applicable",
             binding: null,
             manifestPath: null,
-            manifestSource: null,
             expectedOrigin: null,
             allowedOrigins: [],
-            installDiagnostics: EMPTY_INSTALL_DIAGNOSTICS,
             blocking: false,
             failureReason: "IDENTITY_PREFLIGHT_NOT_REQUIRED"
         };
@@ -570,10 +399,8 @@ export const runIdentityPreflight = async (input) => {
             identityBindingState: "not_applicable",
             binding: null,
             manifestPath: null,
-            manifestSource: null,
             expectedOrigin: null,
             allowedOrigins: [],
-            installDiagnostics: EMPTY_INSTALL_DIAGNOSTICS,
             blocking: false,
             failureReason: "IDENTITY_PREFLIGHT_NOT_REQUIRED"
         };
@@ -588,10 +415,8 @@ export const runIdentityPreflight = async (input) => {
             identityBindingState: "missing",
             binding: null,
             manifestPath: null,
-            manifestSource: null,
             expectedOrigin: null,
             allowedOrigins: [],
-            installDiagnostics: EMPTY_INSTALL_DIAGNOSTICS,
             failureReason: "IDENTITY_BINDING_MISSING"
         });
     }
@@ -609,15 +434,12 @@ export const runIdentityPreflight = async (input) => {
             identityBindingState: "mismatch",
             binding,
             manifestPath: binding.manifestPath,
-            manifestSource: binding.manifestPath ? "binding" : null,
             expectedOrigin,
             allowedOrigins: [],
-            installDiagnostics: EMPTY_INSTALL_DIAGNOSTICS,
             failureReason: "IDENTITY_BINDING_CONFLICT"
         });
     }
-    const manifestResolution = await resolveManifestPathForBinding(binding, profileDir ?? null);
-    const manifestPath = manifestResolution.manifestPath;
+    const manifestPath = await resolveManifestPathForBinding(binding, profileDir ?? null);
     if (manifestPath === null) {
         return buildBlockingResult({
             mode: "official_chrome_persistent_extension",
@@ -626,15 +448,12 @@ export const runIdentityPreflight = async (input) => {
             identityBindingState: "mismatch",
             binding,
             manifestPath: null,
-            manifestSource: manifestResolution.manifestSource,
             expectedOrigin,
             allowedOrigins: [],
-            installDiagnostics: EMPTY_INSTALL_DIAGNOSTICS,
             failureReason: "IDENTITY_MANIFEST_MISSING"
         });
     }
     const manifest = await readNativeHostManifest(manifestPath);
-    const installDiagnostics = await resolveInstallDiagnostics(manifest, manifestPath, profileDir ?? null);
     if (!manifest) {
         return buildBlockingResult({
             mode: "official_chrome_persistent_extension",
@@ -646,35 +465,8 @@ export const runIdentityPreflight = async (input) => {
                 manifestPath
             },
             manifestPath,
-            manifestSource: manifestResolution.manifestSource,
             expectedOrigin,
             allowedOrigins: [],
-            installDiagnostics,
-            failureReason: "IDENTITY_MANIFEST_MISSING"
-        });
-    }
-    const installBroken = installDiagnostics.launcherExists === false ||
-        installDiagnostics.launcherExecutable === false ||
-        installDiagnostics.legacyLauncherDetected === true ||
-        installDiagnostics.profileRootMatches === false ||
-        (installDiagnostics.launcherExists === true &&
-            installDiagnostics.bundleRuntimePath !== null &&
-            installDiagnostics.bundleRuntimeExists === false);
-    if (installBroken) {
-        return buildBlockingResult({
-            mode: "official_chrome_persistent_extension",
-            browserPath,
-            browserVersion,
-            identityBindingState: "mismatch",
-            binding: {
-                ...binding,
-                manifestPath
-            },
-            manifestPath,
-            manifestSource: manifestResolution.manifestSource,
-            expectedOrigin,
-            allowedOrigins: manifest.allowed_origins,
-            installDiagnostics,
             failureReason: "IDENTITY_MANIFEST_MISSING"
         });
     }
@@ -689,10 +481,8 @@ export const runIdentityPreflight = async (input) => {
                 manifestPath
             },
             manifestPath,
-            manifestSource: manifestResolution.manifestSource,
             expectedOrigin,
             allowedOrigins: manifest.allowed_origins,
-            installDiagnostics,
             failureReason: "IDENTITY_NATIVE_HOST_NAME_MISMATCH"
         });
     }
@@ -707,10 +497,8 @@ export const runIdentityPreflight = async (input) => {
                 manifestPath
             },
             manifestPath,
-            manifestSource: manifestResolution.manifestSource,
             expectedOrigin,
             allowedOrigins: manifest.allowed_origins,
-            installDiagnostics,
             failureReason: "IDENTITY_ALLOWED_ORIGIN_MISSING"
         });
     }
@@ -727,10 +515,8 @@ export const runIdentityPreflight = async (input) => {
                     manifestPath
                 },
                 manifestPath,
-                manifestSource: manifestResolution.manifestSource,
                 expectedOrigin,
                 allowedOrigins: manifest.allowed_origins,
-                installDiagnostics,
                 failureReason: "IDENTITY_BINDING_MISSING"
             });
         }
@@ -745,10 +531,8 @@ export const runIdentityPreflight = async (input) => {
             manifestPath
         },
         manifestPath,
-        manifestSource: manifestResolution.manifestSource,
         expectedOrigin,
         allowedOrigins: manifest.allowed_origins,
-        installDiagnostics,
         blocking: false,
         failureReason: "IDENTITY_PREFLIGHT_PASSED"
     };

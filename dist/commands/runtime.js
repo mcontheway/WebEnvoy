@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { CliError } from "../core/errors.js";
 import { WRITE_INTERACTION_TIER, getWriteActionMatrixDecisions, isIssueScope } from "../../shared/risk-state.js";
 import { NativeMessagingBridge, NativeMessagingTransportError } from "../runtime/native-messaging/bridge.js";
@@ -6,7 +7,6 @@ import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { buildFingerprintContextForMeta, appendFingerprintContext } from "../runtime/fingerprint-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
-import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import { buildUnifiedRiskStateOutput, resolveRiskState } from "../runtime/risk-state.js";
 import { RuntimeStoreError, SQLiteRuntimeStore, resolveRuntimeStorePath } from "../runtime/store/sqlite-runtime-store.js";
 const asBoolean = (value) => value === true;
@@ -27,6 +27,7 @@ const resolveRuntimeBridge = () => {
     });
 };
 const profileRuntime = new ProfileRuntimeService();
+const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
 const deriveWriteActionDecisions = (auditRecord) => {
     const issueScope = asString(auditRecord.issue_scope);
     const actionType = asString(auditRecord.action_type);
@@ -104,19 +105,18 @@ const runtimePing = async (context) => {
     if (asBoolean(context.params.force_fail)) {
         throw new Error("forced execution failure");
     }
-    let bridge = null;
     try {
         const requestedExecutionMode = typeof context.params.requested_execution_mode === "string"
             ? context.params.requested_execution_mode
             : null;
-        const profileStore = new ProfileStore(resolveRuntimeProfileRoot(context.cwd));
+        const profileStore = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
         const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
         const bridgeParams = context.profile
             ? appendFingerprintContext(context.params, buildFingerprintContextForMeta(context.profile, profileMeta, {
                 requestedExecutionMode
             }))
             : context.params;
-        bridge = resolveRuntimeBridge();
+        const bridge = resolveRuntimeBridge();
         return await bridge.runtimePing({
             runId: context.run_id,
             profile: context.profile,
@@ -132,9 +132,6 @@ const runtimePing = async (context) => {
             });
         }
         throw error;
-    }
-    finally {
-        await bridge?.close().catch(() => undefined);
     }
 };
 const runtimeStart = async (context) => profileRuntime.start({

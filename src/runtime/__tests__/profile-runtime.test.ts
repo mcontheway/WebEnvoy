@@ -18,7 +18,6 @@ const originalBrowserVersion = process.env.WEBENVOY_BROWSER_VERSION;
 const originalPath = process.env.PATH;
 const originalLocalAppData = process.env.LOCALAPPDATA;
 const originalAppData = process.env.APPDATA;
-const originalNativeHostManifestDir = process.env.WEBENVOY_NATIVE_HOST_MANIFEST_DIR;
 const originalPlatform = process.platform;
 const PERSISTENT_EXTENSION_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -102,14 +101,12 @@ const createNativeHostManifest = async (input: {
   const dir = await mkdtemp(join(tmpdir(), "webenvoy-native-host-manifest-"));
   tempDirs.push(dir);
   const manifestPath = join(dir, `${input.nativeHostName ?? "com.webenvoy.host"}.json`);
-  const launcherPath = join(dir, "mock-webenvoy-host");
-  await writeFile(launcherPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
   await writeFile(
     manifestPath,
     `${JSON.stringify(
       {
         name: input.nativeHostName ?? "com.webenvoy.host",
-        path: launcherPath,
+        path: "/mock/webenvoy-host",
         type: "stdio",
         allowed_origins: input.allowedOrigins
       },
@@ -226,11 +223,6 @@ afterEach(async () => {
     delete process.env.APPDATA;
   } else {
     process.env.APPDATA = originalAppData;
-  }
-  if (originalNativeHostManifestDir === undefined) {
-    delete process.env.WEBENVOY_NATIVE_HOST_MANIFEST_DIR;
-  } else {
-    process.env.WEBENVOY_NATIVE_HOST_MANIFEST_DIR = originalNativeHostManifestDir;
   }
   Object.defineProperty(process, "platform", { value: originalPlatform });
   while (tempDirs.length > 0) {
@@ -422,7 +414,7 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
-  it("surfaces transient persistent extension identity hints in runtime.status for a fresh profile", async () => {
+  it("ignores transient persistent extension identity hints in runtime.status for a fresh profile", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-status-fresh-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
@@ -452,10 +444,10 @@ describe("profile-runtime identity preflight", () => {
       runtimeReadiness: "blocked",
       identityPreflight: {
         mode: "official_chrome_persistent_extension",
-        manifestPath,
         failureReason: "IDENTITY_BINDING_MISSING"
       }
     });
+    expect(status.identityPreflight).not.toHaveProperty("manifestPath", manifestPath);
   });
 
   it("keeps first runtime.start/login available when official Chrome identity is still missing", async () => {
@@ -1757,83 +1749,6 @@ describe("profile-runtime identity preflight", () => {
     expect(status.identityPreflight).toMatchObject({
       manifestPath,
       expectedOrigin: "chrome-extension://cccccccccccccccccccccccccccccccc/"
-    });
-  });
-
-  it("falls back to blocked identity diagnostics after repo-owned install manifest is removed", async () => {
-    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-install-recovery-"));
-    tempDirs.push(baseDir);
-    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
-    const profileName = "identity_repo_owned_recovery_profile";
-    const repoOwnedManifestPath = join(
-      baseDir,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "manifests",
-      "com.webenvoy.host.json"
-    );
-    await mkdir(join(baseDir, ".webenvoy", "native-host-install", "chrome", "manifests"), {
-      recursive: true
-    });
-    process.env.WEBENVOY_NATIVE_HOST_MANIFEST_DIR = join(
-      baseDir,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "manifests"
-    );
-    await writeFile(
-      repoOwnedManifestPath,
-      `${JSON.stringify(
-        {
-          name: "com.webenvoy.host",
-          allowed_origins: [`chrome-extension://${PERSISTENT_EXTENSION_ID}/`]
-        },
-        null,
-        2
-      )}\n`,
-      "utf8"
-    );
-    await seedInstalledPersistentExtension({
-      baseDir,
-      profile: profileName
-    });
-    const service = createTestService();
-
-    await expect(
-      service.start({
-        cwd: baseDir,
-        profile: profileName,
-        runId: "run-runtime-install-recovery-001",
-        params: {
-          persistent_extension_identity: {
-            extension_id: PERSISTENT_EXTENSION_ID
-          }
-        }
-      })
-    ).resolves.toMatchObject({
-      profileState: "ready",
-      identityBindingState: "bound"
-    });
-
-    await rm(repoOwnedManifestPath, { force: true });
-
-    await expect(
-      service.status({
-        cwd: baseDir,
-        profile: profileName,
-        runId: "run-runtime-install-recovery-001",
-        params: {}
-      })
-    ).resolves.toMatchObject({
-      identityBindingState: "mismatch",
-      runtimeReadiness: "blocked",
-      identityPreflight: {
-        manifestPath: repoOwnedManifestPath,
-        manifestSource: "binding",
-        failureReason: "IDENTITY_MANIFEST_MISSING"
-      }
     });
   });
 

@@ -10,7 +10,6 @@ import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
 import { appendFingerprintContext, buildFingerprintContextForMeta } from "../runtime/fingerprint-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
-import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import {
   prepareOfficialChromeRuntime
 } from "../runtime/official-chrome-runtime.js";
@@ -52,6 +51,8 @@ const XHS_LIVE_EXECUTION_MODES = new Set<XhsExecutionMode>([
   "live_read_high_risk",
   "live_write"
 ]);
+const PROFILE_ROOT_SEGMENTS = [".webenvoy", "profiles"];
+
 const asObject = (value: unknown): JsonObject | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as JsonObject)
@@ -418,7 +419,7 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
   }
 
   const bridge = resolveRuntimeBridge();
-  const profileStore = new ProfileStore(resolveRuntimeProfileRoot(context.cwd));
+  const profileStore = new ProfileStore(join(context.cwd, ...PROFILE_ROOT_SEGMENTS));
   const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
   const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
     requestedExecutionMode: gate.requestedExecutionMode
