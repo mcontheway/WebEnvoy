@@ -51,7 +51,7 @@
   - 纯研究 / spike PR
   - formal spec / design input PR
   - 不以真实 live evidence 作为关闭或放行依据的治理前置 PR
-- 同一套触发条件必须在根级规范、开发区规范、review 基线与 PR 模板之间保持一致，不允许某一处缩窄或放宽。
+- 同一套触发条件必须在根级规范、开发区规范、review 基线、guardian 常驻审查摘要与 PR 模板之间保持一致，不允许某一处缩窄或放宽。
 
 ### 2. 有效 / 无效 evidence 边界冻结
 
