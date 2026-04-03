@@ -8,6 +8,21 @@
 
 ## 核心实体
 
+### classification_scope
+
+- 职责：提供独立于作者自报 lane 的机器判定输入，让 reviewer / guardian 能先识别 formal spec 套件与治理落库目标集合，再决定 lane 与 blocker。
+- 关键字段：
+  - `spec_suite_root`
+  - `governance_scope_targets`
+- 约束：
+  - `spec_suite_root` 固定为 `docs/dev/specs/FR-0016-live-evidence-governance-gate/`。
+  - `governance_scope_targets` 固定为 FR-0016 的五个治理落库目标文件。
+  - reviewer / guardian 命中 `spec_suite_root` 时，必须按 formal spec 相关链路处理。
+  - reviewer / guardian 命中 `governance_scope_targets` 时，必须按治理落库相关链路处理。
+  - 若同一 PR 同时命中两者，必须产出 `mixed_spec_and_governance_scope`。
+- 生命周期：
+  - 作为 FR-0016 formal contract 的固定判定输入存在，不由作者在每个 PR 中自由改写。
+
 ### gate_applicability
 
 - 职责：描述当前 PR 是否落入真实 live evidence 专项门禁，以及 `N/A` 是否允许出现。
@@ -19,8 +34,8 @@
   - `n_a_allowed`
 - 约束：
   - `review_lane` 必须显式填写，枚举为 `general_pr`、`formal_spec_review_pr`、`governance_landing_pr`。
-  - `review_lane=governance_landing_pr` 时，`governance_scope_targets` 必须显式列出 FR-0016 冻结的五个治理落库目标文件；其他 lane 必须为空数组。
-  - reviewer / guardian 若发现 PR 实际变更命中上述任一冻结目标文件，必须按 `governance_landing_pr` 处理，不得被自报 lane 绕过。
+  - `review_lane=governance_landing_pr` 时，`governance_scope_targets` 必须显式列出 `classification_scope` 冻结的五个治理落库目标文件；其他 lane 必须为空数组。
+  - reviewer / guardian 若发现 PR 实际变更命中 `classification_scope` 冻结目标，必须按对应 lane 处理，不得被自报 lane 绕过。
   - `in_scope=true` 时，`trigger_reasons` 必须非空，且 `n_a_allowed=false`。
   - `in_scope=false` 时，`trigger_reasons=[]`，且 `n_a_allowed=true`。
   - 只有在 PR 不以真实 live evidence 作为 issue 关闭、完成判定或 merge 放行依据时，才允许 `in_scope=false`；纯文档、纯研究 / spike、formal spec / design input 不是无条件豁免项。
@@ -75,7 +90,7 @@
   - `blocking_reasons` 非空时，`status=blocked`。
   - `status=blocked` 时，`closing_semantics=refs_only` 且 `merge_ready=false`。
   - `status=ready` 时，`merge_ready=true`，且 `closing_semantics` 可按普通 Issue 闭环语义选择 `refs_only` 或 `fixes_allowed`；live evidence 专项门禁只解除“因证据不足而不得使用 `Fixes`”这一层限制，不强制要求作者必须改成 `Fixes`。
-  - `status=not_applicable` 时，`blocking_reasons=[]` 且 `gate_applicability.in_scope=false`，`merge_ready=true`；此时 `closing_semantics` 可按普通 Issue 闭环语义选择 `n_a`、`refs_only` 或 `fixes_allowed`，但 `review_lane=formal_spec_review_pr` 时不得使用 `fixes_allowed`。
+  - `status=not_applicable` 时，`blocking_reasons=[]` 且 `gate_applicability.in_scope=false`，`merge_ready=true`；此时 `closing_semantics` 可按普通 Issue 闭环语义选择 `n_a`、`refs_only` 或 `fixes_allowed`，但 `review_lane=formal_spec_review_pr` 时必须为 `refs_only`。
   - `merge_ready=true` 只表示 live evidence 专项门禁自身不阻断，不替代普通 review / GitHub checks / guardian 总体合并门禁。
   - 只有 `review_lane=governance_landing_pr` 且 formal spec review 未通过时，才必须包含 `spec_review_not_completed`，且 `status=blocked`。
   - 若同一 PR 同时改动 FR-0016 formal spec 套件与五个治理落库目标文件，必须包含 `mixed_spec_and_governance_scope`，且 `status=blocked`。

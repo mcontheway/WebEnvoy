@@ -54,6 +54,7 @@
   - `spec.md`、`plan.md`、`TODO.md` 已补齐
   - 高风险治理套件已补齐 `contracts/`、`data-model.md`、`research.md`、`risks.md`
 3. 规约一致性检查：
+  - `classification_scope` 足以让 reviewer / guardian 在不信任作者自报 lane 的前提下，先判定 spec 套件命中与治理落库目标命中
   - `spec.md`、`contracts/` 与 `risks.md` 对专项门禁触发条件保持同一集合
   - `Fixes` / `Refs` 与 `merge-ready` 的 live evidence 条件保持一致
   - `review_lane` 足以机器化地区分 `formal_spec_review_pr`、`governance_landing_pr` 与 `general_pr`

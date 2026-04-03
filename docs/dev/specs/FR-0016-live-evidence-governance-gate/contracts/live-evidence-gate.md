@@ -13,7 +13,37 @@
 
 ## 共享对象
 
-当 PR 落入专项门禁，或其 `review_lane` 属于 `formal_spec_review_pr` / `governance_landing_pr` 时，门禁共享输出至少包含以下对象：
+FR-0016 的机器判定输入至少包含以下对象：
+
+1. `classification_scope`
+2. `gate_applicability`
+3. `gate_verdict`
+
+`classification_scope` 用于在不信任作者自报 lane 的前提下，先判定 PR 是否命中 formal spec 套件或治理落库目标集合。
+
+```json
+{
+  "classification_scope": {
+    "spec_suite_root": "docs/dev/specs/FR-0016-live-evidence-governance-gate/",
+    "governance_scope_targets": [
+      "AGENTS.md",
+      "docs/dev/AGENTS.md",
+      "code_review.md",
+      "docs/dev/review/guardian-review-addendum.md",
+      ".github/PULL_REQUEST_TEMPLATE.md"
+    ]
+  }
+}
+```
+
+约束：
+
+1. `classification_scope` 是 FR-0016 共享 contract 的固定判定输入，不依赖作者自报 `review_lane`。
+2. reviewer / guardian 若发现 PR 实际变更命中 `spec_suite_root`，必须先视为 formal spec 相关链路。
+3. reviewer / guardian 若发现 PR 实际变更命中 `governance_scope_targets` 中任一目标文件，必须先视为治理落库相关链路。
+4. 若同一 PR 同时命中 `spec_suite_root` 与 `governance_scope_targets`，必须产出 `mixed_spec_and_governance_scope`，并阻断合并。
+
+当 PR 落入专项门禁，或其 `review_lane` 属于 `formal_spec_review_pr` / `governance_landing_pr` 时，门禁共享输出还至少包含以下对象：
 
 1. `gate_applicability`
 2. `gate_verdict`
@@ -83,12 +113,13 @@
 
 1. `review_lane` 必须显式填写，不得依赖 PR 标题、路径或人工上下文推断。
 2. `review_lane=governance_landing_pr` 时，`governance_scope_targets` 必须非空，且只能由上述五个冻结目标文件组成；其他 lane 必须填写空数组。
-3. 若 PR 实际变更命中 `governance_scope_targets` 中任一冻结目标文件，reviewer / guardian 必须按 `governance_landing_pr` 处理，不得被作者自报的其他 lane 覆盖。
-4. `in_scope=true` 时，`trigger_reasons` 必须非空。
-5. `in_scope=true` 时，`n_a_allowed` 必须为 `false`。
-6. `in_scope=false` 时，`trigger_reasons` 必须为空数组。
-7. `in_scope=false` 时，`n_a_allowed` 必须为 `true`，以便 formal spec / 治理前置 / 纯文档 / 纯研究 PR 可以稳定填写 `N/A`，避免被默认值误挡。
-8. 只有在 PR 明确不以真实 live evidence 作为 issue 关闭、完成判定或 merge 放行依据时，才允许 `in_scope=false`；即使 PR 是纯文档、纯研究 / spike 或 formal spec / design input，只要命中任一触发原因，也必须设为 `in_scope=true`。
+3. 若 PR 实际变更命中 `classification_scope.governance_scope_targets` 中任一冻结目标文件，reviewer / guardian 必须按 `governance_landing_pr` 处理，不得被作者自报的其他 lane 覆盖。
+4. 若 PR 实际变更命中 `classification_scope.spec_suite_root`，reviewer / guardian 必须按 `formal_spec_review_pr` 处理，除非同时命中治理落库目标集合而触发混线阻断。
+5. `in_scope=true` 时，`trigger_reasons` 必须非空。
+6. `in_scope=true` 时，`n_a_allowed` 必须为 `false`。
+7. `in_scope=false` 时，`trigger_reasons` 必须为空数组。
+8. `in_scope=false` 时，`n_a_allowed` 必须为 `true`，以便 formal spec / 治理前置 / 纯文档 / 纯研究 PR 可以稳定填写 `N/A`，避免被默认值误挡。
+9. 只有在 PR 明确不以真实 live evidence 作为 issue 关闭、完成判定或 merge 放行依据时，才允许 `in_scope=false`；即使 PR 是纯文档、纯研究 / spike 或 formal spec / design input，只要命中任一触发原因，也必须设为 `in_scope=true`。
 
 ## live_evidence_record
 
@@ -194,10 +225,10 @@
 1. 只要 `blocking_reasons` 非空，`status` 就必须为 `blocked`；不得因为 `gate_applicability.in_scope=false` 而把 `spec_review_not_completed` 等阻断原因降格为 `not_applicable`。
 2. `status=blocked` 时，`closing_semantics` 必须为 `refs_only`，且 `merge_ready=false`。
 3. `status=ready` 时，`merge_ready=true`，且 `closing_semantics` 可按普通 Issue 闭环语义选择 `refs_only` 或 `fixes_allowed`；live evidence 专项门禁只负责解除“因证据不足而不得使用 `Fixes`”这一层限制，不强制要求作者必须改成 `Fixes`。
-4. `status=not_applicable` 时，`blocking_reasons` 必须为空，`gate_applicability.in_scope=false`，且 `merge_ready=true`；此时 `closing_semantics` 默认允许为 `n_a`、`refs_only` 或 `fixes_allowed`，但若 `gate_applicability.review_lane=formal_spec_review_pr`，则只允许为 `n_a` 或 `refs_only`，不得使用 `fixes_allowed` 提前关闭治理落库 issue。
+4. `status=not_applicable` 时，`blocking_reasons` 必须为空，`gate_applicability.in_scope=false`，且 `merge_ready=true`；此时 `closing_semantics` 默认允许为 `n_a`、`refs_only` 或 `fixes_allowed`，但若 `gate_applicability.review_lane=formal_spec_review_pr`，则只允许为 `refs_only`，不得使用 `n_a` 或 `fixes_allowed`。
 5. `merge_ready=true` 只表示 live evidence 专项门禁自身不阻断，不替代普通 review / GitHub checks / guardian 总体合并门禁。
 6. 只有当 `gate_applicability.review_lane=governance_landing_pr` 且 formal spec review 未通过时，才必须在 `blocking_reasons` 中包含 `spec_review_not_completed`，并产出 `status=blocked`。
-7. 若同一 PR 同时改动 `docs/dev/specs/FR-0016-live-evidence-governance-gate/**` 与 `governance_scope_targets` 中任一治理落库目标文件，必须在 `blocking_reasons` 中包含 `mixed_spec_and_governance_scope`，并产出 `status=blocked`。
+7. 若同一 PR 同时改动 `classification_scope.spec_suite_root` 与 `classification_scope.governance_scope_targets` 中任一治理落库目标文件，必须在 `blocking_reasons` 中包含 `mixed_spec_and_governance_scope`，并产出 `status=blocked`。
 
 ## 兼容性约束
 

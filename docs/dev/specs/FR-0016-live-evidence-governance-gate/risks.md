@@ -9,6 +9,7 @@
   - `gate_applicability` 被错误扩成所有 reviewed PR 的 repo-wide 必填元数据
   - `governance_landing_pr` 只靠作者自报 `review_lane`，没有冻结可校验的目标文件集合
   - formal spec review PR 与治理落库目标文件重新混线，但 contract 没有结构化 blocker
+  - lane 判定仍要先相信作者自报 `review_lane`，没有独立的 classification 输入
 - 影响：
   - 作者、reviewer 与 guardian 会基于不同前提做判断
   - live evidence 门禁再次出现可绕过空间
@@ -19,6 +20,7 @@
   - formal spec 明确限制 `gate_applicability` 只作用于专项门禁 PR、formal spec review PR 与 governance landing PR
   - formal contract 中显式冻结 `governance_scope_targets`，并要求 reviewer / guardian 用其校验治理落库 lane
   - formal contract 中显式冻结 `mixed_spec_and_governance_scope` 与 formal spec lane 的 `Fixes` 禁止规则
+  - formal contract 中显式冻结 `classification_scope`，并要求先消费该输入再判 lane
   - 后续治理落库 PR 必须逐项对照同一集合，并同步更新 `docs/dev/review/guardian-review-addendum.md`
 - 回滚：
   - 阻断治理落库 PR，回到 formal spec 层修正 shared contract
@@ -116,7 +118,7 @@
 - `gate_applicability.n_a_allowed=true`
 - `blocking_reasons=[]`
 - `merge_ready=true`
-- `closing_semantics` 可按普通 Issue 闭环语义选择 `n_a`、`refs_only` 或 `fixes_allowed`，但 `review_lane=formal_spec_review_pr` 时不得使用 `fixes_allowed`
+- `closing_semantics` 可按普通 Issue 闭环语义选择 `n_a`、`refs_only` 或 `fixes_allowed`，但 `review_lane=formal_spec_review_pr` 时必须为 `refs_only`
 - `live_evidence_record` 允许省略或置为 `null`
 - PR 明确不命中任一 `trigger_reasons`，且不以真实 live evidence 作为 issue 关闭、完成判定或 merge 放行依据；formal spec / 治理前置 / 纯文档 / 纯研究 PR 只是典型非适用场景，不是唯一入口
 - 一旦命中任一 `trigger_reasons`，就必须回到 `in_scope=true`，不得仅凭文档 / 研究 / 规约属性判为 `not_applicable`

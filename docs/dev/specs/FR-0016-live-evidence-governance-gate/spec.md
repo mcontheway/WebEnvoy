@@ -74,6 +74,9 @@
   - FR-0016 的 formal spec review PR
   - 基于 FR-0016 结论推进的 governance landing PR
 - 其余明确不在上述范围内的 PR，不要求为了 FR-0016 额外携带 `gate_applicability` 元数据。
+- shared contract 还必须冻结独立于作者自报 lane 的 `classification_scope` 判定输入，至少覆盖：
+  - `spec_suite_root`
+  - `governance_scope_targets`
 - 对落入专项门禁的 PR，描述中还必须提供结构化 `live_evidence_record` 区块。
 - `gate_applicability` 必须至少包含：
   - `review_lane`
@@ -100,6 +103,7 @@
   - `blocker_level`
 - 字段命名必须与 `contracts/live-evidence-gate.md` 的 `live_evidence_record` 保持一致；PR 模板可在展示文案中补充中文说明，但不能改出另一套 schema。
 - `gate_applicability` 的字段命名必须与 `contracts/live-evidence-gate.md` 保持一致；即使 `live_evidence_record` 整块为 `N/A`，formal spec review PR、governance landing PR 与其他落入专项门禁的 PR 也仍必须提供 `review_lane`、`in_scope`、`trigger_reasons` 与 `n_a_allowed`，供 reviewer / guardian 机器化判定。
+- `classification_scope` 必须独立于作者自报 `review_lane` 存在，用于让 reviewer / guardian 先依据冻结的目标集合判定“是否命中 FR-0016 formal spec 套件”与“是否命中治理落库目标文件”，再决定 lane 与 blocker。
 - 对 `governance_landing_pr`，`gate_applicability` 还必须显式给出 `governance_scope_targets`，并与 FR-0016 冻结的五处治理落库目标文件保持一致；reviewer / guardian 若发现实际变更命中这些目标文件，就必须按 `governance_landing_pr` 处理，不得被自报 `general_pr` 绕过。
 - `evidence_collected_at` 必须能标识当前 latest head 上这次 fresh rerun 的采集时间；不得继续复用同一 head 的历史 artifact 时间戳来冒充新鲜复验。
 - `run_id` 与 `artifact_identity` 必须使用 provider-scoped 的稳定标识，能够让 reviewer / guardian 机器化地区分“当前 latest head 的 fresh rerun”与“同一 head 的历史 artifact”。
@@ -156,7 +160,7 @@ When 作者填写 PR 模板
 Then `live_evidence_record` 区块可以整体填写 `N/A`
 And `gate_applicability` 仍必须以结构化元数据显式提供
 And reviewer / guardian 不得错误要求其补 runtime live evidence
-And 该 PR 不得使用 `Fixes #...` 提前关闭治理落库 issue
+And 该 PR 必须继续使用 `Refs #...`，不得使用 `Fixes #...` 或省略 issue 引用
 
 ### 场景 3：stub 或控制面信号不能被当作真实闭环证据
 
