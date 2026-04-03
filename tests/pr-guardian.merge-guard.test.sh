@@ -2958,6 +2958,21 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":false'
 }
 
+test_normalize_native_review_result_accepts_reviewed_diff_preface_before_safe_summary() {
+  setup_case_dir "normalize-native-text-reviewed-diff-safe-preface"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+Reviewed the diff against origin/main, and checked the touched merge-guard logic against the relevant guardian baselines. No blocking issues found.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
 test_normalize_native_review_result_fails_closed_for_chinese_incomplete_evidence_prefix() {
   setup_case_dir "normalize-native-text-chinese-incomplete-evidence-prefix"
 
@@ -4026,6 +4041,7 @@ main() {
   test_normalize_native_review_result_accepts_live_plain_text_approve_summary
   test_normalize_native_review_result_accepts_review_context_preface_before_safe_summary
   test_normalize_native_review_result_fails_closed_for_review_context_with_incomplete_evidence
+  test_normalize_native_review_result_accepts_reviewed_diff_preface_before_safe_summary
   test_normalize_native_review_result_fails_closed_for_chinese_incomplete_evidence_prefix
   test_normalize_native_review_result_fails_closed_for_chinese_review_context_with_unfinished_convergence
   test_normalize_native_review_result_accepts_polite_plain_text_approve_phrase
