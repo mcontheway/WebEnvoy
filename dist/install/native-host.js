@@ -272,9 +272,12 @@ const buildLauncherScript = (input) => {
     const profileRootExport = typeof input.profileRoot === "string" && input.profileRoot.length > 0
         ? `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT=${quoteShellArgForScript(input.profileRoot)}\n`
         : "";
+    const legacyProfileDirExport = typeof input.legacyProfileDir === "string" && input.legacyProfileDir.length > 0
+        ? `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR=${quoteShellArgForScript(input.legacyProfileDir)}\n`
+        : "";
     return `#!/usr/bin/env bash
 set -euo pipefail
-${profileRootExport}exec ${argv} "$@"
+${profileRootExport}${legacyProfileDirExport}exec ${argv} "$@"
 `;
 };
 const writeManagedInstallMetadata = async (input) => {
@@ -421,7 +424,8 @@ export const installNativeHost = async (input) => {
     await writeFile(resolvedPaths.launcherPath, buildLauncherScript({
         command: "runtime.install",
         hostCommand,
-        profileRoot
+        profileRoot,
+        legacyProfileDir: hostCommandSource === "explicit" ? profileDir : undefined
     }), "utf8");
     await writeManagedInstallMetadata({
         channelRoot: resolvedPaths.channelRoot,

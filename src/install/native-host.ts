@@ -355,6 +355,7 @@ const buildLauncherScript = (input: {
   command: "runtime.install" | "runtime.uninstall";
   hostCommand: string;
   profileRoot?: string;
+  legacyProfileDir?: string;
 }): string => {
   const argv = tokenizeHostCommand(input.command, input.hostCommand)
     .map((token) => quoteShellArgForScript(token))
@@ -363,10 +364,14 @@ const buildLauncherScript = (input: {
     typeof input.profileRoot === "string" && input.profileRoot.length > 0
       ? `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT=${quoteShellArgForScript(input.profileRoot)}\n`
       : "";
+  const legacyProfileDirExport =
+    typeof input.legacyProfileDir === "string" && input.legacyProfileDir.length > 0
+      ? `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR=${quoteShellArgForScript(input.legacyProfileDir)}\n`
+      : "";
 
   return `#!/usr/bin/env bash
 set -euo pipefail
-${profileRootExport}exec ${argv} "$@"
+${profileRootExport}${legacyProfileDirExport}exec ${argv} "$@"
 `;
 };
 
@@ -585,7 +590,8 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
     buildLauncherScript({
       command: "runtime.install",
       hostCommand,
-      profileRoot
+      profileRoot,
+      legacyProfileDir: hostCommandSource === "explicit" ? profileDir : undefined
     }),
     "utf8"
   );
