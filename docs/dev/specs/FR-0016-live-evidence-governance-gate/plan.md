@@ -19,6 +19,7 @@
 
 - 产出：
   - `contracts/live-evidence-gate.md`
+  - `data-model.md`
   - `risks.md`
 - 目标：
   - 冻结最低 live evidence 元数据契约。
