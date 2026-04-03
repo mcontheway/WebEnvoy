@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -38,6 +38,9 @@ const withRepoOwnedNativeHost = (): Record<string, string> => ({
 });
 const PROFILE_MODE_ROOT_PREFERRED = "profile_root_preferred";
 const tempDirs: string[] = [];
+
+const toMacVarAliasPath = (input: string): string =>
+  input.startsWith("/private/var/") ? input.slice("/private".length) : input;
 
 afterEach(async () => {
   while (tempDirs.length > 0) {
@@ -635,8 +638,9 @@ describe("native messaging contract", () => {
 
   it("rejects profile-mismatched opens when dual-env root-preferred launchers are pinned to an install profile", async () => {
     const profileRoot = await mkdtemp(path.join(tmpdir(), "wv-nmr-pin-"));
+    const canonicalProfileRoot = await realpath(profileRoot);
     const pinnedProfile = "p";
-    const legacyProfileDir = path.join(profileRoot, pinnedProfile);
+    const legacyProfileDir = path.join(toMacVarAliasPath(canonicalProfileRoot), pinnedProfile);
     await rm(legacyProfileDir, { recursive: true, force: true });
     tempDirs.push(profileRoot);
     const child = spawn(process.execPath, [repoOwnedNativeHostPath], {
@@ -644,7 +648,7 @@ describe("native messaging contract", () => {
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
-        WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT: profileRoot,
+        WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT: canonicalProfileRoot,
         WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR: legacyProfileDir,
         WEBENVOY_NATIVE_BRIDGE_PROFILE_MODE: PROFILE_MODE_ROOT_PREFERRED
       }

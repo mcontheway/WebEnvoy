@@ -432,6 +432,13 @@ const isPathInside = (baseDir: string, targetPath: string): boolean => {
 const normalizePathForOutput = (input: string | null | undefined): string | null =>
   typeof input === "string" ? normalizePathForBoundaryCheck(input) : null;
 
+const canonicalizeProfileDirForLauncher = (profileRoot: string, profileDir: string): string => {
+  const normalizedRoot = normalizePathForBoundaryCheck(profileRoot);
+  const normalizedProfileDir = normalizePathForBoundaryCheck(profileDir);
+  const profileKey = relative(normalizedRoot, normalizedProfileDir);
+  return profileKey.length > 0 ? resolve(profileRoot, profileKey) : resolve(profileRoot);
+};
+
 interface ResolveInstallPathsInput {
   command: "runtime.install" | "runtime.uninstall";
   cwd: string;
@@ -596,7 +603,10 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
   const nativeBridgeLauncherContract = usesExplicitProfileContract
     ? "dual_env_launcher_only"
     : "profile_root_only";
-  const legacyProfileDir = usesExplicitProfileContract ? profileDir : undefined;
+  const legacyProfileDir =
+    usesExplicitProfileContract && profileDir
+      ? canonicalizeProfileDirForLauncher(profileRoot, profileDir)
+      : undefined;
   const profileMode = usesExplicitProfileContract ? PROFILE_MODE_ROOT_PREFERRED : undefined;
   await writeFile(
     resolvedPaths.launcherPath,

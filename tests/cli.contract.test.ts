@@ -210,6 +210,12 @@ const PROFILE_MODE_ROOT_PREFERRED = "profile_root_preferred";
 
 const quoteLauncherExportValue = (value: string): string => value.replace(/'/g, `'\"'\"'`);
 
+const resolveCanonicalExpectedProfileDir = async (runtimeCwd: string, profileDir: string): Promise<string> => {
+  const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
+  const requestedProfileRoot = path.join(runtimeCwd, ".webenvoy", "profiles");
+  return path.join(expectedProfileRoot, path.relative(requestedProfileRoot, path.resolve(profileDir)));
+};
+
 const expectProfileRootOnlyLauncherContract = async (input: {
   launcherPath: string;
   runtimeCwd: string;
@@ -231,11 +237,12 @@ const expectDualEnvRootPreferredLauncherContract = async (input: {
 }): Promise<string> => {
   const launcherRaw = await readFile(input.launcherPath, "utf8");
   const expectedProfileRoot = path.join(await realpath(input.runtimeCwd), ".webenvoy", "profiles");
+  const expectedProfileDir = await resolveCanonicalExpectedProfileDir(input.runtimeCwd, input.profileDir);
   expect(launcherRaw).toContain(
     `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${quoteLauncherExportValue(expectedProfileRoot)}'`
   );
   expect(launcherRaw).toContain(
-    `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR='${quoteLauncherExportValue(input.profileDir)}'`
+    `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR='${quoteLauncherExportValue(expectedProfileDir)}'`
   );
   expect(launcherRaw).toContain(
     `export WEBENVOY_NATIVE_BRIDGE_PROFILE_MODE='${PROFILE_MODE_ROOT_PREFERRED}'`
@@ -3671,7 +3678,12 @@ process.stdin.on("data", (chunk) => {
     expect(launch.stderr).toBe("");
     expect(JSON.parse(await readFile(envCapturePath, "utf8"))).toEqual({
       profileRoot: path.join(await realpath(runtimeCwd), ".webenvoy", "profiles"),
-      legacyProfileDir: profileDir,
+      legacyProfileDir: path.join(
+        await realpath(runtimeCwd),
+        ".webenvoy",
+        "profiles",
+        "xhs_explicit_legacy_probe"
+      ),
       profileMode: PROFILE_MODE_ROOT_PREFERRED
     });
   });
@@ -3775,7 +3787,12 @@ process.stdin.on("data", (chunk) => {
     expect(launch.stderr).toBe("");
     expect(JSON.parse(await readFile(envCapturePath, "utf8"))).toEqual({
       profileRoot: path.join(await realpath(runtimeCwd), ".webenvoy", "profiles"),
-      legacyProfileDir: profileDir,
+      legacyProfileDir: path.join(
+        await realpath(runtimeCwd),
+        ".webenvoy",
+        "profiles",
+        "xhs_explicit_legacy_probe"
+      ),
       profileMode: PROFILE_MODE_ROOT_PREFERRED
     });
   });
@@ -3922,7 +3939,7 @@ process.stdin.on("data", (chunk) => {
     expect(launch.stderr).toBe("");
     expect(JSON.parse(await readFile(envCapturePath, "utf8"))).toEqual({
       profileRoot: path.join(await realpath(runtimeCwd), ".webenvoy", "profiles"),
-      legacyProfileDir: profileDir,
+      legacyProfileDir: await resolveCanonicalExpectedProfileDir(runtimeCwd, profileDir),
       profileMode: PROFILE_MODE_ROOT_PREFERRED
     });
   });
@@ -4015,7 +4032,7 @@ process.stdin.on("data", (chunk) => {
     expect(launch.stderr).toBe("");
     expect(JSON.parse(await readFile(envCapturePath, "utf8"))).toEqual({
       profileRoot: path.join(await realpath(runtimeCwd), ".webenvoy", "profiles"),
-      legacyProfileDir: profileDir,
+      legacyProfileDir: await resolveCanonicalExpectedProfileDir(runtimeCwd, profileDir),
       profileMode: PROFILE_MODE_ROOT_PREFERRED
     });
   });

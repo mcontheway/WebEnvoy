@@ -23,9 +23,13 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : {};
 const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
+const normalizePathForRouting = (input) => {
+    const normalized = resolve(input);
+    return normalized.startsWith("/private/var/") ? normalized.slice("/private".length) : normalized;
+};
 const isPathInside = (baseDir, targetPath) => {
-    const normalizedBase = resolve(baseDir);
-    const normalizedTarget = resolve(targetPath);
+    const normalizedBase = normalizePathForRouting(baseDir);
+    const normalizedTarget = normalizePathForRouting(targetPath);
     const rel = relative(normalizedBase, normalizedTarget);
     return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 };
@@ -37,15 +41,18 @@ const resolvePinnedExplicitProfile = () => {
     }
     const profileRoot = resolve(PROFILE_ROOT);
     const profileDir = resolve(LEGACY_PROFILE_DIR);
+    const normalizedProfileRoot = normalizePathForRouting(profileRoot);
+    const normalizedProfileDir = normalizePathForRouting(profileDir);
     if (!isPathInside(profileRoot, profileDir)) {
         return null;
     }
-    const profileKey = relative(profileRoot, profileDir);
+    const profileKey = relative(normalizedProfileRoot, normalizedProfileDir);
     if (profileKey.length === 0 || profileKey.startsWith("..") || isAbsolute(profileKey)) {
         return null;
     }
     return {
         profileDir,
+        normalizedProfileDir,
         profileKey
     };
 };
@@ -59,7 +66,8 @@ const resolveProfileRootSocketTarget = (request) => {
             if (!isPathInside(profileRoot, profileDir)) {
                 throw new Error("native bridge profile escapes controlled root");
             }
-            if (pinnedExplicitProfile && profileDir !== pinnedExplicitProfile.profileDir) {
+            if (pinnedExplicitProfile &&
+                normalizePathForRouting(profileDir) !== pinnedExplicitProfile.normalizedProfileDir) {
                 throw new Error(`native bridge explicit launcher is pinned to profile ${pinnedExplicitProfile.profileKey}`);
             }
             return {

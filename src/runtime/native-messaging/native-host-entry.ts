@@ -41,9 +41,14 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
 
+const normalizePathForRouting = (input: string): string => {
+  const normalized = resolve(input);
+  return normalized.startsWith("/private/var/") ? normalized.slice("/private".length) : normalized;
+};
+
 const isPathInside = (baseDir: string, targetPath: string): boolean => {
-  const normalizedBase = resolve(baseDir);
-  const normalizedTarget = resolve(targetPath);
+  const normalizedBase = normalizePathForRouting(baseDir);
+  const normalizedTarget = normalizePathForRouting(targetPath);
   const rel = relative(normalizedBase, normalizedTarget);
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 };
@@ -54,24 +59,31 @@ const usesRootPreferredDualEnvRouting = (): boolean =>
 const usesLegacyProfileDirRouting = (): boolean =>
   LEGACY_PROFILE_DIR.length > 0 && !usesRootPreferredDualEnvRouting();
 
-const resolvePinnedExplicitProfile = (): { profileDir: string; profileKey: string } | null => {
+const resolvePinnedExplicitProfile = (): {
+  profileDir: string;
+  normalizedProfileDir: string;
+  profileKey: string;
+} | null => {
   if (!usesRootPreferredDualEnvRouting() || LEGACY_PROFILE_DIR.length === 0) {
     return null;
   }
 
   const profileRoot = resolve(PROFILE_ROOT);
   const profileDir = resolve(LEGACY_PROFILE_DIR);
+  const normalizedProfileRoot = normalizePathForRouting(profileRoot);
+  const normalizedProfileDir = normalizePathForRouting(profileDir);
   if (!isPathInside(profileRoot, profileDir)) {
     return null;
   }
 
-  const profileKey = relative(profileRoot, profileDir);
+  const profileKey = relative(normalizedProfileRoot, normalizedProfileDir);
   if (profileKey.length === 0 || profileKey.startsWith("..") || isAbsolute(profileKey)) {
     return null;
   }
 
   return {
     profileDir,
+    normalizedProfileDir,
     profileKey
   };
 };
@@ -89,7 +101,10 @@ const resolveProfileRootSocketTarget = (
       if (!isPathInside(profileRoot, profileDir)) {
         throw new Error("native bridge profile escapes controlled root");
       }
-      if (pinnedExplicitProfile && profileDir !== pinnedExplicitProfile.profileDir) {
+      if (
+        pinnedExplicitProfile &&
+        normalizePathForRouting(profileDir) !== pinnedExplicitProfile.normalizedProfileDir
+      ) {
         throw new Error(
           `native bridge explicit launcher is pinned to profile ${pinnedExplicitProfile.profileKey}`
         );
