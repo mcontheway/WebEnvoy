@@ -14,6 +14,8 @@ const DEFAULT_SESSION_ID = "nm-session-001";
 const RELAY_PATH = "host>background>content-script>background>host";
 const PROFILE_ROOT = process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT?.trim() ?? "";
 const LEGACY_PROFILE_DIR = process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR?.trim() ?? "";
+const PROFILE_MODE = process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_MODE?.trim() ?? "";
+const PROFILE_MODE_ROOT_PREFERRED = "profile_root_preferred";
 
 let nativeReadBuffer = Buffer.alloc(0);
 let sessionId = DEFAULT_SESSION_ID;
@@ -39,47 +41,113 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
 
+const normalizePathForRouting = (input: string): string => {
+  const normalized = resolve(input);
+  return normalized.startsWith("/private/var/") ? normalized.slice("/private".length) : normalized;
+};
+
 const isPathInside = (baseDir: string, targetPath: string): boolean => {
-  const normalizedBase = resolve(baseDir);
-  const normalizedTarget = resolve(targetPath);
+  const normalizedBase = normalizePathForRouting(baseDir);
+  const normalizedTarget = normalizePathForRouting(targetPath);
   const rel = relative(normalizedBase, normalizedTarget);
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 };
 
-const resolveSocketTarget = (
-  request: Pick<BridgeRequestEnvelope, "profile">
-): { profileDir: string; socketPath: string } | null => {
-  if (LEGACY_PROFILE_DIR) {
-    const profileDir = resolve(LEGACY_PROFILE_DIR);
-    return {
-      profileDir,
-      socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
-    };
-  }
-  if (!PROFILE_ROOT) {
+const usesRootPreferredDualEnvRouting = (): boolean =>
+  PROFILE_MODE === PROFILE_MODE_ROOT_PREFERRED && PROFILE_ROOT.length > 0;
+
+const usesLegacyProfileDirRouting = (): boolean =>
+  LEGACY_PROFILE_DIR.length > 0 && !usesRootPreferredDualEnvRouting();
+
+const resolvePinnedExplicitProfile = (): {
+  profileDir: string;
+  normalizedProfileDir: string;
+  profileKey: string;
+} | null => {
+  if (!usesRootPreferredDualEnvRouting() || LEGACY_PROFILE_DIR.length === 0) {
     return null;
   }
-  const profileRoot = resolve(PROFILE_ROOT);
+
+  const profileRoot = normalizePathForRouting(PROFILE_ROOT);
+  const profileDir = normalizePathForRouting(LEGACY_PROFILE_DIR);
+  const normalizedProfileRoot = profileRoot;
+  const normalizedProfileDir = profileDir;
+  if (!isPathInside(profileRoot, profileDir)) {
+    return null;
+  }
+
+  const profileKey = relative(normalizedProfileRoot, normalizedProfileDir);
+  if (profileKey.length === 0 || profileKey.startsWith("..") || isAbsolute(profileKey)) {
+    return null;
+  }
+
+  return {
+    profileDir,
+    normalizedProfileDir,
+    profileKey
+  };
+};
+
+const resolveProfileRootSocketTarget = (
+  request: Pick<BridgeRequestEnvelope, "profile">
+): { profileDir: string; socketPath: string } | null => {
   const profileName = asString(request.profile);
-  if (!profileName) {
+
+  if (PROFILE_ROOT) {
+    const profileRoot = normalizePathForRouting(PROFILE_ROOT);
+    const pinnedExplicitProfile = resolvePinnedExplicitProfile();
+    if (profileName) {
+      const profileDir = resolve(profileRoot, profileName);
+      if (!isPathInside(profileRoot, profileDir)) {
+        throw new Error("native bridge profile escapes controlled root");
+      }
+      if (
+        pinnedExplicitProfile &&
+        normalizePathForRouting(profileDir) !== pinnedExplicitProfile.normalizedProfileDir
+      ) {
+        throw new Error(
+          `native bridge explicit launcher is pinned to profile ${pinnedExplicitProfile.profileKey}`
+        );
+      }
+      return {
+        profileDir,
+        socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
+      };
+    }
     return {
       profileDir: profileRoot,
       socketPath: join(profileRoot, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
     };
   }
-  const profileDir = resolve(profileRoot, profileName);
-  if (!isPathInside(profileRoot, profileDir)) {
-    throw new Error("native bridge profile escapes controlled root");
+
+  return null;
+};
+
+const resolveSocketTarget = (
+  request: Pick<BridgeRequestEnvelope, "profile">
+): { profileDir: string; socketPath: string } | null => {
+  if (usesRootPreferredDualEnvRouting()) {
+    return resolveProfileRootSocketTarget(request);
   }
-  return {
-    profileDir,
-    socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
-  };
+
+  if (LEGACY_PROFILE_DIR) {
+    const profileDir = normalizePathForRouting(LEGACY_PROFILE_DIR);
+    return {
+      profileDir,
+      socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
+    };
+  }
+
+  return resolveProfileRootSocketTarget(request);
 };
 
 const shouldPromoteToProfileSocket = (
   request: Pick<BridgeRequestEnvelope, "profile">
-): boolean => typeof request.profile === "string" && request.profile.trim().length > 0 && !LEGACY_PROFILE_DIR && !!PROFILE_ROOT;
+): boolean =>
+  !!PROFILE_ROOT &&
+  !usesLegacyProfileDirRouting() &&
+  typeof request.profile === "string" &&
+  request.profile.trim().length > 0;
 
 const isBridgeResponse = (value: unknown): value is BridgeResponseEnvelope => {
   const record = asRecord(value);
@@ -146,32 +214,12 @@ const buildSuccessEnvelope = (
   error: null
 });
 
-const buildStubForwardPayload = (request: BridgeRequestEnvelope): Record<string, unknown> => {
-  const command = asString(request.params.command) ?? "runtime.ping";
-  const runId = asString(request.params.run_id) ?? request.id;
-  const cwd = asString(request.params.cwd) ?? "";
-  const commandParams = asRecord(request.params.command_params);
-  const runtimeContextId = asString(commandParams.runtime_context_id) ?? "runtime-context-001";
-
-  if (command === "runtime.bootstrap") {
-    return {
-      result: {
-        version: asString(commandParams.version) ?? "v1",
-        run_id: runId,
-        runtime_context_id: runtimeContextId,
-        profile: request.profile,
-        status: "ready"
-      }
-    };
-  }
-
-  return {
-    message: "pong",
-    run_id: runId,
-    profile: request.profile ?? null,
-    cwd
-  };
-};
+const buildPingPayload = (request: BridgeRequestEnvelope): Record<string, unknown> => ({
+  message: "pong",
+  run_id: asString(request.params.run_id) ?? request.id,
+  profile: request.profile ?? null,
+  cwd: asString(request.params.cwd) ?? ""
+});
 
 const writeNativeSuccess = (
   request: Pick<BridgeRequestEnvelope, "id">,
@@ -190,9 +238,10 @@ const writeNativeError = (
     code: string;
     message: string;
     summary?: Record<string, unknown>;
-  }
+  },
+  onFlushed?: () => void
 ): void => {
-  writeNativeEnvelope(buildErrorEnvelope(request, input));
+  writeNativeEnvelope(buildErrorEnvelope(request, input), onFlushed);
 };
 
 const failPendingSocketResponses = (input: { code: string; message: string }): void => {
@@ -471,23 +520,71 @@ const handleExtensionRequest = async (request: BridgeRequestEnvelope): Promise<v
     return;
   }
 
-  if (!activeSocketPath && request.method === "bridge.forward") {
-    writeNativeSuccess(
-      request,
-      {
-        summary: {
-          session_id: asString(request.params.session_id) ?? sessionId,
-          run_id: asString(request.params.run_id) ?? request.id,
-          command: asString(request.params.command) ?? "runtime.ping",
-          relay_path: RELAY_PATH
-        },
-        payload: buildStubForwardPayload(request)
-      },
-      () => {
-        process.exit(0);
+  if (request.method === "bridge.forward" && (!activeSocketPath || usesLegacyProfileDirRouting())) {
+    const command = asString(request.params.command) ?? "runtime.ping";
+
+    if (usesLegacyProfileDirRouting()) {
+      if (command === "runtime.bootstrap") {
+        writeNativeError(
+          request,
+          {
+            code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+            message: "runtime bootstrap 尚未获得执行面确认",
+            summary: {
+              session_id: asString(request.params.session_id) ?? sessionId,
+              run_id: asString(request.params.run_id) ?? request.id,
+              command,
+              relay_path: RELAY_PATH
+            }
+          },
+          activeSocketPath
+            ? undefined
+            : () => {
+                process.exit(0);
+              }
+        );
+        return;
       }
-    );
-    return;
+
+      writeNativeError(
+        request,
+        {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: `legacy dual-env launcher requires reinstall before forwarding ${command}`,
+          summary: {
+            session_id: asString(request.params.session_id) ?? sessionId,
+            run_id: asString(request.params.run_id) ?? request.id,
+            command,
+            relay_path: RELAY_PATH
+          }
+        },
+        activeSocketPath
+          ? undefined
+          : () => {
+              process.exit(0);
+            }
+      );
+      return;
+    }
+
+    if (!activeSocketPath && command === "runtime.ping") {
+      writeNativeSuccess(
+        request,
+        {
+          summary: {
+            session_id: asString(request.params.session_id) ?? sessionId,
+            run_id: asString(request.params.run_id) ?? request.id,
+            command,
+            relay_path: RELAY_PATH
+          },
+          payload: buildPingPayload(request)
+        },
+        () => {
+          process.exit(0);
+        }
+      );
+      return;
+    }
   }
 
   writeNativeError(request, {

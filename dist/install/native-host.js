@@ -207,6 +207,7 @@ const ensureBundledNativeHostRuntime = async (channelRoot) => {
     return target.entryPath;
 };
 export const resolveRepoOwnedNativeHostEntryPath = () => resolveCurrentBuildNativeHostRuntimePaths().entryPath;
+const PROFILE_MODE_ROOT_PREFERRED = "profile_root_preferred";
 export const resolveRepoOwnedNativeHostCommand = () => `${quoteShellToken(process.execPath)} ${quoteShellToken(resolveRepoOwnedNativeHostEntryPath())}`;
 export const resolveProfileRoot = (cwd) => resolve(cwd, ".webenvoy", "profiles");
 export const resolveProfileScopedNativeBridgeSocketPath = (profileDir) => join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME);
@@ -272,9 +273,15 @@ const buildLauncherScript = (input) => {
     const profileRootExport = typeof input.profileRoot === "string" && input.profileRoot.length > 0
         ? `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT=${quoteShellArgForScript(input.profileRoot)}\n`
         : "";
+    const legacyProfileDirExport = typeof input.legacyProfileDir === "string" && input.legacyProfileDir.length > 0
+        ? `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR=${quoteShellArgForScript(input.legacyProfileDir)}\n`
+        : "";
+    const profileModeExport = typeof input.profileMode === "string" && input.profileMode.length > 0
+        ? `export WEBENVOY_NATIVE_BRIDGE_PROFILE_MODE=${quoteShellArgForScript(input.profileMode)}\n`
+        : "";
     return `#!/usr/bin/env bash
 set -euo pipefail
-${profileRootExport}exec ${argv} "$@"
+${profileRootExport}${legacyProfileDirExport}${profileModeExport}exec ${argv} "$@"
 `;
 };
 const writeManagedInstallMetadata = async (input) => {
@@ -301,6 +308,12 @@ const isPathInside = (baseDir, targetPath) => {
     return (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel)));
 };
 const normalizePathForOutput = (input) => typeof input === "string" ? normalizePathForBoundaryCheck(input) : null;
+const canonicalizeProfileDirForLauncher = (profileRoot, profileDir) => {
+    const normalizedRoot = normalizePathForBoundaryCheck(profileRoot);
+    const normalizedProfileDir = normalizePathForBoundaryCheck(profileDir);
+    const profileKey = relative(normalizedRoot, normalizedProfileDir);
+    return profileKey.length > 0 ? resolve(profileRoot, profileKey) : resolve(profileRoot);
+};
 const resolveInstallPaths = (input) => {
     const roots = resolveControlledInstallRoots(input.cwd, input.browserChannel);
     const manifestRoot = resolveManifestDiscoveryDirectory(input.browserChannel);
@@ -418,10 +431,20 @@ export const installNativeHost = async (input) => {
     const hostCommand = hostCommandSource === "explicit"
         ? input.hostCommand.trim()
         : `${quoteShellToken(process.execPath)} ${quoteShellToken(bundledEntryPath)}`;
+    const usesExplicitProfileContract = hostCommandSource === "explicit" && !!profileDir;
+    const nativeBridgeLauncherContract = usesExplicitProfileContract
+        ? "dual_env_launcher_only"
+        : "profile_root_only";
+    const legacyProfileDir = usesExplicitProfileContract && profileDir
+        ? canonicalizeProfileDirForLauncher(profileRoot, profileDir)
+        : undefined;
+    const profileMode = usesExplicitProfileContract ? PROFILE_MODE_ROOT_PREFERRED : undefined;
     await writeFile(resolvedPaths.launcherPath, buildLauncherScript({
         command: "runtime.install",
         hostCommand,
-        profileRoot
+        profileRoot,
+        legacyProfileDir,
+        profileMode
     }), "utf8");
     await writeManagedInstallMetadata({
         channelRoot: resolvedPaths.channelRoot,
@@ -437,7 +460,9 @@ export const installNativeHost = async (input) => {
         allowed_origins: [allowedOrigin]
     };
     await writeFile(resolvedPaths.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-    if (previousManagedInstall && previousManagedInstall.channelRoot !== resolvedPaths.channelRoot) {
+    if (previousManagedInstall &&
+        normalizePathForBoundaryCheck(previousManagedInstall.channelRoot) !==
+            normalizePathForBoundaryCheck(resolvedPaths.channelRoot)) {
         await rm(previousManagedInstall.channelRoot, { recursive: true, force: true });
     }
     if (previousLegacyLauncherPath) {
@@ -459,8 +484,10 @@ export const installNativeHost = async (input) => {
         launcher_path_source: resolvedPaths.launcherPathSource,
         host_command: hostCommand,
         host_command_source: hostCommandSource,
+        native_bridge_launcher_contract: nativeBridgeLauncherContract,
         profile_root: normalizePathForOutput(profileRoot),
         profile_dir: normalizePathForOutput(profileDir),
+        profile_root_bridge_socket_path: normalizePathForOutput(join(profileRoot, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)),
         profile_scoped_bridge_socket_path: normalizePathForOutput(profileDir ? resolveProfileScopedNativeBridgeSocketPath(profileDir) : null),
         allowed_origins: [allowedOrigin],
         persistent_extension_identity: {
