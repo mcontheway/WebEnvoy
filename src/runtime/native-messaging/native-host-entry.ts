@@ -14,6 +14,8 @@ const DEFAULT_SESSION_ID = "nm-session-001";
 const RELAY_PATH = "host>background>content-script>background>host";
 const PROFILE_ROOT = process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT?.trim() ?? "";
 const LEGACY_PROFILE_DIR = process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR?.trim() ?? "";
+const PROFILE_MODE = process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_MODE?.trim() ?? "";
+const PROFILE_MODE_ROOT_PREFERRED = "profile_root_preferred";
 
 let nativeReadBuffer = Buffer.alloc(0);
 let sessionId = DEFAULT_SESSION_ID;
@@ -46,17 +48,15 @@ const isPathInside = (baseDir: string, targetPath: string): boolean => {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 };
 
-const resolveSocketTarget = (
+const usesRootPreferredDualEnvRouting = (): boolean =>
+  PROFILE_MODE === PROFILE_MODE_ROOT_PREFERRED && PROFILE_ROOT.length > 0;
+
+const usesLegacyProfileDirRouting = (): boolean =>
+  LEGACY_PROFILE_DIR.length > 0 && !usesRootPreferredDualEnvRouting();
+
+const resolveProfileRootSocketTarget = (
   request: Pick<BridgeRequestEnvelope, "profile">
 ): { profileDir: string; socketPath: string } | null => {
-  if (LEGACY_PROFILE_DIR) {
-    const profileDir = resolve(LEGACY_PROFILE_DIR);
-    return {
-      profileDir,
-      socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
-    };
-  }
-
   const profileName = asString(request.profile);
 
   if (PROFILE_ROOT) {
@@ -80,13 +80,31 @@ const resolveSocketTarget = (
   return null;
 };
 
+const resolveSocketTarget = (
+  request: Pick<BridgeRequestEnvelope, "profile">
+): { profileDir: string; socketPath: string } | null => {
+  if (usesRootPreferredDualEnvRouting()) {
+    return resolveProfileRootSocketTarget(request);
+  }
+
+  if (LEGACY_PROFILE_DIR) {
+    const profileDir = resolve(LEGACY_PROFILE_DIR);
+    return {
+      profileDir,
+      socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
+    };
+  }
+
+  return resolveProfileRootSocketTarget(request);
+};
+
 const shouldPromoteToProfileSocket = (
   request: Pick<BridgeRequestEnvelope, "profile">
 ): boolean =>
-  !LEGACY_PROFILE_DIR &&
+  !!PROFILE_ROOT &&
+  !usesLegacyProfileDirRouting() &&
   typeof request.profile === "string" &&
-  request.profile.trim().length > 0 &&
-  !!PROFILE_ROOT;
+  request.profile.trim().length > 0;
 
 const isBridgeResponse = (value: unknown): value is BridgeResponseEnvelope => {
   const record = asRecord(value);
@@ -478,7 +496,7 @@ const handleExtensionRequest = async (request: BridgeRequestEnvelope): Promise<v
     return;
   }
 
-  if (request.method === "bridge.forward" && (!activeSocketPath || !!LEGACY_PROFILE_DIR)) {
+  if (request.method === "bridge.forward" && (!activeSocketPath || usesLegacyProfileDirRouting())) {
     writeNativeSuccess(
       request,
       {

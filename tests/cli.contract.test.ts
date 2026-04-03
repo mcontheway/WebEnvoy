@@ -203,14 +203,45 @@ const expectBundledNativeHostStarts = async (
 const createNativeHostCommand = (scriptPath: string): string =>
   `"${process.execPath}" "${scriptPath}"`;
 
-const createEnvWrappedNativeHostCommand = (scriptPath: string): string =>
-  `"/usr/bin/env" "${process.execPath}" "${scriptPath}"`;
-
 const createShellWrappedNativeHostCommand = (scriptPath: string): string =>
   `"/bin/bash" "${scriptPath}"`;
 
-const createInlineShellWrappedNativeHostCommand = (scriptPath: string): string =>
-  `"/bin/bash" "-lc" ${JSON.stringify(`exec ${JSON.stringify(process.execPath)} ${JSON.stringify(scriptPath)} "$@"`)}`;
+const PROFILE_MODE_ROOT_PREFERRED = "profile_root_preferred";
+
+const quoteLauncherExportValue = (value: string): string => value.replace(/'/g, `'\"'\"'`);
+
+const expectProfileRootOnlyLauncherContract = async (input: {
+  launcherPath: string;
+  runtimeCwd: string;
+}): Promise<string> => {
+  const launcherRaw = await readFile(input.launcherPath, "utf8");
+  const expectedProfileRoot = path.join(await realpath(input.runtimeCwd), ".webenvoy", "profiles");
+  expect(launcherRaw).toContain(
+    `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${quoteLauncherExportValue(expectedProfileRoot)}'`
+  );
+  expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
+  expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_MODE");
+  return launcherRaw;
+};
+
+const expectDualEnvRootPreferredLauncherContract = async (input: {
+  launcherPath: string;
+  runtimeCwd: string;
+  profileDir: string;
+}): Promise<string> => {
+  const launcherRaw = await readFile(input.launcherPath, "utf8");
+  const expectedProfileRoot = path.join(await realpath(input.runtimeCwd), ".webenvoy", "profiles");
+  expect(launcherRaw).toContain(
+    `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${quoteLauncherExportValue(expectedProfileRoot)}'`
+  );
+  expect(launcherRaw).toContain(
+    `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR='${quoteLauncherExportValue(input.profileDir)}'`
+  );
+  expect(launcherRaw).toContain(
+    `export WEBENVOY_NATIVE_BRIDGE_PROFILE_MODE='${PROFILE_MODE_ROOT_PREFERRED}'`
+  );
+  return launcherRaw;
+};
 
 const runGit = (cwd: string, args: string[]) => {
   const result = spawnSync("git", args, {
@@ -3152,7 +3183,9 @@ process.stdin.on("data", (chunk) => {
         launcher_path_source: "custom",
         host_command: hostCommand,
         host_command_source: "explicit",
+        native_bridge_launcher_contract: "profile_root_only",
         profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
+        profile_root_bridge_socket_path: path.join(runtimeCwd, ".webenvoy", "profiles", "nm.sock"),
         profile_dir: null,
         profile_scoped_bridge_socket_path: null,
         allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"],
@@ -3264,7 +3297,9 @@ process.stdin.on("data", (chunk) => {
         launcher_path: defaultLauncherPath,
         launcher_path_source: "repo_owned_default",
         host_command_source: "repo_owned_default",
+        native_bridge_launcher_contract: "profile_root_only",
         profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
+        profile_root_bridge_socket_path: path.join(runtimeCwd, ".webenvoy", "profiles", "nm.sock"),
         write_result: {
           manifest: "created",
           launcher: "created",
@@ -3420,6 +3455,8 @@ process.stdin.on("data", (chunk) => {
         launcher_path: launcherPath,
         host_command: defaultHostCommand,
         host_command_source: "repo_owned_default",
+        native_bridge_launcher_contract: "profile_root_only",
+        profile_root_bridge_socket_path: path.join(runtimeCwd, ".webenvoy", "profiles", "nm.sock"),
         allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"],
         created: {
           manifest: true,
@@ -3546,16 +3583,16 @@ process.stdin.on("data", (chunk) => {
       command: "runtime.install",
       status: "success",
       summary: {
+        native_bridge_launcher_contract: "profile_root_only",
+        profile_root_bridge_socket_path: path.join(runtimeCwd, ".webenvoy", "profiles", "nm.sock"),
         profile_dir: profileDir,
         profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
       }
     });
-    const launcherRaw = await readFile(launcherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
+    const launcherRaw = await expectProfileRootOnlyLauncherContract({
+      launcherPath,
+      runtimeCwd
+    });
     expect(launcherRaw).toContain('exec ');
     expect(launcherRaw).toContain(' "$@"');
   });
@@ -3581,7 +3618,8 @@ process.stdin.on("data", (chunk) => {
         "",
         `writeFileSync(${JSON.stringify(envCapturePath)}, JSON.stringify({`,
         '  profileRoot: process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT ?? null,',
-        '  legacyProfileDir: process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR ?? null',
+        '  legacyProfileDir: process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR ?? null,',
+        '  profileMode: process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_MODE ?? null',
         "}) + \"\\n\", \"utf8\");"
       ].join("\n"),
       "utf8"
@@ -3607,14 +3645,11 @@ process.stdin.on("data", (chunk) => {
     );
 
     expect(result.status).toBe(0);
-    const launcherRaw = await readFile(launcherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR='${profileDir.replace(/'/g, `'\"'\"'`)}'`
-    );
+    const launcherRaw = await expectDualEnvRootPreferredLauncherContract({
+      launcherPath,
+      runtimeCwd,
+      profileDir
+    });
 
     const launch = spawnSync(launcherPath, [], {
       cwd: runtimeCwd,
@@ -3623,8 +3658,9 @@ process.stdin.on("data", (chunk) => {
     expect(launch.status).toBe(0);
     expect(launch.stderr).toBe("");
     expect(JSON.parse(await readFile(envCapturePath, "utf8"))).toEqual({
-      profileRoot: expectedProfileRoot,
-      legacyProfileDir: profileDir
+      profileRoot: path.join(await realpath(runtimeCwd), ".webenvoy", "profiles"),
+      legacyProfileDir: profileDir,
+      profileMode: PROFILE_MODE_ROOT_PREFERRED
     });
   });
 
@@ -3650,7 +3686,8 @@ process.stdin.on("data", (chunk) => {
         "",
         `writeFileSync(${JSON.stringify(envCapturePath)}, JSON.stringify({`,
         '  profileRoot: process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT ?? null,',
-        '  legacyProfileDir: process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR ?? null',
+        '  legacyProfileDir: process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR ?? null,',
+        '  profileMode: process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_MODE ?? null',
         "}) + \"\\n\", \"utf8\");"
       ].join("\n"),
       "utf8"
@@ -3700,14 +3737,11 @@ process.stdin.on("data", (chunk) => {
     );
 
     expect(result.status).toBe(0);
-    const launcherRaw = await readFile(managedLauncherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR='${profileDir.replace(/'/g, `'\"'\"'`)}'`
-    );
+    await expectDualEnvRootPreferredLauncherContract({
+      launcherPath: managedLauncherPath,
+      runtimeCwd,
+      profileDir
+    });
 
     const launch = spawnSync(managedLauncherPath, [], {
       cwd: runtimeCwd,
@@ -3716,12 +3750,13 @@ process.stdin.on("data", (chunk) => {
     expect(launch.status).toBe(0);
     expect(launch.stderr).toBe("");
     expect(JSON.parse(await readFile(envCapturePath, "utf8"))).toEqual({
-      profileRoot: expectedProfileRoot,
-      legacyProfileDir: profileDir
+      profileRoot: path.join(await realpath(runtimeCwd), ".webenvoy", "profiles"),
+      legacyProfileDir: profileDir,
+      profileMode: PROFILE_MODE_ROOT_PREFERRED
     });
   });
 
-  it("keeps repo-owned explicit launchers on the canonical profile-root env contract", async () => {
+  it("uses dual-env root-preferred launcher contract for repo-owned explicit launchers", async () => {
     const runtimeCwd = await mkdtemp(path.join(tmpdir(), "wv-explicit-live-"));
     tempDirs.push(runtimeCwd);
     const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
@@ -3755,938 +3790,28 @@ process.stdin.on("data", (chunk) => {
     );
 
     expect(install.status).toBe(0);
-    const launcherRaw = await readFile(launcherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
+    await expectDualEnvRootPreferredLauncherContract({
+      launcherPath,
+      runtimeCwd,
+      profileDir
+    });
     const expectedProfileRootSummary = path.join(runtimeCwd, ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
 
     expect(parseSingleJsonLine(install.stdout)).toMatchObject({
       command: "runtime.install",
       status: "success",
       summary: {
         host_command_source: "explicit",
+        native_bridge_launcher_contract: "dual_env_root_preferred",
         profile_root: expectedProfileRootSummary,
+        profile_root_bridge_socket_path: path.join(expectedProfileRootSummary, "nm.sock"),
         profile_dir: profileDir,
         profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
       }
     });
   });
 
-  it("keeps wrapped bundled explicit host commands on the canonical profile-root env contract", async () => {
-    const runtimeCwd = await mkdtemp(path.join(tmpdir(), "wv-explicit-bundled-"));
-    tempDirs.push(runtimeCwd);
-    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
-    const bundledLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-explicit"
-    );
-    const bundledEntryPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "runtime",
-      "native-messaging",
-      "native-host-entry.js"
-    );
-
-    const initialInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-explicit-seed-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: bundledLauncherPath
-        })
-      ],
-      runtimeCwd
-    );
-    expect(initialInstall.status).toBe(0);
-
-    const explicitLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-explicit-wrapped"
-    );
-    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "wrapped");
-    const wrappedHostCommand = createEnvWrappedNativeHostCommand(await realpath(bundledEntryPath));
-
-    const explicitInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-explicit-wrapped-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: explicitLauncherPath,
-          host_command: wrappedHostCommand,
-          profile_dir: profileDir
-        })
-      ],
-      runtimeCwd
-    );
-
-    expect(explicitInstall.status).toBe(0);
-    const launcherRaw = await readFile(explicitLauncherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
-  });
-
-  it("keeps shell-wrapper explicit host commands around bundled entries on the canonical profile-root env contract", async () => {
-    const runtimeCwd = await mkdtemp(path.join(tmpdir(), "wv-explicit-bundled-shell-wrapper-"));
-    tempDirs.push(runtimeCwd);
-    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
-    const bundledLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-shell-wrapper-seed"
-    );
-    const bundledEntryPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "runtime",
-      "native-messaging",
-      "native-host-entry.js"
-    );
-
-    const initialInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-shell-wrapper-seed-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: bundledLauncherPath
-        })
-      ],
-      runtimeCwd
-    );
-    expect(initialInstall.status).toBe(0);
-
-    const wrapperPath = path.join(runtimeCwd, "bundled-native-host-wrapper.sh");
-    await writeFile(
-      wrapperPath,
-      [
-        "#!/usr/bin/env bash",
-        "set -euo pipefail",
-        `exec "/usr/bin/env" "${process.execPath}" "${await realpath(bundledEntryPath)}" "$@"`
-      ].join("\n"),
-      "utf8"
-    );
-    await chmod(wrapperPath, 0o755);
-
-    const explicitLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-shell-wrapper"
-    );
-    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "wrapped-shell");
-
-    const explicitInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-shell-wrapper-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: explicitLauncherPath,
-          host_command: createShellWrappedNativeHostCommand(wrapperPath),
-          profile_dir: profileDir
-        })
-      ],
-      runtimeCwd
-    );
-
-    expect(explicitInstall.status).toBe(0);
-    const launcherRaw = await readFile(explicitLauncherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
-  });
-
-  it("keeps relative shell-wrapper explicit host commands around bundled entries on the canonical profile-root env contract", async () => {
-    const runtimeCwd = await mkdtemp(path.join(tmpdir(), "wv-explicit-bundled-relative-wrapper-"));
-    tempDirs.push(runtimeCwd);
-    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
-    const bundledLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-relative-wrapper-seed"
-    );
-    const bundledEntryPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "runtime",
-      "native-messaging",
-      "native-host-entry.js"
-    );
-
-    const initialInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-relative-wrapper-seed-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: bundledLauncherPath
-        })
-      ],
-      runtimeCwd
-    );
-    expect(initialInstall.status).toBe(0);
-
-    const wrapperDir = path.join(runtimeCwd, "shell-wrappers");
-    await mkdir(wrapperDir, { recursive: true });
-    const wrapperPath = path.join(wrapperDir, "bundled-native-host-relative-wrapper.sh");
-    const relativeBundledEntryPath = path.relative(wrapperDir, bundledEntryPath);
-    await writeFile(
-      wrapperPath,
-      [
-        "#!/usr/bin/env bash",
-        "set -euo pipefail",
-        `exec "${process.execPath}" "${relativeBundledEntryPath}" "$@"`
-      ].join("\n"),
-      "utf8"
-    );
-    await chmod(wrapperPath, 0o755);
-
-    const explicitLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-relative-wrapper"
-    );
-    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "wrapped-relative");
-
-    const explicitInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-relative-wrapper-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: explicitLauncherPath,
-          host_command: createShellWrappedNativeHostCommand(wrapperPath),
-          profile_dir: profileDir
-        })
-      ],
-      runtimeCwd
-    );
-
-    expect(explicitInstall.status).toBe(0);
-    const launcherRaw = await readFile(explicitLauncherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
-  });
-
-  it("keeps shell-variable wrapper explicit host commands around bundled entries on the canonical profile-root env contract", async () => {
-    const runtimeCwd = await mkdtemp(path.join(tmpdir(), "wv-explicit-bundled-variable-wrapper-"));
-    tempDirs.push(runtimeCwd);
-    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
-    const bundledLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-variable-wrapper-seed"
-    );
-    const bundledEntryPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "runtime",
-      "native-messaging",
-      "native-host-entry.js"
-    );
-
-    const initialInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-variable-wrapper-seed-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: bundledLauncherPath
-        })
-      ],
-      runtimeCwd
-    );
-    expect(initialInstall.status).toBe(0);
-
-    const wrapperDir = path.join(runtimeCwd, "shell-wrappers", "portable");
-    await mkdir(wrapperDir, { recursive: true });
-    const wrapperPath = path.join(wrapperDir, "bundled-native-host-variable-wrapper.sh");
-    const relativeBundledEntryPath = path.relative(wrapperDir, bundledEntryPath);
-    await writeFile(
-      wrapperPath,
-      [
-        "#!/usr/bin/env bash",
-        "set -euo pipefail",
-        'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"',
-        `ENTRY="$SCRIPT_DIR/${relativeBundledEntryPath.replace(/\\/g, "/")}"`,
-        `exec "${process.execPath}" "$ENTRY" "$@"`
-      ].join("\n"),
-      "utf8"
-    );
-    await chmod(wrapperPath, 0o755);
-
-    const explicitLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-variable-wrapper"
-    );
-    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "wrapped-variable");
-
-    const explicitInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-variable-wrapper-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: explicitLauncherPath,
-          host_command: createShellWrappedNativeHostCommand(wrapperPath),
-          profile_dir: profileDir
-        })
-      ],
-      runtimeCwd
-    );
-
-    expect(explicitInstall.status).toBe(0);
-    const launcherRaw = await readFile(explicitLauncherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
-  });
-
-  it("keeps bash-source wrapper explicit host commands around bundled entries on the canonical profile-root env contract", async () => {
-    const runtimeCwd = await mkdtemp(path.join(tmpdir(), "wv-explicit-bundled-bash-source-wrapper-"));
-    tempDirs.push(runtimeCwd);
-    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
-    const bundledLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-bash-source-wrapper-seed"
-    );
-    const bundledEntryPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "runtime",
-      "native-messaging",
-      "native-host-entry.js"
-    );
-
-    const initialInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-bash-source-wrapper-seed-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: bundledLauncherPath
-        })
-      ],
-      runtimeCwd
-    );
-    expect(initialInstall.status).toBe(0);
-
-    const wrapperDir = path.join(runtimeCwd, "shell-wrappers", "bash-source");
-    await mkdir(wrapperDir, { recursive: true });
-    const wrapperPath = path.join(wrapperDir, "bundled-native-host-bash-source-wrapper.sh");
-    const relativeBundledEntryPath = path.relative(wrapperDir, bundledEntryPath).replace(/\\/g, "/");
-    await writeFile(
-      wrapperPath,
-      [
-        "#!/usr/bin/env bash",
-        "set -euo pipefail",
-        'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
-        `ENTRY="$SCRIPT_DIR/${relativeBundledEntryPath}"`,
-        `exec "${process.execPath}" "$ENTRY" "$@"`
-      ].join("\n"),
-      "utf8"
-    );
-    await chmod(wrapperPath, 0o755);
-
-    const explicitLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-bash-source-wrapper"
-    );
-    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "wrapped-bash-source");
-
-    const explicitInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-bash-source-wrapper-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: explicitLauncherPath,
-          host_command: createShellWrappedNativeHostCommand(wrapperPath),
-          profile_dir: profileDir
-        })
-      ],
-      runtimeCwd
-    );
-
-    expect(explicitInstall.status).toBe(0);
-    const launcherRaw = await readFile(explicitLauncherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
-  });
-
-  it("keeps non-exec shell-variable wrapper explicit host commands around bundled entries on the canonical profile-root env contract", async () => {
-    const runtimeCwd = await mkdtemp(path.join(tmpdir(), "wv-explicit-bundled-non-exec-wrapper-"));
-    tempDirs.push(runtimeCwd);
-    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
-    const bundledLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-non-exec-wrapper-seed"
-    );
-    const bundledEntryPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "runtime",
-      "native-messaging",
-      "native-host-entry.js"
-    );
-
-    const initialInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-non-exec-wrapper-seed-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: bundledLauncherPath
-        })
-      ],
-      runtimeCwd
-    );
-    expect(initialInstall.status).toBe(0);
-
-    const wrapperDir = path.join(runtimeCwd, "shell-wrappers", "non-exec");
-    await mkdir(wrapperDir, { recursive: true });
-    const wrapperPath = path.join(wrapperDir, "bundled-native-host-non-exec-wrapper.sh");
-    const relativeBundledEntryPath = path.relative(wrapperDir, bundledEntryPath).replace(/\\/g, "/");
-    await writeFile(
-      wrapperPath,
-      [
-        "#!/usr/bin/env bash",
-        "set -euo pipefail",
-        `NODE_BIN="${process.execPath}"`,
-        'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"',
-        `ENTRY="$SCRIPT_DIR/${relativeBundledEntryPath}"`,
-        '"$NODE_BIN" "$ENTRY" "$@"'
-      ].join("\n"),
-      "utf8"
-    );
-    await chmod(wrapperPath, 0o755);
-
-    const explicitLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-non-exec-wrapper"
-    );
-    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "wrapped-non-exec");
-
-    const explicitInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-non-exec-wrapper-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: explicitLauncherPath,
-          host_command: createShellWrappedNativeHostCommand(wrapperPath),
-          profile_dir: profileDir
-        })
-      ],
-      runtimeCwd
-    );
-
-    expect(explicitInstall.status).toBe(0);
-    const launcherRaw = await readFile(explicitLauncherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
-  });
-
-  it("keeps unquoted shell-variable wrapper explicit host commands around bundled entries on the canonical profile-root env contract", async () => {
-    const runtimeCwd = await mkdtemp(path.join(tmpdir(), "wv-explicit-bundled-unquoted-wrapper-"));
-    tempDirs.push(runtimeCwd);
-    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
-    const bundledLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-unquoted-wrapper-seed"
-    );
-    const bundledEntryPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "runtime",
-      "native-messaging",
-      "native-host-entry.js"
-    );
-
-    const initialInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-unquoted-wrapper-seed-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: bundledLauncherPath
-        })
-      ],
-      runtimeCwd
-    );
-    expect(initialInstall.status).toBe(0);
-
-    const wrapperDir = path.join(runtimeCwd, "shell-wrappers", "unquoted");
-    await mkdir(wrapperDir, { recursive: true });
-    const wrapperPath = path.join(wrapperDir, "bundled-native-host-unquoted-wrapper.sh");
-    const relativeBundledEntryPath = path.relative(wrapperDir, bundledEntryPath).replace(/\\/g, "/");
-    await writeFile(
-      wrapperPath,
-      [
-        "#!/usr/bin/env bash",
-        "set -euo pipefail",
-        `NODE_BIN="${process.execPath}"`,
-        'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"',
-        `ENTRY=$SCRIPT_DIR/${relativeBundledEntryPath}`,
-        'exec "$NODE_BIN" "$ENTRY" "$@"'
-      ].join("\n"),
-      "utf8"
-    );
-    await chmod(wrapperPath, 0o755);
-
-    const explicitLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-unquoted-wrapper"
-    );
-    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "wrapped-unquoted");
-
-    const explicitInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-unquoted-wrapper-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: explicitLauncherPath,
-          host_command: createShellWrappedNativeHostCommand(wrapperPath),
-          profile_dir: profileDir
-        })
-      ],
-      runtimeCwd
-    );
-
-    expect(explicitInstall.status).toBe(0);
-    const launcherRaw = await readFile(explicitLauncherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
-  });
-
-  it("keeps dirname-parent wrapper explicit host commands around bundled entries on the canonical profile-root env contract", async () => {
-    const runtimeCwd = await mkdtemp(path.join(tmpdir(), "wv-explicit-bundled-dirname-parent-wrapper-"));
-    tempDirs.push(runtimeCwd);
-    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
-    const bundledLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-dirname-parent-wrapper-seed"
-    );
-    const bundledEntryPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "runtime",
-      "native-messaging",
-      "native-host-entry.js"
-    );
-
-    const initialInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-dirname-parent-wrapper-seed-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: bundledLauncherPath
-        })
-      ],
-      runtimeCwd
-    );
-    expect(initialInstall.status).toBe(0);
-
-    const wrapperDir = path.join(runtimeCwd, "shell-wrappers", "portable", "bin");
-    await mkdir(wrapperDir, { recursive: true });
-    const wrapperPath = path.join(wrapperDir, "bundled-native-host-dirname-parent-wrapper.sh");
-    const relativeBundledEntryPath = path.relative(path.join(wrapperDir, ".."), bundledEntryPath).replace(/\\/g, "/");
-    await writeFile(
-      wrapperPath,
-      [
-        "#!/usr/bin/env bash",
-        "set -euo pipefail",
-        `NODE_BIN="${process.execPath}"`,
-        'SCRIPT_ROOT="$(dirname "$0")/.."',
-        `ENTRY="$SCRIPT_ROOT/${relativeBundledEntryPath}"`,
-        'exec "$NODE_BIN" "$ENTRY" "$@"'
-      ].join("\n"),
-      "utf8"
-    );
-    await chmod(wrapperPath, 0o755);
-
-    const explicitLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-dirname-parent-wrapper"
-    );
-    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "wrapped-dirname-parent");
-
-    const explicitInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-dirname-parent-wrapper-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: explicitLauncherPath,
-          host_command: createShellWrappedNativeHostCommand(wrapperPath),
-          profile_dir: profileDir
-        })
-      ],
-      runtimeCwd
-    );
-
-    expect(explicitInstall.status).toBe(0);
-    const launcherRaw = await readFile(explicitLauncherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
-  });
-
-  it("keeps node wrapper explicit host commands around bundled entries on the canonical profile-root env contract", async () => {
-    const runtimeCwd = await mkdtemp(path.join(tmpdir(), "wv-explicit-bundled-node-wrapper-"));
-    tempDirs.push(runtimeCwd);
-    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
-    const bundledLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-node-wrapper-seed"
-    );
-    const bundledEntryPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "runtime",
-      "native-messaging",
-      "native-host-entry.js"
-    );
-
-    const initialInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-node-wrapper-seed-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: bundledLauncherPath
-        })
-      ],
-      runtimeCwd
-    );
-    expect(initialInstall.status).toBe(0);
-
-    const wrapperPath = path.join(runtimeCwd, "bundled-native-host-wrapper.mjs");
-    await writeFile(
-      wrapperPath,
-      [
-        `const bundledEntry = ${JSON.stringify(await realpath(bundledEntryPath))};`,
-        "await import(bundledEntry);"
-      ].join("\n"),
-      "utf8"
-    );
-
-    const explicitLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-node-wrapper"
-    );
-    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "wrapped-node");
-
-    const explicitInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-node-wrapper-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: explicitLauncherPath,
-          host_command: createNativeHostCommand(wrapperPath),
-          profile_dir: profileDir
-        })
-      ],
-      runtimeCwd
-    );
-
-    expect(explicitInstall.status).toBe(0);
-    const launcherRaw = await readFile(explicitLauncherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
-  });
-
-  it("keeps computed node wrapper explicit host commands around bundled entries on the canonical profile-root env contract", async () => {
-    const runtimeCwd = await mkdtemp(path.join(tmpdir(), "wv-explicit-bundled-node-computed-wrapper-"));
-    tempDirs.push(runtimeCwd);
-    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
-    const bundledLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-node-computed-wrapper-seed"
-    );
-
-    const initialInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-node-computed-wrapper-seed-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: bundledLauncherPath
-        })
-      ],
-      runtimeCwd
-    );
-    expect(initialInstall.status).toBe(0);
-
-    const wrapperPath = path.join(runtimeCwd, "bundled-native-host-computed-wrapper.mjs");
-    await writeFile(
-      wrapperPath,
-      [
-        'import { fileURLToPath } from "node:url";',
-        'import path from "node:path";',
-        "const bundledEntryViaResolve = path.resolve(path.join(import.meta.dirname, '.webenvoy', 'native-host-install', 'chrome', 'runtime', 'native-messaging', 'native-host-entry.js'));",
-        "const bundledEntry = fileURLToPath(new URL('./.webenvoy/native-host-install/chrome/runtime/native-messaging/native-host-entry.js', import.meta.url));",
-        "await import(bundledEntryViaResolve);",
-        "await import(bundledEntry);"
-      ].join("\n"),
-      "utf8"
-    );
-
-    const explicitLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-node-computed-wrapper"
-    );
-    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "wrapped-node-computed");
-
-    const explicitInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-node-computed-wrapper-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: explicitLauncherPath,
-          host_command: createNativeHostCommand(wrapperPath),
-          profile_dir: profileDir
-        })
-      ],
-      runtimeCwd
-    );
-
-    expect(explicitInstall.status).toBe(0);
-    const launcherRaw = await readFile(explicitLauncherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
-  });
-
-  it("keeps legacy profile-dir env for third-party shell wrappers even when comments mention repo-owned entries", async () => {
+  it("keeps explicit shell wrappers on the dual-env root-preferred launcher contract", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
     const launcherPath = path.join(
@@ -4695,9 +3820,9 @@ process.stdin.on("data", (chunk) => {
       "native-host-install",
       "chrome",
       "bin",
-      "webenvoy-native-host-third-party-shell-wrapper"
+      "webenvoy-native-host-explicit-shell-wrapper"
     );
-    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "xhs_shell_wrapper_comment_probe");
+    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "xhs_shell_wrapper_probe");
     const envCapturePath = path.join(runtimeCwd, "explicit-host-shell-wrapper-env.json");
     const explicitHostEntryPath = path.join(runtimeCwd, "explicit-host-shell-wrapper-capture.mjs");
     await writeFile(
@@ -4707,13 +3832,14 @@ process.stdin.on("data", (chunk) => {
         "",
         `writeFileSync(${JSON.stringify(envCapturePath)}, JSON.stringify({`,
         '  profileRoot: process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT ?? null,',
-        '  legacyProfileDir: process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR ?? null',
+        '  legacyProfileDir: process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR ?? null,',
+        '  profileMode: process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_MODE ?? null',
         "}) + \"\\n\", \"utf8\");"
       ].join("\n"),
       "utf8"
     );
 
-    const wrapperPath = path.join(runtimeCwd, "third-party-explicit-host-wrapper.sh");
+    const wrapperPath = path.join(runtimeCwd, "explicit-host-wrapper.sh");
     await writeFile(
       wrapperPath,
       [
@@ -4730,7 +3856,7 @@ process.stdin.on("data", (chunk) => {
       [
         "runtime.install",
         "--run-id",
-        "run-contract-install-shell-wrapper-comment-probe-001",
+        "run-contract-install-shell-wrapper-root-preferred-001",
         "--params",
         JSON.stringify({
           extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -4746,17 +3872,38 @@ process.stdin.on("data", (chunk) => {
     );
 
     expect(result.status).toBe(0);
-    const launcherRaw = await readFile(launcherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR='${profileDir.replace(/'/g, `'\"'\"'`)}'`
-    );
+    expect(parseSingleJsonLine(result.stdout)).toMatchObject({
+      command: "runtime.install",
+      status: "success",
+      summary: {
+        host_command_source: "explicit",
+        native_bridge_launcher_contract: "dual_env_root_preferred",
+        profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
+        profile_root_bridge_socket_path: path.join(runtimeCwd, ".webenvoy", "profiles", "nm.sock"),
+        profile_dir: profileDir,
+        profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
+      }
+    });
+    await expectDualEnvRootPreferredLauncherContract({
+      launcherPath,
+      runtimeCwd,
+      profileDir
+    });
+
+    const launch = spawnSync(launcherPath, [], {
+      cwd: runtimeCwd,
+      encoding: "utf8"
+    });
+    expect(launch.status).toBe(0);
+    expect(launch.stderr).toBe("");
+    expect(JSON.parse(await readFile(envCapturePath, "utf8"))).toEqual({
+      profileRoot: path.join(await realpath(runtimeCwd), ".webenvoy", "profiles"),
+      legacyProfileDir: profileDir,
+      profileMode: PROFILE_MODE_ROOT_PREFERRED
+    });
   });
 
-  it("keeps legacy profile-dir env for third-party shell wrappers when bundled paths only appear in unused variables", async () => {
+  it("keeps explicit node wrappers on the dual-env root-preferred launcher contract", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
     const launcherPath = path.join(
@@ -4765,94 +3912,32 @@ process.stdin.on("data", (chunk) => {
       "native-host-install",
       "chrome",
       "bin",
-      "webenvoy-native-host-third-party-shell-wrapper-unused-literal"
+      "webenvoy-native-host-explicit-node-wrapper"
     );
-    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "xhs_shell_wrapper_unused_literal_probe");
-    const explicitHostEntryPath = path.join(runtimeCwd, "explicit-host-shell-wrapper-unused-literal-capture.mjs");
+    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "xhs_node_wrapper_probe");
+    const envCapturePath = path.join(runtimeCwd, "explicit-host-node-wrapper-env.json");
+    const explicitHostEntryPath = path.join(runtimeCwd, "explicit-host-node-wrapper-capture.mjs");
     await writeFile(
       explicitHostEntryPath,
       [
         'import { writeFileSync } from "node:fs";',
-        `writeFileSync(${JSON.stringify(path.join(runtimeCwd, "unused-literal-env.json"))}, "ok\\n", "utf8");`
+        "",
+        `writeFileSync(${JSON.stringify(envCapturePath)}, JSON.stringify({`,
+        '  profileRoot: process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT ?? null,',
+        '  legacyProfileDir: process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR ?? null,',
+        '  profileMode: process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_MODE ?? null',
+        "}) + \"\\n\", \"utf8\");"
       ].join("\n"),
       "utf8"
     );
 
-    const wrapperPath = path.join(runtimeCwd, "third-party-explicit-host-unused-literal-wrapper.sh");
-    await writeFile(
-      wrapperPath,
-      [
-        "#!/usr/bin/env bash",
-        "set -euo pipefail",
-        `UNUSED_REPO_OWNED_ENTRY="${repoOwnedNativeHostEntryPath}"`,
-        'if [[ "${1:-}" == "--unused" ]]; then',
-        '  echo "$UNUSED_REPO_OWNED_ENTRY" >/dev/null',
-        "fi",
-        `exec "${process.execPath}" "${explicitHostEntryPath}" "$@"`
-      ].join("\n"),
-      "utf8"
-    );
-    await chmod(wrapperPath, 0o755);
-
-    const result = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-shell-wrapper-unused-literal-probe-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: launcherPath,
-          host_command: createShellWrappedNativeHostCommand(wrapperPath),
-          profile_dir: profileDir
-        })
-      ],
-      runtimeCwd
-    );
-
-    expect(result.status).toBe(0);
-    const launcherRaw = await readFile(launcherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR='${profileDir.replace(/'/g, `'\"'\"'`)}'`
-    );
-  });
-
-  it("keeps legacy profile-dir env for third-party node wrappers when bundled paths only appear in unused variables", async () => {
-    const runtimeCwd = await createRuntimeCwd();
-    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
-    const launcherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-third-party-node-wrapper-unused-literal"
-    );
-    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "xhs_node_wrapper_unused_literal_probe");
-    const explicitHostEntryPath = path.join(runtimeCwd, "explicit-host-node-wrapper-unused-literal-capture.mjs");
-    await writeFile(
-      explicitHostEntryPath,
-      [
-        'import { writeFileSync } from "node:fs";',
-        `writeFileSync(${JSON.stringify(path.join(runtimeCwd, "unused-node-literal-env.json"))}, "ok\\n", "utf8");`
-      ].join("\n"),
-      "utf8"
-    );
-
-    const wrapperPath = path.join(runtimeCwd, "third-party-explicit-host-unused-literal-wrapper.mjs");
+    const wrapperPath = path.join(runtimeCwd, "explicit-host-wrapper.mjs");
     await writeFile(
       wrapperPath,
       [
         `const unusedRepoOwnedEntry = ${JSON.stringify(repoOwnedNativeHostEntryPath)};`,
         `const explicitHostEntry = ${JSON.stringify(explicitHostEntryPath)};`,
-        'if (process.argv.includes("--unused")) {',
+        "if (process.argv.includes('--unused')) {",
         "  console.log(unusedRepoOwnedEntry);",
         "}",
         "await import(explicitHostEntry);"
@@ -4864,7 +3949,7 @@ process.stdin.on("data", (chunk) => {
       [
         "runtime.install",
         "--run-id",
-        "run-contract-install-node-wrapper-unused-literal-probe-001",
+        "run-contract-install-node-wrapper-root-preferred-001",
         "--params",
         JSON.stringify({
           extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -4880,252 +3965,35 @@ process.stdin.on("data", (chunk) => {
     );
 
     expect(result.status).toBe(0);
-    const launcherRaw = await readFile(launcherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR='${profileDir.replace(/'/g, `'\"'\"'`)}'`
-    );
-  });
-
-  it("keeps legacy profile-dir env for third-party node wrappers when spawn options mention bundled paths", async () => {
-    const runtimeCwd = await createRuntimeCwd();
-    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
-    const launcherPath = path.join(
+    expect(parseSingleJsonLine(result.stdout)).toMatchObject({
+      command: "runtime.install",
+      status: "success",
+      summary: {
+        host_command_source: "explicit",
+        native_bridge_launcher_contract: "dual_env_root_preferred",
+        profile_root: path.join(runtimeCwd, ".webenvoy", "profiles"),
+        profile_root_bridge_socket_path: path.join(runtimeCwd, ".webenvoy", "profiles", "nm.sock"),
+        profile_dir: profileDir,
+        profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
+      }
+    });
+    await expectDualEnvRootPreferredLauncherContract({
+      launcherPath,
       runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-third-party-node-wrapper-spawn-options"
-    );
-    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "xhs_node_wrapper_spawn_options_probe");
-    const explicitHostEntryPath = path.join(runtimeCwd, "explicit-host-node-wrapper-spawn-options-capture.mjs");
-    await writeFile(
-      explicitHostEntryPath,
-      [
-        'import { writeFileSync } from "node:fs";',
-        `writeFileSync(${JSON.stringify(path.join(runtimeCwd, "spawn-options-env.json"))}, "ok\\n", "utf8");`
-      ].join("\n"),
-      "utf8"
-    );
+      profileDir
+    });
 
-    const wrapperPath = path.join(runtimeCwd, "third-party-explicit-host-spawn-options-wrapper.mjs");
-    await writeFile(
-      wrapperPath,
-      [
-        'import { spawn } from "node:child_process";',
-        `const explicitHost = ${JSON.stringify(explicitHostEntryPath)};`,
-        `const repoOwnedEntry = ${JSON.stringify(repoOwnedNativeHostEntryPath)};`,
-        "spawn(process.execPath, [explicitHost], {",
-        "  stdio: 'inherit',",
-        "  env: {",
-        "    ...process.env,",
-        "    DEBUG_ENTRY: repoOwnedEntry",
-        "  }",
-        "});"
-      ].join("\n"),
-      "utf8"
-    );
-
-    const result = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-node-wrapper-spawn-options-probe-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: launcherPath,
-          host_command: createNativeHostCommand(wrapperPath),
-          profile_dir: profileDir
-        })
-      ],
-      runtimeCwd
-    );
-
-    expect(result.status).toBe(0);
-    const launcherRaw = await readFile(launcherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR='${profileDir.replace(/'/g, `'\"'\"'`)}'`
-    );
-  });
-
-  it("keeps argv-variable node wrapper explicit host commands around bundled entries on the canonical profile-root env contract", async () => {
-    const runtimeCwd = await mkdtemp(path.join(tmpdir(), "wv-explicit-bundled-node-argv-wrapper-"));
-    tempDirs.push(runtimeCwd);
-    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
-    const bundledLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-node-argv-wrapper-seed"
-    );
-    const bundledEntryPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "runtime",
-      "native-messaging",
-      "native-host-entry.js"
-    );
-
-    const initialInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-node-argv-wrapper-seed-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: bundledLauncherPath
-        })
-      ],
-      runtimeCwd
-    );
-    expect(initialInstall.status).toBe(0);
-
-    const wrapperPath = path.join(runtimeCwd, "bundled-native-host-argv-wrapper.mjs");
-    await writeFile(
-      wrapperPath,
-      [
-        'import { spawn } from "node:child_process";',
-        `const bundledEntry = ${JSON.stringify(await realpath(bundledEntryPath))};`,
-        "const argv = [bundledEntry];",
-        "spawn(process.execPath, argv, { stdio: 'inherit' });"
-      ].join("\n"),
-      "utf8"
-    );
-
-    const explicitLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-node-argv-wrapper"
-    );
-    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "wrapped-node-argv");
-
-    const explicitInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-node-argv-wrapper-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: explicitLauncherPath,
-          host_command: createNativeHostCommand(wrapperPath),
-          profile_dir: profileDir
-        })
-      ],
-      runtimeCwd
-    );
-
-    expect(explicitInstall.status).toBe(0);
-    const launcherRaw = await readFile(explicitLauncherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
-  });
-
-  it("keeps inline shell-command explicit host commands around bundled entries on the canonical profile-root env contract", async () => {
-    const runtimeCwd = await mkdtemp(path.join(tmpdir(), "wv-explicit-bundled-inline-wrapper-"));
-    tempDirs.push(runtimeCwd);
-    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
-    const bundledLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-inline-wrapper-seed"
-    );
-    const bundledEntryPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "runtime",
-      "native-messaging",
-      "native-host-entry.js"
-    );
-
-    const initialInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-inline-wrapper-seed-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: bundledLauncherPath
-        })
-      ],
-      runtimeCwd
-    );
-    expect(initialInstall.status).toBe(0);
-
-    const explicitLauncherPath = path.join(
-      runtimeCwd,
-      ".webenvoy",
-      "native-host-install",
-      "chrome",
-      "bin",
-      "webenvoy-native-host-bundled-inline-wrapper"
-    );
-    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "wrapped-inline");
-
-    const explicitInstall = runCli(
-      [
-        "runtime.install",
-        "--run-id",
-        "run-contract-install-bundled-inline-wrapper-001",
-        "--params",
-        JSON.stringify({
-          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          browser_channel: "chrome",
-          native_host_name: "com.webenvoy.host",
-          manifest_dir: manifestDir,
-          launcher_path: explicitLauncherPath,
-          host_command: createInlineShellWrappedNativeHostCommand(await realpath(bundledEntryPath)),
-          profile_dir: profileDir
-        })
-      ],
-      runtimeCwd
-    );
-
-    expect(explicitInstall.status).toBe(0);
-    const launcherRaw = await readFile(explicitLauncherPath, "utf8");
-    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
-    expect(launcherRaw).toContain(
-      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
-    );
-    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
+    const launch = spawnSync(launcherPath, [], {
+      cwd: runtimeCwd,
+      encoding: "utf8"
+    });
+    expect(launch.status).toBe(0);
+    expect(launch.stderr).toBe("");
+    expect(JSON.parse(await readFile(envCapturePath, "utf8"))).toEqual({
+      profileRoot: path.join(await realpath(runtimeCwd), ".webenvoy", "profiles"),
+      legacyProfileDir: profileDir,
+      profileMode: PROFILE_MODE_ROOT_PREFERRED
+    });
   });
 
   it("resolves relative profile_dir against the current worktree", async () => {
