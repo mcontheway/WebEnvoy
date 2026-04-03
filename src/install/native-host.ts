@@ -329,6 +329,27 @@ interface ManagedInstallMetadataRecord {
   bundle_runtime_expected: boolean;
 }
 
+const launcherScriptUsesLegacyProfileDirOnly = async (
+  launcherPath: string | null | undefined
+): Promise<boolean> => {
+  if (typeof launcherPath !== "string" || launcherPath.length === 0) {
+    return false;
+  }
+  try {
+    const raw = await readFile(launcherPath, "utf8");
+    return (
+      raw.includes("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR") &&
+      !raw.includes("WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT")
+    );
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+};
+
 const readNativeHostRegistrationManifest = async (
   manifestPath: string
 ): Promise<NativeHostRegistrationManifest | null> => {
@@ -578,6 +599,11 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
     typeof input.hostCommand === "string" && input.hostCommand.trim().length > 0
       ? "explicit"
       : "repo_owned_default";
+  const preserveLegacyProfileDirForLauncher =
+    hostCommandSource === "explicit" &&
+    !!profileDir &&
+    ((await launcherScriptUsesLegacyProfileDirOnly(resolvedPaths.launcherPath)) ||
+      (await launcherScriptUsesLegacyProfileDirOnly(previousLegacyLauncherPath)));
   const bundledEntryPath =
     hostCommandSource === "explicit" ? null : await ensureBundledNativeHostRuntime(resolvedPaths.channelRoot);
   const bundleRuntimeWritten = bundledEntryPath !== null;
@@ -591,7 +617,7 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
       command: "runtime.install",
       hostCommand,
       profileRoot,
-      legacyProfileDir: hostCommandSource === "explicit" ? profileDir : undefined
+      legacyProfileDir: preserveLegacyProfileDirForLauncher ? profileDir : undefined
     }),
     "utf8"
   );

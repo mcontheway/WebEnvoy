@@ -246,6 +246,23 @@ const resolveManifestDirectoryOverride = () => {
     return resolve(override.trim());
 };
 export const resolveManifestDiscoveryDirectory = (browserChannel) => resolveManifestDirectoryOverride() ?? resolveDefaultManifestDirectory(browserChannel);
+const launcherScriptUsesLegacyProfileDirOnly = async (launcherPath) => {
+    if (typeof launcherPath !== "string" || launcherPath.length === 0) {
+        return false;
+    }
+    try {
+        const raw = await readFile(launcherPath, "utf8");
+        return (raw.includes("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR") &&
+            !raw.includes("WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT"));
+    }
+    catch (error) {
+        const nodeError = error;
+        if (nodeError.code === "ENOENT") {
+            return false;
+        }
+        throw error;
+    }
+};
 const readNativeHostRegistrationManifest = async (manifestPath) => {
     try {
         const raw = await readFile(manifestPath, "utf8");
@@ -416,6 +433,10 @@ export const installNativeHost = async (input) => {
     const hostCommandSource = typeof input.hostCommand === "string" && input.hostCommand.trim().length > 0
         ? "explicit"
         : "repo_owned_default";
+    const preserveLegacyProfileDirForLauncher = hostCommandSource === "explicit" &&
+        !!profileDir &&
+        ((await launcherScriptUsesLegacyProfileDirOnly(resolvedPaths.launcherPath)) ||
+            (await launcherScriptUsesLegacyProfileDirOnly(previousLegacyLauncherPath)));
     const bundledEntryPath = hostCommandSource === "explicit" ? null : await ensureBundledNativeHostRuntime(resolvedPaths.channelRoot);
     const bundleRuntimeWritten = bundledEntryPath !== null;
     const hostCommand = hostCommandSource === "explicit"
@@ -425,7 +446,7 @@ export const installNativeHost = async (input) => {
         command: "runtime.install",
         hostCommand,
         profileRoot,
-        legacyProfileDir: hostCommandSource === "explicit" ? profileDir : undefined
+        legacyProfileDir: preserveLegacyProfileDirForLauncher ? profileDir : undefined
     }), "utf8");
     await writeManagedInstallMetadata({
         channelRoot: resolvedPaths.channelRoot,

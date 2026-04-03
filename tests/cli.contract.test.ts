@@ -3544,7 +3544,7 @@ process.stdin.on("data", (chunk) => {
     expect(launcherRaw).toContain(' "$@"');
   });
 
-  it("preserves legacy profile-dir env for explicit host launchers", async () => {
+  it("keeps fresh explicit host launchers on profile-root routing", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
     const launcherPath = path.join(
@@ -3596,11 +3596,102 @@ process.stdin.on("data", (chunk) => {
     expect(launcherRaw).toContain(
       `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
     );
+    expect(launcherRaw).not.toContain("WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR");
+
+    const launch = spawnSync(launcherPath, [], {
+      cwd: runtimeCwd,
+      encoding: "utf8"
+    });
+    expect(launch.status).toBe(0);
+    expect(launch.stderr).toBe("");
+    expect(JSON.parse(await readFile(envCapturePath, "utf8"))).toEqual({
+      profileRoot: expectedProfileRoot,
+      legacyProfileDir: null
+    });
+  });
+
+  it("preserves legacy profile-dir env when replacing a legacy explicit launcher", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
+    const legacyLauncherPath = path.join(manifestDir, "com.webenvoy.host-launcher");
+    const managedLauncherPath = path.join(
+      runtimeCwd,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "bin",
+      "com.webenvoy.host-launcher"
+    );
+    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "xhs_explicit_legacy_probe");
+    const envCapturePath = path.join(runtimeCwd, "explicit-host-env-upgrade.json");
+    const explicitHostEntryPath = path.join(runtimeCwd, "explicit-host-env-upgrade-capture.mjs");
+    await writeFile(
+      explicitHostEntryPath,
+      [
+        'import { writeFileSync } from "node:fs";',
+        "",
+        `writeFileSync(${JSON.stringify(envCapturePath)}, JSON.stringify({`,
+        '  profileRoot: process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT ?? null,',
+        '  legacyProfileDir: process.env.WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR ?? null',
+        "}) + \"\\n\", \"utf8\");"
+      ].join("\n"),
+      "utf8"
+    );
+    await mkdir(manifestDir, { recursive: true });
+    await writeFile(
+      legacyLauncherPath,
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR='${profileDir.replace(/'/g, `'\"'\"'`)}'`,
+        'exec "$@"'
+      ].join("\n"),
+      "utf8"
+    );
+    await writeFile(
+      path.join(manifestDir, "com.webenvoy.host.json"),
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          path: legacyLauncherPath,
+          type: "stdio",
+          allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const result = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-explicit-host-profile-dir-upgrade-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          manifest_dir: manifestDir,
+          host_command: createNativeHostCommand(explicitHostEntryPath),
+          profile_dir: profileDir
+        })
+      ],
+      runtimeCwd
+    );
+
+    expect(result.status).toBe(0);
+    const launcherRaw = await readFile(managedLauncherPath, "utf8");
+    const expectedProfileRoot = path.join(await realpath(runtimeCwd), ".webenvoy", "profiles");
+    expect(launcherRaw).toContain(
+      `export WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT='${expectedProfileRoot.replace(/'/g, `'\"'\"'`)}'`
+    );
     expect(launcherRaw).toContain(
       `export WEBENVOY_NATIVE_BRIDGE_PROFILE_DIR='${profileDir.replace(/'/g, `'\"'\"'`)}'`
     );
 
-    const launch = spawnSync(launcherPath, [], {
+    const launch = spawnSync(managedLauncherPath, [], {
       cwd: runtimeCwd,
       encoding: "utf8"
     });
