@@ -49,6 +49,14 @@ const isPathInside = (baseDir: string, targetPath: string): boolean => {
 const resolveSocketTarget = (
   request: Pick<BridgeRequestEnvelope, "profile">
 ): { profileDir: string; socketPath: string } | null => {
+  if (LEGACY_PROFILE_DIR) {
+    const profileDir = resolve(LEGACY_PROFILE_DIR);
+    return {
+      profileDir,
+      socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
+    };
+  }
+
   const profileName = asString(request.profile);
 
   if (PROFILE_ROOT) {
@@ -69,20 +77,16 @@ const resolveSocketTarget = (
     };
   }
 
-  if (LEGACY_PROFILE_DIR) {
-    const profileDir = resolve(LEGACY_PROFILE_DIR);
-    return {
-      profileDir,
-      socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
-    };
-  }
-
   return null;
 };
 
 const shouldPromoteToProfileSocket = (
   request: Pick<BridgeRequestEnvelope, "profile">
-): boolean => typeof request.profile === "string" && request.profile.trim().length > 0 && !!PROFILE_ROOT;
+): boolean =>
+  !LEGACY_PROFILE_DIR &&
+  typeof request.profile === "string" &&
+  request.profile.trim().length > 0 &&
+  !!PROFILE_ROOT;
 
 const isBridgeResponse = (value: unknown): value is BridgeResponseEnvelope => {
   const record = asRecord(value);
@@ -474,7 +478,7 @@ const handleExtensionRequest = async (request: BridgeRequestEnvelope): Promise<v
     return;
   }
 
-  if (!activeSocketPath && request.method === "bridge.forward") {
+  if (request.method === "bridge.forward" && (!activeSocketPath || !!LEGACY_PROFILE_DIR)) {
     writeNativeSuccess(
       request,
       {
@@ -486,9 +490,11 @@ const handleExtensionRequest = async (request: BridgeRequestEnvelope): Promise<v
         },
         payload: buildStubForwardPayload(request)
       },
-      () => {
-        process.exit(0);
-      }
+      activeSocketPath
+        ? undefined
+        : () => {
+            process.exit(0);
+          }
     );
     return;
   }

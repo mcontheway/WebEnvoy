@@ -254,11 +254,74 @@ describe("native messaging contract", () => {
     }
   });
 
-  it("prefers profile-root routing for profiled requests when both launcher envs are present", async () => {
+  it("keeps rejecting stdio bridge.forward after profile-root bootstrap without legacy launcher env", async () => {
+    const profileRoot = await mkdtemp(path.join(tmpdir(), "webenvoy-native-host-entry-root-only-"));
+    tempDirs.push(profileRoot);
+    const child = spawn(process.execPath, [repoOwnedNativeHostPath], {
+      cwd: repoRoot,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        WEBENVOY_NATIVE_BRIDGE_PROFILE_ROOT: profileRoot
+      }
+    });
+
+    try {
+      const openResponsePromise = readSingleNativeEnvelope(child.stdout);
+      child.stdin.write(
+        encodeNativeEnvelope({
+          id: "open-root-only-001",
+          method: "bridge.open",
+          profile: null,
+          params: {},
+          timeout_ms: 100
+        })
+      );
+      expect(await openResponsePromise).toMatchObject({
+        status: "success",
+        summary: {
+          protocol: "webenvoy.native-bridge.v1",
+          state: "ready"
+        }
+      });
+
+      const forwardResponsePromise = readSingleNativeEnvelope(child.stdout);
+      child.stdin.write(
+        encodeNativeEnvelope({
+          id: "forward-root-only-001",
+          method: "bridge.forward",
+          profile: null,
+          params: {
+            session_id: "nm-session-001",
+            run_id: "run-root-only-001",
+            command: "runtime.ping",
+            command_params: {},
+            cwd: repoRoot
+          },
+          timeout_ms: 100
+        })
+      );
+      expect(await forwardResponsePromise).toMatchObject({
+        status: "error",
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: "unsupported extension request: bridge.forward"
+        }
+      });
+    } finally {
+      child.kill("SIGTERM");
+      await new Promise<void>((resolve) => {
+        child.once("close", () => resolve());
+      });
+    }
+  });
+
+  it("preserves legacy profile-dir routing for profiled requests when both launcher envs are present", async () => {
     const profileRoot = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-root-"));
     const legacyProfileDir = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-legacy-"));
     const profileName = "xhs_dual_profile";
     const profileSocketPath = path.join(profileRoot, profileName, "nm.sock");
+    const legacySocketPath = path.join(legacyProfileDir, "nm.sock");
     tempDirs.push(profileRoot, legacyProfileDir);
     const child = spawn(process.execPath, [repoOwnedNativeHostPath], {
       cwd: repoRoot,
@@ -288,7 +351,10 @@ describe("native messaging contract", () => {
           state: "ready"
         }
       });
-      await expect(access(profileSocketPath)).resolves.toBeUndefined();
+      await expect(access(legacySocketPath)).resolves.toBeUndefined();
+      await expect(access(profileSocketPath)).rejects.toMatchObject({
+        code: "ENOENT"
+      });
     } finally {
       child.kill("SIGTERM");
       await new Promise<void>((resolve) => {
@@ -297,10 +363,11 @@ describe("native messaging contract", () => {
     }
   });
 
-  it("keeps profile-root bootstrap handshake when both launcher envs are present without a profile", async () => {
+  it("keeps stdio forward working after legacy profile-dir bootstrap when both launcher envs are present", async () => {
     const profileRoot = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-boot-root-"));
     const legacyProfileDir = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-boot-legacy-"));
     const rootSocketPath = path.join(profileRoot, "nm.sock");
+    const legacySocketPath = path.join(legacyProfileDir, "nm.sock");
     tempDirs.push(profileRoot, legacyProfileDir);
     const child = spawn(process.execPath, [repoOwnedNativeHostPath], {
       cwd: repoRoot,
@@ -330,7 +397,42 @@ describe("native messaging contract", () => {
           state: "ready"
         }
       });
-      await expect(access(rootSocketPath)).resolves.toBeUndefined();
+      await expect(access(legacySocketPath)).resolves.toBeUndefined();
+      await expect(access(rootSocketPath)).rejects.toMatchObject({
+        code: "ENOENT"
+      });
+
+      const forwardResponsePromise = readSingleNativeEnvelope(child.stdout);
+      child.stdin.write(
+        encodeNativeEnvelope({
+          id: "forward-dual-env-legacy-bootstrap-001",
+          method: "bridge.forward",
+          profile: null,
+          params: {
+            session_id: "nm-session-001",
+            run_id: "run-dual-env-legacy-bootstrap-001",
+            command: "runtime.ping",
+            command_params: {},
+            cwd: repoRoot
+          },
+          timeout_ms: 100
+        })
+      );
+      expect(await forwardResponsePromise).toMatchObject({
+        status: "success",
+        summary: {
+          session_id: "nm-session-001",
+          command: "runtime.ping",
+          run_id: "run-dual-env-legacy-bootstrap-001",
+          relay_path: "host>background>content-script>background>host"
+        },
+        payload: {
+          message: "pong",
+          run_id: "run-dual-env-legacy-bootstrap-001",
+          profile: null,
+          cwd: repoRoot
+        }
+      });
     } finally {
       child.kill("SIGTERM");
       await new Promise<void>((resolve) => {

@@ -14,6 +14,13 @@ const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
 const binPath = path.join(repoRoot, "bin", "webenvoy");
 const mockBrowserPath = path.join(repoRoot, "tests", "fixtures", "mock-browser.sh");
 const nativeHostMockPath = path.join(repoRoot, "tests", "fixtures", "native-host-mock.mjs");
+const repoOwnedNativeHostEntryPath = path.join(
+  repoRoot,
+  "dist",
+  "runtime",
+  "native-messaging",
+  "native-host-entry.js"
+);
 const browserStateFilename = "__webenvoy_browser_instance.json";
 
 const tempDirs: string[] = [];
@@ -3702,6 +3709,63 @@ process.stdin.on("data", (chunk) => {
     expect(JSON.parse(await readFile(envCapturePath, "utf8"))).toEqual({
       profileRoot: expectedProfileRoot,
       legacyProfileDir: profileDir
+    });
+  });
+
+  it("keeps runtime.ping working through an explicit launcher with profile_dir compatibility", async () => {
+    const runtimeCwd = await mkdtemp(path.join(tmpdir(), "wv-explicit-live-"));
+    tempDirs.push(runtimeCwd);
+    const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
+    const launcherPath = path.join(
+      runtimeCwd,
+      ".webenvoy",
+      "native-host-install",
+      "chrome",
+      "bin",
+      "webenvoy-native-host-explicit-profile-dir-live"
+    );
+    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "p");
+
+    const install = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-explicit-host-profile-dir-live-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          manifest_dir: manifestDir,
+          launcher_path: launcherPath,
+          host_command: createNativeHostCommand(repoOwnedNativeHostEntryPath),
+          profile_dir: profileDir
+        })
+      ],
+      runtimeCwd
+    );
+
+    expect(install.status).toBe(0);
+
+    const ping = runCli(
+      ["runtime.ping", "--run-id", "run-contract-explicit-host-profile-dir-live-001"],
+      runtimeCwd,
+      {
+        WEBENVOY_NATIVE_HOST_CMD: JSON.stringify(launcherPath)
+      }
+    );
+
+    expect(ping.status).toBe(0);
+    expect(parseSingleJsonLine(ping.stdout)).toMatchObject({
+      command: "runtime.ping",
+      status: "success",
+      summary: {
+        message: "pong",
+        transport: {
+          protocol: "webenvoy.native-bridge.v1",
+          relay_path: "host>background>content-script>background>host"
+        }
+      }
     });
   });
 
