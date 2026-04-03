@@ -297,10 +297,10 @@ describe("native messaging contract", () => {
     }
   });
 
-  it("keeps legacy profile-dir handshake when both launcher envs are present without a profile", async () => {
+  it("keeps profile-root bootstrap handshake when both launcher envs are present without a profile", async () => {
     const profileRoot = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-boot-root-"));
     const legacyProfileDir = await mkdtemp(path.join(tmpdir(), "webenvoy-nm-dual-boot-legacy-"));
-    const legacySocketPath = path.join(legacyProfileDir, "nm.sock");
+    const rootSocketPath = path.join(profileRoot, "nm.sock");
     tempDirs.push(profileRoot, legacyProfileDir);
     const child = spawn(process.execPath, [repoOwnedNativeHostPath], {
       cwd: repoRoot,
@@ -330,7 +330,7 @@ describe("native messaging contract", () => {
           state: "ready"
         }
       });
-      await expect(access(legacySocketPath)).resolves.toBeUndefined();
+      await expect(access(rootSocketPath)).resolves.toBeUndefined();
     } finally {
       child.kill("SIGTERM");
       await new Promise<void>((resolve) => {

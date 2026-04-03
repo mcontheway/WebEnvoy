@@ -63,13 +63,6 @@ const resolveSocketTarget = (
         socketPath: join(profileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
       };
     }
-    if (LEGACY_PROFILE_DIR) {
-      const legacyProfileDir = resolve(LEGACY_PROFILE_DIR);
-      return {
-        profileDir: legacyProfileDir,
-        socketPath: join(legacyProfileDir, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
-      };
-    }
     return {
       profileDir: profileRoot,
       socketPath: join(profileRoot, PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME)
