@@ -243,7 +243,7 @@ const resolveBundledNativeHostRuntimePaths = (channelRoot: string) => {
   };
 };
 
-const ensureBundledNativeHostRuntime = async (channelRoot: string): Promise<string> => {
+const installBundledNativeHostRuntime = async (channelRoot: string): Promise<string> => {
   const source = resolveCurrentBuildNativeHostRuntimePaths();
   const target = resolveBundledNativeHostRuntimePaths(channelRoot);
   await mkdir(dirname(target.entryPath), { recursive: true });
@@ -534,6 +534,58 @@ const resolveProfileDirForLauncher = (input: {
   return normalizedProfileDir;
 };
 
+const validateNativeHostInstallPaths = async (input: {
+  command: "runtime.install" | "runtime.uninstall";
+  resolvedPaths: ReturnType<typeof resolveInstallPaths>;
+  profileRoot: string;
+  profileDir?: string;
+}): Promise<void> => {
+  await assertNoSymlinkAncestorBetween({
+    command: input.command,
+    field: "manifest_dir",
+    fromDir: input.resolvedPaths.manifestRoot,
+    targetDir: input.resolvedPaths.manifestDir
+  });
+  await assertNoSymlinkAncestorBetween({
+    command: input.command,
+    field: "launcher_path",
+    fromDir: input.resolvedPaths.launcherRoot,
+    targetDir: dirname(input.resolvedPaths.launcherPath)
+  });
+  if (typeof input.profileDir === "string") {
+    await assertNoSymlinkAncestorBetween({
+      command: input.command,
+      field: "profile_dir",
+      fromDir: input.profileRoot,
+      targetDir: input.profileDir
+    });
+  }
+  await assertNotSymlink(input.command, "manifest_path", input.resolvedPaths.manifestPath);
+  await assertNotSymlink(input.command, "launcher_path", input.resolvedPaths.launcherPath);
+};
+
+const resolveNativeHostRuntimeBundlePlan = async (input: {
+  resolvedPaths: ReturnType<typeof resolveInstallPaths>;
+  hostCommandSource: "explicit" | "repo_owned_default";
+  hostCommand?: string;
+}): Promise<{
+  hostCommand: string;
+  bundleRuntimeWritten: boolean;
+}> => {
+  if (input.hostCommandSource === "explicit") {
+    return {
+      hostCommand: input.hostCommand!.trim(),
+      bundleRuntimeWritten: false
+    };
+  }
+
+  const bundledEntryPath = await installBundledNativeHostRuntime(input.resolvedPaths.channelRoot);
+  return {
+    hostCommand: `${quoteShellToken(process.execPath)} ${quoteShellToken(bundledEntryPath)}`,
+    bundleRuntimeWritten: true
+  };
+};
+
 export const installNativeHost = async (input: InstallNativeHostInput) => {
   const resolvedPaths = resolveInstallPaths({
     command: "runtime.install",
@@ -550,28 +602,12 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
     profileRoot,
     profileDir: input.profileDir
   });
-  await assertNoSymlinkAncestorBetween({
+  await validateNativeHostInstallPaths({
     command: "runtime.install",
-    field: "manifest_dir",
-    fromDir: resolvedPaths.manifestRoot,
-    targetDir: resolvedPaths.manifestDir
+    resolvedPaths,
+    profileRoot,
+    profileDir
   });
-  await assertNoSymlinkAncestorBetween({
-    command: "runtime.install",
-    field: "launcher_path",
-    fromDir: resolvedPaths.launcherRoot,
-    targetDir: dirname(resolvedPaths.launcherPath)
-  });
-  if (profileDir) {
-    await assertNoSymlinkAncestorBetween({
-      command: "runtime.install",
-      field: "profile_dir",
-      fromDir: profileRoot,
-      targetDir: profileDir
-    });
-  }
-  await assertNotSymlink("runtime.install", "manifest_path", resolvedPaths.manifestPath);
-  await assertNotSymlink("runtime.install", "launcher_path", resolvedPaths.launcherPath);
   const currentRegistration = await readNativeHostRegistrationManifest(resolvedPaths.manifestPath);
   const previousManagedInstall =
     currentRegistration?.launcherPath && currentRegistration.launcherPath !== resolvedPaths.launcherPath
@@ -592,13 +628,13 @@ export const installNativeHost = async (input: InstallNativeHostInput) => {
     typeof input.hostCommand === "string" && input.hostCommand.trim().length > 0
       ? "explicit"
       : "repo_owned_default";
-  const bundledEntryPath =
-    hostCommandSource === "explicit" ? null : await ensureBundledNativeHostRuntime(resolvedPaths.channelRoot);
-  const bundleRuntimeWritten = bundledEntryPath !== null;
-  const hostCommand =
-    hostCommandSource === "explicit"
-      ? input.hostCommand!.trim()
-      : `${quoteShellToken(process.execPath)} ${quoteShellToken(bundledEntryPath!)}`;
+  const runtimeBundlePlan = await resolveNativeHostRuntimeBundlePlan({
+    resolvedPaths,
+    hostCommandSource,
+    hostCommand: input.hostCommand
+  });
+  const hostCommand = runtimeBundlePlan.hostCommand;
+  const bundleRuntimeWritten = runtimeBundlePlan.bundleRuntimeWritten;
   const usesExplicitProfileContract = hostCommandSource === "explicit" && !!profileDir;
   const nativeBridgeLauncherContract = usesExplicitProfileContract
     ? "dual_env_launcher_only"
