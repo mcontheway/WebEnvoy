@@ -1,5 +1,4 @@
 # FR-0012 TODO
-> 现状说明：本地已实现 fingerprint bundle/patch manifest 与 P0 补丁链路，并有合同/集成测试覆盖；以下未勾选项主要是 formal review / GitHub 状态同步或 P1/P2 扩展，不代表能力未落地。
 
 ## 评审阻断项
 

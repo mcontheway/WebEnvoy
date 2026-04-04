@@ -1,7 +1,5 @@
 # FR-0002 TODO
 
-状态说明：本地实现已落地并通过合同测试；未勾选项主要是 formal spec review / GitHub 同步，不代表能力缺失。
-
 ## Spec Review 阶段
 
 - [x] 明确 FR-0002 只覆盖 Native Messaging 最小通信闭环

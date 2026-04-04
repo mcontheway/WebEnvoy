@@ -1,5 +1,4 @@
 # FR-0008 TODO
-> 现状说明：本地已实现 `issue_208 + live_write + editor_input` 的最小验证链路与合同测试，以下未勾选项主要是浏览器内证据与 formal review 同步，不代表能力未落地。
 
 ## 已完成前置
 
