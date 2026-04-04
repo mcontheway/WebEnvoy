@@ -105,8 +105,8 @@
   - `blocker_level`
 - 字段命名必须与 `contracts/live-evidence-gate.md` 的 `live_evidence_record` 保持一致；PR 模板可在展示文案中补充中文说明，但不能改出另一套 schema。
 - `gate_applicability` 的字段命名必须与 `contracts/live-evidence-gate.md` 保持一致；即使 `live_evidence_record` 整块为 `N/A`，formal spec review PR、governance landing PR 与其他落入专项门禁的 PR 也仍必须提供 `review_lane`、`in_scope`、`trigger_reasons` 与 `n_a_allowed`，供 reviewer / guardian 机器化判定。
-- `classification_scope` 必须独立于作者自报 `review_lane` 存在，用于让 reviewer / guardian 先依据冻结的目标集合判定“是否命中 FR-0016 formal spec 套件”与“是否命中治理落库目标文件”，再决定 lane 与 blocker。
-- 对 `governance_landing_pr`，`gate_applicability` 还必须显式给出 `governance_scope_targets`，并与 FR-0016 冻结的五处治理落库目标文件保持一致；reviewer / guardian 只有在 PR 同时命中这些目标文件、且 PR 元数据显式引用 `#310` 这一 FR-0016 治理落库 issue 时，才按 `governance_landing_pr` 处理，不得被自报 `general_pr` 绕过。
+- `classification_scope` 必须独立于作者自报 `review_lane` 存在，用于让 reviewer / guardian 先依据冻结的目标集合判定“是否命中 FR-0016 formal spec 契约文件”与“是否完整命中治理落库目标文件”，再决定 lane 与 blocker。
+- 对 `governance_landing_pr`，`gate_applicability` 还必须显式给出 `governance_scope_targets`，并与 FR-0016 冻结的五处治理落库目标文件保持一致；reviewer / guardian 只有在 PR 完整命中这五处目标文件、且 PR 元数据显式引用 `#310` 这一 FR-0016 治理落库 issue 时，才按 `governance_landing_pr` 处理，不得被自报 `general_pr` 绕过。
 - `evidence_collected_at` 必须能标识当前 latest head 上这次 fresh rerun 的采集时间；不得继续复用同一 head 的历史 artifact 时间戳来冒充新鲜复验。
 - `run_id` 与 `artifact_identity` 必须使用 provider-scoped 的稳定标识，能够让 reviewer / guardian 机器化地区分“当前 latest head 的 fresh rerun”与“同一 head 的历史 artifact”。
 - 若 evidence 成功，`failure_reason` 与 `blocker_level` 必须填写 `N/A`。
@@ -142,7 +142,7 @@
   - 更新 `.github/PULL_REQUEST_TEMPLATE.md`
 - 在 formal spec review 通过前，治理落库 PR 不得申报为可合并状态。
 - `spec_review_not_completed` 的阻断必须只对 `governance_landing_pr` 生效，并由 shared contract 内部的结构化 lane 字段判定，而不是依赖 PR 标题、改动路径或人工上下文。
-- 若同一 PR 同时改动 `spec_contract_targets` 中任一正式契约文件，且又命中“五处治理落库目标文件 + `#310` issue 引用”这一 FR-0016 落库条件，必须作为 `mixed_spec_and_governance_scope` 直接阻断；纯 `TODO.md` 进度回写不计入该阻断。
+- 若同一 PR 同时改动 `spec_contract_targets` 中任一正式契约文件，且又命中“五处治理落库目标文件完整集合 + `#310` issue 引用”这一 FR-0016 落库条件，必须作为 `mixed_spec_and_governance_scope` 直接阻断；纯 `TODO.md` 进度回写不计入该阻断。
 
 ## GWT 验收场景
 
@@ -206,6 +206,7 @@ And 阻断理由应明确指向“先完成 formal spec review”
 6. formal spec review PR 与治理落库 PR 混在同一条高风险链路：视为流程违规，必须拆分。
 7. 未来其他事项若单独修改 `AGENTS.md`、`docs/dev/AGENTS.md`、`code_review.md`、`docs/dev/review/guardian-review-addendum.md` 或 `.github/PULL_REQUEST_TEMPLATE.md`，但不承载 `#310` 的 FR-0016 落库闭环：不得被误判为 `governance_landing_pr`。
 8. 治理落库 PR 若仅随手回写 FR-0016 `TODO.md` 的非语义进度状态：不应因此触发 `mixed_spec_and_governance_scope`。
+9. 仅改动五处治理落库目标文件中的子集，即使引用 `#310`，也不得被视为完成版 `governance_landing_pr`，更不得据此提前关闭 `#310`。
 
 ## 验收标准
 
