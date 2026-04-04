@@ -1569,11 +1569,12 @@ normalize_native_review_result() {
       def has_condition($sentence):
         ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|(^|[[:space:],，。！？；：()（）])当(?!前)[^。！？；：]*时([[:space:],，。！？；：()（）]|$)"));
       def has_followup($sentence):
-        ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should|missing|lacks?)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
+        ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit|not\\s+be\\s+(?:merged|approved))|missing|lacks?)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
       def strong_safe_sentence($sentence):
         ($sentence | trim_text) as $trimmed
         | ($trimmed | ascii_downcase) as $lower
         | ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$"))
+          or ($lower | test("^(?:i )?did not identify any actionable correctness regressions(?: in the changed code)?(?: that should block merg(?:e|ing) (?:this )?pr)?[.!]?$"))
           or ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$"))
           or ($lower | test("^(?:i )?did not identify any issues that clearly block merge[.!]?$"))
           or ($lower | test("^no blocking issues found[.!]?$"))
@@ -1605,6 +1606,7 @@ normalize_native_review_result() {
         | ($lower | test("does not affect code paths"))
           or ($lower | test("does not modify executable code or behavior"))
           or ($lower | test("does not affect .*runtime behavior"))
+          or ($lower | test("^after reviewing the diff against [^,]+, (?:the )?(?:refactor|patch|change) appears? to preserve .+[.!]?$"))
           or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"));
       def harmless_tail_sentence($sentence):
         ($sentence | ascii_downcase | trim_text) as $lower
@@ -1727,11 +1729,12 @@ normalize_native_review_result() {
       def has_condition($sentence):
         ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|(^|[[:space:],，。！？；：()（）])当(?!前)[^。！？；：]*时([[:space:],，。！？；：()（）]|$)"));
       def has_followup($sentence):
-        ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should|missing|lacks?)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
+        ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit|not\\s+be\\s+(?:merged|approved))|missing|lacks?)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
       def strong_safe_sentence($sentence):
         ($sentence | trim_text) as $trimmed
         | ($trimmed | ascii_downcase) as $lower
         | ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$"))
+          or ($lower | test("^(?:i )?did not identify any actionable correctness regressions(?: in the changed code)?(?: that should block merg(?:e|ing) (?:this )?pr)?[.!]?$"))
           or ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$"))
           or ($lower | test("^(?:i )?did not find any current-?pr-introduced issues(?: that would block merge)?[.!]?$"))
           or ($lower | test("^(?:i )?did not identify any issues that clearly block merge[.!]?$"))
@@ -1773,6 +1776,7 @@ normalize_native_review_result() {
         | ($lower | test("does not affect code paths"))
           or ($lower | test("does not modify executable code or behavior"))
           or ($lower | test("does not affect .*runtime behavior"))
+          or ($lower | test("^after reviewing the diff against [^,]+, (?:the )?(?:refactor|patch|change) appears? to preserve .+[.!]?$"))
           or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"))
           or review_context_sentence($sentence);
       def harmless_tail_sentence($sentence):
@@ -1877,7 +1881,7 @@ normalize_native_review_result() {
     def trim:
       sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
     def has_followup($sentence):
-      ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should|missing|lacks?)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
+      ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit|not\\s+be\\s+(?:merged|approved))|missing|lacks?)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
     def has_contrast($sentence):
       ($sentence | ascii_downcase | test("\\b(but|however|although|except|except for|yet|still|though|nevertheless|aside from|other than)\\b|但是|但|不过|然而|只是|除外|除此之外"));
     def has_condition($sentence):
@@ -1886,6 +1890,7 @@ normalize_native_review_result() {
       ($sentence | trim) as $trimmed
       | ($trimmed | ascii_downcase) as $lower
       | ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$"))
+        or ($lower | test("^(?:i )?did not identify any actionable correctness regressions(?: in the changed code)?(?: that should block merg(?:e|ing) (?:this )?pr)?[.!]?$"))
         or ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$"))
         or ($lower | test("^(?:i )?did not find any current-?pr-introduced issues(?: that would block merge)?[.!]?$"))
         or ($lower | test("^(?:i )?did not identify any issues that clearly block merge[.!]?$"))
@@ -1927,6 +1932,7 @@ normalize_native_review_result() {
       | ($lower | test("does not affect code paths"))
         or ($lower | test("does not modify executable code or behavior"))
         or ($lower | test("does not affect .*runtime behavior"))
+        or ($lower | test("^after reviewing the diff against [^,]+, (?:the )?(?:refactor|patch|change) appears? to preserve .+[.!]?$"))
         or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"))
         or review_context_sentence($sentence);
     def harmless_tail_sentence($sentence):

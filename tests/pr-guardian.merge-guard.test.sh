@@ -3004,6 +3004,21 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":true'
 }
 
+test_normalize_native_review_result_accepts_after_reviewing_diff_preserve_summary() {
+  setup_case_dir "normalize-native-text-after-reviewing-diff-preserve"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+After reviewing the diff against origin/main, the refactor appears to preserve the existing readiness, lock-inspection, and attach/status behaviors while only extracting them into helpers. I did not identify any actionable correctness regressions in the changed code that should block merging this PR.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
 test_normalize_native_review_result_fails_closed_for_chinese_incomplete_evidence_prefix() {
   setup_case_dir "normalize-native-text-chinese-incomplete-evidence-prefix"
 
@@ -4074,6 +4089,7 @@ main() {
   test_normalize_native_review_result_accepts_chinese_review_context_with_current_runtime_phrase
   test_normalize_native_review_result_fails_closed_for_review_context_with_incomplete_evidence
   test_normalize_native_review_result_accepts_reviewed_diff_preface_before_safe_summary
+  test_normalize_native_review_result_accepts_after_reviewing_diff_preserve_summary
   test_normalize_native_review_result_fails_closed_for_chinese_incomplete_evidence_prefix
   test_normalize_native_review_result_fails_closed_for_chinese_review_context_with_unfinished_convergence
   test_normalize_native_review_result_accepts_polite_plain_text_approve_phrase
