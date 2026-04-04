@@ -110,6 +110,7 @@
 - `classification_scope` 必须独立于作者自报 `review_lane` 存在，用于让 reviewer / guardian 先依据冻结的目标集合判定“是否命中 FR-0016 formal spec 契约文件”“是否只做 `TODO.md` 非语义进度回写”与“是否精确命中治理落库目标文件”，再决定 lane 与 blocker。
 - 对 `governance_landing_pr`，`gate_applicability` 还必须显式给出 `governance_scope_targets`，并与 FR-0016 冻结的五处治理落库目标文件保持一致；reviewer / guardian 只有在 PR 精确命中这五处目标文件、且 PR 元数据显式引用 `#310` 这一 FR-0016 治理落库 issue 时，才按 `governance_landing_pr` 处理，不得被自报 `general_pr` 绕过。
 - 若 PR 已精确命中五处治理落库目标文件，但缺少 `#310` issue 引用，reviewer / guardian 仍必须直接阻断，不得把它降格成 `general_pr` 放行。
+- `governance_landing_pr` 即使对 live evidence 本身属于 `not_applicable`，也仍必须携带可用的 issue closing semantics，只允许 `Refs #310` 或在实际闭环时使用 `Fixes #310`；不得退成 `n_a`。
 - `evidence_collected_at` 必须能标识当前 latest head 上这次 fresh rerun 的采集时间；不得继续复用同一 head 的历史 artifact 时间戳来冒充新鲜复验。
 - `run_id` 与 `artifact_identity` 必须使用 provider-scoped 的稳定标识，能够让 reviewer / guardian 机器化地区分“当前 latest head 的 fresh rerun”与“同一 head 的历史 artifact”。
 - 若 evidence 成功，`failure_reason` 与 `blocker_level` 必须填写 `N/A`。

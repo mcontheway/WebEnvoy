@@ -99,7 +99,7 @@
   - `blocking_reasons` 非空时，`status=blocked`。
   - `status=blocked` 时，`closing_semantics=refs_only` 且 `merge_ready=false`。
   - `status=ready` 时，`merge_ready=true`，且 `closing_semantics` 可按普通 Issue 闭环语义选择 `refs_only` 或 `fixes_allowed`；live evidence 专项门禁只解除“因证据不足而不得使用 `Fixes`”这一层限制，不强制要求作者必须改成 `Fixes`。
-  - `status=not_applicable` 时，`blocking_reasons=[]` 且 `gate_applicability.in_scope=false`，`merge_ready=true`；此时 `closing_semantics` 可按普通 Issue 闭环语义选择 `n_a`、`refs_only` 或 `fixes_allowed`，但 `review_lane=formal_spec_review_pr` 时必须为 `refs_only`。
+  - `status=not_applicable` 时，`blocking_reasons=[]` 且 `gate_applicability.in_scope=false`，`merge_ready=true`；此时 `closing_semantics` 可按普通 Issue 闭环语义选择 `n_a`、`refs_only` 或 `fixes_allowed`，但 `review_lane=formal_spec_review_pr` 时必须为 `refs_only`，`review_lane=governance_landing_pr` 时只允许为 `refs_only` 或 `fixes_allowed`。
   - `merge_ready=true` 只表示 live evidence 专项门禁自身不阻断，不替代普通 review / GitHub checks / guardian 总体合并门禁。
   - 只有 `review_lane=governance_landing_pr` 且 formal spec review 未通过时，才必须包含 `spec_review_not_completed`，且 `status=blocked`。
   - formal spec review PR、governance landing PR 与其他 `in_scope=true` 的 PR 若缺少 `gate_applicability`，必须包含 `missing_gate_applicability_metadata`，且 `status=blocked`。
