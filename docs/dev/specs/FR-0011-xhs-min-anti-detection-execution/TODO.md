@@ -25,15 +25,15 @@
 
 ## spec 通过后的实施清单（非本 PR）
 
-- [x] 实现插件层门禁主落点（background/content-script/main world）
-- [x] 实现读路径执行模式收敛（默认 dry_run/recon + 受控 live）
-- [x] 实现写路径交互分级判定与默认阻断
-- [x] 实现最小 risk 状态机（paused/limited/allowed）
-- [x] 实现 `#208/#209` 三态差异化阻断矩阵（统一判定入口）
+- [ ] 实现插件层门禁主落点（background/content-script/main world）
+- [ ] 实现读路径执行模式收敛（默认 dry_run/recon + 受控 live）
+- [ ] 实现写路径交互分级判定与默认阻断
+- [ ] 实现最小 risk 状态机（paused/limited/allowed）
+- [ ] 实现 `#208/#209` 三态差异化阻断矩阵（统一判定入口）
 - [ ] 实现 session 节律/冷却/恢复最小约束
-- [x] 实现状态变更审计落盘与缺失审计回退 `paused` 逻辑
-- [x] 为 `#208` gate-only success / blocked 场景补齐 `page_state` 契约测试
-- [x] 以 FR-0011 当前冻结的 `editor_input` 验证边界为准，为 `#208` 的单动作真实验证补齐最小 replay 与证据回传
+- [ ] 实现状态变更审计落盘与缺失审计回退 `paused` 逻辑
+- [ ] 为 `#208` gate-only success / blocked 场景补齐 `page_state` 契约测试
+- [ ] 以 FR-0011 当前冻结的 `editor_input` 验证边界为准，为 `#208` 的单动作真实验证补齐最小 replay 与证据回传
 - [ ] 如需正式引入 `xhs.editor_input` 或 `xhs.interact`，先单独起 command contract 规约 PR
 - [ ] 补齐对应契约测试与状态迁移测试
 
