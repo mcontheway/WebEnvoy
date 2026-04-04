@@ -523,13 +523,6 @@ const collectXhsCommandGateReasons = (input) => {
   if (targetDomain === XHS_READ_DOMAIN && actionType !== null && actionType !== "read") {
     pushReason(gateReasons, "ACTION_DOMAIN_MISMATCH");
   }
-  if (
-    input.includeWriteInteractionTierReason === true &&
-    input.issue208WriteGateOnly === true &&
-    input.writeTierReason
-  ) {
-    pushReason(gateReasons, input.writeTierReason);
-  }
   return gateReasons;
 };
 
@@ -560,6 +553,15 @@ const collectXhsMatrixGateReasons = (input) => {
         state.writeMatrixDecision.decision === "blocked" ||
         state.writeMatrixDecision.decision === "not_applicable"
       ) {
+        if (input.issue208EditorInputValidation !== true) {
+          pushReason(gateReasons, "EDITOR_INPUT_VALIDATION_REQUIRED");
+        }
+        if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
+          pushReason(gateReasons, "MANUAL_CONFIRMATION_MISSING");
+        }
+        if (XHS_REQUIRED_APPROVAL_CHECKS.some((key) => approvalRecord.checks[key] !== true)) {
+          pushReason(gateReasons, "APPROVAL_CHECKS_INCOMPLETE");
+        }
         pushReason(gateReasons, `RISK_STATE_${state.riskState.toUpperCase()}`);
         pushReason(gateReasons, "ISSUE_ACTION_MATRIX_BLOCKED");
       } else if (
