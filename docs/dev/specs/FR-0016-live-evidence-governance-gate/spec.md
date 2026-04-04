@@ -109,6 +109,7 @@
 - formal spec review PR、governance landing PR 与其他落入专项门禁的 PR 若缺少必需的结构化 `gate_applicability` 元数据，必须直接阻断；reviewer / guardian 不得用路径或 issue 引用替代这份 PR 元数据义务。
 - `classification_scope` 必须独立于作者自报 `review_lane` 存在，用于让 reviewer / guardian 先依据冻结的目标集合判定“是否命中 FR-0016 formal spec 契约文件”“是否只做 `TODO.md` 非语义进度回写”与“是否精确命中治理落库目标文件”，再决定 lane 与 blocker。
 - 对 `governance_landing_pr`，`gate_applicability` 还必须显式给出 `governance_scope_targets`，并与 FR-0016 冻结的五处治理落库目标文件保持一致；reviewer / guardian 只有在 PR 精确命中这五处目标文件、且 PR 元数据显式引用 `#310` 这一 FR-0016 治理落库 issue 时，才按 `governance_landing_pr` 处理，不得被自报 `general_pr` 绕过。
+- 若 PR 已精确命中五处治理落库目标文件，但缺少 `#310` issue 引用，reviewer / guardian 仍必须直接阻断，不得把它降格成 `general_pr` 放行。
 - `evidence_collected_at` 必须能标识当前 latest head 上这次 fresh rerun 的采集时间；不得继续复用同一 head 的历史 artifact 时间戳来冒充新鲜复验。
 - `run_id` 与 `artifact_identity` 必须使用 provider-scoped 的稳定标识，能够让 reviewer / guardian 机器化地区分“当前 latest head 的 fresh rerun”与“同一 head 的历史 artifact”。
 - 若 evidence 成功，`failure_reason` 与 `blocker_level` 必须填写 `N/A`。
@@ -210,6 +211,7 @@ And 阻断理由应明确指向“先完成 formal spec review”
 8. 治理落库 PR 若仅随手回写 FR-0016 `TODO.md` 的非语义进度状态：不应因此触发 `mixed_spec_and_governance_scope`。
 9. 仅改动五处治理落库目标文件中的子集，即使引用 `#310`，也不得被视为完成版 `governance_landing_pr`，更不得据此提前关闭 `#310`。
 10. 若治理落库 PR 在五处目标文件之外再混入其他实质性文档或实现改动，也不得继续宣称自己是受控的 `governance_landing_pr`。
+11. 若治理落库 PR 精确命中五处目标文件却漏掉 `#310` issue 引用，也必须被阻断，不能退回普通 PR 处理。
 
 ## 验收标准
 

@@ -17,6 +17,7 @@
   - 必需的 `gate_applicability` 元数据若缺失却不显式 blocked，reviewer/guardian 仍可回到启发式放行
   - `TODO.md` 若被无条件豁免，后续语义改动会绕开 formal spec / mixed-scope 门禁
   - 治理落库 PR 若允许在五文件之外夹带其他实质性改动，split 规则仍不可机器执行
+  - 精确命中五个治理落库目标文件却缺少 `#310` 引用时，若不显式 blocked，仍可绕开治理落库前置门禁
 - 影响：
   - 作者、reviewer 与 guardian 会基于不同前提做判断
   - live evidence 门禁再次出现可绕过空间
@@ -34,6 +35,7 @@
   - formal contract 中显式冻结 `missing_gate_applicability_metadata` blocker，禁止 reviewer/guardian 以启发式替代必需元数据
   - formal contract 中显式限定 `TODO.md` 只有非语义进度回写可同行，语义变更仍回 formal spec 线
   - formal contract 中显式限定治理落库线为精确五文件范围，排除其他实质性夹带改动
+  - formal contract 中显式冻结 `missing_governance_issue_ref` blocker，禁止精确命中治理落库集合的 PR 通过漏写 `#310` 引用来绕路
   - 后续治理落库 PR 必须逐项对照同一集合，并同步更新 `docs/dev/review/guardian-review-addendum.md`
 - 回滚：
   - 阻断治理落库 PR，回到 formal spec 层修正 shared contract

@@ -35,6 +35,7 @@
   - #322 最新 guardian 继续指出：mixed-scope blocker 若直接覆盖整个 spec 套件目录，会误伤仓库已允许随落库 PR 同行的纯 `TODO.md` 进度回写
   - #322 最新 guardian 继续指出：formal spec lane 也需要排除纯 `TODO.md` 命中；governance landing lane 还必须要求完整五文件集合，不能被部分落库 PR 提前占用
   - #322 最新 guardian 继续指出：仍需把 `gate_applicability` 缺失显式建模为 blocker；`TODO.md` 只应豁免非语义进度回写；治理落库线还要要求精确五文件范围，不能夹带其他实质性改动
+  - #322 最新 guardian 继续指出：即使精确命中五个治理落库目标文件，若漏掉 `#310` 引用，也必须有结构化 blocker，不能退回普通 PR
   - 最新一轮明确指出：高风险治理基线变更缺 formal spec review
 
 ## 证据梳理
@@ -109,6 +110,7 @@
 | U12 | `mixed_spec_and_governance_scope` 不能直接覆盖整个 spec 套件目录；必须排除仓库已允许与落库 PR 同行的纯 `TODO.md` 进度回写 | `#322` guardian review | review blocker 对照 | M3 | 90% | 若把整个 spec 目录都算进 mixed-scope blocker，后续合规的治理落库 PR 也会被错误阻断 |
 | U13 | `formal_spec_review_pr` 也必须只由 `spec_contract_targets` 触发，且 `governance_landing_pr` 必须要求完整五文件集合 | `#322` guardian review | review blocker 对照 | M3 | 95% | 若 formal spec lane 仍吃进纯 `TODO.md`，或治理落库 lane 可由部分文件子集触发，后续合规 PR 仍会被误判或提前关闭 `#310` |
 | U14 | 缺失必需 `gate_applicability` 元数据必须显式 blocked，且 `TODO.md` 仅豁免非语义进度回写、治理落库线必须是精确五文件范围 | `#322` guardian review | review blocker 对照 | M3 | 95% | 若缺少结构化 blocker 与精确范围约束，reviewer/guardian 仍可靠启发式放行缺失元数据或夹带改动的 PR |
+| U15 | 精确命中五个治理落库目标文件但缺少 `#310` 引用时，必须有结构化 blocker，不能退回普通 PR | `#322` guardian review | review blocker 对照 | M3 | 95% | 若缺少这一 blocker，formal spec review 通过前的落库 PR 仍可能绕开 `spec_review_not_completed` 与 metadata 门禁 |
 
 ## Gate Status
 
