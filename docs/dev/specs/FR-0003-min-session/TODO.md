@@ -1,5 +1,7 @@
 # FR-0003 TODO
 
+状态说明：本地实现已落地并通过合同测试；未勾选项主要是 formal spec review / GitHub 同步，不代表能力缺失。
+
 ## Spec Review 阶段
 
 - [x] 明确浏览器启动、Named Profile、基础状态流转、代理绑定、并发保护与最小持久化边界
@@ -22,12 +24,12 @@
 
 ## Spec Review 通过后进入实现
 
-- [ ] 初始化浏览器启动与 Profile 管理相关实现骨架
-- [ ] 建立 Profile 独占锁
-- [ ] 建立 Profile 元数据读写
-- [ ] 建立 `runtime.start` / `runtime.login` / `runtime.status` / `runtime.stop` 的承载
-- [ ] 建立代理粘性绑定与冲突拒绝
-- [ ] 建立状态机转移与断连回读
-- [ ] 建立 `localStorageSnapshots` 最小写入与摘要回读（不实现自动回写浏览器会话）
-- [ ] 补齐生命周期测试、锁测试、元数据测试与代理绑定测试
-- [ ] 补齐最小启动 smoke test
+- [x] 初始化浏览器启动与 Profile 管理相关实现骨架
+- [x] 建立 Profile 独占锁
+- [x] 建立 Profile 元数据读写
+- [x] 建立 `runtime.start` / `runtime.login` / `runtime.status` / `runtime.stop` 的承载
+- [x] 建立代理粘性绑定与冲突拒绝
+- [x] 建立状态机转移与断连回读
+- [x] 建立 `localStorageSnapshots` 最小写入与摘要回读（不实现自动回写浏览器会话）
+- [x] 补齐生命周期测试、锁测试、元数据测试与代理绑定测试
+- [x] 补齐最小启动 smoke test

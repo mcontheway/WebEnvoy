@@ -2,6 +2,13 @@
 
 > GitHub Issue / PR / Project 是进度真相源。
 > 本文件只保留 FR-0015 formal blocker、进入实现前条件和实现停点，不承载本地 closeout 状态账本。
+> 现状说明：本地已落地 official Chrome 持久扩展主路径的核心能力与合同测试，以下未勾选项主要是 formal review / GitHub 同步与治理收口，不代表能力未落地。
+
+## 本地实现现状（已落地）
+
+- [x] identity preflight 与 persistent extension 绑定持久化链路已实现。
+- [x] `runtime_bootstrap_envelope` 生成与 `runtime.readiness`/`runtime.status` 读模型已实现。
+- [x] stale ack、identity mismatch、ready-signal 冲突等失败路径已在合同测试覆盖。
 
 ## Review 阶段待办
 

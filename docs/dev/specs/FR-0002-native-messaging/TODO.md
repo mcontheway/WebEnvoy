@@ -1,5 +1,7 @@
 # FR-0002 TODO
 
+状态说明：本地实现已落地并通过合同测试；未勾选项主要是 formal spec review / GitHub 同步，不代表能力缺失。
+
 ## Spec Review 阶段
 
 - [x] 明确 FR-0002 只覆盖 Native Messaging 最小通信闭环
@@ -22,14 +24,13 @@
 
 ## Spec 通过后进入实现
 
-- [ ] 建立 Native Messaging 最小握手路径
-- [ ] 建立 Background 到 Content Script 的最小转发路径
-- [ ] 建立 `runtime.ping` 页面侧往返 smoke path
-- [ ] 建立心跳发送与应答
-- [ ] 建立断连判定与恢复流程
-- [ ] 建立握手失败、转发失败、超时、断连的错误分类
-- [ ] 补齐协议 envelope 的单测
-- [ ] 补齐状态机与超时判定的单测
-- [ ] 补齐 CLI -> 页面侧 round-trip 集成测试
-- [ ] 补齐断连与超时的契约测试
-
+- [x] 建立 Native Messaging 最小握手路径
+- [x] 建立 Background 到 Content Script 的最小转发路径
+- [x] 建立 `runtime.ping` 页面侧往返 smoke path
+- [x] 建立心跳发送与应答
+- [x] 建立断连判定与恢复流程
+- [x] 建立握手失败、转发失败、超时、断连的错误分类
+- [x] 补齐协议 envelope 的单测
+- [x] 补齐状态机与超时判定的单测
+- [x] 补齐 CLI -> 页面侧 round-trip 集成测试
+- [x] 补齐断连与超时的契约测试
