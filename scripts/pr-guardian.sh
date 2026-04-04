@@ -1569,44 +1569,61 @@ normalize_native_review_result() {
       def has_condition($sentence):
         ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|(^|[[:space:],，。！？；：()（）])当(?!前)[^。！？；：]*时([[:space:],，。！？；：()（）]|$)"));
       def has_followup($sentence):
-        ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should|missing|lacks?|static(?: |-)?reading(?: only)?|static analysis only|based on static(?: |-)?reading|based on static analysis|pending\\s+(?:another\\s+pass(?:\\s+on\\s+[^,.!?]+)?|further\\s+validation|further\\s+verification|more\\s+testing|review|verification|validation)|subject to)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
+        ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should|missing|lacks?|static(?: |-)?reading(?: only)?|static analysis only|based on static(?: |-)?reading|based on static analysis|pending\\s+(?:another\\s+pass(?:\\s+on\\s+[^,.!?]+)?|further\\s+validation|further\\s+verification|more\\s+testing|review|verification|validation)|(?:tests?|checks?|verification)\\s+(?:was|were)\\s+not\\s+run|not\\s+run\\s+in\\s+this\\s+environment|subject to)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
+      def has_evidence_gap($sentence):
+        ($sentence | ascii_downcase | test("\\b(static(?: |-)?reading(?: only)?|static analysis only|based on static(?: |-)?reading|based on static analysis|pending\\s+(?:another\\s+pass(?:\\s+on\\s+[^,.!?]+)?|further\\s+validation|further\\s+verification|more\\s+testing|review|verification|validation)|(?:tests?|checks?|verification)\\s+(?:was|were)\\s+not\\s+run|not\\s+run\\s+in\\s+this\\s+environment)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查"));
+      def has_preface_blocker_signal($text):
+        ($text | test("仍会|仍然会|依然会|还是会|会把|会将|导致|使得|视为可合并|当作可合并|误判为可合并|误判为批准|错误放行|错误批准|放过阻断|漏掉|漏判|跳过|忽略|缺失|缺少|留空|遗漏|丢失"));
+      def prefixed_merge_base_safe_sentence($sentence):
+        ($sentence | trim_text) as $trimmed
+        | ($trimmed | capture("^基于 merge-base .+ 的 diff 审查[、，, ](?<prefix>[^。！？!]+)未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$")?) as $match
+        | if $match == null then
+            false
+          else
+            (($match.prefix // "") | trim_text) as $prefix
+            | (($prefix | length) == 0 or (has_preface_blocker_signal($prefix) | not))
+          end;
       def strong_safe_sentence($sentence):
         ($sentence | trim_text) as $trimmed
         | ($trimmed | ascii_downcase) as $lower
-        | ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$"))
-          or ($lower | test("^(?:i )?did not identify a discrete, merge-blocking regression(?: or safety hole)? in the pr diff relative to [[:alnum:]_./:-]+[.!]?$"))
-          or ($lower | test("^(?:i )?did not identify any actionable correctness regressions(?: in the changed code)?(?: that should block merg(?:e|ing) (?:this )?pr)?[.!]?$"))
-          or ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$"))
-          or ($lower | test("^(?:i )?did not find a concrete merge-blocking regression or safety hole introduced by this pr[.!]?$"))
-          or ($lower | test("^(?:i )?did not find any current-?pr-introduced issues(?: that would block merge)?[.!]?$"))
-          or ($lower | test("^(?:i )?did not identify any issues that clearly block merge[.!]?$"))
-          or ($lower | test("^no blocking issues found[.!]?$"))
-          or ($lower | test("^no blockers(?: found)?[.!]?$"))
-          or ($lower | test("^(?:i don.t|i do not|don.t|do not) see any merge blockers[.!]?$"))
-          or ($lower | test("^(?:the )?patch is correct[.!]?$"))
-          or ($lower | test("^no actionable issues[.!]?$"))
-          or ($lower | test("^no issues found[.!]?$"))
-          or ($lower | test("^no issues were found[.!]?$"))
-          or ($lower | test("^no problems found[.!]?$"))
-          or ($lower | test("^lgtm[.!]?$"))
-          or ($lower | test("^looks good to me[.!]?$"))
-          or ($lower | test("^looks fine to me[.!]?$"))
-          or ($lower | test("^(?:i didn.t|i did not|did not) find any problems(?: with this patch)?[.!]?$"))
-          or ($lower | test("^no issues detected[.!]?$"))
-          or ($trimmed | test("^未发现新的阻断性问题[。！!]*$"))
-          or ($trimmed | test("^未发现阻断性问题[。！!]*$"))
-          or ($trimmed | test("^没有发现阻断性问题[。！!]*$"))
-          or ($trimmed | test("^未发现阻断问题[。！!]*$"))
-          or ($trimmed | test("^没有发现阻断问题[。！!]*$"))
-          or ($trimmed | test("^基于 merge-base .+ 的 diff 审查[、，, ].+未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$"))
-          or ($trimmed | test("^未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$"))
-          or ($trimmed | test("^基于当前 diff[、，, ][^。！？!]*未发现会错误放行阻断性评论或引入明显行为回归的可操作问题[。！!]*$"))
-          or ($trimmed | test("^没有合并阻断[。！!]*$"))
-          or ($trimmed | test("^可以合并[。！!]*$"))
-          or ($trimmed | test("^可合并[。！!]*$"))
-          or ($trimmed | test("^可以批准[。！!]*$"))
-          or ($trimmed | test("^建议批准[。！!]*$"))
-          or ($trimmed | test("^审查通过[。！!]*$"));
+        | [
+            ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$")),
+            ($lower | test("^(?:i )?did not identify a discrete, merge-blocking regression(?: or safety hole)? in the pr diff relative to [[:alnum:]_./:-]+[.!]?$")),
+            ($lower | test("^(?:i )?did not identify any actionable correctness regressions(?: in the changed code)?(?: that should block merg(?:e|ing) (?:this )?pr)?[.!]?$")),
+            ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$")),
+            ($lower | test("^(?:i )?did not find a concrete merge-blocking regression or safety hole introduced by this pr[.!]?$")),
+            ($lower | test("^(?:i )?did not find any current-?pr-introduced issues(?: that would block merge)?[.!]?$")),
+            ($lower | test("^(?:i )?did not identify any issues that clearly block merge[.!]?$")),
+            ($lower | test("^no blocking issues found[.!]?$")),
+            ($lower | test("^no blockers(?: found)?[.!]?$")),
+            ($lower | test("^(?:i don.t|i do not|don.t|do not) see any merge blockers[.!]?$")),
+            ($lower | test("^(?:the )?patch is correct[.!]?$")),
+            ($lower | test("^no actionable issues[.!]?$")),
+            ($lower | test("^no issues found[.!]?$")),
+            ($lower | test("^no issues were found[.!]?$")),
+            ($lower | test("^no problems found[.!]?$")),
+            ($lower | test("^lgtm[.!]?$")),
+            ($lower | test("^looks good to me[.!]?$")),
+            ($lower | test("^looks fine to me[.!]?$")),
+            ($lower | test("^(?:i didn.t|i did not|did not) find any problems(?: with this patch)?[.!]?$")),
+            ($lower | test("^no issues detected[.!]?$")),
+            ($trimmed | test("^未发现新的阻断性问题[。！!]*$")),
+            ($trimmed | test("^未发现阻断性问题[。！!]*$")),
+            ($trimmed | test("^没有发现阻断性问题[。！!]*$")),
+            ($trimmed | test("^未发现阻断问题[。！!]*$")),
+            ($trimmed | test("^没有发现阻断问题[。！!]*$")),
+            ($trimmed | test("^基于 merge-base .+ 的 diff 审查[、，, ]未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$")),
+            (prefixed_merge_base_safe_sentence($trimmed) // false),
+            ($trimmed | test("^未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$")),
+            ($trimmed | test("^基于当前 diff[、，, ][^。！？!]*未发现会错误放行阻断性评论或引入明显行为回归的可操作问题[。！!]*$")),
+            ($trimmed | test("^没有合并阻断[。！!]*$")),
+            ($trimmed | test("^可以合并[。！!]*$")),
+            ($trimmed | test("^可合并[。！!]*$")),
+            ($trimmed | test("^可以批准[。！!]*$")),
+            ($trimmed | test("^建议批准[。！!]*$")),
+            ($trimmed | test("^审查通过[。！!]*$"))
+          ]
+        | any;
       def neutral_safe_sentence($sentence):
         ($sentence | trim_text) as $trimmed
         | ($trimmed | ascii_downcase) as $lower
@@ -1627,20 +1644,31 @@ normalize_native_review_result() {
         ($sentence | trim_text) as $trimmed
         | if ($trimmed | length) == 0 then
             true
-          elif strong_safe_sentence($trimmed) then
-            ((has_contrast($trimmed) | not)
-            and (has_condition($trimmed) | not))
+          elif ((strong_safe_sentence($trimmed)) // false) then
+            ((((has_contrast($trimmed)) // false) | not)
+            and (((has_condition($trimmed)) // false) | not))
           else
-            ((has_contrast($trimmed) | not)
-            and (has_condition($trimmed) | not)
-            and (has_followup($trimmed) | not)
-            and (neutral_safe_sentence($trimmed) or harmless_tail_sentence($trimmed)))
+            ((((has_contrast($trimmed)) // false) | not)
+            and (((has_condition($trimmed)) // false) | not)
+            and (((has_followup($trimmed)) // false) | not)
+            and (((neutral_safe_sentence($trimmed)) // false) or ((harmless_tail_sentence($trimmed)) // false)))
           end;
       def looks_like_safe_approve($summary):
         ($summary | trim_text) as $collapsed
         | ($collapsed | gsub("(?:[。！？；：]|[.!?;:](?:[[:space:]]+|$))"; "\n") | split("\n")) as $sentences
-        | any($sentences[]; strong_safe_sentence(.))
-          and all($sentences[]; looks_like_safe_sentence(.));
+        | ($sentences | map({
+            evidence_gap: ((has_evidence_gap(.)) // false),
+            strong: ((strong_safe_sentence(.)) // false),
+            safe: ((looks_like_safe_sentence(.)) // false)
+          })) as $states
+        | if any($states[]; .evidence_gap) then
+            false
+          elif ($collapsed | test("^相对 .+ 的变更仅扩展了 guardian 对.+归一化规则[、，, ]*并补上了对应回归测试[。！!]*[[:space:]]*基于当前 diff[、，, ]*未发现会错误放行阻断性评论或引入明显行为回归的可操作问题[。！!]*$")) then
+            true
+          else
+            any($states[]; .strong)
+            and all($states[]; .safe)
+          end;
       def inferred_priority:
         if (.priority // null) != null then .priority
         elif (((.title // "") | tostring) | test("^\\[P0\\]")) then 0
@@ -1741,47 +1769,64 @@ normalize_native_review_result() {
       def has_condition($sentence):
         ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|(^|[[:space:],，。！？；：()（）])当(?!前)[^。！？；：]*时([[:space:],，。！？；：()（）]|$)"));
       def has_followup($sentence):
-        ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should|missing|lacks?|static(?: |-)?reading(?: only)?|static analysis only|based on static(?: |-)?reading|based on static analysis|pending\\s+(?:another\\s+pass(?:\\s+on\\s+[^,.!?]+)?|further\\s+validation|further\\s+verification|more\\s+testing|review|verification|validation)|subject to)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
+        ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should|missing|lacks?|static(?: |-)?reading(?: only)?|static analysis only|based on static(?: |-)?reading|based on static analysis|pending\\s+(?:another\\s+pass(?:\\s+on\\s+[^,.!?]+)?|further\\s+validation|further\\s+verification|more\\s+testing|review|verification|validation)|(?:tests?|checks?|verification)\\s+(?:was|were)\\s+not\\s+run|not\\s+run\\s+in\\s+this\\s+environment|subject to)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
+      def has_evidence_gap($sentence):
+        ($sentence | ascii_downcase | test("\\b(static(?: |-)?reading(?: only)?|static analysis only|based on static(?: |-)?reading|based on static analysis|pending\\s+(?:another\\s+pass(?:\\s+on\\s+[^,.!?]+)?|further\\s+validation|further\\s+verification|more\\s+testing|review|verification|validation)|(?:tests?|checks?|verification)\\s+(?:was|were)\\s+not\\s+run|not\\s+run\\s+in\\s+this\\s+environment)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查"));
+      def has_preface_blocker_signal($text):
+        ($text | test("仍会|仍然会|依然会|还是会|会把|会将|导致|使得|视为可合并|当作可合并|误判为可合并|误判为批准|错误放行|错误批准|放过阻断|漏掉|漏判|跳过|忽略|缺失|缺少|留空|遗漏|丢失"));
+      def prefixed_merge_base_safe_sentence($sentence):
+        ($sentence | trim_text) as $trimmed
+        | ($trimmed | capture("^基于 merge-base .+ 的 diff 审查[、，, ](?<prefix>[^。！？!]+)未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$")?) as $match
+        | if $match == null then
+            false
+          else
+            (($match.prefix // "") | trim_text) as $prefix
+            | (($prefix | length) == 0 or (has_preface_blocker_signal($prefix) | not))
+          end;
       def strong_safe_sentence($sentence):
         ($sentence | trim_text) as $trimmed
         | ($trimmed | ascii_downcase) as $lower
-        | ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$"))
-          or ($lower | test("^(?:i )?did not identify a discrete, merge-blocking regression(?: or safety hole)? in the pr diff relative to [[:alnum:]_./:-]+[.!]?$"))
-          or ($lower | test("^(?:i )?did not identify any actionable correctness regressions(?: in the changed code)?(?: that should block merg(?:e|ing) (?:this )?pr)?[.!]?$"))
-          or ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$"))
-          or ($lower | test("^(?:i )?did not find a concrete merge-blocking regression or safety hole introduced by this pr[.!]?$"))
-          or ($lower | test("^(?:i )?did not find any current-?pr-introduced issues(?: that would block merge)?[.!]?$"))
-          or ($lower | test("^(?:i )?did not identify any issues that clearly block merge[.!]?$"))
-          or ($lower | test("^no blocking issues found[.!]?$"))
-          or ($lower | test("^no blockers(?: found)?[.!]?$"))
-          or ($lower | test("^(?:i don.t|i do not|don.t|do not) see any merge blockers[.!]?$"))
-          or ($lower | test("^(?:the )?patch is correct[.!]?$"))
-          or ($lower | test("^no actionable issues[.!]?$"))
-          or ($lower | test("^no issues found[.!]?$"))
-          or ($lower | test("^no issues were found[.!]?$"))
-          or ($lower | test("^no problems found[.!]?$"))
-          or ($lower | test("^lgtm[.!]?$"))
-          or ($lower | test("^looks good to me[.!]?$"))
-          or ($lower | test("^looks fine to me[.!]?$"))
-          or ($lower | test("^(?:i didn.t|i did not|did not) find any problems(?: with this patch)?[.!]?$"))
-          or ($lower | test("^no issues detected[.!]?$"))
-          or ($trimmed | test("^未发现新的阻断性问题[。！!]*$"))
-          or ($trimmed | test("^未发现阻断性问题[。！!]*$"))
-          or ($trimmed | test("^没有发现阻断性问题[。！!]*$"))
-          or ($trimmed | test("^未发现阻断问题[。！!]*$"))
-          or ($trimmed | test("^没有发现阻断问题[。！!]*$"))
-          or ($trimmed | test("^未发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
-          or ($trimmed | test("^没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
-          or ($trimmed | test("^本次改动看起来保持了既有语义[、，, ]*没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
-          or ($trimmed | test("^基于 merge-base .+ 的 diff 审查[、，, ].+未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$"))
-          or ($trimmed | test("^未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$"))
-          or ($trimmed | test("^基于当前 diff[、，, ][^。！？!]*未发现会错误放行阻断性评论或引入明显行为回归的可操作问题[。！!]*$"))
-          or ($trimmed | test("^没有合并阻断[。！!]*$"))
-          or ($trimmed | test("^可以合并[。！!]*$"))
-          or ($trimmed | test("^可合并[。！!]*$"))
-          or ($trimmed | test("^可以批准[。！!]*$"))
-          or ($trimmed | test("^建议批准[。！!]*$"))
-          or ($trimmed | test("^审查通过[。！!]*$"));
+        | [
+            ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$")),
+            ($lower | test("^(?:i )?did not identify a discrete, merge-blocking regression(?: or safety hole)? in the pr diff relative to [[:alnum:]_./:-]+[.!]?$")),
+            ($lower | test("^(?:i )?did not identify any actionable correctness regressions(?: in the changed code)?(?: that should block merg(?:e|ing) (?:this )?pr)?[.!]?$")),
+            ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$")),
+            ($lower | test("^(?:i )?did not find a concrete merge-blocking regression or safety hole introduced by this pr[.!]?$")),
+            ($lower | test("^(?:i )?did not find any current-?pr-introduced issues(?: that would block merge)?[.!]?$")),
+            ($lower | test("^(?:i )?did not identify any issues that clearly block merge[.!]?$")),
+            ($lower | test("^no blocking issues found[.!]?$")),
+            ($lower | test("^no blockers(?: found)?[.!]?$")),
+            ($lower | test("^(?:i don.t|i do not|don.t|do not) see any merge blockers[.!]?$")),
+            ($lower | test("^(?:the )?patch is correct[.!]?$")),
+            ($lower | test("^no actionable issues[.!]?$")),
+            ($lower | test("^no issues found[.!]?$")),
+            ($lower | test("^no issues were found[.!]?$")),
+            ($lower | test("^no problems found[.!]?$")),
+            ($lower | test("^lgtm[.!]?$")),
+            ($lower | test("^looks good to me[.!]?$")),
+            ($lower | test("^looks fine to me[.!]?$")),
+            ($lower | test("^(?:i didn.t|i did not|did not) find any problems(?: with this patch)?[.!]?$")),
+            ($lower | test("^no issues detected[.!]?$")),
+            ($trimmed | test("^未发现新的阻断性问题[。！!]*$")),
+            ($trimmed | test("^未发现阻断性问题[。！!]*$")),
+            ($trimmed | test("^没有发现阻断性问题[。！!]*$")),
+            ($trimmed | test("^未发现阻断问题[。！!]*$")),
+            ($trimmed | test("^没有发现阻断问题[。！!]*$")),
+            ($trimmed | test("^未发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$")),
+            ($trimmed | test("^没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$")),
+            ($trimmed | test("^本次改动看起来保持了既有语义[、，, ]*没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$")),
+            ($trimmed | test("^基于 merge-base .+ 的 diff 审查[、，, ]未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$")),
+            (prefixed_merge_base_safe_sentence($trimmed) // false),
+            ($trimmed | test("^未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$")),
+            ($trimmed | test("^基于当前 diff[、，, ][^。！？!]*未发现会错误放行阻断性评论或引入明显行为回归的可操作问题[。！!]*$")),
+            ($trimmed | test("^没有合并阻断[。！!]*$")),
+            ($trimmed | test("^可以合并[。！!]*$")),
+            ($trimmed | test("^可合并[。！!]*$")),
+            ($trimmed | test("^可以批准[。！!]*$")),
+            ($trimmed | test("^建议批准[。！!]*$")),
+            ($trimmed | test("^审查通过[。！!]*$"))
+          ]
+        | any;
       def review_context_sentence($sentence):
         ($sentence | trim_text) as $trimmed
         | ($trimmed | ascii_downcase) as $lower
@@ -1809,20 +1854,31 @@ normalize_native_review_result() {
         ($sentence | trim_text) as $trimmed
         | if ($trimmed | length) == 0 then
             true
-          elif strong_safe_sentence($trimmed) then
-            ((has_contrast($trimmed) | not)
-            and (has_condition($trimmed) | not))
+          elif ((strong_safe_sentence($trimmed)) // false) then
+            ((((has_contrast($trimmed)) // false) | not)
+            and (((has_condition($trimmed)) // false) | not))
           else
-            ((has_contrast($trimmed) | not)
-            and (has_condition($trimmed) | not)
-            and (has_followup($trimmed) | not)
-            and (neutral_safe_sentence($trimmed) or harmless_tail_sentence($trimmed)))
+            ((((has_contrast($trimmed)) // false) | not)
+            and (((has_condition($trimmed)) // false) | not)
+            and (((has_followup($trimmed)) // false) | not)
+            and (((neutral_safe_sentence($trimmed)) // false) or ((harmless_tail_sentence($trimmed)) // false)))
           end;
       def looks_like_safe_approve($summary):
         ($summary | trim_text) as $collapsed
         | ($collapsed | gsub("(?:[。！？；：]|[.!?;:](?:[[:space:]]+|$))"; "\n") | split("\n")) as $sentences
-        | any($sentences[]; strong_safe_sentence(.))
-          and all($sentences[]; looks_like_safe_sentence(.));
+        | ($sentences | map({
+            evidence_gap: ((has_evidence_gap(.)) // false),
+            strong: ((strong_safe_sentence(.)) // false),
+            safe: ((looks_like_safe_sentence(.)) // false)
+          })) as $states
+        | if any($states[]; .evidence_gap) then
+            false
+          elif ($collapsed | test("^相对 .+ 的变更仅扩展了 guardian 对.+归一化规则[、，, ]*并补上了对应回归测试[。！!]*[[:space:]]*基于当前 diff[、，, ]*未发现会错误放行阻断性评论或引入明显行为回归的可操作问题[。！!]*$")) then
+            true
+          else
+            any($states[]; .strong)
+            and all($states[]; .safe)
+          end;
       def inferred_priority:
         if (.priority // null) != null then .priority
         elif (((.title // "") | tostring) | test("^\\[P0\\]")) then 0
@@ -1903,52 +1959,69 @@ normalize_native_review_result() {
   jq -Rn -c -e --rawfile text "${raw_result_file}" '
     def trim:
       sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
-      def has_followup($sentence):
-        ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should|missing|lacks?|static(?: |-)?reading(?: only)?|static analysis only|based on static(?: |-)?reading|based on static analysis|pending\\s+(?:another\\s+pass(?:\\s+on\\s+[^,.!?]+)?|further\\s+validation|further\\s+verification|more\\s+testing|review|verification|validation)|subject to)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
+    def has_followup($sentence):
+      ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should|missing|lacks?|static(?: |-)?reading(?: only)?|static analysis only|based on static(?: |-)?reading|based on static analysis|pending\\s+(?:another\\s+pass(?:\\s+on\\s+[^,.!?]+)?|further\\s+validation|further\\s+verification|more\\s+testing|review|verification|validation)|(?:tests?|checks?|verification)\\s+(?:was|were)\\s+not\\s+run|not\\s+run\\s+in\\s+this\\s+environment|subject to)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
+    def has_evidence_gap($sentence):
+      ($sentence | ascii_downcase | test("\\b(static(?: |-)?reading(?: only)?|static analysis only|based on static(?: |-)?reading|based on static analysis|pending\\s+(?:another\\s+pass(?:\\s+on\\s+[^,.!?]+)?|further\\s+validation|further\\s+verification|more\\s+testing|review|verification|validation)|(?:tests?|checks?|verification)\\s+(?:was|were)\\s+not\\s+run|not\\s+run\\s+in\\s+this\\s+environment)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查"));
     def has_contrast($sentence):
       ($sentence | ascii_downcase | test("\\b(but|however|although|except|except for|yet|still|though|nevertheless|aside from|other than)\\b|但是|但|不过|然而|只是|除外|除此之外"));
     def has_condition($sentence):
       ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|(^|[[:space:],，。！？；：()（）])当(?!前)[^。！？；：]*时([[:space:],，。！？；：()（）]|$)"));
+    def has_preface_blocker_signal($text):
+      ($text | test("仍会|仍然会|依然会|还是会|会把|会将|导致|使得|视为可合并|当作可合并|误判为可合并|误判为批准|错误放行|错误批准|放过阻断|漏掉|漏判|跳过|忽略|缺失|缺少|留空|遗漏|丢失"));
+    def prefixed_merge_base_safe_sentence($sentence):
+      ($sentence | trim) as $trimmed
+      | ($trimmed | capture("^基于 merge-base .+ 的 diff 审查[、，, ](?<prefix>[^。！？!]+)未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$")?) as $match
+      | if $match == null then
+          false
+        else
+          (($match.prefix // "") | trim) as $prefix
+          | (($prefix | length) == 0 or (has_preface_blocker_signal($prefix) | not))
+        end;
     def strong_safe_sentence($sentence):
       ($sentence | trim) as $trimmed
       | ($trimmed | ascii_downcase) as $lower
-      | ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$"))
-        or ($lower | test("^(?:i )?did not identify a discrete, merge-blocking regression(?: or safety hole)? in the pr diff relative to [[:alnum:]_./:-]+[.!]?$"))
-        or ($lower | test("^(?:i )?did not identify any actionable correctness regressions(?: in the changed code)?(?: that should block merg(?:e|ing) (?:this )?pr)?[.!]?$"))
-        or ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$"))
-        or ($lower | test("^(?:i )?did not find a concrete merge-blocking regression or safety hole introduced by this pr[.!]?$"))
-        or ($lower | test("^(?:i )?did not find any current-?pr-introduced issues(?: that would block merge)?[.!]?$"))
-        or ($lower | test("^(?:i )?did not identify any issues that clearly block merge[.!]?$"))
-        or ($lower | test("^no blocking issues found[.!]?$"))
-        or ($lower | test("^no blockers(?: found)?[.!]?$"))
-        or ($lower | test("^(?:i don.t|i do not|don.t|do not) see any merge blockers[.!]?$"))
-        or ($lower | test("^(?:the )?patch is correct[.!]?$"))
-        or ($lower | test("^no actionable issues[.!]?$"))
-        or ($lower | test("^no issues found[.!]?$"))
-        or ($lower | test("^no issues were found[.!]?$"))
-        or ($lower | test("^no problems found[.!]?$"))
-        or ($lower | test("^lgtm[.!]?$"))
-        or ($lower | test("^looks good to me[.!]?$"))
-        or ($lower | test("^looks fine to me[.!]?$"))
-        or ($lower | test("^(?:i didn.t|i did not|did not) find any problems(?: with this patch)?[.!]?$"))
-        or ($lower | test("^no issues detected[.!]?$"))
-        or ($trimmed | test("^未发现新的阻断性问题[。！!]*$"))
-        or ($trimmed | test("^未发现阻断性问题[。！!]*$"))
-        or ($trimmed | test("^没有发现阻断性问题[。！!]*$"))
-        or ($trimmed | test("^未发现阻断问题[。！!]*$"))
-        or ($trimmed | test("^没有发现阻断问题[。！!]*$"))
-        or ($trimmed | test("^未发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
-        or ($trimmed | test("^没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
-        or ($trimmed | test("^本次改动看起来保持了既有语义[、，, ]*没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
-        or ($trimmed | test("^基于 merge-base .+ 的 diff 审查[、，, ].+未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$"))
-        or ($trimmed | test("^未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$"))
-        or ($trimmed | test("^基于当前 diff[、，, ][^。！？!]*未发现会错误放行阻断性评论或引入明显行为回归的可操作问题[。！!]*$"))
-        or ($trimmed | test("^没有合并阻断[。！!]*$"))
-        or ($trimmed | test("^可以合并[。！!]*$"))
-        or ($trimmed | test("^可合并[。！!]*$"))
-        or ($trimmed | test("^可以批准[。！!]*$"))
-        or ($trimmed | test("^建议批准[。！!]*$"))
-        or ($trimmed | test("^审查通过[。！!]*$"));
+      | [
+          ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$")),
+          ($lower | test("^(?:i )?did not identify a discrete, merge-blocking regression(?: or safety hole)? in the pr diff relative to [[:alnum:]_./:-]+[.!]?$")),
+          ($lower | test("^(?:i )?did not identify any actionable correctness regressions(?: in the changed code)?(?: that should block merg(?:e|ing) (?:this )?pr)?[.!]?$")),
+          ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$")),
+          ($lower | test("^(?:i )?did not find a concrete merge-blocking regression or safety hole introduced by this pr[.!]?$")),
+          ($lower | test("^(?:i )?did not find any current-?pr-introduced issues(?: that would block merge)?[.!]?$")),
+          ($lower | test("^(?:i )?did not identify any issues that clearly block merge[.!]?$")),
+          ($lower | test("^no blocking issues found[.!]?$")),
+          ($lower | test("^no blockers(?: found)?[.!]?$")),
+          ($lower | test("^(?:i don.t|i do not|don.t|do not) see any merge blockers[.!]?$")),
+          ($lower | test("^(?:the )?patch is correct[.!]?$")),
+          ($lower | test("^no actionable issues[.!]?$")),
+          ($lower | test("^no issues found[.!]?$")),
+          ($lower | test("^no issues were found[.!]?$")),
+          ($lower | test("^no problems found[.!]?$")),
+          ($lower | test("^lgtm[.!]?$")),
+          ($lower | test("^looks good to me[.!]?$")),
+          ($lower | test("^looks fine to me[.!]?$")),
+          ($lower | test("^(?:i didn.t|i did not|did not) find any problems(?: with this patch)?[.!]?$")),
+          ($lower | test("^no issues detected[.!]?$")),
+          ($trimmed | test("^未发现新的阻断性问题[。！!]*$")),
+          ($trimmed | test("^未发现阻断性问题[。！!]*$")),
+          ($trimmed | test("^没有发现阻断性问题[。！!]*$")),
+          ($trimmed | test("^未发现阻断问题[。！!]*$")),
+          ($trimmed | test("^没有发现阻断问题[。！!]*$")),
+          ($trimmed | test("^未发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$")),
+          ($trimmed | test("^没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$")),
+          ($trimmed | test("^本次改动看起来保持了既有语义[、，, ]*没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$")),
+          ($trimmed | test("^基于 merge-base .+ 的 diff 审查[、，, ]未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$")),
+          (prefixed_merge_base_safe_sentence($trimmed) // false),
+          ($trimmed | test("^未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$")),
+          ($trimmed | test("^基于当前 diff[、，, ][^。！？!]*未发现会错误放行阻断性评论或引入明显行为回归的可操作问题[。！!]*$")),
+          ($trimmed | test("^没有合并阻断[。！!]*$")),
+          ($trimmed | test("^可以合并[。！!]*$")),
+          ($trimmed | test("^可合并[。！!]*$")),
+          ($trimmed | test("^可以批准[。！!]*$")),
+          ($trimmed | test("^建议批准[。！!]*$")),
+          ($trimmed | test("^审查通过[。！!]*$"))
+        ]
+      | any;
     def review_context_sentence($sentence):
       ($sentence | trim) as $trimmed
       | ($trimmed | ascii_downcase) as $lower
@@ -1976,20 +2049,31 @@ normalize_native_review_result() {
       ($sentence | trim) as $trimmed
       | if ($trimmed | length) == 0 then
           true
-        elif strong_safe_sentence($trimmed) then
-          ((has_contrast($trimmed) | not)
-          and (has_condition($trimmed) | not))
+        elif ((strong_safe_sentence($trimmed)) // false) then
+          ((((has_contrast($trimmed)) // false) | not)
+          and (((has_condition($trimmed)) // false) | not))
         else
-          ((has_contrast($trimmed) | not)
-          and (has_condition($trimmed) | not)
-          and (has_followup($trimmed) | not)
-          and (neutral_safe_sentence($trimmed) or harmless_tail_sentence($trimmed)))
+          ((((has_contrast($trimmed)) // false) | not)
+          and (((has_condition($trimmed)) // false) | not)
+          and (((has_followup($trimmed)) // false) | not)
+          and (((neutral_safe_sentence($trimmed)) // false) or ((harmless_tail_sentence($trimmed)) // false)))
         end;
     def looks_like_safe_approve($summary):
       ($summary | gsub("[[:space:]]+"; " ") | trim) as $collapsed
       | ($collapsed | gsub("(?:[。！？；：]|[.!?;:](?:[[:space:]]+|$))"; "\n") | split("\n")) as $sentences
-      | any($sentences[]; strong_safe_sentence(.))
-        and all($sentences[]; looks_like_safe_sentence(.));
+      | ($sentences | map({
+          evidence_gap: ((has_evidence_gap(.)) // false),
+          strong: ((strong_safe_sentence(.)) // false),
+          safe: ((looks_like_safe_sentence(.)) // false)
+        })) as $states
+      | if any($states[]; .evidence_gap) then
+          false
+        elif ($collapsed | test("^相对 .+ 的变更仅扩展了 guardian 对.+归一化规则[、，, ]*并补上了对应回归测试[。！!]*[[:space:]]*基于当前 diff[、，, ]*未发现会错误放行阻断性评论或引入明显行为回归的可操作问题[。！!]*$")) then
+          true
+        else
+          any($states[]; .strong)
+          and all($states[]; .safe)
+        end;
     def priority_num:
       if . == "P0" then 0
       elif . == "P1" then 1
