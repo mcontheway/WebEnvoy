@@ -165,6 +165,15 @@ assert_fail() {
   fi
 }
 
+assert_equal() {
+  local actual="$1"
+  local expected="$2"
+  if [[ "${actual}" != "${expected}" ]]; then
+    echo "expected '${expected}', got '${actual}'" >&2
+    exit 1
+  fi
+}
+
 assert_file_contains() {
   local file="$1"
   local expected="$2"
@@ -231,6 +240,9 @@ setup_case_dir() {
   unset MOCK_GH_ISSUE_VIEW_STDERR || true
   unset MOCK_CODEX_REVIEW_BASE_PROMPT_UNSUPPORTED || true
   unset MOCK_CODEX_FORCE_FAIL || true
+  unset MOCK_CODEX_OUTPUT_SEQUENCE_FILE || true
+  unset MOCK_CODEX_PROMPT_CAPTURE_DIR || true
+  unset MOCK_CODEX_FAIL_CALL || true
   export MOCK_GH_REVIEWS_REQUIRE_PAGINATE
 }
 
@@ -322,8 +334,15 @@ set -euo pipefail
 echo "$*" >> "${MOCK_CODEX_CALLS_LOG:?missing MOCK_CODEX_CALLS_LOG}"
 
 if [[ "${1:-}" == "exec" ]]; then
+  local_call_index="$(wc -l < "${MOCK_CODEX_CALLS_LOG}" | tr -d '[:space:]')"
+
   if [[ "${MOCK_CODEX_FORCE_FAIL:-0}" == "1" ]]; then
     echo "mock codex failure" >&2
+    exit 70
+  fi
+
+  if [[ -n "${MOCK_CODEX_FAIL_CALL:-}" && "${MOCK_CODEX_FAIL_CALL}" == "${local_call_index}" ]]; then
+    echo "mock codex failure on call ${local_call_index}" >&2
     exit 70
   fi
 
@@ -332,7 +351,12 @@ if [[ "${1:-}" == "exec" ]]; then
     exit 2
   fi
 
-  prompt_file="${MOCK_CODEX_PROMPT_CAPTURE:?missing MOCK_CODEX_PROMPT_CAPTURE}"
+  prompt_file="${MOCK_CODEX_PROMPT_CAPTURE:-}"
+  if [[ -n "${MOCK_CODEX_PROMPT_CAPTURE_DIR:-}" ]]; then
+    mkdir -p "${MOCK_CODEX_PROMPT_CAPTURE_DIR}"
+    prompt_file="${MOCK_CODEX_PROMPT_CAPTURE_DIR}/prompt.${local_call_index}.log"
+  fi
+  prompt_file="${prompt_file:?missing MOCK_CODEX_PROMPT_CAPTURE or MOCK_CODEX_PROMPT_CAPTURE_DIR}"
   output_file=""
   prompt_value=""
   saw_command=0
@@ -387,7 +411,13 @@ if [[ "${1:-}" == "exec" ]]; then
     exit 64
   }
 
-  cat "${MOCK_CODEX_REVIEW_RESULT_JSON:?missing MOCK_CODEX_REVIEW_RESULT_JSON}" > "${output_file}"
+  result_file="${MOCK_CODEX_REVIEW_RESULT_JSON:-}"
+  if [[ -n "${MOCK_CODEX_OUTPUT_SEQUENCE_FILE:-}" ]]; then
+    result_file="$(sed -n "${local_call_index}p" "${MOCK_CODEX_OUTPUT_SEQUENCE_FILE}")"
+  fi
+  result_file="${result_file:?missing MOCK_CODEX_REVIEW_RESULT_JSON or MOCK_CODEX_OUTPUT_SEQUENCE_FILE}"
+
+  cat "${result_file}" > "${output_file}"
   exit 0
 fi
 
@@ -2989,7 +3019,7 @@ EOF
   assert_file_contains "${result_file}" '"findings":[]'
 }
 
-test_normalize_native_review_result_accepts_merge_base_safe_summary_variant() {
+test_normalize_native_review_result_fails_closed_for_merge_base_safe_summary_variant() {
   setup_case_dir "normalize-native-text-merge-base-safe-summary-variant"
 
   local raw_file="${TMP_DIR}/native-review.txt"
@@ -3000,12 +3030,11 @@ EOF
 
   assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
   assert_pass validate_review_result_shape "${result_file}"
-  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
-  assert_file_contains "${result_file}" '"safe_to_merge":true'
-  assert_file_contains "${result_file}" '"findings":[]'
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
 }
 
-test_normalize_native_review_result_accepts_diff_only_guardian_summary_variant() {
+test_normalize_native_review_result_fails_closed_for_diff_only_guardian_summary_variant() {
   setup_case_dir "normalize-native-text-diff-only-guardian-summary-variant"
 
   local raw_file="${TMP_DIR}/native-review.txt"
@@ -3016,9 +3045,8 @@ EOF
 
   assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
   assert_pass validate_review_result_shape "${result_file}"
-  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
-  assert_file_contains "${result_file}" '"safe_to_merge":true'
-  assert_file_contains "${result_file}" '"findings":[]'
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
 }
 
 test_normalize_native_review_result_fails_closed_for_arbitrary_merge_base_preface_with_blocker() {
@@ -3612,8 +3640,8 @@ EOF
   assert_file_contains "${RESULT_FILE}" '"verdict":"APPROVE"'
 }
 
-test_run_codex_review_accepts_plain_text_native_review_output() {
-  setup_case_dir "run-plain-text-review"
+test_run_codex_review_formats_plain_text_native_review_output_to_schema() {
+  setup_case_dir "run-plain-text-review-to-schema"
 
   BASE_REF="main"
   HEAD_SHA="head-sha-321"
@@ -3653,13 +3681,23 @@ test_run_codex_review_accepts_plain_text_native_review_output() {
 
   collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
 
-  MOCK_CODEX_REVIEW_RESULT_JSON="${TMP_DIR}/native-review.txt"
-  cat > "${MOCK_CODEX_REVIEW_RESULT_JSON}" <<'EOF'
-The patch only adds a small wording tweak to README.md and does not affect code paths, tests, or runtime behavior. I did not identify any actionable bugs introduced by this change.
+  local native_review_text="${TMP_DIR}/native-review.txt"
+  local formatted_schema_json="${TMP_DIR}/formatted-review.json"
+  local output_sequence_file="${TMP_DIR}/codex-output-sequence.txt"
+  cat > "${native_review_text}" <<'EOF'
+基于 merge-base `bc253d2f2dee41827a41a516d572eb38d97bb387` 的 diff 审查，这个 PR 主要是在 `background`、`loopback` 和 `xhs-search` 之间收敛重复的 XHS gate 逻辑到共享模块，未发现当前改动明确引入、且足以阻止合并的离散缺陷。已重点检查高风险执行路径与共享契约变更，未定位到可证实的行为回归。
 EOF
-  export MOCK_CODEX_REVIEW_RESULT_JSON
+  cat > "${formatted_schema_json}" <<'EOF'
+{"verdict":"APPROVE","safe_to_merge":true,"summary":"未发现新的阻断性问题。","findings":[],"required_actions":[]}
+EOF
+  printf '%s\n%s\n' "${native_review_text}" "${formatted_schema_json}" > "${output_sequence_file}"
+  export MOCK_CODEX_OUTPUT_SEQUENCE_FILE="${output_sequence_file}"
+  unset MOCK_CODEX_REVIEW_RESULT_JSON
 
   assert_pass run_codex_review 4
+  assert_equal "$(wc -l < "${MOCK_CODEX_CALLS_LOG}" | tr -d '[:space:]')" "2"
+  assert_file_contains "${PROMPT_RUN_FILE}" "请保持结构化 JSON 输出"
+  assert_file_contains "${TMP_DIR}/codex-native-review-format.prompt.md" "你将收到一段来自 native reviewer 的自由文本审查结果"
   assert_file_contains "${RESULT_FILE}" '"verdict":"APPROVE"'
   assert_file_contains "${REVIEW_MD_FILE}" "**结论**: APPROVE"
 }
@@ -3719,6 +3757,65 @@ EOF
   assert_file_not_contains "${MOCK_CODEX_CALLS_LOG}" "--output-schema"
   assert_file_contains "${err_file}" "mock codex failure"
   assert_file_contains "${err_file}" "Codex 审查执行失败"
+}
+
+test_run_codex_review_fails_closed_when_formatter_command_fails() {
+  setup_case_dir "run-review-formatter-failure"
+
+  BASE_REF="main"
+  HEAD_SHA="head-sha-987"
+  PR_TITLE="formatter failure"
+  PR_URL="https://example.test/pr/5"
+  PR_BODY=$'## 摘要\n\n- 变更目的：Guardian\n'
+  PR_AUTHOR="author"
+  REVIEW_PROFILE="default_impl_profile"
+  export BASE_REF HEAD_SHA PR_TITLE PR_URL PR_BODY PR_AUTHOR REVIEW_PROFILE
+
+  WORKTREE_DIR="${TMP_DIR}/worktree"
+  mkdir -p "${WORKTREE_DIR}/docs/dev/review"
+  mkdir -p "${WORKTREE_DIR}/docs/dev/architecture"
+  mkdir -p "${WORKTREE_DIR}/docs/dev"
+  export WORKTREE_DIR
+
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  CONTEXT_DOCS_FILE="${TMP_DIR}/context-docs.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  ISSUE_SUMMARY_FILE="${TMP_DIR}/issue-summary.md"
+  PROMPT_RUN_FILE="${TMP_DIR}/prompt.md"
+  REVIEW_STATS_FILE="${TMP_DIR}/review-stats.txt"
+  RAW_RESULT_FILE="${TMP_DIR}/review.raw.txt"
+  RESULT_FILE="${TMP_DIR}/review.json"
+  REVIEW_MD_FILE="${TMP_DIR}/review.md"
+  export CHANGED_FILES_FILE CONTEXT_DOCS_FILE SLIM_PR_FILE ISSUE_SUMMARY_FILE PROMPT_RUN_FILE REVIEW_STATS_FILE RAW_RESULT_FILE RESULT_FILE REVIEW_MD_FILE
+
+  printf '%s\n' 'README.md' > "${CHANGED_FILES_FILE}"
+  slim_pr_body > "${SLIM_PR_FILE}"
+  cp "${REPO_ROOT}/vision.md" "${WORKTREE_DIR}/vision.md"
+  cp "${REPO_ROOT}/AGENTS.md" "${WORKTREE_DIR}/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/AGENTS.md" "${WORKTREE_DIR}/docs/dev/AGENTS.md"
+  cp "${REPO_ROOT}/docs/dev/roadmap.md" "${WORKTREE_DIR}/docs/dev/roadmap.md"
+  cp "${REPO_ROOT}/docs/dev/architecture/system-design.md" "${WORKTREE_DIR}/docs/dev/architecture/system-design.md"
+  cp "${REPO_ROOT}/code_review.md" "${WORKTREE_DIR}/code_review.md"
+  cp "${REVIEW_ADDENDUM_FILE}" "${WORKTREE_DIR}/docs/dev/review/guardian-review-addendum.md"
+
+  collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
+
+  local native_review_text="${TMP_DIR}/native-review.txt"
+  local output_sequence_file="${TMP_DIR}/codex-output-sequence.txt"
+  cat > "${native_review_text}" <<'EOF'
+The patch only adds a small wording tweak to README.md and does not affect code paths, tests, or runtime behavior. I did not identify any actionable bugs introduced by this change.
+EOF
+  printf '%s\n' "${native_review_text}" > "${output_sequence_file}"
+  export MOCK_CODEX_OUTPUT_SEQUENCE_FILE="${output_sequence_file}"
+  export MOCK_CODEX_FAIL_CALL="2"
+  unset MOCK_CODEX_REVIEW_RESULT_JSON
+
+  local err_file="${TMP_DIR}/run.err"
+  assert_fail run_codex_review 5 2>"${err_file}"
+  assert_equal "$(wc -l < "${MOCK_CODEX_CALLS_LOG}" | tr -d '[:space:]')" "2"
+  assert_file_contains "${TMP_DIR}/codex-native-review-format.prompt.md" "你将收到一段来自 native reviewer 的自由文本审查结果"
+  assert_file_contains "${err_file}" "mock codex failure on call 2"
+  assert_file_contains "${err_file}" "Codex 审查结果格式化失败"
 }
 
 test_main_review_mode_does_not_fail_on_mode_expansion_after_summary() {
@@ -4315,8 +4412,8 @@ main() {
   test_normalize_native_review_result_accepts_live_plain_text_approve_summary
   test_normalize_native_review_result_accepts_review_context_preface_before_safe_summary
   test_normalize_native_review_result_accepts_chinese_review_context_with_current_runtime_phrase
-  test_normalize_native_review_result_accepts_merge_base_safe_summary_variant
-  test_normalize_native_review_result_accepts_diff_only_guardian_summary_variant
+  test_normalize_native_review_result_fails_closed_for_merge_base_safe_summary_variant
+  test_normalize_native_review_result_fails_closed_for_diff_only_guardian_summary_variant
   test_normalize_native_review_result_fails_closed_for_arbitrary_merge_base_preface_with_blocker
   test_normalize_native_review_result_fails_closed_for_behavior_regression_free_phrase_only
   test_normalize_native_review_result_fails_closed_for_merge_base_summary_with_inline_blocker_clause
@@ -4351,8 +4448,9 @@ main() {
   test_normalize_native_review_result_fails_closed_for_unless_caveat
   test_add_fallback_finding_for_unstructured_rejection_creates_actionable_output
   test_run_codex_review_uses_context_budget_prompt_and_native_review_engine
-  test_run_codex_review_accepts_plain_text_native_review_output
+  test_run_codex_review_formats_plain_text_native_review_output_to_schema
   test_run_codex_review_fails_closed_when_native_review_command_fails
+  test_run_codex_review_fails_closed_when_formatter_command_fails
   test_main_review_mode_does_not_fail_on_mode_expansion_after_summary
   test_fetch_issue_summary_fails_closed_when_issue_lookup_fails
 
