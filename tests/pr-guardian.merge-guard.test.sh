@@ -3064,6 +3064,21 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":false'
 }
 
+test_normalize_native_review_result_fails_closed_for_static_reading_in_review_preface() {
+  setup_case_dir "normalize-native-text-static-reading-in-review-preface"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+After reviewing the diff against origin/main based on static reading only, the patch appears to preserve the existing attach logic while only extracting it into helpers. No blocking issues found.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"REQUEST_CHANGES"'
+  assert_file_contains "${result_file}" '"safe_to_merge":false'
+}
+
 test_normalize_native_review_result_fails_closed_for_generic_should_followup() {
   setup_case_dir "normalize-native-text-generic-should-followup"
 
@@ -4198,6 +4213,7 @@ main() {
   test_normalize_native_review_result_accepts_after_reviewing_diff_preserve_summary
   test_normalize_native_review_result_fails_closed_for_after_reviewing_diff_static_reading_caveat
   test_normalize_native_review_result_fails_closed_for_preserve_summary_with_static_reading_disclaimer
+  test_normalize_native_review_result_fails_closed_for_static_reading_in_review_preface
   test_normalize_native_review_result_fails_closed_for_generic_should_followup
   test_normalize_native_review_result_fails_closed_for_should_block_merge_until_caveat
   test_normalize_native_review_result_fails_closed_for_chinese_incomplete_evidence_prefix
