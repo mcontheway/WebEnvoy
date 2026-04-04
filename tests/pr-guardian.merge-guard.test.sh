@@ -3184,6 +3184,21 @@ EOF
   assert_file_contains "${result_file}" '"safe_to_merge":true'
 }
 
+test_normalize_native_review_result_accepts_discrete_merge_blocking_regression_free_phrase() {
+  setup_case_dir "normalize-native-text-approve-discrete-merge-blocking-regression-free"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+I did not identify a discrete, merge-blocking regression in the PR diff relative to origin/main.
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+}
+
 test_normalize_native_review_result_accepts_lgtm_phrase() {
   setup_case_dir "normalize-native-text-approve-lgtm"
 
@@ -4191,6 +4206,7 @@ main() {
   test_normalize_native_review_result_fails_closed_for_polite_plain_text_with_followup
   test_normalize_native_review_result_accepts_merge_blocker_free_approve_phrase
   test_normalize_native_review_result_accepts_concrete_merge_blocking_regression_free_phrase
+  test_normalize_native_review_result_accepts_discrete_merge_blocking_regression_free_phrase
   test_normalize_native_review_result_accepts_lgtm_phrase
   test_normalize_native_review_result_fails_closed_for_chinese_caveat
   test_normalize_native_review_result_fails_closed_for_chinese_condition

@@ -1574,6 +1574,7 @@ normalize_native_review_result() {
         ($sentence | trim_text) as $trimmed
         | ($trimmed | ascii_downcase) as $lower
         | ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$"))
+          or ($lower | test("^(?:i )?did not identify a discrete, merge-blocking regression(?: or safety hole)? in the pr diff relative to [^.]+[.!]?$"))
           or ($lower | test("^(?:i )?did not identify any actionable correctness regressions(?: in the changed code)?(?: that should block merg(?:e|ing) (?:this )?pr)?[.!]?$"))
           or ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$"))
           or ($lower | test("^(?:i )?did not find a concrete merge-blocking regression or safety hole introduced by this pr[.!]?$"))
@@ -1738,6 +1739,7 @@ normalize_native_review_result() {
         ($sentence | trim_text) as $trimmed
         | ($trimmed | ascii_downcase) as $lower
         | ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$"))
+          or ($lower | test("^(?:i )?did not identify a discrete, merge-blocking regression(?: or safety hole)? in the pr diff relative to [^.]+[.!]?$"))
           or ($lower | test("^(?:i )?did not identify any actionable correctness regressions(?: in the changed code)?(?: that should block merg(?:e|ing) (?:this )?pr)?[.!]?$"))
           or ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$"))
           or ($lower | test("^(?:i )?did not find a concrete merge-blocking regression or safety hole introduced by this pr[.!]?$"))
@@ -1898,6 +1900,7 @@ normalize_native_review_result() {
       ($sentence | trim) as $trimmed
       | ($trimmed | ascii_downcase) as $lower
       | ($lower | test("^(?:i )?did not identify any actionable bugs(?: introduced by this change)?[.!]?$"))
+        or ($lower | test("^(?:i )?did not identify a discrete, merge-blocking regression(?: or safety hole)? in the pr diff relative to [^.]+[.!]?$"))
         or ($lower | test("^(?:i )?did not identify any actionable correctness regressions(?: in the changed code)?(?: that should block merg(?:e|ing) (?:this )?pr)?[.!]?$"))
         or ($lower | test("^(?:i )?did not identify any current-?pr-introduced issues(?: that clearly block merge)?[.!]?$"))
         or ($lower | test("^(?:i )?did not find a concrete merge-blocking regression or safety hole introduced by this pr[.!]?$"))
