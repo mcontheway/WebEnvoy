@@ -11,16 +11,17 @@
   - formal spec review PR 与治理落库目标文件重新混线，但 contract 没有结构化 blocker
   - lane 判定仍要先相信作者自报 `review_lane`，没有独立的 classification 输入
   - `governance_landing_pr` 若只靠五个治理目标文件路径命中，会把未来无关治理修订误吸进 FR-0016 专项门禁
-  - `mixed_spec_and_governance_scope` 若覆盖整个 spec 套件目录，会误伤仓库已允许同行的纯 `TODO.md` 进度回写
-  - `formal_spec_review_pr` 若继续按整棵 spec 目录命中，仍会误伤只同行 `TODO.md` 的治理落库 PR
+  - `mixed_spec_and_governance_scope` 若没有把 FR-0016 `TODO.md` handoff 文件纳入阻断，治理落库 PR 仍可夹带 handoff 改动重新混线
+  - `formal_spec_review_pr` 若继续按整棵 spec 目录命中，会把非契约 handoff 回写也误判成 formal spec 语义变更
   - `governance_landing_pr` 若允许部分五文件子集触发，仍会给不完整落库 PR 留下提前关闭 `#310` 的空间
   - 必需的 `gate_applicability` 元数据若缺失却不显式 blocked，reviewer/guardian 仍可回到启发式放行
-  - `TODO.md` 若被无条件豁免，后续语义改动会绕开 formal spec / mixed-scope 门禁
+  - 治理落库 lane 若继续为 `TODO.md` 开同行例外，机器判定仍会回到“进度回写还是语义回写”的启发式争议
   - 治理落库 PR 若允许在五文件之外夹带其他实质性改动，split 规则仍不可机器执行
   - 精确命中五个治理落库目标文件却缺少 `#310` 引用时，若不显式 blocked，仍可绕开治理落库前置门禁
   - `governance_landing_pr` 若允许 `n_a` closing semantics，仍可绕开仓库要求的 `Refs/Fixes #310` metadata
   - 带 `#310` 上下文的治理落库尝试若只命中目标文件子集，或在五文件之外扩 scope，仍可能绕开治理前置门禁
   - formal spec PR 若触碰任一治理落库目标文件却不立即 mixed-scope blocked，仍可能把高风险治理文案重新塞回 spec 线
+  - formal spec PR 若在 `status=ready` 时仍可使用 `Fixes`，仍可能提前关闭本应由治理落库 PR 承接的 `#310`
 - 影响：
   - 作者、reviewer 与 guardian 会基于不同前提做判断
   - live evidence 门禁再次出现可绕过空间
@@ -33,15 +34,16 @@
   - formal contract 中显式冻结 `mixed_spec_and_governance_scope` 与 formal spec lane 的 `Fixes` 禁止规则
   - formal contract 中显式冻结 `classification_scope`，并要求先消费该输入再判 lane
   - formal contract 中显式冻结 `governance_issue_ref=#310`，要求治理落库 lane 只能在“目标文件命中 + issue 上下文命中”时成立
-  - formal contract 中显式冻结 `spec_contract_targets`，只把正式契约文件纳入 mixed-scope blocker，排除纯 `TODO.md` 回写
+  - formal contract 中显式冻结 `spec_contract_targets`，把正式契约文件与 FR-0016 `TODO.md` handoff 文件分开建模
   - formal contract 中显式要求 formal spec lane 只由 `spec_contract_targets` 触发，治理落库 lane 只在完整五文件集合落库时成立
   - formal contract 中显式冻结 `missing_gate_applicability_metadata` blocker，禁止 reviewer/guardian 以启发式替代必需元数据
-  - formal contract 中显式限定 `TODO.md` 只有非语义进度回写可同行，语义变更仍回 formal spec 线
+  - formal contract 中显式限定 FR-0016 `TODO.md` 只承担 handoff 记录，不再作为治理落库 lane 的同行例外
   - formal contract 中显式限定治理落库线为精确五文件范围，排除其他实质性夹带改动
   - formal contract 中显式冻结 `missing_governance_issue_ref` blocker，禁止精确命中治理落库集合的 PR 通过漏写 `#310` 引用来绕路
   - formal contract 中显式限定 `governance_landing_pr` 即使 `not_applicable` 也不得使用 `n_a` closing semantics
   - formal contract 中显式冻结 `invalid_governance_landing_scope` blocker，禁止带 `#310` 上下文的子集/超集治理改动退回普通 PR
   - formal contract 中显式要求 formal spec PR 只要触碰任一治理落库目标文件就立即触发 `mixed_spec_and_governance_scope`
+  - formal contract 中显式要求 formal spec lane 无论 `ready` 还是 `not_applicable` 都保持 `refs_only`
   - 后续治理落库 PR 必须逐项对照同一集合，并同步更新 `docs/dev/review/guardian-review-addendum.md`
 - 回滚：
   - 阻断治理落库 PR，回到 formal spec 层修正 shared contract
@@ -114,7 +116,8 @@
 - `gate_applicability.trigger_reasons` 非空
 - `gate_applicability.n_a_allowed=false`
 - `blocking_reasons=[]`
-- `closing_semantics` 可按普通 Issue 闭环语义选择 `fixes_allowed` 或继续保持 `refs_only`；live evidence 专项门禁只负责解除“因证据不足而不得使用 `Fixes`”这一层限制，不强制要求作者必须改成 `Fixes`
+- 若 `review_lane=formal_spec_review_pr`，`closing_semantics` 必须保持 `refs_only`
+- 其他 lane 的 `closing_semantics` 可按普通 Issue 闭环语义选择 `fixes_allowed` 或继续保持 `refs_only`；live evidence 专项门禁只负责解除“因证据不足而不得使用 `Fixes`”这一层限制，不强制要求作者必须改成 `Fixes`
 - `merge_ready=true`
 - `live_evidence_record` 已完整提供，`latest_head_sha` 对应当前 PR latest head，`execution_surface=real_browser`，`success_signals` 能证明真实页面交互或真实闭环结果
 - `run_id`、`evidence_collected_at`、`artifact_identity` 与 `artifact_log_ref` 能共同指向当前 latest head 的 fresh rerun，而不是同一 head 的历史 artifact
@@ -129,7 +132,7 @@
 - `merge_ready=false`
 - 常见阻断原因包括缺少 latest head 新鲜复验、evidence 来源不是 `real_browser`、只有控制面信号、最低字段缺失、旧 head / 旧 artifact 复用
 - 只有 `gate_applicability.review_lane=governance_landing_pr` 且 formal spec review 未通过时，才必须把 `spec_review_not_completed` 放入 `blocking_reasons`，并保持 `status=blocked`
-- 若同一 PR 同时改动 FR-0016 formal spec 套件与五个治理落库目标文件，必须包含 `mixed_spec_and_governance_scope`
+- 若同一 PR 同时改动 FR-0016 `spec_contract_targets` 或 `TODO.md` handoff 文件，并命中五个治理落库目标文件中的任一项，必须包含 `mixed_spec_and_governance_scope`
 
 ### not_applicable
 
@@ -139,7 +142,7 @@
 - `gate_applicability.n_a_allowed=true`
 - `blocking_reasons=[]`
 - `merge_ready=true`
-- `closing_semantics` 可按普通 Issue 闭环语义选择 `n_a`、`refs_only` 或 `fixes_allowed`，但 `review_lane=formal_spec_review_pr` 时必须为 `refs_only`
+- `closing_semantics` 可按普通 Issue 闭环语义选择 `n_a`、`refs_only` 或 `fixes_allowed`，但 `review_lane=formal_spec_review_pr` 时必须为 `refs_only`，`review_lane=governance_landing_pr` 时不得为 `n_a`
 - `live_evidence_record` 允许省略或置为 `null`
 - PR 明确不命中任一 `trigger_reasons`，且不以真实 live evidence 作为 issue 关闭、完成判定或 merge 放行依据；formal spec / 治理前置 / 纯文档 / 纯研究 PR 只是典型非适用场景，不是唯一入口
 - 一旦命中任一 `trigger_reasons`，就必须回到 `in_scope=true`，不得仅凭文档 / 研究 / 规约属性判为 `not_applicable`

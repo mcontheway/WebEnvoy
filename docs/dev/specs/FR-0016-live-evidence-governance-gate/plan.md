@@ -55,12 +55,12 @@
   - 高风险治理套件已补齐 `contracts/`、`data-model.md`、`research.md`、`risks.md`
 3. 规约一致性检查：
   - `classification_scope` 足以让 reviewer / guardian 在不信任作者自报 lane 的前提下，先判定 spec 套件命中与治理落库目标命中
-  - `mixed_spec_and_governance_scope` 只针对 `spec_contract_targets` 生效，不误伤仓库已允许与落库 PR 同行的纯 `TODO.md` 进度回写
+  - `mixed_spec_and_governance_scope` 对 `spec_contract_targets` 与 `todo_handoff_target` 都必须生效，确保治理落库 PR 不会再夹带 FR-0016 的 `TODO.md` handoff 回写
   - formal spec PR 只要碰任一治理落库目标文件，就必须直接触发 `mixed_spec_and_governance_scope`，不需要等到完整 landing 形态
   - `classification_scope` 对治理落库的判定必须同时消费 `governance_issue_ref=#310`，避免把未来其他治理文件修订误吸进 FR-0016 landing lane
   - `governance_landing_pr` 必须以完整五文件落库为前提，不能被任一单文件或子集落库 PR 提前占用 lane 与 closing semantics
   - formal spec review PR、governance landing PR 与所有 `in_scope=true` PR 缺少 `gate_applicability` 时必须直接 blocked，不能靠 reviewer/guardian 事后脑补
-  - `TODO.md` 只有在非语义进度回写时才允许同行；一旦改动准入条件、阻断规则或治理结论，就要回到 formal spec 线
+  - FR-0016 `TODO.md` 只作为 handoff 文件存在，不再作为治理落库 lane 的同行例外；若需要更新停点或恢复说明，必须拆到独立 PR
   - `governance_landing_pr` 必须是精确五文件落库范围，不能夹带其他实质性改动
   - 精确命中五个治理落库目标文件却缺少 `#310` 引用时，也必须直接 blocked，不能降格成普通 PR
   - `governance_landing_pr` 即使 `not_applicable`，closing semantics 也只能是 `Refs #310` 或 `Fixes #310`，不得退成 `n_a`
@@ -79,7 +79,7 @@
   - `live_evidence_record` 的最小定位字段必须使用中性命名，不能把 write-flow 专用 locator 冻结成所有 in-scope PR 的统一必填项
   - 最低字段清单必须完整覆盖 `contracts/live-evidence-gate.md` 已冻结的全部 `live_evidence_record` 字段，且只可追加、不可删减或降格为可选
   - reviewer / guardian 必须能用 `run_id`、`evidence_collected_at`、`artifact_identity` 与 `artifact_log_ref` 排除“同一 latest head 下复用历史 artifact”的假新鲜复验
-  - formal spec review PR 不得使用 `Fixes #...` 提前关闭治理落库 issue
+  - formal spec review PR 无论 `ready` 还是 `not_applicable` 都不得使用 `Fixes #...` 提前关闭治理落库 issue
   - `N/A` 仅在非适用 PR 中出现
   - review/guardian 文案能直接阻断 stub/fake host、旧 head、`runtime.ping`、`runtime.bootstrap`
 

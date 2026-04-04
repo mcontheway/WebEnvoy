@@ -77,7 +77,7 @@
 - shared contract 还必须冻结独立于作者自报 lane 的 `classification_scope` 判定输入，至少覆盖：
   - `spec_suite_root`
   - `spec_contract_targets`
-  - `progress_only_todo_target`
+  - `todo_handoff_target`
   - `governance_issue_ref`
   - `governance_scope_targets`
 - 对落入专项门禁的 PR，描述中还必须提供结构化 `live_evidence_record` 区块。
@@ -107,10 +107,11 @@
 - 字段命名必须与 `contracts/live-evidence-gate.md` 的 `live_evidence_record` 保持一致；PR 模板可在展示文案中补充中文说明，但不能改出另一套 schema。
 - `gate_applicability` 的字段命名必须与 `contracts/live-evidence-gate.md` 保持一致；即使 `live_evidence_record` 整块为 `N/A`，formal spec review PR、governance landing PR 与其他落入专项门禁的 PR 也仍必须提供 `review_lane`、`in_scope`、`trigger_reasons` 与 `n_a_allowed`，供 reviewer / guardian 机器化判定。
 - formal spec review PR、governance landing PR 与其他落入专项门禁的 PR 若缺少必需的结构化 `gate_applicability` 元数据，必须直接阻断；reviewer / guardian 不得用路径或 issue 引用替代这份 PR 元数据义务。
-- `classification_scope` 必须独立于作者自报 `review_lane` 存在，用于让 reviewer / guardian 先依据冻结的目标集合判定“是否命中 FR-0016 formal spec 契约文件”“是否只做 `TODO.md` 非语义进度回写”与“是否精确命中治理落库目标文件”，再决定 lane 与 blocker。
+- `classification_scope` 必须独立于作者自报 `review_lane` 存在，用于让 reviewer / guardian 先依据冻结的目标集合判定“是否命中 FR-0016 formal spec 契约文件”“是否触碰 FR-0016 的 `TODO.md` handoff 文件”与“是否精确命中治理落库目标文件”，再决定 lane 与 blocker。
 - 对 `governance_landing_pr`，`gate_applicability` 还必须显式给出 `governance_scope_targets`，并与 FR-0016 冻结的五处治理落库目标文件保持一致；reviewer / guardian 只有在 PR 精确命中这五处目标文件、且 PR 元数据显式引用 `#310` 这一 FR-0016 治理落库 issue 时，才按 `governance_landing_pr` 处理，不得被自报 `general_pr` 绕过。
 - 若 PR 已精确命中五处治理落库目标文件，但缺少 `#310` issue 引用，reviewer / guardian 仍必须直接阻断，不得把它降格成 `general_pr` 放行。
 - 若 PR 在 `#310` 上下文中只命中五处治理目标文件的子集，或在五处目标文件之外再夹带其他实质性改动，也必须直接阻断，不得退成普通 PR。
+- 治理落库 PR 不得触碰 FR-0016 的 `TODO.md` handoff 文件；若需要更新停点或恢复说明，必须拆到独立 PR，而不是继续占用受控 landing lane。
 - `governance_landing_pr` 即使对 live evidence 本身属于 `not_applicable`，也仍必须携带可用的 issue closing semantics，只允许 `Refs #310` 或在实际闭环时使用 `Fixes #310`；不得退成 `n_a`。
 - `evidence_collected_at` 必须能标识当前 latest head 上这次 fresh rerun 的采集时间；不得继续复用同一 head 的历史 artifact 时间戳来冒充新鲜复验。
 - `run_id` 与 `artifact_identity` 必须使用 provider-scoped 的稳定标识，能够让 reviewer / guardian 机器化地区分“当前 latest head 的 fresh rerun”与“同一 head 的历史 artifact”。
@@ -131,6 +132,7 @@
   - 只有 latest head 的新鲜有效 live evidence 齐备后，才允许使用 `Fixes #...`
   - 若 latest head 的新鲜有效 live evidence 不足，必须继续使用 `Refs #...`
   - 若 evidence 已齐备但本次 PR 只阶段性引用 issue、不构成完整关闭，仍可继续使用 `Refs #...`，不得被 live evidence 专项门禁强制改成 `Fixes #...`
+  - 若 `review_lane=formal_spec_review_pr`，则无论 `status=ready` 还是 `status=not_applicable`，都必须继续使用 `Refs #...`，不得使用 `Fixes #...`
   - 只有 reviewer / guardian 未标记 evidence 缺失、失效或边界不符时，才允许进入 `merge-ready`
 
 ### 5. formal spec review 与治理落库 PR 的拆分冻结
@@ -147,7 +149,7 @@
   - 更新 `.github/PULL_REQUEST_TEMPLATE.md`
 - 在 formal spec review 通过前，治理落库 PR 不得申报为可合并状态。
 - `spec_review_not_completed` 的阻断必须只对 `governance_landing_pr` 生效，并由 shared contract 内部的结构化 lane 字段判定，而不是依赖 PR 标题、改动路径或人工上下文。
-- 若同一 PR 同时改动 `spec_contract_targets` 中任一正式契约文件，或对 `TODO.md` 产生语义变化，且又命中任一治理落库目标文件，必须作为 `mixed_spec_and_governance_scope` 直接阻断；不需要等到完整五文件 landing 形态才触发，只有纯 `TODO.md` 非语义进度回写不计入该阻断。
+- 若同一 PR 同时改动 `spec_contract_targets` 中任一正式契约文件，或命中 `todo_handoff_target`，且又命中任一治理落库目标文件，必须作为 `mixed_spec_and_governance_scope` 直接阻断；不需要等到完整五文件 landing 形态才触发。
 
 ## GWT 验收场景
 
@@ -210,7 +212,7 @@ And 阻断理由应明确指向“先完成 formal spec review”
 5. reviewer / guardian 文档任一处出现缩窄或放宽触发集合：视为治理基线不一致，必须阻断。
 6. formal spec review PR 与治理落库 PR 混在同一条高风险链路：视为流程违规，必须拆分。
 7. 未来其他事项若单独修改 `AGENTS.md`、`docs/dev/AGENTS.md`、`code_review.md`、`docs/dev/review/guardian-review-addendum.md` 或 `.github/PULL_REQUEST_TEMPLATE.md`，但不承载 `#310` 的 FR-0016 落库闭环：不得被误判为 `governance_landing_pr`。
-8. 治理落库 PR 若仅随手回写 FR-0016 `TODO.md` 的非语义进度状态：不应因此触发 `mixed_spec_and_governance_scope`。
+8. 治理落库 PR 若触碰 FR-0016 `TODO.md` handoff 文件：视为混线，必须拆分，不继续占用 `governance_landing_pr` lane。
 9. 仅改动五处治理落库目标文件中的子集，即使引用 `#310`，也不得被视为完成版 `governance_landing_pr`，更不得据此提前关闭 `#310`。
 10. 若治理落库 PR 在五处目标文件之外再混入其他实质性文档或实现改动，也不得继续宣称自己是受控的 `governance_landing_pr`。
 11. 若治理落库 PR 精确命中五处目标文件却漏掉 `#310` issue 引用，也必须被阻断，不能退回普通 PR 处理。

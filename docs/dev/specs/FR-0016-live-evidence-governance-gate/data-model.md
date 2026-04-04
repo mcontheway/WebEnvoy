@@ -14,20 +14,20 @@
 - 关键字段：
   - `spec_suite_root`
   - `spec_contract_targets`
-  - `progress_only_todo_target`
+  - `todo_handoff_target`
   - `governance_issue_ref`
   - `governance_scope_targets`
 - 约束：
   - `spec_suite_root` 固定为 `docs/dev/specs/FR-0016-live-evidence-governance-gate/`。
-  - `spec_contract_targets` 固定为 formal spec 中承载正式契约语义的文件集合，不包含纯 `TODO.md` 进度回写。
-  - `progress_only_todo_target` 固定为 `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md`，且只在非语义进度回写时允许随治理落库 PR 同行。
+  - `spec_contract_targets` 固定为 formal spec 中承载正式契约语义的文件集合，不包含 FR-0016 的 `TODO.md` handoff 文件。
+  - `todo_handoff_target` 固定为 `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md`，且只承担停点恢复与 handoff 记录，不属于治理落库 lane 的允许范围。
   - `governance_issue_ref` 固定为 `#310`，用于限定 FR-0016 治理落库 issue 上下文。
   - `governance_scope_targets` 固定为 FR-0016 的五个治理落库目标文件。
-  - reviewer / guardian 命中 `spec_suite_root` 时，应先识别为 FR-0016 spec 上下文；只有继续命中 `spec_contract_targets`，或对 `progress_only_todo_target` 产生语义变化时，才进入 formal spec 相关链路。
+  - reviewer / guardian 命中 `spec_suite_root` 时，应先识别为 FR-0016 spec 上下文；只有继续命中 `spec_contract_targets` 时，才进入 formal spec 相关链路。
   - reviewer / guardian 只有在同时精确命中 `governance_scope_targets`、未混入其他实质性改动，且 PR 元数据显式引用 `governance_issue_ref` 时，才按治理落库相关链路处理。
   - 若 PR 在 `governance_issue_ref` 上下文中只命中 `governance_scope_targets` 子集，或在其外扩 scope，必须产出 `invalid_governance_landing_scope` 并阻断。
   - 若 PR 已精确命中 `governance_scope_targets` 但缺少 `governance_issue_ref`，必须产出 `missing_governance_issue_ref` 并阻断。
-  - 若同一 PR 同时命中 `spec_contract_targets`，或对 `progress_only_todo_target` 产生语义变化，并且又命中任一治理落库目标文件，不论是否已经构成完整 landing 形态，都必须产出 `mixed_spec_and_governance_scope`。
+  - 若同一 PR 同时命中 `spec_contract_targets` 或 `todo_handoff_target`，并且又命中任一治理落库目标文件，不论是否已经构成完整 landing 形态，都必须产出 `mixed_spec_and_governance_scope`。
 - 生命周期：
   - 作为 FR-0016 formal contract 的固定判定输入存在，不由作者在每个 PR 中自由改写。
 
@@ -44,7 +44,7 @@
   - `review_lane` 必须显式填写，枚举为 `general_pr`、`formal_spec_review_pr`、`governance_landing_pr`。
   - `review_lane=governance_landing_pr` 时，`governance_scope_targets` 必须显式列出 `classification_scope` 冻结的五个治理落库目标文件；其他 lane 必须为空数组。
   - formal spec review PR、governance landing PR 与其他 `in_scope=true` 的 PR 缺少该对象时，必须直接阻断，不得由 reviewer / guardian 代填。
-  - reviewer / guardian 若发现 PR 实际变更命中 `classification_scope` 冻结目标，并满足对应的 issue 上下文、完整文件集合与非语义 `TODO.md` 约束时，必须按对应 lane 处理，不得被自报 lane 绕过。
+  - reviewer / guardian 若发现 PR 实际变更命中 `classification_scope` 冻结目标，并满足对应的 issue 上下文与完整文件集合约束时，必须按对应 lane 处理，不得被自报 lane 绕过。
   - 若 PR 精确命中治理落库目标文件集合却缺少 `#310` 引用，不得退回 `general_pr`。
   - 若 PR 只命中治理落库目标文件子集，或在目标集合外扩 scope，即使引用 `#310` 也不得退回 `general_pr`。
   - `in_scope=true` 时，`trigger_reasons` 必须非空，且 `n_a_allowed=false`。
@@ -100,14 +100,14 @@
 - 约束：
   - `blocking_reasons` 非空时，`status=blocked`。
   - `status=blocked` 时，`closing_semantics=refs_only` 且 `merge_ready=false`。
-  - `status=ready` 时，`merge_ready=true`，且 `closing_semantics` 可按普通 Issue 闭环语义选择 `refs_only` 或 `fixes_allowed`；live evidence 专项门禁只解除“因证据不足而不得使用 `Fixes`”这一层限制，不强制要求作者必须改成 `Fixes`。
+  - `status=ready` 时，`merge_ready=true`；若 `review_lane=formal_spec_review_pr`，则 `closing_semantics` 必须为 `refs_only`；其他 lane 才可按普通 Issue 闭环语义选择 `refs_only` 或 `fixes_allowed`。live evidence 专项门禁只解除“因证据不足而不得使用 `Fixes`”这一层限制，不强制要求作者必须改成 `Fixes`。
   - `status=not_applicable` 时，`blocking_reasons=[]` 且 `gate_applicability.in_scope=false`，`merge_ready=true`；此时 `closing_semantics` 可按普通 Issue 闭环语义选择 `n_a`、`refs_only` 或 `fixes_allowed`，但 `review_lane=formal_spec_review_pr` 时必须为 `refs_only`，`review_lane=governance_landing_pr` 时只允许为 `refs_only` 或 `fixes_allowed`。
   - `merge_ready=true` 只表示 live evidence 专项门禁自身不阻断，不替代普通 review / GitHub checks / guardian 总体合并门禁。
   - 只有 `review_lane=governance_landing_pr` 且 formal spec review 未通过时，才必须包含 `spec_review_not_completed`，且 `status=blocked`。
   - formal spec review PR、governance landing PR 与其他 `in_scope=true` 的 PR 若缺少 `gate_applicability`，必须包含 `missing_gate_applicability_metadata`，且 `status=blocked`。
   - 若 PR 在 `#310` 上下文中只命中五个治理落库目标文件子集，或在五文件之外扩 scope，必须包含 `invalid_governance_landing_scope`，且 `status=blocked`。
   - 若 PR 精确命中五个治理落库目标文件却缺少 `#310` 引用，必须包含 `missing_governance_issue_ref`，且 `status=blocked`。
-  - 若同一 PR 同时改动 FR-0016 `spec_contract_targets` 中任一正式契约文件，或对 `progress_only_todo_target` 产生语义变化，且又命中任一治理落库目标文件，不论是否已经构成完整 landing 形态，都必须包含 `mixed_spec_and_governance_scope`，且 `status=blocked`。
+  - 若同一 PR 同时改动 FR-0016 `spec_contract_targets` 中任一正式契约文件，或命中 `todo_handoff_target`，且又命中任一治理落库目标文件，不论是否已经构成完整 landing 形态，都必须包含 `mixed_spec_and_governance_scope`，且 `status=blocked`。
 - 生命周期：
   - reviewer / guardian 基于当前 PR 描述、latest head 和 formal spec review 状态即时产出。
   - 若 PR head 或 review 前置状态发生变化，旧 verdict 自动过期，必须重新计算。
