@@ -2989,6 +2989,22 @@ EOF
   assert_file_contains "${result_file}" '"findings":[]'
 }
 
+test_normalize_native_review_result_accepts_merge_base_safe_summary_variant() {
+  setup_case_dir "normalize-native-text-merge-base-safe-summary-variant"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+基于 merge-base `bc253d2f2dee41827a41a516d572eb38d97bb387` 的 diff 审查，这个 PR 主要是在 `background`、`loopback` 和 `xhs-search` 之间收敛重复的 XHS gate 逻辑到共享模块，未发现当前改动明确引入、且足以阻止合并的离散缺陷。已重点检查高风险执行路径与共享契约变更，未定位到可证实的行为回归。
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+  assert_file_contains "${result_file}" '"findings":[]'
+}
+
 test_normalize_native_review_result_fails_closed_for_review_context_with_incomplete_evidence() {
   setup_case_dir "normalize-native-text-review-context-incomplete-evidence"
 

@@ -1597,6 +1597,8 @@ normalize_native_review_result() {
           or ($trimmed | test("^没有发现阻断性问题[。！!]*$"))
           or ($trimmed | test("^未发现阻断问题[。！!]*$"))
           or ($trimmed | test("^没有发现阻断问题[。！!]*$"))
+          or ($trimmed | test("^基于 merge-base .+ 的 diff 审查[、，, ].+未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$"))
+          or ($trimmed | test("^未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$"))
           or ($trimmed | test("^没有合并阻断[。！!]*$"))
           or ($trimmed | test("^可以合并[。！!]*$"))
           or ($trimmed | test("^可合并[。！!]*$"))
@@ -1604,12 +1606,14 @@ normalize_native_review_result() {
           or ($trimmed | test("^建议批准[。！!]*$"))
           or ($trimmed | test("^审查通过[。！!]*$"));
       def neutral_safe_sentence($sentence):
-        ($sentence | ascii_downcase) as $lower
+        ($sentence | trim_text) as $trimmed
+        | ($trimmed | ascii_downcase) as $lower
         | ($lower | test("does not affect code paths"))
           or ($lower | test("does not modify executable code or behavior"))
           or ($lower | test("does not affect .*runtime behavior"))
           or ($lower | test("^after reviewing the diff against [^,]+, (?:the )?(?:refactor|patch|change) appears? to preserve the existing (?![^.]*\\b(?:based on static reading|static reading|static analysis only|pending another pass(?: on [^,.!?]+)?|pending (?:further )?(?:validation|verification|testing|review)|subject to)\\b)([^.]+?) while only extracting (?:them|it) into helpers[.!]?$"))
-          or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"));
+          or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"))
+          or ($trimmed | test("^已重点检查.+未定位到可证实的行为回归[。！!]*$"));
       def harmless_tail_sentence($sentence):
         ($sentence | ascii_downcase | trim_text) as $lower
         | ($lower | test("^(thanks|thank you|thx)[.!]?$"))
@@ -1766,6 +1770,8 @@ normalize_native_review_result() {
           or ($trimmed | test("^未发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
           or ($trimmed | test("^没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
           or ($trimmed | test("^本次改动看起来保持了既有语义[、，, ]*没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
+          or ($trimmed | test("^基于 merge-base .+ 的 diff 审查[、，, ].+未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$"))
+          or ($trimmed | test("^未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$"))
           or ($trimmed | test("^没有合并阻断[。！!]*$"))
           or ($trimmed | test("^可以合并[。！!]*$"))
           or ($trimmed | test("^可合并[。！!]*$"))
@@ -1779,12 +1785,14 @@ normalize_native_review_result() {
           or ($lower | test("^reviewed the diff against [^,]+, and checked .+ against the relevant .+ baselines[.!]?$"))
           or ($trimmed | test("^审查了相对 .+ 的实际差异，并对照相关架构/审查基线检查了[[:space:]]*.+行为收敛[。！!]*$"));
       def neutral_safe_sentence($sentence):
-        ($sentence | ascii_downcase) as $lower
+        ($sentence | trim_text) as $trimmed
+        | ($trimmed | ascii_downcase) as $lower
         | ($lower | test("does not affect code paths"))
           or ($lower | test("does not modify executable code or behavior"))
           or ($lower | test("does not affect .*runtime behavior"))
           or ($lower | test("^after reviewing the diff against [^,]+, (?:the )?(?:refactor|patch|change) appears? to preserve the existing (?![^.]*\\b(?:based on static reading|static reading|static analysis only|pending another pass(?: on [^,.!?]+)?|pending (?:further )?(?:validation|verification|testing|review)|subject to)\\b)([^.]+?) while only extracting (?:them|it) into helpers[.!]?$"))
           or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"))
+          or ($trimmed | test("^已重点检查.+未定位到可证实的行为回归[。！!]*$"))
           or review_context_sentence($sentence);
       def harmless_tail_sentence($sentence):
         ($sentence | ascii_downcase | trim_text) as $lower
@@ -1927,6 +1935,8 @@ normalize_native_review_result() {
         or ($trimmed | test("^未发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
         or ($trimmed | test("^没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
         or ($trimmed | test("^本次改动看起来保持了既有语义[、，, ]*没有发现当前 PR 新引入[、，, ]*足以阻止合并的离散问题[。！!]*$"))
+        or ($trimmed | test("^基于 merge-base .+ 的 diff 审查[、，, ].+未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$"))
+        or ($trimmed | test("^未发现当前改动明确引入[、，, ]*且足以阻止合并的离散缺陷[。！!]*$"))
         or ($trimmed | test("^没有合并阻断[。！!]*$"))
         or ($trimmed | test("^可以合并[。！!]*$"))
         or ($trimmed | test("^可合并[。！!]*$"))
@@ -1940,12 +1950,14 @@ normalize_native_review_result() {
         or ($lower | test("^reviewed the diff against [^,]+, and checked .+ against the relevant .+ baselines[.!]?$"))
         or ($trimmed | test("^审查了相对 .+ 的实际差异，并对照相关架构/审查基线检查了[[:space:]]*.+行为收敛[。！!]*$"));
     def neutral_safe_sentence($sentence):
-      ($sentence | ascii_downcase) as $lower
+      ($sentence | trim) as $trimmed
+      | ($trimmed | ascii_downcase) as $lower
       | ($lower | test("does not affect code paths"))
         or ($lower | test("does not modify executable code or behavior"))
         or ($lower | test("does not affect .*runtime behavior"))
         or ($lower | test("^after reviewing the diff against [^,]+, (?:the )?(?:refactor|patch|change) appears? to preserve the existing (?![^.]*\\b(?:based on static reading|static reading|static analysis only|pending another pass(?: on [^,.!?]+)?|pending (?:further )?(?:validation|verification|testing|review)|subject to)\\b)([^.]+?) while only extracting (?:them|it) into helpers[.!]?$"))
         or ($lower | test("appears? (?:internally )?consistent(?: with .+)?[.!]?$"))
+        or ($trimmed | test("^已重点检查.+未定位到可证实的行为回归[。！!]*$"))
         or review_context_sentence($sentence);
     def harmless_tail_sentence($sentence):
       ($sentence | ascii_downcase | trim) as $lower
