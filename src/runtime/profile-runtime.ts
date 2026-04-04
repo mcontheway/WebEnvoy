@@ -142,6 +142,14 @@ interface RuntimeReadinessSnapshot {
   details?: JsonObject;
 }
 
+interface ResolvedProfileAccessState {
+  profileState: ProfileState;
+  lockHeld: boolean;
+  observedRunId: string;
+  healthyLock: boolean;
+  controlConnected: boolean;
+}
+
 const isoNow = (): string => new Date().toISOString();
 type LockAcquisition = "new" | "same-owner" | "same-owner-dead" | "reclaimed";
 const DEFAULT_LOCK_FILE_ADAPTER: LockFileAdapter = {
@@ -589,6 +597,32 @@ const buildIdentityPreflightOutput = (identityPreflight: IdentityPreflightResult
   failureReason: identityPreflight.failureReason,
   installDiagnostics: identityPreflight.installDiagnostics
 });
+
+const resolveProfileAccessState = (input: {
+  storedProfileState: ProfileState;
+  lockOwnerRunId: string | null;
+  lockInspection: ProfileLockInspection | null;
+  runtimeRunId: string;
+}): ResolvedProfileAccessState => {
+  const activeState = isRuntimeActiveProfileState(input.storedProfileState);
+  const healthyLock = input.lockInspection?.blocksReuse ?? false;
+  const controlConnected = input.lockInspection?.controlConnected ?? false;
+  const profileState: ProfileState =
+    activeState && !controlConnected ? "disconnected" : input.storedProfileState;
+  const lockHeld = activeState && healthyLock && input.lockOwnerRunId === input.runtimeRunId;
+  const observedRunId =
+    activeState && healthyLock && typeof input.lockOwnerRunId === "string"
+      ? input.lockOwnerRunId
+      : input.runtimeRunId;
+
+  return {
+    profileState,
+    lockHeld,
+    observedRunId,
+    healthyLock,
+    controlConnected
+  };
+};
 
 export class ProfileRuntimeService {
   readonly #storeFactory: (cwd: string) => ProfileStoreLike;
@@ -1039,17 +1073,14 @@ export class ProfileRuntimeService {
     const lock = await this.#readLock(lockPath);
 
     const storedProfileState: ProfileState = meta?.profileState ?? "uninitialized";
-    const activeState = isRuntimeActiveProfileState(storedProfileState);
     const lockInspection =
       lock !== null ? await this.#inspectProfileLock(lock, profileDir) : null;
-    const healthyLock = lockInspection?.blocksReuse ?? false;
-    const profileState: ProfileState =
-      activeState && !(lockInspection?.controlConnected ?? false) ? "disconnected" : storedProfileState;
-    const lockHeld = activeState && healthyLock && lock?.ownerRunId === input.runId;
-    const observedRunId =
-      activeState && healthyLock && typeof lock?.ownerRunId === "string"
-        ? lock.ownerRunId
-        : input.runId;
+    const accessState = resolveProfileAccessState({
+      storedProfileState,
+      lockOwnerRunId: lock?.ownerRunId ?? null,
+      lockInspection,
+      runtimeRunId: input.runId
+    });
     const requestedExecutionMode = readRequestedExecutionMode(input.params);
     const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, meta, {
       requestedExecutionMode
@@ -1061,19 +1092,19 @@ export class ProfileRuntimeService {
     });
     const readiness = await this.#readRuntimeReadiness({
       runtimeInput: input,
-      lockHeld,
-      observedRunId,
+      lockHeld: accessState.lockHeld,
+      observedRunId: accessState.observedRunId,
       identityPreflight,
-      profileState
+      profileState: accessState.profileState
     });
 
     return {
       profile: input.profile,
-      profileState,
-      browserState: browserStateFromProfileState(profileState, lockHeld),
+      profileState: accessState.profileState,
+      browserState: browserStateFromProfileState(accessState.profileState, accessState.lockHeld),
       profileDir,
       proxyUrl: meta?.proxyBinding?.url ?? null,
-      lockHeld,
+      lockHeld: accessState.lockHeld,
       identityBindingState: readiness.identityBindingState,
       transportState: readiness.transportState,
       bootstrapState: readiness.bootstrapState,
@@ -1112,14 +1143,13 @@ export class ProfileRuntimeService {
     }
 
     const lockInspection = await this.#inspectProfileLock(lock, profileDir);
-    const healthyLock = lockInspection.blocksReuse;
-    const profileState: ProfileState =
-      activeState && !(lockInspection.controlConnected ?? false) ? "disconnected" : storedProfileState;
-    if (
-      !healthyLock ||
-      !lockInspection.controlConnected ||
-      profileState !== "ready"
-    ) {
+    const accessState = resolveProfileAccessState({
+      storedProfileState,
+      lockOwnerRunId: lock.ownerRunId,
+      lockInspection,
+      runtimeRunId: input.runId
+    });
+    if (!accessState.healthyLock || !accessState.controlConnected || accessState.profileState !== "ready") {
       throw new CliError("ERR_PROFILE_LOCKED", "profile 当前不存在可安全接管的 ready runtime", {
         retryable: true
       });
@@ -1162,13 +1192,13 @@ export class ProfileRuntimeService {
       runtimeInput: input,
       lockHeld: true,
       identityPreflight,
-      profileState
+      profileState: accessState.profileState
     });
 
     return {
       profile: input.profile,
-      profileState,
-      browserState: browserStateFromProfileState(profileState, true),
+      profileState: accessState.profileState,
+      browserState: browserStateFromProfileState(accessState.profileState, true),
       profileDir,
       proxyUrl: meta?.proxyBinding?.url ?? null,
       lockHeld: true,
@@ -1784,20 +1814,15 @@ export class ProfileRuntimeService {
   }): Promise<RuntimeReadinessSnapshot> {
     const baseIdentity = input.identityPreflight.identityBindingState;
     if (input.identityPreflight.mode !== "official_chrome_persistent_extension") {
-      const transportState: TransportState =
-        input.lockHeld && input.profileState === "ready" ? "ready" : "not_connected";
-      const bootstrapState: BootstrapState =
-        input.lockHeld && input.profileState === "ready" ? "ready" : "not_started";
-      return {
+      return this.#buildNonPersistentRuntimeReadiness({
         identityBindingState: baseIdentity,
-        transportState,
-        bootstrapState,
-        runtimeReadiness: input.lockHeld && input.profileState === "ready" ? "ready" : "unknown"
-      };
+        lockHeld: input.lockHeld,
+        profileState: input.profileState
+      });
     }
     if (!input.lockHeld) {
       if (baseIdentity === "bound" && input.profileState === "ready" && input.observedRunId) {
-        return await this.#readRuntimeReadiness({
+        const readiness = await this.#readPersistentRuntimeReadiness({
           ...input,
           runtimeInput: {
             ...input.runtimeInput,
@@ -1805,7 +1830,8 @@ export class ProfileRuntimeService {
           },
           lockHeld: true,
           observedRunId: undefined
-        }).then((readiness) => ({
+        });
+        return {
           ...readiness,
           runtimeReadiness: buildRuntimeReadiness({
             lockHeld: false,
@@ -1813,38 +1839,90 @@ export class ProfileRuntimeService {
             transportState: readiness.transportState,
             bootstrapState: readiness.bootstrapState
           })
-        }));
+        };
       }
-      const transportState: TransportState =
-        input.profileState === "disconnected" ? "disconnected" : "not_connected";
-      const bootstrapState: BootstrapState =
-        baseIdentity === "bound" && transportState === "disconnected" ? "pending" : "not_started";
-      return {
+      return this.#buildUnlockedPersistentRuntimeReadiness({
         identityBindingState: baseIdentity,
-        transportState,
-        bootstrapState,
-        runtimeReadiness: buildRuntimeReadiness({
-          lockHeld: false,
-          identityBindingState: baseIdentity,
-          transportState,
-          bootstrapState
-        })
-      };
+        profileState: input.profileState
+      });
     }
     if (baseIdentity !== "bound") {
-      return {
+      return this.#buildBoundlessRuntimeReadiness({
         identityBindingState: baseIdentity,
-        transportState: "not_connected",
-        bootstrapState: "not_started",
-        runtimeReadiness: buildRuntimeReadiness({
-          lockHeld: input.lockHeld,
-          identityBindingState: baseIdentity,
-          transportState: "not_connected",
-          bootstrapState: "not_started"
-        })
-      };
+        lockHeld: input.lockHeld
+      });
     }
 
+    return this.#readPersistentRuntimeReadiness(input);
+  }
+
+  #buildNonPersistentRuntimeReadiness(input: {
+    identityBindingState: IdentityPreflightResult["identityBindingState"];
+    lockHeld: boolean;
+    profileState: ProfileState;
+  }): RuntimeReadinessSnapshot {
+    const transportState: TransportState =
+      input.lockHeld && input.profileState === "ready" ? "ready" : "not_connected";
+    const bootstrapState: BootstrapState =
+      input.lockHeld && input.profileState === "ready" ? "ready" : "not_started";
+    return {
+      identityBindingState: input.identityBindingState,
+      transportState,
+      bootstrapState,
+      runtimeReadiness: input.lockHeld && input.profileState === "ready" ? "ready" : "unknown"
+    };
+  }
+
+  #buildUnlockedPersistentRuntimeReadiness(input: {
+    identityBindingState: IdentityPreflightResult["identityBindingState"];
+    profileState: ProfileState;
+  }): RuntimeReadinessSnapshot {
+    const transportState: TransportState =
+      input.profileState === "disconnected" ? "disconnected" : "not_connected";
+    const bootstrapState: BootstrapState =
+      input.identityBindingState === "bound" && transportState === "disconnected"
+        ? "pending"
+        : "not_started";
+    return {
+      identityBindingState: input.identityBindingState,
+      transportState,
+      bootstrapState,
+      runtimeReadiness: buildRuntimeReadiness({
+        lockHeld: false,
+        identityBindingState: input.identityBindingState,
+        transportState,
+        bootstrapState
+      })
+    };
+  }
+
+  #buildBoundlessRuntimeReadiness(input: {
+    identityBindingState: IdentityPreflightResult["identityBindingState"];
+    lockHeld: boolean;
+  }): RuntimeReadinessSnapshot {
+    const transportState: TransportState = "not_connected";
+    const bootstrapState: BootstrapState = "not_started";
+    return {
+      identityBindingState: input.identityBindingState,
+      transportState,
+      bootstrapState,
+      runtimeReadiness: buildRuntimeReadiness({
+        lockHeld: input.lockHeld,
+        identityBindingState: input.identityBindingState,
+        transportState,
+        bootstrapState
+      })
+    };
+  }
+
+  async #readPersistentRuntimeReadiness(input: {
+    runtimeInput: RuntimeActionInput;
+    lockHeld: boolean;
+    observedRunId?: string;
+    identityPreflight: IdentityPreflightResult;
+    profileState: ProfileState;
+  }): Promise<RuntimeReadinessSnapshot> {
+    const baseIdentity = input.identityPreflight.identityBindingState;
     const bridge = this.#bridgeFactory();
     const runtimeContextId = buildRuntimeBootstrapContextId(
       input.runtimeInput.profile,
