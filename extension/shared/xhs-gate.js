@@ -612,10 +612,6 @@ const collectXhsMatrixGateReasons = (input) => {
     }
   }
 
-  if (input.includeWriteInteractionTierReason === true && state.issue208WriteGateOnly) {
-    pushReason(gateReasons, state.writeTierReason);
-  }
-
   return {
     gateReasons,
     approvalRecord,
@@ -653,7 +649,8 @@ const evaluateXhsGate = (input) => {
     gateReasons,
     state,
     approvalRecord: input.approvalRecord,
-    issue208EditorInputValidation: input.issue208EditorInputValidation === true
+    issue208EditorInputValidation: input.issue208EditorInputValidation === true,
+    includeWriteInteractionTierReason: input.includeWriteInteractionTierReason === true
   });
   const outcome = finalizeXhsGateOutcome({
     gateReasons,
@@ -662,6 +659,13 @@ const evaluateXhsGate = (input) => {
     writeGateOnlyEligibleBehavior:
       input.writeGateOnlyEligibleBehavior === "block" ? "block" : "allow"
   });
+  if (
+    input.includeWriteInteractionTierReason === true &&
+    state.issue208WriteGateOnly &&
+    state.writeTierReason
+  ) {
+    pushReason(outcome.gateReasons, state.writeTierReason);
+  }
   return {
     scope_context: { ...XHS_SCOPE_CONTEXT },
     read_execution_policy: {
