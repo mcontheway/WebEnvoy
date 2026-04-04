@@ -7,6 +7,12 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
 const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
 const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+const cloneFingerprintRuntimeContextWithInjection = (runtime, injection) => injection
+    ? {
+        ...runtime,
+        injection: JSON.parse(JSON.stringify(injection))
+    }
+    : { ...runtime };
 const resolveRequestedExecutionMode = (message) => {
     const topLevelMode = asString(asRecord(message.commandParams)?.requested_execution_mode);
     if (topLevelMode) {
@@ -21,29 +27,22 @@ const resolveAttestedFingerprintRuntimeContext = (value) => {
         return null;
     }
     const injection = asRecord(record.injection);
-    const cloneWithInjection = (runtime) => injection
-        ? {
-            ...runtime,
-            injection: JSON.parse(JSON.stringify(injection))
-        }
-        : { ...runtime };
     const direct = ensureFingerprintRuntimeContext(record);
     if (direct) {
-        return cloneWithInjection(direct);
+        return cloneFingerprintRuntimeContextWithInjection(direct, injection);
     }
     const sanitized = { ...record };
     delete sanitized.injection;
     const normalized = ensureFingerprintRuntimeContext(sanitized);
-    return normalized ? cloneWithInjection(normalized) : null;
+    return normalized ? cloneFingerprintRuntimeContextWithInjection(normalized, injection) : null;
 };
+const resolveFingerprintContextFromCommandParams = (commandParams) => asRecord(commandParams.fingerprint_context) ?? asRecord(commandParams.fingerprint_runtime) ?? null;
 const resolveFingerprintContextFromMessage = (message) => {
     const direct = resolveAttestedFingerprintRuntimeContext(message.fingerprintContext ?? null);
     if (direct) {
         return direct;
     }
-    const fallback = resolveAttestedFingerprintRuntimeContext(asRecord(message.commandParams)?.fingerprint_context ??
-        asRecord(message.commandParams)?.fingerprint_runtime ??
-        null);
+    const fallback = resolveAttestedFingerprintRuntimeContext(resolveFingerprintContextFromCommandParams(message.commandParams));
     return fallback ?? null;
 };
 const buildFailedFingerprintInjectionContext = (fingerprintRuntime, errorMessage) => {
@@ -57,6 +56,11 @@ const buildFailedFingerprintInjectionContext = (fingerprintRuntime, errorMessage
             error: errorMessage
         }
     };
+};
+const hasInstalledFingerprintInjection = (fingerprintRuntime) => {
+    const existingInjection = asRecord(fingerprintRuntime.injection);
+    return (existingInjection?.installed === true &&
+        asStringArray(existingInjection.missing_required_patches).length === 0);
 };
 const resolveMissingRequiredFingerprintPatches = (fingerprintRuntime) => {
     const injection = asRecord(fingerprintRuntime.injection);
@@ -156,6 +160,10 @@ const hashMainWorldEventChannel = (value) => {
     return (hash >>> 0).toString(36);
 };
 const normalizeMainWorldSecret = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const createMainWorldBootstrapDetail = (channel) => ({
+    request_event: channel.requestEvent,
+    result_event: channel.resultEvent
+});
 export const resolveMainWorldEventNamesForSecret = (secret) => {
     const channel = hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|${secret}`);
     return {
@@ -231,10 +239,7 @@ export const installMainWorldEventChannelSecret = (secret) => {
         requestEvent: names.requestEvent,
         resultEvent: names.resultEvent
     };
-    window.dispatchEvent(createWindowEvent(MAIN_WORLD_EVENT_BOOTSTRAP, {
-        request_event: names.requestEvent,
-        result_event: names.resultEvent
-    }));
+    window.dispatchEvent(createWindowEvent(MAIN_WORLD_EVENT_BOOTSTRAP, createMainWorldBootstrapDetail(mainWorldEventChannel)));
     return true;
 };
 export const resetMainWorldEventChannelForContract = () => {
@@ -328,6 +333,18 @@ const requestXhsSignatureViaExtension = async (uri, body) => {
     return response.result;
 };
 const resolveRequiredFingerprintPatches = (fingerprintRuntime) => asStringArray(asRecord(fingerprintRuntime.fingerprint_patch_manifest)?.required_patches);
+const installFingerprintRuntimeWithVerification = async (fingerprintRuntime) => {
+    const requiredPatches = resolveRequiredFingerprintPatches(fingerprintRuntime);
+    const preInstallAudioSample = requiredPatches.includes("audio_context")
+        ? await probeAudioFirstSample()
+        : null;
+    const installResult = await installFingerprintRuntimeViaMainWorld(fingerprintRuntime);
+    return await verifyFingerprintInstallResult({
+        fingerprintRuntime,
+        installResult: asRecord(installResult),
+        preInstallAudioSample
+    });
+};
 const probeAudioFirstSample = async () => {
     const offlineAudioCtor = typeof window.OfflineAudioContext === "function"
         ? window.OfflineAudioContext
@@ -356,6 +373,18 @@ const probeAudioFirstSample = async () => {
         return null;
     }
 };
+const buildRuntimeBootstrapAckPayload = (input) => ({
+    method: "runtime.bootstrap.ack",
+    result: {
+        version: input.version,
+        run_id: input.runId,
+        runtime_context_id: input.runtimeContextId,
+        profile: input.profile,
+        status: input.attested ? "ready" : "pending"
+    },
+    runtime_bootstrap_attested: input.attested,
+    ...(input.runtimeWithInjection ? { fingerprint_runtime: input.runtimeWithInjection } : {})
+});
 const probeBatteryApi = async () => {
     const getBattery = window.navigator
         .getBattery;
@@ -566,22 +595,11 @@ export class ContentScriptHandler {
         if (!fingerprintRuntime) {
             return null;
         }
-        const existingInjection = asRecord(fingerprintRuntime.injection);
-        if (existingInjection?.installed === true &&
-            asStringArray(existingInjection.missing_required_patches).length === 0) {
+        if (hasInstalledFingerprintInjection(fingerprintRuntime)) {
             return fingerprintRuntime;
         }
         try {
-            const requiredPatches = resolveRequiredFingerprintPatches(fingerprintRuntime);
-            const preInstallAudioSample = requiredPatches.includes("audio_context")
-                ? await probeAudioFirstSample()
-                : null;
-            const installResult = await installFingerprintRuntimeViaMainWorld(fingerprintRuntime);
-            const verifiedInjection = await verifyFingerprintInstallResult({
-                fingerprintRuntime,
-                installResult: asRecord(installResult),
-                preInstallAudioSample
-            });
+            const verifiedInjection = await installFingerprintRuntimeWithVerification(fingerprintRuntime);
             return {
                 ...fingerprintRuntime,
                 injection: verifiedInjection
@@ -661,18 +679,14 @@ export class ContentScriptHandler {
             : buildFailedFingerprintInjectionContext(fingerprintRuntime, "main world event channel unavailable");
         const injection = asRecord(runtimeWithInjection?.injection);
         const attested = injection?.installed === true;
-        const ackPayload = {
-            method: "runtime.bootstrap.ack",
-            result: {
-                version,
-                run_id: runId,
-                runtime_context_id: runtimeContextId,
-                profile,
-                status: attested ? "ready" : "pending"
-            },
-            runtime_bootstrap_attested: attested,
-            ...(runtimeWithInjection ? { fingerprint_runtime: runtimeWithInjection } : {})
-        };
+        const ackPayload = buildRuntimeBootstrapAckPayload({
+            version,
+            runId,
+            runtimeContextId,
+            profile,
+            attested,
+            runtimeWithInjection
+        });
         if (!attested) {
             this.#emit({
                 kind: "result",

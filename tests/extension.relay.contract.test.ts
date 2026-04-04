@@ -828,8 +828,10 @@ describe("extension background relay contract", () => {
       consumer_gate_result: {
         requested_execution_mode: "live_write",
         effective_execution_mode: "dry_run",
-        gate_decision: "blocked"
-      }
+        gate_decision: "blocked",
+        write_interaction_tier: null
+      },
+      write_action_matrix_decisions: null
     });
     expect(
       (((response.payload as Record<string, unknown>).consumer_gate_result as Record<string, unknown>)

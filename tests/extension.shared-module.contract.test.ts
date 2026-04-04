@@ -6,6 +6,10 @@ import {
   WRITE_INTERACTION_TIER
 } from "../extension/shared/risk-state.js";
 import {
+  XHS_ALLOWED_DOMAINS,
+  evaluateXhsGate
+} from "../extension/shared/xhs-gate.js";
+import {
   DEFAULT_MIME_TYPE_DESCRIPTORS,
   DEFAULT_PLUGIN_DESCRIPTORS,
   ensureFingerprintRuntimeContext
@@ -24,5 +28,20 @@ describe("extension shared module contract", () => {
     expect(DEFAULT_PLUGIN_DESCRIPTORS.length).toBeGreaterThan(0);
     expect(DEFAULT_MIME_TYPE_DESCRIPTORS.length).toBeGreaterThan(0);
     expect(typeof ensureFingerprintRuntimeContext).toBe("function");
+  });
+
+  it("exports xhs gate helpers from the extension root", () => {
+    expect(XHS_ALLOWED_DOMAINS.has("www.xiaohongshu.com")).toBe(true);
+    expect(
+      evaluateXhsGate({
+        issueScope: "issue_209",
+        riskState: "allowed",
+        targetDomain: "www.xiaohongshu.com",
+        targetTabId: 8,
+        targetPage: "search_result_tab",
+        actionType: "read",
+        requestedExecutionMode: "dry_run"
+      }).consumer_gate_result.gate_decision
+    ).toBe("allowed");
   });
 });

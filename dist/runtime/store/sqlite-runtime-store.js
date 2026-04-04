@@ -9,7 +9,7 @@ export class RuntimeStoreError extends Error {
         this.code = code;
     }
 }
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 const SUMMARY_MAX_CHARS = 512;
 const SQLITE_BUSY_MESSAGE = /SQLITE_BUSY|database is locked/i;
 const SQLITE_OPEN_RETRY_LIMIT = 8;
@@ -199,7 +199,7 @@ export class SQLiteRuntimeStore {
         target_domain TEXT NOT NULL,
         target_tab_id INTEGER NOT NULL,
         target_page TEXT NOT NULL,
-        action_type TEXT NOT NULL,
+        action_type TEXT,
         requested_execution_mode TEXT NOT NULL,
         effective_execution_mode TEXT NOT NULL,
         gate_decision TEXT NOT NULL,
@@ -243,6 +243,10 @@ export class SQLiteRuntimeStore {
             this.#migrateV4ToV5();
             return;
         }
+        if (version === 5) {
+            this.#migrateV5ToV6();
+            return;
+        }
         if (version !== SCHEMA_VERSION) {
             throw new RuntimeStoreError("ERR_RUNTIME_STORE_SCHEMA_MISMATCH", `schema mismatch: ${row.value ?? "unknown"}`);
         }
@@ -272,7 +276,7 @@ export class SQLiteRuntimeStore {
         target_domain TEXT NOT NULL,
         target_tab_id INTEGER NOT NULL,
         target_page TEXT NOT NULL,
-        action_type TEXT NOT NULL,
+        action_type TEXT,
         requested_execution_mode TEXT NOT NULL,
         effective_execution_mode TEXT NOT NULL,
         gate_decision TEXT NOT NULL,
@@ -336,6 +340,56 @@ export class SQLiteRuntimeStore {
       ADD COLUMN issue_scope TEXT;
     `);
         this.#backfillIssueScope();
+        this.#db
+            .prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'")
+            .run(String(SCHEMA_VERSION));
+    }
+    #migrateV5ToV6() {
+        this.#db.exec(`
+      PRAGMA foreign_keys = OFF;
+      CREATE TABLE runtime_gate_audit_records_v6 (
+        event_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        profile TEXT NOT NULL,
+        issue_scope TEXT,
+        risk_state TEXT NOT NULL,
+        next_state TEXT NOT NULL DEFAULT 'paused',
+        transition_trigger TEXT NOT NULL DEFAULT 'gate_evaluation',
+        target_domain TEXT NOT NULL,
+        target_tab_id INTEGER NOT NULL,
+        target_page TEXT NOT NULL,
+        action_type TEXT,
+        requested_execution_mode TEXT NOT NULL,
+        effective_execution_mode TEXT NOT NULL,
+        gate_decision TEXT NOT NULL,
+        gate_reasons_json TEXT NOT NULL,
+        approver TEXT,
+        approved_at TEXT,
+        recorded_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+      );
+      INSERT INTO runtime_gate_audit_records_v6 (
+        event_id, run_id, session_id, profile, issue_scope, risk_state, next_state, transition_trigger,
+        target_domain, target_tab_id, target_page, action_type, requested_execution_mode, effective_execution_mode,
+        gate_decision, gate_reasons_json, approver, approved_at, recorded_at, created_at
+      )
+      SELECT
+        event_id, run_id, session_id, profile, issue_scope, risk_state, next_state, transition_trigger,
+        target_domain, target_tab_id, target_page, action_type, requested_execution_mode, effective_execution_mode,
+        gate_decision, gate_reasons_json, approver, approved_at, recorded_at, created_at
+      FROM runtime_gate_audit_records;
+      DROP TABLE runtime_gate_audit_records;
+      ALTER TABLE runtime_gate_audit_records_v6 RENAME TO runtime_gate_audit_records;
+      CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_run_recorded
+        ON runtime_gate_audit_records(run_id, recorded_at ASC);
+      CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_session_recorded
+        ON runtime_gate_audit_records(session_id, recorded_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_profile_recorded
+        ON runtime_gate_audit_records(profile, recorded_at DESC);
+      PRAGMA foreign_keys = ON;
+    `);
         this.#db
             .prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'")
             .run(String(SCHEMA_VERSION));
@@ -710,7 +764,6 @@ export class SQLiteRuntimeStore {
             !input.transitionTrigger.trim() ||
             !input.targetDomain.trim() ||
             !input.targetPage.trim() ||
-            !input.actionType.trim() ||
             !input.requestedExecutionMode.trim() ||
             !input.effectiveExecutionMode.trim() ||
             !input.gateDecision.trim()) {
@@ -728,7 +781,7 @@ export class SQLiteRuntimeStore {
         if (!GATE_RISK_STATES.has(input.nextState)) {
             throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid next_state");
         }
-        if (!GATE_ACTION_TYPES.has(input.actionType)) {
+        if (input.actionType !== null && !GATE_ACTION_TYPES.has(input.actionType)) {
             throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid action_type");
         }
         if (!GATE_EXECUTION_MODES.has(input.requestedExecutionMode)) {

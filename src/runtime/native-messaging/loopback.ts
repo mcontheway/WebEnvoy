@@ -2,13 +2,10 @@ import { BRIDGE_PROTOCOL, ensureBridgeRequestEnvelope, type BridgeRequestEnvelop
 import type { NativeBridgeTransport } from "./transport.js";
 import {
   WRITE_INTERACTION_TIER,
-  APPROVAL_CHECK_KEYS,
-  EXECUTION_MODES,
   ISSUE_SCOPES,
   buildRiskTransitionAudit,
   buildUnifiedRiskStateOutput,
   getIssueActionMatrixEntry,
-  getWriteActionMatrixDecisions,
   resolveIssueScope as resolveSharedIssueScope,
   resolveRiskState as resolveSharedRiskState,
   type ActionType,
@@ -16,9 +13,9 @@ import {
   type IssueActionMatrixEntry,
   type IssueScope,
   type RiskState,
-  type WriteActionMatrixDecision,
   type WriteActionMatrixDecisionsOutput
 } from "../../../shared/risk-state.js";
+import { evaluateXhsGate } from "../../../shared/xhs-gate.js";
 
 type HostMessage =
   | { kind: "request"; envelope: BridgeRequestEnvelope }
@@ -42,9 +39,6 @@ type ContentMessage =
     };
 
 const RELAY_PATH = "host>background>content-script>background>host";
-const XHS_READ_DOMAIN = "www.xiaohongshu.com";
-const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
-const XHS_ALLOWED_DOMAINS = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
 type LoopbackActionType = ActionType;
 type LoopbackExecutionMode = ExecutionMode;
 type LoopbackEffectiveExecutionMode = LoopbackExecutionMode | null;
@@ -52,39 +46,6 @@ type LoopbackRiskState = RiskState;
 type LoopbackIssueScope = IssueScope;
 type LoopbackIssueActionMatrixEntry = IssueActionMatrixEntry;
 
-const LOOPBACK_EXECUTION_MODES = new Set<LoopbackExecutionMode>(EXECUTION_MODES);
-const LOOPBACK_ACTION_TYPES = new Set<LoopbackActionType>(["read", "write", "irreversible_write"]);
-const LOOPBACK_REQUIRED_APPROVAL_CHECKS = APPROVAL_CHECK_KEYS;
-const XHS_WRITE_APPROVAL_REQUIREMENTS = [
-  "approval_record_approved_true",
-  "approval_record_approver_present",
-  "approval_record_approved_at_present",
-  "approval_record_checks_all_true"
-] as const;
-const LOOPBACK_READ_EXECUTION_POLICY = {
-  default_mode: "dry_run",
-  allowed_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
-  blocked_actions: ["expand_new_live_surface_without_gate"],
-  live_entry_requirements: [
-    "gate_input_risk_state_limited_or_allowed",
-    "risk_state_checked",
-    "target_domain_confirmed",
-    "target_tab_confirmed",
-    "target_page_confirmed",
-    "action_type_confirmed",
-    "approval_record_approved_true",
-    "approval_record_approver_present",
-    "approval_record_approved_at_present",
-    "approval_record_checks_all_true"
-  ]
-} as const;
-
-const LOOPBACK_SCOPE_CONTEXT = {
-  platform: "xhs",
-  read_domain: XHS_READ_DOMAIN,
-  write_domain: XHS_WRITE_DOMAIN,
-  domain_mixing_forbidden: true
-} as const;
 const LOOPBACK_PLUGIN_GATE_OWNERSHIP = {
   background_gate: ["target_domain_check", "target_tab_check", "mode_gate", "risk_state_gate"],
   content_script_gate: ["page_context_check", "action_tier_check"],
@@ -105,19 +66,6 @@ const asInteger = (value: unknown): number | null =>
 
 const asBoolean = (value: unknown): boolean => value === true;
 
-const resolveLoopbackActionType = (options: Record<string, unknown>): LoopbackActionType | null => {
-  const explicit = asString(options.action_type);
-  if (explicit && LOOPBACK_ACTION_TYPES.has(explicit as LoopbackActionType)) {
-    return explicit as LoopbackActionType;
-  }
-  return null;
-};
-
-const resolveLoopbackExecutionMode = (value: unknown): LoopbackExecutionMode | null =>
-  typeof value === "string" && LOOPBACK_EXECUTION_MODES.has(value as LoopbackExecutionMode)
-    ? (value as LoopbackExecutionMode)
-    : null;
-
 const resolveLoopbackRiskState = (value: unknown): LoopbackRiskState => resolveSharedRiskState(value);
 
 const resolveLoopbackIssueScope = (value: unknown): LoopbackIssueScope =>
@@ -131,63 +79,6 @@ const resolveLoopbackIssueActionMatrixEntry = (
 ): LoopbackIssueActionMatrixEntry => {
   return getIssueActionMatrixEntry(issueScope, riskState);
 };
-const resolveWriteMatrixDecision = (
-  output: WriteActionMatrixDecisionsOutput,
-  state: LoopbackRiskState
-): WriteActionMatrixDecision =>
-  output.decisions.find((entry) => entry.state === state) ?? {
-    state,
-    decision: "blocked",
-    requires: []
-  };
-const resolveApprovalRequirementGaps = (
-  requirements: string[],
-  approvalRecord: Record<string, unknown>,
-  approvalChecks: Record<string, unknown>
-): string[] => {
-  const gaps: string[] = [];
-  for (const requirement of requirements) {
-    if (requirement === "approval_record_approved_true") {
-      if (approvalRecord.approved !== true) {
-        gaps.push(requirement);
-      }
-      continue;
-    }
-    if (requirement === "approval_record_approver_present") {
-      if (!asString(approvalRecord.approver)) {
-        gaps.push(requirement);
-      }
-      continue;
-    }
-    if (requirement === "approval_record_approved_at_present") {
-      if (!asString(approvalRecord.approved_at)) {
-        gaps.push(requirement);
-      }
-      continue;
-    }
-    if (requirement === "approval_record_checks_all_true") {
-      const allChecksComplete = LOOPBACK_REQUIRED_APPROVAL_CHECKS.every(
-        (key) => asBoolean(approvalChecks[key])
-      );
-      if (!allChecksComplete) {
-        gaps.push(requirement);
-      }
-      continue;
-    }
-    gaps.push(requirement);
-  }
-  return gaps;
-};
-
-const resolveLoopbackFallbackMode = (
-  requestedExecutionMode: LoopbackExecutionMode,
-  riskState: LoopbackRiskState
-): LoopbackExecutionMode => {
-  if (requestedExecutionMode === "live_write") {
-    return "dry_run";
-  }
-  return riskState === "limited" ? "recon" : "dry_run";
-};
 
 const buildLoopbackGate = (
   options: Record<string, unknown>,
@@ -195,260 +86,48 @@ const buildLoopbackGate = (
   allowIssue208InteractProbe = false
 ): {
   scopeContext: Record<string, unknown>;
+  readExecutionPolicy: Record<string, unknown>;
   issueScope: LoopbackIssueScope;
   issueActionMatrix: LoopbackIssueActionMatrixEntry;
   writeInteractionTier: typeof WRITE_INTERACTION_TIER;
-  writeActionMatrixDecisions: WriteActionMatrixDecisionsOutput;
+  writeActionMatrixDecisions: WriteActionMatrixDecisionsOutput | null;
   gateInput: Record<string, unknown>;
   gateOutcome: Record<string, unknown>;
   consumerGateResult: Record<string, unknown>;
   approvalRecord: Record<string, unknown>;
 } => {
-  const requestedExecutionMode = resolveLoopbackExecutionMode(options.requested_execution_mode);
-  const riskState = resolveLoopbackRiskState(options.risk_state);
-  const issueScope = resolveLoopbackIssueScope(options.issue_scope);
-  const issueActionMatrix = resolveLoopbackIssueActionMatrixEntry(issueScope, riskState);
-  const actionType = resolveLoopbackActionType(options);
-  const writeActionMatrixDecisions = getWriteActionMatrixDecisions(
-    issueScope,
-    actionType ?? "read",
-    requestedExecutionMode
-  );
-  const writeMatrixDecision = resolveWriteMatrixDecision(writeActionMatrixDecisions, riskState);
-  const issue208WriteGateOnly =
-    issueScope === "issue_208" &&
-    actionType !== null &&
-    writeActionMatrixDecisions.write_interaction_tier !== "observe_only";
   const issue208EditorInputValidation =
-    issue208WriteGateOnly &&
-    requestedExecutionMode === "live_write" &&
+    options.issue_scope === "issue_208" &&
+    options.requested_execution_mode === "live_write" &&
     asString(options.validation_action) === "editor_input";
-  const writeTierReason = `WRITE_INTERACTION_TIER_${writeActionMatrixDecisions.write_interaction_tier.toUpperCase()}`;
-  const targetDomain = asString(options.target_domain);
-  const targetTabId = asInteger(options.target_tab_id);
-  const targetPage = asString(options.target_page);
-  const approvalRecord = asRecord(options.approval_record) ?? asRecord(options.approval) ?? {};
-  const approvalChecks = asRecord(approvalRecord.checks) ?? {};
-  const gateReasons: string[] = [];
-  let effectiveExecutionMode: LoopbackEffectiveExecutionMode = requestedExecutionMode;
-  let gateDecision: "allowed" | "blocked" = "allowed";
-
-  if (!targetDomain) {
-    gateReasons.push("TARGET_DOMAIN_NOT_EXPLICIT");
-  } else if (!XHS_ALLOWED_DOMAINS.has(targetDomain)) {
-    gateReasons.push("TARGET_DOMAIN_OUT_OF_SCOPE");
-  }
-  if (targetTabId === null || targetTabId <= 0) {
-    gateReasons.push("TARGET_TAB_NOT_EXPLICIT");
-  }
-  if (!targetPage) {
-    gateReasons.push("TARGET_PAGE_NOT_EXPLICIT");
-  }
-  if (!actionType) {
-    gateReasons.push("ACTION_TYPE_NOT_EXPLICIT");
-  }
-  if (!requestedExecutionMode) {
-    gateReasons.push("REQUESTED_EXECUTION_MODE_NOT_EXPLICIT");
-  }
-  if (!actionType) {
-    gateReasons.push("ACTION_TYPE_NOT_EXPLICIT");
-  }
-  if (abilityAction && actionType && abilityAction !== actionType) {
-    gateReasons.push("ABILITY_ACTION_CONTEXT_MISMATCH");
-  }
-  if (requestedExecutionMode === "live_write" && actionType === "irreversible_write") {
-    gateReasons.push("IRREVERSIBLE_WRITE_NOT_ALLOWED");
-  }
-  if (
-    requestedExecutionMode === "live_write" &&
-    (!issue208WriteGateOnly || !issue208EditorInputValidation)
-  ) {
-    gateReasons.push("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
-  }
-  if (targetDomain === XHS_WRITE_DOMAIN && actionType === "read") {
-    gateReasons.push("ACTION_DOMAIN_MISMATCH");
-  }
-  if (targetDomain === XHS_READ_DOMAIN && actionType && actionType !== "read") {
-    gateReasons.push("ACTION_DOMAIN_MISMATCH");
-  }
-
-  if (gateReasons.length > 0) {
-    gateDecision = "blocked";
-    if (
-      requestedExecutionMode === "live_read_limited" ||
-      requestedExecutionMode === "live_read_high_risk" ||
-      requestedExecutionMode === "live_write"
-    ) {
-      effectiveExecutionMode = resolveLoopbackFallbackMode(requestedExecutionMode, riskState);
-    }
-  } else if (
-    issue208WriteGateOnly &&
-    actionType &&
-    requestedExecutionMode !== null
-  ) {
-    const approvalRequirementGaps = resolveApprovalRequirementGaps(
-      [...XHS_WRITE_APPROVAL_REQUIREMENTS],
-      approvalRecord,
-      approvalChecks
-    );
-    if (
-      issue208EditorInputValidation &&
-      riskState === "allowed" &&
-      approvalRequirementGaps.length === 0
-    ) {
-      gateDecision = "blocked";
-      effectiveExecutionMode = resolveLoopbackFallbackMode(requestedExecutionMode, riskState);
-      gateReasons.push("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
-    } else {
-      effectiveExecutionMode = resolveLoopbackFallbackMode(requestedExecutionMode, riskState);
-      gateDecision = "blocked";
-      if (!issue208EditorInputValidation) {
-        gateReasons.push("EDITOR_INPUT_VALIDATION_REQUIRED");
-      }
-      if (riskState !== "allowed") {
-        gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
-        gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
-      }
-      for (const gap of approvalRequirementGaps) {
-        if (
-          gap === "approval_record_approved_true" ||
-          gap === "approval_record_approver_present" ||
-          gap === "approval_record_approved_at_present"
-        ) {
-          if (!gateReasons.includes("MANUAL_CONFIRMATION_MISSING")) {
-            gateReasons.push("MANUAL_CONFIRMATION_MISSING");
-          }
-        }
-        if (gap === "approval_record_checks_all_true") {
-          if (!gateReasons.includes("APPROVAL_CHECKS_INCOMPLETE")) {
-            gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
-          }
-        }
-      }
-    }
-  } else if (actionType && actionType !== "read") {
-    gateDecision = "blocked";
-    if (
-      requestedExecutionMode === "live_read_limited" ||
-      requestedExecutionMode === "live_read_high_risk"
-    ) {
-      effectiveExecutionMode = resolveLoopbackFallbackMode(requestedExecutionMode, riskState);
-      gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
-    }
-    gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
-    gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
-  } else if (requestedExecutionMode === "dry_run" || requestedExecutionMode === "recon") {
-    gateReasons.push(
-      requestedExecutionMode === "recon" ? "DEFAULT_MODE_RECON" : "DEFAULT_MODE_DRY_RUN"
-    );
-  } else {
-    gateDecision = "blocked";
-    effectiveExecutionMode = resolveLoopbackFallbackMode(requestedExecutionMode ?? "dry_run", riskState);
-
-    if (requestedExecutionMode === "live_read_high_risk" && actionType !== "read") {
-      gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
-    }
-    if (requestedExecutionMode === "live_read_limited" && actionType !== "read") {
-      gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
-    }
-    if (requestedExecutionMode === "live_write" && actionType === "read") {
-      gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
-    }
-    const isLiveReadMode =
-      requestedExecutionMode === "live_read_limited" ||
-      requestedExecutionMode === "live_read_high_risk";
-    const isBlockedByStateMatrix =
-      requestedExecutionMode !== null &&
-      issueActionMatrix.blocked_actions.includes(requestedExecutionMode);
-    if (isBlockedByStateMatrix) {
-      if (isLiveReadMode) {
-        gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
-        gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
-      } else {
-        gateReasons.push("ISSUE_ACTION_BLOCKED_BY_STATE_MATRIX");
-      }
-    }
-
-    const liveModeCanEnter =
-      requestedExecutionMode !== null &&
-      issueActionMatrix.conditional_actions.some(
-        (entry) => entry.action === requestedExecutionMode
-      ) &&
-      isLiveReadMode;
-
-    if (liveModeCanEnter) {
-      if (
-        approvalRecord.approved !== true ||
-        !asString(approvalRecord.approver) ||
-        !asString(approvalRecord.approved_at)
-      ) {
-        gateReasons.push("MANUAL_CONFIRMATION_MISSING");
-      }
-
-      const missingChecks = LOOPBACK_REQUIRED_APPROVAL_CHECKS.filter(
-        (key) => !asBoolean(approvalChecks[key])
-      );
-      if (missingChecks.length > 0) {
-        gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
-      }
-
-      if (gateReasons.length === 0) {
-        gateDecision = "allowed";
-        effectiveExecutionMode = requestedExecutionMode;
-        gateReasons.push("LIVE_MODE_APPROVED");
-      }
-    }
-  }
-
-  if (issue208WriteGateOnly && !gateReasons.includes(writeTierReason)) {
-    gateReasons.push(writeTierReason);
-  }
+  const evaluatedGate = evaluateXhsGate({
+    issueScope: options.issue_scope,
+    riskState: options.risk_state,
+    targetDomain: options.target_domain,
+    targetTabId: options.target_tab_id,
+    targetPage: options.target_page,
+    actionType: options.action_type,
+    abilityAction,
+    requestedExecutionMode: options.requested_execution_mode,
+    approvalRecord: options.approval_record ?? options.approval,
+    issue208EditorInputValidation,
+    treatMissingEditorValidationAsUnsupported: true,
+    includeWriteInteractionTierReason: true,
+    writeGateOnlyEligibleBehavior: "block"
+  });
+  const issueScope = resolveLoopbackIssueScope(evaluatedGate.gate_input.issue_scope);
 
   return {
-    scopeContext: { ...LOOPBACK_SCOPE_CONTEXT },
+    scopeContext: { ...evaluatedGate.scope_context },
+    readExecutionPolicy: { ...evaluatedGate.read_execution_policy },
     issueScope,
-    issueActionMatrix,
-    gateInput: {
-      issue_scope: issueScope,
-      target_domain: targetDomain,
-      target_tab_id: targetTabId,
-      target_page: targetPage,
-      action_type: actionType,
-      requested_execution_mode: requestedExecutionMode,
-      risk_state: riskState
-    },
-    gateOutcome: {
-      effective_execution_mode: effectiveExecutionMode,
-      gate_decision: gateDecision,
-      gate_reasons: gateReasons,
-      requires_manual_confirmation:
-        requestedExecutionMode === "live_read_limited" ||
-        requestedExecutionMode === "live_read_high_risk" ||
-        requestedExecutionMode === "live_write"
-    },
-    consumerGateResult: {
-      risk_state: riskState,
-      issue_scope: issueScope,
-      target_domain: targetDomain,
-      target_tab_id: targetTabId,
-      target_page: targetPage,
-      action_type: actionType,
-      requested_execution_mode: requestedExecutionMode,
-      effective_execution_mode: effectiveExecutionMode,
-      gate_decision: gateDecision,
-      gate_reasons: gateReasons,
-      write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier
-    },
-    approvalRecord: {
-      approved: approvalRecord.approved === true,
-      approver: asString(approvalRecord.approver),
-      approved_at: asString(approvalRecord.approved_at),
-      checks: Object.fromEntries(
-        LOOPBACK_REQUIRED_APPROVAL_CHECKS.map((key) => [key, asBoolean(approvalChecks[key])])
-      )
-    },
+    issueActionMatrix: evaluatedGate.issue_action_matrix,
+    gateInput: { ...evaluatedGate.gate_input },
+    gateOutcome: { ...evaluatedGate.gate_outcome },
+    consumerGateResult: { ...evaluatedGate.consumer_gate_result },
+    approvalRecord: { ...evaluatedGate.approval_record },
     writeInteractionTier: WRITE_INTERACTION_TIER,
-    writeActionMatrixDecisions
+    writeActionMatrixDecisions: evaluatedGate.write_action_matrix_decisions
   };
 };
 
@@ -473,7 +152,7 @@ const buildLoopbackAuditRecord = (input: {
   gate_reasons: input.gate.consumerGateResult.gate_reasons,
   approver: input.gate.approvalRecord.approver,
   approved_at: input.gate.approvalRecord.approved_at,
-  write_interaction_tier: input.gate.writeActionMatrixDecisions.write_interaction_tier,
+  write_interaction_tier: input.gate.writeActionMatrixDecisions?.write_interaction_tier ?? null,
   write_action_matrix_decisions: input.gate.writeActionMatrixDecisions,
   recorded_at: "2026-03-23T10:00:00.000Z"
 });
@@ -527,7 +206,7 @@ const buildLoopbackGatePayload = (input: {
     write_interaction_tier: input.gate.writeInteractionTier,
     write_action_matrix_decisions: input.gate.writeActionMatrixDecisions,
     observability: buildLoopbackGateObservability(input.gate),
-    read_execution_policy: LOOPBACK_READ_EXECUTION_POLICY,
+    read_execution_policy: input.gate.readExecutionPolicy,
     risk_state_output: buildUnifiedRiskStateOutput(
       resolvedRiskState,
       {

@@ -25,18 +25,6 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
 const asBoolean = (value) => value === true;
-const resolveActionTypeFromWriteTier = (value) => {
-    if (value === "irreversible_write") {
-        return "irreversible_write";
-    }
-    if (value === "reversible_interaction") {
-        return "write";
-    }
-    if (value === "observe_only") {
-        return "read";
-    }
-    return null;
-};
 const buildEvent = (context, input) => ({
     runId: context.run_id,
     eventTime: new Date().toISOString(),
@@ -71,15 +59,20 @@ const extractGateAuditRecordInput = (source) => {
     if (!auditRecord) {
         return null;
     }
-    const derivedWriteActionDecisions = getWriteActionMatrixDecisions(asString(auditRecord.issue_scope) ??
+    const derivedIssueScope = asString(auditRecord.issue_scope) ??
         asString(gateInput?.issue_scope) ??
-        asString(transitionAudit?.issue_scope), asString(auditRecord.action_type) ??
+        asString(transitionAudit?.issue_scope);
+    const derivedActionType = asString(auditRecord.action_type) ??
         asString(consumerGateResult?.action_type) ??
         asString(gateInput?.action_type) ??
-        asString(providedWriteActionDecisions?.action_type), asString(auditRecord.requested_execution_mode) ??
+        asString(providedWriteActionDecisions?.action_type);
+    const derivedRequestedExecutionMode = asString(auditRecord.requested_execution_mode) ??
         asString(consumerGateResult?.requested_execution_mode) ??
         asString(gateInput?.requested_execution_mode) ??
-        asString(providedWriteActionDecisions?.requested_execution_mode));
+        asString(providedWriteActionDecisions?.requested_execution_mode);
+    const derivedWriteActionDecisions = derivedIssueScope && derivedActionType && derivedRequestedExecutionMode
+        ? getWriteActionMatrixDecisions(derivedIssueScope, derivedActionType, derivedRequestedExecutionMode)
+        : null;
     const runId = asString(auditRecord.run_id) ?? asString(gateInput?.run_id) ?? asString(source.run_id);
     const sessionId = asString(auditRecord.session_id) ??
         asString(gateInput?.session_id) ??
@@ -102,13 +95,12 @@ const extractGateAuditRecordInput = (source) => {
     const actionType = asString(auditRecord.action_type) ??
         asString(consumerGateResult?.action_type) ??
         asString(gateInput?.action_type) ??
-        asString(providedWriteActionDecisions?.action_type) ??
-        resolveActionTypeFromWriteTier(derivedWriteActionDecisions.write_interaction_tier);
+        asString(providedWriteActionDecisions?.action_type);
     const requestedExecutionMode = asString(auditRecord.requested_execution_mode) ??
         asString(consumerGateResult?.requested_execution_mode) ??
         asString(gateInput?.requested_execution_mode) ??
         asString(providedWriteActionDecisions?.requested_execution_mode) ??
-        asString(derivedWriteActionDecisions.requested_execution_mode);
+        asString(derivedWriteActionDecisions?.requested_execution_mode);
     const effectiveExecutionMode = asString(auditRecord.effective_execution_mode) ??
         asString(consumerGateResult?.effective_execution_mode) ??
         requestedExecutionMode;
@@ -132,7 +124,6 @@ const extractGateAuditRecordInput = (source) => {
         !targetDomain ||
         targetTabId === null ||
         !targetPage ||
-        !actionType ||
         !requestedExecutionMode ||
         !effectiveExecutionMode ||
         !gateDecision ||

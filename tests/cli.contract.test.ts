@@ -1001,6 +1001,75 @@ describe("webenvoy cli contract", () => {
     );
   });
 
+  itWithSqlite("persists null write matrix decisions when xhs.search action_type is omitted", async () => {
+    const cwd = await createRuntimeCwd();
+    const runId = "run-audit-missing-action-type-xhs-001";
+
+    const executeResult = runCli([
+      "xhs.search",
+      "--run-id",
+      runId,
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
+          requested_execution_mode: "live_write",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], cwd, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+    expect(executeResult.status).toBe(6);
+
+    const queryResult = runCli([
+      "runtime.audit",
+      "--run-id",
+      "run-audit-missing-action-type-xhs-query-001",
+      "--params",
+      JSON.stringify({
+        run_id: runId
+      })
+    ], cwd);
+    expect(queryResult.status).toBe(0);
+    const body = parseSingleJsonLine(queryResult.stdout);
+    expect(body.summary).toMatchObject({
+      audit_records: expect.arrayContaining([
+        expect.objectContaining({
+          run_id: runId,
+          action_type: null,
+          write_interaction_tier: null,
+          write_action_matrix_decisions: null
+        })
+      ]),
+      write_action_matrix_decisions: null
+    });
+  });
+
   it("blocks live_write because xhs.search is a read-only command", () => {
     const result = runCli([
       "xhs.search",

@@ -26,6 +26,15 @@ import {
   ensureFingerprintRuntimeContext,
   type FingerprintRuntimeContext
 } from "../shared/fingerprint-profile.js";
+import {
+  buildXhsGatePolicyState,
+  collectXhsCommandGateReasons,
+  collectXhsMatrixGateReasons,
+  finalizeXhsGateOutcome,
+  resolveXhsActionType,
+  resolveXhsExecutionMode,
+  normalizeXhsApprovalRecord
+} from "../shared/xhs-gate.js";
 import type { EditorInputFocusAttestation } from "./xhs-editor-input.js";
 
 type BridgeRequest = {
@@ -306,6 +315,7 @@ const XHS_SCOPE_CONTEXT = {
   domain_mixing_forbidden: true
 } as const;
 const XHS_GATE_CONTRACT_MARKERS = {
+  conditional_actions: "conditional_actions",
   recovery_requirements: "recovery_requirements",
   session_rhythm_policy: "session_rhythm_policy",
   session_rhythm: "session_rhythm"
@@ -684,12 +694,12 @@ const resolveXhsGateCommandInput = (
     targetPage: asNonEmptyString(readGateParam("target_page")),
     issueScope: resolveIssueScope(readGateParam("issue_scope")),
     riskState: resolveRiskState(readGateParam("risk_state")),
-    actionType: parseActionType(readGateParam("action_type")),
-    abilityActionType: parseActionType(abilityParams?.action),
-    requestedExecutionMode: parseRequestedExecutionMode(readGateParam("requested_execution_mode")),
-    approvalRecord: normalizeApprovalRecord(
+    actionType: resolveXhsActionType(readGateParam("action_type")),
+    abilityActionType: resolveXhsActionType(abilityParams?.action),
+    requestedExecutionMode: resolveXhsExecutionMode(readGateParam("requested_execution_mode")),
+    approvalRecord: normalizeXhsApprovalRecord(
       readGateParam("approval_record") ?? readGateParam("approval")
-    ),
+    ) as XhsApprovalRecord,
     validationAction: asNonEmptyString(readGateParam("validation_action")),
     requestedFingerprintContext: resolveFingerprintContext(commandParams)
   };
@@ -792,7 +802,7 @@ const createRelayXhsGatePayload = (input: {
   requiresManualConfirmation: boolean;
   approvalRecord: XhsApprovalRecord;
   consumerGateResult: Record<string, unknown>;
-  writeActionMatrixDecisions: XhsWriteActionMatrixDecisionsOutput;
+  writeActionMatrixDecisions: XhsWriteActionMatrixDecisionsOutput | null;
   writeGateOnlyDecision?: Record<string, unknown>;
 }): Record<string, unknown> => {
   const recordedAt = new Date().toISOString();
@@ -891,8 +901,8 @@ const createBackgroundXhsGatePayload = (input: {
   fingerprintExecution: FingerprintRuntimeContext["execution"] | null;
   consumerGateResult: Record<string, unknown>;
   approvalRecord: XhsApprovalRecord;
-  writeActionMatrixDecisions: XhsWriteActionMatrixDecisionsOutput;
-  writeMatrixDecision: WriteActionMatrixDecision;
+  writeActionMatrixDecisions: XhsWriteActionMatrixDecisionsOutput | null;
+  writeMatrixDecision: WriteActionMatrixDecision | null;
   writeGateOnlyDecision: Record<string, unknown> | null;
   riskTransitionAudit: ReturnType<typeof buildRiskTransitionAudit>;
 }): Record<string, unknown> => {
@@ -917,8 +927,8 @@ const createBackgroundXhsGatePayload = (input: {
     gate_reasons: input.gateReasons,
     approver: input.approvalRecord.approver,
     approved_at: input.approvalRecord.approved_at,
-    write_interaction_tier: input.writeActionMatrixDecisions.write_interaction_tier,
-    write_matrix_decision: input.writeMatrixDecision.decision,
+    write_interaction_tier: input.writeActionMatrixDecisions?.write_interaction_tier ?? null,
+    write_matrix_decision: input.writeMatrixDecision?.decision ?? null,
     recorded_at: recordedAt,
     next_state: input.riskTransitionAudit.next_state,
     transition_trigger: input.riskTransitionAudit.trigger
@@ -3679,19 +3689,7 @@ class ChromeBackgroundBridge {
       Array.isArray(fingerprintExecution?.reason_codes) ? fingerprintExecution.reason_codes : []
     ).filter((code): code is string => typeof code === "string");
     let targetTabId = initialTargetTabId;
-    const issueActionMatrixEntry = resolveIssueActionMatrixEntry(issueScope, riskState);
-    const writeActionMatrixDecisions = getWriteActionMatrixDecisions(
-      issueScope,
-      actionType ?? "read",
-      requestedExecutionMode
-    );
-    const writeMatrixDecision = resolveWriteMatrixDecision(writeActionMatrixDecisions, riskState);
-    const issue208WriteGateOnly =
-      issueScope === "issue_208" &&
-      actionType !== null &&
-      writeActionMatrixDecisions.write_interaction_tier !== "observe_only";
     const issue208EditorInputValidation =
-      issue208WriteGateOnly &&
       targetPage === "creator_publish_tab" &&
       requestedExecutionMode === "live_write" &&
       validationAction === "editor_input";
@@ -3702,7 +3700,6 @@ class ChromeBackgroundBridge {
     let fingerprintLiveBlocked = false;
     let fingerprintGateDecision: "allowed" | "blocked" = "allowed";
     let resolvedFingerprintReasonCodes = [...fingerprintReasonCodes];
-    const writeTierReason = `WRITE_INTERACTION_TIER_${writeActionMatrixDecisions.write_interaction_tier.toUpperCase()}`;
     const gateReasons: string[] = [];
     let writeGateOnlyApprovalDecision: Record<string, unknown> | null = null;
     let writeGateOnlyEligible = false;
@@ -3711,21 +3708,6 @@ class ChromeBackgroundBridge {
         gateReasons.push(reason);
       }
     };
-
-    if (!requestedExecutionMode) {
-      pushReason("REQUESTED_EXECUTION_MODE_NOT_EXPLICIT");
-    }
-    if (!actionType) {
-      pushReason("ACTION_TYPE_NOT_EXPLICIT");
-    }
-    if (abilityActionType && actionType && abilityActionType !== actionType) {
-      pushReason("ABILITY_ACTION_CONTEXT_MISMATCH");
-    }
-    if (!targetDomain) {
-      pushReason("TARGET_DOMAIN_NOT_EXPLICIT");
-    } else if (!XHS_DOMAIN_ALLOWLIST.has(targetDomain)) {
-      pushReason("TARGET_DOMAIN_OUT_OF_SCOPE");
-    }
 
     if (targetTabId === null && !issue208EditorInputValidation) {
       targetTabId = await this.#resolveTargetTabId({
@@ -3737,107 +3719,32 @@ class ChromeBackgroundBridge {
       });
     }
 
-    if (targetTabId === null) {
-      pushReason("TARGET_TAB_NOT_EXPLICIT");
-    }
-    if (!targetPage) {
-      pushReason("TARGET_PAGE_NOT_EXPLICIT");
-    }
-    if (targetDomain === XHS_WRITE_DOMAIN && actionType === "read") {
-      pushReason("ACTION_DOMAIN_MISMATCH");
-    }
-    if (targetDomain === XHS_READ_DOMAIN && actionType !== null && actionType !== "read") {
-      pushReason("ACTION_DOMAIN_MISMATCH");
-    }
-
-    if (requestedExecutionMode === "live_write" && !issue208WriteGateOnly) {
-      pushReason("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
-    }
-    const isLiveReadMode =
-      requestedExecutionMode === "live_read_limited" ||
-      requestedExecutionMode === "live_read_high_risk";
-    const isBlockedByStateMatrix =
-      !issue208WriteGateOnly &&
-      requestedExecutionMode !== null &&
-      issueActionMatrixEntry.blocked_actions.includes(requestedExecutionMode);
-    if (isBlockedByStateMatrix) {
-      if (isLiveReadMode) {
-        pushReason(`RISK_STATE_${riskState.toUpperCase()}`);
-        pushReason("ISSUE_ACTION_MATRIX_BLOCKED");
-      } else {
-        pushReason("ISSUE_ACTION_BLOCKED_BY_STATE_MATRIX");
-      }
-    }
-    const conditionalRequirement =
-      issue208WriteGateOnly || requestedExecutionMode === null
-        ? null
-        : issueActionMatrixEntry.conditional_actions.find(
-            (entry) => entry.action === requestedExecutionMode
-          ) ?? null;
-    if (isLiveReadMode && !isBlockedByStateMatrix && conditionalRequirement) {
-      if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
-        pushReason("MANUAL_CONFIRMATION_MISSING");
-      }
-      const missingChecks = XHS_REQUIRED_APPROVAL_CHECKS.filter(
-        (key) => !approvalRecord.checks[key]
-      );
-      if (missingChecks.length > 0) {
-        pushReason("APPROVAL_CHECKS_INCOMPLETE");
-      }
-    }
-    if (issue208WriteGateOnly) {
-      const writeApprovalRequirements: string[] = [];
-      const approvalRequirementGaps: string[] = [];
-      const approvalSatisfied =
-        approvalRecord.approved === true &&
-        approvalRecord.approver !== null &&
-        approvalRecord.approved_at !== null &&
-        XHS_REQUIRED_APPROVAL_CHECKS.every((key) => approvalRecord.checks[key] === true);
-      if (issue208EditorInputValidation && riskState === "allowed" && approvalSatisfied) {
-        writeGateOnlyEligible = true;
-        writeApprovalRequirements.push(...XHS_WRITE_APPROVAL_REQUIREMENTS);
-      } else {
-        if (!issue208EditorInputValidation) {
-          pushReason("EDITOR_INPUT_VALIDATION_REQUIRED");
-        }
-        if (riskState !== "allowed") {
-          pushReason(`RISK_STATE_${riskState.toUpperCase()}`);
-          pushReason("ISSUE_ACTION_MATRIX_BLOCKED");
-        }
-        if (!approvalSatisfied) {
-          if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
-            pushReason("MANUAL_CONFIRMATION_MISSING");
-          }
-          const missingChecks = XHS_REQUIRED_APPROVAL_CHECKS.filter(
-            (key) => !approvalRecord.checks[key]
-          );
-          if (missingChecks.length > 0) {
-            pushReason("APPROVAL_CHECKS_INCOMPLETE");
-          }
-        }
-      }
-      writeGateOnlyApprovalDecision = {
-        issue_scope: issueScope,
-        state: riskState,
-        write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier,
-        matrix_decision: writeGateOnlyEligible ? "conditional" : "blocked",
-        matrix_actions: writeActionMatrixDecisions.matrix_actions,
-        required_approval: writeApprovalRequirements,
-        approval_satisfied: approvalSatisfied,
-        approval_missing_requirements: approvalRequirementGaps,
-        execution_enabled: writeGateOnlyEligible
-      };
-    } else if (
-      issueScope !== "issue_208" &&
-      actionType !== null &&
-      actionType !== "read"
-    ) {
-      if (isLiveReadMode) {
-        pushReason("ACTION_TYPE_MODE_MISMATCH");
-      }
-      pushReason(`RISK_STATE_${riskState.toUpperCase()}`);
-      pushReason("ISSUE_ACTION_MATRIX_BLOCKED");
-    }
+    const gateState = buildXhsGatePolicyState({
+      issueScope,
+      riskState,
+      actionType,
+      requestedExecutionMode
+    });
+    collectXhsCommandGateReasons({
+      gateReasons,
+      actionType,
+      requestedExecutionMode,
+      abilityAction: abilityActionType,
+      targetDomain,
+      targetTabId,
+      targetPage,
+      issue208WriteGateOnly: gateState.issue208WriteGateOnly,
+      issue208EditorInputValidation,
+      treatMissingEditorValidationAsUnsupported: false
+    });
+    const matrixResolution = collectXhsMatrixGateReasons({
+      gateReasons,
+      state: gateState,
+      approvalRecord,
+      issue208EditorInputValidation
+    });
+    writeGateOnlyEligible = matrixResolution.writeGateOnlyEligible;
+    writeGateOnlyApprovalDecision = matrixResolution.writeGateOnlyApprovalDecision;
 
     if (gateReasons.length === 0 && targetDomain && targetTabId !== null && targetPage) {
       const domainTabs = await this.chromeApi.tabs.query({
@@ -3870,7 +3777,7 @@ class ChromeBackgroundBridge {
     }
     const shouldEvaluateTrustedFingerprintGate =
       requestedLiveMode &&
-      (!issue208WriteGateOnly || writeGateOnlyEligible) &&
+      (!gateState.issue208WriteGateOnly || writeGateOnlyEligible) &&
       gateReasons.length === 0;
     if (shouldEvaluateTrustedFingerprintGate) {
       const trustedGateRequest: BridgeRequest = {
@@ -3916,45 +3823,27 @@ class ChromeBackgroundBridge {
           ? "blocked"
           : "allowed";
     }
-    if (issue208WriteGateOnly) {
-      if (!gateReasons.includes(writeTierReason)) {
-        gateReasons.push(writeTierReason);
+    if (gateState.issue208WriteGateOnly) {
+      if (!gateReasons.includes(gateState.writeTierReason)) {
+        gateReasons.push(gateState.writeTierReason);
       }
     }
 
-    const blockingReasons = gateReasons.filter((reason) => reason !== writeTierReason);
-    const allowed = blockingReasons.length === 0;
-    const gateDecision: "allowed" | "blocked" = allowed ? "allowed" : "blocked";
+    const finalizedGate = finalizeXhsGateOutcome({
+      gateReasons,
+      state: gateState,
+      writeGateOnlyEligible,
+      nonBlockingReasons: [gateState.writeTierReason]
+    });
+    const gateDecision = finalizedGate.gateDecision;
+    const allowed = finalizedGate.allowed;
+    const resolvedEffectiveExecutionMode =
+      finalizedGate.effectiveExecutionMode ?? gateState.fallbackMode;
     const requiresManualConfirmation =
-      !issue208WriteGateOnly &&
+      !gateState.issue208WriteGateOnly &&
       (requestedExecutionMode === "live_read_limited" ||
         requestedExecutionMode === "live_read_high_risk" ||
         requestedExecutionMode === "live_write");
-    const gateOnlyEffectiveExecutionMode: XhsExecutionMode =
-      requestedExecutionMode === "recon" ? "recon" : "dry_run";
-    const effectiveExecutionMode = allowed
-      ? issue208WriteGateOnly
-        ? writeGateOnlyEligible
-          ? (requestedExecutionMode ?? "dry_run")
-          : gateOnlyEffectiveExecutionMode
-        : requestedExecutionMode ?? "dry_run"
-      : resolveBlockedFallbackMode(requestedExecutionMode, riskState);
-    if (allowed && requestedExecutionMode === "dry_run") {
-      gateReasons.push("DEFAULT_MODE_DRY_RUN");
-    }
-    if (allowed && requestedExecutionMode === "recon") {
-      gateReasons.push("DEFAULT_MODE_RECON");
-    }
-    if (
-      allowed &&
-      (requestedExecutionMode === "live_read_limited" ||
-        requestedExecutionMode === "live_read_high_risk")
-    ) {
-      gateReasons.push("LIVE_MODE_APPROVED");
-    }
-    if (allowed && issue208WriteGateOnly && writeGateOnlyEligible) {
-      gateReasons.push("WRITE_INTERACTION_APPROVED", "ISSUE_208_EDITOR_INPUT_VALIDATION_APPROVED");
-    }
     const consumerGateResult = {
       risk_state: riskState,
       issue_scope: issueScope,
@@ -3963,12 +3852,12 @@ class ChromeBackgroundBridge {
       target_page: targetPage,
       action_type: actionType,
       requested_execution_mode: requestedExecutionMode,
-      effective_execution_mode: effectiveExecutionMode,
+      effective_execution_mode: resolvedEffectiveExecutionMode,
       gate_decision: gateDecision,
-      gate_reasons: gateReasons,
+      gate_reasons: finalizedGate.gateReasons,
       fingerprint_gate_decision: fingerprintGateDecision,
       fingerprint_reason_codes: resolvedFingerprintReasonCodes,
-      write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier
+      write_interaction_tier: gateState.writeActionMatrixDecisions?.write_interaction_tier ?? null
     };
     const runId = String(request.params.run_id ?? request.id);
     const sessionId = String(request.params.session_id ?? this.#sessionId);
@@ -3986,13 +3875,13 @@ class ChromeBackgroundBridge {
       target_page: targetPage,
       action_type: actionType,
       requested_execution_mode: requestedExecutionMode,
-      effective_execution_mode: effectiveExecutionMode,
+      effective_execution_mode: resolvedEffectiveExecutionMode,
       gate_decision: gateDecision,
-      gate_reasons: gateReasons,
+      gate_reasons: finalizedGate.gateReasons,
       approver: approvalRecord.approver,
       approved_at: approvalRecord.approved_at,
-      write_interaction_tier: writeActionMatrixDecisions.write_interaction_tier,
-      write_matrix_decision: writeMatrixDecision.decision,
+      write_interaction_tier: gateState.writeActionMatrixDecisions?.write_interaction_tier ?? null,
+      write_matrix_decision: gateState.writeMatrixDecision?.decision ?? null,
       recorded_at: recordedAt
     };
     const riskTransitionAudit = buildRiskTransitionAudit({
@@ -4001,7 +3890,7 @@ class ChromeBackgroundBridge {
       issueScope,
       prevState: riskState,
       decision: gateDecision,
-      gateReasons,
+      gateReasons: finalizedGate.gateReasons,
       requestedExecutionMode,
       approvalRecord,
       auditRecords: [gateAuditSeed],
@@ -4018,16 +3907,16 @@ class ChromeBackgroundBridge {
       targetPage,
       actionType,
       requestedExecutionMode,
-      effectiveExecutionMode,
+      effectiveExecutionMode: resolvedEffectiveExecutionMode,
       gateDecision,
-      gateReasons,
+      gateReasons: finalizedGate.gateReasons,
       requiresManualConfirmation,
       fingerprintGateDecision,
       fingerprintExecution,
       consumerGateResult,
       approvalRecord,
-      writeActionMatrixDecisions,
-      writeMatrixDecision,
+      writeActionMatrixDecisions: gateState.writeActionMatrixDecisions,
+      writeMatrixDecision: gateState.writeMatrixDecision,
       writeGateOnlyDecision: writeGateOnlyApprovalDecision,
       riskTransitionAudit
     });
@@ -4035,8 +3924,11 @@ class ChromeBackgroundBridge {
     return {
       allowed,
       targetTabId: allowed ? targetTabId : null,
-      errorMessage: allowed ? "" : xhsGateReasonMessage(gateReasons[0] ?? "TARGET_TAB_NOT_EXPLICIT"),
-      gateOnly: allowed && issue208WriteGateOnly && !writeGateOnlyEligible,
+      errorMessage:
+        allowed
+          ? ""
+          : xhsGateReasonMessage(finalizedGate.gateReasons[0] ?? "TARGET_TAB_NOT_EXPLICIT"),
+      gateOnly: allowed && gateState.issue208WriteGateOnly && !writeGateOnlyEligible,
       consumerGateResult,
       gatePayload
     };

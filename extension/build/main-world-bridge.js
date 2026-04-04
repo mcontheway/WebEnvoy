@@ -189,96 +189,114 @@ const createPluginAndMimeTypeArrays = () => {
         mimeTypes
     };
 };
+const installAudioContextPatch = (context) => {
+    if (!context.bundle || !context.requiredPatches.has("audio_context")) {
+        return;
+    }
+    const audioNoiseSeed = asNumber(context.bundle.audioNoiseSeed);
+    const webkitOfflineAudioContextCtor = window.webkitOfflineAudioContext;
+    const OfflineCtor = typeof window.OfflineAudioContext === "function"
+        ? window.OfflineAudioContext
+        : typeof webkitOfflineAudioContextCtor === "function"
+            ? webkitOfflineAudioContextCtor
+            : null;
+    if (audioNoiseSeed === null || !OfflineCtor) {
+        return;
+    }
+    const prototype = OfflineCtor.prototype;
+    const originalStartRendering = prototype.startRendering;
+    if (typeof originalStartRendering !== "function") {
+        return;
+    }
+    context.appliedPatches.push("audio_context");
+    audioNoiseSeedByPrototype.set(prototype, audioNoiseSeed);
+    if (patchedAudioContextPrototypes.has(prototype)) {
+        return;
+    }
+    const patchedChannelData = new WeakSet();
+    const patchAudioBuffer = (audioBuffer) => {
+        if (!audioBuffer || typeof audioBuffer.getChannelData !== "function") {
+            return audioBuffer;
+        }
+        const originalGetChannelData = audioBuffer.getChannelData.bind(audioBuffer);
+        audioBuffer.getChannelData = (channel) => {
+            const channelData = originalGetChannelData(channel);
+            if (channelData &&
+                typeof channelData.length === "number" &&
+                channelData.length > 0 &&
+                !patchedChannelData.has(channelData)) {
+                const noiseSeed = audioNoiseSeedByPrototype.get(prototype) ?? audioNoiseSeed;
+                channelData[0] = channelData[0] + noiseSeed;
+                patchedChannelData.add(channelData);
+            }
+            return channelData;
+        };
+        return audioBuffer;
+    };
+    const originalStartRenderingFn = originalStartRendering;
+    prototype.startRendering = function (...args) {
+        const renderingResult = originalStartRenderingFn.apply(this, args);
+        if (renderingResult && typeof renderingResult.then === "function") {
+            return renderingResult.then((audioBuffer) => patchAudioBuffer(audioBuffer));
+        }
+        return patchAudioBuffer(renderingResult);
+    };
+    patchedAudioContextPrototypes.add(prototype);
+};
+const installBatteryPatch = (context) => {
+    if (!context.bundle || !context.requiredPatches.has("battery")) {
+        return;
+    }
+    const battery = asRecord(context.bundle.battery);
+    const level = asNumber(battery?.level);
+    const charging = typeof battery?.charging === "boolean" ? battery.charging : null;
+    if (charging === null || level === null) {
+        return;
+    }
+    window.navigator.getBattery = () => Promise.resolve({
+        charging,
+        level,
+        chargingTime: charging ? 0 : Infinity,
+        dischargingTime: charging ? Infinity : 3600,
+        addEventListener() { },
+        removeEventListener() { },
+        dispatchEvent() {
+            return true;
+        }
+    });
+    context.appliedPatches.push("battery");
+};
+const installNavigatorPluginsPatch = (context) => {
+    if (!context.requiredPatches.has("navigator_plugins")) {
+        return;
+    }
+    defineGetter(window.navigator, "plugins", () => context.pluginAndMimeTypes.plugins);
+    context.appliedPatches.push("navigator_plugins");
+};
+const installNavigatorMimeTypesPatch = (context) => {
+    if (!context.requiredPatches.has("navigator_mime_types")) {
+        return;
+    }
+    defineGetter(window.navigator, "mimeTypes", () => context.pluginAndMimeTypes.mimeTypes);
+    context.appliedPatches.push("navigator_mime_types");
+};
 const installFingerprintRuntime = (runtime) => {
     const bundle = asRecord(runtime?.fingerprint_profile_bundle ?? null);
     const requiredPatches = asStringArray(asRecord(runtime?.fingerprint_patch_manifest ?? null)?.required_patches);
-    const patchNameSet = new Set(requiredPatches);
+    const requiredPatchNames = new Set(requiredPatches);
     const appliedPatches = [];
-    const missingRequiredPatches = [];
     const pluginAndMimeTypes = createPluginAndMimeTypeArrays();
-    if (bundle && patchNameSet.has("audio_context")) {
-        const audioNoiseSeed = asNumber(bundle.audioNoiseSeed);
-        const webkitOfflineAudioContextCtor = window.webkitOfflineAudioContext;
-        const OfflineCtor = typeof window.OfflineAudioContext === "function"
-            ? window.OfflineAudioContext
-            : typeof webkitOfflineAudioContextCtor === "function"
-                ? webkitOfflineAudioContextCtor
-                : null;
-        if (audioNoiseSeed !== null && OfflineCtor) {
-            const prototype = OfflineCtor.prototype;
-            const originalStartRendering = prototype.startRendering;
-            if (typeof originalStartRendering === "function") {
-                audioNoiseSeedByPrototype.set(prototype, audioNoiseSeed);
-                if (patchedAudioContextPrototypes.has(prototype)) {
-                    appliedPatches.push("audio_context");
-                }
-                else {
-                    const patchedChannelData = new WeakSet();
-                    const patchAudioBuffer = (audioBuffer) => {
-                        if (!audioBuffer || typeof audioBuffer.getChannelData !== "function") {
-                            return audioBuffer;
-                        }
-                        const originalGetChannelData = audioBuffer.getChannelData.bind(audioBuffer);
-                        audioBuffer.getChannelData = (channel) => {
-                            const channelData = originalGetChannelData(channel);
-                            if (channelData &&
-                                typeof channelData.length === "number" &&
-                                channelData.length > 0 &&
-                                !patchedChannelData.has(channelData)) {
-                                const noiseSeed = audioNoiseSeedByPrototype.get(prototype) ?? audioNoiseSeed;
-                                channelData[0] = channelData[0] + noiseSeed;
-                                patchedChannelData.add(channelData);
-                            }
-                            return channelData;
-                        };
-                        return audioBuffer;
-                    };
-                    const originalStartRenderingFn = originalStartRendering;
-                    prototype.startRendering = function (...args) {
-                        const renderingResult = originalStartRenderingFn.apply(this, args);
-                        if (renderingResult && typeof renderingResult.then === "function") {
-                            return renderingResult.then((audioBuffer) => patchAudioBuffer(audioBuffer));
-                        }
-                        return patchAudioBuffer(renderingResult);
-                    };
-                    patchedAudioContextPrototypes.add(prototype);
-                    appliedPatches.push("audio_context");
-                }
-            }
-        }
-    }
-    if (bundle && patchNameSet.has("battery")) {
-        const battery = asRecord(bundle.battery);
-        const level = asNumber(battery?.level);
-        const charging = typeof battery?.charging === "boolean" ? battery.charging : null;
-        if (charging !== null && level !== null) {
-            window.navigator.getBattery = () => Promise.resolve({
-                charging,
-                level,
-                chargingTime: charging ? 0 : Infinity,
-                dischargingTime: charging ? Infinity : 3600,
-                addEventListener() { },
-                removeEventListener() { },
-                dispatchEvent() {
-                    return true;
-                }
-            });
-            appliedPatches.push("battery");
-        }
-    }
-    if (patchNameSet.has("navigator_plugins")) {
-        defineGetter(window.navigator, "plugins", () => pluginAndMimeTypes.plugins);
-        appliedPatches.push("navigator_plugins");
-    }
-    if (patchNameSet.has("navigator_mime_types")) {
-        defineGetter(window.navigator, "mimeTypes", () => pluginAndMimeTypes.mimeTypes);
-        appliedPatches.push("navigator_mime_types");
-    }
-    for (const patchName of requiredPatches) {
-        if (!appliedPatches.includes(patchName)) {
-            missingRequiredPatches.push(patchName);
-        }
-    }
+    const context = {
+        bundle,
+        requiredPatches: requiredPatchNames,
+        appliedPatches,
+        pluginAndMimeTypes
+    };
+    installAudioContextPatch(context);
+    installBatteryPatch(context);
+    installNavigatorPluginsPatch(context);
+    installNavigatorMimeTypesPatch(context);
+    const missingRequiredPatches = requiredPatches.filter((patchName) => !appliedPatches.includes(patchName));
     return {
         installed: missingRequiredPatches.length === 0,
         applied_patches: appliedPatches,
@@ -303,33 +321,42 @@ const parseMainWorldRequest = (event) => {
         payload: asRecord(detail.payload) ?? {}
     };
 };
-const handleRequest = async (request) => {
-    if (request.type === "fingerprint-verify") {
-        if (!activeMainWorldEventChannel) {
-            return;
-        }
-        const hasGetBattery = typeof window.navigator.getBattery === "function";
-        await emitResult(activeMainWorldEventChannel.resultEvent, {
-            id: request.id,
-            ok: true,
-            result: {
-                has_get_battery: hasGetBattery,
-                plugins_length: typeof window.navigator.plugins?.length === "number" ? window.navigator.plugins.length : null,
-                mime_types_length: typeof window.navigator.mimeTypes?.length === "number" ? window.navigator.mimeTypes.length : null
-            }
-        });
-        return;
-    }
-    const runtime = asRecord(request.payload.fingerprint_runtime ?? null);
-    const result = installFingerprintRuntime(runtime);
+const emitMainWorldResult = async (result) => {
     if (!activeMainWorldEventChannel) {
         return;
     }
-    await emitResult(activeMainWorldEventChannel.resultEvent, {
+    await emitResult(activeMainWorldEventChannel.resultEvent, result);
+};
+const buildMainWorldVerifyResult = () => {
+    const hasGetBattery = typeof window.navigator.getBattery === "function";
+    return {
+        has_get_battery: hasGetBattery,
+        plugins_length: typeof window.navigator.plugins?.length === "number" ? window.navigator.plugins.length : null,
+        mime_types_length: typeof window.navigator.mimeTypes?.length === "number" ? window.navigator.mimeTypes.length : null
+    };
+};
+const handleFingerprintVerifyRequest = async (request) => {
+    await emitMainWorldResult({
+        id: request.id,
+        ok: true,
+        result: buildMainWorldVerifyResult()
+    });
+};
+const handleFingerprintInstallRequest = async (request) => {
+    const runtime = asRecord(request.payload.fingerprint_runtime ?? null);
+    const result = installFingerprintRuntime(runtime);
+    await emitMainWorldResult({
         id: request.id,
         ok: true,
         result
     });
+};
+const handleRequest = async (request) => {
+    if (request.type === "fingerprint-verify") {
+        await handleFingerprintVerifyRequest(request);
+        return;
+    }
+    await handleFingerprintInstallRequest(request);
 };
 const isValidChannelEventName = (value, prefix) => value.startsWith(prefix) && /^[A-Za-z0-9_.:-]+$/.test(value) && value.length <= 128;
 const attachMainWorldEventChannelIfValid = (requestEvent, resultEvent) => {

@@ -3152,6 +3152,8 @@ describe("extension service worker recovery contract", () => {
     const consumerGateResult = asRecord(payload.consumer_gate_result);
     expect(consumerGateResult?.action_type).toBeNull();
     expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.write_interaction_tier).toBeNull();
+    expect(payload.write_action_matrix_decisions).toBeNull();
     expect(consumerGateResult?.gate_reasons).toEqual(
       expect.arrayContaining(["ACTION_TYPE_NOT_EXPLICIT", "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"])
     );
