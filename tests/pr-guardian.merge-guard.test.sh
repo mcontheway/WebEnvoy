@@ -2958,6 +2958,22 @@ EOF
   assert_file_contains "${result_file}" '"findings":[]'
 }
 
+test_normalize_native_review_result_accepts_chinese_review_context_with_current_runtime_phrase() {
+  setup_case_dir "normalize-native-text-chinese-review-context-current-runtime"
+
+  local raw_file="${TMP_DIR}/native-review.txt"
+  local result_file="${TMP_DIR}/guardian-review.json"
+  cat > "${raw_file}" <<'EOF'
+审查了相对 origin/main 的实际差异，并对照相关架构/审查基线检查了当前运行时 profile 锁路径的行为收敛。未发现新的阻断性问题。
+EOF
+
+  assert_pass normalize_native_review_result "${raw_file}" "${result_file}"
+  assert_pass validate_review_result_shape "${result_file}"
+  assert_file_contains "${result_file}" '"verdict":"APPROVE"'
+  assert_file_contains "${result_file}" '"safe_to_merge":true'
+  assert_file_contains "${result_file}" '"findings":[]'
+}
+
 test_normalize_native_review_result_fails_closed_for_review_context_with_incomplete_evidence() {
   setup_case_dir "normalize-native-text-review-context-incomplete-evidence"
 
@@ -4055,6 +4071,7 @@ main() {
   test_normalize_native_review_result_accepts_common_plain_text_approve_phrases
   test_normalize_native_review_result_accepts_live_plain_text_approve_summary
   test_normalize_native_review_result_accepts_review_context_preface_before_safe_summary
+  test_normalize_native_review_result_accepts_chinese_review_context_with_current_runtime_phrase
   test_normalize_native_review_result_fails_closed_for_review_context_with_incomplete_evidence
   test_normalize_native_review_result_accepts_reviewed_diff_preface_before_safe_summary
   test_normalize_native_review_result_fails_closed_for_chinese_incomplete_evidence_prefix

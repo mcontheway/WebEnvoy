@@ -1567,7 +1567,7 @@ normalize_native_review_result() {
       def has_contrast($sentence):
         ($sentence | ascii_downcase | test("\\b(but|however|although|except|except for|yet|still|though|nevertheless|aside from|other than)\\b|但是|但|不过|然而|只是|除外|除此之外"));
       def has_condition($sentence):
-        ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|当"));
+        ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|(^|[[:space:],，。！？；：()（）])当(?!前)[^。！？；：]*时([[:space:],，。！？；：()（）]|$)"));
       def has_followup($sentence):
         ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should|missing|lacks?)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
       def strong_safe_sentence($sentence):
@@ -1725,7 +1725,7 @@ normalize_native_review_result() {
       def has_contrast($sentence):
         ($sentence | ascii_downcase | test("\\b(but|however|although|except|except for|yet|still|though|nevertheless|aside from|other than)\\b|但是|但|不过|然而|只是|除外|除此之外"));
       def has_condition($sentence):
-        ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|当.+时"));
+        ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|(^|[[:space:],，。！？；：()（）])当(?!前)[^。！？；：]*时([[:space:],，。！？；：()（）]|$)"));
       def has_followup($sentence):
         ($sentence | ascii_downcase | test("\\b(please\\s+(?:add|fix|update|restore|include|keep|clarify|address|re-?check|revisit)|must|needs?\\s+to|need\\s+to|should|missing|lacks?)\\b|需先|需要先|仍需|还需|请先|先补|补齐|补充|缺少|缺失|后续|重新检查|再检查|暂不建议|不可合并|不能合并|不得合并|后再|之后再"));
       def strong_safe_sentence($sentence):
@@ -1767,7 +1767,7 @@ normalize_native_review_result() {
         | ($trimmed | ascii_downcase) as $lower
         | ($lower | test("^based on the diff against [^,]+, (?:the )?review checked .+ against the relevant .+ baselines[.!]?$"))
           or ($lower | test("^reviewed the diff against [^,]+, and checked .+ against the relevant .+ baselines[.!]?$"))
-          or ($trimmed | test("^审查了相对 .+ 的实际差异，并对照相关架构/审查基线检查了 .+行为收敛[。！!]*$"));
+          or ($trimmed | test("^审查了相对 .+ 的实际差异，并对照相关架构/审查基线检查了[[:space:]]*.+行为收敛[。！!]*$"));
       def neutral_safe_sentence($sentence):
         ($sentence | ascii_downcase) as $lower
         | ($lower | test("does not affect code paths"))
@@ -1881,7 +1881,7 @@ normalize_native_review_result() {
     def has_contrast($sentence):
       ($sentence | ascii_downcase | test("\\b(but|however|although|except|except for|yet|still|though|nevertheless|aside from|other than)\\b|但是|但|不过|然而|只是|除外|除此之外"));
     def has_condition($sentence):
-      ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|当.+时"));
+      ($sentence | ascii_downcase | test("\\b(unless|except when|only if|provided that|assuming|if|when)\\b|除非|仅当|只有在|前提是|如果|(^|[[:space:],，。！？；：()（）])当(?!前)[^。！？；：]*时([[:space:],，。！？；：()（）]|$)"));
     def strong_safe_sentence($sentence):
       ($sentence | trim) as $trimmed
       | ($trimmed | ascii_downcase) as $lower
@@ -1921,7 +1921,7 @@ normalize_native_review_result() {
       | ($trimmed | ascii_downcase) as $lower
       | ($lower | test("^based on the diff against [^,]+, (?:the )?review checked .+ against the relevant .+ baselines[.!]?$"))
         or ($lower | test("^reviewed the diff against [^,]+, and checked .+ against the relevant .+ baselines[.!]?$"))
-        or ($trimmed | test("^审查了相对 .+ 的实际差异，并对照相关架构/审查基线检查了 .+行为收敛[。！!]*$"));
+        or ($trimmed | test("^审查了相对 .+ 的实际差异，并对照相关架构/审查基线检查了[[:space:]]*.+行为收敛[。！!]*$"));
     def neutral_safe_sentence($sentence):
       ($sentence | ascii_downcase) as $lower
       | ($lower | test("does not affect code paths"))
