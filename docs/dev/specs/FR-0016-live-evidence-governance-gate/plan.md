@@ -56,6 +56,7 @@
 3. 规约一致性检查：
   - `classification_scope` 足以让 reviewer / guardian 在不信任作者自报 lane 的前提下，先判定 spec 套件命中与治理落库目标命中
   - `mixed_spec_and_governance_scope` 只针对 `spec_contract_targets` 生效，不误伤仓库已允许与落库 PR 同行的纯 `TODO.md` 进度回写
+  - formal spec PR 只要碰任一治理落库目标文件，就必须直接触发 `mixed_spec_and_governance_scope`，不需要等到完整 landing 形态
   - `classification_scope` 对治理落库的判定必须同时消费 `governance_issue_ref=#310`，避免把未来其他治理文件修订误吸进 FR-0016 landing lane
   - `governance_landing_pr` 必须以完整五文件落库为前提，不能被任一单文件或子集落库 PR 提前占用 lane 与 closing semantics
   - formal spec review PR、governance landing PR 与所有 `in_scope=true` PR 缺少 `gate_applicability` 时必须直接 blocked，不能靠 reviewer/guardian 事后脑补

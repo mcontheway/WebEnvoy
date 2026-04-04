@@ -38,6 +38,7 @@
   - #322 最新 guardian 继续指出：即使精确命中五个治理落库目标文件，若漏掉 `#310` 引用，也必须有结构化 blocker，不能退回普通 PR
   - #322 最新 guardian 继续指出：`governance_landing_pr` 即使是 `not_applicable` 也不能允许 `n_a` closing semantics，必须保留 `Refs/Fixes #310`
   - #322 最新 guardian 继续指出：若带 `#310` 上下文的治理落库 PR 只命中目标文件子集，或在五文件之外扩 scope，也必须显式 blocked，不能退回 `general_pr`
+  - #322 最新 guardian 继续指出：formal spec PR 只要触碰任一治理落库目标文件，也必须立刻 mixed-scope blocked，不能等到完整 landing 形态才阻断
   - 最新一轮明确指出：高风险治理基线变更缺 formal spec review
 
 ## 证据梳理
@@ -115,6 +116,7 @@
 | U15 | 精确命中五个治理落库目标文件但缺少 `#310` 引用时，必须有结构化 blocker，不能退回普通 PR | `#322` guardian review | review blocker 对照 | M3 | 95% | 若缺少这一 blocker，formal spec review 通过前的落库 PR 仍可能绕开 `spec_review_not_completed` 与 metadata 门禁 |
 | U16 | `governance_landing_pr` 即使 `not_applicable`，closing semantics 也必须保留 `Refs/Fixes #310`，不得使用 `n_a` | `#322` guardian review | review blocker 对照 | M3 | 95% | 若允许 `n_a`，治理落库 PR 仍可绕开仓库要求的 issue closing metadata |
 | U17 | 带 `#310` 上下文的治理落库尝试若只命中目标文件子集，或在五文件之外扩 scope，也必须显式 blocked | `#322` guardian review | review blocker 对照 | M3 | 95% | 若只对“精确五文件”建模，子集/超集治理改动仍可绕开 `spec_review_not_completed` 与 metadata 门禁 |
+| U18 | formal spec PR 只要触碰任一治理落库目标文件，就必须立即触发 `mixed_spec_and_governance_scope` | `#322` guardian review | review blocker 对照 | M3 | 95% | 若 mixed-scope 只在完整 landing 形态才触发，spec PR 仍可顺手塞入单个治理文件改动而绕开 split 规则 |
 
 ## Gate Status
 

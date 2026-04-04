@@ -147,7 +147,7 @@
   - 更新 `.github/PULL_REQUEST_TEMPLATE.md`
 - 在 formal spec review 通过前，治理落库 PR 不得申报为可合并状态。
 - `spec_review_not_completed` 的阻断必须只对 `governance_landing_pr` 生效，并由 shared contract 内部的结构化 lane 字段判定，而不是依赖 PR 标题、改动路径或人工上下文。
-- 若同一 PR 同时改动 `spec_contract_targets` 中任一正式契约文件，或对 `TODO.md` 产生语义变化，且又命中“五处治理落库目标文件精确集合 + `#310` issue 引用”这一 FR-0016 落库条件，必须作为 `mixed_spec_and_governance_scope` 直接阻断；只有纯 `TODO.md` 非语义进度回写不计入该阻断。
+- 若同一 PR 同时改动 `spec_contract_targets` 中任一正式契约文件，或对 `TODO.md` 产生语义变化，且又命中任一治理落库目标文件，必须作为 `mixed_spec_and_governance_scope` 直接阻断；不需要等到完整五文件 landing 形态才触发，只有纯 `TODO.md` 非语义进度回写不计入该阻断。
 
 ## GWT 验收场景
 

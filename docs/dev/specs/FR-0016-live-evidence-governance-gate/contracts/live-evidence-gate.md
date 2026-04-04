@@ -56,7 +56,7 @@ FR-0016 的机器判定输入至少包含以下对象：
 6. 若 PR 实际变更命中 `governance_scope_targets` 中任一目标文件，且 PR 元数据显式引用 `governance_issue_ref`，但其文件范围不是“精确等于五个治理目标文件集合（允许额外同行 `progress_only_todo_target` 的非语义进度回写）”，reviewer / guardian 必须产出 `invalid_governance_landing_scope`，并阻断合并。
 7. 若 PR 实际变更精确等于 `governance_scope_targets` 冻结的五个目标文件集合（允许额外同行 `progress_only_todo_target` 的非语义进度回写），但 PR 元数据没有显式引用 `governance_issue_ref`，reviewer / guardian 必须产出 `missing_governance_issue_ref`，并阻断合并。
 8. reviewer / guardian 只有在 PR 同时满足“实际变更精确等于 `governance_scope_targets` 冻结的五个目标文件集合（允许额外同行 `progress_only_todo_target` 的非语义进度回写）”与“PR 元数据显式引用 `governance_issue_ref`”时，才能先视为治理落库相关链路。
-9. 若同一 PR 同时命中 `spec_contract_targets` 中任一正式契约文件，或对 `progress_only_todo_target` 产生语义变化，与已命中的 FR-0016 治理落库条件并存，必须产出 `mixed_spec_and_governance_scope`，并阻断合并。
+9. 若同一 PR 同时命中 `spec_contract_targets` 中任一正式契约文件，或对 `progress_only_todo_target` 产生语义变化，且又命中 `governance_scope_targets` 中任一治理落库目标文件，无论是否已经满足完整 landing 形态，都必须产出 `mixed_spec_and_governance_scope`，并阻断合并。
 
 当 PR 落入专项门禁，或其 `review_lane` 属于 `formal_spec_review_pr` / `governance_landing_pr` 时，门禁共享输出还至少包含以下对象：
 
@@ -252,7 +252,7 @@ FR-0016 的机器判定输入至少包含以下对象：
 7. formal spec review PR、governance landing PR 或任何 `in_scope=true` 的 PR 若缺少必需的结构化 `gate_applicability` 元数据，必须在 `blocking_reasons` 中包含 `missing_gate_applicability_metadata`，并产出 `status=blocked`。
 8. 若 PR 实际变更命中 `classification_scope.governance_scope_targets` 中任一目标文件，且 PR 元数据显式引用 `classification_scope.governance_issue_ref`，但其文件范围不是“精确命中五个治理目标文件集合 + 可选非语义 TODO 回写”，必须在 `blocking_reasons` 中包含 `invalid_governance_landing_scope`，并产出 `status=blocked`。
 9. 若 PR 实际变更精确命中 `classification_scope.governance_scope_targets`，但 PR 元数据没有显式引用 `classification_scope.governance_issue_ref`，必须在 `blocking_reasons` 中包含 `missing_governance_issue_ref`，并产出 `status=blocked`。
-10. 若同一 PR 同时改动 `classification_scope.spec_contract_targets` 中任一正式契约文件，或对 `classification_scope.progress_only_todo_target` 产生语义变化，且又满足“精确命中 `classification_scope.governance_scope_targets` + 引用 `classification_scope.governance_issue_ref`”的 FR-0016 治理落库条件，必须在 `blocking_reasons` 中包含 `mixed_spec_and_governance_scope`，并产出 `status=blocked`。
+10. 若同一 PR 同时改动 `classification_scope.spec_contract_targets` 中任一正式契约文件，或对 `classification_scope.progress_only_todo_target` 产生语义变化，且又命中 `classification_scope.governance_scope_targets` 中任一治理落库目标文件，无论是否已经满足完整 landing 形态，都必须在 `blocking_reasons` 中包含 `mixed_spec_and_governance_scope`，并产出 `status=blocked`。
 
 ## 兼容性约束
 

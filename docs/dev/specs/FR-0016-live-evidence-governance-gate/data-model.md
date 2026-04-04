@@ -27,7 +27,7 @@
   - reviewer / guardian 只有在同时精确命中 `governance_scope_targets`、未混入其他实质性改动，且 PR 元数据显式引用 `governance_issue_ref` 时，才按治理落库相关链路处理。
   - 若 PR 在 `governance_issue_ref` 上下文中只命中 `governance_scope_targets` 子集，或在其外扩 scope，必须产出 `invalid_governance_landing_scope` 并阻断。
   - 若 PR 已精确命中 `governance_scope_targets` 但缺少 `governance_issue_ref`，必须产出 `missing_governance_issue_ref` 并阻断。
-  - 若同一 PR 同时命中 `spec_contract_targets`，或对 `progress_only_todo_target` 产生语义变化，与上述 FR-0016 治理落库条件并存，必须产出 `mixed_spec_and_governance_scope`。
+  - 若同一 PR 同时命中 `spec_contract_targets`，或对 `progress_only_todo_target` 产生语义变化，并且又命中任一治理落库目标文件，不论是否已经构成完整 landing 形态，都必须产出 `mixed_spec_and_governance_scope`。
 - 生命周期：
   - 作为 FR-0016 formal contract 的固定判定输入存在，不由作者在每个 PR 中自由改写。
 
@@ -107,7 +107,7 @@
   - formal spec review PR、governance landing PR 与其他 `in_scope=true` 的 PR 若缺少 `gate_applicability`，必须包含 `missing_gate_applicability_metadata`，且 `status=blocked`。
   - 若 PR 在 `#310` 上下文中只命中五个治理落库目标文件子集，或在五文件之外扩 scope，必须包含 `invalid_governance_landing_scope`，且 `status=blocked`。
   - 若 PR 精确命中五个治理落库目标文件却缺少 `#310` 引用，必须包含 `missing_governance_issue_ref`，且 `status=blocked`。
-  - 若同一 PR 同时改动 FR-0016 `spec_contract_targets` 中任一正式契约文件，或对 `progress_only_todo_target` 产生语义变化，且又满足“精确命中五个治理落库目标文件 + 显式引用 `#310`”这一 FR-0016 落库条件，必须包含 `mixed_spec_and_governance_scope`，且 `status=blocked`。
+  - 若同一 PR 同时改动 FR-0016 `spec_contract_targets` 中任一正式契约文件，或对 `progress_only_todo_target` 产生语义变化，且又命中任一治理落库目标文件，不论是否已经构成完整 landing 形态，都必须包含 `mixed_spec_and_governance_scope`，且 `status=blocked`。
 - 生命周期：
   - reviewer / guardian 基于当前 PR 描述、latest head 和 formal spec review 状态即时产出。
   - 若 PR head 或 review 前置状态发生变化，旧 verdict 自动过期，必须重新计算。
