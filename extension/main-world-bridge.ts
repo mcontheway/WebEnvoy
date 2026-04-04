@@ -22,6 +22,13 @@ type MainWorldEventChannel = {
   resultEvent: string;
 };
 
+type FingerprintPatchInstallContext = {
+  bundle: RecordValue | null;
+  requiredPatches: Set<string>;
+  appliedPatches: string[];
+  pluginAndMimeTypes: ReturnType<typeof createPluginAndMimeTypeArrays>;
+};
+
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
@@ -265,112 +272,142 @@ const createPluginAndMimeTypeArrays = () => {
   };
 };
 
+const installAudioContextPatch = (context: FingerprintPatchInstallContext): void => {
+  if (!context.bundle || !context.requiredPatches.has("audio_context")) {
+    return;
+  }
+
+  const audioNoiseSeed = asNumber(context.bundle.audioNoiseSeed);
+  const webkitOfflineAudioContextCtor = (
+    window as Window & { webkitOfflineAudioContext?: typeof OfflineAudioContext }
+  ).webkitOfflineAudioContext;
+  const OfflineCtor =
+    typeof window.OfflineAudioContext === "function"
+      ? window.OfflineAudioContext
+      : typeof webkitOfflineAudioContextCtor === "function"
+        ? webkitOfflineAudioContextCtor
+        : null;
+  if (audioNoiseSeed === null || !OfflineCtor) {
+    return;
+  }
+
+  const prototype = OfflineCtor.prototype as object & {
+    startRendering?: (...args: unknown[]) => unknown;
+  };
+  const originalStartRendering = prototype.startRendering;
+  if (typeof originalStartRendering !== "function") {
+    return;
+  }
+
+  context.appliedPatches.push("audio_context");
+  audioNoiseSeedByPrototype.set(prototype, audioNoiseSeed);
+  if (patchedAudioContextPrototypes.has(prototype)) {
+    return;
+  }
+
+  const patchedChannelData = new WeakSet<Float32Array>();
+  const patchAudioBuffer = (audioBuffer: any) => {
+    if (!audioBuffer || typeof audioBuffer.getChannelData !== "function") {
+      return audioBuffer;
+    }
+    const originalGetChannelData = audioBuffer.getChannelData.bind(audioBuffer);
+    audioBuffer.getChannelData = (channel: number) => {
+      const channelData = originalGetChannelData(channel);
+      if (
+        channelData &&
+        typeof channelData.length === "number" &&
+        channelData.length > 0 &&
+        !patchedChannelData.has(channelData)
+      ) {
+        const noiseSeed = audioNoiseSeedByPrototype.get(prototype) ?? audioNoiseSeed;
+        channelData[0] = channelData[0] + noiseSeed;
+        patchedChannelData.add(channelData);
+      }
+      return channelData;
+    };
+    return audioBuffer;
+  };
+  const originalStartRenderingFn = originalStartRendering as (...args: unknown[]) => unknown;
+  prototype.startRendering = function (...args: unknown[]) {
+    const renderingResult = originalStartRenderingFn.apply(this, args);
+    if (renderingResult && typeof (renderingResult as Promise<unknown>).then === "function") {
+      return (renderingResult as Promise<unknown>).then((audioBuffer) =>
+        patchAudioBuffer(audioBuffer)
+      );
+    }
+    return patchAudioBuffer(renderingResult);
+  };
+  patchedAudioContextPrototypes.add(prototype);
+};
+
+const installBatteryPatch = (context: FingerprintPatchInstallContext): void => {
+  if (!context.bundle || !context.requiredPatches.has("battery")) {
+    return;
+  }
+
+  const battery = asRecord(context.bundle.battery);
+  const level = asNumber(battery?.level);
+  const charging = typeof battery?.charging === "boolean" ? battery.charging : null;
+  if (charging === null || level === null) {
+    return;
+  }
+
+  (window.navigator as Navigator & { getBattery?: () => Promise<unknown> }).getBattery = () =>
+    Promise.resolve({
+      charging,
+      level,
+      chargingTime: charging ? 0 : Infinity,
+      dischargingTime: charging ? Infinity : 3600,
+      addEventListener() {},
+      removeEventListener() {},
+      dispatchEvent() {
+        return true;
+      }
+    });
+  context.appliedPatches.push("battery");
+};
+
+const installNavigatorPluginsPatch = (context: FingerprintPatchInstallContext): void => {
+  if (!context.requiredPatches.has("navigator_plugins")) {
+    return;
+  }
+
+  defineGetter(window.navigator, "plugins", () => context.pluginAndMimeTypes.plugins);
+  context.appliedPatches.push("navigator_plugins");
+};
+
+const installNavigatorMimeTypesPatch = (context: FingerprintPatchInstallContext): void => {
+  if (!context.requiredPatches.has("navigator_mime_types")) {
+    return;
+  }
+
+  defineGetter(window.navigator, "mimeTypes", () => context.pluginAndMimeTypes.mimeTypes);
+  context.appliedPatches.push("navigator_mime_types");
+};
+
 const installFingerprintRuntime = (runtime: RecordValue | null): RecordValue => {
   const bundle = asRecord(runtime?.fingerprint_profile_bundle ?? null);
   const requiredPatches = asStringArray(
     asRecord(runtime?.fingerprint_patch_manifest ?? null)?.required_patches
   );
-  const patchNameSet = new Set(requiredPatches);
+  const requiredPatchNames = new Set(requiredPatches);
   const appliedPatches: string[] = [];
-  const missingRequiredPatches: string[] = [];
   const pluginAndMimeTypes = createPluginAndMimeTypeArrays();
+  const context: FingerprintPatchInstallContext = {
+    bundle,
+    requiredPatches: requiredPatchNames,
+    appliedPatches,
+    pluginAndMimeTypes
+  };
 
-  if (bundle && patchNameSet.has("audio_context")) {
-    const audioNoiseSeed = asNumber(bundle.audioNoiseSeed);
-    const webkitOfflineAudioContextCtor = (
-      window as Window & { webkitOfflineAudioContext?: typeof OfflineAudioContext }
-    ).webkitOfflineAudioContext;
-    const OfflineCtor =
-      typeof window.OfflineAudioContext === "function"
-        ? window.OfflineAudioContext
-        : typeof webkitOfflineAudioContextCtor === "function"
-          ? webkitOfflineAudioContextCtor
-          : null;
-    if (audioNoiseSeed !== null && OfflineCtor) {
-      const prototype = OfflineCtor.prototype as object & {
-        startRendering?: (...args: unknown[]) => unknown;
-      };
-      const originalStartRendering = prototype.startRendering;
-      if (typeof originalStartRendering === "function") {
-        audioNoiseSeedByPrototype.set(prototype, audioNoiseSeed);
-        if (patchedAudioContextPrototypes.has(prototype)) {
-          appliedPatches.push("audio_context");
-        } else {
-          const patchedChannelData = new WeakSet<Float32Array>();
-          const patchAudioBuffer = (audioBuffer: any) => {
-            if (!audioBuffer || typeof audioBuffer.getChannelData !== "function") {
-              return audioBuffer;
-            }
-            const originalGetChannelData = audioBuffer.getChannelData.bind(audioBuffer);
-            audioBuffer.getChannelData = (channel: number) => {
-              const channelData = originalGetChannelData(channel);
-              if (
-                channelData &&
-                typeof channelData.length === "number" &&
-                channelData.length > 0 &&
-                !patchedChannelData.has(channelData)
-              ) {
-                const noiseSeed = audioNoiseSeedByPrototype.get(prototype) ?? audioNoiseSeed;
-                channelData[0] = channelData[0] + noiseSeed;
-                patchedChannelData.add(channelData);
-              }
-              return channelData;
-            };
-            return audioBuffer;
-          };
-          const originalStartRenderingFn = originalStartRendering as (...args: unknown[]) => unknown;
-          prototype.startRendering = function (...args: unknown[]) {
-            const renderingResult = originalStartRenderingFn.apply(this, args);
-            if (renderingResult && typeof (renderingResult as Promise<unknown>).then === "function") {
-              return (renderingResult as Promise<unknown>).then((audioBuffer) =>
-                patchAudioBuffer(audioBuffer)
-              );
-            }
-            return patchAudioBuffer(renderingResult);
-          };
-          patchedAudioContextPrototypes.add(prototype);
-          appliedPatches.push("audio_context");
-        }
-      }
-    }
-  }
+  installAudioContextPatch(context);
+  installBatteryPatch(context);
+  installNavigatorPluginsPatch(context);
+  installNavigatorMimeTypesPatch(context);
 
-  if (bundle && patchNameSet.has("battery")) {
-    const battery = asRecord(bundle.battery);
-    const level = asNumber(battery?.level);
-    const charging = typeof battery?.charging === "boolean" ? battery.charging : null;
-    if (charging !== null && level !== null) {
-      (window.navigator as Navigator & { getBattery?: () => Promise<unknown> }).getBattery = () =>
-        Promise.resolve({
-          charging,
-          level,
-          chargingTime: charging ? 0 : Infinity,
-          dischargingTime: charging ? Infinity : 3600,
-          addEventListener() {},
-          removeEventListener() {},
-          dispatchEvent() {
-            return true;
-          }
-        });
-      appliedPatches.push("battery");
-    }
-  }
-
-  if (patchNameSet.has("navigator_plugins")) {
-    defineGetter(window.navigator, "plugins", () => pluginAndMimeTypes.plugins);
-    appliedPatches.push("navigator_plugins");
-  }
-
-  if (patchNameSet.has("navigator_mime_types")) {
-    defineGetter(window.navigator, "mimeTypes", () => pluginAndMimeTypes.mimeTypes);
-    appliedPatches.push("navigator_mime_types");
-  }
-
-  for (const patchName of requiredPatches) {
-    if (!appliedPatches.includes(patchName)) {
-      missingRequiredPatches.push(patchName);
-    }
-  }
+  const missingRequiredPatches = requiredPatches.filter(
+    (patchName) => !appliedPatches.includes(patchName)
+  );
 
   return {
     installed: missingRequiredPatches.length === 0,
@@ -398,36 +435,49 @@ const parseMainWorldRequest = (event: Event): MainWorldRequest | null => {
   };
 };
 
-const handleRequest = async (request: MainWorldRequest): Promise<void> => {
-  if (request.type === "fingerprint-verify") {
-    if (!activeMainWorldEventChannel) {
-      return;
-    }
-    const hasGetBattery =
-      typeof (window.navigator as Navigator & { getBattery?: unknown }).getBattery === "function";
-    await emitResult(activeMainWorldEventChannel.resultEvent, {
-      id: request.id,
-      ok: true,
-      result: {
-        has_get_battery: hasGetBattery,
-        plugins_length:
-          typeof window.navigator.plugins?.length === "number" ? window.navigator.plugins.length : null,
-        mime_types_length:
-          typeof window.navigator.mimeTypes?.length === "number" ? window.navigator.mimeTypes.length : null
-      }
-    });
-    return;
-  }
-  const runtime = asRecord(request.payload.fingerprint_runtime ?? null);
-  const result = installFingerprintRuntime(runtime);
+const emitMainWorldResult = async (result: MainWorldResult): Promise<void> => {
   if (!activeMainWorldEventChannel) {
     return;
   }
-  await emitResult(activeMainWorldEventChannel.resultEvent, {
+  await emitResult(activeMainWorldEventChannel.resultEvent, result);
+};
+
+const buildMainWorldVerifyResult = (): RecordValue => {
+  const hasGetBattery =
+    typeof (window.navigator as Navigator & { getBattery?: unknown }).getBattery === "function";
+  return {
+    has_get_battery: hasGetBattery,
+    plugins_length:
+      typeof window.navigator.plugins?.length === "number" ? window.navigator.plugins.length : null,
+    mime_types_length:
+      typeof window.navigator.mimeTypes?.length === "number" ? window.navigator.mimeTypes.length : null
+  };
+};
+
+const handleFingerprintVerifyRequest = async (request: MainWorldRequest): Promise<void> => {
+  await emitMainWorldResult({
+    id: request.id,
+    ok: true,
+    result: buildMainWorldVerifyResult()
+  });
+};
+
+const handleFingerprintInstallRequest = async (request: MainWorldRequest): Promise<void> => {
+  const runtime = asRecord(request.payload.fingerprint_runtime ?? null);
+  const result = installFingerprintRuntime(runtime);
+  await emitMainWorldResult({
     id: request.id,
     ok: true,
     result
   });
+};
+
+const handleRequest = async (request: MainWorldRequest): Promise<void> => {
+  if (request.type === "fingerprint-verify") {
+    await handleFingerprintVerifyRequest(request);
+    return;
+  }
+  await handleFingerprintInstallRequest(request);
 };
 
 const isValidChannelEventName = (value: string, prefix: string): boolean =>
