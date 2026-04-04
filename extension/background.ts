@@ -1056,6 +1056,52 @@ interface NativeBridgeRecoveryStateHooks {
   emit(message: BridgeResponse): void;
 }
 
+class NativeBridgePendingForwardState {
+  #pending = new Map<string, PendingForward>();
+
+  register(id: string, pending: PendingForward): void {
+    this.#pending.set(id, pending);
+  }
+
+  take(id: string): PendingForward | null {
+    const pending = this.#pending.get(id);
+    if (!pending) {
+      return null;
+    }
+    clearTimeout(pending.timeout);
+    this.#pending.delete(id);
+    return pending;
+  }
+
+  fail(
+    id: string,
+    error: { code: string; message: string },
+    emit: (payload: BridgeResponse) => void
+  ): void {
+    const pending = this.take(id);
+    if (!pending || pending.suppressHostResponse) {
+      return;
+    }
+    emit({
+      id,
+      status: "error",
+      summary: {
+        relay_path: "host>background>content-script>background>host"
+      },
+      error
+    });
+  }
+
+  failAll(
+    error: { code: string; message: string },
+    emit: (payload: BridgeResponse) => void
+  ): void {
+    for (const id of [...this.#pending.keys()]) {
+      this.fail(id, error, emit);
+    }
+  }
+}
+
 class NativeBridgeRecoveryState {
   #recoveryQueue: QueuedForwardRequest[] = [];
 
@@ -1189,7 +1235,7 @@ class NativeBridgeRecoveryState {
 
 class ChromeBackgroundBridge {
   #port: ExtensionPort | null = null;
-  #pending = new Map<string, PendingForward>();
+  #pendingState = new NativeBridgePendingForwardState();
   #trustedFingerprintContexts = new Map<string, TrustedFingerprintContextEntry>();
   #runtimeBootstrapStates = new Map<string, RuntimeBootstrapState>();
   #recoveryState: NativeBridgeRecoveryState;
@@ -2877,7 +2923,7 @@ class ChromeBackgroundBridge {
         message: timeoutError.message
       });
     }, forwardTimeoutMs);
-    this.#pending.set(request.id, {
+    this.#pendingState.register(request.id, {
       request,
       timeout,
       consumerGateResult,
@@ -3911,14 +3957,11 @@ class ChromeBackgroundBridge {
       typeof result.payload === "object" && result.payload !== null
         ? { ...(result.payload as Record<string, unknown>) }
         : {};
-    const pending = this.#pending.get(result.id);
+    const pending = this.#pendingState.take(result.id);
     if (!pending) {
       void this.#rememberStartupTrustedFingerprintContext(payload, sender);
       return;
     }
-
-    clearTimeout(pending.timeout);
-    this.#pending.delete(result.id);
     const request = pending.request;
     const suppressHostResponse = pending.suppressHostResponse === true;
     const command = String(request.params.command ?? "");
@@ -4105,29 +4148,15 @@ class ChromeBackgroundBridge {
   }
 
   #failPending(id: string, error: { code: string; message: string }): void {
-    const pending = this.#pending.get(id);
-    if (!pending) {
-      return;
-    }
-    clearTimeout(pending.timeout);
-    this.#pending.delete(id);
-    if (pending.suppressHostResponse) {
-      return;
-    }
-    this.#emit({
-      id,
-      status: "error",
-      summary: {
-        relay_path: "host>background>content-script>background>host"
-      },
-      error
+    this.#pendingState.fail(id, error, (payload) => {
+      this.#emit(payload);
     });
   }
 
   #failAllPending(error: { code: string; message: string }): void {
-    for (const [id] of this.#pending.entries()) {
-      this.#failPending(id, error);
-    }
+    this.#pendingState.failAll(error, (payload) => {
+      this.#emit(payload);
+    });
   }
 
   async #resolveAllowlistedTabDomain(tabId: number): Promise<string | null> {
