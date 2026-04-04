@@ -7,7 +7,8 @@ const repoRoot = join(scriptDir, "..");
 
 const copies = [
   ["shared/risk-state.js", "extension/shared/risk-state.js"],
-  ["shared/fingerprint-profile.js", "extension/shared/fingerprint-profile.js"]
+  ["shared/fingerprint-profile.js", "extension/shared/fingerprint-profile.js"],
+  ["shared/xhs-gate.js", "extension/shared/xhs-gate.js"]
 ];
 
 for (const [source, target] of copies) {

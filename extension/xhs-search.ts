@@ -1,11 +1,7 @@
 import {
-  APPROVAL_CHECK_KEYS,
-  EXECUTION_MODES,
   WRITE_INTERACTION_TIER,
   buildRiskTransitionAudit,
   buildUnifiedRiskStateOutput,
-  getWriteActionMatrixDecisions,
-  getIssueActionMatrixEntry,
   resolveIssueScope as resolveSharedIssueScope,
   resolveRiskState as resolveSharedRiskState,
   type ExecutionMode,
@@ -15,6 +11,11 @@ import {
   type WriteActionMatrixDecisionsOutput,
   type WriteInteractionTier
 } from "../shared/risk-state.js";
+import {
+  XHS_READ_DOMAIN,
+  XHS_WRITE_DOMAIN,
+  evaluateXhsGate
+} from "../shared/xhs-gate.js";
 import type {
   EditorInputFocusAttestation,
   EditorInputValidationResult
@@ -202,29 +203,6 @@ interface XhsExecutionContext {
 }
 
 const SEARCH_ENDPOINT = "/api/sns/web/v1/search/notes";
-const XHS_READ_DOMAIN = "www.xiaohongshu.com";
-const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
-const XHS_ALLOWED_DOMAINS = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
-const ACTION_TYPES = new Set<ActionType>(["read", "write", "irreversible_write"]);
-const REQUESTED_EXECUTION_MODES = new Set<RequestedExecutionMode>(EXECUTION_MODES);
-const READ_EXECUTION_POLICY = {
-  default_mode: "dry_run" as const,
-  allowed_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"] as const,
-  blocked_actions: ["expand_new_live_surface_without_gate"] as const,
-  live_entry_requirements: [
-    "gate_input_risk_state_limited_or_allowed",
-    "risk_state_checked",
-    "target_domain_confirmed",
-    "target_tab_confirmed",
-    "target_page_confirmed",
-    "action_type_confirmed",
-    "approval_record_approved_true",
-    "approval_record_approver_present",
-    "approval_record_approved_at_present",
-    "approval_record_checks_all_true"
-  ] as const
-};
-const REQUIRED_APPROVAL_CHECKS = APPROVAL_CHECK_KEYS;
 
 const asRecord = (value: unknown): JsonRecord | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -240,16 +218,6 @@ const asNonEmptyString = (value: unknown): string | null =>
 
 const asInteger = (value: unknown): number | null =>
   typeof value === "number" && Number.isInteger(value) ? value : null;
-
-const resolveActionType = (value: unknown): ActionType | null =>
-  typeof value === "string" && ACTION_TYPES.has(value as ActionType)
-    ? (value as ActionType)
-    : null;
-
-const resolveRequestedExecutionMode = (value: unknown): RequestedExecutionMode | null =>
-  typeof value === "string" && REQUESTED_EXECUTION_MODES.has(value as RequestedExecutionMode)
-    ? (value as RequestedExecutionMode)
-    : null;
 
 const resolveRiskState = (value: unknown): RiskState => resolveSharedRiskState(value);
 
@@ -301,92 +269,15 @@ const resolveEditorFocusAttestation = (
   };
 };
 
-const resolveIssueActionMatrix = (
-  issueScope: IssueScope,
-  state: RiskState
-): XhsSearchGate["issue_action_matrix"] => getIssueActionMatrixEntry(issueScope, state);
-const resolveWriteActionMatrix = (
-  issueScope: IssueScope,
-  actionType: ActionType | null,
-  requestedExecutionMode: RequestedExecutionMode | null
-): WriteActionMatrixDecisionsOutput | null =>
-  actionType === null || requestedExecutionMode === null
-    ? null
-    : getWriteActionMatrixDecisions(issueScope, actionType, requestedExecutionMode);
-
-const resolveReadExecutionPolicy = (): XhsSearchGate["read_execution_policy"] => ({
-  default_mode: READ_EXECUTION_POLICY.default_mode,
-  allowed_modes: [...READ_EXECUTION_POLICY.allowed_modes],
-  blocked_actions: [...READ_EXECUTION_POLICY.blocked_actions],
-  live_entry_requirements: [...READ_EXECUTION_POLICY.live_entry_requirements]
-});
-
-const resolveFallbackMode = (
-  requestedExecutionMode: RequestedExecutionMode,
-  riskState: RiskState
-): EffectiveExecutionMode => {
-  if (requestedExecutionMode === "live_write") {
-    return "dry_run";
-  }
-  return riskState === "limited" ? "recon" : "dry_run";
-};
-
-const normalizeApprovalRecord = (
-  value: unknown
-): XhsSearchGate["approval_record"] => {
-  const record = asRecord(value);
-  const checksRecord = asRecord(record?.checks);
-  const checks = Object.fromEntries(
-    REQUIRED_APPROVAL_CHECKS.map((key) => [key, asBoolean(checksRecord?.[key])])
-  ) as Record<string, boolean>;
-
-  return {
-    approved: asBoolean(record?.approved),
-    approver: asNonEmptyString(record?.approver),
-    approved_at: asNonEmptyString(record?.approved_at),
-    checks
-  };
-};
-
-const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
-  const actionType = resolveActionType(options.action_type);
-  const requestedExecutionMode = resolveRequestedExecutionMode(options.requested_execution_mode);
-  const issueScope = resolveIssueScope(options.issue_scope);
-  const riskState = resolveRiskState(options.risk_state);
-  const issue208EditorInputValidation = isIssue208EditorInputValidation(options);
-  const readExecutionPolicy = resolveReadExecutionPolicy();
-  const issueActionMatrix = resolveIssueActionMatrix(issueScope, riskState);
-  const writeActionMatrixDecisions = resolveWriteActionMatrix(
-    issueScope,
-    actionType,
-    requestedExecutionMode
-  );
-  const currentWriteActionDecision =
-    writeActionMatrixDecisions?.decisions.find((entry) => entry.state === riskState) ?? null;
-  const fallbackMode = resolveFallbackMode(requestedExecutionMode ?? "dry_run", riskState);
+const resolveActualTargetGateReasons = (options: XhsSearchOptions): string[] => {
+  const gateReasons: string[] = [];
   const targetDomain = asNonEmptyString(options.target_domain);
   const targetTabId = asInteger(options.target_tab_id);
   const targetPage = asNonEmptyString(options.target_page);
   const actualTargetDomain = asNonEmptyString(options.actual_target_domain);
   const actualTargetTabId = asInteger(options.actual_target_tab_id);
   const actualTargetPage = asNonEmptyString(options.actual_target_page);
-  const abilityAction = asNonEmptyString(options.ability_action);
-  const approvalRecord = normalizeApprovalRecord(options.approval_record ?? options.approval);
-  const gateReasons: string[] = [];
-  let gateDecision: ConsumerGateResult["gate_decision"] = "allowed";
-  let effectiveExecutionMode: EffectiveExecutionMode = requestedExecutionMode;
 
-  if (!targetDomain) {
-    gateReasons.push("TARGET_DOMAIN_NOT_EXPLICIT");
-  } else if (!XHS_ALLOWED_DOMAINS.has(targetDomain)) {
-    gateReasons.push("TARGET_DOMAIN_OUT_OF_SCOPE");
-  }
-  if (targetTabId === null || targetTabId <= 0) {
-    gateReasons.push("TARGET_TAB_NOT_EXPLICIT");
-  }
-  if (!targetPage) {
-    gateReasons.push("TARGET_PAGE_NOT_EXPLICIT");
-  }
   if (actualTargetDomain && targetDomain && actualTargetDomain !== targetDomain) {
     gateReasons.push("TARGET_DOMAIN_CONTEXT_MISMATCH");
   }
@@ -399,187 +290,28 @@ const resolveGate = (options: XhsSearchOptions): XhsSearchGate => {
   if (actualTargetPage && targetPage && actualTargetPage !== targetPage) {
     gateReasons.push("TARGET_PAGE_CONTEXT_MISMATCH");
   }
-  if (!actionType) {
-    gateReasons.push("ACTION_TYPE_NOT_EXPLICIT");
-  }
-  if (!requestedExecutionMode) {
-    gateReasons.push("REQUESTED_EXECUTION_MODE_NOT_EXPLICIT");
-  }
-  if (abilityAction && actionType && abilityAction !== actionType) {
-    gateReasons.push("ABILITY_ACTION_CONTEXT_MISMATCH");
-  }
-  if (requestedExecutionMode === "live_write" && actionType === "irreversible_write") {
-    gateReasons.push("IRREVERSIBLE_WRITE_NOT_ALLOWED");
-  }
-  if (requestedExecutionMode === "live_write" && !issue208EditorInputValidation) {
-    gateReasons.push("EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
-  }
-  if (targetDomain === XHS_WRITE_DOMAIN && actionType === "read") {
-    gateReasons.push("ACTION_DOMAIN_MISMATCH");
-  }
-  if (targetDomain === XHS_READ_DOMAIN && actionType && actionType !== "read") {
-    gateReasons.push("ACTION_DOMAIN_MISMATCH");
-  }
 
-  if (gateReasons.length > 0) {
-    gateDecision = "blocked";
-    if (
-      requestedExecutionMode === "live_read_limited" ||
-      requestedExecutionMode === "live_read_high_risk" ||
-      requestedExecutionMode === "live_write"
-    ) {
-      effectiveExecutionMode = fallbackMode;
-    }
-  } else if (
-    issueScope === "issue_208" &&
-    actionType &&
-    actionType !== "read" &&
-    requestedExecutionMode !== null &&
-    currentWriteActionDecision
-  ) {
-    if (
-      currentWriteActionDecision.decision === "blocked" ||
-      currentWriteActionDecision.decision === "not_applicable"
-    ) {
-      effectiveExecutionMode = fallbackMode;
-      gateDecision = "blocked";
-      gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
-      gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
-    } else if (currentWriteActionDecision.decision === "conditional") {
-      const missingChecks = REQUIRED_APPROVAL_CHECKS.filter((key) => !approvalRecord.checks[key]);
-      if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
-        gateReasons.push("MANUAL_CONFIRMATION_MISSING");
-      }
-      if (missingChecks.length > 0) {
-        gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
-      }
-      if (!issue208EditorInputValidation) {
-        gateReasons.push("EDITOR_INPUT_VALIDATION_REQUIRED");
-      }
-      if (gateReasons.length === 0) {
-        gateDecision = "allowed";
-        effectiveExecutionMode = requestedExecutionMode;
-        gateReasons.push("WRITE_INTERACTION_APPROVED");
-        gateReasons.push("ISSUE_208_EDITOR_INPUT_VALIDATION_APPROVED");
-      } else {
-        effectiveExecutionMode = fallbackMode;
-        gateDecision = "blocked";
-      }
-    } else {
-      gateDecision = "allowed";
-      effectiveExecutionMode = requestedExecutionMode;
-      gateReasons.push("WRITE_INTERACTION_ALLOWED");
-    }
-  } else if (actionType && actionType !== "read") {
-    gateDecision = "blocked";
-    if (
-      requestedExecutionMode === "live_read_limited" ||
-      requestedExecutionMode === "live_read_high_risk"
-    ) {
-      effectiveExecutionMode = fallbackMode;
-      gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
-    }
-    gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
-    gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
-  } else if (requestedExecutionMode === "dry_run" || requestedExecutionMode === "recon") {
-    gateReasons.push(
-      requestedExecutionMode === "recon" ? "DEFAULT_MODE_RECON" : "DEFAULT_MODE_DRY_RUN"
-    );
-  } else {
-    effectiveExecutionMode = fallbackMode;
-    gateDecision = "blocked";
-
-    if (requestedExecutionMode === "live_read_high_risk" && actionType !== "read") {
-      gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
-    }
-    if (requestedExecutionMode === "live_read_limited" && actionType !== "read") {
-      gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
-    }
-    if (requestedExecutionMode === "live_write" && actionType === "read") {
-      gateReasons.push("ACTION_TYPE_MODE_MISMATCH");
-    }
-    const isLiveReadMode =
-      requestedExecutionMode === "live_read_limited" ||
-      requestedExecutionMode === "live_read_high_risk";
-    const isBlockedByStateMatrix =
-      requestedExecutionMode !== null &&
-      issueActionMatrix.blocked_actions.includes(requestedExecutionMode);
-    if (isBlockedByStateMatrix) {
-      if (isLiveReadMode) {
-        gateReasons.push(`RISK_STATE_${riskState.toUpperCase()}`);
-        gateReasons.push("ISSUE_ACTION_MATRIX_BLOCKED");
-      } else {
-        gateReasons.push("ISSUE_ACTION_BLOCKED_BY_STATE_MATRIX");
-      }
-    }
-
-    const liveModeCanEnter =
-      requestedExecutionMode !== null &&
-      issueActionMatrix.conditional_actions.some((entry) => entry.action === requestedExecutionMode) &&
-      isLiveReadMode;
-
-    if (liveModeCanEnter) {
-      const missingChecks = REQUIRED_APPROVAL_CHECKS.filter((key) => !approvalRecord.checks[key]);
-      if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
-        gateReasons.push("MANUAL_CONFIRMATION_MISSING");
-      }
-      if (missingChecks.length > 0) {
-        gateReasons.push("APPROVAL_CHECKS_INCOMPLETE");
-      }
-
-      if (gateReasons.length === 0) {
-        gateDecision = "allowed";
-        effectiveExecutionMode = requestedExecutionMode;
-        gateReasons.push("LIVE_MODE_APPROVED");
-      }
-    }
-  }
-
-  return {
-    scope_context: {
-      platform: "xhs",
-      read_domain: XHS_READ_DOMAIN,
-      write_domain: XHS_WRITE_DOMAIN,
-      domain_mixing_forbidden: true
-    },
-    read_execution_policy: readExecutionPolicy,
-    issue_action_matrix: issueActionMatrix,
-    write_interaction_tier: WRITE_INTERACTION_TIER,
-    write_action_matrix_decisions: writeActionMatrixDecisions,
-    gate_input: {
-      issue_scope: issueScope,
-      target_domain: targetDomain,
-      target_tab_id: targetTabId,
-      target_page: targetPage,
-      action_type: actionType,
-      requested_execution_mode: requestedExecutionMode,
-      risk_state: riskState
-    },
-    gate_outcome: {
-      effective_execution_mode: effectiveExecutionMode,
-      gate_decision: gateDecision,
-      gate_reasons: gateReasons,
-      requires_manual_confirmation:
-        requestedExecutionMode === "live_read_limited" ||
-        requestedExecutionMode === "live_read_high_risk" ||
-        requestedExecutionMode === "live_write"
-    },
-    consumer_gate_result: {
-      risk_state: riskState,
-      issue_scope: issueScope,
-      target_domain: targetDomain,
-      target_tab_id: targetTabId,
-      target_page: targetPage,
-      action_type: actionType,
-      requested_execution_mode: requestedExecutionMode,
-      effective_execution_mode: effectiveExecutionMode,
-      gate_decision: gateDecision,
-      gate_reasons: gateReasons,
-      write_interaction_tier: writeActionMatrixDecisions?.write_interaction_tier ?? null
-    },
-    approval_record: approvalRecord
-  };
+  return gateReasons;
 };
+
+const resolveGate = (options: XhsSearchOptions): XhsSearchGate =>
+  evaluateXhsGate({
+    issueScope: options.issue_scope,
+    riskState: options.risk_state,
+    targetDomain: options.target_domain,
+    targetTabId: options.target_tab_id,
+    targetPage: options.target_page,
+    actualTargetDomain: options.actual_target_domain,
+    actualTargetTabId: options.actual_target_tab_id,
+    actualTargetPage: options.actual_target_page,
+    requireActualTargetPage: true,
+    actionType: options.action_type,
+    abilityAction: options.ability_action,
+    requestedExecutionMode: options.requested_execution_mode,
+    approvalRecord: options.approval_record ?? options.approval,
+    issue208EditorInputValidation: isIssue208EditorInputValidation(options),
+    treatMissingEditorValidationAsUnsupported: true
+  }) as XhsSearchGate;
 
 const resolveRiskStateOutput = (
   gate: XhsSearchGate,
