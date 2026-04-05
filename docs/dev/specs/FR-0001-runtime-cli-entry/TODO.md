@@ -12,15 +12,15 @@
 - [x] 本地运行文档相关最小校验
 - [x] 在 GitHub Issue `#141` 中绑定 `FR-0001`
 - [x] 创建仅包含规约文档的 Draft PR
-- [ ] 完成 spec review，并收敛所有 findings / blockers
+- [x] 完成 spec review，并收敛所有 findings / blockers
 
-## 进入实现前条件
+## 实现准入结论回写
 
-- [ ] 获得 `APPROVE`
-- [ ] 获得 `ready_for_implementation = true`
-- [ ] 确认 FR-0001 的实现 PR 与 spec PR 分离
+- [x] spec review 结论为 `APPROVE`
+- [x] 已获得 `ready_for_implementation = true`
+- [x] 已确认 FR-0001 的实现 PR 与 spec PR 分离
 
-在以上三项完成前，不启动 FR-0001 的实现代码。
+以上三项用于回写 `#160` / `#162` 已形成的实现准入结论，不表示当前 PR 在实现启动前重新建立这些前置条件。
 
 ## Spec Review 通过后进入实现
 
