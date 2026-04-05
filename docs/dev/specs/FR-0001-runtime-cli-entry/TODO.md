@@ -13,14 +13,22 @@
 - [x] 在 GitHub Issue `#141` 中绑定 `FR-0001`
 - [x] 创建仅包含规约文档的 Draft PR
 - [x] 完成 spec review，并收敛所有 findings / blockers
+- [x] `data-model.md` 的 formal review coverage 已由 `#353` 补齐
 
-## 实现准入结论回写
+## 进入实现前条件（门禁定义）
 
-- [x] spec review 结论为 `APPROVE`
-- [x] 已获得 `ready_for_implementation = true`
-- [x] 已确认 FR-0001 的实现 PR 与 spec PR 分离
+- 获得 `APPROVE`
+- 获得 `ready_for_implementation = true`
+- 确认 FR-0001 的实现 PR 与 spec PR 分离
 
-以上三项用于回写 `#160` / `#162` 已形成的实现准入结论，不表示当前 PR 在实现启动前重新建立这些前置条件。
+本节保留为进入实现前的门禁定义，不在 close-out 回写中倒写为历史上已先行满足；当前 formal 收口记录见下节。
+
+## Formal 收口记录
+
+- [x] `#160` 已给出 FR-0001 的 `APPROVE`
+- [x] `#160` 已给出 FR-0001 的 `ready_for_implementation = true`
+- [x] `#162` 已作为独立实现 PR 合入，说明 FR-0001 的 spec PR 与实现 PR 分离已实际成立
+- [x] `#353` 已补齐 `data-model.md` 的 formal review coverage，因此当前套件缺失项已收口完毕
 
 ## Spec Review 通过后进入实现
 
