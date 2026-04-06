@@ -14,7 +14,7 @@ ProfileDirectory 是浏览器 UserDataDir 对应的物理目录。
 
 - `profileName`：Profile 的稳定名称
 - `profileDir`：Profile 目录绝对路径
-- `browserChannel`：浏览器通道标识
+- `browserChannel`：浏览器通道标识；这里只表示目录 / 运行时上下文属性，不代表它属于 FR-0003 `__webenvoy_meta.json` 基线白名单
 - `createdAt`：目录首次稳定初始化时间
 
 约束：
@@ -115,6 +115,7 @@ FR-0003 基线下，`__webenvoy_meta.json` 只允许以下顶层字段：
 - `proxyBinding.url` 为空表示直连，不代表缺失或待定。
 - `updatedAt` 必须在每次状态变更或绑定变更后刷新。
 - `fingerprintSeeds` 与 `localStorageSnapshots` 仅承载最小会话摘要 / 恢复输入，不得膨胀为账号资产总表。
+- `fingerprintSeeds` 只承载稳定 seed，不承载 `runtime_bootstrap_envelope`、`fingerprint_runtime`、`fingerprint_patch_manifest`、`main_world_secret` 等 FR-0015 单次运行 bootstrap 字段。
 - 不允许把账号健康、矩阵调度、风控分数写入该文件。
 - `run_id` 只属于 FR-0001 定义的单次 CLI 调用上下文；即使实现会把命令级 `run_id` 写入锁文件审计，也不得把它持久化为 `ProfileMeta` 字段。
 - 后续 FR 只能以“加性可选字段”方式扩展 `ProfileMeta`；新增字段必须在对应 formal spec / data-model 中冻结字段边界、生命周期、非法值处理与回滚策略，且不得改写 FR-0003 基线字段语义。

@@ -47,7 +47,7 @@ disconnected -> starting
 
 - `uninitialized` 表示该 Profile 目录和最小元数据尚未形成稳定初始化结果。
 - `starting` 表示浏览器正在启动并绑定该 Profile。
-- `ready` 表示浏览器已可用，Profile 可被后续命令复用。
+- `ready` 表示浏览器已可用，Profile 可被后续命令复用；它只表达 FR-0003 的本地 lifecycle ready，不等同于 FR-0002 transport ready 或 FR-0015 runtime readiness ready。
 - `logging_in` 表示用户正在通过可见浏览器完成一次手动登录。
 - `disconnected` 表示浏览器进程退出、连接断开或异常中止。
 - `stopping` 表示正在主动关闭当前浏览器实例。
@@ -68,7 +68,7 @@ disconnected -> starting
 
 - `absent` 表示当前没有活动浏览器实例
 - `starting` 表示浏览器正在拉起
-- `ready` 表示浏览器可用并可接收后续命令
+- `ready` 表示浏览器在本地生命周期层面可用并可接收 FR-0003 范围内的后续命令；它不单独证明 transport/bootstrap/readiness 全部就绪
 - `logging_in` 表示可见浏览器正处于手动登录流程
 - `stopping` 表示浏览器正在主动关闭
 - `disconnected` 表示活动浏览器曾存在，但当前已断连或异常退出
@@ -238,6 +238,13 @@ disconnected -> starting
 
 - `audioNoiseSeed`
 - `canvasNoiseSeed`
+
+并且 `fingerprintSeeds` 只允许承载稳定 seed，不得承载以下 FR-0015 单次运行 bootstrap 字段：
+
+- `runtime_bootstrap_envelope`
+- `fingerprint_runtime`
+- `fingerprint_patch_manifest`
+- `main_world_secret`
 
 其中 `localStorageSnapshots` 用于保存最小的 SPA 鉴权快照，不要求导出全部浏览器会话细节；在 FR-0003 中它只作为最小会话摘要 / 恢复输入，不要求自动回写到后续浏览器会话。
 

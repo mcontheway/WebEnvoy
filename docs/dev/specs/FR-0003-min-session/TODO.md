@@ -23,11 +23,14 @@
 - [x] 完成 `#356` 要求的 formal closeout 文档回写，并清空当前套件内的文档 blocker
 - [x] 确认 FR-0003 的实现链路必须保持 spec / impl 分离
 
-## Formal 收口说明
+## Formal 收口依据
 
-- 本次 `#356` 仅回写 FR-0003 formal closeout 所需的正式文档边界，不新增或追溯填写外部 PR、guardian verdict、merge 或审批编号。
-- 外部 review / 审批 / 合入事实仍以 GitHub issue、PR 与 review 记录为准，不在本地 `TODO.md` 伪造补录。
-- FR-0003 的后续实现仍必须走独立实现 PR，并继续遵守 spec / impl 分离。
+- `#168` 已作为 FR-0003 的正式契约同步 issue 持续保留，且已有“FR-0003 已完成并进入主干；对应规约与实现已合并”的历史记录，可作为本次 closeout 的正式存量依据。
+- `#167` 已作为 FR-0003 的独立规约评审 PR 合入，说明 FR-0003 的 formal spec review 链路已经实际存在。
+- `#171/#181` 已以独立实现 PR 的形式合入，说明 FR-0003 的 spec / impl 分离策略已经实际成立。
+- `#182` 已进一步收紧 `localStorageSnapshots` 的最小边界，说明 `__webenvoy_meta.json` 中该字段的“最小会话摘要 / 恢复输入”口径已经在正式链路中得到补强。
+- `#354/#355` 已完成 formal 收口，FR-0003 承接的 CLI 外层契约与最小通信基座已不再构成当前 closeout 阻塞。
+- 本次 `#356` 仅回写 FR-0003 formal closeout 所需的正式文档边界，不追溯伪造外部 guardian verdict 或补录不存在的审批事实；以上 closeout 结论以“formal review 链路已存在 + 独立实现已成立 + 上游基座已完成收口”为准。
 
 ## Implementation Backlog
 
