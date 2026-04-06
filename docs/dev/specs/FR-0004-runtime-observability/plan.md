@@ -171,13 +171,13 @@
 
 ## 进入实现前条件
 
-只有在以下条件满足后，才允许进入 `feat/FR-0004-*` 的实现工作：
+以下条件是未来进入 `feat/FR-0004-*` 实现工作的门禁，当前未满足前不得进入：
 
-- 当前 spec-only 变更已经进入 Draft PR 或等价评审上下文
-- spec review 结论为 `APPROVE`
+- spec-only 变更先进入 Draft PR 或等价评审上下文
+- spec review 结论达到 `APPROVE`
 - `ready_for_implementation = true`
-- `contracts/runtime-observability.md` 与 `risks.md` 已随套件一起评审
-- `TODO.md` 中的 review blockers 已清空
+- `contracts/runtime-observability.md` 与 `risks.md` 随套件一起完成评审
+- `TODO.md` 中的 review blockers 清空
 
 在这些条件满足前，明确禁止：
 
@@ -185,4 +185,4 @@
 - 把完整暂停 / 恢复系统混入当前实现切片
 - 破坏 FR-0001 已冻结的外层错误壳与退出码
 
-formal closeout 后，本计划只保留后续实现消费边界；不在此文件补写外部 PR、guardian 或 merge 历史事实。
+在 formal review 通过并完成 closeout 后，本计划只保留后续实现消费边界；不在此文件补写外部 PR、guardian 或 merge 历史事实。

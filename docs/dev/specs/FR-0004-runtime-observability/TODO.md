@@ -2,12 +2,12 @@
 
 > 本文件只记录 FR-0004 的 formal closeout 状态与实现消费边界，不追溯外部 Draft PR、guardian、merge 或审批载体事实。
 
-## 进入实现前条件（门禁定义）
+## 进入实现前条件（未来门禁）
 
-- 获得 `APPROVE`
-- 获得 `ready_for_implementation = true`
-- 确认 FR-0004 的实现工作承接 FR-0001 外层壳与 FR-0002 transport 边界，不重写上游契约
-- 确认 `contracts/runtime-observability.md`、`plan.md`、`risks.md` 已随套件一起完成 formal closeout 审查
+- 待获得 `APPROVE`
+- 待获得 `ready_for_implementation = true`
+- 在后续实现前确认 FR-0004 的实现工作承接 FR-0001 外层壳与 FR-0002 transport 边界，不重写上游契约
+- 在后续 formal review 通过后，确认 `contracts/runtime-observability.md`、`plan.md`、`risks.md` 已随套件一起完成 formal closeout 审查
 
 ## Formal 收口依据
 
@@ -22,12 +22,12 @@
 - [x] 与 `#359` 的诊断落库边界、与 `#360` 的 `run_id` / 能力错误关联边界已冻结。
 - [x] 当前 formal closeout 范围内的 findings 与 blockers 已收敛。
 
-## 当前 closeout 记录
+## 当前 review 状态
 
-- [x] `#357` 当前只回写 FR-0004 正式套件的 formal closeout 状态，不重开 FR-0004 边界或实现范围。
-- [x] FR-0004 当前可在本地正式套件口径下记录为 `APPROVE`。
-- [x] FR-0004 当前可在本地正式套件口径下记录为 `ready_for_implementation = true`。
-- [x] FR-0004 当前可在本地正式套件口径下记录为 `formal_closeout = complete`。
+- [x] `#357` 当前只回写 FR-0004 正式套件的 review 状态，不重开 FR-0004 边界或实现范围。
+- [ ] FR-0004 仍需在 formal review 通过后，才能记录为 `APPROVE`。
+- [ ] FR-0004 仍需在 formal review 通过后，才能记录为 `ready_for_implementation = true`。
+- [ ] FR-0004 仍需在 formal review 通过后，才能记录为 `formal_closeout = complete`。
 
 ## 进入实现后由后续事项承接
 
