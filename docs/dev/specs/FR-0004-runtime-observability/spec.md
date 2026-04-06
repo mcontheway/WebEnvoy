@@ -4,7 +4,7 @@
 
 Phase 1 已经明确要先打通首个 L3 最小闭环，但如果命令只返回黑盒式 `success / fail`，就算流程跑通，也无法判断问题出在页面变化、关键请求失败，还是执行链路中断。
 
-`#154` 吸收了旧的“侦察建模”诉求中，首阶段真正需要的部分，目标不是提前建立完整暂停 / 恢复系统，而是在不改变 FR-0001 外层错误壳和退出码的前提下，补上最小观察、最小错误分类和结构化诊断能力。
+历史 issue `#154` 吸收了旧的“侦察建模”诉求中首阶段真正需要的部分；当前 formal closeout 由 issue `#357` 承接。它的目标不是提前建立完整暂停 / 恢复系统，而是在不改变 FR-0001 外层错误壳和退出码的前提下，补上最小观察、最小错误分类和结构化诊断能力。
 
 ## 目标
 
@@ -126,7 +126,7 @@ And 系统不应伪造不存在的页面状态或关键请求
 - 前置契约：
   - [FR-0001 CLI 最小入口与可集成契约骨架](../FR-0001-runtime-cli-entry/spec.md)
 - 前置阶段能力：
-  - `#142` 对 CLI ↔ Extension ↔ Content Script 基础通信链路的承接
+  - `#355` 对 CLI ↔ Extension ↔ Content Script 基础通信链路的 formal 承接
   - Phase 1 首个平台读闭环的实现工作
 - 依赖输入：
   - `vision.md`
@@ -134,4 +134,8 @@ And 系统不应伪造不存在的页面状态或关键请求
   - `docs/dev/architecture/system-design.md`
   - `docs/dev/architecture/system-design/communication.md`
   - `docs/dev/architecture/system-design/error-handling.md`
-  - `gh issue view 154`
+- Governing issue：
+  - `#357`
+- 共享边界：
+  - `#359`（最小诊断字段落库与脱敏 / 截断边界）
+  - `#360`（`run_id` 与能力错误关联边界）
