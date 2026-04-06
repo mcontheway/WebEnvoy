@@ -4,7 +4,7 @@
 
 Phase 1 已经冻结了 CLI 的最小调用面。下一步需要把“能被稳定调用”推进到“能稳定拉起一个绑定 Named Profile 的浏览器，并保留最小身份 / 会话边界”。
 
-Issue #143 要求的不是完整账号系统，也不是长期运营基座，而是为后续平台读取、最小写入和会话复用提供一个足够窄的运行时底座。这个底座必须回答四个问题：
+历史 issue `#143` 提出了最小身份 / 会话基座的目标；当前 formal closeout 由 issue `#356` 承接。这个底座要求的不是完整账号系统，也不是长期运营基座，而是为后续平台读取、最小写入和会话复用提供一个足够窄的运行时底座。这个底座必须回答四个问题：
 
 1. 浏览器如何按指定 Profile 拉起。
 2. Named Profile 如何作为最小身份边界被持久化。
@@ -32,6 +32,32 @@ Issue #143 要求的不是完整账号系统，也不是长期运营基座，而
 - 不在本 FR 中定义平台级读写命令的业务语义。
 - 不在本 FR 中实现 `localStorageSnapshots` 自动回写到后续浏览器会话。
 
+## 与相邻 FR 的边界
+
+### 与 FR-0001 的边界
+
+- FR-0001 冻结 CLI 外层调用壳、`stdout/stderr` 边界、退出码与命令级 `run_id` 语义；FR-0003 只承接这套外层契约，不重写它。
+- FR-0003 的 `runtime.start`、`runtime.login`、`runtime.status`、`runtime.stop` 都必须复用 FR-0001 的单次调用 `run_id`；每次命令调用各自拥有一个 `run_id`，不得引入 Profile 级、浏览器级或元数据级第二套运行标识。
+- FR-0003 允许在锁文件中记录 `ownerRunId` 作为审计 / 恢复输入，但它不是新的共享运行标识，也不是 `__webenvoy_meta.json` 主键。
+
+### 与 FR-0002 的边界
+
+- FR-0002 只冻结 CLI 到页面侧的最小通信闭环、link-layer 状态与 `ERR_TRANSPORT_*` 错误；FR-0003 不承接握手、心跳、转发和 transport error 分类。
+- FR-0003 只定义 Profile / 浏览器生命周期语义；若运行时依赖通信链路，则仍需在 FR-0002 的 transport readiness 上承载。
+- `run_id` 在 FR-0002 中只属于单次转发上下文，不属于握手字段；FR-0003 继续沿用这一分层，不得把会话状态、Profile 元数据或握手字段改写成另一套 `run_id` 语义。
+
+### 与 FR-0006 的边界
+
+- FR-0003 冻结实时 Profile 状态、最小元数据和锁语义；FR-0006 只负责 SQLite 运行记录、历史证据和诊断时间线。
+- FR-0003 的 `runtime.status` 以 Profile 目录、锁和运行时观测为真相源；FR-0006 不得通过 SQLite 回放驱动 `profileState` / `browserState` 切换。
+- FR-0003 只要求把命令级 `run_id` 透传到锁审计 / 运行态关联面；是否落库、如何按 `run_id` 查询历史记录属于 FR-0006。
+
+### 与 FR-0015 的边界
+
+- FR-0003 冻结 Named Profile、最小身份 / 会话模型和 `__webenvoy_meta.json` 基线字段；FR-0015 只允许在 official Chrome persistent extension 迁移语境下，以 formal 加项方式新增 `persistentExtensionBinding`。
+- FR-0015 的 `runtime_bootstrap_envelope`、`runtime_context_id`、bootstrap ack 与 readiness 分层属于单次运行上下文，不得回写成 FR-0003 的基线元数据字段。
+- FR-0003 不承接 stable extension identity、bootstrap transport contract 或 readiness 细分视图；这些能力必须在 FR-0015 自己的 formal contract / data-model 内冻结。
+
 ## 功能需求
 
 ### 1. Named Profile 作为最小身份边界
@@ -58,6 +84,12 @@ Issue #143 要求的不是完整账号系统，也不是长期运营基座，而
 - `runtime.login` 负责打开或保持可见浏览器，让用户完成一次手动登录并将结果持久化回 Profile；若 Profile 尚未初始化，命令可直接创建最小目录与元数据后进入登录流程。
 - `runtime.status` 负责读取当前 Profile 的浏览器态与持久化态，不应修改状态。
 - `runtime.stop` 负责关闭当前 Profile 的浏览器实例并释放锁。
+
+命令级运行标识要求：
+
+- 上述四个命令都必须返回并透传 FR-0001 定义的命令级 `run_id`。
+- 同一 Profile 上连续两次 `runtime.start` / `runtime.login` 即使作用于同一目录，也必须是两个不同的命令级 `run_id`。
+- `runtime.status` 与 `runtime.stop` 同样拥有各自独立的命令级 `run_id`；不能复用先前 `start/login` 的 `run_id` 充当“会话 ID”。
 
 ### 3. 基础状态流转
 
@@ -104,6 +136,22 @@ Issue #143 要求的不是完整账号系统，也不是长期运营基座，而
 - `__webenvoy_meta.json` 只保留运行所需的最小字段，不承载账号矩阵或长期运营信息。
 - `localStorageSnapshots` 在本 FR 中只作为最小会话摘要 / 恢复输入写入元数据与状态回读。
 - 本 FR 不要求把 `localStorageSnapshots` 自动回写到后续浏览器会话。
+- FR-0003 基线下，`__webenvoy_meta.json` 只允许出现以下顶层字段白名单：
+  - `schemaVersion`
+  - `profileName`
+  - `profileDir`
+  - `profileState`
+  - `proxyBinding`
+  - `fingerprintSeeds`
+  - `localStorageSnapshots`
+  - `createdAt`
+  - `updatedAt`
+  - `lastStartedAt`
+  - `lastLoginAt`
+  - `lastStoppedAt`
+  - `lastDisconnectedAt`
+- 上述白名单之外的顶层字段，只有在后续 FR 经 formal spec review 明确冻结后，才允许作为加性可选字段出现；当前已冻结的例外只有 FR-0015 的 `persistentExtensionBinding`。
+- FR-0003 基线下，`__webenvoy_meta.json` 不得持久化 `run_id`、`session_id`、transport session、bootstrap envelope、账号评分或代理池状态。
 
 ## GWT 验收场景
 
@@ -209,6 +257,7 @@ And 本 FR 不要求自动把该快照回写到浏览器会话
 6. 本 FR 未引入账号矩阵、长期运营、代理池或独立会话数据库。
 7. 浏览器启动与最小身份 / 会话模型能为后续 `#145`、`#146`、`#148` 提供稳定承载面。
 8. `localStorageSnapshots` 在本 FR 中仅作为最小会话摘要 / 恢复输入，不作为自动回写浏览器会话的完成标准。
+9. FR-0003 与 FR-0001 / FR-0002 / FR-0006 / FR-0015 的边界分工、`run_id` 口径、`__webenvoy_meta.json` 字段白名单与错误码白名单都已形成正式冻结表述。
 
 ## 依赖与前置条件
 
@@ -224,10 +273,12 @@ And 本 FR 不要求自动把该快照回写到浏览器会话
   - `docs/dev/specs/FR-0001-runtime-cli-entry/spec.md`
   - `docs/dev/specs/FR-0001-runtime-cli-entry/contracts/cli-entry.md`
 - Governing issue：
-  - `#143`
+  - `#356`
 - 前置能力：
-  - `#141` 的 CLI 最小入口与可集成契约
+  - `#354` 已收口 FR-0001 的 CLI 最小入口与可集成契约
 - 并行协同：
-  - `#142`、`#144`
+  - `#355`（最小通信闭环 formal 基座）
+  - `#359`（SQLite 运行记录映射边界）
+  - `#361`（official Chrome 主方案下的运行时增量边界）
 - 后续承接：
   - `#145`、`#146`、`#148`

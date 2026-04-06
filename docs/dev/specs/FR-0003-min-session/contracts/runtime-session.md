@@ -18,6 +18,12 @@
 - 直接消费者：后续平台读取命令、测试程序、人工 smoke 流程
 - 间接消费者：`#145`、`#146`、`#148`
 
+## 运行标识兼容边界
+
+- 所有 `runtime.start` / `runtime.login` / `runtime.status` / `runtime.stop` 命令都复用 FR-0001 已冻结的外层 `run_id`。
+- FR-0003 不另起第二套运行标识体系，也不把 `run_id` 写成 Profile 元数据主键。
+- `ProfileLock.ownerRunId` 仅用于锁审计、陈旧锁识别和异常恢复，不对外替代 FR-0001 的命令级 `run_id` 语义。
+
 ## 状态模型
 
 ### Profile 状态
