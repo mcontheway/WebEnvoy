@@ -40,7 +40,8 @@
 - `#182` 进一步收紧 `localStorageSnapshots` 的最小边界，说明 `__webenvoy_meta.json` 中该字段的“最小会话摘要 / 恢复输入”口径已经在正式链路中得到补强。
 - `#372` 的 latest guardian review 已在 commit `fd34a4abe3f09f795f51bec76dae1bba9aca1fa2` 上于 `2026-04-06T07:32:35Z` 明确给出 `APPROVE`，随后该 PR 于 `2026-04-06T07:32:44Z` 合入主干，merge commit 为 `fda39a211ff3fa50acdfe6fa27d8e0e8b7f6ec8f`。
 - `#354/#355` 已完成 formal 收口，FR-0003 承接的 CLI 外层契约与最小通信基座已不再构成当前 review 阻塞。
-- 本次 `#356` 回写 FR-0003 formal review 所需的正式文档边界，并以“formal review 链路已存在 + 独立实现已成立 + 上游基座已完成收口 + `#372` latest guardian 已 `APPROVE` 且随后合入主干”为依据记录最终 formal verdict。
+- `#379` 已安全合并，但它只承担 final writeback-only，不重开 spec；`#372` 才是 actual formal-review record。
+- 本次 `#356` finalization 只负责把 FR-0003 的最终完成态正确落回主干，并以“formal review 链路已存在 + 独立实现已成立 + 上游基座已完成收口 + `#372` latest guardian 已 `APPROVE` 且随后合入主干”为依据记录最终 formal verdict。
 
 ## Implementation Backlog
 
