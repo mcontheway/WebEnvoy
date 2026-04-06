@@ -22,7 +22,7 @@
 - [x] `#355` 已完成通信闭环 formal 承接，因此 FR-0004 新增观测字段不构成 transport 侧阻塞。
 - [x] 与 `#359` 的诊断落库边界、与 `#360` 的 `run_id` / 能力错误关联边界已冻结。
 - [x] 当前 formal closeout 范围内的 findings 与 blockers 已收敛。
-- [x] `#373` 承载 FR-0004 actual formal-review record；该 PR 在受控合并前已获得 guardian `APPROVE` 且 GitHub checks 全绿，并于 `2026-04-06T06:36:14Z` 合入主干，merge commit 为 `3f16de8d8525aa36e77eaa16dfc028c0163ff016`。以上 PR 编号、guardian 通过结论、GitHub checks 全绿与 merge commit 共同构成 merge-stable closeout evidence。
+- [x] `#373` 承载 FR-0004 actual formal-review record；其最终 guardian `APPROVE` review artifact 为 `https://github.com/mcontheway/WebEnvoy/pull/373#pullrequestreview-4060634038`，该 artifact 于 `2026-04-06T06:36:05Z` 提交，并锚定到 commit `14633757ea67b6e01d6ffc97bdef3650bf624fa7`。该 PR 在受控合并前 GitHub checks 全绿，并于 `2026-04-06T06:36:14Z` 合入主干，merge commit 为 `3f16de8d8525aa36e77eaa16dfc028c0163ff016`。以上 review artifact、checks 结果、mergedAt 与 merge commit 共同构成 merge-stable closeout evidence。
 
 ## 当前 review 状态
 
