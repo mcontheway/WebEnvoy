@@ -20,11 +20,13 @@
 - [x] external formal spec review 已完成并收敛 findings / blockers
 - [x] formal 结论：`APPROVE`
 - [x] formal 结论：`ready_for_implementation = true`
+- [x] PR `#374` 的 latest guardian review 在 commit `15440dc07dbab3a6f1e3d1426255f53988f2ee79` 上于 `2026-04-06T08:11:40Z` 明确给出 `APPROVE`
 
 当前状态说明：
 
 - FR-0007 的 final formal verdict 已回写为完成；相邻 FR 边界的实现承接复核不再构成本次 closeout 的门禁。
 - PR `#374` 已合入主干，merge commit 为 `cb6262d1e39eef3048030074267ca62a221fc24c`，mergedAt 为 `2026-04-06T08:11:48Z`，可作为本次最终 formal verdict 的可核实依据。
+- 该 verdict 的可核实链路为：`#374` latest guardian review 在 `15440dc07dbab3a6f1e3d1426255f53988f2ee79` 上于 `2026-04-06T08:11:40Z` 明确给出 `APPROVE`，随后该 PR 于 `2026-04-06T08:11:48Z` 合入主干。
 
 ## 进入实现前条件（门禁定义）
 
