@@ -119,7 +119,7 @@ FR-0003 基线下，`__webenvoy_meta.json` 只允许以下顶层字段：
 - 不允许把账号健康、矩阵调度、风控分数写入该文件。
 - `run_id` 只属于 FR-0001 定义的单次 CLI 调用上下文；即使实现会把命令级 `run_id` 写入锁文件审计，也不得把它持久化为 `ProfileMeta` 字段。
 - 后续 FR 只能以“加性可选字段”方式扩展 `ProfileMeta`；新增字段必须在对应 formal spec / data-model 中冻结字段边界、生命周期、非法值处理与回滚策略，且不得改写 FR-0003 基线字段语义。
-- 在当前已冻结的后续 FR 中，`FR-0015` 允许以受控加项形式新增 `persistentExtensionBinding`；该字段不属于 FR-0003 原生基线字段，只在 FR-0015 formal 边界内有效。
+- 如后续 FR 需要新增 `persistentExtensionBinding` 等 profile meta 字段，必须先在各自 formal 套件中完成审批并冻结边界；在此之前，这些字段都不属于 FR-0003 原生基线字段。
 
 ### `localStorageSnapshots` 语义约束
 
