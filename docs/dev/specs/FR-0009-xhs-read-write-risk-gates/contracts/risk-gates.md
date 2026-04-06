@@ -114,8 +114,9 @@
 4. 必须保留可被后续事项引用的审批记录；formal closeout 留痕与未来运行时审批 / 审计记录不得混为同一正式载体。
 5. `approver_recorded=true` 表示 live 放行所需的审批已被真实记录，且该记录可被后续执行契约消费；本 FR 不把具体实现硬编码为 GitHub issue / PR 记录。
 6. `approver_recorded=true` 只有在同时存在以下两类可复核记录时才成立：
-   - approval record：至少包含 `approver`、`approved_at`、`checks`
-   - audit trail：至少包含与同一次恢复判断对应的执行模式、门禁决策与 `recorded_at`
+   - approval record：至少包含 `approver`、`approved_at`、`checks`、`approval_record_ref`
+   - audit trail：至少包含与同一次恢复判断对应的执行模式、门禁决策、`recorded_at`、`audit_record_ref`
+7. `approval_record_ref` 与 `audit_record_ref` 必须是稳定、可复核、不可歧义的记录引用；formal closeout 阶段可指向 canonical PR review artifact / sync comment permalink，后续执行阶段则由运行时审批 / 审计载体继续承接，但这两个引用字段本身不得省略。
 
 ## 兼容性约束
 
