@@ -1,6 +1,6 @@
 # FR-0004 TODO
 
-> 本文件只记录 FR-0004 的 formal closeout 状态与实现消费边界，不追溯外部 Draft PR、guardian、merge 或审批载体事实。
+> 本文件只记录 FR-0004 的 formal closeout 状态与实现消费边界；在可核实前提下，也允许回写 external review / guardian / merge facts，但不把 writeback 伪装成新的 spec review。
 
 ## 进入实现前条件（未来门禁）
 
@@ -21,6 +21,7 @@
 - [x] `#355` 已完成通信闭环 formal 承接，因此 FR-0004 新增观测字段不构成 transport 侧阻塞。
 - [x] 与 `#359` 的诊断落库边界、与 `#360` 的 `run_id` / 能力错误关联边界已冻结。
 - [x] 当前 formal closeout 范围内的 findings 与 blockers 已收敛。
+- [x] `#373` 承载 FR-0004 actual formal-review record；可核实的 guardian / merge facts 可回写到本 TODO 作为 finalization evidence。
 
 ## 当前 review 状态
 
