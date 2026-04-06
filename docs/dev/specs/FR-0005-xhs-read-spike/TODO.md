@@ -24,6 +24,8 @@
 
 - [x] 触发账号异常（`code=300011`）后已暂停 live XHS 交互，避免继续放大风控
 - [x] 明确标记本轮为“部分完成”，非实现就绪
+- [x] 2026-04-06 已按 WebEnvoy-managed profile 口径复查本地执行现场；当前 `.webenvoy/profiles` 不存在可用于 XHS live 复核的已登录 profile
+- [x] 由于缺少 WebEnvoy-managed XHS 会话，本轮按 `No-Go/paused` 收口，不绕过 `#362/#363/#365` 继续 live 扩展
 - [ ] 恢复可用账号/会话后再继续同口径复核
 
 ## #185 阻断点吸收（本次规约修订）
@@ -45,6 +47,8 @@
 
 ## 后续衔接
 
+- [x] 2026-04-06 已形成本轮 Go/No-Go 结论：`No-Go/paused`
+- [x] 本轮不创建“小红书 L3 读适配实现 FR”；等待 WebEnvoy-managed XHS 会话恢复并补齐 `search/detail/user_home` 的 API primary 复核后再重新评估
 - [ ] 完成浏览器内复核后，再决定是否进入后续实现 FR
 - [ ] 若存在 fallback-only 场景：先补 API primary 成功证据，或提交“实现范围修订”并通过独立 spec review
 - [ ] 创建“小红书 L3 读适配实现 FR”并引用 FR-0005 已复核结论

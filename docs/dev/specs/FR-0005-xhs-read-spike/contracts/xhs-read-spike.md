@@ -67,7 +67,7 @@ Spike 输出必须包含以下三个对象：
     ]
   },
   "success_signal": "HTTP 200 + business code success | 页面命中 + __INITIAL_STATE__ 可读 + 关键 store 存在",
-  "failure_signals": ["browser_env_abnormal", "account_abnormal", "gateway_invoker_failed", "signature_entry_missing", "captcha", "session_expired", "invalid_sign"]
+  "failure_signals": ["browser_env_abnormal", "account_abnormal", "gateway_invoker_failed", "signature_entry_missing", "captcha_required", "session_expired", "invalid_sign"]
 }
 ```
 
@@ -78,7 +78,7 @@ Spike 输出必须包含以下三个对象：
 3. `evidence_maturity` 用于表达证据成熟度：
    - `observed_once`：单次样本或单轮观测，不能直接支撑实现准入
    - `reproduced_multi_round`：已满足多轮复现，但仍可能缺少实现前置（如 headers/cookie 实验矩阵）
-   - `admission_ready`：仅允许用于 `route_role=primary` 且 `path_kind=api` 的成功证据，并且必须满足 `plan.md`「进入实现前条件」与本 FR「fallback 非准入」约束，方可作为实现 FR 的直接准入输入
+   - `admission_ready`：仅允许用于 `route_role=primary` 且 `path_kind=api` 的成功证据，并且必须满足 `plan.md`「进入实现前条件」与本 FR「fallback 非准入」约束；该证据还必须绑定 WebEnvoy-managed profile、official runtime 边界和仓库内可复核 replay，方可作为实现 FR 的直接准入输入
    - `route_role=fallback` 或 `path_kind=page` 的记录不得标注为 `admission_ready`
 4. `path_kind=page` 时，`endpoint_catalog` 仅用于冻结 page fallback 最小内容；不得把 fallback 重新建模为完整 API 端点。该场景下字段约束如下：
    - `page_state_fallback` 必填，并且必须至少包含：

@@ -43,3 +43,15 @@
 - 回滚/降级：
   - 停止实现分支推进
   - 回到 FR-0005 规约补齐评审阻断项
+
+## 风险 5：缺少 WebEnvoy-managed XHS 会话导致准入证据失真
+
+- 触发条件：仓库内没有可由 WebEnvoy 管理且保持有效登录态的小红书 profile，只能依赖外部手工浏览器或历史 clone 样本
+- 影响：本轮复核无法绑定 official runtime / profile 边界，`reproduced_multi_round` 与 `admission_ready` 结论都可能失真
+- 缓解：
+  - 先做 `.webenvoy/profiles/**/__webenvoy_meta.json` 准入预检
+  - 没有可用 profile 时，直接按 `No-Go/paused` 收口，不继续 live 复核
+  - 将外部手工浏览器证据保留在 `browser_first_hand` / `candidate` 层，不升级为实现准入输入
+- 回滚/降级：
+  - 暂停本轮 issue 的 live 扩展
+  - 待 WebEnvoy-managed XHS profile 恢复后，再重新执行 `search/detail/user_home` 的同口径复核
