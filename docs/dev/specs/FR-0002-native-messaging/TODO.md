@@ -11,19 +11,21 @@
 - [x] 补齐 `risks.md`
 - [x] 完成 spec review，并清空所有 findings / blockers
 
-## 进入实现前条件
+## 进入实现前条件（门禁定义）
 
-- [x] 获得 `APPROVE`
-- [x] 获得 `ready_for_implementation = true`
-- [x] 确认 FR-0002 的实现 PR 与 spec PR 分离
-- [x] 确认 `#141` / FR-0001 已经可以作为承接基座
+- 获得 `APPROVE`
+- 获得 `ready_for_implementation = true`
+- 确认 FR-0002 的实现 PR 与 spec PR 分离
+- 确认 `#141` / FR-0001 已经可以作为承接基座
 
 ## Formal 收口依据
 
 - `#166` 已完成 FR-0002 的 formal spec review，最终 review 结论为 `APPROVE`。
 - `#173` 已作为独立实现 PR 合入，说明 FR-0002 的 spec PR 与实现 PR 分离策略已经实际成立。
-- `#160` 已明确 FR-0001 `ready_for_implementation = true`，因此 FR-0002 承接的 CLI 外层契约基座已不再构成阻塞。
-- 本次 `#355` 仅回写 formal 收口状态，不重开 FR-0002 协议边界或实现范围；`ready_for_implementation = true` 以“spec review 已通过 + 分离实现已完成 + 上游 CLI 基座已可承接”为准。
+- `#369/#371` 已完成 FR-0001 expanded suite formal 对齐与 close-out 回写，因此 FR-0002 承接的 CLI 外层契约基座已不再构成阻塞。
+- FR-0002 当前可正式记录为 `APPROVE`。
+- FR-0002 当前可正式记录为 `ready_for_implementation = true`。
+- 本次 `#355` 仅回写 formal 收口状态，不重开 FR-0002 协议边界或实现范围；以上 close-out 结论以“spec review 已通过 + 分离实现已完成 + 上游 CLI 基座已完成 expanded suite formal 收口”为准。
 
 在以上条件完成前，不启动 FR-0002 的实现代码。
 
