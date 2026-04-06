@@ -212,5 +212,5 @@
 2. FR-0009 作为治理基线保留；Sprint 2 实现统一消费本契约对象。
 3. `gate_decision` 枚举值变更必须经过独立 spec review。
 4. `gate_reasons` 的新增代码允许追加，不允许复用同义码造成歧义。
-5. `FR-0009` 新增的 live-resume 前置若继续保留，必须在本契约中给出等价机器承载，不得形成 contract drift。
+5. `FR-0009` 新增的 live-resume 前置若继续保留，必须在 formal suites 中明确其归属层级与消费方式，不得形成 contract drift。
 6. `FR-0009.resume_requirements.limited_read_rollout_ready` 继续保留为上游治理前置；在 `FR-0011` 提供正式机器承载前，本契约只能以“默认阻断 `live_read_limited`”的方式消费该前置，不得把它伪装成 Sprint 2 已冻结字段。

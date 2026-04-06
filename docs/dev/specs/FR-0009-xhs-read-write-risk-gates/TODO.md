@@ -1,6 +1,6 @@
 # FR-0009 TODO（读写路径风险审查与保护门禁）
 
-> 本文件记录 FR-0009 在 `#362` 语境下的 formal closeout 状态；canonical formal-review PR 与 final writeback 会分别记录。当前 PR 只负责收敛正式套件与 review 输入，不提前伪造 `APPROVE`、`ready_for_implementation = true` 或 closed issue sync 已完成的事实。
+> 本文件记录 FR-0009 在 `#362` 语境下的 formal closeout 状态；canonical formal-review PR 与 final writeback 会分别记录。当前 PR 只负责收敛正式套件与 review 输入，不提前伪造 `APPROVE`、`formal_closeout = complete` 或 closed issue sync 已完成的事实。
 
 ## Formal Review Repair Snapshot
 
@@ -20,7 +20,6 @@
 
 - [ ] `#362` 的 canonical formal-review PR 已在 guardian `APPROVE` 后受控合入主干。
 - [ ] FR-0009 已记录为 `APPROVE`。
-- [ ] FR-0009 已记录为 `ready_for_implementation = true`。
 - [ ] FR-0009 已记录为 `formal_closeout = complete`。
 
 ## 进入实现前必须完成
