@@ -14,7 +14,7 @@
 - [x] `research.md` 已明确“插件事实中枢 vs CLI-first 叙事”定位张力及其治理影响。
 - [x] `research.md` 已提供“文档已设计 / Phase 1 已落地 / 仍未落地”gap 清单，并说明与预警关系。
 - [x] `spec.md` / `plan.md` / `contracts/` 已明确人工确认流程中的责任人，以及 formal closeout 留痕与后续执行层审批 / 审计载体的边界。
-- [x] 当前 formal 套件已对齐 `#201/#208/#209` 的历史消费语境：本轮只同步 FR-0009 与这些事项的关系，不重定义后续验证事项的关闭语义。
+- [x] 当前 formal 套件已对齐 `#201/#208/#209` 的消费语境：`#201` 作为历史消费者，`#208/#209` 继续作为当前 gate consumer，本轮不重定义后续验证事项的关闭语义。
 
 ## 当前 review 状态
 
@@ -26,7 +26,7 @@
 ## 进入实现前必须完成
 
 - [ ] 完成 FR-0009 spec review 并清零阻断意见。
-- [ ] 在 `#208` 的历史 issue 中写入“FR-0009 已明确其后续 live / replay / 恢复事项必须先消费的前置与禁止动作边界”的 sync comment。
+- [ ] 在 `#208` 的当前 consumer issue 中写入“FR-0009 已明确其后续 live / replay / 恢复事项必须先消费的前置与禁止动作边界”的 sync comment。
 - [ ] 在 `#209` 的历史 issue 中写入“后续高风险 live 扩展需先过 FR-0009 门禁”的 sync comment。
 - [ ] 在 `#201` 的历史 issue 中补充“风险门禁前置已冻结，可作为历史 exit review 的补充输入”的 sync comment。
 - [ ] 明确人工确认流程中的责任人、审批记录载体与审计留痕方式。
@@ -36,7 +36,7 @@
 ## Formal Review 现状依据
 
 - `#215` 继续作为 FR-0009 的 open FR 锚点，承接正式规约入口；`#362` 只承接本轮 formal 收口。
-- `#201/#208/#209` 在本轮只作为历史事项 / 消费者引用；sync comment 只补统一口径，不借此改写其他 FR 已冻结的关闭语义。
+- `#201` 在本轮作为历史消费者引用；`#208/#209` 继续作为当前 gate consumer 引用；sync comment 只补统一口径，不借此改写其他 FR 已冻结的关闭语义。
 - `FR-0009` 本轮只收 formal spec，不进入实现代码，也不以 live evidence 作为关闭依据。
 - final writeback 必须在 canonical formal-review PR 合入后，依据 latest guardian `APPROVE`、GitHub checks 全绿与受控 merge 结果回写。
 
