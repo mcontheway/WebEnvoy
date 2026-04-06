@@ -88,7 +88,7 @@
 1. `default_mode` 在本 FR 生效阶段必须是 `dry_run` 或 `recon`。
 2. 若 `manual_confirmation_required=true`，检查项必须非空。
 3. 规约阶段的人工确认责任人默认是发起本次 live 恢复 / 扩展请求的实现负责人。
-4. 审批记录必须能回链到对应 PR review artifact 与 issue comment；本 FR 不承接运行时持久化审计 schema。
+4. formal closeout 的 review / sync 记录可保留在 GitHub issue / PR 中，但后续 live 放行的正式审批载体不得只依赖这些 GitHub 记录。
 
 ## resume_requirements
 
@@ -109,8 +109,8 @@
 约束：
 
 1. 任一字段为 `false` 时，不得进入 live 放行。
-2. 必须保留审批记录，且可被后续事项引用。
-3. `approver_recorded=true` 仅表示 GitHub issue / PR 中存在可复核的审批与同步记录，不表示运行时已经具备落盘审计能力。
+2. 必须保留可被后续事项引用的审批记录；formal closeout 留痕与未来运行时审批 / 审计记录不得混为同一正式载体。
+3. `approver_recorded=true` 只表示“后续执行契约要求的审批载体已被定义并可复核”，不把具体实现硬编码为 GitHub issue / PR 记录。
 
 ## 兼容性约束
 

@@ -30,21 +30,21 @@
   - 提供四对象稳定契约
   - 在 TODO 中明确消费关系与前置动作
 
-### R4：人工确认责任与审批留痕缺失导致误放行
+### R4：人工确认责任与审批留痕边界不清导致误放行
 
 - 等级：high
-- 触发条件：恢复 limited / allowed live 时，没有明确责任人、PR review artifact 或 issue comment 留痕
+- 触发条件：恢复 limited / allowed live 时，没有明确责任人，或未来执行契约中的审批 / 审计载体仍不清晰
 - 影响：无法复核放行依据、问题责任失焦、后续事项绕过统一口径
 - 缓解：
   - 规约阶段默认由发起 live 恢复 / 扩展请求的实现负责人承担确认责任
-  - 审批记录必须保留在对应 PR review artifact 与 issue sync comment 中
-  - 运行时持久化审计能力延后到 `FR-0010/0011` 承接
+  - formal closeout 留痕与未来执行层审批 / 审计载体必须分开描述
+  - 未来 live 放行所需的正式审批 / 审计记录由 `FR-0010/0011` 承接
 
 ## Stop-Ship 条件
 
 - 未通过 spec review 即试图恢复 `#208` 后续事项的高风险 live 验证。
 - 未完成人工确认门禁设计即放行高风险 live。
-- 缺少责任人、PR review artifact 或 issue comment 留痕即试图放行 limited / allowed live。
+- 缺少责任人，或未来执行契约中的审批 / 审计载体仍不可复核，即试图放行 limited / allowed live。
 
 
 ## 回滚策略

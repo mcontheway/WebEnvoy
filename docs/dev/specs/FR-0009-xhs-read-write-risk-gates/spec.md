@@ -60,7 +60,7 @@
   - formal spec review 已通过
   - 风险复核已完成
   - `#208` 的动作边界与 `#209` 的扩展边界均已显式冻结
-  - 审批记录已保留在 GitHub PR review artifact 与对应 issue comment 中
+  - 审批与审计载体已与后续执行契约对齐，不存在口头放行
 
 ### 4. 人工确认与门禁机制
 
@@ -70,8 +70,8 @@
   - 动作类型确认（读、写、不可逆写）
 - 必须定义人工确认流程中的最小责任与留痕：
   - 规约阶段默认责任人是发起本次 live 恢复 / 扩展请求的实现负责人
-  - 审批记录载体为对应 PR review artifact 与对应 issue comment 链接
-  - 审计留痕方式为 GitHub issue / PR 中的结构化 closeout 或 sync comment；运行时持久化不在本 FR 承接
+  - formal closeout 的 review / sync 记录可保留在 GitHub issue / PR 中，供历史追溯与 review 复核
+  - 后续 limited / allowed live 的审批与审计正式载体由执行层契约承接；本 FR 不把 GitHub review/comment 升格为未来运行时审批通道
 - 必须定义 dry-run/侦察门禁，至少覆盖：
   - 默认模式
   - 升级到 live 的前置条件
@@ -145,7 +145,7 @@ And 每条差距都说明了与当前风险预警的直接关联
 4. 不可逆写动作：任何可能触发不可逆写入的路径，在门禁未放行前一律禁止。
 5. 证据不足：只有单次样本或不可复核样本时，不得放行为 live 恢复结论。
 6. 定位漂移：若后续事项把插件层风险面降格为“CLI 参数问题”，必须判定为治理边界错误并阻断。
-7. 审批留痕缺失：若缺少对应 PR review artifact 或 issue comment，同样不得放行为 limited / allowed live。
+7. 审批留痕缺失：若后续执行契约要求的审批 / 审计载体未明确定义或不可复核，同样不得放行为 limited / allowed live。
 
 ## 验收标准
 

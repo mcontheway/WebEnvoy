@@ -34,7 +34,7 @@
   - `manual_confirmation_required`
   - `manual_confirmation_checks`
 - 生命周期：作为 `#208/#209` 后续事项与后续读写实现的模式前置。
-- 说明：责任人、PR review artifact 与 issue comment 作为规约阶段审批留痕，不在本实体中扩展为新的持久化字段。
+- 说明：责任人与 formal closeout 留痕可在 GitHub issue / PR 中追溯，但这类记录不替代后续执行契约中的正式审批 / 审计载体。
 
 ## 实体 4：ResumeRequirements
 
@@ -46,7 +46,7 @@
   - `explicit_scope_for_209_extension`
   - `approver_recorded`
 - 生命周期：全部满足前，live 不得放行。
-- 说明：`approver_recorded` 的完成依据是 GitHub issue / PR 中存在可复核的审批与同步记录，而不是运行时数据库或新的审计对象。
+- 说明：`approver_recorded` 只要求“后续执行契约中的审批载体已被明确定义且可复核”，不把 GitHub issue / PR 记录硬编码为唯一正式载体。
 
 ## 约束与一致性
 
