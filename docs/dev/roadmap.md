@@ -160,7 +160,7 @@ WebEnvoy 当前主线专注于：
 
 ### Sprint 2：风险门禁与执行硬化
 
-聚焦 `#215` / FR-0009 对应前置，至少覆盖：
+聚焦 `#213` / FR-0009 对应前置，至少覆盖：
 
 - 读域 / 写域分离（`www.xiaohongshu.com` vs `creator.xiaohongshu.com`）
 - 显式目标域与目标页确认
