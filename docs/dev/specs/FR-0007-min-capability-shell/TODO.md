@@ -11,7 +11,7 @@
 - [x] `plan.md`、`contracts/ability-shell.md`、`data-model.md`、`risks.md` 已完成 formal 文档收口
 - [x] 当前 formal 承接 issue 已冻结为 `#360`
 - [x] 历史 issue `#159` 仅保留来源引用，不再作为当前 formal closeout 承接 issue
-- [ ] FR-0007 当前仅暂定“不重定义 FR-0004 的 `observability` / `error.diagnosis` 真相源”这一边界；最小诊断 / `run_id` 关联待 FR-0004 formal review 结束后再确认
+- [ ] 相邻诊断套件边界仅保留为实现承接时的复核事项，不作为当前 formal review 输入中的已冻结依赖
 - [x] FR-0007 不把 FR-0006 作为持久化真相源；能力结果 / 错误落库映射只在实现承接时继续复核
 - [x] 确认 FR-0007 的实现链路必须保持 spec / impl 分离
 - [x] issue `#360` 当前只校验 FR-0007 本套件的 formal review 输入是否自洽，不新增 FR-0004 / FR-0006 completion gate
