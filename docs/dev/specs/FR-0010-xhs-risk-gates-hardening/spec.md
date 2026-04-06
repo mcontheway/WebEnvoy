@@ -57,6 +57,7 @@
 - `live_read_limited`、`live_read_high_risk` 与 `live_write` 进入 live 前都必须满足升级前置；若前置缺失则默认阻断。
 - `live_read_limited` 在本 FR 中只保留为 Sprint 3 兼容占位值；其正式公开模式语义与 live-entry 条件仍由 `FR-0011` 单独冻结。
 - `live_read_limited` 只允许用于读动作，不得被写动作或不可逆写动作请求或生效；在 `FR-0011` 未完成 formal 收口前，本 FR 必须默认阻断该模式。
+- `live_read_limited` 只有在治理侧 `scope_context.limited_read_rollout_ready=true` 时才可视为满足 staged rollout readiness；该前置不得由调用方在 `gate_input` 自报。
 - 任意 live 恢复或扩展都必须同时满足治理侧 `scope_context.spec_review_passed=true` 与 `scope_context.risk_review_completed=true`；任一为 `false` 时必须阻断。
 - 升级 live 前置至少包含：
   - 风险状态检查通过
@@ -166,6 +167,7 @@ And 不存在某一事项绕过门禁的路径
 - 替代细化：
   - `FR-0009.resume_requirements.spec_review_passed` -> `FR-0010.scope_context.spec_review_passed`
   - `FR-0009.resume_requirements.risk_review_completed` -> `FR-0010.scope_context.risk_review_completed`
+  - `FR-0009.resume_requirements.limited_read_rollout_ready` -> `FR-0010.scope_context.limited_read_rollout_ready`
   - `FR-0009.resume_requirements.explicit_scope_for_209_extension` -> `FR-0010.scope_context.explicit_scope_for_209_extension`
   - `FR-0009.resume_requirements.explicit_scope_for_208` -> `FR-0010.scope_context.explicit_scope_for_208`
   - `FR-0009.resume_requirements.approval_record_ref` -> `FR-0010.approval_record.approval_id`
