@@ -4,15 +4,15 @@
 
 本模型只覆盖 Phase 1 的运行证据与审计记录，不覆盖平台业务正文数据，不覆盖实时会话状态机，也不覆盖能力主数据。
 
-实时状态真相源仍是 `#356` 的 profile/session 路径；能力输入 / 输出 / 错误壳真相源仍是 `#360`；本模型只承载历史运行事实。
+实时状态真相源仍是 FR-0003 的 profile/session 路径；能力输入 / 输出 / 错误壳真相源仍是 FR-0007；本模型只承载历史运行事实。
 
 ## 共享映射冻结
 
-- `run_id`：跨 `#356/#357/#360` 的最小关联键。由上游运行时生成并传入 store；SQLite 只持久化，不分配新值。
-- `profile_name`：来自 `#356` 的最小已冻结引用字段，用于把运行记录关联回 Profile。
+- `run_id`：跨 FR-0003 / FR-0004 / FR-0007 的最小关联键。由上游运行时生成并传入 store；SQLite 只持久化，不分配新值。
+- `profile_name`：来自 FR-0003 的最小已冻结引用字段，用于把运行记录关联回 Profile。
 - `session_id`：在 Phase 1 中仅作为 optional pending field；缺失不影响本 FR 验收，也不允许据此反向推导会话状态。
-- 诊断字段：只保存 `#357` 诊断对象的最小 projection，不承诺持久层结果可 1:1 还原完整诊断对象。
-- 能力侧映射：FR-0006 只保证 `run_id`、`command`、`profile_name`、`status`、`ended_at` 可被 `#360` 复用，不新增能力主数据列。
+- 诊断字段：只保存 FR-0004 诊断对象的最小 projection，不承诺持久层结果可 1:1 还原完整诊断对象。
+- 能力侧映射：FR-0006 只保证 `run_id`、`command`、`profile_name`、`status`、`ended_at` 可被 FR-0007 复用，不新增能力主数据列。
 
 ## 核心实体
 
@@ -97,6 +97,6 @@
 
 ## 与其他 FR 的模型关系
 
-- 与 `#356`：共享 `profile_name`、`session_id` 引用字段，但不共享实时状态主表。
-- 与 `#357`：`diagnosis_category`、`failure_point`、`component`、`summary`、`summary_truncated` 按最小 projection 对齐。
-- 与 `#360`：`run_id`、`command`、`profile_name`、`status`、`ended_at` 作为能力执行证据最小锚点；SQLite 不承接能力目录、版本、健康度或 `summary.capability_result` 真相源。
+- 与 FR-0003：共享 `profile_name`、`session_id` 引用字段，但不共享实时状态主表。
+- 与 FR-0004：`diagnosis_category`、`failure_point`、`component`、`summary`、`summary_truncated` 按最小 projection 对齐。
+- 与 FR-0007：`run_id`、`command`、`profile_name`、`status`、`ended_at` 作为能力执行证据最小锚点；SQLite 不承接能力目录、版本、健康度或 `summary.capability_result` 真相源。
