@@ -1,6 +1,6 @@
 # FR-0006 TODO
 
-> 本文件记录 FR-0006 在 `#359` 语境下的 formal spec review 修正状态；当前 formal review 已完成回写，`APPROVE` 与 `ready_for_implementation = true` 已由 reviewer 明确给出。
+> 本文件记录 FR-0006 在 `#359` 语境下的 formal spec review 修正状态；`#375` 是 actual formal-review record，`#376` 是 final writeback，当前 formal review 已完成回写，`APPROVE` 与 `ready_for_implementation = true` 已由 reviewer 明确给出。
 
 ## Formal Review Repair Snapshot
 
@@ -30,6 +30,7 @@
 
 - 历史规约评审 PR `#174` 已完成并合入，FR-0006 的 formal spec review 结论已不再停留在本地 TODO 语境。
 - `#375` 已合入主干，merge commit 为 `744a7764ed240e47c4c1209d25caea66e44fab60`，`mergedAt` 为 `2026-04-06T07:21:18Z`；该受控合并结果可作为本次 formal verdict 回写的可核实依据。
+- `#376` 已合入主干，merge commit 为 `9125bc3b8ee714138c8ba228cc8b9c85e7b13c83`，`mergedAt` 为 `2026-04-06T08:41:11Z`；该 PR 仅承担 final writeback 角色，不重开 FR-0006 的正式边界，也不改变 `#375` 作为 actual formal-review record 的地位。
 - `#354/#355` 已完成 formal 收口，FR-0006 承接的 CLI 外层契约与最小通信基座已不再构成当前 closeout 阻塞。
 - FR-0006 当前套件已在本地回写并对齐与 FR-0003 / FR-0004 / FR-0007 的共享边界，供 formal review 继续判断。
 - 当前 issue `#359` 只负责修正 formal review 元数据与共享边界表述，不重开 FR-0006 的正式边界，也不扩写到实现代码或完整业务仓库。
