@@ -72,7 +72,7 @@
   "execution_mode_gate": {
     "default_mode": "dry_run",
     "allowed_modes": ["dry_run", "recon"],
-    "blocked_modes": ["live_read_high_risk", "live_write"],
+    "blocked_modes": ["live_read_limited", "live_read_high_risk", "live_write"],
     "manual_confirmation_required": true,
     "manual_confirmation_checks": [
       "target_domain_confirmed",
@@ -99,7 +99,6 @@
   "resume_requirements": {
     "spec_review_passed": true,
     "risk_review_completed": true,
-    "sprint3_live_entry_ready": true,
     "limited_read_rollout_ready": true,
     "explicit_scope_for_208": true,
     "explicit_scope_for_209_extension": true,
@@ -113,17 +112,16 @@
 约束：
 
 1. `spec_review_passed=false`、`risk_review_completed=false` 或 `approver_recorded=false` 时，不得进入任何 live 放行。
-2. `sprint3_live_entry_ready=false` 时，不得放行任何受控读侧 live；`live_read_limited` 的正式公开模式语义仍由 `FR-0011` 单独冻结。
-3. `limited_read_rollout_ready=false` 时，不得放行任何受控读侧 staged rollout，包括 `live_read_limited`。
-4. `explicit_scope_for_209_extension=false` 时，不得放行任何读侧 live 扩展，包括 `live_read_limited`。
-5. `explicit_scope_for_208=false` 时，不得放行 `live_write` 或任何 `#208` 真实交互；该字段本身不阻断受控读侧 `live_read_limited`。
+2. `limited_read_rollout_ready=false` 时，不得放行为未来受控读侧 staged rollout 保留的治理前置，包括 `live_read_limited` 的讨论前置。
+3. `explicit_scope_for_209_extension=false` 时，不得放行任何读侧 live 扩展，包括 `live_read_limited`。
+4. `explicit_scope_for_208=false` 时，不得放行 `live_write` 或任何 `#208` 真实交互；该字段本身不阻断受控读侧 `live_read_limited`。
 6. 必须保留可被后续事项引用的审批记录；formal closeout 留痕与未来运行时审批 / 审计记录不得混为同一正式载体。
 7. `approver_recorded=true` 表示 live 放行所需的审批已被真实记录，且该记录可被后续执行契约消费；本 FR 不把具体实现硬编码为 GitHub issue / PR 记录。
 8. `approver_recorded=true` 只有在同时存在以下两类可复核记录时才成立：
    - approval record：至少包含 `approver`、`approved_at`、`checks`、`approval_record_ref`
    - audit trail：至少包含与同一次恢复判断对应的执行模式、门禁决策、`recorded_at`、`audit_record_ref`
 9. `approval_record_ref` 与 `audit_record_ref` 必须是稳定、可复核、不可歧义的 live-approval 记录引用；formal closeout 阶段的 PR review artifact / sync comment permalink 只用于 review evidence，不得单独满足 `approver_recorded=true`。
-10. `limited_read_rollout_ready=true` 只表示治理前置已齐备；在 `FR-0010` 的可执行门禁替代契约成立、且 `FR-0011` 已冻结 Sprint 3 live-entry 前置前，不得据此单独恢复 `live_read_limited`。
+10. `limited_read_rollout_ready=true` 只表示治理前置已齐备；在 `FR-0010` 与 `FR-0011` 都完成各自 formal 收口前，不得据此单独恢复 `live_read_limited`。
 
 ## 兼容性约束
 
