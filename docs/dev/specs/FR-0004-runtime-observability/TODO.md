@@ -21,7 +21,7 @@
 - [x] `#355` 已完成通信闭环 formal 承接，因此 FR-0004 新增观测字段不构成 transport 侧阻塞。
 - [x] 与 `#359` 的诊断落库边界、与 `#360` 的 `run_id` / 能力错误关联边界已冻结。
 - [x] 当前 formal closeout 范围内的 findings 与 blockers 已收敛。
-- [x] `#373` 的 latest guardian review 已在 commit `14633757ea67b6e01d6ffc97bdef3650bf624fa7` 上于 `2026-04-06T06:36:05Z` 明确给出 `APPROVE`，随后该 PR 于 `2026-04-06T06:36:14Z` 合入主干，merge commit 为 `3f16de8d8525aa36e77eaa16dfc028c0163ff016`，可作为 FR-0004 最终 formal verdict 的可核实回写依据。
+- [x] 当前 PR latest head 的 guardian/reviewer 结论与合并记录可作为 FR-0004 最终 formal verdict 的可核实回写依据；最终审计链路以当前 PR latest head 为准。
 
 ## 当前 review 状态
 
