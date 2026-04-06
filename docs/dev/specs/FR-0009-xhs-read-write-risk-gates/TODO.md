@@ -36,7 +36,7 @@
 ## Formal Review 现状依据
 
 - `#215` 继续作为 FR-0009 的 open FR 锚点，承接正式规约入口；`#362` 只承接本轮 formal 收口。
-- `#213` 只保留为历史来源；本轮 canonical GitHub anchor 统一使用 `#215`。
+- `#213` 仍保留为当前 formal 套件与下游 Sprint 2/3 套件继续引用的 upstream issue；若后续要统一迁移到 `#215`，需在 dedicated follow-up 中先同步下游套件再切换 canonical anchor。
 - `#201` 在本轮作为历史消费者引用；`#208/#209` 在本轮作为 issue 线程与后续 formal 套件的治理基线引用方；sync comment 只补统一口径，不借此改写其他 FR 已冻结的关闭语义。
 - `FR-0009` 本轮只收 formal spec，不进入实现代码，也不以 live evidence 作为关闭依据。
 - final writeback 必须在 canonical formal-review PR 合入后，依据 latest guardian `APPROVE`、GitHub checks 全绿与受控 merge 结果回写。

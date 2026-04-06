@@ -168,6 +168,6 @@ And 每条差距都说明了与当前风险预警的直接关联
 
 ## 依赖与前置条件
 
-- 输入事项：`#201`、`#208`、`#209`、`#215`
+- 输入事项：`#201`、`#208`、`#209`、`#213`
 - 侦察输入：`#146`、`FR-0008`
 - 架构约束：`docs/dev/architecture/anti-detection.md`、`docs/dev/architecture/system-design/read-write.md`
