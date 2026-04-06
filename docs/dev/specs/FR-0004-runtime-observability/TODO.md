@@ -1,25 +1,36 @@
 # FR-0004 TODO
 
-## Spec Review 阶段
+> 本文件只记录 FR-0004 的 formal closeout 状态与实现消费边界，不追溯外部 Draft PR、guardian、merge 或审批载体事实。
 
-- [ ] 确认 `spec.md` 只覆盖 Phase 1 所需的最小观察与诊断面
-- [ ] 确认 `spec.md` 没有把完整 pause / resume 系统混进来
-- [ ] 确认 `contracts/runtime-observability.md` 与 FR-0001 外层壳兼容
-- [ ] 确认 `risks.md` 覆盖敏感信息泄露、误分类和载荷膨胀
-- [ ] 创建仅包含规约文档的 Draft PR
-- [ ] 收敛 spec review findings 与 blockers
+## 进入实现前条件（未来门禁）
 
-## 进入实现前条件
+- 待获得 `APPROVE`
+- 待获得 `ready_for_implementation = true`
+- 在后续实现前确认 FR-0004 的实现工作承接 FR-0001 外层壳与 FR-0002 transport 边界，不重写上游契约
+- 在后续 formal review 通过后，确认 `contracts/runtime-observability.md`、`plan.md`、`risks.md` 已随套件一起完成 formal closeout 审查
 
-- [ ] 获得 `APPROVE`
-- [ ] 获得 `ready_for_implementation = true`
-- [ ] 确认 FR-0001 与 FR-0004 的职责边界没有交叉冲突
-- [ ] 确认 `#142` 的通信链路能够承载诊断字段
+## Formal 收口依据
 
-## Spec 通过后实施清单
+- [x] `spec.md` 已收敛到 Phase 1 所需的最小观察与诊断面，没有把完整 pause / resume 系统混进来。
+- [x] `contracts/runtime-observability.md` 已与 FR-0001 外层壳兼容，且没有改写 FR-0002 已冻结的 transport 承载边界。
+- [x] `#354` 已完成 FR-0001 formal 收口，因此 FR-0004 依赖的 CLI 外层响应壳与错误码兼容基线已冻结。
+- [x] `spec.md` 与 `contracts/runtime-observability.md` 已冻结 `page_state`、`key_requests`、`failure_site`、`error.diagnosis` 的最小字段与最小枚举。
+- [x] URL 净化、脱敏与截断边界已冻结，不再把这部分留给实现时临场判断。
+- [x] `risks.md` 已覆盖敏感信息泄露、误分类、载荷膨胀与处理顺序错误的核心风险。
+- [x] FR-0001 与 FR-0004 的职责边界没有交叉冲突。
+- [x] `#355` 已完成通信闭环 formal 承接，因此 FR-0004 新增观测字段不构成 transport 侧阻塞。
+- [x] 与 `#359` 的诊断落库边界、与 `#360` 的 `run_id` / 能力错误关联边界已冻结。
+- [x] 当前 formal closeout 范围内的 findings 与 blockers 已收敛。
 
-- [ ] 冻结页面状态、关键请求和失败位置的最小字段
-- [ ] 冻结诊断分类与证据格式
+## 当前 review 状态
+
+- [x] `#357` 当前只回写 FR-0004 正式套件的 review 状态，不重开 FR-0004 边界或实现范围。
+- [ ] FR-0004 仍需在 formal review 通过后，才能记录为 `APPROVE`。
+- [ ] FR-0004 仍需在 formal review 通过后，才能记录为 `ready_for_implementation = true`。
+- [ ] FR-0004 仍需在 formal review 通过后，才能记录为 `formal_closeout = complete`。
+
+## 进入实现后由后续事项承接
+
 - [ ] 接入成功 / 错误响应的结构化输出
-- [ ] 接入脱敏与截断规则
+- [ ] 接入 URL 净化、脱敏与截断规则
 - [ ] 补齐诊断分类、契约和边界测试

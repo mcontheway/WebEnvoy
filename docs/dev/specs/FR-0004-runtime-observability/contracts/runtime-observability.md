@@ -37,9 +37,26 @@
 
 URL 类字段必须默认做净化处理：
 
-- 保留用于定位问题所需的稳定主干信息，例如 `scheme://host/path`
-- 默认移除 `query` 与 `fragment`
-- 若业务场景必须保留部分查询参数，仅允许白名单字段，并且必须对 `token`、`code`、`signature`、`sig`、`auth` 这类敏感参数做替换或删除
+- 页面 URL 只保留 `scheme://host/path`
+- 关键请求 URL 在同源场景下只保留 origin-less path（例如 `/api/feed`）；仅当请求不是同源目标时才保留 `scheme://host/path`
+- 默认移除全部 `query` 与 `fragment`
+- Phase 1 不保留任何查询参数白名单；若后续 FR 需要保留参数，必须单独扩展本契约
+
+进入最终响应前必须先执行以下脱敏规则：
+
+- 删除或替换 Cookie、`Authorization`、`Set-Cookie`、Bearer Token、一次性验证码、签名串与 OAuth code
+- 把疑似密钥、JWT、长随机串或高熵标识替换为统一占位符 `[redacted]`
+- 不得把原始请求体、原始响应体、完整 DOM、完整 HTML 片段或页面截图文字直接拼进证据字段
+
+进入最终响应前必须执行以下 Phase 1 截断规则：
+
+- `observability.key_requests` 最多保留 5 条
+- `error.diagnosis.evidence` 最多保留 5 条
+- `page_state.title`、`failure_site.target`、`failure_site.summary`、`key_requests[*].failure_reason`、`diagnosis.evidence[*]` 每项最多 160 个字符
+- `page_state.url` 与 `key_requests[*].url` 在净化后仍最多保留 200 个字符
+- `observability + error.diagnosis` 的总序列化预算默认不超过 8 KB
+
+若发生裁剪，必须显式返回截断标记，而不是静默吞掉字段。
 
 ## 输出
 
@@ -60,7 +77,8 @@ URL 类字段必须默认做净化处理：
       "page_kind": "feed",
       "url": "https://example.com/feed",
       "title": "Example Feed",
-      "ready_state": "complete"
+      "ready_state": "complete",
+      "observation_status": "complete"
     },
     "key_requests": [
       {
@@ -72,7 +90,8 @@ URL 类字段必须默认做净化处理：
         "status_code": 200
       }
     ],
-    "failure_site": null
+    "failure_site": null,
+    "truncated": false
   },
   "timestamp": "2026-03-19T12:00:00.000Z"
 }
@@ -101,7 +120,8 @@ URL 类字段必须默认做净化处理：
       "evidence": [
         "expected selector missing",
         "page kind changed from compose to login"
-      ]
+      ],
+      "truncated": false
     }
   },
   "observability": {
@@ -109,7 +129,8 @@ URL 类字段必须默认做净化处理：
       "page_kind": "login",
       "url": "https://example.com/login",
       "title": "Example Login",
-      "ready_state": "complete"
+      "ready_state": "complete",
+      "observation_status": "complete"
     },
     "key_requests": [],
     "failure_site": {
@@ -117,7 +138,8 @@ URL 类字段必须默认做净化处理：
       "component": "page",
       "target": "selector:#publish-button",
       "summary": "expected selector missing"
-    }
+    },
+    "truncated": false
   },
   "timestamp": "2026-03-19T12:00:01.000Z"
 }
@@ -133,6 +155,7 @@ URL 类字段必须默认做净化处理：
 - `url`：当前页面的规范化 URL，必须默认仅保留 `scheme://host/path`；query、fragment 和携带凭据的片段必须删除或替换为脱敏值
 - `title`：页面标题
 - `ready_state`：文档加载状态
+- `observation_status`：观测状态，取值至少包含 `complete`、`partial`、`unavailable`
 
 允许按需扩展的字段：
 
@@ -148,7 +171,7 @@ URL 类字段必须默认做净化处理：
 - `request_id`
 - `stage`
 - `method`
-- `url`：关键请求的规范化 URL 或路径，必须默认仅保留定位问题所需的主干信息；query、fragment 和可能携带 token / signature 的参数必须删除或替换
+- `url`：关键请求的规范化地址；同源请求必须输出 origin-less path，非同源请求才输出 `scheme://host/path`；query、fragment 和可能携带 token / signature 的参数必须删除或替换
 - `outcome`
 
 可选字段：
@@ -156,6 +179,12 @@ URL 类字段必须默认做净化处理：
 - `status_code`
 - `failure_reason`
 - `request_class`
+
+枚举与约束：
+
+- `stage` 只允许使用 `page_load`、`request`、`action`、`settle_wait`、`runtime_link`
+- `outcome` 只允许使用 `completed`、`failed`、`timeout`、`skipped`
+- `failure_reason` 只允许返回脱敏后的短摘要，不得回传原始响应内容
 
 ### `observability.failure_site`
 
@@ -165,6 +194,12 @@ URL 类字段必须默认做净化处理：
 - `component`
 - `target`
 - `summary`
+
+约束：
+
+- `component` 只允许返回 `cli`、`extension`、`content_script`、`page`、`network`
+- `target` 只允许返回最小定位片段，例如规范化 URL 主干、逻辑动作名或截断后的 selector 摘要
+- `summary` 必须在脱敏后输出，不得回传页面原文长片段
 
 ### `error.diagnosis`
 
@@ -176,6 +211,10 @@ URL 类字段必须默认做净化处理：
 - `failure_site`
 - `evidence`
 
+可选字段：
+
+- `truncated`
+
 最小分类集合：
 
 - `page_changed`
@@ -184,15 +223,29 @@ URL 类字段必须默认做净化处理：
 - `runtime_unavailable`
 - `unknown`
 
+字段处理顺序固定为：
+
+1. 归一化
+2. URL 净化
+3. 敏感信息脱敏
+4. 长度截断
+5. 总预算裁剪
+
+若在第 4/5 步发生裁剪：
+
+- `observability.truncated=true` 表示观察字段发生过裁剪
+- `error.diagnosis.truncated=true` 表示诊断字段发生过裁剪
+
 ## 兼容策略
 
 - 该契约只允许增量扩展，不允许重定义 FR-0001 外层壳。
 - 旧实现若没有 `observability` 或 `error.diagnosis`，消费者必须能降级处理。
 - 新字段只允许增加，不允许修改既有字段的语义。
-- 诊断证据必须受长度和敏感信息约束，避免因为载荷膨胀破坏 Native Messaging 传输。
+- 诊断证据必须受长度和敏感信息约束，避免因为载荷膨胀破坏 FR-0002 已冻结的 Native Messaging 承载边界。
 
 ## 约束
 
 - 不返回 Cookie、Authorization、Token、完整响应体、完整 HTML 或页面截图原文。
 - 不返回长篇自由文本诊断，证据必须是短句或枚举化描述。
 - 不依赖稳定的私有实现细节作为契约字段。
+- 不引入新的 transport envelope、额外的 link-layer 握手字段或单独分片协议去承载诊断信息。
