@@ -11,8 +11,8 @@
 - [x] `plan.md`、`contracts/ability-shell.md`、`data-model.md`、`risks.md` 已完成 formal 文档收口
 - [x] 当前 formal 承接 issue 已冻结为 `#360`
 - [x] 历史 issue `#159` 仅保留来源引用，不再作为当前 formal closeout 承接 issue
-- [x] 与 `#357` 的最小诊断 / `run_id` 关联边界已冻结，且 FR-0007 不重定义 `observability` / `error.diagnosis`
-- [x] 与 `#359` 的能力结果 / 错误落库映射边界已冻结，且 FR-0007 不引入持久化真相源
+- [x] 已在 FR-0007 套件内写明与 `#357` 的最小诊断 / `run_id` 关联输入假设，且 FR-0007 不重定义 `observability` / `error.diagnosis`
+- [x] 已在 FR-0007 套件内写明与 `#359` 的能力结果 / 错误落库输入假设，且 FR-0007 不引入持久化真相源
 - [x] 确认 FR-0007 的实现链路必须保持 spec / impl 分离
 - [x] 已形成可供 issue `#360` 后续 external formal review 使用的正式套件基线
 
