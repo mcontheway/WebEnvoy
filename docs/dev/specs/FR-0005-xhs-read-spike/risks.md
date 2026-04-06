@@ -52,9 +52,9 @@
   - 先做 `.webenvoy/profiles/**/__webenvoy_meta.json` 准入预检
   - 没有可用 profile 时，直接按 `No-Go/paused` 收口，不继续 live 复核
   - 将外部手工浏览器证据保留在 `browser_first_hand` / `candidate` 层，不升级为实现准入输入
-- 当前状态更新（2026-04-06 晚间）：
-  - `xhs_001` 已恢复为 WebEnvoy-managed 且已登录的 profile，因此“无受管 XHS 会话”的 blocker 已解除
-  - 本风险当前保留为“会话未来可能再次失效”的持续风险，而不再是“当前没有 profile 可用”的现时事实
+- 口径约束：
+  - 作者本机 `.webenvoy/profiles/**` 的恢复状态，不在 formal spec 中写成静态当前事实
+  - 若执行现场已恢复受管 XHS profile，应先把准入预检结果沉淀为仓库可复核 artifact 或可核对链接，再更新正式结论
 - 回滚/降级：
   - 暂停本轮 issue 的 live 扩展
-  - 待 WebEnvoy-managed XHS profile 恢复后，再重新执行 `search/detail/user_home` 的同口径复核
+  - 待执行现场通过 WebEnvoy-managed XHS profile 准入预检后，再重新执行 `search/detail/user_home` 的同口径复核
