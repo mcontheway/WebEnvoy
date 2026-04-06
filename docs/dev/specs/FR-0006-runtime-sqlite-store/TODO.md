@@ -10,10 +10,11 @@
 - [x] 确认 `contracts/runtime-store.md` 输入输出、错误码与兼容策略完整
 - [x] 确认 `risks.md` 覆盖并发写入、敏感字段泄露、迁移失败与能力边界误用风险
 - [x] 当前 formal 承接 issue 已冻结为 `#359`
-- [x] 与 `#356` 的 `run_id/session_id/profile` 复用边界已冻结
-- [x] 与 `#357` 的诊断字段映射边界已冻结
-- [x] 与 `#360` 的能力证据字段映射边界已冻结
-- [x] formal spec review findings / blockers 已收口
+- [x] 旧 `#144/#159` 残留已回收到“历史来源 / 当前共享边界”的 formal 语境
+- [x] 与 `#356` 的共享边界已收紧为：`run_id` 关联键 + `profile_name` 引用字段；`session_id` 仅作为 optional pending field
+- [x] 与 `#357` 的共享边界已收紧为：最小诊断 projection、脱敏与截断，不承诺持久层 1:1 还原完整诊断对象
+- [x] 与 `#360` 的共享边界已收紧为：能力运行证据锚点，不宣称能力字段映射已完整冻结
+- [x] 本地 formal closeout 所需文档项已收口，不再依赖额外 TODO 占位
 - [x] formal 结论：`APPROVE`
 - [x] formal 结论：`ready_for_implementation = true`
 

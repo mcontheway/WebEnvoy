@@ -2,9 +2,17 @@
 
 ## 模型边界
 
-本模型只覆盖 Phase 1 的运行证据与审计记录，不覆盖平台业务正文数据，不覆盖实时会话状态机。
+本模型只覆盖 Phase 1 的运行证据与审计记录，不覆盖平台业务正文数据，不覆盖实时会话状态机，也不覆盖能力主数据。
 
-实时状态真相源仍是 `#356` 的 profile/session 路径；本模型只承载历史运行事实。
+实时状态真相源仍是 `#356` 的 profile/session 路径；能力输入 / 输出 / 错误壳真相源仍是 `#360`；本模型只承载历史运行事实。
+
+## 共享映射冻结
+
+- `run_id`：跨 `#356/#357/#360` 的最小关联键。由上游运行时生成并传入 store；SQLite 只持久化，不分配新值。
+- `profile_name`：来自 `#356` 的最小已冻结引用字段，用于把运行记录关联回 Profile。
+- `session_id`：在 Phase 1 中仅作为 optional pending field；缺失不影响本 FR 验收，也不允许据此反向推导会话状态。
+- 诊断字段：只保存 `#357` 诊断对象的最小 projection，不承诺持久层结果可 1:1 还原完整诊断对象。
+- 能力侧映射：FR-0006 只保证 `run_id`、`command`、`profile_name`、`status`、`ended_at` 可被 `#360` 复用，不新增能力主数据列。
 
 ## 核心实体
 
@@ -30,8 +38,10 @@
 约束：
 
 - `run_id` 全局唯一。
+- `run_id` 由上游运行时提供，SQLite 不生成新值。
 - `status` 只允许最小枚举：`running`、`succeeded`、`failed`。
 - `ended_at` 在 `status = running` 时可空，其余状态必须非空。
+- `session_id` 在当前阶段只作为可空引用字段；为空不构成写入失败。
 
 索引：
 
@@ -56,13 +66,16 @@
 - `diagnosis_category` TEXT NULL
 - `failure_point` TEXT NULL
 - `summary` TEXT NULL
+- `summary_truncated` INTEGER NOT NULL DEFAULT 0
 - `created_at` TEXT NOT NULL
 
 约束：
 
 - `run_id` 必须关联 `runtime_runs.run_id`。
 - `summary` 必须经过脱敏与截断。
+- `summary_truncated` 只允许取值 `0` 或 `1`。
 - `diagnosis_category`、`failure_point` 仅在失败或诊断事件中可填。
+- 不允许把完整 `error.diagnosis` 对象或等价 JSON blob 直接作为 Phase 1 默认列落库。
 
 索引：
 
@@ -85,5 +98,5 @@
 ## 与其他 FR 的模型关系
 
 - 与 `#356`：共享 `profile_name`、`session_id` 引用字段，但不共享实时状态主表。
-- 与 `#357`：`diagnosis_category`、`failure_point` 与诊断摘要字段按最小映射对齐。
-- 与 `#360`：`run_id`、`command`、`status`、`ended_at` 作为能力执行证据最小输入；SQLite 不承接能力目录、版本或健康度真相源。
+- 与 `#357`：`diagnosis_category`、`failure_point`、`component`、`summary`、`summary_truncated` 按最小 projection 对齐。
+- 与 `#360`：`run_id`、`command`、`profile_name`、`status`、`ended_at` 作为能力执行证据最小锚点；SQLite 不承接能力目录、版本、健康度或 `summary.capability_result` 真相源。
