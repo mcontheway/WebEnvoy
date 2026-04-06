@@ -26,9 +26,9 @@
 ## 当前 review 状态
 
 - [x] `#357` 当前只回写 FR-0004 正式套件的 review 状态，不重开 FR-0004 边界或实现范围。
-- [ ] FR-0004 仍需在 formal review 通过后，才能记录为 `APPROVE`。
-- [ ] FR-0004 仍需在 formal review 通过后，才能记录为 `ready_for_implementation = true`。
-- [ ] FR-0004 仍需在 formal review 通过后，才能记录为 `formal_closeout = complete`。
+- [x] FR-0004 已记录为 `APPROVE`。
+- [x] FR-0004 已记录为 `ready_for_implementation = true`。
+- [x] FR-0004 已记录为 `formal_closeout = complete`。
 
 ## 进入实现后由后续事项承接
 
