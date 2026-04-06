@@ -26,7 +26,7 @@
 ## 进入实现前必须完成
 
 - [ ] 完成 FR-0009 spec review 并清零阻断意见。
-- [ ] 在 `#208` 的历史 issue 中写入“FR-0009 已冻结其后续 live / replay / 恢复前置与禁止动作边界”的 sync comment。
+- [ ] 在 `#208` 的历史 issue 中写入“FR-0009 已明确其后续 live / replay / 恢复事项必须先消费的前置与禁止动作边界”的 sync comment。
 - [ ] 在 `#209` 的历史 issue 中写入“后续高风险 live 扩展需先过 FR-0009 门禁”的 sync comment。
 - [ ] 在 `#201` 的历史 issue 中补充“风险门禁前置已冻结，可作为历史 exit review 的补充输入”的 sync comment。
 - [ ] 明确人工确认流程中的责任人、审批记录载体与审计留痕方式。
