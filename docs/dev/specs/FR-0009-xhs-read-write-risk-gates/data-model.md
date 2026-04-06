@@ -46,7 +46,7 @@
   - `explicit_scope_for_209_extension`
   - `approver_recorded`
 - 生命周期：全部满足前，live 不得放行。
-- 说明：`approver_recorded` 只要求“后续执行契约中的审批载体已被明确定义且可复核”，不把 GitHub issue / PR 记录硬编码为唯一正式载体。
+- 说明：`approver_recorded` 表示 live 放行所需的审批已被真实记录并可复核，但不把 GitHub issue / PR 记录硬编码为唯一正式载体。
 
 ## 约束与一致性
 

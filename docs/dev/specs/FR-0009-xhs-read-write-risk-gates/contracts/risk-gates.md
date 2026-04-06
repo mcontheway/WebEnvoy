@@ -110,7 +110,7 @@
 
 1. 任一字段为 `false` 时，不得进入 live 放行。
 2. 必须保留可被后续事项引用的审批记录；formal closeout 留痕与未来运行时审批 / 审计记录不得混为同一正式载体。
-3. `approver_recorded=true` 只表示“后续执行契约要求的审批载体已被定义并可复核”，不把具体实现硬编码为 GitHub issue / PR 记录。
+3. `approver_recorded=true` 表示 live 放行所需的审批已被真实记录，且该记录可被后续执行契约消费；本 FR 不把具体实现硬编码为 GitHub issue / PR 记录。
 
 ## 兼容性约束
 
