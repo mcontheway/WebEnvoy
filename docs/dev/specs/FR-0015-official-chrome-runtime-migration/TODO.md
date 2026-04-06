@@ -17,9 +17,11 @@
 
 ## 进入实现前条件
 
+- 第一刀切片必须限定在 `#281` 约束内：仅包含 identity preflight、`runtime_bootstrap_envelope` contract、`runtime.status` read model，以及 bootstrap 失败后的 stop/retry/recover 边界；不得外扩到安装器产品化、candidate 分发或 `#239` 验证体系。
 - 如后续实现继续改 `runtime.status` 或 `runtime_bootstrap_envelope`，先核对 `contracts/` 中已冻结的状态语义与错误分类，避免通过 `TODO.md` 临时改口径。
 - 如进入实现阶段需要推进恢复链路、健康矩阵或 stop-ship 规则，先确认对应验证入口、失败回退与证据产物已在 formal 文档中冻结，而不是通过 `TODO.md` 临时补约束。
-- 开始第一刀前，先确认 `#361` 中引用的 stop-ship 与验证入口仍与 `plan.md`、`implementation-prep.md`、`risks.md` 一致；触发 stop-ship 后必须阻断 `runtime.start` 成功路径并产出可复核状态。
+- 开始第一刀前，先明确 stop-ship 触发条件：identity mismatch、stale bootstrap ack、多信号冲突、陈旧 ready marker、bootstrap 非幂等恢复失败；触发后必须阻断 `runtime.start` 成功路径并产出可复核状态。
+- 开始第一刀前，先冻结验证入口：`tests/cli.contract.test.ts` 并发/恢复契约、runtime status contract 回读、bootstrap ack/失败注入、断连恢复与幂等 stop/start 证据。
 
 ## 实现停点
 
