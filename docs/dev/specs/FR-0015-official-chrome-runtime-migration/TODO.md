@@ -13,7 +13,7 @@
 
 - `#281` 继续作为 FR-0015 runtime migration 的主线约束 issue；`#361` 只承接当前 implementation-prep 第一刀 backlog 的 GitHub 回写，不替代 `#281` 的对应关系。
 - `#361` 只负责 backlog 挂接与关闭元数据；scope、stop-ship、验证入口与恢复边界仍只以 `spec.md`、`plan.md`、`implementation-prep.md`、`contracts/`、`risks.md` 为准，本文件不再重复维护一份缩写版 contract，也不把 issue 正文升格为 formal 来源。
-- 历史实现链路继续以 `#281` 及其已合并 PR 为准；后续任何仍承接 FR-0015 第一刀实现或验证 follow-up 的 issue / PR，都应在不外扩 scope 的前提下同时显式挂接 `#281` 与 `#361`。
+- 历史实现链路继续以 `#281` 及其已合并 PR 为准；后续任何仍承接 FR-0015 第一刀 implementation-prep / backlog handoff 的 issue / PR，都应在不外扩 scope 的前提下同时显式挂接 `#281` 与 `#361`。纯验证 follow-up 继续归属 `#239`，不在 `#361` 下重复挂接。
 
 ## 进入实现前条件
 
