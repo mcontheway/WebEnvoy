@@ -8,13 +8,16 @@
 
 - CLI 运行时向 SQLite 写入最小运行证据
 - CLI 按 `run_id` 查询运行主记录与事件时间线
-- 与 `#154` 诊断字段的最小落库映射
+- 与 FR-0004 诊断字段的最小落库映射
+- 供 FR-0007 通过 `run_id` 关联最小运行证据锚点
 
 不在本契约范围：
 
 - 平台业务原始数据存储
 - 实时会话状态判定
 - 能力版本发布与分发
+- 能力结果、能力版本或能力健康度真相源
+- `run_id` 分配或二次编排
 
 ## 生产者 / 消费者
 
@@ -25,15 +28,15 @@
 消费者：
 
 - CLI 诊断查询路径
-- `#154` 诊断输出映射层
-- `#159` 能力壳运行证据聚合层
+- FR-0004 诊断输出映射层
+- FR-0007 能力壳运行证据聚合层（只读消费，不反向写回能力真相）
 
 ## 输入
 
 ### 1. UpsertRunInput
 
-- `run_id` string（必填，稳定唯一）
-- `session_id` string | null（可空）
+- `run_id` string（必填，稳定唯一，由上游运行时生成，store 不负责分配）
+- `session_id` string | null（可空；当前阶段仅作为引用字段）
 - `profile_name` string（必填）
 - `command` string（必填）
 - `status` enum（`running` | `succeeded` | `failed`）
@@ -50,7 +53,8 @@
 - `event_type` string（必填，如 `started` / `succeeded` / `failed` / `diagnosis`）
 - `diagnosis_category` string | null
 - `failure_point` string | null
-- `summary` string | null（写入前必须脱敏与截断）
+- `summary` string | null（写入前必须脱敏与截断；只承载最小 projection，不承诺还原完整诊断对象）
+- `summary_truncated` boolean（必填，`true` 表示摘要已因预算被截断）
 
 ### 3. GetRunTraceInput
 
@@ -75,6 +79,7 @@
 
 - `run` object | null
 - `events` array（按 `event_time` 升序）
+- 不返回完整 `error.diagnosis` 对象、能力对象、能力版本、能力健康度或 `summary.capability_result`
 
 ## 错误 / 状态返回
 
@@ -90,6 +95,9 @@
 
 - 同一 `run_id` 不允许出现多条主记录。
 - `append event` 不允许写入孤儿事件。
+- store 层返回的 `run` / `events` 只表达历史证据，不可直接替代 FR-0003 的实时会话状态，也不可替代 FR-0007 的能力真相源。
+- `session_id`、`profile_name` 在 store 中属于引用字段；消费者不得据此反向修改 FR-0003 状态。
+- FR-0007 如需形成能力结果或错误壳，必须先取自身真相数据，再按 `run_id` 读取 store 证据；不得把 store 响应直接冒充能力壳。
 
 ## 兼容与版本策略
 
@@ -125,6 +133,7 @@
   "event_type": "failed",
   "diagnosis_category": "runtime_unavailable",
   "failure_point": "native_bridge_open",
-  "summary": "heartbeat timeout after retry budget"
+  "summary": "heartbeat timeout after retry budget",
+  "summary_truncated": false
 }
 ```
