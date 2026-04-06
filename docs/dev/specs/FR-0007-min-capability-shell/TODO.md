@@ -11,10 +11,10 @@
 - [x] `plan.md`、`contracts/ability-shell.md`、`data-model.md`、`risks.md` 已完成 formal 文档收口
 - [x] 当前 formal 承接 issue 已冻结为 `#360`
 - [x] 历史 issue `#159` 仅保留来源引用，不再作为当前 formal closeout 承接 issue
-- [x] 已在 FR-0007 套件内写明与 `#357` 的最小诊断 / `run_id` 关联输入假设，且 FR-0007 不重定义 `observability` / `error.diagnosis`
-- [x] 已在 FR-0007 套件内写明与 `#359` 的能力结果 / 错误落库输入假设，且 FR-0007 不引入持久化真相源
+- [ ] 待 FR-0004 formal suite 完成后，再确认最小诊断 / `run_id` 关联输入是否可作为 FR-0007 的正式前置；在此之前，FR-0007 只保持“不重定义 `observability` / `error.diagnosis`”的边界约束
+- [ ] 待 FR-0006 formal suite 完成后，再确认能力结果 / 错误落库输入是否可作为 FR-0007 的正式前置；在此之前，FR-0007 只保持“不引入持久化真相源”的边界约束
 - [x] 确认 FR-0007 的实现链路必须保持 spec / impl 分离
-- [x] 已形成可供 issue `#360` 后续 external formal review 使用的正式套件基线
+- [ ] 待相邻 FR formal suite 完成后，再确认 issue `#360` 的 external formal review 输入是否齐备
 
 ## Formal Review 当前状态
 
@@ -24,7 +24,7 @@
 
 当前状态说明：
 
-- FR-0007 的本地正式套件边界已收口，可进入 issue `#360` 后续 formal review。
+- FR-0007 的本地正式套件主体已收口，但与 FR-0004 / FR-0006 的相邻输入仍待对齐；当前只适合作为 formal review 准备态。
 - 在 external formal review 明确给出结论前，FR-0007 仍保持 review open，不宣称 `APPROVE` 已成立，也不宣称 `ready_for_implementation = true` 已成立。
 
 ## 进入实现前条件（门禁定义）
