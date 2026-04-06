@@ -352,10 +352,17 @@
 
 | 错误码 / 现象                                | 语义             | 建议分类                      |
 | --------------------------------------- | -------------- | ------------------------- |
+| 登录页 / 缺少有效会话                         | 未登录 / 会话过期     | `session_expired`         |
 | `300015` + Browser environment abnormal | 浏览器环境校验失败      | `browser_env_abnormal`    |
 | `300011` + Account abnormal             | 账号异常/风控阻断      | `account_abnormal`        |
 | `HTTP 500` + create invoker failed      | 网关侧调用失败（上下文不足） | `gateway_invoker_failed`  |
+| `HTTP 429` / captcha                    | 额外人机验证阻断       | `captcha_required`        |
 | `window._webmsxyw` 缺失                   | 页面脚本分流/漂移      | `signature_entry_missing` |
+
+2026-04-06 代码与 contract test 已对齐最小诊断壳映射：
+
+- `SESSION_EXPIRED` / `ACCOUNT_ABNORMAL` / `BROWSER_ENV_ABNORMAL` / `GATEWAY_INVOKER_FAILED` / `CAPTCHA_REQUIRED` -> `request_failed`
+- `SIGNATURE_ENTRY_MISSING` -> `page_changed`
 
 
 ## 5. 当前状态与暂停说明
@@ -366,6 +373,21 @@
 - 未有：`detail` 与 `user_home` 的稳定成功闭环证据，及每个端点“最小必要 headers”严格证明。
 
 由于已出现 `account abnormal`，本轮 live 复核到此为止。后续需要在账号/环境恢复后继续，当前结论不得直接转写为“实现已就绪”。
+
+### 5.1 2026-04-06 WebEnvoy-managed profile 准入预检
+
+2026-04-06 在仓库本地按 `#358` 的正式执行口径复查 `.webenvoy/profiles/**/__webenvoy_meta.json`：
+
+- 当前仅存在 `fr0012_diag_stage` 与 `fr0012_diag_stage2` 两个诊断样本 profile。
+- 两个 profile 的 `lastLoginAt` 均为 `null`，且 profile 名称、用途与小红书 live 复核无关。
+- 当前仓库内不存在可由 WebEnvoy 接管、且保持有效登录态的小红书 profile，因此无法在 WebEnvoy-managed official runtime 边界内继续执行 `search/detail/user_home` 的同口径 live 复核。
+
+由此得到的正式结论：
+
+- 2026-04-06 这轮不能把外部手工浏览器/Claw clone 会话继续升级为 `admission_ready` 证据。
+- `search` 仍停留在 `observed_once` 的 `primary` 成功样本，尚缺 WebEnvoy-managed profile 下的多轮 replay 与 required headers 最小必要集。
+- `detail` 与 `user_home` 仍分别停留在 `fallback-only` 与 `candidate/failed` 组合，不满足进入实现 FR 的前提。
+- 本轮 Go/No-Go 结论固定为 `No-Go/paused`：不创建“小红书 L3 读适配实现 FR”，直到可用的 WebEnvoy-managed 小红书 profile 恢复并完成剩余复核。
 
 ## 未决项（进入下一轮复核前保留）
 
