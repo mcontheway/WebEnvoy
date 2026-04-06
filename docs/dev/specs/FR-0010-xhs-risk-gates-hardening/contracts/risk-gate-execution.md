@@ -33,7 +33,6 @@
     "domain_mixing_forbidden": true,
     "spec_review_passed": true,
     "risk_review_completed": true,
-    "limited_read_rollout_ready": false,
     "explicit_scope_for_209_extension": false,
     "explicit_scope_for_208": false
   }
@@ -44,7 +43,7 @@
 
 1. 读写域必须显式存在，不允许隐式继承。
 2. `domain_mixing_forbidden=true` 时，不允许单域成功推导另一域放行。
-3. `spec_review_passed`、`risk_review_completed`、`limited_read_rollout_ready`、`explicit_scope_for_209_extension`、`explicit_scope_for_208` 都属于治理侧 scope gate，不得由调用方请求载荷直接声明。
+3. `spec_review_passed`、`risk_review_completed`、`explicit_scope_for_209_extension`、`explicit_scope_for_208` 都属于治理侧 scope gate，不得由调用方请求载荷直接声明。
 4. `live_read_limited` 在本 FR 中只保留为被阻断的兼容占位值；其正式公开模式语义仍由 `FR-0011` 单独冻结。
 
 ## gate_input
@@ -77,7 +76,6 @@
 2. `requested_execution_mode` 只表示请求方模式，不承载门禁降级后的实际执行结果。
 3. `requested_execution_mode=live_read_limited` 只允许与 `action_type=read` 搭配；写动作或不可逆写动作不得请求该模式。
 4. `requested_execution_mode=live_read_limited` 在 `FR-0011` 未完成 formal 收口前必须返回阻断结果，不得被解释为 Sprint 2 已放行的正式 live 模式。
-5. `requested_execution_mode=live_read_limited` 时仍必须同时满足 `scope_context.limited_read_rollout_ready=true`，否则只能得到 `blocked` 结果。
 
 ## gate_outcome
 
@@ -106,7 +104,7 @@
 6. `effective_execution_mode=live_read_limited` 只允许表示读动作的真实继续执行路径，不得用于写动作或不可逆写动作。
 7. 若 `scope_context.spec_review_passed=false` 或 `scope_context.risk_review_completed=false`，必须阻断任意 live 恢复或扩展。
 8. 若请求或生效模式命中 `live_read_limited`，在 `FR-0011` 未完成 formal 收口前必须阻断。
-9. 若 `scope_context.limited_read_rollout_ready=false`、`scope_context.explicit_scope_for_209_extension=false` 或 `scope_context.explicit_scope_for_208=false` 与请求目标不匹配，必须阻断对应 live 放行。
+9. 若 `scope_context.explicit_scope_for_209_extension=false` 或 `scope_context.explicit_scope_for_208=false` 与请求目标不匹配，必须阻断对应 live 放行。
 
 ## approval_record
 
@@ -134,7 +132,7 @@
 1. `approved=true` 时，`approver` 与 `approved_at` 必填。
 2. `checks` 任一项为 `false`，不得放行 live。
 3. `requested_execution_mode|effective_execution_mode` 命中 `live_read_high_risk` 或 `live_write` 且 `gate_decision=allowed` 时，必须存在完整审批证据。
-4. `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 且 `gate_decision=allowed` 时，除审批证据外还必须同时满足 `scope_context.limited_read_rollout_ready=true` 且 `FR-0011` 已正式冻结其 live-entry 语义；在此之前不得放行。
+4. `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 且 `gate_decision=allowed` 时，除审批证据外还必须满足 `FR-0011` 已正式冻结其 live-entry 语义；在此之前不得放行。
 5. `approval_id` 是 `FR-0009.approval_record_ref` 的等价承载，必须稳定、可检索、不可歧义。
 6. `decision_id` 必须指向同一次 `gate_outcome` 决策，保证审批记录可回链到唯一门禁结论。
 
@@ -174,7 +172,7 @@
 3. `gate_reasons` 不得为空，必须能独立解释本次放行或阻断原因。
 4. 若 `gate_decision=allowed`，`approver` 与 `approved_at` 必填；若为阻断，可为空。
 5. `requested_execution_mode|effective_execution_mode` 命中 `live_read_high_risk` 或 `live_write` 且 `gate_decision=allowed` 时，审计记录必须能独立证明审批已完成。
-6. `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 且 `gate_decision=allowed` 时，除审批证据外还必须能证明 `scope_context.limited_read_rollout_ready=true` 且 `FR-0011` 已正式冻结其 live-entry 语义；在此之前不得放行。
+6. `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 且 `gate_decision=allowed` 时，除审批证据外还必须能证明 `FR-0011` 已正式冻结其 live-entry 语义；在此之前不得放行。
 7. `event_id` 是 `FR-0009.audit_record_ref` 的等价承载，必须稳定、可检索、不可歧义。
 8. `decision_id` 必须指向同一次 `gate_outcome` 决策，保证审计记录能回链到唯一门禁结论。
 9. 若 live 被放行，`approval_id` 必填且必须引用对应 `approval_record.approval_id`；若为阻断，可为空。
@@ -221,3 +219,4 @@
 3. `gate_decision` 枚举值变更必须经过独立 spec review。
 4. `gate_reasons` 的新增代码允许追加，不允许复用同义码造成歧义。
 5. `FR-0009` 新增的 live-resume 前置若继续保留，必须在本契约中给出等价机器承载，不得形成 contract drift。
+6. `FR-0009.resume_requirements.limited_read_rollout_ready` 继续保留为上游治理前置；在 `FR-0011` 提供正式机器承载前，本契约只能以“默认阻断 `live_read_limited`”的方式消费该前置，不得把它伪装成 Sprint 2 已冻结字段。
