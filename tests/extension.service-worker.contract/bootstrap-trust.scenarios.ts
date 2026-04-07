@@ -1810,8 +1810,7 @@ describe("extension service worker recovery contract / bootstrap and trust", () 
           target_page: "search_result_tab",
           requested_execution_mode: "dry_run",
           effective_execution_mode: "dry_run",
-          issue_scope: "issue_209",
-          risk_state: "paused"
+          issue_scope: "issue_209"
         },
         details: {
           reason: "SESSION_EXPIRED"

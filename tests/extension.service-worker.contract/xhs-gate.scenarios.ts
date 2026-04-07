@@ -103,8 +103,7 @@ describe("extension service worker recovery contract / xhs gate and live forward
             requested_execution_mode: "dry_run",
             effective_execution_mode: "dry_run",
             gate_decision: "allowed",
-            issue_scope: "issue_209",
-            risk_state: "paused"
+            issue_scope: "issue_209"
           }
         }
       }
