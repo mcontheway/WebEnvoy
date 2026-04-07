@@ -129,6 +129,10 @@ const defaultRuntimeEnv = (cwd: string): Record<string, string> => ({
 let cliContractRuntimeBuilt = false;
 
 const ensureFreshCliContractRuntimeBuild = (): void => {
+  if (process.env.WEBENVOY_CLI_CONTRACT_RUNTIME_PREBUILT === "1") {
+    cliContractRuntimeBuilt = true;
+  }
+
   if (cliContractRuntimeBuilt) {
     return;
   }

@@ -12,7 +12,7 @@
     "build:runtime": "tsc -p tsconfig.json",
     "build:extension": "node scripts/sync-extension-shared.mjs && tsc -p tsconfig.extension.json && node scripts/bundle-extension-content-script.mjs",
     "test": "npm run build && vitest run && bash tests/pr-guardian.merge-guard.test.sh",
-    "test:suites": "npm run build && vitest --config vitest.suite.config.ts run",
+    "test:suites": "npm run build && WEBENVOY_CLI_CONTRACT_RUNTIME_PREBUILT=1 vitest --config vitest.suite.config.ts run",
     "test:watch": "vitest",
     "typecheck": "npm run typecheck:runtime && npm run typecheck:extension",
     "typecheck:runtime": "tsc -p tsconfig.json --noEmit",
