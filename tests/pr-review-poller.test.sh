@@ -120,6 +120,10 @@ echo "$*" >> "${MOCK_GUARDIAN_LOG:?missing MOCK_GUARDIAN_LOG}"
 
 case "${1:-}" in
   review-status)
+    if [[ "${MOCK_GUARDIAN_FAIL_REVIEW_STATUS_PR:-}" == "${2:-}" ]]; then
+      echo "mock review-status failure for PR ${2}" >&2
+      exit 42
+    fi
     cat "${MOCK_GUARDIAN_STATUS_DIR:?missing MOCK_GUARDIAN_STATUS_DIR}/${2}.json"
     ;;
   review)
@@ -205,6 +209,29 @@ test_poller_post_review_mode_does_not_use_state_as_truth() {
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review 278"
 }
 
+test_poller_continues_when_review_status_query_fails() {
+  setup_case_dir "continue-after-review-status-failure"
+  GUARDIAN_SCRIPT="${MOCK_GUARDIAN_SCRIPT}"
+  export GUARDIAN_SCRIPT
+  MOCK_GUARDIAN_FAIL_REVIEW_STATUS_PR="279"
+  export MOCK_GUARDIAN_FAIL_REVIEW_STATUS_PR
+
+  cat > "${MOCK_GH_OPEN_PRS_JSON}" <<'EOF'
+[
+  {"number":279,"title":"Status failure","headRefOid":"head-sha-279","headRefName":"feat/status-fail","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/279","baseRefName":"main","milestone":{"title":"Sprint A"}},
+  {"number":284,"title":"Next PR still reviews","headRefOid":"head-sha-284","headRefName":"feat/next","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/284","baseRefName":"main","milestone":{"title":"Sprint A"}}
+]
+EOF
+  printf '%s\n' '{"reusable":false,"reason":"missing_metadata","head_sha":"head-sha-284","review_profile":"high_risk_impl_profile","prompt_digest":"prompt-digest-123","verdict":null,"safe_to_merge":null}' > "${MOCK_GUARDIAN_STATUS_DIR}/284.json"
+
+  assert_pass main --state-file "${STATE_FILE}"
+  assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 279"
+  assert_file_not_contains "${MOCK_GUARDIAN_LOG}" "review 279"
+  assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 284"
+  assert_file_contains "${MOCK_GUARDIAN_LOG}" "review 284"
+  assert_equal "$(jq -r '.prs["284"].head_sha' "${STATE_FILE}")" "head-sha-284"
+}
+
 test_poller_preserves_draft_base_branch_and_milestone_filters() {
   setup_case_dir "preserve-poller-filters"
   GUARDIAN_SCRIPT="${MOCK_GUARDIAN_SCRIPT}"
@@ -234,6 +261,7 @@ main() {
   test_poller_reviews_pr_when_metadata_is_stale
   test_poller_no_post_review_uses_state_as_same_head_throttle
   test_poller_post_review_mode_does_not_use_state_as_truth
+  test_poller_continues_when_review_status_query_fails
   test_poller_preserves_draft_base_branch_and_milestone_filters
   echo "pr-review-poller test passed."
 }

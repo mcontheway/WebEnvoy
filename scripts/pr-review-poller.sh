@@ -238,7 +238,12 @@ main() {
     fi
 
     review_status_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-pr-review-status.XXXXXX")"
-    load_review_status "${pr_number}" "${review_status_file}"
+    if ! load_review_status "${pr_number}" "${review_status_file}"; then
+      echo "跳过 review-status 查询失败的 PR #${pr_number}: ${pr_title} (reason=review_status_failed)"
+      rm -f "${review_status_file}"
+      skipped_count=$((skipped_count + 1))
+      continue
+    fi
     reusable_review="$(jq -r '.reusable' "${review_status_file}")"
     review_status_reason="$(jq -r '.reason' "${review_status_file}")"
 
