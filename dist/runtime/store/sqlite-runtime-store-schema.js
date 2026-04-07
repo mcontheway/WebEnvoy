@@ -1,4 +1,10 @@
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
+const hasColumn = (db, tableName, columnName) => {
+    const rows = db
+        .prepare(`PRAGMA table_info(${tableName})`)
+        .all();
+    return rows.some((row) => row.name === columnName);
+};
 const backfillIssueScope = (db) => {
     db.exec(`
     UPDATE runtime_gate_audit_records
@@ -63,7 +69,7 @@ const migrateV1ToV2 = (db) => {
     CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_profile_recorded
       ON runtime_gate_audit_records(profile, recorded_at DESC);
   `);
-    db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION));
+    db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run("2");
 };
 const migrateV2ToV3 = (db) => {
     db.exec(`
@@ -138,6 +144,27 @@ const migrateV5ToV6 = (db) => {
       ON runtime_gate_audit_records(profile, recorded_at DESC);
     PRAGMA foreign_keys = ON;
   `);
+    db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run("6");
+};
+const migrateV6ToV7 = (db) => {
+    if (!hasColumn(db, "runtime_gate_approvals", "decision_id")) {
+        db.exec(`
+      ALTER TABLE runtime_gate_approvals
+      ADD COLUMN decision_id TEXT;
+    `);
+    }
+    if (!hasColumn(db, "runtime_gate_audit_records", "decision_id")) {
+        db.exec(`
+      ALTER TABLE runtime_gate_audit_records
+      ADD COLUMN decision_id TEXT;
+    `);
+    }
+    if (!hasColumn(db, "runtime_gate_audit_records", "approval_id")) {
+        db.exec(`
+      ALTER TABLE runtime_gate_audit_records
+      ADD COLUMN approval_id TEXT;
+    `);
+    }
     db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION));
 };
 export const initializeRuntimeStoreSchema = ({ db, onSchemaMismatch }) => {
@@ -177,6 +204,7 @@ export const initializeRuntimeStoreSchema = ({ db, onSchemaMismatch }) => {
     CREATE TABLE IF NOT EXISTS runtime_gate_approvals (
       approval_id TEXT PRIMARY KEY,
       run_id TEXT NOT NULL UNIQUE,
+      decision_id TEXT,
       approved INTEGER NOT NULL,
       approver TEXT,
       approved_at TEXT,
@@ -187,6 +215,8 @@ export const initializeRuntimeStoreSchema = ({ db, onSchemaMismatch }) => {
     );
     CREATE TABLE IF NOT EXISTS runtime_gate_audit_records (
       event_id TEXT PRIMARY KEY,
+      decision_id TEXT,
+      approval_id TEXT,
       run_id TEXT NOT NULL,
       session_id TEXT NOT NULL,
       profile TEXT NOT NULL,
@@ -247,6 +277,11 @@ export const initializeRuntimeStoreSchema = ({ db, onSchemaMismatch }) => {
         if (currentVersion === 5) {
             migrateV5ToV6(db);
             currentVersion = 6;
+            continue;
+        }
+        if (currentVersion === 6) {
+            migrateV6ToV7(db);
+            currentVersion = 7;
             continue;
         }
         break;

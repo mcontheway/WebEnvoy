@@ -108,6 +108,7 @@ export interface GateInputRecord {
 }
 
 export interface GateOutcomeRecord {
+  decision_id: string;
   effective_execution_mode: EffectiveExecutionMode;
   gate_decision: "allowed" | "blocked";
   gate_reasons: string[];
@@ -142,6 +143,8 @@ export interface XhsSearchGate {
   gate_outcome: GateOutcomeRecord;
   consumer_gate_result: ConsumerGateResult;
   approval_record: {
+    approval_id: string;
+    decision_id: string;
     approved: boolean;
     approver: string | null;
     approved_at: string | null;
@@ -151,6 +154,8 @@ export interface XhsSearchGate {
 
 export interface XhsExecutionAuditRecord {
   event_id: string;
+  decision_id: string;
+  approval_id: string | null;
   run_id: string;
   session_id: string;
   profile: string;

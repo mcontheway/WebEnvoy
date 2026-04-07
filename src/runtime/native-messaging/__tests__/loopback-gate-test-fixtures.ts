@@ -34,6 +34,7 @@ export const createLoopbackGateFixture = (overrides: Record<string, unknown> = {
       requested_execution_mode: "dry_run"
     },
     gateOutcome: {
+      decision_id: "gate_decision_run-001",
       gate_decision: "allowed"
     },
     consumerGateResult: {
@@ -47,6 +48,8 @@ export const createLoopbackGateFixture = (overrides: Record<string, unknown> = {
       effective_execution_mode: "dry_run"
     },
     approvalRecord: {
+      approval_id: "gate_appr_run-001",
+      decision_id: "gate_decision_run-001",
       approved: true,
       approver: "loopback-agent",
       approved_at: "2026-03-23T10:00:00.000Z",
@@ -119,6 +122,7 @@ export const createLoopbackAuditFixture = (
   const gate = createLoopbackGateFixture(overrides as Record<string, unknown>);
   return {
     gateInput: gate.gateInput,
+    gateOutcome: gate.gateOutcome,
     consumerGateResult: gate.consumerGateResult,
     approvalRecord: gate.approvalRecord,
     writeActionMatrixDecisions: gate.writeActionMatrixDecisions

@@ -2,7 +2,7 @@ import type { LoopbackGate } from "./loopback-gate.js";
 
 export type LoopbackAuditSource = Pick<
   LoopbackGate,
-  "gateInput" | "consumerGateResult" | "approvalRecord" | "writeActionMatrixDecisions"
+  "gateInput" | "gateOutcome" | "consumerGateResult" | "approvalRecord" | "writeActionMatrixDecisions"
 >;
 
 export const buildLoopbackAuditRecord = (input: {
@@ -15,6 +15,8 @@ export const buildLoopbackAuditRecord = (input: {
 
   return {
     event_id: `gate_evt_${input.runId}`,
+    decision_id: String(input.gate.gateOutcome.decision_id ?? `gate_decision_${input.runId}`),
+    approval_id: String(input.gate.approvalRecord.approval_id ?? `gate_appr_${input.runId}`),
     run_id: input.runId,
     session_id: input.sessionId,
     profile: input.profile,

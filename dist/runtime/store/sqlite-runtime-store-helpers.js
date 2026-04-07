@@ -33,6 +33,7 @@ export const mapGateAuditRecordRow = (row) => ({
 export const mapGateApprovalRecordRow = (row) => ({
     approval_id: row.approval_id,
     run_id: row.run_id,
+    decision_id: row.decision_id ?? null,
     approved: row.approved === 1,
     approver: row.approver,
     approved_at: row.approved_at,

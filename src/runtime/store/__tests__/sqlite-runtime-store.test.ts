@@ -64,6 +64,8 @@ const expectLegacyMigrationAllowsNullActionTypeWrite = async (
 ) => {
   const appended = await store.appendGateAuditRecord({
     eventId: `evt-null-action-${input.runId}`,
+    decisionId: `gate_decision_${input.runId}`,
+    approvalId: null,
     runId: input.runId,
     sessionId: input.sessionId,
     profile: input.profile,
@@ -262,6 +264,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
 
     await store.upsertApprovalRecord({
       runId: "run-gate-001",
+      decisionId: "gate_decision_run-gate-001",
       approved: true,
       approver: "qa-reviewer",
       approvedAt: "2026-03-23T10:00:10.000Z",
@@ -275,6 +278,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
     });
     await store.appendAuditRecord({
       eventId: "gate_evt_run-gate-001_1",
+      decisionId: "gate_decision_run-gate-001",
+      approvalId: "gate_appr_run-gate-001",
       runId: "run-gate-001",
       sessionId: "session-gate-1",
       profile: "profile-a",
@@ -299,13 +304,17 @@ describeWithSqlite("sqlite-runtime-store", () => {
     store.close();
 
     expect(trail.approval_record).toMatchObject({
+      approval_id: "gate_appr_run-gate-001",
       run_id: "run-gate-001",
+      decision_id: "gate_decision_run-gate-001",
       approved: true,
       approver: "qa-reviewer",
       approved_at: "2026-03-23T10:00:10.000Z"
     });
     expect(trail.audit_records).toHaveLength(1);
     expect(trail.audit_records[0]).toMatchObject({
+      decision_id: "gate_decision_run-gate-001",
+      approval_id: "gate_appr_run-gate-001",
       run_id: "run-gate-001",
       session_id: "session-gate-1",
       profile: "profile-a",
@@ -339,6 +348,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
 
     await store.appendAuditRecord({
       eventId: "gate_evt_run-gate-limited-001_1",
+      decisionId: "gate_decision_run-gate-limited-001",
+      approvalId: "gate_appr_run-gate-limited-001",
       runId: "run-gate-limited-001",
       sessionId: "session-gate-limited-1",
       profile: "profile-a",
@@ -364,6 +375,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
 
     expect(trail.audit_records).toHaveLength(1);
     expect(trail.audit_records[0]).toMatchObject({
+      decision_id: "gate_decision_run-gate-limited-001",
+      approval_id: "gate_appr_run-gate-limited-001",
       run_id: "run-gate-limited-001",
       risk_state: "limited",
       next_state: "allowed",
@@ -402,6 +415,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
 
     await store.appendAuditRecord({
       eventId: "gate_evt_run-gate-filter-1",
+      decisionId: "gate_decision_run-gate-filter-1",
+      approvalId: null,
       runId: "run-gate-filter-1",
       sessionId: "session-a",
       profile: "profile-a",
@@ -423,6 +438,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
     });
     await store.appendAuditRecord({
       eventId: "gate_evt_run-gate-filter-2",
+      decisionId: "gate_decision_run-gate-filter-2",
+      approvalId: null,
       runId: "run-gate-filter-2",
       sessionId: "session-b",
       profile: "profile-b",
@@ -470,6 +487,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
     await expect(
       store.appendAuditRecord({
         eventId: "gate_evt_run-gate-invalid-001",
+        decisionId: "gate_decision_run-gate-invalid-001",
+        approvalId: null,
         runId: "run-gate-invalid-001",
         sessionId: "session-gate-invalid",
         profile: "profile-a",
@@ -512,6 +531,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
     await expect(
       store.appendAuditRecord({
         eventId: "gate_evt_run-gate-limited-invalid-001",
+        decisionId: "gate_decision_run-gate-limited-invalid-001",
+        approvalId: null,
         runId: "run-gate-limited-invalid-001",
         sessionId: "session-gate-limited-invalid",
         profile: "profile-a",

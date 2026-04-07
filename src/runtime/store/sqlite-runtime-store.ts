@@ -57,6 +57,7 @@ export interface AppendRunEventResult {
 
 export interface UpsertGateApprovalInput {
   runId: string;
+  decisionId: string;
   approved: boolean;
   approver: string | null;
   approvedAt: string | null;
@@ -66,6 +67,7 @@ export interface UpsertGateApprovalInput {
 export interface GateApprovalRecord {
   approval_id: string;
   run_id: string;
+  decision_id: string | null;
   approved: boolean;
   approver: string | null;
   approved_at: string | null;
@@ -76,6 +78,8 @@ export interface GateApprovalRecord {
 
 export interface AppendGateAuditRecordInput {
   eventId: string;
+  decisionId: string;
+  approvalId: string | null;
   runId: string;
   sessionId: string;
   profile: string;
@@ -98,6 +102,8 @@ export interface AppendGateAuditRecordInput {
 
 export interface GateAuditRecord {
   event_id: string;
+  decision_id: string | null;
+  approval_id: string | null;
   run_id: string;
   session_id: string;
   profile: string;
@@ -443,9 +449,10 @@ export class SQLiteRuntimeStore {
         .prepare(
           `
           INSERT INTO runtime_gate_approvals(
-            approval_id, run_id, approved, approver, approved_at, checks_json, created_at, updated_at
-          ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            approval_id, run_id, decision_id, approved, approver, approved_at, checks_json, created_at, updated_at
+          ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(run_id) DO UPDATE SET
+            decision_id = excluded.decision_id,
             approved = excluded.approved,
             approver = excluded.approver,
             approved_at = excluded.approved_at,
@@ -456,6 +463,7 @@ export class SQLiteRuntimeStore {
         .run(
           approvalId,
           input.runId,
+          input.decisionId,
           input.approved ? 1 : 0,
           input.approver,
           input.approvedAt,
@@ -488,11 +496,13 @@ export class SQLiteRuntimeStore {
         .prepare(
           `
           INSERT INTO runtime_gate_audit_records(
-            event_id, run_id, session_id, profile, issue_scope, risk_state, next_state, transition_trigger, target_domain, target_tab_id, target_page,
+            event_id, decision_id, approval_id, run_id, session_id, profile, issue_scope, risk_state, next_state, transition_trigger, target_domain, target_tab_id, target_page,
             action_type, requested_execution_mode, effective_execution_mode, gate_decision,
             gate_reasons_json, approver, approved_at, recorded_at, created_at
-          ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(event_id) DO UPDATE SET
+            decision_id = excluded.decision_id,
+            approval_id = excluded.approval_id,
             session_id = excluded.session_id,
             profile = excluded.profile,
             issue_scope = excluded.issue_scope,
@@ -514,6 +524,8 @@ export class SQLiteRuntimeStore {
         )
         .run(
           input.eventId,
+          input.decisionId,
+          input.approvalId,
           input.runId,
           input.sessionId,
           input.profile,
@@ -643,6 +655,7 @@ export class SQLiteRuntimeStore {
     values.push(limit);
     const sql = `
       SELECT event_id, run_id, session_id, profile, issue_scope, risk_state, next_state, transition_trigger, target_domain, target_tab_id, target_page,
+             decision_id, approval_id,
              action_type, requested_execution_mode, effective_execution_mode, gate_decision,
              gate_reasons_json, approver, approved_at, recorded_at, created_at
       FROM runtime_gate_audit_records
@@ -662,6 +675,7 @@ export class SQLiteRuntimeStore {
       .prepare(
         `
       SELECT approval_id, run_id, approved, approver, approved_at, checks_json, created_at, updated_at
+             , decision_id
       FROM runtime_gate_approvals
       WHERE run_id = ?
     `
@@ -693,6 +707,7 @@ export class SQLiteRuntimeStore {
       .prepare(
         `
       SELECT event_id, run_id, session_id, profile, issue_scope, risk_state, next_state, transition_trigger, target_domain, target_tab_id, target_page,
+             decision_id, approval_id,
              action_type, requested_execution_mode, effective_execution_mode, gate_decision,
              gate_reasons_json, approver, approved_at, recorded_at, created_at
       FROM runtime_gate_audit_records

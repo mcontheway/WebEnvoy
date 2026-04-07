@@ -41,7 +41,12 @@ const resolveLoopbackIssueActionMatrixEntry = (
 
 export const buildLoopbackGate = (
   options: Record<string, unknown>,
-  abilityAction: string | null
+  abilityAction: string | null,
+  linkage?: {
+    runId?: string;
+    decisionId?: string;
+    approvalId?: string;
+  }
 ): {
   scopeContext: Record<string, unknown>;
   readExecutionPolicy: Record<string, unknown>;
@@ -69,6 +74,9 @@ export const buildLoopbackGate = (
     abilityAction,
     requestedExecutionMode: options.requested_execution_mode,
     approvalRecord: options.approval_record ?? options.approval,
+    runId: linkage?.runId,
+    decisionId: linkage?.decisionId,
+    approvalId: linkage?.approvalId,
     issue208EditorInputValidation,
     treatMissingEditorValidationAsUnsupported: true,
     includeWriteInteractionTierReason: true,

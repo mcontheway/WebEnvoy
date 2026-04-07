@@ -10,6 +10,8 @@ import type {
 } from "./risk-state.js";
 
 export interface XhsApprovalRecord {
+  approval_id: string;
+  decision_id: string;
   approved: boolean;
   approver: string | null;
   approved_at: string | null;
@@ -42,8 +44,11 @@ export interface XhsGateCoreInput {
   requestedExecutionMode: unknown;
   issueScope: unknown;
   riskState: unknown;
+  runId?: unknown;
   abilityAction?: unknown;
   approvalRecord: unknown;
+  decisionId?: unknown;
+  approvalId?: unknown;
   issue208EditorInputValidation?: boolean;
   includeWriteInteractionTierReason?: boolean;
   treatMissingEditorValidationAsUnsupported?: boolean;
@@ -198,6 +203,7 @@ export declare const evaluateXhsGate: (input: XhsGateCoreInput & {
     risk_state: RiskState;
   };
   gate_outcome: {
+    decision_id: string;
     effective_execution_mode: ExecutionMode | null;
     gate_decision: "allowed" | "blocked";
     gate_reasons: string[];

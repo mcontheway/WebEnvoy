@@ -13,7 +13,7 @@ const resolveLoopbackIssueScope = (value) => ISSUE_SCOPES.includes(value)
     ? value
     : resolveSharedIssueScope(value);
 const resolveLoopbackIssueActionMatrixEntry = (issueScope, riskState) => getIssueActionMatrixEntry(issueScope, riskState);
-export const buildLoopbackGate = (options, abilityAction) => {
+export const buildLoopbackGate = (options, abilityAction, linkage) => {
     const clone = (value) => structuredClone(value);
     const issue208EditorInputValidation = options.issue_scope === "issue_208" &&
         options.requested_execution_mode === "live_write" &&
@@ -28,6 +28,9 @@ export const buildLoopbackGate = (options, abilityAction) => {
         abilityAction,
         requestedExecutionMode: options.requested_execution_mode,
         approvalRecord: options.approval_record ?? options.approval,
+        runId: linkage?.runId,
+        decisionId: linkage?.decisionId,
+        approvalId: linkage?.approvalId,
         issue208EditorInputValidation,
         treatMissingEditorValidationAsUnsupported: true,
         includeWriteInteractionTierReason: true,

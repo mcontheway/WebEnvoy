@@ -53,6 +53,43 @@ const asString = (value) => (typeof value === "string" && value.trim().length > 
 
 const asInteger = (value) => (typeof value === "number" && Number.isInteger(value) ? value : null);
 
+const deriveGateDecisionId = (input) => {
+  const explicitDecisionId = asString(input.decisionId);
+  if (explicitDecisionId) {
+    return explicitDecisionId;
+  }
+
+  const runId = asString(input.runId);
+  if (runId) {
+    return `gate_decision_${runId}`;
+  }
+
+  const issueScope = asString(input.issueScope) ?? "unknown_scope";
+  const targetPage = asString(input.targetPage) ?? "unknown_page";
+  const targetTabId = asInteger(input.targetTabId);
+  return `gate_decision_${issueScope}_${targetPage}_${targetTabId ?? "unknown_tab"}`;
+};
+
+const deriveApprovalId = (input, decisionId) => {
+  const explicitApprovalId = asString(input.approvalId);
+  if (explicitApprovalId) {
+    return explicitApprovalId;
+  }
+
+  const record = asRecord(input.approvalRecord);
+  const recordApprovalId = asString(record?.approval_id);
+  if (recordApprovalId) {
+    return recordApprovalId;
+  }
+
+  const runId = asString(input.runId);
+  if (runId) {
+    return `gate_appr_${runId}`;
+  }
+
+  return `gate_appr_${decisionId}`;
+};
+
 const pushReason = (target, reason) => {
   if (!target.includes(reason)) {
     target.push(reason);
@@ -73,6 +110,8 @@ const normalizeXhsApprovalRecord = (value) => {
   const record = asRecord(value);
   const checksRecord = asRecord(record?.checks);
   return {
+    approval_id: asString(record?.approval_id),
+    decision_id: asString(record?.decision_id),
     approved: asBoolean(record?.approved),
     approver: asString(record?.approver),
     approved_at: asString(record?.approved_at),
@@ -637,6 +676,7 @@ const collectXhsMatrixGateReasons = (input) => {
 
 const evaluateXhsGate = (input) => {
   const state = buildXhsGatePolicyState(input);
+  const decisionId = deriveGateDecisionId(input);
   const gateReasons = Array.isArray(input.additionalGateReasons)
     ? input.additionalGateReasons.filter((reason) => typeof reason === "string")
     : [];
@@ -666,6 +706,9 @@ const evaluateXhsGate = (input) => {
     issue208EditorInputValidation: input.issue208EditorInputValidation === true,
     includeWriteInteractionTierReason: input.includeWriteInteractionTierReason === true
   });
+  const approvalId = deriveApprovalId(input, decisionId);
+  approvalRecord.approval_id = approvalId;
+  approvalRecord.decision_id = decisionId;
   const outcome = finalizeXhsGateOutcome({
     gateReasons,
     state,
@@ -701,6 +744,7 @@ const evaluateXhsGate = (input) => {
       risk_state: state.riskState
     },
     gate_outcome: {
+      decision_id: decisionId,
       effective_execution_mode: outcome.effectiveExecutionMode,
       gate_decision: outcome.gateDecision,
       gate_reasons: outcome.gateReasons,

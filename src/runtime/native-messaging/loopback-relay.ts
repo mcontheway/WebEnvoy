@@ -100,7 +100,11 @@ export class InMemoryBackgroundRelay {
           typeof commandParams.options === "object" && commandParams.options !== null
             ? (commandParams.options as Record<string, unknown>)
             : {};
-        const gate = buildLoopbackGate(options, asString(ability.action));
+        const gate = buildLoopbackGate(options, asString(ability.action), {
+          runId,
+          decisionId: `gate_decision_${runId}`,
+          approvalId: `gate_appr_${runId}`
+        });
         const auditRecord = buildLoopbackAuditRecord({
           runId,
           sessionId,

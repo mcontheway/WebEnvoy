@@ -81,9 +81,15 @@ const extractGateApprovalInput = (
     return null;
   }
 
+  const decisionId =
+    asString(approvalRecord.decision_id) ??
+    asString((asObject(source.gate_outcome) ?? {}).decision_id) ??
+    `gate_decision_${runId}`;
+
   const checksObject = asObject(approvalRecord.checks) ?? {};
   return {
     runId,
+    decisionId,
     approved: asBoolean(approvalRecord.approved),
     approver: asString(approvalRecord.approver),
     approvedAt: asString(approvalRecord.approved_at),
@@ -170,6 +176,15 @@ const extractGateAuditRecordInput = (
     asString(auditRecord.gate_decision) ??
     asString(consumerGateResult?.gate_decision) ??
     asString(asObject(source.gate_outcome)?.gate_decision);
+  const decisionId =
+    asString(auditRecord.decision_id) ??
+    asString(asObject(source.gate_outcome)?.decision_id) ??
+    asString((asObject(source.approval_record) ?? {}).decision_id) ??
+    (runId ? `gate_decision_${runId}` : null);
+  const approvalId =
+    asString(auditRecord.approval_id) ??
+    asString((asObject(source.approval_record) ?? {}).approval_id) ??
+    (runId && asObject(source.approval_record) ? `gate_appr_${runId}` : null);
   const recordedAt = asString(auditRecord.recorded_at);
   const gateReasons = Array.isArray(auditRecord.gate_reasons)
     ? auditRecord.gate_reasons.filter(
@@ -183,6 +198,7 @@ const extractGateAuditRecordInput = (
 
   if (
     !runId ||
+    !decisionId ||
     !sessionId ||
     !profile ||
     !issueScope ||
@@ -204,6 +220,8 @@ const extractGateAuditRecordInput = (
 
   return {
     eventId,
+    decisionId,
+    approvalId,
     runId,
     sessionId,
     profile,

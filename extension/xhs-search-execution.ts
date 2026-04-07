@@ -40,7 +40,7 @@ export const executeXhsSearch = async (
   },
   env: XhsSearchEnvironment
 ): Promise<SearchExecutionResult> => {
-  const gate = resolveGate(input.options);
+  const gate = resolveGate(input.options, input.executionContext);
   const auditRecord = createAuditRecord(input.executionContext, gate, env);
   const startedAt = env.now();
   if (gate.consumer_gate_result.gate_decision === "blocked") {

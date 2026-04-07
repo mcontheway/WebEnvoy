@@ -5,7 +5,7 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 export const executeXhsSearch = async (input, env) => {
-    const gate = resolveGate(input.options);
+    const gate = resolveGate(input.options, input.executionContext);
     const auditRecord = createAuditRecord(input.executionContext, gate, env);
     const startedAt = env.now();
     if (gate.consumer_gate_result.gate_decision === "blocked") {

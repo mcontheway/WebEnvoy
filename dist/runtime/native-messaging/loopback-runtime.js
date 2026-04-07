@@ -7,7 +7,11 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const buildLoopbackXhsSearchGateBundle = (input) => {
-    const gate = buildLoopbackGate(input.options, input.abilityAction);
+    const gate = buildLoopbackGate(input.options, input.abilityAction, {
+        runId: input.runId,
+        decisionId: `gate_decision_${input.runId}`,
+        approvalId: `gate_appr_${input.runId}`
+    });
     const auditRecord = buildLoopbackAuditRecord({
         runId: input.runId,
         sessionId: input.sessionId,

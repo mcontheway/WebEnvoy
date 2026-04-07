@@ -51,6 +51,12 @@ const isIssue208EditorInputValidation = (options: XhsSearchOptions): boolean =>
   options.requested_execution_mode === "live_write" &&
   options.validation_action === "editor_input";
 
+const buildGateDecisionId = (context: XhsExecutionContext): string =>
+  `gate_decision_${context.runId}`;
+
+const buildGateApprovalId = (context: XhsExecutionContext): string =>
+  `gate_appr_${context.runId}`;
+
 export const resolveActualTargetGateReasons = (options: XhsSearchOptions): string[] => {
   const gateReasons: string[] = [];
   const targetDomain = asNonEmptyString(options.target_domain);
@@ -76,7 +82,10 @@ export const resolveActualTargetGateReasons = (options: XhsSearchOptions): strin
   return gateReasons;
 };
 
-export const resolveGate = (options: XhsSearchOptions): XhsSearchGate =>
+export const resolveGate = (
+  options: XhsSearchOptions,
+  context: XhsExecutionContext
+): XhsSearchGate =>
   evaluateXhsGate({
     issueScope: options.issue_scope,
     riskState: options.risk_state,
@@ -91,6 +100,8 @@ export const resolveGate = (options: XhsSearchOptions): XhsSearchGate =>
     abilityAction: options.ability_action,
     requestedExecutionMode: options.requested_execution_mode,
     approvalRecord: options.approval_record ?? options.approval,
+    decisionId: buildGateDecisionId(context),
+    approvalId: buildGateApprovalId(context),
     issue208EditorInputValidation: isIssue208EditorInputValidation(options),
     treatMissingEditorValidationAsUnsupported: true
   }) as XhsSearchGate;
@@ -113,7 +124,9 @@ export const createAuditRecord = (
     liveModeRequested;
 
   const auditRecord: XhsExecutionAuditRecord = {
-    event_id: `gate_evt_${env.randomId()}`,
+    event_id: `gate_evt_${context.runId}`,
+    decision_id: gate.gate_outcome.decision_id,
+    approval_id: gate.approval_record.approval_id,
     run_id: context.runId,
     session_id: context.sessionId,
     profile: context.profile,
