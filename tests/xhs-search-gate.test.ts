@@ -144,4 +144,46 @@ describe("xhs-search gate helpers", () => {
     expect(gate.approval_record.approval_id).not.toBe("gate_appr_previous_req");
     expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-003_req-3");
   });
+
+  it("reissues approval_id when a legacy approval_record omits decision_id", () => {
+    const gate = resolveGate(
+      {
+        issue_scope: "issue_209",
+        risk_state: "allowed",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 30,
+        target_page: "search_result_tab",
+        actual_target_domain: "www.xiaohongshu.com",
+        actual_target_tab_id: 30,
+        actual_target_page: "search_result_tab",
+        action_type: "read",
+        ability_action: "read",
+        requested_execution_mode: "live_read_high_risk",
+        approval_record: {
+          approval_id: "gate_appr_legacy_without_decision",
+          approved: true,
+          approver: "qa-reviewer",
+          approved_at: "2026-03-23T10:00:00.000Z",
+          checks: {
+            target_domain_confirmed: true,
+            target_tab_confirmed: true,
+            target_page_confirmed: true,
+            risk_state_checked: true,
+            action_type_confirmed: true
+          }
+        }
+      },
+      {
+        runId: "run-extension-004",
+        requestId: "req-4",
+        sessionId: "session-extension-004",
+        profile: "profile-a"
+      }
+    );
+
+    expect(gate.gate_outcome.decision_id).toBe("gate_decision_run-extension-004_req-4");
+    expect(gate.approval_record.approval_id).toBe("gate_appr_gate_decision_run-extension-004_req-4");
+    expect(gate.approval_record.approval_id).not.toBe("gate_appr_legacy_without_decision");
+    expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-004_req-4");
+  });
 });

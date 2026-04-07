@@ -1,4 +1,4 @@
-import { getWriteActionMatrixDecisions } from "../../../shared/risk-state.js";
+import { APPROVAL_CHECK_KEYS, getWriteActionMatrixDecisions } from "../../../shared/risk-state.js";
 import { RuntimeStoreError, SQLiteRuntimeStore, resolveRuntimeStorePath } from "./sqlite-runtime-store.js";
 const resolveSessionId = (summary) => {
     const directSession = summary.sessionId;
@@ -25,6 +25,7 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
 const asBoolean = (value) => value === true;
+const REQUIRED_APPROVAL_CHECK_KEYS = APPROVAL_CHECK_KEYS;
 const hasRealApprovalRecord = (approvalRecord) => {
     if (!approvalRecord || !asBoolean(approvalRecord.approved)) {
         return false;
@@ -32,9 +33,8 @@ const hasRealApprovalRecord = (approvalRecord) => {
     if (!asString(approvalRecord.approver) || !asString(approvalRecord.approved_at)) {
         return false;
     }
-    const checksObject = asObject(approvalRecord.checks) ?? {};
-    const checkValues = Object.values(checksObject);
-    return checkValues.length > 0 && checkValues.every((value) => value === true);
+    const checksObject = asObject(approvalRecord.checks);
+    return REQUIRED_APPROVAL_CHECK_KEYS.every((key) => checksObject?.[key] === true);
 };
 const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
 const requiresApprovalIdForAudit = (input) => input.gateDecision === "allowed" &&
@@ -56,10 +56,13 @@ const extractGateApprovalInput = (source) => {
     if (!runId) {
         return null;
     }
-    const decisionId = asString(approvalRecord.decision_id) ??
+    const approvalDecisionId = asString(approvalRecord.decision_id);
+    const decisionId = approvalDecisionId ??
         asString((asObject(source.gate_outcome) ?? {}).decision_id) ??
         `gate_decision_${runId}`;
-    const approvalId = asString(approvalRecord.approval_id);
+    const approvalId = approvalDecisionId === null
+        ? `gate_appr_${decisionId}`
+        : asString(approvalRecord.approval_id);
     if (!approvalId) {
         return null;
     }
@@ -70,7 +73,10 @@ const extractGateApprovalInput = (source) => {
         approved: asBoolean(approvalRecord.approved),
         approver: asString(approvalRecord.approver),
         approvedAt: asString(approvalRecord.approved_at),
-        checks: Object.fromEntries(Object.entries(asObject(approvalRecord.checks) ?? {}).map(([key, value]) => [key, asBoolean(value)]))
+        checks: Object.fromEntries(REQUIRED_APPROVAL_CHECK_KEYS.map((key) => [
+            key,
+            asBoolean((asObject(approvalRecord.checks) ?? {})[key])
+        ]))
     };
 };
 const extractGateAuditRecordInput = (source) => {

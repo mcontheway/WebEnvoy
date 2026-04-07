@@ -81,8 +81,7 @@ const deriveApprovalId = (input, decisionId) => {
     return null;
   }
 
-  const approvalRecordMatchesDecision =
-    approvalRecord.decision_id === null || approvalRecord.decision_id === decisionId;
+  const approvalRecordMatchesDecision = approvalRecord.decision_id === decisionId;
 
   const explicitApprovalId = asString(input.approvalId);
   if (explicitApprovalId && approvalRecordMatchesDecision) {

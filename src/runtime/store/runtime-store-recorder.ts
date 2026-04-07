@@ -1,6 +1,9 @@
 import type { CliError } from "../../core/errors.js";
 import type { JsonObject, RuntimeContext } from "../../core/types.js";
-import { getWriteActionMatrixDecisions } from "../../../shared/risk-state.js";
+import {
+  APPROVAL_CHECK_KEYS,
+  getWriteActionMatrixDecisions
+} from "../../../shared/risk-state.js";
 import {
   RuntimeStoreError,
   SQLiteRuntimeStore,
@@ -48,6 +51,8 @@ const asInteger = (value: unknown): number | null =>
 
 const asBoolean = (value: unknown): boolean => value === true;
 
+const REQUIRED_APPROVAL_CHECK_KEYS = APPROVAL_CHECK_KEYS;
+
 const hasRealApprovalRecord = (approvalRecord: JsonObject | null): boolean => {
   if (!approvalRecord || !asBoolean(approvalRecord.approved)) {
     return false;
@@ -57,9 +62,8 @@ const hasRealApprovalRecord = (approvalRecord: JsonObject | null): boolean => {
     return false;
   }
 
-  const checksObject = asObject(approvalRecord.checks) ?? {};
-  const checkValues = Object.values(checksObject);
-  return checkValues.length > 0 && checkValues.every((value) => value === true);
+  const checksObject = asObject(approvalRecord.checks);
+  return REQUIRED_APPROVAL_CHECK_KEYS.every((key) => checksObject?.[key] === true);
 };
 
 const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
@@ -102,11 +106,15 @@ const extractGateApprovalInput = (
     return null;
   }
 
+  const approvalDecisionId = asString(approvalRecord.decision_id);
   const decisionId =
-    asString(approvalRecord.decision_id) ??
+    approvalDecisionId ??
     asString((asObject(source.gate_outcome) ?? {}).decision_id) ??
     `gate_decision_${runId}`;
-  const approvalId = asString(approvalRecord.approval_id);
+  const approvalId =
+    approvalDecisionId === null
+      ? `gate_appr_${decisionId}`
+      : asString(approvalRecord.approval_id);
   if (!approvalId) {
     return null;
   }
@@ -119,7 +127,10 @@ const extractGateApprovalInput = (
     approver: asString(approvalRecord.approver),
     approvedAt: asString(approvalRecord.approved_at),
     checks: Object.fromEntries(
-      Object.entries(asObject(approvalRecord.checks) ?? {}).map(([key, value]) => [key, asBoolean(value)])
+      REQUIRED_APPROVAL_CHECK_KEYS.map((key) => [
+        key,
+        asBoolean((asObject(approvalRecord.checks) ?? {})[key])
+      ])
     )
   };
 };
