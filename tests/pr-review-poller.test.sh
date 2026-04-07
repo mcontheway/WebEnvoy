@@ -210,7 +210,7 @@ test_poller_post_review_mode_does_not_use_state_as_truth() {
 }
 
 test_poller_continues_when_review_status_query_fails() {
-  setup_case_dir "continue-after-review-status-failure"
+  setup_case_dir "degrade-to-review-after-review-status-failure"
   GUARDIAN_SCRIPT="${MOCK_GUARDIAN_SCRIPT}"
   export GUARDIAN_SCRIPT
   MOCK_GUARDIAN_FAIL_REVIEW_STATUS_PR="279"
@@ -226,9 +226,10 @@ EOF
 
   assert_pass main --state-file "${STATE_FILE}"
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 279"
-  assert_file_not_contains "${MOCK_GUARDIAN_LOG}" "review 279"
+  assert_file_contains "${MOCK_GUARDIAN_LOG}" "review 279"
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 284"
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review 284"
+  assert_equal "$(jq -r '.prs["279"].head_sha' "${STATE_FILE}")" "head-sha-279"
   assert_equal "$(jq -r '.prs["284"].head_sha' "${STATE_FILE}")" "head-sha-284"
 }
 

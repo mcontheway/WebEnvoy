@@ -239,13 +239,13 @@ main() {
 
     review_status_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-pr-review-status.XXXXXX")"
     if ! load_review_status "${pr_number}" "${review_status_file}"; then
-      echo "跳过 review-status 查询失败的 PR #${pr_number}: ${pr_title} (reason=review_status_failed)"
-      rm -f "${review_status_file}"
-      skipped_count=$((skipped_count + 1))
-      continue
+      echo "review-status 查询失败，降级执行 guardian 审查 PR #${pr_number}: ${pr_title} (reason=review_status_failed)"
+      reusable_review="false"
+      review_status_reason="review_status_failed"
+    else
+      reusable_review="$(jq -r '.reusable' "${review_status_file}")"
+      review_status_reason="$(jq -r '.reason' "${review_status_file}")"
     fi
-    reusable_review="$(jq -r '.reusable' "${review_status_file}")"
-    review_status_reason="$(jq -r '.reason' "${review_status_file}")"
 
     if [[ "${reusable_review}" == "true" ]]; then
       echo "跳过已存在 fresh guardian review 的 PR #${pr_number}: ${pr_title} (reason=${review_status_reason})"
