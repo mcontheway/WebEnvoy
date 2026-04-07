@@ -10,9 +10,7 @@
 - [x] `data-model.md` 定义门禁实体、约束与生命周期。
 - [x] `#218/#219/#221` 的职责映射已在 FR-0010 套件内显式冻结。
 - [x] `consumer_gate_result` 的稳定字段集合已在 formal 套件内固定为 `target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`。
-- [x] `#254` 对应的 sidecar 契约分歧已在规约层明确结论：`consumer_gate_result.risk_state` 不是 FR-0010 稳定字段。
 - [x] `risk_state` 的正式归属已在 formal 套件内固定到 `gate_input.risk_state` 与 `audit_record.risk_state`。
-- [x] service-worker / relay 阻断路径的正式承诺已收口为“不要求在 `consumer_gate_result` 内稳定透传 `risk_state`”。
 
 ## 当前 review 待完成项
 
@@ -25,8 +23,8 @@
 - [x] `FR-0011` formal 收口前，`live_read_limited` 对读动作同样默认阻断，且 staged rollout 条件载体 `limited_read_rollout_ready_true` 已回写到实现/测试准入口径。
 - [x] 门禁默认模式（`dry_run/recon`）与 live 升级审批流程已在 formal 套件内达成统一评审口径。
 - [x] 统一消费对象字段已在 formal 套件内冻结：`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`。
-- [x] 在 `#208` issue 线程同步“FR-0010 已冻结其后续 live 恢复需要消费的统一门禁对象与状态字段真相源”。permalink=`https://github.com/mcontheway/WebEnvoy/issues/208#issuecomment-4198847806`
-- [x] 在 `#209` issue 线程同步“FR-0010 已冻结其后续 live 扩展只能消费统一门禁对象，`consumer_gate_result.risk_state` 不属于稳定契约”。permalink=`https://github.com/mcontheway/WebEnvoy/issues/209#issuecomment-4198850182`
+- [x] 在 `#208` issue 线程同步“FR-0010 已冻结其后续 live 恢复需要消费的统一门禁对象与 review 边界”。permalink=`https://github.com/mcontheway/WebEnvoy/issues/208#issuecomment-4199076361`
+- [x] 在 `#209` issue 线程同步“FR-0010 已冻结其后续 live 扩展需要引用的统一门禁对象与 review 边界”。permalink=`https://github.com/mcontheway/WebEnvoy/issues/209#issuecomment-4199076389`
 
 ## 实施清单（spec 通过后）
 
@@ -47,5 +45,4 @@
 - [x] Refs #218
 - [x] Refs #219
 - [x] Refs #221
-- [x] Refs #254
 - [x] Refs #363

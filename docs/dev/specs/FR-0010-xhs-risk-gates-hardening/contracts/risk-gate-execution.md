@@ -4,7 +4,6 @@
 
 本契约定义 Sprint 2 风险门禁与执行硬化的稳定输出对象，供运行时门禁实现、`#208`、`#209` 与后续审计链路消费。
 凡后续 FR 扩展 live 读模式，必须继续沿用本契约冻结的 `gate_input` / `gate_outcome` / `approval_record` / `audit_record` / `consumer_gate_result`，不得为同一字段再定义并行正式语义。
-`#254` 的 sidecar 契约分歧也以本文件为准：`consumer_gate_result.risk_state` 不是 FR-0010 稳定字段。
 
 不定义：
 
@@ -73,7 +72,7 @@
 2. `requested_execution_mode` 只表示请求方模式，不承载门禁降级后的实际执行结果。
 3. `requested_execution_mode=live_read_limited` 只允许与 `action_type=read` 搭配；写动作或不可逆写动作不得请求该模式。
 4. `requested_execution_mode=live_read_limited` 在 `FR-0011` 未完成 formal 收口前必须返回阻断结果，不得被解释为 Sprint 2 已放行的正式 live 模式。
-5. `gate_input.risk_state` 是统一风险状态机在请求入口侧的唯一正式输入字段；后续消费者如需读取状态输入，必须从本对象读取，而不是依赖 `consumer_gate_result` 的镜像字段。
+5. `gate_input.risk_state` 是统一风险状态机在请求入口侧的正式输入字段。
 
 ## gate_outcome
 
@@ -203,12 +202,6 @@
 1. `target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons` 为冻结字段。
 2. `#208` 与 `#209` 只允许追加附加字段，不允许重定义冻结字段语义。
 3. `requested_execution_mode` 与 `effective_execution_mode` 中保留 `live_read_limited` 仅用于与 `FR-0011` 的兼容承接；其正式公开模式语义不得在本 FR 中重定义。
-4. `risk_state` 不属于 `consumer_gate_result` 的稳定字段；service-worker / relay 的阻断路径与放行路径都不得把 `consumer_gate_result.risk_state` 当作正式承诺。
-5. 风险状态的正式真相源固定为：
-   - `gate_input.risk_state`
-   - `audit_record.risk_state`
-6. 若历史实现仍暂时透传 `consumer_gate_result.risk_state`，该字段只可视为 legacy debug signal，不得进入 contract tests、formal consumers 或后续 FR 的必填字段白名单。
-
 ## #223 统一状态机锚点（规约层）
 
 `#223` 在 Sprint 2 仅允许扩展本契约，不允许新建并行门禁契约。可引用锚点如下：
