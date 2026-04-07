@@ -21,7 +21,7 @@ describe("xhs-search gate helpers", () => {
     );
   });
 
-  it("regenerates decision_id per gate evaluation while preserving approval_id for live approvals", () => {
+  it("preserves approval_id when the provided approval linkage already matches the current decision", () => {
     const gate = resolveGate(
       {
         issue_scope: "issue_209",
@@ -37,7 +37,7 @@ describe("xhs-search gate helpers", () => {
         requested_execution_mode: "live_read_high_risk",
         approval_record: {
           approval_id: "gate_appr_custom_extension_req-1",
-          decision_id: "gate_decision_custom_extension_req-1",
+          decision_id: "gate_decision_run-extension-001_req-1",
           approved: true,
           approver: "qa-reviewer",
           approved_at: "2026-03-23T10:00:00.000Z",
@@ -100,5 +100,48 @@ describe("xhs-search gate helpers", () => {
     expect(gate.gate_outcome.decision_id).toBe("gate_decision_run-extension-002_req-2");
     expect(gate.approval_record.approval_id).toBeNull();
     expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-002_req-2");
+  });
+
+  it("reissues approval_id when a reused approval_record belongs to an older decision", () => {
+    const gate = resolveGate(
+      {
+        issue_scope: "issue_209",
+        risk_state: "allowed",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 24,
+        target_page: "search_result_tab",
+        actual_target_domain: "www.xiaohongshu.com",
+        actual_target_tab_id: 24,
+        actual_target_page: "search_result_tab",
+        action_type: "read",
+        ability_action: "read",
+        requested_execution_mode: "live_read_high_risk",
+        approval_record: {
+          approval_id: "gate_appr_previous_req",
+          decision_id: "gate_decision_previous_req",
+          approved: true,
+          approver: "qa-reviewer",
+          approved_at: "2026-03-23T10:00:00.000Z",
+          checks: {
+            target_domain_confirmed: true,
+            target_tab_confirmed: true,
+            target_page_confirmed: true,
+            risk_state_checked: true,
+            action_type_confirmed: true
+          }
+        }
+      },
+      {
+        runId: "run-extension-003",
+        requestId: "req-3",
+        sessionId: "session-extension-003",
+        profile: "profile-a"
+      }
+    );
+
+    expect(gate.gate_outcome.decision_id).toBe("gate_decision_run-extension-003_req-3");
+    expect(gate.approval_record.approval_id).toBe("gate_appr_gate_decision_run-extension-003_req-3");
+    expect(gate.approval_record.approval_id).not.toBe("gate_appr_previous_req");
+    expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-003_req-3");
   });
 });

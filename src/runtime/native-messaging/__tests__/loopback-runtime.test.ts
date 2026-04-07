@@ -57,7 +57,7 @@ describe("native messaging legacy loopback runtime", () => {
     });
   });
 
-  it("regenerates decision_id while preserving approval_id on allowed live loopback bundles", async () => {
+  it("reissues approval_id when an allowed live loopback bundle reuses approval linkage from an older decision", async () => {
     const bridge = new NativeMessagingBridge({
       transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
     });
@@ -112,13 +112,17 @@ describe("native messaging legacy loopback runtime", () => {
             )
           }),
           approval_record: expect.objectContaining({
-            approval_id: "gate_appr_custom_run-loopback-custom-approval-001",
+            approval_id: expect.stringMatching(
+              /^gate_appr_gate_decision_run-loopback-custom-approval-001_run-\d{4}$/
+            ),
             decision_id: expect.stringMatching(
               /^gate_decision_run-loopback-custom-approval-001_run-\d{4}$/
             )
           }),
           audit_record: expect.objectContaining({
-            approval_id: "gate_appr_custom_run-loopback-custom-approval-001",
+            approval_id: expect.stringMatching(
+              /^gate_appr_gate_decision_run-loopback-custom-approval-001_run-\d{4}$/
+            ),
             decision_id: expect.stringMatching(
               /^gate_decision_run-loopback-custom-approval-001_run-\d{4}$/
             )
