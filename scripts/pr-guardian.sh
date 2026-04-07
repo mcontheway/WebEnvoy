@@ -2724,7 +2724,7 @@ write_review_status_json() {
         .[][]
         | select((.commit_id // "") == $head_sha)
         | select((.state // "") | completed_state)
-        | select((.user.login // "") as $login | ($trusted_reviewers | index($login)) != null)
+        | select((.user.login // "") as $login | (($trusted_reviewers | index($login)) != null) or ($login | endswith("[bot]")))
         | normalize_review
       ] as $raw_matching_reviews
       | [

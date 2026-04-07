@@ -82,7 +82,7 @@ test_review_status_reports_reusable_review_from_other_reviewer() {
   setup_review_status_fixture \
     "review-status-reusable-other-reviewer" \
     "pr-author" \
-    "poller-bot" \
+    "poller[bot]" \
     "APPROVED" \
     "APPROVE" \
     "true" \
@@ -90,19 +90,17 @@ test_review_status_reports_reusable_review_from_other_reviewer() {
     "valid"
 
   local status_file="${TMP_DIR}/review-status.json"
-  WEBENVOY_GUARDIAN_TRUSTED_REVIEWERS="poller-bot"
-  export WEBENVOY_GUARDIAN_TRUSTED_REVIEWERS
   assert_pass write_review_status_json 274 human-reviewer "${status_file}"
   assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
   assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
-  assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "poller-bot"
+  assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "poller[bot]"
 }
 
 test_review_status_rejects_untrusted_other_reviewer() {
   setup_review_status_fixture \
     "review-status-untrusted-other-reviewer" \
     "pr-author" \
-    "poller-bot" \
+    "other-human" \
     "APPROVED" \
     "APPROVE" \
     "true" \
@@ -217,7 +215,7 @@ test_merge_if_safe_accepts_reused_review_from_other_reviewer() {
   setup_review_status_fixture \
     "merge-reused-review-other-reviewer" \
     "pr-author" \
-    "poller-bot" \
+    "poller[bot]" \
     "APPROVED" \
     "APPROVE" \
     "true" \
@@ -227,12 +225,10 @@ test_merge_if_safe_accepts_reused_review_from_other_reviewer() {
   local status_file="${TMP_DIR}/review-status.json"
   MOCK_GH_USER_LOGIN="human-reviewer"
   export MOCK_GH_USER_LOGIN
-  WEBENVOY_GUARDIAN_TRUSTED_REVIEWERS="poller-bot"
-  export WEBENVOY_GUARDIAN_TRUSTED_REVIEWERS
 
   assert_pass write_review_status_json 274 human-reviewer "${status_file}"
-  assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "poller-bot"
-  REUSED_REVIEWER_LOGIN="poller-bot"
+  assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "poller[bot]"
+  REUSED_REVIEWER_LOGIN="poller[bot]"
   export REUSED_REVIEWER_LOGIN
   assert_pass merge_if_safe 274 0
   assert_file_contains "${MOCK_GH_MERGE_LOG}" "--match-head-commit head-sha-123"
