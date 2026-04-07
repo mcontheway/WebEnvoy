@@ -78,6 +78,24 @@ test_review_status_reports_reusable_review_for_matching_metadata() {
   assert_equal "$(jq -r '.safe_to_merge' "${status_file}")" "true"
 }
 
+test_review_status_reports_reusable_review_from_other_reviewer() {
+  setup_review_status_fixture \
+    "review-status-reusable-other-reviewer" \
+    "pr-author" \
+    "poller-bot" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
+  assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "poller-bot"
+}
+
 test_review_status_rejects_prompt_digest_mismatch() {
   setup_review_status_fixture \
     "review-status-prompt-digest-mismatch" \
@@ -146,10 +164,36 @@ test_reused_request_changes_does_not_become_mergeable() {
   local err_file="${TMP_DIR}/merge.err"
   assert_pass write_review_status_json 274 review-bot "${status_file}"
   assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
-  assert_pass hydrate_reused_review_result "${status_file}"
+  hydrate_reused_review_result "${status_file}" || {
+    echo "expected hydrate_reused_review_result to pass" >&2
+    exit 1
+  }
   assert_fail merge_if_safe 274 0 2>"${err_file}"
   assert_file_contains "${err_file}" "Codex 审查未批准，拒绝合并。"
   assert_file_empty "${MOCK_GH_MERGE_LOG}"
+}
+
+test_merge_if_safe_accepts_reused_review_from_other_reviewer() {
+  setup_review_status_fixture \
+    "merge-reused-review-other-reviewer" \
+    "pr-author" \
+    "poller-bot" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  MOCK_GH_USER_LOGIN="human-reviewer"
+  export MOCK_GH_USER_LOGIN
+
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
+  assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "poller-bot"
+  REUSED_REVIEWER_LOGIN="poller-bot"
+  export REUSED_REVIEWER_LOGIN
+  assert_pass merge_if_safe 274 0
+  assert_file_contains "${MOCK_GH_MERGE_LOG}" "--match-head-commit head-sha-123"
 }
 
 test_merge_if_safe_without_post_review_respects_comment_contract() {

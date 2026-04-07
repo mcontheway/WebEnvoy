@@ -245,6 +245,7 @@ setup_case_dir() {
   unset MOCK_CODEX_OUTPUT_SEQUENCE_FILE || true
   unset MOCK_CODEX_PROMPT_CAPTURE_DIR || true
   unset MOCK_CODEX_FAIL_CALL || true
+  unset REUSED_REVIEWER_LOGIN || true
   export MOCK_GH_REVIEWS_REQUIRE_PAGINATE
 }
 

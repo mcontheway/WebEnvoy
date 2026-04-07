@@ -2633,14 +2633,14 @@ head_has_expected_review_state() {
 
 write_review_status_json() {
   local pr_number="$1"
-  local reviewer="$2"
+  local requesting_user="$2"
   local output_file="$3"
   local reviews_file="${TMP_DIR}/reviews-status.json"
 
   load_pull_reviews "${pr_number}" "${reviews_file}"
 
   jq -c \
-    --arg reviewer "${reviewer}" \
+    --arg requesting_user "${requesting_user}" \
     --arg pr_author "${PR_AUTHOR:-}" \
     --arg head_sha "${HEAD_SHA:-}" \
     --arg base_ref "${BASE_REF:-}" \
@@ -2650,7 +2650,7 @@ write_review_status_json() {
     '
       def completed_state:
         . == "APPROVED" or . == "CHANGES_REQUESTED" or . == "COMMENTED" or . == "DISMISSED";
-      def expected_state($verdict):
+      def expected_state($verdict; $reviewer):
         if ($pr_author | length) > 0 and $pr_author == $reviewer then
           "COMMENTED"
         elif $verdict == "APPROVE" then
@@ -2668,13 +2668,67 @@ write_review_status_json() {
         );
       def body_without_meta($body):
         ($body // "") | gsub("\\n?<!-- webenvoy-guardian-meta:v1 [A-Za-z0-9+/=]+ -->\\n?"; "\n");
+      def normalize_review:
+        (.body // "") as $body
+        | body_without_meta($body) as $cleaned_body
+        | (([$body | match("<!-- webenvoy-guardian-meta:v1 (?<meta>[A-Za-z0-9+/=]+) -->"; "g")?] | last | .captures[0].string?) // "") as $meta_b64
+        | if ($meta_b64 | length) == 0 then
+            . + {
+              meta_status: "missing_metadata",
+              meta: null,
+              cleaned_body: $cleaned_body
+            }
+          else
+            ((try ($meta_b64 | @base64d | fromjson) catch null)) as $meta
+            | if $meta == null or (($meta.verdict // "") | IN("APPROVE", "REQUEST_CHANGES") | not) or (($meta.safe_to_merge | type) != "boolean") then
+                . + {
+                  meta_status: "invalid_metadata",
+                  meta: $meta,
+                  cleaned_body: $cleaned_body
+                }
+              else
+                . + {
+                  meta_status: "ok",
+                  meta: $meta,
+                  cleaned_body: $cleaned_body,
+                  expected_state: expected_state(($meta.verdict // ""); (.user.login // ""))
+                }
+              end
+          end;
       [
         .[][]
-        | select((.user.login // "") == $reviewer)
         | select((.commit_id // "") == $head_sha)
         | select((.state // "") | completed_state)
+        | normalize_review
       ] as $matching_reviews
-      | if ($matching_reviews | length) == 0 then
+      | [
+          $matching_reviews[]
+          | select((.meta_status // "") == "ok")
+          | select((.meta.head_sha // "") == $head_sha)
+          | select((.meta.base_ref // "") == $base_ref)
+          | select((.meta.merge_base_sha // "") == $merge_base_sha)
+          | select((.meta.review_profile // "") == $review_profile)
+          | select((.meta.prompt_digest // "") == $prompt_digest)
+          | select((.state // "") == (.expected_state // ""))
+        ] as $reusable_reviews
+      | if ($reusable_reviews | length) > 0 then
+          (latest_review($reusable_reviews)) as $reused
+          | {
+              reusable: true,
+              reason: "matching_metadata",
+              head_sha: $head_sha,
+              review_profile: $review_profile,
+              prompt_digest: $prompt_digest,
+              verdict: ($reused.meta.verdict // null),
+              safe_to_merge: ($reused.meta.safe_to_merge // null),
+              base_ref: ($reused.meta.base_ref // ""),
+              merge_base_sha: ($reused.meta.merge_base_sha // ""),
+              review_state: ($reused.state // ""),
+              review_id: ($reused.id // null),
+              review_body: ($reused.cleaned_body // ""),
+              reviewer_login: ($reused.user.login // "")
+            }
+        elif ($matching_reviews | length) == 0 then
           {
             reusable: false,
             reason: "missing_review",
@@ -2682,13 +2736,12 @@ write_review_status_json() {
             review_profile: $review_profile,
             prompt_digest: $prompt_digest,
             verdict: null,
-            safe_to_merge: null
+            safe_to_merge: null,
+            reviewer_login: ($requesting_user // "")
           }
         else
           (latest_review($matching_reviews)) as $latest
-          | ($latest.body // "") as $body
-          | (([$body | match("<!-- webenvoy-guardian-meta:v1 (?<meta>[A-Za-z0-9+/=]+) -->"; "g")?] | last | .captures[0].string?) // "") as $meta_b64
-          | if ($meta_b64 | length) == 0 then
+          | if ($latest.meta_status // "") == "missing_metadata" then
               {
                 reusable: false,
                 reason: "missing_metadata",
@@ -2696,69 +2749,52 @@ write_review_status_json() {
                 review_profile: $review_profile,
                 prompt_digest: $prompt_digest,
                 verdict: null,
-                safe_to_merge: null
+                safe_to_merge: null,
+                reviewer_login: ($latest.user.login // "")
+              }
+            elif ($latest.meta_status // "") == "invalid_metadata" then
+              {
+                reusable: false,
+                reason: "invalid_metadata",
+                head_sha: $head_sha,
+                review_profile: $review_profile,
+                prompt_digest: $prompt_digest,
+                verdict: ($latest.meta.verdict // null),
+                safe_to_merge: ($latest.meta.safe_to_merge // null),
+                reviewer_login: ($latest.user.login // "")
               }
             else
-              ((try ($meta_b64 | @base64d | fromjson) catch null)) as $meta
-              | if $meta == null then
-                  {
-                    reusable: false,
-                    reason: "invalid_metadata",
-                    head_sha: $head_sha,
-                    review_profile: $review_profile,
-                    prompt_digest: $prompt_digest,
-                    verdict: null,
-                    safe_to_merge: null
-                  }
-                elif (($meta.verdict // "") | IN("APPROVE", "REQUEST_CHANGES") | not) or (($meta.safe_to_merge | type) != "boolean") then
-                  {
-                    reusable: false,
-                    reason: "invalid_metadata",
-                    head_sha: $head_sha,
-                    review_profile: $review_profile,
-                    prompt_digest: $prompt_digest,
-                    verdict: ($meta.verdict // null),
-                    safe_to_merge: ($meta.safe_to_merge // null)
-                  }
-                else
-                  {
-                    reusable: (
-                      ($meta.head_sha // "") == $head_sha
-                      and ($meta.base_ref // "") == $base_ref
-                      and ($meta.merge_base_sha // "") == $merge_base_sha
-                      and ($meta.review_profile // "") == $review_profile
-                      and ($meta.prompt_digest // "") == $prompt_digest
-                      and ($latest.state // "") == expected_state($meta.verdict)
-                    ),
-                    reason: (
-                      if ($meta.head_sha // "") != $head_sha then
-                        "head_sha_mismatch"
-                      elif ($meta.base_ref // "") != $base_ref then
-                        "base_ref_mismatch"
-                      elif ($meta.merge_base_sha // "") != $merge_base_sha then
-                        "merge_base_sha_mismatch"
-                      elif ($meta.review_profile // "") != $review_profile then
-                        "review_profile_mismatch"
-                      elif ($meta.prompt_digest // "") != $prompt_digest then
-                        "prompt_digest_mismatch"
-                      elif ($latest.state // "") != expected_state($meta.verdict) then
-                        "review_state_mismatch"
-                      else
-                        "matching_metadata"
-                      end
-                    ),
-                    head_sha: $head_sha,
-                    review_profile: $review_profile,
-                    prompt_digest: $prompt_digest,
-                    verdict: $meta.verdict,
-                    safe_to_merge: $meta.safe_to_merge,
-                    base_ref: ($meta.base_ref // ""),
-                    merge_base_sha: ($meta.merge_base_sha // ""),
-                    review_state: ($latest.state // ""),
-                    review_id: ($latest.id // null),
-                    review_body: body_without_meta($body)
-                  }
-                end
+              {
+                reusable: false,
+                reason: (
+                  if ($latest.meta.head_sha // "") != $head_sha then
+                    "head_sha_mismatch"
+                  elif ($latest.meta.base_ref // "") != $base_ref then
+                    "base_ref_mismatch"
+                  elif ($latest.meta.merge_base_sha // "") != $merge_base_sha then
+                    "merge_base_sha_mismatch"
+                  elif ($latest.meta.review_profile // "") != $review_profile then
+                    "review_profile_mismatch"
+                  elif ($latest.meta.prompt_digest // "") != $prompt_digest then
+                    "prompt_digest_mismatch"
+                  elif ($latest.state // "") != ($latest.expected_state // "") then
+                    "review_state_mismatch"
+                  else
+                    "matching_metadata"
+                  end
+                ),
+                head_sha: $head_sha,
+                review_profile: $review_profile,
+                prompt_digest: $prompt_digest,
+                verdict: ($latest.meta.verdict // null),
+                safe_to_merge: ($latest.meta.safe_to_merge // null),
+                base_ref: ($latest.meta.base_ref // ""),
+                merge_base_sha: ($latest.meta.merge_base_sha // ""),
+                review_state: ($latest.state // ""),
+                review_id: ($latest.id // null),
+                review_body: ($latest.cleaned_body // ""),
+                reviewer_login: ($latest.user.login // "")
+              }
             end
         end
     ' "${reviews_file}" > "${output_file}"
@@ -2766,6 +2802,9 @@ write_review_status_json() {
 
 hydrate_reused_review_result() {
   local review_status_file="$1"
+
+  REUSED_REVIEWER_LOGIN="$(jq -r '.reviewer_login // ""' "${review_status_file}")"
+  export REUSED_REVIEWER_LOGIN
 
   jq -c '
     {
@@ -3033,6 +3072,7 @@ merge_if_safe() {
   local merge_state_status
   local is_draft
   local current_user
+  local reviewer_for_gate
   local expected_review_state
   local current_head_sha
   local current_base_ref
@@ -3041,6 +3081,7 @@ merge_if_safe() {
   verdict="$(jq -r '.verdict' "${RESULT_FILE}")"
   safe_to_merge="$(jq -r '.safe_to_merge' "${RESULT_FILE}")"
   current_user="$(gh api user --jq '.login')"
+  reviewer_for_gate="${REUSED_REVIEWER_LOGIN:-${current_user}}"
   current_meta_file="${TMP_DIR}/merge-meta.json"
 
   wait_for_merge_gate_ready "${pr_number}" "${current_meta_file}" || true
@@ -3049,7 +3090,7 @@ merge_if_safe() {
   mergeable="$(jq -r '.mergeable' "${current_meta_file}")"
   merge_state_status="$(jq -r '.mergeStateStatus' "${current_meta_file}")"
   is_draft="$(jq -r '.isDraft' "${current_meta_file}")"
-  expected_review_state="$(expected_review_state_for_verdict "${verdict}" "${current_user}")"
+  expected_review_state="$(expected_review_state_for_verdict "${verdict}" "${reviewer_for_gate}")"
 
   if [[ "${current_head_sha}" != "${HEAD_SHA}" ]]; then
     die "合并前检测到 PR HEAD 已变化：审查快照=${HEAD_SHA}，当前=${current_head_sha}。请重跑 guardian。"
@@ -3071,8 +3112,8 @@ merge_if_safe() {
       ;;
   esac
 
-  if ! wait_for_expected_review_state "${pr_number}" "${HEAD_SHA}" "${current_user}" "${expected_review_state}"; then
-    die "当前 HEAD (${HEAD_SHA}) 缺少 ${current_user} 的已完成 GitHub review（期望状态: ${expected_review_state}，已重试 ${PR_GUARDIAN_REVIEW_STATE_MAX_ATTEMPTS:-3} 次），拒绝合并。"
+  if ! wait_for_expected_review_state "${pr_number}" "${HEAD_SHA}" "${reviewer_for_gate}" "${expected_review_state}"; then
+    die "当前 HEAD (${HEAD_SHA}) 缺少 ${reviewer_for_gate} 的已完成 GitHub review（期望状态: ${expected_review_state}，已重试 ${PR_GUARDIAN_REVIEW_STATE_MAX_ATTEMPTS:-3} 次），拒绝合并。"
   fi
 
   if ! all_required_checks_pass "${pr_number}"; then
@@ -3152,6 +3193,9 @@ main() {
   local review_status_file="${TMP_DIR}/review-status.json"
   local reused_existing_review=0
   local should_check_reusable_review=0
+
+  REUSED_REVIEWER_LOGIN=""
+  export REUSED_REVIEWER_LOGIN
 
   if [[ "${mode}" == "merge-if-safe" ]]; then
     should_check_reusable_review=1
