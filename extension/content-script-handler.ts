@@ -707,8 +707,11 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
   getDocumentTitle: () => document.title,
   getReadyState: () => document.readyState,
   getCookie: () => document.cookie,
-  callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
-  fetchJson: async (input) => {
+  callSignature: async (
+    uri: Parameters<XhsSearchEnvironment["callSignature"]>[0],
+    payload: Parameters<XhsSearchEnvironment["callSignature"]>[1]
+  ) => await requestXhsSignatureViaExtension(uri, payload),
+  fetchJson: async (input: Parameters<XhsSearchEnvironment["fetchJson"]>[0]) => {
     const controller = new AbortController();
     const timer = setTimeout(() => {
       controller.abort();
@@ -731,7 +734,9 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
       clearTimeout(timer);
     }
   },
-  performEditorInputValidation: async (input) => await performEditorInputValidation(input)
+  performEditorInputValidation: async (
+    input: Parameters<NonNullable<XhsSearchEnvironment["performEditorInputValidation"]>>[0]
+  ) => await performEditorInputValidation(input)
 });
 
 const resolveTargetDomainFromHref = (href: string): string | null => {

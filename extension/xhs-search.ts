@@ -474,3 +474,8 @@ export const executeXhsSearch = async (
     }
   };
 };
+
+export type {
+  SearchExecutionResult,
+  XhsSearchEnvironment
+} from "./xhs-search-contract.js";
