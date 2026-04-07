@@ -349,7 +349,7 @@ describe("extension background relay contract / gate matrix", () => {
     });
   });
 
-  it("reissues stale approval_id in allowed relay gate bundles", async () => {
+  it("blocks stale approval_record reuse in relay gate bundles", async () => {
     const contentScript = new ContentScriptHandler({
       xhsEnv: {
         now: () => 1_000,
@@ -402,25 +402,38 @@ describe("extension background relay contract / gate matrix", () => {
     });
 
     const response = await responsePromise;
-    const decisionId =
-      "gate_decision_run-xhs-live-stale-approval-001_forward-xhs-live-stale-approval-001";
-    const approvalId = `gate_appr_${decisionId}`;
-
-    expect(response.status).toBe("success");
+    expect(response.status).toBe("error");
+    expect(response.error?.code).toBe("ERR_EXECUTION_FAILED");
     expect(response.payload).toMatchObject({
+      details: {
+        reason: "EXECUTION_MODE_GATE_BLOCKED"
+      },
+      gate_outcome: {
+        effective_execution_mode: "recon",
+        gate_decision: "blocked"
+      },
+      consumer_gate_result: {
+        requested_execution_mode: "live_read_limited",
+        effective_execution_mode: "recon",
+        gate_decision: "blocked",
+        gate_reasons: ["MANUAL_CONFIRMATION_MISSING"]
+      },
+      approval_record: {
+        approval_id: null
+      },
+      audit_record: {
+        approval_id: null
+      },
       summary: {
         gate_outcome: {
-          decision_id: decisionId,
-          effective_execution_mode: "live_read_limited",
-          gate_decision: "allowed"
+          effective_execution_mode: "recon",
+          gate_decision: "blocked"
         },
         approval_record: {
-          approval_id: approvalId,
-          decision_id: decisionId
+          approval_id: null
         },
         audit_record: {
-          approval_id: approvalId,
-          decision_id: decisionId
+          approval_id: null
         }
       }
     });

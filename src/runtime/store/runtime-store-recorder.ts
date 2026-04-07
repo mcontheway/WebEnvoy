@@ -107,14 +107,16 @@ const extractGateApprovalInput = (
   }
 
   const approvalDecisionId = asString(approvalRecord.decision_id);
-  const decisionId =
-    approvalDecisionId ??
+  const currentDecisionId =
     asString((asObject(source.gate_outcome) ?? {}).decision_id) ??
+    asString((asObject(source.audit_record) ?? {}).decision_id) ??
     `gate_decision_${runId}`;
-  const approvalId =
-    approvalDecisionId === null
-      ? `gate_appr_${decisionId}`
-      : asString(approvalRecord.approval_id);
+  if (!approvalDecisionId || approvalDecisionId !== currentDecisionId) {
+    return null;
+  }
+
+  const decisionId = approvalDecisionId;
+  const approvalId = asString(approvalRecord.approval_id);
   if (!approvalId) {
     return null;
   }

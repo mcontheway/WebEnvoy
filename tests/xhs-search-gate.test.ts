@@ -102,7 +102,7 @@ describe("xhs-search gate helpers", () => {
     expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-002_req-2");
   });
 
-  it("reissues approval_id when a reused approval_record belongs to an older decision", () => {
+  it("blocks live approval when a reused approval_record belongs to an older decision", () => {
     const gate = resolveGate(
       {
         issue_scope: "issue_209",
@@ -140,12 +140,14 @@ describe("xhs-search gate helpers", () => {
     );
 
     expect(gate.gate_outcome.decision_id).toBe("gate_decision_run-extension-003_req-3");
-    expect(gate.approval_record.approval_id).toBe("gate_appr_gate_decision_run-extension-003_req-3");
-    expect(gate.approval_record.approval_id).not.toBe("gate_appr_previous_req");
+    expect(gate.gate_outcome.effective_execution_mode).toBe("dry_run");
+    expect(gate.gate_outcome.gate_decision).toBe("blocked");
+    expect(gate.gate_outcome.gate_reasons).toContain("MANUAL_CONFIRMATION_MISSING");
+    expect(gate.approval_record.approval_id).toBeNull();
     expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-003_req-3");
   });
 
-  it("reissues approval_id when a legacy approval_record omits decision_id", () => {
+  it("blocks live approval when a legacy approval_record omits decision_id", () => {
     const gate = resolveGate(
       {
         issue_scope: "issue_209",
@@ -182,8 +184,10 @@ describe("xhs-search gate helpers", () => {
     );
 
     expect(gate.gate_outcome.decision_id).toBe("gate_decision_run-extension-004_req-4");
-    expect(gate.approval_record.approval_id).toBe("gate_appr_gate_decision_run-extension-004_req-4");
-    expect(gate.approval_record.approval_id).not.toBe("gate_appr_legacy_without_decision");
+    expect(gate.gate_outcome.effective_execution_mode).toBe("dry_run");
+    expect(gate.gate_outcome.gate_decision).toBe("blocked");
+    expect(gate.gate_outcome.gate_reasons).toContain("MANUAL_CONFIRMATION_MISSING");
+    expect(gate.approval_record.approval_id).toBeNull();
     expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-004_req-4");
   });
 });

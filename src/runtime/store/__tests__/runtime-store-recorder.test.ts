@@ -278,13 +278,10 @@ describe("runtime-store-recorder", () => {
     );
   });
 
-  it("reissues approval_id when a legacy approval record omits decision_id", async () => {
+  it("rejects reused approval records when decision linkage is missing", async () => {
     const upsertRun = vi.fn().mockResolvedValue(undefined);
     const appendRunEvent = vi.fn().mockResolvedValue(undefined);
-    const upsertGateApproval = vi.fn().mockResolvedValue({
-      approval_id: "gate_appr_gate_decision_run-recorder-legacy_req-1",
-      decision_id: "gate_decision_run-recorder-legacy_req-1"
-    });
+    const upsertGateApproval = vi.fn().mockResolvedValue(undefined);
     const appendGateAuditRecord = vi.fn().mockResolvedValue(undefined);
     const close = vi.fn();
     const recorder = new RuntimeStoreRecorder(baseContext.cwd, {
@@ -295,65 +292,57 @@ describe("runtime-store-recorder", () => {
       close
     });
 
-    await recorder.recordSuccess(
-      { ...baseContext, command: "xhs.search" },
-      {
-        run_id: "run-recorder-legacy",
-        gate_outcome: {
-          decision_id: "gate_decision_run-recorder-legacy_req-1"
-        },
-        approval_record: {
-          approval_id: "gate_appr_legacy_without_decision",
-          approved: true,
-          approver: "qa-reviewer",
-          approved_at: "2026-03-23T10:00:10.000Z",
-          checks: {
-            target_domain_confirmed: true,
-            target_tab_confirmed: true,
-            target_page_confirmed: true,
-            risk_state_checked: true,
-            action_type_confirmed: true
-          }
-        },
-        audit_record: {
-          event_id: "gate_evt_gate_decision_run-recorder-legacy_req-1",
-          decision_id: "gate_decision_run-recorder-legacy_req-1",
-          approval_id: "gate_appr_legacy_without_decision",
+    await expect(
+      recorder.recordSuccess(
+        { ...baseContext, command: "xhs.search" },
+        {
           run_id: "run-recorder-legacy",
-          session_id: "session-recorder-legacy",
-          profile: "default",
-          issue_scope: "issue_209",
-          risk_state: "allowed",
-          next_state: "allowed",
-          transition_trigger: "manual_approval",
-          target_domain: "www.xiaohongshu.com",
-          target_tab_id: 9,
-          target_page: "search_result_tab",
-          action_type: "read",
-          requested_execution_mode: "live_read_high_risk",
-          effective_execution_mode: "live_read_high_risk",
-          gate_decision: "allowed",
-          gate_reasons: ["LIVE_MODE_APPROVED"],
-          approver: "qa-reviewer",
-          approved_at: "2026-03-23T10:00:10.000Z",
-          recorded_at: "2026-03-23T10:00:11.000Z"
+          gate_outcome: {
+            decision_id: "gate_decision_run-recorder-legacy_req-1"
+          },
+          approval_record: {
+            approval_id: "gate_appr_legacy_without_decision",
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:10.000Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          },
+          audit_record: {
+            event_id: "gate_evt_gate_decision_run-recorder-legacy_req-1",
+            decision_id: "gate_decision_run-recorder-legacy_req-1",
+            approval_id: "gate_appr_legacy_without_decision",
+            run_id: "run-recorder-legacy",
+            session_id: "session-recorder-legacy",
+            profile: "default",
+            issue_scope: "issue_209",
+            risk_state: "allowed",
+            next_state: "allowed",
+            transition_trigger: "manual_approval",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 9,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_high_risk",
+            effective_execution_mode: "live_read_high_risk",
+            gate_decision: "allowed",
+            gate_reasons: ["LIVE_MODE_APPROVED"],
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:10.000Z",
+            recorded_at: "2026-03-23T10:00:11.000Z"
+          }
         }
-      }
-    );
-
-    expect(upsertGateApproval).toHaveBeenCalledWith(
-      expect.objectContaining({
-        approvalId: "gate_appr_gate_decision_run-recorder-legacy_req-1",
-        decisionId: "gate_decision_run-recorder-legacy_req-1",
-        runId: "run-recorder-legacy"
-      })
-    );
-    expect(appendGateAuditRecord).toHaveBeenCalledWith(
-      expect.objectContaining({
-        approvalId: "gate_appr_gate_decision_run-recorder-legacy_req-1",
-        decisionId: "gate_decision_run-recorder-legacy_req-1"
-      })
-    );
+      )
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+    });
+    expect(upsertGateApproval).not.toHaveBeenCalled();
+    expect(appendGateAuditRecord).not.toHaveBeenCalled();
   });
 
   it("rewrites audit approval_id to the persisted approval row when approval upsert normalizes conflicts", async () => {

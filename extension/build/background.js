@@ -2596,6 +2596,11 @@ class ChromeBackgroundBridge {
         const matrixResolution = collectXhsMatrixGateReasons({
             gateReasons,
             state: gateState,
+            decisionId: request.params.run_id && request.id
+                ? `gate_decision_${request.params.run_id}_${request.id}`
+                : request.params.run_id
+                    ? `gate_decision_${request.params.run_id}`
+                    : null,
             approvalRecord,
             issue208EditorInputValidation
         });

@@ -57,7 +57,7 @@ describe("native messaging legacy loopback runtime", () => {
     });
   });
 
-  it("reissues approval_id when an allowed live loopback bundle reuses approval linkage from an older decision", async () => {
+  it("blocks stale approval linkage in live loopback bundles", async () => {
     const bridge = new NativeMessagingBridge({
       transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
     });
@@ -103,30 +103,28 @@ describe("native messaging legacy loopback runtime", () => {
       }
     });
 
+    expect(result.ok).toBe(false);
     expect(result.payload).toEqual(
       expect.objectContaining({
-        summary: expect.objectContaining({
-          gate_outcome: expect.objectContaining({
-            decision_id: expect.stringMatching(
-              /^gate_decision_run-loopback-custom-approval-001_run-\d{4}$/
-            )
-          }),
-          approval_record: expect.objectContaining({
-            approval_id: expect.stringMatching(
-              /^gate_appr_gate_decision_run-loopback-custom-approval-001_run-\d{4}$/
-            ),
-            decision_id: expect.stringMatching(
-              /^gate_decision_run-loopback-custom-approval-001_run-\d{4}$/
-            )
-          }),
-          audit_record: expect.objectContaining({
-            approval_id: expect.stringMatching(
-              /^gate_appr_gate_decision_run-loopback-custom-approval-001_run-\d{4}$/
-            ),
-            decision_id: expect.stringMatching(
-              /^gate_decision_run-loopback-custom-approval-001_run-\d{4}$/
-            )
-          })
+        gate_outcome: expect.objectContaining({
+          decision_id: expect.stringMatching(
+            /^gate_decision_run-loopback-custom-approval-001_run-\d{4}$/
+          ),
+          effective_execution_mode: "dry_run",
+          gate_decision: "blocked",
+          gate_reasons: expect.arrayContaining(["MANUAL_CONFIRMATION_MISSING"])
+        }),
+        approval_record: expect.objectContaining({
+          approval_id: null,
+          decision_id: expect.stringMatching(
+            /^gate_decision_run-loopback-custom-approval-001_run-\d{4}$/
+          )
+        }),
+        audit_record: expect.objectContaining({
+          approval_id: null,
+          decision_id: expect.stringMatching(
+            /^gate_decision_run-loopback-custom-approval-001_run-\d{4}$/
+          )
         })
       })
     );

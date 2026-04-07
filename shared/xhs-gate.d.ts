@@ -152,6 +152,7 @@ export declare const collectXhsCommandGateReasons: (input: {
 export declare const collectXhsMatrixGateReasons: (input: {
   gateReasons: string[];
   state: ReturnType<typeof buildXhsGatePolicyState>;
+  decisionId?: string | null;
   approvalRecord: unknown;
   issue208EditorInputValidation?: boolean;
   includeWriteInteractionTierReason?: boolean;
