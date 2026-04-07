@@ -59,7 +59,10 @@ describe("runtime-store-recorder", () => {
   it("preserves approval_id when recording gate artifacts", async () => {
     const upsertRun = vi.fn().mockResolvedValue(undefined);
     const appendRunEvent = vi.fn().mockResolvedValue(undefined);
-    const upsertGateApproval = vi.fn().mockResolvedValue(undefined);
+    const upsertGateApproval = vi.fn().mockResolvedValue({
+      approval_id: "gate_appr_custom_run-recorder-001",
+      decision_id: "gate_decision_run-recorder-001_req-1"
+    });
     const appendGateAuditRecord = vi.fn().mockResolvedValue(undefined);
     const close = vi.fn();
     const recorder = new RuntimeStoreRecorder(baseContext.cwd, {
@@ -411,6 +414,74 @@ describe("runtime-store-recorder", () => {
     ).rejects.toMatchObject({
       code: "ERR_RUNTIME_STORE_INVALID_INPUT"
     });
+    expect(appendGateAuditRecord).not.toHaveBeenCalled();
+  });
+
+  it("rejects allowed live audit artifacts that only carry audit-side approval linkage", async () => {
+    const upsertRun = vi.fn().mockResolvedValue(undefined);
+    const appendRunEvent = vi.fn().mockResolvedValue(undefined);
+    const upsertGateApproval = vi.fn().mockResolvedValue(undefined);
+    const appendGateAuditRecord = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn();
+    const recorder = new RuntimeStoreRecorder(baseContext.cwd, {
+      upsertRun,
+      appendRunEvent,
+      upsertGateApproval,
+      appendGateAuditRecord,
+      close
+    });
+
+    await expect(
+      recorder.recordSuccess(
+        { ...baseContext, command: "xhs.search" },
+        {
+          run_id: "run-recorder-005",
+          gate_outcome: {
+            decision_id: "gate_decision_run-recorder-005_req-1"
+          },
+          approval_record: {
+            approval_id: null,
+            decision_id: "gate_decision_run-recorder-005_req-1",
+            approved: false,
+            approver: null,
+            approved_at: null,
+            checks: {
+              target_domain_confirmed: false,
+              target_tab_confirmed: false,
+              target_page_confirmed: false,
+              risk_state_checked: false,
+              action_type_confirmed: false
+            }
+          },
+          audit_record: {
+            event_id: "gate_evt_gate_decision_run-recorder-005_req-1",
+            decision_id: "gate_decision_run-recorder-005_req-1",
+            approval_id: "gate_appr_stale_run-recorder-005",
+            run_id: "run-recorder-005",
+            session_id: "session-recorder-005",
+            profile: "default",
+            issue_scope: "issue_209",
+            risk_state: "allowed",
+            next_state: "allowed",
+            transition_trigger: "manual_approval",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 9,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_high_risk",
+            effective_execution_mode: "live_read_high_risk",
+            gate_decision: "allowed",
+            gate_reasons: ["LIVE_MODE_APPROVED"],
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:10.000Z",
+            recorded_at: "2026-03-23T10:00:11.000Z"
+          }
+        }
+      )
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+    });
+    expect(upsertGateApproval).not.toHaveBeenCalled();
     expect(appendGateAuditRecord).not.toHaveBeenCalled();
   });
 });

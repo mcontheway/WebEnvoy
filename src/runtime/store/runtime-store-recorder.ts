@@ -207,11 +207,7 @@ const extractGateAuditRecordInput = (
     asString((asObject(source.approval_record) ?? {}).decision_id) ??
     (runId ? `gate_decision_${runId}` : null);
   const sourceApprovalRecord = asObject(source.approval_record);
-  const hasRealApprovalEvidence =
-    hasRealApprovalRecord(sourceApprovalRecord) ||
-    (asString(auditRecord.approval_id) !== null &&
-      asString(auditRecord.approver) !== null &&
-      asString(auditRecord.approved_at) !== null);
+  const hasRealApprovalEvidence = hasRealApprovalRecord(sourceApprovalRecord);
   const approvalId =
     hasRealApprovalEvidence
       ? (asString(auditRecord.approval_id) ??
@@ -310,16 +306,23 @@ export class RuntimeStoreRecorder {
 
     const auditInput = extractGateAuditRecordInput(source);
     if (auditInput && this.#store.appendGateAuditRecord) {
+      const approvalRequired = requiresApprovalIdForAudit(auditInput);
+      if (approvalRequired && !approvalInput) {
+        throw new RuntimeStoreError(
+          "ERR_RUNTIME_STORE_INVALID_INPUT",
+          "approval_record is required for allowed live audit records"
+        );
+      }
       if (persistedApprovalId) {
         auditInput.approvalId = persistedApprovalId;
       }
       if (persistedDecisionId) {
         auditInput.decisionId = persistedDecisionId;
       }
-      if (requiresApprovalIdForAudit(auditInput) && !auditInput.approvalId) {
+      if (approvalRequired && !persistedApprovalId) {
         throw new RuntimeStoreError(
           "ERR_RUNTIME_STORE_INVALID_INPUT",
-          "approval_id is required for allowed live audit records"
+          "persisted approval_id is required for allowed live audit records"
         );
       }
       await this.#store.appendGateAuditRecord(auditInput);
