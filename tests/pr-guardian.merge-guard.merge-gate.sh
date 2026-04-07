@@ -40,6 +40,26 @@ test_merge_if_safe_rejects_review_from_old_head() {
   assert_file_empty "${MOCK_GH_MERGE_LOG}"
 }
 
+test_merge_if_safe_blocks_when_required_checks_fail() {
+  setup_merge_if_safe_fixture \
+    "merge-required-check-failure" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "head-sha-123" \
+    "0"
+
+  MOCK_GH_REQUIRED_CHECKS_JSON="${TEST_TMP_DIR}/merge-required-check-failure/mock/required-checks.json"
+  printf '%s\n' '[{"name":"review-completed","bucket":"pass","state":"SUCCESS","link":"https://example.test/review"},{"name":"Run Tests","bucket":"fail","state":"FAILURE","link":"https://example.test/tests"}]' > "${MOCK_GH_REQUIRED_CHECKS_JSON}"
+  export MOCK_GH_REQUIRED_CHECKS_JSON
+
+  local err_file="${TMP_DIR}/merge.err"
+  assert_fail merge_if_safe 274 0 2>"${err_file}"
+  assert_file_contains "${err_file}" "GitHub required checks 未全部通过，拒绝合并。"
+  assert_file_contains "${MOCK_GH_CALLS_LOG}" "pr checks 274 --required --json name,bucket,state,link"
+  assert_file_empty "${MOCK_GH_MERGE_LOG}"
+}
+
 test_merge_if_safe_uses_latest_review_state_on_same_head() {
   setup_merge_if_safe_fixture \
     "merge-review-latest-state-same-head" \
@@ -235,4 +255,3 @@ test_merge_if_safe_rejects_comment_marker_without_formal_review() {
   assert_file_contains "${err_file}" "缺少 review-bot 的已完成 GitHub review"
   assert_file_empty "${MOCK_GH_MERGE_LOG}"
 }
-
