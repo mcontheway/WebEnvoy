@@ -1,9 +1,9 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { buildFingerprintProfileBundle, isFingerprintProfileBundle, markFingerprintProfileBundleAsLegacyBackfilled } from "../../shared/fingerprint-profile.js";
-import { isValidNativeHostName } from "../install/native-host-platform.js";
 import { resolveBrowserVersionTruthSource } from "./browser-launcher.js";
 import { resolveCurrentFingerprintEnvironment } from "./fingerprint-runtime.js";
+import { assertPersistentExtensionBindingShape } from "./persistent-extension-binding.js";
 export const PROFILE_META_FILENAME = "__webenvoy_meta.json";
 const DEFAULT_FILE_SYSTEM = {
     mkdir,
@@ -22,8 +22,6 @@ const PROFILE_STATES = [
     "stopped"
 ];
 const PROXY_BINDING_SOURCES = ["runtime.start", "runtime.login"];
-const EXTENSION_ID_PATTERN = /^[a-p]{32}$/;
-const BROWSER_CHANNELS = ["chrome", "chrome_beta", "chromium", "brave", "edge"];
 const LINUX_KERNEL_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+._][0-9A-Za-z._+-]+)*$/u;
 const validateProfileName = (profileName, rootDir) => {
     if (!PROFILE_NAME_PATTERN.test(profileName)) {
@@ -141,25 +139,7 @@ function assertProfileMeta(value) {
         }
     }
     if (value.persistentExtensionBinding !== undefined) {
-        if (!isObjectRecord(value.persistentExtensionBinding)) {
-            throw new Error("Invalid profile meta structure: persistentExtensionBinding");
-        }
-        const binding = value.persistentExtensionBinding;
-        if (typeof binding.extensionId !== "string" || !EXTENSION_ID_PATTERN.test(binding.extensionId)) {
-            throw new Error("Invalid profile meta structure: persistentExtensionBinding.extensionId");
-        }
-        if (typeof binding.nativeHostName !== "string" ||
-            binding.nativeHostName.trim().length === 0 ||
-            !isValidNativeHostName(binding.nativeHostName.trim())) {
-            throw new Error("Invalid profile meta structure: persistentExtensionBinding.nativeHostName");
-        }
-        if (typeof binding.browserChannel !== "string" ||
-            !BROWSER_CHANNELS.includes(binding.browserChannel)) {
-            throw new Error("Invalid profile meta structure: persistentExtensionBinding.browserChannel");
-        }
-        if (binding.manifestPath !== null && typeof binding.manifestPath !== "string") {
-            throw new Error("Invalid profile meta structure: persistentExtensionBinding.manifestPath");
-        }
+        assertPersistentExtensionBindingShape(value.persistentExtensionBinding);
     }
     if (!isObjectRecord(value.fingerprintSeeds)) {
         throw new Error("Invalid profile meta structure: fingerprintSeeds");

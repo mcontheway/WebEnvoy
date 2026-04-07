@@ -2,6 +2,8 @@ import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { initializeRuntimeStoreSchema } from "./sqlite-runtime-store-schema.js";
+import { mapGateApprovalRecordRow, mapGateAuditRecordRow } from "./sqlite-runtime-store-helpers.js";
+import { assertAppendRunEventInput, assertGateApprovalInput, assertGateAuditRecordInput, assertListGateAuditInput, assertUpsertRunInput } from "./sqlite-runtime-store-validation.js";
 export class RuntimeStoreError extends Error {
     code;
     constructor(code, message, options) {
@@ -14,24 +16,6 @@ const SUMMARY_MAX_CHARS = 512;
 const SQLITE_BUSY_MESSAGE = /SQLITE_BUSY|database is locked/i;
 const SQLITE_OPEN_RETRY_LIMIT = 8;
 let databaseSyncCtorCache;
-const GATE_ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
-const GATE_EXECUTION_MODES = new Set([
-    "dry_run",
-    "recon",
-    "live_read_limited",
-    "live_read_high_risk",
-    "live_write"
-]);
-const GATE_RISK_STATES = new Set(["paused", "limited", "allowed"]);
-const GATE_DECISIONS = new Set(["allowed", "blocked"]);
-const GATE_ISSUE_SCOPES = new Set(["issue_208", "issue_209"]);
-const REQUIRED_APPROVAL_CHECKS = new Set([
-    "target_domain_confirmed",
-    "target_tab_confirmed",
-    "target_page_confirmed",
-    "risk_state_checked",
-    "action_type_confirmed"
-]);
 const sanitizeSummary = (summary) => {
     if (summary === null) {
         return null;
@@ -47,33 +31,8 @@ const sanitizeSummary = (summary) => {
 };
 const isIsoLike = (value) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value);
 const isSqliteBusyError = (error) => error instanceof Error && SQLITE_BUSY_MESSAGE.test(error.message);
-const parseJsonObject = (value, fallback) => {
-    if (typeof value !== "string" || value.length === 0) {
-        return fallback;
-    }
-    try {
-        const parsed = JSON.parse(value);
-        return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-            ? parsed
-            : fallback;
-    }
-    catch {
-        return fallback;
-    }
-};
-const parseJsonArray = (value) => {
-    if (typeof value !== "string" || value.length === 0) {
-        return [];
-    }
-    try {
-        const parsed = JSON.parse(value);
-        return Array.isArray(parsed)
-            ? parsed.filter((item) => typeof item === "string" && item.length > 0)
-            : [];
-    }
-    catch {
-        return [];
-    }
+const invalidRuntimeStoreInput = (message) => {
+    throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", message);
 };
 export const resolveRuntimeStorePath = (cwd) => path.join(cwd, ".webenvoy", "runtime", "store.sqlite");
 const sleepSync = (milliseconds) => {
@@ -165,7 +124,10 @@ export class SQLiteRuntimeStore {
         });
     }
     async upsertRun(input) {
-        this.#assertUpsertRunInput(input);
+        assertUpsertRunInput(input, {
+            invalidInput: invalidRuntimeStoreInput,
+            isIsoLike
+        });
         try {
             const nowIso = new Date().toISOString();
             const existing = this.#db
@@ -200,7 +162,10 @@ export class SQLiteRuntimeStore {
         }
     }
     async appendRunEvent(input) {
-        this.#assertAppendEventInput(input);
+        assertAppendRunEventInput(input, {
+            invalidInput: invalidRuntimeStoreInput,
+            isIsoLike
+        });
         try {
             const runExists = this.#db
                 .prepare("SELECT run_id FROM runtime_runs WHERE run_id = ?")
@@ -228,7 +193,10 @@ export class SQLiteRuntimeStore {
         }
     }
     async upsertGateApproval(input) {
-        this.#assertGateApprovalInput(input);
+        assertGateApprovalInput(input, {
+            invalidInput: invalidRuntimeStoreInput,
+            isIsoLike
+        });
         try {
             const runExists = this.#db
                 .prepare("SELECT run_id FROM runtime_runs WHERE run_id = ?")
@@ -258,7 +226,10 @@ export class SQLiteRuntimeStore {
         }
     }
     async appendGateAuditRecord(input) {
-        this.#assertGateAuditRecordInput(input);
+        assertGateAuditRecordInput(input, {
+            invalidInput: invalidRuntimeStoreInput,
+            isIsoLike
+        });
         try {
             const runExists = this.#db
                 .prepare("SELECT run_id FROM runtime_runs WHERE run_id = ?")
@@ -358,7 +329,10 @@ export class SQLiteRuntimeStore {
         });
     }
     #listGateAuditRecords(input) {
-        this.#assertListGateAuditInput(input);
+        assertListGateAuditInput(input, {
+            invalidInput: invalidRuntimeStoreInput,
+            isIsoLike
+        });
         const clauses = [];
         const values = [];
         if (input.runId?.trim()) {
@@ -387,10 +361,7 @@ export class SQLiteRuntimeStore {
       LIMIT ?
     `;
         const rows = this.#db.prepare(sql).all(...values);
-        return rows.map((row) => ({
-            ...row,
-            gate_reasons: parseJsonArray(row.gate_reasons_json)
-        }));
+        return rows.map(mapGateAuditRecordRow);
     }
     #getOptionalGateApprovalByRunId(runId) {
         const row = this.#db
@@ -403,16 +374,7 @@ export class SQLiteRuntimeStore {
         if (!row) {
             return null;
         }
-        return {
-            approval_id: row.approval_id,
-            run_id: row.run_id,
-            approved: row.approved === 1,
-            approver: row.approver,
-            approved_at: row.approved_at,
-            checks: Object.fromEntries(Object.entries(parseJsonObject(row.checks_json, {})).map(([key, value]) => [key, value === true])),
-            created_at: row.created_at,
-            updated_at: row.updated_at
-        };
+        return mapGateApprovalRecordRow(row);
     }
     #getGateApprovalByRunId(runId) {
         const record = this.#getOptionalGateApprovalByRunId(runId);
@@ -434,136 +396,6 @@ export class SQLiteRuntimeStore {
         if (!row) {
             throw new RuntimeStoreError("ERR_RUNTIME_STORE_RUN_NOT_FOUND", "gate audit record not found");
         }
-        return {
-            ...row,
-            gate_reasons: parseJsonArray(row.gate_reasons_json)
-        };
-    }
-    #assertUpsertRunInput(input) {
-        if (!input.runId.trim() || !input.profileName.trim() || !input.command.trim()) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "missing required run fields");
-        }
-        if (input.status !== "running" && input.status !== "succeeded" && input.status !== "failed") {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid run status");
-        }
-        if (!isIsoLike(input.startedAt) || (input.endedAt !== null && !isIsoLike(input.endedAt))) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid timestamp format");
-        }
-        if (input.status === "running" && input.endedAt !== null) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "running status must not include ended_at");
-        }
-        if (input.status !== "running" && input.endedAt === null) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "final status must include ended_at");
-        }
-    }
-    #assertAppendEventInput(input) {
-        if (!input.runId.trim() || !input.stage.trim() || !input.component.trim() || !input.eventType.trim()) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "missing required event fields");
-        }
-        if (!isIsoLike(input.eventTime)) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid event_time");
-        }
-    }
-    #assertGateApprovalInput(input) {
-        if (!input.runId.trim()) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "run_id is required");
-        }
-        if (!input.checks || typeof input.checks !== "object") {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "checks is required");
-        }
-        for (const check of REQUIRED_APPROVAL_CHECKS) {
-            if (typeof input.checks[check] !== "boolean") {
-                throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", `checks.${check} is required`);
-            }
-        }
-        if (input.approved) {
-            if (!input.approver?.trim() || !input.approvedAt || !isIsoLike(input.approvedAt)) {
-                throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "approved record requires approver and approved_at");
-            }
-        }
-        else if (input.approvedAt !== null && !isIsoLike(input.approvedAt)) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid approved_at");
-        }
-    }
-    #assertGateAuditRecordInput(input) {
-        if (!input.eventId.trim() ||
-            !input.runId.trim() ||
-            !input.sessionId.trim() ||
-            !input.profile.trim() ||
-            !input.issueScope.trim() ||
-            !input.riskState.trim() ||
-            !input.nextState.trim() ||
-            !input.transitionTrigger.trim() ||
-            !input.targetDomain.trim() ||
-            !input.targetPage.trim() ||
-            !input.requestedExecutionMode.trim() ||
-            !input.effectiveExecutionMode.trim() ||
-            !input.gateDecision.trim()) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "missing required gate audit fields");
-        }
-        if (!Number.isInteger(input.targetTabId) || input.targetTabId <= 0) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid target_tab_id");
-        }
-        if (!GATE_RISK_STATES.has(input.riskState)) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid risk_state");
-        }
-        if (!GATE_ISSUE_SCOPES.has(input.issueScope)) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid issue_scope");
-        }
-        if (!GATE_RISK_STATES.has(input.nextState)) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid next_state");
-        }
-        if (input.actionType !== null && !GATE_ACTION_TYPES.has(input.actionType)) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid action_type");
-        }
-        if (!GATE_EXECUTION_MODES.has(input.requestedExecutionMode)) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid requested_execution_mode");
-        }
-        if (!GATE_EXECUTION_MODES.has(input.effectiveExecutionMode)) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid effective_execution_mode");
-        }
-        if (!GATE_DECISIONS.has(input.gateDecision)) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid gate_decision");
-        }
-        if (!Array.isArray(input.gateReasons) || input.gateReasons.length === 0) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "gate_reasons is required");
-        }
-        for (const reason of input.gateReasons) {
-            if (typeof reason !== "string" || reason.trim().length === 0) {
-                throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid gate_reasons");
-            }
-        }
-        if (!isIsoLike(input.recordedAt)) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid recorded_at");
-        }
-        const requiresApprovalEvidence = input.gateDecision === "allowed" &&
-            (input.requestedExecutionMode === "live_read_limited" ||
-                input.requestedExecutionMode === "live_read_high_risk" ||
-                input.requestedExecutionMode === "live_write" ||
-                input.effectiveExecutionMode === "live_read_limited" ||
-                input.effectiveExecutionMode === "live_read_high_risk" ||
-                input.effectiveExecutionMode === "live_write");
-        if (requiresApprovalEvidence &&
-            (!input.approver?.trim() || !input.approvedAt || !isIsoLike(input.approvedAt))) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "allowed record requires approver and approved_at");
-        }
-        if (input.approvedAt !== null && !isIsoLike(input.approvedAt)) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid approved_at");
-        }
-    }
-    #assertListGateAuditInput(input) {
-        if (input.runId !== undefined && input.runId.trim().length === 0) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "run_id is empty");
-        }
-        if (input.sessionId !== undefined && input.sessionId.trim().length === 0) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "session_id is empty");
-        }
-        if (input.profile !== undefined && input.profile.trim().length === 0) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "profile is empty");
-        }
-        if (input.limit !== undefined &&
-            (!Number.isInteger(input.limit) || input.limit <= 0 || input.limit > 100)) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "invalid limit");
-        }
+        return mapGateAuditRecordRow(row);
     }
 }

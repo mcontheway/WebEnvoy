@@ -1,9 +1,8 @@
 import { execFile } from "node:child_process";
-import { isAbsolute, resolve } from "node:path";
 import { promisify } from "node:util";
 import { CliError } from "../core/errors.js";
-import { DEFAULT_NATIVE_HOST_NAME, isBrowserChannel, isValidNativeHostName, EXTENSION_ID_PATTERN } from "../install/native-host-platform.js";
 import { BrowserLaunchError, isUnsupportedBrandedChromeForExtensions, resolvePreferredBrowserVersionTruthSource } from "./browser-launcher.js";
+import { inferPersistentExtensionBrowserChannel, parsePersistentExtensionBindingFromParams, readPersistentExtensionBindingFromMetaValue } from "./persistent-extension-binding.js";
 import { readNativeHostManifest, resolveInstallDiagnostics, resolveManifestPathForBinding, resolveProfileExtensionState } from "./persistent-extension-identity-install.js";
 const execFileAsync = promisify(execFile);
 const DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS = {
@@ -33,128 +32,7 @@ export const setIdentityPreflightAdaptersForTests = (overrides) => {
 export const resetIdentityPreflightAdaptersForTests = () => {
     identityPreflightAdapters = DEFAULT_IDENTITY_PREFLIGHT_ADAPTERS;
 };
-const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value
-    : null;
 const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-const ensureValidNativeHostName = (nativeHostName) => {
-    if (!isValidNativeHostName(nativeHostName)) {
-        throw new CliError("ERR_PROFILE_INVALID", "persistent_extension_identity.native_host_name 格式非法，必须满足 Chrome Native Messaging host 命名规则", {
-            details: {
-                ability_id: "runtime.identity_preflight",
-                stage: "input_validation",
-                reason: "IDENTITY_BINDING_INVALID_NATIVE_HOST_NAME"
-            }
-        });
-    }
-};
-const inferResolvedBrowserChannel = (input) => {
-    const normalizedVersion = input.browserVersion?.trim().toLowerCase() ?? "";
-    const normalizedPath = input.browserPath?.toLowerCase() ?? "";
-    if (normalizedVersion.includes("google chrome beta") || normalizedPath.includes("chrome beta")) {
-        return "chrome_beta";
-    }
-    if (normalizedVersion.includes("google chrome")) {
-        return "chrome";
-    }
-    if (normalizedVersion.includes("chromium") || normalizedPath.includes("chromium")) {
-        return "chromium";
-    }
-    if (normalizedVersion.includes("microsoft edge") || normalizedPath.includes("microsoft/edge")) {
-        return "edge";
-    }
-    if (normalizedVersion.includes("brave") || normalizedPath.includes("brave")) {
-        return "brave";
-    }
-    return null;
-};
-const parsePersistentExtensionBindingFromParams = (params) => {
-    const raw = asRecord(params.persistent_extension_identity) ??
-        asRecord(params.persistentExtensionIdentity);
-    if (!raw) {
-        return null;
-    }
-    const extensionId = asNonEmptyString(raw.extension_id) ?? asNonEmptyString(raw.extensionId);
-    if (!extensionId || !EXTENSION_ID_PATTERN.test(extensionId)) {
-        throw new CliError("ERR_PROFILE_INVALID", "persistent_extension_identity.extension_id 必须是 32 位 Chrome extension id", {
-            details: {
-                ability_id: "runtime.identity_preflight",
-                stage: "input_validation",
-                reason: "IDENTITY_BINDING_INVALID_EXTENSION_ID"
-            }
-        });
-    }
-    const nativeHostName = asNonEmptyString(raw.native_host_name) ??
-        asNonEmptyString(raw.nativeHostName) ??
-        DEFAULT_NATIVE_HOST_NAME;
-    ensureValidNativeHostName(nativeHostName);
-    const browserChannelRaw = asNonEmptyString(raw.browser_channel) ?? asNonEmptyString(raw.browserChannel) ?? "chrome";
-    if (!isBrowserChannel(browserChannelRaw)) {
-        throw new CliError("ERR_PROFILE_INVALID", "persistent_extension_identity.browser_channel 不受支持", {
-            details: {
-                ability_id: "runtime.identity_preflight",
-                stage: "input_validation",
-                reason: "IDENTITY_BINDING_INVALID_BROWSER_CHANNEL"
-            }
-        });
-    }
-    const manifestPathRaw = asNonEmptyString(raw.manifest_path) ??
-        asNonEmptyString(raw.manifestPath) ??
-        asNonEmptyString(process.env.WEBENVOY_NATIVE_HOST_MANIFEST_PATH) ??
-        null;
-    const manifestPath = manifestPathRaw === null
-        ? null
-        : isAbsolute(manifestPathRaw)
-            ? manifestPathRaw
-            : resolve(manifestPathRaw);
-    return {
-        extensionId,
-        nativeHostName,
-        browserChannel: browserChannelRaw,
-        manifestPath
-    };
-};
-const parsePersistentExtensionBindingFromMeta = (meta) => {
-    const raw = meta?.persistentExtensionBinding;
-    if (!raw) {
-        return null;
-    }
-    if (typeof raw.extensionId !== "string" ||
-        !EXTENSION_ID_PATTERN.test(raw.extensionId) ||
-        typeof raw.browserChannel !== "string" ||
-        !isBrowserChannel(raw.browserChannel)) {
-        return null;
-    }
-    if (typeof raw.nativeHostName !== "string") {
-        return null;
-    }
-    const nativeHostName = raw.nativeHostName.trim();
-    if (nativeHostName.length === 0) {
-        return null;
-    }
-    if (!isValidNativeHostName(nativeHostName)) {
-        throw new CliError("ERR_PROFILE_INVALID", "profile meta 中的 persistentExtensionBinding.nativeHostName 格式非法", {
-            details: {
-                ability_id: "runtime.identity_preflight",
-                stage: "input_validation",
-                reason: "IDENTITY_BINDING_INVALID_NATIVE_HOST_NAME"
-            }
-        });
-    }
-    if (raw.manifestPath !== null && typeof raw.manifestPath !== "string") {
-        return null;
-    }
-    return {
-        extensionId: raw.extensionId,
-        nativeHostName,
-        browserChannel: raw.browserChannel,
-        manifestPath: raw.manifestPath === null
-            ? null
-            : isAbsolute(raw.manifestPath)
-                ? raw.manifestPath
-                : resolve(raw.manifestPath)
-    };
-};
 const buildBlockingResult = (input) => ({
     ...input,
     blocking: true
@@ -250,7 +128,7 @@ export const runIdentityPreflight = async (input) => {
         };
     }
     const binding = parsePersistentExtensionBindingFromParams(input.params) ??
-        parsePersistentExtensionBindingFromMeta(input.meta);
+        readPersistentExtensionBindingFromMetaValue(input.meta?.persistentExtensionBinding);
     if (!binding) {
         return buildBlockingResult({
             mode: "official_chrome_persistent_extension",
@@ -268,7 +146,7 @@ export const runIdentityPreflight = async (input) => {
     }
     const expectedOrigin = `chrome-extension://${binding.extensionId}/`;
     const profileDir = asNonEmptyString(input.meta?.profileDir) ?? asNonEmptyString(input.profileDir);
-    const resolvedBrowserChannel = inferResolvedBrowserChannel({
+    const resolvedBrowserChannel = inferPersistentExtensionBrowserChannel({
         browserPath,
         browserVersion
     });
