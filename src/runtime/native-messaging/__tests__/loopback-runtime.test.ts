@@ -57,7 +57,7 @@ describe("native messaging legacy loopback runtime", () => {
     });
   });
 
-  it("preserves a caller-provided approval_id across the loopback gate bundle", async () => {
+  it("preserves caller-provided linkage inside the blocked loopback gate bundle", async () => {
     const bridge = new NativeMessagingBridge({
       transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
     });
@@ -87,6 +87,7 @@ describe("native messaging legacy loopback runtime", () => {
           risk_state: "paused",
           approval_record: {
             approval_id: "gate_appr_custom_run-loopback-custom-approval-001",
+            decision_id: "gate_decision_custom_run-loopback-custom-approval-001",
             approved: true,
             approver: "qa-reviewer",
             approved_at: "2026-03-23T10:00:00Z",
@@ -103,11 +104,16 @@ describe("native messaging legacy loopback runtime", () => {
     });
 
     expect(result.payload).toMatchObject({
+      gate_outcome: {
+        decision_id: "gate_decision_custom_run-loopback-custom-approval-001"
+      },
       approval_record: {
-        approval_id: "gate_appr_custom_run-loopback-custom-approval-001"
+        approval_id: "gate_appr_custom_run-loopback-custom-approval-001",
+        decision_id: "gate_decision_custom_run-loopback-custom-approval-001"
       },
       audit_record: {
-        approval_id: "gate_appr_custom_run-loopback-custom-approval-001"
+        approval_id: "gate_appr_custom_run-loopback-custom-approval-001",
+        decision_id: "gate_decision_custom_run-loopback-custom-approval-001"
       }
     });
   });

@@ -13,6 +13,10 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const resolveApprovalRecord = (
+  options: Record<string, unknown>
+): Record<string, unknown> | null => asRecord(options.approval_record) ?? asRecord(options.approval);
+
 export class InMemoryBackgroundRelay {
   #pendingForward = new Map<
     string,
@@ -100,10 +104,12 @@ export class InMemoryBackgroundRelay {
           typeof commandParams.options === "object" && commandParams.options !== null
             ? (commandParams.options as Record<string, unknown>)
             : {};
+        const approvalRecord = resolveApprovalRecord(options);
         const gate = buildLoopbackGate(options, asString(ability.action), {
           runId,
-          decisionId: `gate_decision_${runId}_${request.id}`,
-          approvalId: `gate_appr_${runId}`
+          decisionId:
+            asString(approvalRecord?.decision_id) ?? `gate_decision_${runId}_${request.id}`,
+          approvalId: asString(approvalRecord?.approval_id) ?? `gate_appr_${runId}`
         });
         const auditRecord = buildLoopbackAuditRecord({
           runId,

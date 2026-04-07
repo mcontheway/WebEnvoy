@@ -6,11 +6,13 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const resolveApprovalRecord = (options) => asRecord(options.approval_record) ?? asRecord(options.approval);
 const buildLoopbackXhsSearchGateBundle = (input) => {
+    const approvalRecord = resolveApprovalRecord(input.options);
     const gate = buildLoopbackGate(input.options, input.abilityAction, {
         runId: input.runId,
-        decisionId: `gate_decision_${input.runId}_${input.requestId}`,
-        approvalId: `gate_appr_${input.runId}`
+        decisionId: asString(approvalRecord?.decision_id) ?? `gate_decision_${input.runId}_${input.requestId}`,
+        approvalId: asString(approvalRecord?.approval_id) ?? `gate_appr_${input.runId}`
     });
     const auditRecord = buildLoopbackAuditRecord({
         runId: input.runId,

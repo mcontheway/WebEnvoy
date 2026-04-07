@@ -38,6 +38,10 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const resolveApprovalRecord = (
+  options: Record<string, unknown>
+): Record<string, unknown> | null => asRecord(options.approval_record) ?? asRecord(options.approval);
+
 const buildLoopbackXhsSearchGateBundle = (input: {
   options: Record<string, unknown>;
   abilityAction: string | null;
@@ -49,10 +53,12 @@ const buildLoopbackXhsSearchGateBundle = (input: {
   consumerGateResult: Record<string, unknown>;
   payload: Record<string, unknown>;
 } => {
+  const approvalRecord = resolveApprovalRecord(input.options);
   const gate = buildLoopbackGate(input.options, input.abilityAction, {
     runId: input.runId,
-    decisionId: `gate_decision_${input.runId}_${input.requestId}`,
-    approvalId: `gate_appr_${input.runId}`
+    decisionId:
+      asString(approvalRecord?.decision_id) ?? `gate_decision_${input.runId}_${input.requestId}`,
+    approvalId: asString(approvalRecord?.approval_id) ?? `gate_appr_${input.runId}`
   });
   const auditRecord = buildLoopbackAuditRecord({
     runId: input.runId,

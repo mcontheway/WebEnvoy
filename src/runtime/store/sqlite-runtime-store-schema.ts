@@ -190,23 +190,31 @@ const migrateV6ToV7 = (db: DatabaseSync): void => {
     WHERE decision_id IS NULL OR decision_id = '';
 
     UPDATE runtime_gate_audit_records
-    SET decision_id = 'gate_decision_' || run_id
-    WHERE decision_id IS NULL OR decision_id = '';
-
-    UPDATE runtime_gate_audit_records
-    SET approval_id = (
-      SELECT runtime_gate_approvals.approval_id
-      FROM runtime_gate_approvals
-      WHERE runtime_gate_approvals.run_id = runtime_gate_audit_records.run_id
-    )
-    WHERE (approval_id IS NULL OR approval_id = '')
-      AND EXISTS (
-        SELECT 1
+    SET approval_id = COALESCE(
+      (
+        SELECT runtime_gate_approvals.approval_id
         FROM runtime_gate_approvals
         WHERE runtime_gate_approvals.run_id = runtime_gate_audit_records.run_id
-          AND runtime_gate_approvals.approval_id IS NOT NULL
-          AND runtime_gate_approvals.approval_id != ''
-      );
+      ),
+      CASE
+        WHEN (approver IS NOT NULL AND approver != '')
+          OR (approved_at IS NOT NULL AND approved_at != '')
+        THEN 'gate_appr_' || run_id
+        ELSE NULL
+      END
+    )
+    WHERE approval_id IS NULL OR approval_id = '';
+
+    UPDATE runtime_gate_audit_records
+    SET decision_id = COALESCE(
+      (
+        SELECT runtime_gate_approvals.decision_id
+        FROM runtime_gate_approvals
+        WHERE runtime_gate_approvals.run_id = runtime_gate_audit_records.run_id
+      ),
+      'gate_decision_' || run_id
+    )
+    WHERE decision_id IS NULL OR decision_id = '';
   `);
   db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run(
     String(SCHEMA_VERSION)

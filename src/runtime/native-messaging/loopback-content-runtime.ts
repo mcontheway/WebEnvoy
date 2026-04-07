@@ -12,6 +12,9 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const resolveApprovalRecord = (options: Record<string, unknown>): Record<string, unknown> | null =>
+  asRecord(options.approval_record) ?? asRecord(options.approval);
+
 export class InMemoryContentScriptRuntime {
   static readonly BOOTSTRAP_ATTEST_DELAY_MS = 10;
 
@@ -180,9 +183,12 @@ export class InMemoryContentScriptRuntime {
         typeof message.commandParams.options === "object" && message.commandParams.options !== null
           ? (message.commandParams.options as Record<string, unknown>)
           : {};
+      const approvalRecord = resolveApprovalRecord(options);
       const gate = buildLoopbackGate(options, asString(ability.action), {
         runId: message.runId,
-        decisionId: `gate_decision_${message.runId}_${message.id}`
+        decisionId:
+          asString(approvalRecord?.decision_id) ?? `gate_decision_${message.runId}_${message.id}`,
+        approvalId: asString(approvalRecord?.approval_id) ?? `gate_appr_${message.runId}`
       });
       const consumerGateResult = gate.consumerGateResult;
       const auditRecord = buildLoopbackAuditRecord({

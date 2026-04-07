@@ -6,6 +6,7 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const resolveApprovalRecord = (options) => asRecord(options.approval_record) ?? asRecord(options.approval);
 export class InMemoryBackgroundRelay {
     hostPort;
     contentPort;
@@ -76,10 +77,11 @@ export class InMemoryBackgroundRelay {
                 const options = typeof commandParams.options === "object" && commandParams.options !== null
                     ? commandParams.options
                     : {};
+                const approvalRecord = resolveApprovalRecord(options);
                 const gate = buildLoopbackGate(options, asString(ability.action), {
                     runId,
-                    decisionId: `gate_decision_${runId}_${request.id}`,
-                    approvalId: `gate_appr_${runId}`
+                    decisionId: asString(approvalRecord?.decision_id) ?? `gate_decision_${runId}_${request.id}`,
+                    approvalId: asString(approvalRecord?.approval_id) ?? `gate_appr_${runId}`
                 });
                 const auditRecord = buildLoopbackAuditRecord({
                     runId,
