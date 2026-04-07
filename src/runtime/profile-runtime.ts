@@ -52,15 +52,19 @@ import {
   markSessionReady,
   markSessionStopped
 } from "./runtime-session.js";
+import {
+  browserStateFromProfileState,
+  buildRuntimeReadiness,
+  mapBootstrapCliErrorToReadiness,
+  mapTransportErrorToReadiness,
+  type BootstrapState,
+  type RuntimeReadinessSnapshot,
+  type TransportState
+} from "./profile-runtime-readiness.js";
 
 const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
 const LOCK_ACQUIRE_MAX_RETRIES = 6;
 const STOP_LOCK_DELETE_MAX_RETRIES = 3;
-
-type BrowserState = "absent" | "starting" | "ready" | "logging_in" | "stopping" | "disconnected";
-type TransportState = "not_connected" | "ready" | "disconnected";
-type BootstrapState = "not_started" | "pending" | "ready" | "stale" | "failed";
-type RuntimeReadiness = "blocked" | "pending" | "ready" | "recoverable" | "unknown";
 
 interface RuntimeActionInput {
   cwd: string;
@@ -134,14 +138,6 @@ interface RuntimeBridgeLike {
   }): Promise<BridgeCommandResult>;
 }
 
-interface RuntimeReadinessSnapshot {
-  identityBindingState: IdentityPreflightResult["identityBindingState"];
-  transportState: TransportState;
-  bootstrapState: BootstrapState;
-  runtimeReadiness: RuntimeReadiness;
-  details?: JsonObject;
-}
-
 interface ResolvedProfileAccessState {
   profileState: ProfileState;
   lockHeld: boolean;
@@ -162,29 +158,6 @@ const DEFAULT_LOCK_FILE_ADAPTER: LockFileAdapter = {
     await writeFile(path, data, options);
   },
   unlink: async (path) => unlink(path)
-};
-
-const browserStateFromProfileState = (profileState: ProfileState, lockHeld: boolean): BrowserState => {
-  if (!lockHeld) {
-    if (profileState === "disconnected") {
-      return "disconnected";
-    }
-    return "absent";
-  }
-
-  if (profileState === "starting") {
-    return "starting";
-  }
-  if (profileState === "logging_in") {
-    return "logging_in";
-  }
-  if (profileState === "stopping") {
-    return "stopping";
-  }
-  if (profileState === "disconnected") {
-    return "disconnected";
-  }
-  return "ready";
 };
 
 const parseProxyUrl = (params: JsonObject): string | null | undefined => {
@@ -423,129 +396,6 @@ const resolvePersistentExtensionBindingForMeta = (input: {
     input.identityPreflight.binding
     ? input.identityPreflight.binding
     : (input.currentMeta.persistentExtensionBinding ?? null);
-
-const buildRuntimeReadiness = (input: {
-  lockHeld: boolean;
-  identityBindingState: IdentityPreflightResult["identityBindingState"];
-  transportState: TransportState;
-  bootstrapState: BootstrapState;
-}): RuntimeReadiness => {
-  if (
-    input.identityBindingState === "mismatch" || input.identityBindingState === "missing"
-  ) {
-    return "blocked";
-  }
-  if (!input.lockHeld) {
-    return input.transportState === "disconnected" ? "recoverable" : "blocked";
-  }
-  if (
-    input.identityBindingState === "bound" &&
-    input.transportState === "ready" &&
-    input.bootstrapState === "ready"
-  ) {
-    return "ready";
-  }
-  if (input.transportState === "disconnected") {
-    return "recoverable";
-  }
-  if (
-    input.identityBindingState === "bound" &&
-    (input.bootstrapState === "pending" || input.bootstrapState === "not_started")
-  ) {
-    return "pending";
-  }
-  if (input.bootstrapState === "failed") {
-    return "recoverable";
-  }
-  if (input.bootstrapState === "stale") {
-    return "blocked";
-  }
-  return "unknown";
-};
-
-const mapTransportErrorToReadiness = (
-  error: NativeMessagingTransportError
-): Pick<RuntimeReadinessSnapshot, "transportState" | "bootstrapState" | "runtimeReadiness" | "details"> => {
-  const details = {
-    code: error.code,
-    message: error.message
-  };
-  if (error.code === "ERR_TRANSPORT_HANDSHAKE_FAILED") {
-    return {
-      transportState: "not_connected",
-      bootstrapState: "not_started",
-      runtimeReadiness: "recoverable",
-      details
-    };
-  }
-  return {
-    transportState: "disconnected",
-    bootstrapState: "not_started",
-    runtimeReadiness: "recoverable",
-    details
-  };
-};
-
-const mapBootstrapCliErrorToReadiness = (
-  error: CliError,
-  identityBindingState: IdentityPreflightResult["identityBindingState"] = "bound"
-): RuntimeReadinessSnapshot => {
-  const details = {
-    code: error.code,
-    message: error.message
-  };
-
-  switch (error.code) {
-    case "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED":
-      return {
-        identityBindingState,
-        transportState: "ready",
-        bootstrapState: "pending",
-        runtimeReadiness: "pending",
-        details
-      };
-    case "ERR_RUNTIME_BOOTSTRAP_ACK_TIMEOUT":
-      return {
-        identityBindingState,
-        transportState: "ready",
-        bootstrapState: "pending",
-        runtimeReadiness: "recoverable",
-        details
-      };
-    case "ERR_RUNTIME_BOOTSTRAP_ACK_STALE":
-      return {
-        identityBindingState,
-        transportState: "ready",
-        bootstrapState: "stale",
-        runtimeReadiness: "blocked",
-        details
-      };
-    case "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH":
-      return {
-        identityBindingState: "mismatch",
-        transportState: "ready",
-        bootstrapState: "failed",
-        runtimeReadiness: "blocked",
-        details
-      };
-    case "ERR_RUNTIME_READY_SIGNAL_CONFLICT":
-      return {
-        identityBindingState,
-        transportState: "ready",
-        bootstrapState: "failed",
-        runtimeReadiness: "unknown",
-        details
-      };
-    default:
-      return {
-        identityBindingState,
-        transportState: "ready",
-        bootstrapState: "failed",
-        runtimeReadiness: "recoverable",
-        details
-      };
-  }
-};
 
 const asResultRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
