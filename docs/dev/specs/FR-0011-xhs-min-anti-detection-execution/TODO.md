@@ -18,13 +18,13 @@
 - [x] 2026-03-30 之后，任何真实验证、回放证据或实现线程状态变化都应在对应 issue / PR 线程承载；本文件只保留对 formal contract 解释有影响的时间边界，不复写可变状态。
 - [x] FR-0011 本轮 closeout 继续服从上游 `FR-0009` / `FR-0010` 已冻结的契约边界；这些上游 formal closeout 的具体结论与 GitHub 状态仍由各自 issue / PR / TODO 单独承载。
 
-## 进入实现前必须满足
+## 进入实现前必须完成
 
-- [x] FR-0011 的 formal review 结论必须先形成，后续 Sprint 3 实现事项才能把它作为 implementation-ready 输入消费。
-- [x] `#208` 与 `#209` 的后续事项必须继续把 FR-0011 作为统一前置消费者，而不是回退到未冻结的口头边界。
-- [x] 涉及 `#208` 的后续文案若再次引用“验证前置已冻结”，必须同时区分该表述属于 2026-03-30 的 contract freeze 语境，而不是用它代替后续实现链路里的真实验证或关闭结论。
-- [x] `#216` 提供的 Sprint 治理基线必须已对齐，FR-0011 的后续实现事项才可按当前 Sprint 2 / Sprint 3 / Sprint 4 语义消费 roadmap 与 milestone。
-- [x] active issue anchor 的同步与切换必须在 dedicated GitHub / formal writeback 链路中单独完成；本文件不并行重定义 FR-0011 的当前 open anchor。
+- [ ] FR-0011 spec review 通过并形成明确结论。
+- [ ] `#208` 与 `#209` 的后续事项继续以 FR-0011 作为统一前置消费者，不回退到未冻结的口头边界。
+- [ ] 涉及 `#208` 的后续文案若再次引用“验证前置已冻结”，必须同时区分该表述属于 2026-03-30 的 contract freeze 语境，而不是用它代替后续实现链路里的真实验证或关闭结论。
+- [ ] `#216` 提供的 Sprint 治理基线已对齐，后续 Sprint 3 实现事项可按当前 Sprint 2 / Sprint 3 / Sprint 4 语义消费 roadmap 与 milestone。
+- [ ] active issue anchor 的同步与切换通过 dedicated GitHub / formal writeback 链路单独完成；本文件不并行重定义 FR-0011 的当前 open anchor。
 
 ## 关闭后仍需保持的引用关系
 
@@ -41,5 +41,7 @@
 - [ ] 实现 `#208/#209` 三态差异化阻断矩阵（统一判定入口）。
 - [ ] 实现 session 节律/冷却/恢复最小约束。
 - [ ] 实现状态变更审计落盘与缺失审计回退 `paused` 逻辑。
+- [ ] 为 FR-0011 已冻结的 `#208` gate-only success / blocked 场景补齐 `page_state` 契约测试。
+- [ ] 围绕 FR-0011 已冻结的 `editor_input` 验证边界补齐最小 replay 与证据回传，供后续实现与验证链路消费。
 - [ ] 如需正式引入 `xhs.editor_input` 或 `xhs.interact`，先单独起 command contract 规约 PR。
 - [ ] 补齐对应契约测试与状态迁移测试。
