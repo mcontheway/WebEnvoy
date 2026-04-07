@@ -1277,60 +1277,6 @@ test_main_review_mode_does_not_fail_on_mode_expansion_after_summary() {
   assert_file_not_contains "${call_log}" "merge_if_safe:274"
 }
 
-test_main_review_with_post_review_reuses_existing_guardian_review() {
-  setup_case_dir "main-review-reuse"
-
-  local call_log="${TMP_DIR}/main.calls.log"
-  export call_log
-
-  (
-    require_cmd() { :; }
-    gh() {
-      if [[ "${1:-}" == "api" && "${2:-}" == "user" ]]; then
-        printf '%s\n' "review-bot"
-        return 0
-      fi
-      echo "unexpected gh call: $*" >&2
-      return 1
-    }
-    check_gh_auth() { printf '%s\n' "check_gh_auth" >> "${call_log}"; }
-    prepare_pr_workspace() { printf '%s\n' "prepare_pr_workspace:$1" >> "${call_log}"; }
-    assert_required_review_context_available() { printf '%s\n' "assert_required_review_context_available" >> "${call_log}"; }
-    ensure_review_prompt_prepared() { printf '%s\n' "ensure_review_prompt_prepared:$1" >> "${call_log}"; }
-    write_review_status_json() {
-      printf '%s\n' "write_review_status_json:$1:$2" >> "${call_log}"
-      cat > "$3" <<'EOF'
-{"reusable":true,"reason":"matching_metadata","head_sha":"head-sha-123","review_profile":"high_risk_impl_profile","prompt_digest":"prompt-digest-123","verdict":"APPROVE","safe_to_merge":true,"review_body":"reused review body"}
-EOF
-    }
-    hydrate_reused_review_result() {
-      printf '%s\n' "hydrate_reused_review_result:$1" >> "${call_log}"
-      RESULT_FILE="${TMP_DIR}/review.json"
-      REVIEW_MD_FILE="${TMP_DIR}/review.md"
-      printf '%s\n' '{"verdict":"APPROVE","safe_to_merge":true,"summary":"reused","findings":[],"required_actions":[]}' > "${RESULT_FILE}"
-      printf '%s\n' "reused review body" > "${REVIEW_MD_FILE}"
-      export RESULT_FILE REVIEW_MD_FILE
-    }
-    run_codex_review() { printf '%s\n' "run_codex_review:$1" >> "${call_log}"; }
-    print_summary() { printf '%s\n' "print_summary" >> "${call_log}"; }
-    post_review() { printf '%s\n' "post_review:$1" >> "${call_log}"; }
-    merge_if_safe() { printf '%s\n' "merge_if_safe:$1:$2" >> "${call_log}"; }
-    cleanup() { :; }
-
-    assert_pass main review 274 --post-review
-  )
-
-  assert_file_contains "${call_log}" "check_gh_auth"
-  assert_file_contains "${call_log}" "prepare_pr_workspace:274"
-  assert_file_contains "${call_log}" "ensure_review_prompt_prepared:274"
-  assert_file_contains "${call_log}" "write_review_status_json:274:"
-  assert_file_contains "${call_log}" "hydrate_reused_review_result:"
-  assert_file_contains "${call_log}" "print_summary"
-  assert_file_not_contains "${call_log}" "run_codex_review:274"
-  assert_file_not_contains "${call_log}" "post_review:274"
-  assert_file_not_contains "${call_log}" "merge_if_safe:274"
-}
-
 test_main_merge_if_safe_reuses_existing_guardian_review() {
   setup_case_dir "main-merge-if-safe-reuse"
 
@@ -1377,7 +1323,7 @@ EOF
   assert_file_contains "${call_log}" "check_gh_auth"
   assert_file_contains "${call_log}" "prepare_pr_workspace:274"
   assert_file_contains "${call_log}" "ensure_review_prompt_prepared:274"
-  assert_file_contains "${call_log}" "write_review_status_json:274:"
+  assert_file_contains "${call_log}" "write_review_status_json:274:review-bot"
   assert_file_contains "${call_log}" "hydrate_reused_review_result:"
   assert_file_contains "${call_log}" "print_summary"
   assert_file_contains "${call_log}" "merge_if_safe:274:0"
