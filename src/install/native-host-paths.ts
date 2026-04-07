@@ -169,17 +169,24 @@ export interface ResolveInstallPathsInput {
   browserChannel: BrowserChannel;
   manifestDir?: string;
   launcherPath?: string;
+  platform?: NodeJS.Platform;
 }
 
 export const resolveInstallPaths = (input: ResolveInstallPathsInput) => {
   const roots = resolveControlledInstallRoots(input.cwd, input.browserChannel);
-  const manifestRoot = resolveManifestDiscoveryDirectory(input.browserChannel);
-  const manifestDir =
-    typeof input.manifestDir === "string" && input.manifestDir.length > 0
-      ? asAbsolutePath(input.cwd, input.manifestDir)
-      : manifestRoot;
+  const platform = input.platform ?? process.platform;
   const hasCustomManifestDir = typeof input.manifestDir === "string" && input.manifestDir.length > 0;
-  if (hasCustomManifestDir && !isPathInside(manifestRoot, manifestDir)) {
+  const manifestRoot =
+    hasCustomManifestDir || platform === "win32"
+      ? roots.manifestRoot
+      : resolveManifestDiscoveryDirectory(input.browserChannel, platform);
+  const manifestDir =
+    hasCustomManifestDir
+      ? asAbsolutePath(input.cwd, input.manifestDir!)
+      : platform === "win32"
+        ? roots.manifestRoot
+        : manifestRoot;
+  if (hasCustomManifestDir && platform !== "win32" && !isPathInside(manifestRoot, manifestDir)) {
     throw nativeHostPathError(input.command, "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT", {
       field: "manifest_dir",
       allowed_root: manifestRoot,
@@ -214,7 +221,11 @@ export const resolveInstallPaths = (input: ResolveInstallPathsInput) => {
     launcherPath,
     hasCustomManifestDir,
     hasCustomLauncherPath,
-    manifestPathSource: hasCustomManifestDir ? ("custom" as InstallPathSource) : ("browser_default" as InstallPathSource),
+    manifestPathSource: hasCustomManifestDir
+      ? ("custom" as InstallPathSource)
+      : platform === "win32"
+        ? ("repo_owned_default" as InstallPathSource)
+        : ("browser_default" as InstallPathSource),
     launcherPathSource: hasCustomLauncherPath ? ("custom" as InstallPathSource) : ("repo_owned_default" as InstallPathSource)
   };
 };
