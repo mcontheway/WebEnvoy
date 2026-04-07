@@ -1508,6 +1508,68 @@ describe("extension service worker recovery contract / xhs gate and live forward
     );
   });
 
+  it("reuses request.id as the approval-linkage run identifier when params.run_id is absent", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const profile = "profile-a";
+    const trustRunId = "run-xhs-live-request-id-fallback-prime-001";
+    const requestId = "run-xhs-live-request-id-fallback-001";
+    const fingerprintContext = createFingerprintRuntimeContext({
+      live_allowed: true,
+      live_decision: "allowed",
+      allowed_execution_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+      reason_codes: []
+    });
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: trustRunId,
+      profile,
+      fingerprintContext
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onMessageListeners[0]?.({
+      id: requestId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: {
+            ...createApprovedReadApprovalRecord(),
+            approval_id: `gate_appr_custom_${requestId}`,
+            decision_id: `gate_decision_${requestId}_${requestId}`
+          },
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: requestId,
+        runId: requestId,
+        command: "xhs.search"
+      })
+    );
+  });
+
   it("does not establish trusted fingerprint context from runtime.ping", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);

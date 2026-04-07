@@ -2561,6 +2561,7 @@ class ChromeBackgroundBridge {
         const gateReasons = [];
         let writeGateOnlyApprovalDecision = null;
         let writeGateOnlyEligible = false;
+        const requestRunId = String(request.params.run_id ?? request.id);
         const pushReason = (reason) => {
             if (!gateReasons.includes(reason)) {
                 gateReasons.push(reason);
@@ -2596,11 +2597,7 @@ class ChromeBackgroundBridge {
         const matrixResolution = collectXhsMatrixGateReasons({
             gateReasons,
             state: gateState,
-            decisionId: request.params.run_id && request.id
-                ? `gate_decision_${request.params.run_id}_${request.id}`
-                : request.params.run_id
-                    ? `gate_decision_${request.params.run_id}`
-                    : null,
+            decisionId: `gate_decision_${requestRunId}_${request.id}`,
             approvalRecord,
             issue208EditorInputValidation
         });
@@ -2710,7 +2707,7 @@ class ChromeBackgroundBridge {
             fingerprint_reason_codes: resolvedFingerprintReasonCodes,
             write_interaction_tier: gateState.writeActionMatrixDecisions?.write_interaction_tier ?? null
         };
-        const runId = String(request.params.run_id ?? request.id);
+        const runId = requestRunId;
         const sessionId = String(request.params.session_id ?? this.#sessionId);
         const profile = typeof request.profile === "string" ? request.profile : null;
         const recordedAt = new Date().toISOString();
