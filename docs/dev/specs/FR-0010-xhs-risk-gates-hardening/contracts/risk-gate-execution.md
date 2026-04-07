@@ -145,6 +145,7 @@
     "run_id": "run_001",
     "session_id": "nm-session-001",
     "profile": "xhs_account_001",
+    "risk_state": "paused",
     "target_domain": "www.xiaohongshu.com",
     "target_tab_id": 924,
     "target_page": "search_result_tab",
@@ -174,6 +175,35 @@
 7. `event_id` 是 `FR-0009.audit_record_ref` 的等价承载，必须稳定、可检索、不可歧义。
 8. `decision_id` 必须指向同一次 `gate_outcome` 决策，保证审计记录能回链到唯一门禁结论。
 9. 若 live 被放行，`approval_id` 必填且必须引用对应 `approval_record.approval_id`；若为阻断，可为空。
+10. `risk_state` 是统一状态机在审计记录侧的正式真相源，必须记录本次门禁判定实际使用的状态输入值；后续消费者不得要求从 `consumer_gate_result` 回读同名字段。
+
+## risk_state_output
+
+当门禁实现需要对外发布统一风险状态机结果时，必须通过独立对象 `risk_state_output` 输出，而不是回灌到 `consumer_gate_result`：
+
+```json
+{
+  "risk_state_output": {
+    "current_state": "paused",
+    "next_state": "paused",
+    "transition_trigger": "gate_evaluation",
+    "audit_records": [
+      {
+        "event_id": "gate_evt_001"
+      }
+    ]
+  }
+}
+```
+
+约束：
+
+1. `risk_state_output` 只承载统一状态机输出，不替代 `gate_input`、`gate_outcome`、`approval_record`、`audit_record` 或 `consumer_gate_result`。
+2. `current_state` 与 `next_state` 枚举固定为 `paused | limited | allowed`。
+3. `transition_trigger` 必须提供稳定原因字符串，至少能区分 `gate_evaluation` 与其他后续 FR 新增的状态迁移来源。
+4. `audit_records` 必须引用同一次门禁判定已生成的审计记录；在 FR-0010 基线下至少包含 `event_id`。
+5. 如运行时未对外发布统一状态机结果，可整体省略 `risk_state_output`；一旦发布，则上述字段都视为稳定输出字段。
+6. service-worker / relay 若对外暴露状态机结果，也必须复用本对象，而不是新增并行状态输出字段。
 
 ## consumer_gate_result
 

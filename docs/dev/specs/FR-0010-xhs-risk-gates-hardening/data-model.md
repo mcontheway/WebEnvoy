@@ -87,6 +87,7 @@
 - `run_id` string NOT NULL
 - `session_id` string NOT NULL
 - `profile` string NOT NULL
+- `risk_state` ENUM NOT NULL (`paused` | `limited` | `allowed`)
 - `target_domain` string NOT NULL
 - `target_tab_id` integer NOT NULL
 - `target_page` string NOT NULL
@@ -109,6 +110,21 @@
 6. `event_id` 是 `FR-0009.audit_record_ref` 的等价承载，必须稳定、可检索、不可歧义。
 7. `decision_id` 必须指向同一次 `GateDecision`，保证审计记录能回链到唯一门禁结论。
 8. `approval_id` 在 live 放行时必填，且必须引用对应 `ApprovalRecord.approval_id`，确保 `approval_record_ref` 与 `audit_record_ref` 能唯一对应同一 live 恢复/扩展决策。
+9. `risk_state` 是统一风险状态机在审计记录侧的正式真相源，记录本次门禁判定实际使用的状态输入值，不要求 `consumer_gate_result` 复制该字段。
+
+## 实体 6：RiskStateOutput
+
+- `current_state` ENUM NOT NULL (`paused` | `limited` | `allowed`)
+- `next_state` ENUM NOT NULL (`paused` | `limited` | `allowed`)
+- `transition_trigger` string NOT NULL
+- `audit_records` JSON array NOT NULL
+
+约束：
+
+1. `RiskStateOutput` 只承载统一状态机输出，不替代 `GateInput` 或 `AuditRecord` 的状态字段。
+2. `audit_records` 至少要能回链到当前门禁判定的 `AuditRecord.event_id`。
+3. `RiskStateOutput` 在 FR-0010 中属于可选公开对象；如果实现选择输出，就必须完整满足上述字段要求。
+4. service-worker / relay 若需要对外暴露状态机结果，必须复用同一对象结构，不得新增并行状态输出契约。
 
 ## 生命周期
 
@@ -117,7 +133,7 @@
 3. 计算门禁后生成 `GateDecision`。
 4. 若请求 live 升级，生成或更新 `ApprovalRecord`，并绑定对应 `decision_id`。
 5. 不论放行或阻断，写入 `AuditRecord`；若 live 放行，必须回链同一 `decision_id` 与 `approval_id`。
-6. 若需要对外返回统一风险状态机结果，使用 `risk_state_output`；不得把状态输入或下一状态镜像回 `consumer_gate_result` 作为稳定契约。
+6. 若需要对外返回统一风险状态机结果，生成 `RiskStateOutput`；不得把状态输入或下一状态镜像回 `consumer_gate_result` 作为稳定契约。
 
 ## 与现有 FR 对齐
 
