@@ -1,0 +1,257 @@
+export const SCHEMA_VERSION = 6;
+const backfillIssueScope = (db) => {
+    db.exec(`
+    UPDATE runtime_gate_audit_records
+    SET issue_scope = CASE
+      WHEN issue_scope IS NOT NULL AND issue_scope != '' THEN issue_scope
+      WHEN target_domain = 'www.xiaohongshu.com' THEN 'issue_209'
+      WHEN target_page = 'search_result_tab' THEN 'issue_209'
+      WHEN requested_execution_mode IN ('live_read_limited', 'live_read_high_risk') THEN 'issue_209'
+      WHEN action_type = 'read' THEN 'issue_209'
+      WHEN target_domain = 'creator.xiaohongshu.com'
+           AND target_page IN ('creator_publish_tab', 'publish_page')
+           AND (
+             effective_execution_mode = 'live_write'
+             OR action_type = 'irreversible_write'
+           )
+        THEN 'issue_208'
+      ELSE NULL
+    END
+    WHERE issue_scope IS NULL OR issue_scope = '';
+  `);
+};
+const migrateV1ToV2 = (db) => {
+    db.exec(`
+    CREATE TABLE IF NOT EXISTS runtime_gate_approvals (
+      approval_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL UNIQUE,
+      approved INTEGER NOT NULL,
+      approver TEXT,
+      approved_at TEXT,
+      checks_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+    );
+    CREATE TABLE IF NOT EXISTS runtime_gate_audit_records (
+      event_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      profile TEXT NOT NULL,
+      issue_scope TEXT,
+      risk_state TEXT NOT NULL DEFAULT 'paused',
+      next_state TEXT NOT NULL DEFAULT 'paused',
+      transition_trigger TEXT NOT NULL DEFAULT 'gate_evaluation',
+      target_domain TEXT NOT NULL,
+      target_tab_id INTEGER NOT NULL,
+      target_page TEXT NOT NULL,
+      action_type TEXT,
+      requested_execution_mode TEXT NOT NULL,
+      effective_execution_mode TEXT NOT NULL,
+      gate_decision TEXT NOT NULL,
+      gate_reasons_json TEXT NOT NULL,
+      approver TEXT,
+      approved_at TEXT,
+      recorded_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_run_recorded
+      ON runtime_gate_audit_records(run_id, recorded_at ASC);
+    CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_session_recorded
+      ON runtime_gate_audit_records(session_id, recorded_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_profile_recorded
+      ON runtime_gate_audit_records(profile, recorded_at DESC);
+  `);
+    db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION));
+};
+const migrateV2ToV3 = (db) => {
+    db.exec(`
+    ALTER TABLE runtime_gate_audit_records
+    ADD COLUMN risk_state TEXT NOT NULL DEFAULT 'paused';
+  `);
+    db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run("3");
+};
+const migrateV3ToV4 = (db) => {
+    db.exec(`
+    ALTER TABLE runtime_gate_audit_records
+    ADD COLUMN next_state TEXT NOT NULL DEFAULT 'paused';
+    ALTER TABLE runtime_gate_audit_records
+    ADD COLUMN transition_trigger TEXT NOT NULL DEFAULT 'gate_evaluation';
+    UPDATE runtime_gate_audit_records
+    SET next_state = risk_state
+    WHERE next_state IS NULL OR next_state = '';
+  `);
+    db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run("4");
+};
+const migrateV4ToV5 = (db) => {
+    db.exec(`
+    ALTER TABLE runtime_gate_audit_records
+    ADD COLUMN issue_scope TEXT;
+  `);
+    backfillIssueScope(db);
+    db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run("5");
+};
+const migrateV5ToV6 = (db) => {
+    db.exec(`
+    PRAGMA foreign_keys = OFF;
+    CREATE TABLE runtime_gate_audit_records_v6 (
+      event_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      profile TEXT NOT NULL,
+      issue_scope TEXT,
+      risk_state TEXT NOT NULL,
+      next_state TEXT NOT NULL DEFAULT 'paused',
+      transition_trigger TEXT NOT NULL DEFAULT 'gate_evaluation',
+      target_domain TEXT NOT NULL,
+      target_tab_id INTEGER NOT NULL,
+      target_page TEXT NOT NULL,
+      action_type TEXT,
+      requested_execution_mode TEXT NOT NULL,
+      effective_execution_mode TEXT NOT NULL,
+      gate_decision TEXT NOT NULL,
+      gate_reasons_json TEXT NOT NULL,
+      approver TEXT,
+      approved_at TEXT,
+      recorded_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+    );
+    INSERT INTO runtime_gate_audit_records_v6 (
+      event_id, run_id, session_id, profile, issue_scope, risk_state, next_state, transition_trigger,
+      target_domain, target_tab_id, target_page, action_type, requested_execution_mode, effective_execution_mode,
+      gate_decision, gate_reasons_json, approver, approved_at, recorded_at, created_at
+    )
+    SELECT
+      event_id, run_id, session_id, profile, issue_scope, risk_state, next_state, transition_trigger,
+      target_domain, target_tab_id, target_page, action_type, requested_execution_mode, effective_execution_mode,
+      gate_decision, gate_reasons_json, approver, approved_at, recorded_at, created_at
+    FROM runtime_gate_audit_records;
+    DROP TABLE runtime_gate_audit_records;
+    ALTER TABLE runtime_gate_audit_records_v6 RENAME TO runtime_gate_audit_records;
+    CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_run_recorded
+      ON runtime_gate_audit_records(run_id, recorded_at ASC);
+    CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_session_recorded
+      ON runtime_gate_audit_records(session_id, recorded_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_profile_recorded
+      ON runtime_gate_audit_records(profile, recorded_at DESC);
+    PRAGMA foreign_keys = ON;
+  `);
+    db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION));
+};
+export const initializeRuntimeStoreSchema = ({ db, onSchemaMismatch }) => {
+    db.exec("PRAGMA journal_mode=WAL;");
+    db.exec(`
+    CREATE TABLE IF NOT EXISTS runtime_store_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS runtime_runs (
+      run_id TEXT PRIMARY KEY,
+      session_id TEXT,
+      profile_name TEXT NOT NULL,
+      command TEXT NOT NULL,
+      status TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      error_code TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS runtime_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id TEXT NOT NULL,
+      event_time TEXT NOT NULL,
+      stage TEXT NOT NULL,
+      component TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      diagnosis_category TEXT,
+      failure_point TEXT,
+      summary TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_runtime_events_run_time
+      ON runtime_events(run_id, event_time ASC);
+    CREATE TABLE IF NOT EXISTS runtime_gate_approvals (
+      approval_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL UNIQUE,
+      approved INTEGER NOT NULL,
+      approver TEXT,
+      approved_at TEXT,
+      checks_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+    );
+    CREATE TABLE IF NOT EXISTS runtime_gate_audit_records (
+      event_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      profile TEXT NOT NULL,
+      issue_scope TEXT,
+      risk_state TEXT NOT NULL,
+      next_state TEXT NOT NULL DEFAULT 'paused',
+      transition_trigger TEXT NOT NULL DEFAULT 'gate_evaluation',
+      target_domain TEXT NOT NULL,
+      target_tab_id INTEGER NOT NULL,
+      target_page TEXT NOT NULL,
+      action_type TEXT,
+      requested_execution_mode TEXT NOT NULL,
+      effective_execution_mode TEXT NOT NULL,
+      gate_decision TEXT NOT NULL,
+      gate_reasons_json TEXT NOT NULL,
+      approver TEXT,
+      approved_at TEXT,
+      recorded_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_run_recorded
+      ON runtime_gate_audit_records(run_id, recorded_at ASC);
+    CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_session_recorded
+      ON runtime_gate_audit_records(session_id, recorded_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_profile_recorded
+      ON runtime_gate_audit_records(profile, recorded_at DESC);
+  `);
+    const row = db
+        .prepare("SELECT value FROM runtime_store_meta WHERE key = 'schema_version'")
+        .get();
+    if (!row) {
+        db.prepare("INSERT INTO runtime_store_meta(key, value) VALUES('schema_version', ?) ON CONFLICT(key) DO NOTHING").run(String(SCHEMA_VERSION));
+        return;
+    }
+    const version = Number(row.value);
+    if (version === 1) {
+        migrateV1ToV2(db);
+        return;
+    }
+    let currentVersion = version;
+    while (currentVersion !== SCHEMA_VERSION) {
+        if (currentVersion === 2) {
+            migrateV2ToV3(db);
+            currentVersion = 3;
+            continue;
+        }
+        if (currentVersion === 3) {
+            migrateV3ToV4(db);
+            currentVersion = 4;
+            continue;
+        }
+        if (currentVersion === 4) {
+            migrateV4ToV5(db);
+            currentVersion = 5;
+            continue;
+        }
+        if (currentVersion === 5) {
+            migrateV5ToV6(db);
+            currentVersion = 6;
+            continue;
+        }
+        break;
+    }
+    if (currentVersion !== SCHEMA_VERSION) {
+        throw onSchemaMismatch(row.value);
+    }
+};

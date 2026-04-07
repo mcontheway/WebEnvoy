@@ -1,82 +1,66 @@
 import { describe, expect, it } from "vitest";
-
 import {
-  normalizeGateOptions,
-  parseAbilityEnvelope,
-  parseSearchInput
+  normalizeGateOptionsForContract,
+  parseAbilityEnvelopeForContract,
+  parseSearchInputForContract
 } from "../xhs-input.js";
 
-describe("xhs input module boundaries", () => {
-  it("parses ability envelope without depending on command execution state", () => {
-    expect(
-      parseAbilityEnvelope({
-        ability: {
-          id: "xhs.note.search.v1",
-          layer: "L3",
-          action: "read"
-        },
-        input: {
-          query: "露营装备"
-        },
-        options: {
-          target_domain: "www.xiaohongshu.com"
-        }
-      })
-    ).toEqual({
-      ability: {
-        id: "xhs.note.search.v1",
-        layer: "L3",
-        action: "read"
-      },
+describe("xhs-input", () => {
+  it("parses ability envelope and normalizes xhs.search input", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
       input: {
-        query: "露营装备"
+        query: "  露营  ",
+        limit: 8,
+        page: 2,
+        search_id: "  search-1  ",
+        sort: "  general  ",
+        note_type: 3
       },
       options: {
-        target_domain: "www.xiaohongshu.com"
+        target_domain: "creator.xiaohongshu.com",
+        target_tab_id: 7,
+        target_page: "search_result",
+        requested_execution_mode: "dry_run"
       }
+    });
+
+    expect(envelope.ability).toEqual({
+      id: "xhs.note.search.v1",
+      layer: "L3",
+      action: "read"
+    });
+    expect(parseSearchInputForContract(envelope.input, envelope.ability.id, envelope.options, envelope.ability.action)).toEqual({
+      query: "露营",
+      limit: 8,
+      page: 2,
+      search_id: "search-1",
+      sort: "general",
+      note_type: 3
+    });
+    expect(normalizeGateOptionsForContract(envelope.options, envelope.ability.id)).toMatchObject({
+      targetDomain: "creator.xiaohongshu.com",
+      targetTabId: 7,
+      targetPage: "search_result",
+      requestedExecutionMode: "dry_run"
     });
   });
 
-  it("keeps issue_208 editor_input validation out of search payload shaping", () => {
-    expect(
-      parseSearchInput(
-        {
-          query: "should-not-be-required"
-        },
-        "xhs.issue208.editor_input",
-        {
-          issue_scope: "issue_208",
-          action_type: "write",
-          requested_execution_mode: "live_write",
-          validation_action: "editor_input"
-        },
-        "write"
-      )
-    ).toEqual({});
-  });
-
-  it("normalizes explicit gate coordinates without changing gate semantics", () => {
-    expect(
-      normalizeGateOptions(
-        {
-          target_domain: " www.xiaohongshu.com ",
-          target_tab_id: 32,
-          target_page: " search_result_tab ",
-          requested_execution_mode: "live_read_high_risk"
-        },
-        "xhs.note.search.v1"
-      )
-    ).toEqual({
-      targetDomain: "www.xiaohongshu.com",
-      targetTabId: 32,
-      targetPage: "search_result_tab",
-      requestedExecutionMode: "live_read_high_risk",
+  it("permits issue_208 editor_input validation without query", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.editor.input.v1", layer: "L3", action: "write" },
+      input: {},
       options: {
-        target_domain: "www.xiaohongshu.com",
-        target_tab_id: 32,
-        target_page: "search_result_tab",
-        requested_execution_mode: "live_read_high_risk"
+        issue_scope: "issue_208",
+        action_type: "write",
+        requested_execution_mode: "live_write",
+        validation_action: "editor_input",
+        target_domain: "creator.xiaohongshu.com",
+        target_tab_id: 11,
+        target_page: "creator_publish_tab"
       }
     });
+
+    expect(parseSearchInputForContract(envelope.input, envelope.ability.id, envelope.options, envelope.ability.action)).toEqual({});
   });
 });

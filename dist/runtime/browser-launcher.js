@@ -1,51 +1,10 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
 import { access, cp, mkdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
-import { delimiter, dirname, isAbsolute, join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-const KNOWN_BROWSER_CANDIDATES = {
-    darwin: [
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-        "/Applications/Chromium.app/Contents/MacOS/Chromium"
-    ],
-    linux: [
-        "/usr/bin/google-chrome-stable",
-        "/usr/bin/google-chrome",
-        "/usr/bin/chromium-browser",
-        "/usr/bin/chromium",
-        "google-chrome-stable",
-        "google-chrome",
-        "chromium-browser",
-        "chromium"
-    ],
-    win32: [
-        "chrome.exe",
-        "chromium.exe",
-        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-        "C:\\Program Files\\Chromium\\Application\\chrome.exe"
-    ],
-    aix: [],
-    android: [],
-    freebsd: [],
-    haiku: [],
-    openbsd: [],
-    netbsd: [],
-    sunos: [],
-    cygwin: []
-};
-const hasPathSegment = (value) => /[\\/]/.test(value);
-export const resolvePreferredBrowserCandidates = (platform, explicitFromEnv) => [explicitFromEnv, ...(KNOWN_BROWSER_CANDIDATES[platform] ?? [])].filter((item) => item !== null);
-export class BrowserLaunchError extends Error {
-    code;
-    constructor(code, message, options) {
-        super(message, options);
-        this.name = "BrowserLaunchError";
-        this.code = code;
-    }
-}
+import { BrowserLaunchError, resolveBrowserExecutablePath } from "./browser-discovery.js";
+export { BrowserLaunchError, isUnsupportedBrandedChromeForExtensions, resolveBrowserExecutablePath, resolveBrowserVersionOutputForFingerprint, resolveBrowserVersionTruthSource, resolvePreferredBrowserCandidates, resolvePreferredBrowserVersionTruthSource } from "./browser-discovery.js";
 export const BROWSER_STATE_FILENAME = "__webenvoy_browser_instance.json";
 export const BROWSER_CONTROL_FILENAME = "__webenvoy_browser_control.json";
 export const EXTENSION_STAGING_DIRNAME = "__webenvoy_extension_staging";
@@ -92,26 +51,6 @@ const sanitizePathSegment = (value) => {
     const normalized = value.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^_+|_+$/g, "");
     return normalized.length > 0 ? normalized : "default";
 };
-const parseOptionalString = (value) => {
-    if (value === undefined || value === null) {
-        return null;
-    }
-    if (typeof value !== "string") {
-        throw new BrowserLaunchError("BROWSER_INVALID_ARGUMENT", "浏览器启动参数必须是字符串");
-    }
-    const normalized = value.trim();
-    if (normalized.length === 0) {
-        throw new BrowserLaunchError("BROWSER_INVALID_ARGUMENT", "浏览器启动参数不能为空字符串");
-    }
-    return normalized;
-};
-const readTrimmedEnvString = (value) => {
-    if (typeof value !== "string") {
-        return null;
-    }
-    const normalized = value.trim();
-    return normalized.length > 0 ? normalized : null;
-};
 const parseStartUrl = (params) => {
     const raw = params.startUrl;
     if (raw === undefined || raw === null) {
@@ -142,7 +81,7 @@ const parseStartUrl = (params) => {
 };
 const pathExists = async (path) => {
     try {
-        await access(path, fsConstants.F_OK);
+        await access(path);
         return true;
     }
     catch {
@@ -193,10 +132,6 @@ const waitForProcessExit = async (pid, deadlineMs) => {
     }
     return !isProcessAlive(pid);
 };
-const cleanupSupervisorArtifacts = async (profileDir) => {
-    await deleteFileQuietly(getStateFilePath(profileDir));
-    await deleteFileQuietly(getControlFilePath(profileDir));
-};
 const terminateBrowserPid = async (browserPid, timeoutMs) => {
     if (!isProcessAlive(browserPid)) {
         return true;
@@ -227,9 +162,16 @@ const terminateBrowserPid = async (browserPid, timeoutMs) => {
     }
     return waitForProcessExit(browserPid, Date.now() + 1_000);
 };
-const getStateFilePath = (profileDir) => join(profileDir, BROWSER_STATE_FILENAME);
-const getControlFilePath = (profileDir) => join(profileDir, BROWSER_CONTROL_FILENAME);
-const parseInstanceState = (raw) => {
+const getBrowserInstanceArtifactPaths = (profileDir) => ({
+    stateFilePath: join(profileDir, BROWSER_STATE_FILENAME),
+    controlFilePath: join(profileDir, BROWSER_CONTROL_FILENAME)
+});
+const cleanupSupervisorArtifacts = async (profileDir) => {
+    const artifactPaths = getBrowserInstanceArtifactPaths(profileDir);
+    await deleteFileQuietly(artifactPaths.stateFilePath);
+    await deleteFileQuietly(artifactPaths.controlFilePath);
+};
+const parseBrowserInstanceState = (raw) => {
     const parsed = JSON.parse(raw);
     if (parsed.schemaVersion !== 1 ||
         typeof parsed.launchToken !== "string" ||
@@ -243,10 +185,10 @@ const parseInstanceState = (raw) => {
     }
     return parsed;
 };
-const readInstanceState = async (path) => {
+const readBrowserInstanceState = async (path) => {
     try {
         const raw = await readFile(path, "utf8");
-        return parseInstanceState(raw);
+        return parseBrowserInstanceState(raw);
     }
     catch (error) {
         const nodeError = error;
@@ -255,208 +197,6 @@ const readInstanceState = async (path) => {
         }
         return null;
     }
-};
-const resolveCommandFromPath = async (command) => {
-    const pathEnv = process.env.PATH ?? "";
-    if (pathEnv.trim().length === 0) {
-        return null;
-    }
-    const dirs = pathEnv.split(delimiter).filter((segment) => segment.length > 0);
-    const extensions = process.platform === "win32"
-        ? ((process.env.PATHEXT ?? ".EXE;.CMD;.BAT")
-            .split(";")
-            .filter((ext) => ext.length > 0)
-            .map((ext) => ext.toLowerCase()))
-        : [""];
-    const hasExtension = /\.[A-Za-z0-9]+$/.test(command);
-    for (const dir of dirs) {
-        const candidates = process.platform === "win32" && !hasExtension
-            ? extensions.map((ext) => join(dir, `${command}${ext}`))
-            : [join(dir, command)];
-        for (const candidate of candidates) {
-            if (await pathExists(candidate)) {
-                return candidate;
-            }
-        }
-    }
-    return null;
-};
-const resolveExplicitBrowserPathFromEnv = async () => {
-    const explicitFromEnv = readTrimmedEnvString(process.env.WEBENVOY_BROWSER_PATH);
-    if (!explicitFromEnv) {
-        return null;
-    }
-    if (isAbsolute(explicitFromEnv) || hasPathSegment(explicitFromEnv)) {
-        return explicitFromEnv;
-    }
-    return resolveCommandFromPath(explicitFromEnv);
-};
-const readBrowserVersionOutput = async (executablePath) => {
-    return await new Promise((resolve) => {
-        const child = spawn(executablePath, ["--version"], {
-            stdio: ["ignore", "pipe", "pipe"],
-            env: process.env
-        });
-        let stdout = "";
-        let stderr = "";
-        let settled = false;
-        const finish = (value) => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            resolve(value);
-        };
-        const timer = setTimeout(() => {
-            try {
-                child.kill("SIGKILL");
-            }
-            catch {
-                // ignore kill failures
-            }
-            finish(null);
-        }, 2_000);
-        child.stdout?.on("data", (chunk) => {
-            stdout += chunk.toString();
-        });
-        child.stderr?.on("data", (chunk) => {
-            stderr += chunk.toString();
-        });
-        child.on("error", () => {
-            clearTimeout(timer);
-            finish(null);
-        });
-        child.on("close", () => {
-            clearTimeout(timer);
-            const combined = `${stdout}\n${stderr}`.trim();
-            finish(combined.length > 0 ? combined : null);
-        });
-    });
-};
-export const isUnsupportedBrandedChromeForExtensions = (versionOutput) => {
-    if (!versionOutput) {
-        return false;
-    }
-    const normalized = versionOutput.trim();
-    if (!/^Google Chrome\s/i.test(normalized) || /Google Chrome for Testing/i.test(normalized)) {
-        return false;
-    }
-    const match = normalized.match(/(\d+)\./);
-    if (!match) {
-        return false;
-    }
-    const major = Number.parseInt(match[1], 10);
-    return Number.isInteger(major) && major >= 137;
-};
-const resolveExecutablePath = async (params, options) => {
-    const explicitFromParams = parseOptionalString(params.browserPath);
-    if (explicitFromParams !== null) {
-        throw new BrowserLaunchError("BROWSER_INVALID_ARGUMENT", "params.browserPath 不受支持，请使用受信环境变量 WEBENVOY_BROWSER_PATH");
-    }
-    const explicitFromEnv = parseOptionalString(process.env.WEBENVOY_BROWSER_PATH);
-    const candidates = resolvePreferredBrowserCandidates(process.platform, explicitFromEnv);
-    let brandedChromeRejected = false;
-    for (const candidate of candidates) {
-        let resolvedCandidate = null;
-        if (isAbsolute(candidate) || hasPathSegment(candidate)) {
-            if (await pathExists(candidate)) {
-                resolvedCandidate = candidate;
-            }
-        }
-        else {
-            resolvedCandidate = await resolveCommandFromPath(candidate);
-        }
-        if (resolvedCandidate === null) {
-            continue;
-        }
-        const versionOutput = await readBrowserVersionOutput(resolvedCandidate);
-        if (isUnsupportedBrandedChromeForExtensions(versionOutput)) {
-            if (options?.allowUnsupportedExtensionBrowser) {
-                return resolvedCandidate;
-            }
-            brandedChromeRejected = true;
-            if (explicitFromEnv && candidate === explicitFromEnv) {
-                throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "Google Chrome 137+ 已禁用命令行 --load-extension；请改用 Chrome for Testing / Chromium，或通过 WEBENVOY_BROWSER_PATH 指向受支持浏览器");
-            }
-            continue;
-        }
-        return resolvedCandidate;
-    }
-    if (brandedChromeRejected) {
-        throw new BrowserLaunchError("BROWSER_NOT_FOUND", "未找到受支持的可加载扩展浏览器；Google Chrome 137+ 已禁用命令行 --load-extension，请安装 Chrome for Testing / Chromium，或通过 WEBENVOY_BROWSER_PATH 指向它们");
-    }
-    throw new BrowserLaunchError("BROWSER_NOT_FOUND", "未找到系统 Chrome/Chromium，可通过受信环境变量 WEBENVOY_BROWSER_PATH 显式指定");
-};
-export const resolveBrowserVersionOutputForFingerprint = async (executablePath) => {
-    if (executablePath) {
-        return readTrimmedEnvString(await readBrowserVersionOutput(executablePath));
-    }
-    try {
-        const truthSource = await resolveBrowserVersionTruthSource();
-        return truthSource.browserVersion;
-    }
-    catch {
-        return null;
-    }
-};
-const resolveExecutableCandidate = async (candidate) => {
-    let executablePath = null;
-    if (isAbsolute(candidate) || hasPathSegment(candidate)) {
-        if (await pathExists(candidate)) {
-            executablePath = candidate;
-        }
-    }
-    else {
-        executablePath = await resolveCommandFromPath(candidate);
-    }
-    if (executablePath === null) {
-        return null;
-    }
-    return {
-        executablePath,
-        browserVersion: readTrimmedEnvString(await readBrowserVersionOutput(executablePath))
-    };
-};
-export const resolveBrowserVersionTruthSource = async (params = {}, options) => {
-    const executablePath = await resolveExecutablePath(params, options);
-    return {
-        executablePath,
-        browserVersion: readTrimmedEnvString(await readBrowserVersionOutput(executablePath))
-    };
-};
-export const resolvePreferredBrowserVersionTruthSource = async (params = {}) => {
-    const explicitFromParams = parseOptionalString(params.browserPath);
-    if (explicitFromParams !== null) {
-        throw new BrowserLaunchError("BROWSER_INVALID_ARGUMENT", "params.browserPath 不受支持，请使用受信环境变量 WEBENVOY_BROWSER_PATH");
-    }
-    const explicitFromEnv = parseOptionalString(process.env.WEBENVOY_BROWSER_PATH);
-    const candidates = [
-        explicitFromEnv,
-        ...(KNOWN_BROWSER_CANDIDATES[process.platform] ?? [])
-    ].filter((item) => item !== null);
-    let officialChromePreferred = null;
-    let fallbackCandidate = null;
-    for (const candidate of candidates) {
-        const resolved = await resolveExecutableCandidate(candidate);
-        if (resolved === null) {
-            continue;
-        }
-        if (explicitFromEnv && candidate === explicitFromEnv) {
-            return resolved;
-        }
-        if (isUnsupportedBrandedChromeForExtensions(resolved.browserVersion)) {
-            officialChromePreferred ??= resolved;
-            continue;
-        }
-        fallbackCandidate ??= resolved;
-    }
-    if (officialChromePreferred) {
-        return officialChromePreferred;
-    }
-    if (fallbackCandidate) {
-        return fallbackCandidate;
-    }
-    return resolveBrowserVersionTruthSource(params);
 };
 const resolveSupervisorScriptPath = async () => {
     const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -501,6 +241,40 @@ const resolveSharedSourceDir = async (extensionSourceDir) => {
         }
     }
     throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "缺少 shared 指纹/risk-state 构建产物，无法生成 staged content script bundle");
+};
+const buildExtensionBootstrapEnvelope = (input) => ({
+    schemaVersion: 1,
+    runId: input.runId,
+    writtenAt: new Date().toISOString(),
+    extension_bootstrap: input.extensionBootstrap
+});
+const writeExtensionBootstrapFiles = async (input) => {
+    const bootstrapPath = join(input.stagedExtensionDir, EXTENSION_BOOTSTRAP_FILENAME);
+    await writeFile(bootstrapPath, `${JSON.stringify(buildExtensionBootstrapEnvelope({
+        runId: input.runId,
+        extensionBootstrap: input.extensionBootstrap
+    }), null, 2)}\n`, "utf8");
+    const bootstrapScriptPath = join(input.stagedExtensionDir, EXTENSION_BOOTSTRAP_SCRIPT_PATH);
+    await writeFile(bootstrapScriptPath, buildBootstrapScriptSource({
+        payload: buildBridgeBootstrapPayload({
+            bridgeSecret: input.bridgeSecret,
+            extensionBootstrap: input.extensionBootstrap
+        })
+    }), "utf8");
+    return { bootstrapPath, bootstrapScriptPath };
+};
+const rewriteExtensionStagingArtifacts = async (input) => {
+    await rewriteStagedContentScriptForRuntime({
+        stagedExtensionDir: input.stagedExtensionDir,
+        extensionSourceDir: input.extensionSourceDir,
+        bridgeSecret: input.bridgeSecret,
+        extensionBootstrap: input.extensionBootstrap
+    });
+    await rewriteStagedMainWorldBridgeForRuntime({
+        stagedExtensionDir: input.stagedExtensionDir,
+        bridgeSecret: input.bridgeSecret
+    });
+    await injectBootstrapScriptIntoManifest(join(input.stagedExtensionDir, "manifest.json"));
 };
 const resolveExtensionBootstrapPayload = (input) => {
     if (input.extensionBootstrap) {
@@ -838,33 +612,18 @@ const stageExtensionForRun = async (input) => {
     await rm(stagedExtensionDir, { recursive: true, force: true });
     await cp(extensionSourceDir, stagedExtensionDir, { recursive: true });
     const bridgeSecret = randomUUID();
-    const bootstrapPath = join(stagedExtensionDir, EXTENSION_BOOTSTRAP_FILENAME);
-    const envelope = {
-        schemaVersion: 1,
+    const { bootstrapPath, bootstrapScriptPath } = await writeExtensionBootstrapFiles({
+        stagedExtensionDir,
         runId: input.runId,
-        writtenAt: new Date().toISOString(),
-        extension_bootstrap: input.extensionBootstrap
-    };
-    await writeFile(bootstrapPath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
-    const bootstrapScriptPath = join(stagedExtensionDir, EXTENSION_BOOTSTRAP_SCRIPT_PATH);
-    const bootstrapScriptPayload = buildBridgeBootstrapPayload({
         bridgeSecret,
         extensionBootstrap: input.extensionBootstrap
     });
-    await writeFile(bootstrapScriptPath, buildBootstrapScriptSource({
-        payload: bootstrapScriptPayload
-    }), "utf8");
-    await rewriteStagedContentScriptForRuntime({
+    await rewriteExtensionStagingArtifacts({
         stagedExtensionDir,
         extensionSourceDir,
         bridgeSecret,
         extensionBootstrap: input.extensionBootstrap
     });
-    await rewriteStagedMainWorldBridgeForRuntime({
-        stagedExtensionDir,
-        bridgeSecret
-    });
-    await injectBootstrapScriptIntoManifest(join(stagedExtensionDir, "manifest.json"));
     return { stagedExtensionDir, bootstrapPath, bootstrapScriptPath };
 };
 const cleanupStagedExtensions = async (profileDir) => {
@@ -902,19 +661,6 @@ const waitForBrowserReady = async (profileDir, pid, launchedAtMs) => {
         await sleep(READY_WAIT_INTERVAL_MS);
     }
     throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器启动超时，未完成最小 profile 初始化");
-};
-const waitForSupervisorState = async (input) => {
-    for (let attempt = 0; attempt < SUPERVISOR_STATE_WAIT_ATTEMPTS; attempt += 1) {
-        const state = await readInstanceState(input.stateFilePath);
-        if (state &&
-            state.launchToken === input.expectedToken &&
-            state.controllerPid === input.expectedControllerPid &&
-            state.browserPid > 0) {
-            return state;
-        }
-        await sleep(SUPERVISOR_STATE_WAIT_INTERVAL_MS);
-    }
-    throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器控制进程未写入可用状态");
 };
 const launchProcess = async (supervisorScriptPath, executablePath, args, input) => {
     const launchedAtMs = Date.now();
@@ -974,9 +720,28 @@ const launchProcess = async (supervisorScriptPath, executablePath, args, input) 
         launchedAtMs
     };
 };
+const prepareBrowserInstanceArtifacts = async (profileDir) => {
+    const artifactPaths = getBrowserInstanceArtifactPaths(profileDir);
+    await mkdir(profileDir, { recursive: true });
+    await deleteFileQuietly(artifactPaths.stateFilePath);
+    await deleteFileQuietly(artifactPaths.controlFilePath);
+};
+const waitForBrowserInstanceState = async (input) => {
+    for (let attempt = 0; attempt < SUPERVISOR_STATE_WAIT_ATTEMPTS; attempt += 1) {
+        const state = await readBrowserInstanceState(input.stateFilePath);
+        if (state &&
+            state.launchToken === input.expectedToken &&
+            state.controllerPid === input.expectedControllerPid &&
+            state.browserPid > 0) {
+            return state;
+        }
+        await sleep(SUPERVISOR_STATE_WAIT_INTERVAL_MS);
+    }
+    throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器控制进程未写入可用状态");
+};
 export const launchBrowser = async (input) => {
     const launchMode = input.launchMode ?? "load_extension";
-    const executablePath = await resolveExecutablePath(input.params, {
+    const executablePath = await resolveBrowserExecutablePath(input.params, {
         allowUnsupportedExtensionBrowser: launchMode === "official_chrome_persistent_extension"
     });
     const supervisorScriptPath = await resolveSupervisorScriptPath();
@@ -1006,24 +771,21 @@ export const launchBrowser = async (input) => {
     }
     launchArgs.push(startUrl);
     const launchToken = randomUUID();
-    const stateFilePath = getStateFilePath(input.profileDir);
-    const controlFilePath = getControlFilePath(input.profileDir);
+    const artifactPaths = getBrowserInstanceArtifactPaths(input.profileDir);
     let controllerPid = null;
     let launchSucceeded = false;
     try {
-        await mkdir(input.profileDir, { recursive: true });
-        await deleteFileQuietly(stateFilePath);
-        await deleteFileQuietly(controlFilePath);
+        await prepareBrowserInstanceArtifacts(input.profileDir);
         const launched = await launchProcess(supervisorScriptPath, executablePath, launchArgs, {
-            stateFilePath,
-            controlFilePath,
+            stateFilePath: artifactPaths.stateFilePath,
+            controlFilePath: artifactPaths.controlFilePath,
             launchToken,
             profileDir: input.profileDir,
             runId: input.runId
         });
         controllerPid = launched.pid;
-        const state = await waitForSupervisorState({
-            stateFilePath,
+        const state = await waitForBrowserInstanceState({
+            stateFilePath: artifactPaths.stateFilePath,
             expectedToken: launchToken,
             expectedControllerPid: launched.pid
         });
@@ -1061,9 +823,8 @@ export const launchBrowser = async (input) => {
 };
 export const shutdownBrowserSession = async (input) => {
     const timeoutMs = input.timeoutMs ?? SUPERVISOR_SHUTDOWN_TIMEOUT_MS;
-    const stateFilePath = getStateFilePath(input.profileDir);
-    const controlFilePath = getControlFilePath(input.profileDir);
-    const state = await readInstanceState(stateFilePath);
+    const artifactPaths = getBrowserInstanceArtifactPaths(input.profileDir);
+    const state = await readBrowserInstanceState(artifactPaths.stateFilePath);
     if (!state) {
         throw new BrowserLaunchError("BROWSER_LAUNCH_FAILED", "浏览器实例状态缺失，无法安全停止");
     }
@@ -1086,11 +847,11 @@ export const shutdownBrowserSession = async (input) => {
         launchToken: state.launchToken,
         requestedAt: new Date().toISOString()
     };
-    await writeFile(controlFilePath, `${JSON.stringify(command, null, 2)}\n`, "utf8");
+    await writeFile(artifactPaths.controlFilePath, `${JSON.stringify(command, null, 2)}\n`, "utf8");
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         const controllerAlive = isProcessAlive(input.controllerPid);
-        const nextState = await readInstanceState(stateFilePath);
+        const nextState = await readBrowserInstanceState(artifactPaths.stateFilePath);
         if (!controllerAlive && nextState === null) {
             await cleanupStagedExtensions(input.profileDir);
             return;
@@ -1108,7 +869,7 @@ export const shutdownBrowserSession = async (input) => {
     const gracefulDeadline = Date.now() + 1_000;
     while (Date.now() < gracefulDeadline) {
         const controllerAlive = isProcessAlive(input.controllerPid);
-        const nextState = await readInstanceState(stateFilePath);
+        const nextState = await readBrowserInstanceState(artifactPaths.stateFilePath);
         if (!controllerAlive && nextState === null) {
             await cleanupStagedExtensions(input.profileDir);
             return;

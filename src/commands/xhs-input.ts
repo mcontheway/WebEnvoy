@@ -46,7 +46,7 @@ const invalidAbilityInput = (reason: string, abilityId = "unknown"): CliError =>
     }
   });
 
-export const parseAbilityEnvelope = (params: JsonObject): AbilityEnvelope => {
+export const parseAbilityEnvelopeForContract = (params: JsonObject): AbilityEnvelope => {
   const abilityObject = asObject(params.ability);
   if (!abilityObject) {
     throw invalidAbilityInput("ABILITY_MISSING");
@@ -91,7 +91,7 @@ export const parseAbilityEnvelope = (params: JsonObject): AbilityEnvelope => {
   };
 };
 
-export const parseSearchInput = (
+export const parseSearchInputForContract = (
   input: JsonObject,
   abilityId: string,
   options: JsonObject,
@@ -139,7 +139,7 @@ export const parseSearchInput = (
   return normalized;
 };
 
-export const normalizeGateOptions = (
+export const normalizeGateOptionsForContract = (
   options: JsonObject,
   abilityId: string
 ): {
@@ -172,7 +172,6 @@ export const normalizeGateOptions = (
   if (!targetPage) {
     throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
   }
-
   const issueScope =
     typeof options.issue_scope === "string" && options.issue_scope.trim().length > 0
       ? options.issue_scope.trim()
@@ -212,3 +211,16 @@ export const normalizeGateOptions = (
     }
   };
 };
+
+export const buildCapabilityResult = (
+  ability: AbilityRef,
+  summary?: JsonObject
+): JsonObject => ({
+  capability_result: {
+    ability_id: ability.id,
+    layer: ability.layer,
+    action: ability.action,
+    outcome: "partial",
+    ...(summary ? summary : {})
+  }
+});

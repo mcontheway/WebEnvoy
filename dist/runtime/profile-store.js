@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { buildFingerprintProfileBundle, isFingerprintProfileBundle, markFingerprintProfileBundleAsLegacyBackfilled } from "../../shared/fingerprint-profile.js";
-import { isValidNativeHostName } from "../install/native-host.js";
+import { isValidNativeHostName } from "../install/native-host-platform.js";
 import { resolveBrowserVersionTruthSource } from "./browser-launcher.js";
 import { resolveCurrentFingerprintEnvironment } from "./fingerprint-runtime.js";
 export const PROFILE_META_FILENAME = "__webenvoy_meta.json";
