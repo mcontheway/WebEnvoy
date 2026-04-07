@@ -26,6 +26,17 @@ import {
   type PersistentExtensionBinding
 } from "./profile-store.js";
 import {
+  inspectProfileLock,
+  isLoginableProfileState,
+  isRuntimeActiveProfileState,
+  isStartableProfileState,
+  resolveProfileAccessState,
+  shouldRecoverAsDisconnected,
+  type BrowserInstanceStateSnapshot,
+  type LockAcquisition,
+  type ProfileLockInspection
+} from "./profile-access.js";
+import {
   buildIdentityPreflightError,
   runIdentityPreflight,
   type IdentityPreflightResult
@@ -54,13 +65,15 @@ import {
 } from "./runtime-session.js";
 import {
   browserStateFromProfileState,
+  buildBoundlessRuntimeReadiness,
+  buildNonPersistentRuntimeReadiness,
   buildRuntimeReadiness,
+  buildUnlockedPersistentRuntimeReadiness,
   mapBootstrapCliErrorToReadiness,
+  mapRuntimeReadinessPayload,
   mapTransportErrorToReadiness,
-  type BootstrapState,
-  type RuntimeReadinessSnapshot,
-  type TransportState
-} from "./profile-runtime-readiness.js";
+  type RuntimeReadinessSnapshot
+} from "./runtime-readiness.js";
 
 const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
 const LOCK_ACQUIRE_MAX_RETRIES = 6;
@@ -108,24 +121,10 @@ interface BrowserLauncherLike {
   }): Promise<void>;
 }
 
-interface BrowserInstanceStateSnapshot {
-  runId: string;
-  controllerPid: number;
-  browserPid: number;
-}
-
 interface BrowserInstanceStateRecord extends Record<string, unknown> {
   runId: string;
   controllerPid: number;
   browserPid: number;
-}
-
-interface ProfileLockInspection {
-  blocksReuse: boolean;
-  controlConnected: boolean;
-  browserPid: number | null;
-  stateRunId: string | null;
-  orphanRecoverable: boolean;
 }
 
 interface RuntimeBridgeLike {
@@ -137,17 +136,7 @@ interface RuntimeBridgeLike {
     params: JsonObject;
   }): Promise<BridgeCommandResult>;
 }
-
-interface ResolvedProfileAccessState {
-  profileState: ProfileState;
-  lockHeld: boolean;
-  observedRunId: string;
-  healthyLock: boolean;
-  controlConnected: boolean;
-}
-
 const isoNow = (): string => new Date().toISOString();
-type LockAcquisition = "new" | "same-owner" | "same-owner-dead" | "reclaimed";
 const DEFAULT_LOCK_FILE_ADAPTER: LockFileAdapter = {
   readFile: async (path, encoding) => readFile(path, encoding),
   writeFile: async (path, data, options) => {
@@ -249,20 +238,6 @@ const buildRecoverableSessionSummary = (
     lastLoginAt: meta?.lastLoginAt ?? null
   };
 };
-
-const isStartableProfileState = (state: ProfileState): boolean =>
-  state === "uninitialized" || state === "stopped" || state === "disconnected";
-const isLoginableProfileState = (state: ProfileState): boolean =>
-  state === "uninitialized" ||
-  state === "stopped" ||
-  state === "disconnected" ||
-  state === "ready" ||
-  state === "logging_in";
-const isRuntimeActiveProfileState = (state: ProfileState): boolean =>
-  state === "starting" || state === "ready" || state === "logging_in" || state === "stopping";
-
-const shouldRecoverAsDisconnected = (acquisition: LockAcquisition, state: ProfileState): boolean =>
-  acquisition !== "same-owner" && isRuntimeActiveProfileState(state);
 const shouldConfirmLogin = (params: JsonObject): boolean => params.confirm === true;
 const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
 
@@ -447,32 +422,6 @@ const buildIdentityPreflightOutput = (identityPreflight: IdentityPreflightResult
   failureReason: identityPreflight.failureReason,
   installDiagnostics: identityPreflight.installDiagnostics
 });
-
-const resolveProfileAccessState = (input: {
-  storedProfileState: ProfileState;
-  lockOwnerRunId: string | null;
-  lockInspection: ProfileLockInspection | null;
-  runtimeRunId: string;
-}): ResolvedProfileAccessState => {
-  const activeState = isRuntimeActiveProfileState(input.storedProfileState);
-  const healthyLock = input.lockInspection?.blocksReuse ?? false;
-  const controlConnected = input.lockInspection?.controlConnected ?? false;
-  const profileState: ProfileState =
-    activeState && !controlConnected ? "disconnected" : input.storedProfileState;
-  const lockHeld = activeState && healthyLock && input.lockOwnerRunId === input.runtimeRunId;
-  const observedRunId =
-    activeState && healthyLock && typeof input.lockOwnerRunId === "string"
-      ? input.lockOwnerRunId
-      : input.runtimeRunId;
-
-  return {
-    profileState,
-    lockHeld,
-    observedRunId,
-    healthyLock,
-    controlConnected
-  };
-};
 
 export class ProfileRuntimeService {
   readonly #storeFactory: (cwd: string) => ProfileStoreLike;
@@ -1501,25 +1450,11 @@ export class ProfileRuntimeService {
   }
 
   async #inspectProfileLock(lock: ProfileLock, profileDir: string): Promise<ProfileLockInspection> {
-    const lockOwnerAlive = this.#isProcessAlive(lock.ownerPid);
-    const state = await this.#readBrowserInstanceState(profileDir);
-    const stateMatchesLockOwner = state !== null && state.controllerPid === lock.ownerPid;
-    const controllerAlive =
-      lockOwnerAlive ||
-      (stateMatchesLockOwner && this.#isProcessAlive(state.controllerPid));
-    const browserAlive = state !== null && this.#isProcessAlive(state.browserPid);
-    const orphanRecoverable =
-      !controllerAlive &&
-      stateMatchesLockOwner &&
-      state.runId === lock.ownerRunId &&
-      browserAlive;
-    return {
-      blocksReuse: controllerAlive || browserAlive,
-      controlConnected: controllerAlive,
-      browserPid: browserAlive ? state?.browserPid ?? null : null,
-      stateRunId: state?.runId ?? null,
-      orphanRecoverable
-    };
+    return inspectProfileLock({
+      lock,
+      browserInstanceState: await this.#readBrowserInstanceState(profileDir),
+      isProcessAlive: this.#isProcessAlive
+    });
   }
 
   async #deleteBrowserStateFiles(profileDir: string): Promise<void> {
@@ -1664,7 +1599,7 @@ export class ProfileRuntimeService {
   }): Promise<RuntimeReadinessSnapshot> {
     const baseIdentity = input.identityPreflight.identityBindingState;
     if (input.identityPreflight.mode !== "official_chrome_persistent_extension") {
-      return this.#buildNonPersistentRuntimeReadiness({
+      return buildNonPersistentRuntimeReadiness({
         identityBindingState: baseIdentity,
         lockHeld: input.lockHeld,
         profileState: input.profileState
@@ -1691,78 +1626,19 @@ export class ProfileRuntimeService {
           })
         };
       }
-      return this.#buildUnlockedPersistentRuntimeReadiness({
+      return buildUnlockedPersistentRuntimeReadiness({
         identityBindingState: baseIdentity,
         profileState: input.profileState
       });
     }
     if (baseIdentity !== "bound") {
-      return this.#buildBoundlessRuntimeReadiness({
+      return buildBoundlessRuntimeReadiness({
         identityBindingState: baseIdentity,
         lockHeld: input.lockHeld
       });
     }
 
     return this.#readPersistentRuntimeReadiness(input);
-  }
-
-  #buildNonPersistentRuntimeReadiness(input: {
-    identityBindingState: IdentityPreflightResult["identityBindingState"];
-    lockHeld: boolean;
-    profileState: ProfileState;
-  }): RuntimeReadinessSnapshot {
-    const transportState: TransportState =
-      input.lockHeld && input.profileState === "ready" ? "ready" : "not_connected";
-    const bootstrapState: BootstrapState =
-      input.lockHeld && input.profileState === "ready" ? "ready" : "not_started";
-    return {
-      identityBindingState: input.identityBindingState,
-      transportState,
-      bootstrapState,
-      runtimeReadiness: input.lockHeld && input.profileState === "ready" ? "ready" : "unknown"
-    };
-  }
-
-  #buildUnlockedPersistentRuntimeReadiness(input: {
-    identityBindingState: IdentityPreflightResult["identityBindingState"];
-    profileState: ProfileState;
-  }): RuntimeReadinessSnapshot {
-    const transportState: TransportState =
-      input.profileState === "disconnected" ? "disconnected" : "not_connected";
-    const bootstrapState: BootstrapState =
-      input.identityBindingState === "bound" && transportState === "disconnected"
-        ? "pending"
-        : "not_started";
-    return {
-      identityBindingState: input.identityBindingState,
-      transportState,
-      bootstrapState,
-      runtimeReadiness: buildRuntimeReadiness({
-        lockHeld: false,
-        identityBindingState: input.identityBindingState,
-        transportState,
-        bootstrapState
-      })
-    };
-  }
-
-  #buildBoundlessRuntimeReadiness(input: {
-    identityBindingState: IdentityPreflightResult["identityBindingState"];
-    lockHeld: boolean;
-  }): RuntimeReadinessSnapshot {
-    const transportState: TransportState = "not_connected";
-    const bootstrapState: BootstrapState = "not_started";
-    return {
-      identityBindingState: input.identityBindingState,
-      transportState,
-      bootstrapState,
-      runtimeReadiness: buildRuntimeReadiness({
-        lockHeld: input.lockHeld,
-        identityBindingState: input.identityBindingState,
-        transportState,
-        bootstrapState
-      })
-    };
   }
 
   async #readPersistentRuntimeReadiness(input: {
@@ -1793,32 +1669,11 @@ export class ProfileRuntimeService {
         throw this.#buildRuntimeBootstrapCliError(result);
       }
       const payload = asResultRecord(result.payload);
-      const transportState =
-        payload?.transport_state === "disconnected"
-          ? "disconnected"
-          : payload?.transport_state === "ready"
-            ? "ready"
-            : "not_connected";
-      const bootstrapStateValue =
-        payload?.bootstrap_state === "not_started" ||
-        payload?.bootstrap_state === "pending" ||
-        payload?.bootstrap_state === "ready" ||
-        payload?.bootstrap_state === "stale" ||
-        payload?.bootstrap_state === "failed"
-          ? (payload.bootstrap_state as BootstrapState)
-          : "not_started";
-      return {
+      return mapRuntimeReadinessPayload({
+        payload,
         identityBindingState: baseIdentity,
-        transportState,
-        bootstrapState: bootstrapStateValue,
-        runtimeReadiness: buildRuntimeReadiness({
-          lockHeld: input.lockHeld,
-          identityBindingState: baseIdentity,
-          transportState,
-          bootstrapState: bootstrapStateValue
-        }),
-        details: payload ? (payload as JsonObject) : undefined
-      };
+        lockHeld: input.lockHeld
+      });
     } catch (error) {
       if (error instanceof NativeMessagingTransportError) {
         return {

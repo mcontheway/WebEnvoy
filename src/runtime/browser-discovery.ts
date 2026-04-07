@@ -5,10 +5,13 @@ import { delimiter, isAbsolute, join } from "node:path";
 
 import type { JsonObject } from "../core/types.js";
 
-export type BrowserLaunchErrorCode =
-  | "BROWSER_NOT_FOUND"
-  | "BROWSER_LAUNCH_FAILED"
-  | "BROWSER_INVALID_ARGUMENT";
+import {
+  BrowserLaunchError,
+  type BrowserLaunchErrorCode
+} from "./browser-launcher-shared.js";
+
+export { BrowserLaunchError };
+export type { BrowserLaunchErrorCode };
 
 const KNOWN_BROWSER_CANDIDATES: Record<NodeJS.Platform, string[]> = {
   darwin: [
@@ -45,12 +48,21 @@ const KNOWN_BROWSER_CANDIDATES: Record<NodeJS.Platform, string[]> = {
 
 const hasPathSegment = (value: string): boolean => /[\\/]/.test(value);
 
-const readTrimmedEnvString = (value: unknown): string | null => {
-  if (typeof value !== "string") {
-    return null;
+export const resolvePreferredBrowserCandidates = (
+  platform: NodeJS.Platform,
+  explicitFromEnv: string | null
+): string[] =>
+  [explicitFromEnv, ...(KNOWN_BROWSER_CANDIDATES[platform] ?? [])].filter(
+    (item): item is string => item !== null
+  );
+
+const pathExists = async (path: string): Promise<boolean> => {
+  try {
+    await access(path, fsConstants.F_OK);
+    return true;
+  } catch {
+    return false;
   }
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
 };
 
 const parseOptionalString = (value: unknown): string | null => {
@@ -67,33 +79,13 @@ const parseOptionalString = (value: unknown): string | null => {
   return normalized;
 };
 
-const pathExists = async (path: string): Promise<boolean> => {
-  try {
-    await access(path, fsConstants.F_OK);
-    return true;
-  } catch {
-    return false;
+const readTrimmedEnvString = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
   }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 };
-
-export class BrowserLaunchError extends Error {
-  readonly code: BrowserLaunchErrorCode;
-
-  constructor(code: BrowserLaunchErrorCode, message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = "BrowserLaunchError";
-    this.code = code;
-  }
-}
-
-export const resolvePreferredBrowserCandidates = (
-  platform: NodeJS.Platform,
-  explicitFromEnv: string | null
-): string[] =>
-  [explicitFromEnv, ...(KNOWN_BROWSER_CANDIDATES[platform] ?? [])].filter(
-    (item): item is string => item !== null
-  );
-
 const resolveCommandFromPath = async (command: string): Promise<string | null> => {
   const pathEnv = process.env.PATH ?? "";
   if (pathEnv.trim().length === 0) {
@@ -194,7 +186,7 @@ export const isUnsupportedBrandedChromeForExtensions = (versionOutput: string | 
   return Number.isInteger(major) && major >= 137;
 };
 
-export const resolveBrowserExecutablePath = async (
+export const resolveExecutablePath = async (
   params: JsonObject,
   options?: { allowUnsupportedExtensionBrowser?: boolean }
 ): Promise<string> => {
@@ -245,19 +237,7 @@ export const resolveBrowserExecutablePath = async (
   );
 };
 
-export const resolveBrowserVersionOutputForFingerprint = async (
-  executablePath?: string
-): Promise<string | null> => {
-  if (executablePath) {
-    return readTrimmedEnvString(await readBrowserVersionOutput(executablePath));
-  }
-  try {
-    const truthSource = await resolveBrowserVersionTruthSource();
-    return truthSource.browserVersion;
-  } catch {
-    return null;
-  }
-};
+export const resolveBrowserExecutablePath = resolveExecutablePath;
 
 export interface BrowserVersionTruthSource {
   executablePath: string;
@@ -336,4 +316,18 @@ export const resolvePreferredBrowserVersionTruthSource = async (
   }
 
   return resolveBrowserVersionTruthSource(params);
+};
+
+export const resolveBrowserVersionOutputForFingerprint = async (
+  executablePath?: string
+): Promise<string | null> => {
+  if (executablePath) {
+    return readTrimmedEnvString(await readBrowserVersionOutput(executablePath));
+  }
+  try {
+    const truthSource = await resolveBrowserVersionTruthSource();
+    return truthSource.browserVersion;
+  } catch {
+    return null;
+  }
 };
