@@ -9,7 +9,7 @@ const asString = (value) => typeof value === "string" && value.trim().length > 0
 const resolveApprovalRecord = (options) => asRecord(options.approval_record) ?? asRecord(options.approval);
 const buildLoopbackXhsSearchGateBundle = (input) => {
     const approvalRecord = resolveApprovalRecord(input.options);
-    const decisionId = asString(approvalRecord?.decision_id) ?? `gate_decision_${input.runId}_${input.requestId}`;
+    const decisionId = `gate_decision_${input.runId}_${input.requestId}`;
     const gate = buildLoopbackGate(input.options, input.abilityAction, {
         runId: input.runId,
         decisionId,

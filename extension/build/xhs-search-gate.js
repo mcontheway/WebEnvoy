@@ -42,7 +42,7 @@ export const resolveActualTargetGateReasons = (options) => {
 export const resolveGate = (options, context) => {
     const providedApprovalRecord = (options.approval_record ?? options.approval);
     const approvalRecord = asRecord(providedApprovalRecord);
-    const decisionId = asNonEmptyString(approvalRecord?.decision_id) ?? buildGateDecisionId(context);
+    const decisionId = buildGateDecisionId(context);
     const approvalId = asNonEmptyString(approvalRecord?.approval_id) ?? undefined;
     return evaluateXhsGate({
         issueScope: options.issue_scope,

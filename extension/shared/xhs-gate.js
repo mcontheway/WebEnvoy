@@ -71,6 +71,16 @@ const deriveGateDecisionId = (input) => {
 };
 
 const deriveApprovalId = (input, decisionId) => {
+  const approvalRecord = normalizeXhsApprovalRecord(input.approvalRecord);
+  const hasRealApproval =
+    approvalRecord.approved &&
+    approvalRecord.approver &&
+    approvalRecord.approved_at &&
+    XHS_REQUIRED_APPROVAL_CHECKS.every((key) => approvalRecord.checks[key] === true);
+  if (!hasRealApproval) {
+    return null;
+  }
+
   const explicitApprovalId = asString(input.approvalId);
   if (explicitApprovalId) {
     return explicitApprovalId;
@@ -82,14 +92,7 @@ const deriveApprovalId = (input, decisionId) => {
     return recordApprovalId;
   }
 
-  const approvalRecord = normalizeXhsApprovalRecord(input.approvalRecord);
-  const hasRealApproval =
-    approvalRecord.approved &&
-    approvalRecord.approver &&
-    approvalRecord.approved_at &&
-    XHS_REQUIRED_APPROVAL_CHECKS.every((key) => approvalRecord.checks[key] === true);
-
-  return hasRealApproval ? `gate_appr_${decisionId}` : null;
+  return `gate_appr_${decisionId}`;
 };
 
 const pushReason = (target, reason) => {
@@ -718,6 +721,11 @@ const evaluateXhsGate = (input) => {
     writeGateOnlyEligibleBehavior:
       input.writeGateOnlyEligibleBehavior === "block" ? "block" : "allow"
   });
+  const approvalActive =
+    outcome.gateDecision === "allowed" &&
+    (outcome.effectiveExecutionMode === "live_read_limited" ||
+      outcome.effectiveExecutionMode === "live_read_high_risk" ||
+      outcome.effectiveExecutionMode === "live_write");
   if (
     input.includeWriteInteractionTierReason === true &&
     state.issue208WriteGateOnly &&
@@ -725,6 +733,7 @@ const evaluateXhsGate = (input) => {
   ) {
     pushReason(outcome.gateReasons, state.writeTierReason);
   }
+  approvalRecord.approval_id = approvalActive ? approvalId : null;
   return {
     scope_context: { ...XHS_SCOPE_CONTEXT },
     read_execution_policy: {

@@ -168,7 +168,7 @@ describe("runtime-store-recorder", () => {
           audit_record: {
             event_id: "gate_evt_gate_decision_run-recorder-002_req-1",
             decision_id: "gate_decision_run-recorder-002_req-1",
-            approval_id: null,
+            approval_id: "gate_appr_stale_run-recorder-002",
             run_id: "run-recorder-002",
             session_id: "session-recorder-002",
             profile: "default",

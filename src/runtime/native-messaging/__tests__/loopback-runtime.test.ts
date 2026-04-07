@@ -57,7 +57,7 @@ describe("native messaging legacy loopback runtime", () => {
     });
   });
 
-  it("preserves caller-provided linkage inside the blocked loopback gate bundle", async () => {
+  it("regenerates decision_id while preserving approval_id on allowed live loopback bundles", async () => {
     const bridge = new NativeMessagingBridge({
       transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
     });
@@ -71,20 +71,20 @@ describe("native messaging legacy loopback runtime", () => {
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
-          action: "write"
+          action: "read"
         },
         input: {
           query: "露营装备"
         },
         options: {
           simulate_result: "success",
-          target_domain: "creator.xiaohongshu.com",
+          target_domain: "www.xiaohongshu.com",
           target_tab_id: 32,
-          target_page: "creator_publish_tab",
-          issue_scope: "issue_208",
-          action_type: "write",
-          requested_execution_mode: "dry_run",
-          risk_state: "paused",
+          target_page: "search_result_tab",
+          issue_scope: "issue_209",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
           approval_record: {
             approval_id: "gate_appr_custom_run-loopback-custom-approval-001",
             decision_id: "gate_decision_custom_run-loopback-custom-approval-001",
@@ -103,19 +103,29 @@ describe("native messaging legacy loopback runtime", () => {
       }
     });
 
-    expect(result.payload).toMatchObject({
-      gate_outcome: {
-        decision_id: "gate_decision_custom_run-loopback-custom-approval-001"
-      },
-      approval_record: {
-        approval_id: "gate_appr_custom_run-loopback-custom-approval-001",
-        decision_id: "gate_decision_custom_run-loopback-custom-approval-001"
-      },
-      audit_record: {
-        approval_id: "gate_appr_custom_run-loopback-custom-approval-001",
-        decision_id: "gate_decision_custom_run-loopback-custom-approval-001"
-      }
-    });
+    expect(result.payload).toEqual(
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          gate_outcome: expect.objectContaining({
+            decision_id: expect.stringMatching(
+              /^gate_decision_run-loopback-custom-approval-001_run-\d{4}$/
+            )
+          }),
+          approval_record: expect.objectContaining({
+            approval_id: "gate_appr_custom_run-loopback-custom-approval-001",
+            decision_id: expect.stringMatching(
+              /^gate_decision_run-loopback-custom-approval-001_run-\d{4}$/
+            )
+          }),
+          audit_record: expect.objectContaining({
+            approval_id: "gate_appr_custom_run-loopback-custom-approval-001",
+            decision_id: expect.stringMatching(
+              /^gate_decision_run-loopback-custom-approval-001_run-\d{4}$/
+            )
+          })
+        })
+      })
+    );
   });
 
   it("keeps approval_id null in blocked loopback gate bundles without approval", async () => {

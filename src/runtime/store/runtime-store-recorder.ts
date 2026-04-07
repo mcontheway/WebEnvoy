@@ -199,10 +199,18 @@ const extractGateAuditRecordInput = (
     asString(asObject(source.gate_outcome)?.decision_id) ??
     asString((asObject(source.approval_record) ?? {}).decision_id) ??
     (runId ? `gate_decision_${runId}` : null);
+  const sourceApprovalRecord = asObject(source.approval_record);
+  const hasRealApprovalEvidence =
+    hasRealApprovalRecord(sourceApprovalRecord) ||
+    (asString(auditRecord.approval_id) !== null &&
+      asString(auditRecord.approver) !== null &&
+      asString(auditRecord.approved_at) !== null);
   const approvalId =
-    asString(auditRecord.approval_id) ??
-    asString((asObject(source.approval_record) ?? {}).approval_id) ??
-    null;
+    hasRealApprovalEvidence
+      ? (asString(auditRecord.approval_id) ??
+        asString(sourceApprovalRecord?.approval_id) ??
+        null)
+      : null;
   const recordedAt = asString(auditRecord.recorded_at);
   const gateReasons = Array.isArray(auditRecord.gate_reasons)
     ? auditRecord.gate_reasons.filter(
