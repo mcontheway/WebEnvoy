@@ -27,6 +27,19 @@ import {
   type FingerprintRuntimeContext
 } from "../shared/fingerprint-profile.js";
 import {
+  PendingRequestState,
+  RecoveryQueueState,
+  type RecoveryQueueHooks
+} from "./background-bridge-state.js";
+import {
+  BackgroundRuntimeTrustState,
+  hasInstalledFingerprintInjection,
+  isFingerprintRuntimeContextEquivalent,
+  serializeFingerprintRuntimeContext,
+  type RuntimeBootstrapState,
+  type TrustedFingerprintContextEntry
+} from "./background-runtime-trust.js";
+import {
   buildXhsGatePolicyState,
   collectXhsCommandGateReasons,
   collectXhsMatrixGateReasons,
@@ -61,21 +74,6 @@ interface PendingForward {
   consumerGateResult?: XhsTargetGateResult["consumerGateResult"];
   gatePayload?: XhsTargetGateResult["gatePayload"];
   suppressHostResponse?: boolean;
-}
-
-interface QueuedForwardRequest {
-  request: BridgeRequest;
-  deadlineMs: number;
-}
-
-interface TrustedFingerprintContextEntry {
-  sessionId: string;
-  runId: string | null;
-  runtimeContextId: string | null;
-  fingerprintRuntime: FingerprintRuntimeContext;
-  serializedFingerprintRuntime: string;
-  sourceTabId: number | null;
-  sourceDomain: string | null;
 }
 
 const defaultForwardTimeoutMs = 3_000;
@@ -219,18 +217,6 @@ interface NativeHeartbeatMessage {
 }
 
 type NativeBridgeState = "connecting" | "ready" | "recovering" | "disconnected";
-type RuntimeBootstrapStatus = "pending" | "ready" | "stale" | "failed";
-interface RuntimeBootstrapState {
-  version: string;
-  runId: string;
-  runtimeContextId: string;
-  profile: string;
-  sessionId: string;
-  status: RuntimeBootstrapStatus;
-  serializedFingerprintRuntime: string;
-  updatedAt: string;
-}
-
 interface DispatchForwardOptions {
   suppressHostResponse?: boolean;
 }
@@ -977,35 +963,6 @@ const createBackgroundXhsGatePayload = (input: {
   };
 };
 
-const buildTrustedFingerprintContextKey = (profile: string, sessionId: string): string =>
-  `${profile}::${sessionId}`;
-
-const serializeFingerprintRuntimeContext = (
-  fingerprintRuntime: FingerprintRuntimeContext
-): string => {
-  const record = { ...(fingerprintRuntime as unknown as Record<string, unknown>) };
-  delete record.injection;
-  return JSON.stringify(record);
-};
-
-const hasInstalledFingerprintInjection = (
-  fingerprintRuntime: FingerprintRuntimeContext | null
-): boolean => {
-  if (!fingerprintRuntime) {
-    return false;
-  }
-  const injection = asRecord((fingerprintRuntime as unknown as Record<string, unknown>).injection);
-  return (
-    injection?.installed === true &&
-    asStringArray(injection.missing_required_patches).length === 0
-  );
-};
-
-const isFingerprintRuntimeContextEquivalent = (
-  left: FingerprintRuntimeContext,
-  right: FingerprintRuntimeContext
-): boolean => serializeFingerprintRuntimeContext(left) === serializeFingerprintRuntimeContext(right);
-
 const TRUST_INVALIDATION_COMMANDS = new Set(["runtime.stop", "runtime.start", "runtime.login"]);
 // Trust must come from startup trust bound to an allowlist page, not generic bridge commands.
 const TRUST_PRIMING_COMMANDS = new Set<string>(["runtime.ping"]);
@@ -1201,295 +1158,11 @@ export class BackgroundRelay {
 
 }
 
-interface NativeBridgeRecoveryStateHooks {
-  getState(): NativeBridgeState;
-  emit(message: BridgeResponse): void;
-}
-
-class BackgroundRuntimeTrustState {
-  #trustedFingerprintContexts = new Map<string, TrustedFingerprintContextEntry>();
-  #runtimeBootstrapStates = new Map<string, RuntimeBootstrapState>();
-
-  clearAll(): void {
-    this.clearTrustedContexts();
-    this.clearRuntimeBootstrapStates();
-  }
-
-  clearTrustedContexts(): void {
-    if (this.#trustedFingerprintContexts.size === 0) {
-      return;
-    }
-    this.#trustedFingerprintContexts.clear();
-  }
-
-  clearRuntimeBootstrapStates(): void {
-    if (this.#runtimeBootstrapStates.size === 0) {
-      return;
-    }
-    this.#runtimeBootstrapStates.clear();
-  }
-
-  clearTrustedContextBySession(profile: string, sessionId: string): void {
-    this.#trustedFingerprintContexts.delete(buildTrustedFingerprintContextKey(profile, sessionId));
-  }
-
-  clearTrustedContextsByProfile(profile: string): void {
-    const profilePrefix = `${profile}::`;
-    for (const key of this.#trustedFingerprintContexts.keys()) {
-      if (key.startsWith(profilePrefix)) {
-        this.#trustedFingerprintContexts.delete(key);
-      }
-    }
-  }
-
-  getBootstrap(profile: string): RuntimeBootstrapState | null {
-    return this.#runtimeBootstrapStates.get(profile) ?? null;
-  }
-
-  setBootstrap(profile: string, state: RuntimeBootstrapState): void {
-    this.#runtimeBootstrapStates.set(profile, state);
-  }
-
-  getTrusted(profile: string, sessionId: string): TrustedFingerprintContextEntry | null {
-    return this.#trustedFingerprintContexts.get(buildTrustedFingerprintContextKey(profile, sessionId)) ?? null;
-  }
-
-  upsertTrusted(
-    profile: string,
-    sessionId: string,
-    normalized: FingerprintRuntimeContext,
-    source?: {
-      sourceTabId?: number | null;
-      sourceDomain?: string | null;
-      runId?: string | null;
-      runtimeContextId?: string | null;
-    }
-  ): void {
-    const key = buildTrustedFingerprintContextKey(profile, sessionId);
-    const serializedFingerprintRuntime = serializeFingerprintRuntimeContext(normalized);
-    const sourceTabId = source?.sourceTabId ?? null;
-    const sourceDomain = source?.sourceDomain ?? null;
-    const runId = source?.runId ?? null;
-    const runtimeContextId = source?.runtimeContextId ?? null;
-    const existing = this.#trustedFingerprintContexts.get(key);
-    const shouldRotate =
-      !!existing &&
-      (existing.sessionId !== sessionId ||
-        existing.runId !== runId ||
-        existing.runtimeContextId !== runtimeContextId ||
-        existing.serializedFingerprintRuntime !== serializedFingerprintRuntime ||
-        existing.sourceTabId !== sourceTabId ||
-        existing.sourceDomain !== sourceDomain);
-    if (shouldRotate) {
-      this.#trustedFingerprintContexts.delete(key);
-    }
-    this.#trustedFingerprintContexts.set(key, {
-      sessionId,
-      runId,
-      runtimeContextId,
-      fingerprintRuntime: normalized,
-      serializedFingerprintRuntime,
-      sourceTabId,
-      sourceDomain
-    });
-    if (this.#trustedFingerprintContexts.size <= MAX_TRUSTED_FINGERPRINT_CONTEXTS) {
-      return;
-    }
-    const oldestKey = this.#trustedFingerprintContexts.keys().next().value;
-    if (typeof oldestKey === "string") {
-      this.#trustedFingerprintContexts.delete(oldestKey);
-    }
-  }
-
-  listTrustedByProfile(profile: string): Array<[string, TrustedFingerprintContextEntry]> {
-    return Array.from(this.#trustedFingerprintContexts.entries()).filter(([key]) =>
-      key.startsWith(`${profile}::`)
-    );
-  }
-}
-
-class NativeBridgePendingForwardState {
-  #pending = new Map<string, PendingForward>();
-
-  register(id: string, pending: PendingForward): void {
-    this.#pending.set(id, pending);
-  }
-
-  take(id: string): PendingForward | null {
-    const pending = this.#pending.get(id);
-    if (!pending) {
-      return null;
-    }
-    clearTimeout(pending.timeout);
-    this.#pending.delete(id);
-    return pending;
-  }
-
-  fail(
-    id: string,
-    error: { code: string; message: string },
-    emit: (payload: BridgeResponse) => void
-  ): void {
-    const pending = this.take(id);
-    if (!pending || pending.suppressHostResponse) {
-      return;
-    }
-    emit({
-      id,
-      status: "error",
-      summary: {
-        relay_path: "host>background>content-script>background>host"
-      },
-      error
-    });
-  }
-
-  failAll(
-    error: { code: string; message: string },
-    emit: (payload: BridgeResponse) => void
-  ): void {
-    for (const id of [...this.#pending.keys()]) {
-      this.fail(id, error, emit);
-    }
-  }
-}
-
-class NativeBridgeRecoveryState {
-  #recoveryQueue: QueuedForwardRequest[] = [];
-
-  constructor(
-    private readonly hooks: NativeBridgeRecoveryStateHooks,
-    private readonly options?: ChromeBackgroundBridgeOptions
-  ) {}
-
-  queueForward(request: BridgeRequest): void {
-    const timeoutMs = this.#resolveForwardTimeoutMs(request);
-    const deadlineMs = Date.now() + timeoutMs;
-    if (Date.now() >= deadlineMs) {
-      this.hooks.emit({
-        id: request.id,
-        status: "error",
-        summary: {
-          relay_path: "host>background>content-script>background>host"
-        },
-        error: {
-          code: "ERR_TRANSPORT_TIMEOUT",
-          message: "forward request timed out during recovery"
-        }
-      });
-      return;
-    }
-    if (this.#recoveryQueue.length >= maxRecoveryQueuedForwards) {
-      this.hooks.emit({
-        id: request.id,
-        status: "error",
-        summary: {
-          relay_path: "host>background>content-script>background>host"
-        },
-        error: {
-          code: "ERR_TRANSPORT_DISCONNECTED",
-          message: `recovery queue exhausted (${maxRecoveryQueuedForwards})`
-        }
-      });
-      return;
-    }
-    this.#recoveryQueue.push({
-      request,
-      deadlineMs
-    });
-  }
-
-  async replayQueuedForwards(
-    dispatchForward: (request: BridgeRequest, deadlineMs: number) => Promise<void>
-  ): Promise<void> {
-    if (this.#recoveryQueue.length === 0) {
-      return;
-    }
-    this.#expireQueuedForwards(Date.now());
-    const queued = [...this.#recoveryQueue];
-    this.#recoveryQueue.length = 0;
-    for (const queuedForward of queued) {
-      const request = queuedForward.request;
-      if (Date.now() >= queuedForward.deadlineMs) {
-        this.hooks.emit({
-          id: request.id,
-          status: "error",
-          summary: {
-            relay_path: "host>background>content-script>background>host"
-          },
-          error: {
-            code: "ERR_TRANSPORT_TIMEOUT",
-            message: "forward request timed out during recovery"
-          }
-        });
-        continue;
-      }
-      if (this.hooks.getState() !== "ready") {
-        this.#recoveryQueue.push(queuedForward);
-        continue;
-      }
-      await dispatchForward(request, queuedForward.deadlineMs);
-    }
-  }
-
-  failRecoveryQueue(message: string): void {
-    const queued = [...this.#recoveryQueue];
-    this.#recoveryQueue.length = 0;
-    for (const queuedForward of queued) {
-      this.hooks.emit({
-        id: queuedForward.request.id,
-        status: "error",
-        summary: {
-          relay_path: "host>background>content-script>background>host"
-        },
-        error: {
-          code: "ERR_TRANSPORT_DISCONNECTED",
-          message
-        }
-      });
-    }
-  }
-
-  expireQueuedForwards(nowMs: number): void {
-    this.#expireQueuedForwards(nowMs);
-  }
-
-  #expireQueuedForwards(nowMs: number): void {
-    if (this.#recoveryQueue.length === 0) {
-      return;
-    }
-    const keep: QueuedForwardRequest[] = [];
-    for (const queuedForward of this.#recoveryQueue) {
-      if (nowMs < queuedForward.deadlineMs) {
-        keep.push(queuedForward);
-        continue;
-      }
-      this.hooks.emit({
-        id: queuedForward.request.id,
-        status: "error",
-        summary: {
-          relay_path: "host>background>content-script>background>host"
-        },
-        error: {
-          code: "ERR_TRANSPORT_TIMEOUT",
-          message: "forward request timed out during recovery"
-        }
-      });
-    }
-    this.#recoveryQueue = keep;
-  }
-
-  #resolveForwardTimeoutMs(request: BridgeRequest): number {
-    const timeoutMs = readTimeoutMs(request.timeout_ms);
-    return timeoutMs ?? (this.options?.forwardTimeoutMs ?? defaultForwardTimeoutMs);
-  }
-}
-
 class ChromeBackgroundBridge {
   #port: ExtensionPort | null = null;
-  #pendingState = new NativeBridgePendingForwardState();
-  #runtimeTrustState = new BackgroundRuntimeTrustState();
-  #recoveryState: NativeBridgeRecoveryState;
+  #pendingState = new PendingRequestState<PendingForward>();
+  #runtimeTrustState = new BackgroundRuntimeTrustState(MAX_TRUSTED_FINGERPRINT_CONTEXTS);
+  #recoveryState: RecoveryQueueState<BridgeRequest>;
   #heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   #heartbeatTimeout: ReturnType<typeof setTimeout> | null = null;
   #handshakeTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -1507,14 +1180,18 @@ class ChromeBackgroundBridge {
     private readonly chromeApi: ExtensionChromeApi,
     private readonly options?: ChromeBackgroundBridgeOptions
   ) {
-    this.#recoveryState = new NativeBridgeRecoveryState(
-      {
-        getState: () => this.#state,
-        emit: (message) => {
-          this.#emit(message);
-        }
-      },
-      options
+    const recoveryHooks: RecoveryQueueHooks = {
+      getState: () => this.#state,
+      emit: (message) => {
+        this.#emit(message);
+      }
+    };
+    this.#recoveryState = new RecoveryQueueState<BridgeRequest>(
+      recoveryHooks,
+      maxRecoveryQueuedForwards,
+      (request) =>
+        readTimeoutMs(request.timeout_ms) ?? (this.options?.forwardTimeoutMs ?? defaultForwardTimeoutMs),
+      (request) => request.id
     );
   }
 
@@ -1727,7 +1404,7 @@ class ChromeBackgroundBridge {
     this.#recoveryDeadlineMs = null;
     this.#stopRecoveryLoop();
     this.#startHeartbeatLoop();
-    void this.#recoveryState.replayQueuedForwards((request, deadlineMs) =>
+    void this.#recoveryState.replayQueuedRequests((request, deadlineMs) =>
       this.#dispatchForward(request, deadlineMs)
     );
   }
@@ -1778,12 +1455,12 @@ class ChromeBackgroundBridge {
       if (this.#state !== "recovering" && this.#state !== "connecting") {
         return;
       }
-      this.#recoveryState.expireQueuedForwards(Date.now());
+      this.#recoveryState.expireQueuedRequests(Date.now());
       const deadline = this.#recoveryDeadlineMs;
       if (deadline !== null && Date.now() >= deadline) {
         this.#state = "disconnected";
         this.#recoveryDeadlineMs = null;
-        this.#recoveryState.failRecoveryQueue("recovery window exhausted");
+        this.#recoveryState.failQueue("recovery window exhausted");
         this.#stopRecoveryLoop();
         return;
       }
@@ -2951,7 +2628,7 @@ class ChromeBackgroundBridge {
   }
 
   #enqueueRecoveryForward(request: BridgeRequest): void {
-    this.#recoveryState.queueForward(request);
+    this.#recoveryState.queueRequest(request);
   }
 
   async #dispatchForward(
