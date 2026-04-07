@@ -176,8 +176,8 @@ export const resolveInstallPaths = (input: ResolveInstallPathsInput) => {
   const roots = resolveControlledInstallRoots(input.cwd, input.browserChannel);
   const platform = input.platform ?? process.platform;
   const hasCustomManifestDir = typeof input.manifestDir === "string" && input.manifestDir.length > 0;
-  const manifestRoot =
-    hasCustomManifestDir || platform === "win32"
+  const manifestDiscoveryRoot =
+    platform === "win32"
       ? roots.manifestRoot
       : resolveManifestDiscoveryDirectory(input.browserChannel, platform);
   const manifestDir =
@@ -185,11 +185,11 @@ export const resolveInstallPaths = (input: ResolveInstallPathsInput) => {
       ? asAbsolutePath(input.cwd, input.manifestDir!)
       : platform === "win32"
         ? roots.manifestRoot
-        : manifestRoot;
-  if (hasCustomManifestDir && platform !== "win32" && !isPathInside(manifestRoot, manifestDir)) {
+        : manifestDiscoveryRoot;
+  if (hasCustomManifestDir && platform !== "win32" && !isPathInside(manifestDiscoveryRoot, manifestDir)) {
     throw nativeHostPathError(input.command, "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT", {
       field: "manifest_dir",
-      allowed_root: manifestRoot,
+      allowed_root: manifestDiscoveryRoot,
       received_path: manifestDir
     });
   }
@@ -213,7 +213,7 @@ export const resolveInstallPaths = (input: ResolveInstallPathsInput) => {
     installKey: roots.installKey,
     channelRoot: roots.channelRoot,
     worktreePath: roots.worktreePath,
-    manifestRoot,
+    manifestRoot: manifestDiscoveryRoot,
     manifestDir,
     manifestPath,
     runtimeRoot: roots.runtimeRoot,
