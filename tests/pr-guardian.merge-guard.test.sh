@@ -11,6 +11,8 @@ source "${SCRIPT_DIR}/pr-guardian.merge-guard.merge-gate.sh"
 
 main() {
   load_guardian_without_main
+  mkdir -p "${TEST_TMP_DIR}/bin"
+  setup_mock_npm
   assert_pass run_all_checks_pass_with_payload '[{"name":"Run Tests","bucket":"pass","state":"SUCCESS","link":"https://example.test/tests"}]'
   assert_pass run_all_checks_pass_without_required_checks_reported
   assert_fail run_all_checks_pass_when_required_checks_pass_but_all_checks_fail
