@@ -1,4 +1,6 @@
 import type { LoopbackGate } from "../loopback-gate.js";
+import type { LoopbackAuditSource } from "../loopback-gate-audit.js";
+import type { LoopbackObservabilitySource } from "../loopback-gate-observability.js";
 
 export const createLoopbackGateFixture = (overrides: Record<string, unknown> = {}): LoopbackGate => {
   const base = {
@@ -109,4 +111,26 @@ export const createLoopbackGateFixture = (overrides: Record<string, unknown> = {
       ...(overrides.writeActionMatrixDecisions as Record<string, unknown> | undefined)
     }
   } as LoopbackGate;
+};
+
+export const createLoopbackAuditFixture = (
+  overrides: Partial<LoopbackAuditSource> = {}
+): LoopbackAuditSource => {
+  const gate = createLoopbackGateFixture(overrides as Record<string, unknown>);
+  return {
+    gateInput: gate.gateInput,
+    consumerGateResult: gate.consumerGateResult,
+    approvalRecord: gate.approvalRecord,
+    writeActionMatrixDecisions: gate.writeActionMatrixDecisions
+  };
+};
+
+export const createLoopbackObservabilityFixture = (
+  overrides: Partial<LoopbackObservabilitySource> = {}
+): LoopbackObservabilitySource => {
+  const gate = createLoopbackGateFixture(overrides as Record<string, unknown>);
+  return {
+    gateInput: gate.gateInput,
+    consumerGateResult: gate.consumerGateResult
+  };
 };

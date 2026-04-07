@@ -1,9 +1,16 @@
 import type { LoopbackGate } from "./loopback-gate.js";
 
+export type LoopbackObservabilitySource = Pick<
+  LoopbackGate,
+  "gateInput" | "consumerGateResult"
+>;
+
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
-export const buildLoopbackGateObservability = (gate: LoopbackGate): Record<string, unknown> => {
+export const buildLoopbackGateObservability = (
+  gate: LoopbackObservabilitySource
+): Record<string, unknown> => {
   const targetPage = asString(gate.gateInput.target_page);
   const targetDomain = asString(gate.gateInput.target_domain);
 

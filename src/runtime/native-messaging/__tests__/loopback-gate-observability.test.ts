@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { buildLoopbackGateObservability } from "../loopback-gate-observability.js";
-import { createLoopbackGateFixture } from "./loopback-gate-test-fixtures.js";
+import { createLoopbackObservabilityFixture } from "./loopback-gate-test-fixtures.js";
 
 describe("native messaging loopback gate observability", () => {
   it("emits page state and failure site for a blocked creator publish gate", () => {
     const observability = buildLoopbackGateObservability(
-      createLoopbackGateFixture({
+      createLoopbackObservabilityFixture({
         gateInput: {
           issue_scope: "issue_208",
           risk_state: "paused",

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { buildLoopbackAuditRecord } from "../loopback-gate-audit.js";
-import { createLoopbackGateFixture } from "./loopback-gate-test-fixtures.js";
+import { createLoopbackAuditFixture } from "./loopback-gate-test-fixtures.js";
 
 describe("native messaging loopback gate audit", () => {
   it("records the gate outcome into the audit envelope", () => {
-    const gate = createLoopbackGateFixture();
+    const gate = createLoopbackAuditFixture();
     const audit = buildLoopbackAuditRecord({
       runId: "run-001",
       sessionId: "session-001",

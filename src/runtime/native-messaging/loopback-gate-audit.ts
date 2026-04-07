@@ -1,10 +1,15 @@
 import type { LoopbackGate } from "./loopback-gate.js";
 
+export type LoopbackAuditSource = Pick<
+  LoopbackGate,
+  "gateInput" | "consumerGateResult" | "approvalRecord" | "writeActionMatrixDecisions"
+>;
+
 export const buildLoopbackAuditRecord = (input: {
   runId: string;
   sessionId: string;
   profile: string;
-  gate: LoopbackGate;
+  gate: LoopbackAuditSource;
 }): Record<string, unknown> => {
   const clone = <T>(value: T): T => structuredClone(value);
 
