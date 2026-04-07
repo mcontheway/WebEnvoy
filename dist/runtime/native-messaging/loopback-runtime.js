@@ -1,9 +1,30 @@
 import { BRIDGE_PROTOCOL, ensureBridgeRequestEnvelope } from "./protocol.js";
-import { buildLoopbackXhsSearchGateBundle } from "./loopback-gate.js";
+import { buildLoopbackGate } from "./loopback-gate.js";
+import { buildLoopbackAuditRecord } from "./loopback-gate-audit.js";
+import { buildLoopbackGatePayload } from "./loopback-gate-payload.js";
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const buildLoopbackXhsSearchGateBundle = (input) => {
+    const gate = buildLoopbackGate(input.options, input.abilityAction);
+    const auditRecord = buildLoopbackAuditRecord({
+        runId: input.runId,
+        sessionId: input.sessionId,
+        profile: input.profile,
+        gate
+    });
+    return {
+        consumerGateResult: gate.consumerGateResult,
+        payload: buildLoopbackGatePayload({
+            runId: input.runId,
+            sessionId: input.sessionId,
+            profile: input.profile,
+            gate,
+            auditRecord
+        })
+    };
+};
 class InMemoryPort {
     #listeners = new Set();
     #peer = null;
