@@ -225,29 +225,53 @@ const migrateV7ToV8 = (db) => {
       approval_id, run_id, decision_id, approved, approver, approved_at, checks_json, created_at, updated_at
     )
     SELECT
-      runtime_gate_audit_records.approval_id,
-      runtime_gate_audit_records.run_id,
-      runtime_gate_audit_records.decision_id,
-      CASE
-        WHEN (runtime_gate_audit_records.approver IS NOT NULL AND runtime_gate_audit_records.approver != '')
-          OR (runtime_gate_audit_records.approved_at IS NOT NULL AND runtime_gate_audit_records.approved_at != '')
-        THEN 1
-        ELSE 0
-      END,
-      runtime_gate_audit_records.approver,
-      runtime_gate_audit_records.approved_at,
+      synthesized_approvals.approval_id,
+      synthesized_approvals.run_id,
+      synthesized_approvals.decision_id,
+      1,
+      synthesized_approvals.approver,
+      synthesized_approvals.approved_at,
       '{}',
-      runtime_gate_audit_records.recorded_at,
-      runtime_gate_audit_records.recorded_at
-    FROM runtime_gate_audit_records
-    WHERE runtime_gate_audit_records.approval_id IS NOT NULL
-      AND runtime_gate_audit_records.approval_id != ''
-      AND runtime_gate_audit_records.decision_id IS NOT NULL
-      AND runtime_gate_audit_records.decision_id != ''
+      synthesized_approvals.recorded_at,
+      synthesized_approvals.recorded_at
+    FROM (
+      SELECT *
+      FROM (
+        SELECT
+          runtime_gate_audit_records.approval_id,
+          runtime_gate_audit_records.run_id,
+          runtime_gate_audit_records.decision_id,
+          runtime_gate_audit_records.approver,
+          runtime_gate_audit_records.approved_at,
+          runtime_gate_audit_records.recorded_at,
+          ROW_NUMBER() OVER (
+            PARTITION BY runtime_gate_audit_records.decision_id
+            ORDER BY runtime_gate_audit_records.recorded_at DESC, runtime_gate_audit_records.event_id DESC
+          ) AS row_num
+        FROM runtime_gate_audit_records
+        WHERE runtime_gate_audit_records.approval_id IS NOT NULL
+          AND runtime_gate_audit_records.approval_id != ''
+          AND runtime_gate_audit_records.decision_id IS NOT NULL
+          AND runtime_gate_audit_records.decision_id != ''
+          AND runtime_gate_audit_records.gate_decision = 'allowed'
+          AND runtime_gate_audit_records.effective_execution_mode IN (
+            'live_read_limited',
+            'live_read_high_risk',
+            'live_write'
+          )
+          AND runtime_gate_audit_records.approver IS NOT NULL
+          AND runtime_gate_audit_records.approver != ''
+          AND runtime_gate_audit_records.approved_at IS NOT NULL
+          AND runtime_gate_audit_records.approved_at != ''
+      )
+      WHERE row_num = 1
+    ) AS synthesized_approvals
+    WHERE synthesized_approvals.decision_id IS NOT NULL
+      AND synthesized_approvals.decision_id != ''
       AND NOT EXISTS (
         SELECT 1
         FROM runtime_gate_approvals_v8
-        WHERE runtime_gate_approvals_v8.decision_id = runtime_gate_audit_records.decision_id
+        WHERE runtime_gate_approvals_v8.decision_id = synthesized_approvals.decision_id
       );
     DROP TABLE runtime_gate_approvals;
     ALTER TABLE runtime_gate_approvals_v8 RENAME TO runtime_gate_approvals;

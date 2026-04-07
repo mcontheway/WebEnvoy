@@ -962,6 +962,194 @@ describeWithSqlite("sqlite-runtime-store", () => {
     ]);
   });
 
+  it("deduplicates synthesized v7 approvals by decision_id and ignores blocked legacy audits", async () => {
+    const cwd = await createTempCwd();
+    const dbPath = resolveRuntimeStorePath(cwd);
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    await mkdir(path.dirname(dbPath), { recursive: true });
+    const db = new DatabaseSyncCtor(dbPath);
+
+    db.prepare("PRAGMA journal_mode=WAL").run();
+    db.exec(`
+      CREATE TABLE runtime_store_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO runtime_store_meta(key, value) VALUES('schema_version', '7');
+      CREATE TABLE runtime_runs (
+        run_id TEXT PRIMARY KEY,
+        session_id TEXT,
+        profile_name TEXT NOT NULL,
+        command TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE runtime_gate_approvals (
+        approval_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL UNIQUE,
+        decision_id TEXT,
+        approved INTEGER NOT NULL,
+        approver TEXT,
+        approved_at TEXT,
+        checks_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+      );
+      CREATE TABLE runtime_gate_audit_records (
+        event_id TEXT PRIMARY KEY,
+        decision_id TEXT,
+        approval_id TEXT,
+        run_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        profile TEXT NOT NULL,
+        issue_scope TEXT,
+        risk_state TEXT NOT NULL,
+        next_state TEXT NOT NULL DEFAULT 'paused',
+        transition_trigger TEXT NOT NULL DEFAULT 'gate_evaluation',
+        target_domain TEXT NOT NULL,
+        target_tab_id INTEGER NOT NULL,
+        target_page TEXT NOT NULL,
+        action_type TEXT,
+        requested_execution_mode TEXT NOT NULL,
+        effective_execution_mode TEXT NOT NULL,
+        gate_decision TEXT NOT NULL,
+        gate_reasons_json TEXT NOT NULL,
+        approver TEXT,
+        approved_at TEXT,
+        recorded_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+      );
+    `);
+    db.prepare(
+      `INSERT INTO runtime_runs(
+        run_id, session_id, profile_name, command, status, started_at, ended_at, error_code, created_at, updated_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "run-v7-synth",
+      "session-v7-synth",
+      "profile-a",
+      "xhs.search",
+      "succeeded",
+      "2026-03-23T10:00:00.000Z",
+      "2026-03-23T10:00:01.000Z",
+      null,
+      "2026-03-23T10:00:00.000Z",
+      "2026-03-23T10:00:01.000Z"
+    );
+    const insertAudit = db.prepare(
+      `INSERT INTO runtime_gate_audit_records(
+        event_id, decision_id, approval_id, run_id, session_id, profile, issue_scope, risk_state, next_state, transition_trigger,
+        target_domain, target_tab_id, target_page, action_type, requested_execution_mode, effective_execution_mode, gate_decision,
+        gate_reasons_json, approver, approved_at, recorded_at, created_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertAudit.run(
+      "gate_evt_run-v7-synth_req-1_a",
+      "gate_decision_run-v7-synth_req-1",
+      "gate_appr_run-v7-synth_req-1",
+      "run-v7-synth",
+      "session-v7-synth",
+      "profile-a",
+      "issue_209",
+      "allowed",
+      "allowed",
+      "manual_approval",
+      "www.xiaohongshu.com",
+      21,
+      "search_result_tab",
+      "read",
+      "live_read_high_risk",
+      "live_read_high_risk",
+      "allowed",
+      JSON.stringify(["LIVE_MODE_APPROVED"]),
+      "qa-reviewer-a",
+      "2026-03-23T10:00:10.000Z",
+      "2026-03-23T10:00:11.000Z",
+      "2026-03-23T10:00:11.000Z"
+    );
+    insertAudit.run(
+      "gate_evt_run-v7-synth_req-1_b",
+      "gate_decision_run-v7-synth_req-1",
+      "gate_appr_run-v7-synth_req-1",
+      "run-v7-synth",
+      "session-v7-synth",
+      "profile-a",
+      "issue_209",
+      "allowed",
+      "allowed",
+      "manual_approval",
+      "www.xiaohongshu.com",
+      21,
+      "search_result_tab",
+      "read",
+      "live_read_high_risk",
+      "live_read_high_risk",
+      "allowed",
+      JSON.stringify(["LIVE_MODE_APPROVED"]),
+      "qa-reviewer-b",
+      "2026-03-23T10:00:20.000Z",
+      "2026-03-23T10:00:21.000Z",
+      "2026-03-23T10:00:21.000Z"
+    );
+    insertAudit.run(
+      "gate_evt_run-v7-synth_blocked",
+      "gate_decision_run-v7-synth_blocked",
+      "gate_appr_run-v7-synth_blocked",
+      "run-v7-synth",
+      "session-v7-synth",
+      "profile-a",
+      "issue_209",
+      "paused",
+      "paused",
+      "gate_evaluation",
+      "www.xiaohongshu.com",
+      22,
+      "search_result_tab",
+      "read",
+      "live_read_high_risk",
+      "dry_run",
+      "blocked",
+      JSON.stringify(["LIVE_READ_HIGH_RISK_BLOCKED"]),
+      "qa-reviewer-z",
+      "2026-03-23T10:00:30.000Z",
+      "2026-03-23T10:00:31.000Z",
+      "2026-03-23T10:00:31.000Z"
+    );
+    db.close();
+
+    const store = new SQLiteRuntimeStore(dbPath);
+    const trail = await store.getAuditTrailByRunId("run-v7-synth");
+    store.close();
+
+    const migratedDb = new DatabaseSyncCtor(dbPath);
+    const approvalRows = migratedDb
+      .prepare(
+        "SELECT approval_id, decision_id, approver FROM runtime_gate_approvals WHERE run_id = ? ORDER BY decision_id ASC"
+      )
+      .all("run-v7-synth") as Array<{ approval_id: string; decision_id: string; approver: string | null }>;
+    migratedDb.close();
+
+    expect(approvalRows).toEqual([
+      {
+        approval_id: "gate_appr_run-v7-synth_req-1",
+        decision_id: "gate_decision_run-v7-synth_req-1",
+        approver: "qa-reviewer-b"
+      }
+    ]);
+    expect(trail.audit_records.map((record) => record.decision_id)).toEqual([
+      "gate_decision_run-v7-synth_blocked",
+      "gate_decision_run-v7-synth_req-1",
+      "gate_decision_run-v7-synth_req-1"
+    ]);
+    expect(trail.audit_records.filter((record) => record.approval_id === "gate_appr_run-v7-synth_blocked")).toHaveLength(1);
+  });
+
   it("accepts live_read_limited in persisted gate audit records", async () => {
     const cwd = await createTempCwd();
     const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
