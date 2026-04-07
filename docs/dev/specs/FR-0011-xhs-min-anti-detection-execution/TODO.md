@@ -60,6 +60,7 @@
 - [x] Open FR anchor: `#231`
 - [x] Historical suite setup: `#217`
 - [x] Formal closeout writeback: `#365`
+- [x] Spec review closure: 已由 `#365` formal closeout truth sync 收口，不再保留“待本 PR review 收口”的陈旧表述
 - [x] Governance: `#216`
 - [x] Upstream: `#213` / `FR-0009`
 - [x] Strong sequencing dependency: `#363`
