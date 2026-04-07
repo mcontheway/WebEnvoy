@@ -1,5 +1,7 @@
 import { BRIDGE_PROTOCOL, ensureBridgeRequestEnvelope, type BridgeRequestEnvelope } from "./protocol.js";
-import { RELAY_PATH, buildLoopbackAuditRecord, buildLoopbackGate, buildLoopbackGatePayload } from "./loopback-gate.js";
+import { RELAY_PATH, buildLoopbackGate } from "./loopback-gate.js";
+import { buildLoopbackAuditRecord } from "./loopback-gate-audit.js";
+import { buildLoopbackGatePayload } from "./loopback-gate-payload.js";
 import type { ContentMessage, HostMessage } from "./loopback-messages.js";
 import type { InMemoryPort } from "./loopback-port.js";
 

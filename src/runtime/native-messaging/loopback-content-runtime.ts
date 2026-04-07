@@ -1,5 +1,7 @@
 import type { ContentMessage } from "./loopback-messages.js";
-import { buildLoopbackAuditRecord, buildLoopbackGate, buildLoopbackGatePayload } from "./loopback-gate.js";
+import { buildLoopbackGate } from "./loopback-gate.js";
+import { buildLoopbackAuditRecord } from "./loopback-gate-audit.js";
+import { buildLoopbackGatePayload } from "./loopback-gate-payload.js";
 import { InMemoryPort } from "./loopback-port.js";
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -464,4 +466,3 @@ export class InMemoryContentScriptRuntime {
     };
   }
 }
-
