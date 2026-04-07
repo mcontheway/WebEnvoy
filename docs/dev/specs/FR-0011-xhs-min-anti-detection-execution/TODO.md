@@ -8,8 +8,6 @@
 - [x] FR-0011 已冻结 Sprint 3 的核心边界：插件层门禁主落点、读路径执行模式收敛、写路径交互分级、最小 session 节律/冷却/恢复、以及 `paused/limited/allowed` 风险状态机。
 - [x] FR-0011 已冻结 `#208/#209` 共享的状态机、审批/审计边界、`live_read_limited` 正式公开模式语义、`limited_read_rollout_ready_true` 条件载体，以及 `gate_decision=blocked` 时 `effective_execution_mode` 的正式解释。
 - [x] FR-0011 已冻结 `#208` 的 gate-only `page_state` / `key_requests=[]` / `failure_site` 语义，以及 `editor_input` 作为唯一正式验证对象时的验证范围、成功/失败信号、最小 replay 与关闭语义。
-- [x] `#231` 是 FR-0011 当前 canonical GitHub thread / open anchor；`#217` 仅保留历史起草与早期 formal review 线索，不再承担当前 open anchor 语义。
-- [x] `PR #414` 是本轮 closeout writeback 的可审计 review artifact；`#365` 只负责驱动这次 truth sync，不单独承担 formal review 记录职责。
 - [x] 本文件只回写 formal review 结论和解释边界，不把本地 `TODO.md` 扩张成 GitHub issue、Project、里程碑或关闭状态的真相源。
 
 ## 时间边界澄清
@@ -25,13 +23,13 @@
 - [ ] `#208` 与 `#209` 的后续事项继续以 FR-0011 作为统一前置消费者，不回退到未冻结的口头边界。
 - [ ] 涉及 `#208` 的后续文案若再次引用“验证前置已冻结”，必须同时区分该表述属于 2026-03-30 的 contract freeze 语境，而不是用它代替后续实现链路里的真实验证或关闭结论。
 - [ ] `#216` 提供的 Sprint 治理基线已对齐，后续 Sprint 3 实现事项可按当前 Sprint 2 / Sprint 3 / Sprint 4 语义消费 roadmap 与 milestone。
-- [ ] active issue anchor 的同步与切换通过 dedicated GitHub / formal writeback 链路单独完成；本文件不并行重定义 FR-0011 的当前 open anchor。
+- [ ] 涉及 issue thread / anchor 的同步与切换通过 dedicated GitHub / formal writeback 链路单独完成；本文件不并行重定义 GitHub 元数据。
 
 ## 关闭后仍需保持的引用关系
 
 - [x] 后续任何 `#209` 范围的 live 扩展或 follow-up 修复，仍应继续引用 FR-0011 已冻结的 Sprint 3 前置。
 - [x] 后续任何 `#208` 邻近事项若再次引用 `editor_input`，都必须沿用 FR-0011 已冻结的唯一正式验证边界；后续实现线程若产生新的验证或关闭结论，也不得直接改写回 FR-0011 套件内部。
-- [x] 后续任何 formal 文档回写若需要同步 active issue anchor，应先与当前 canonical GitHub thread 对齐，再独立回写，不在 FR-0011 closeout note 内并行造新口径。
+- [x] 后续任何 formal 文档回写若需要同步 issue thread / anchor 元数据，应先在对应 GitHub 线程完成，再独立回写，不在 FR-0011 closeout note 内并行造新口径。
 
 ## 后续实现入口
 
