@@ -342,7 +342,8 @@ class InMemoryContentScriptRuntime {
               page_kind: "search",
               url: "https://www.xiaohongshu.com/search_result",
               title: "Search Result",
-              ready_state: "complete"
+              ready_state: "complete",
+              observation_status: "complete"
             },
             key_requests: [],
             failure_site: null
@@ -392,7 +393,8 @@ class InMemoryContentScriptRuntime {
               page_kind: "compose",
               url: "https://creator.xiaohongshu.com/publish/publish",
               title: "Creator Publish",
-              ready_state: "complete"
+              ready_state: "complete",
+              observation_status: "complete"
             },
             key_requests: [],
             failure_site: {
@@ -438,7 +440,8 @@ class InMemoryContentScriptRuntime {
               page_kind: "search",
               url: "https://www.xiaohongshu.com/search_result",
               title: "Search Result",
-              ready_state: "complete"
+              ready_state: "complete",
+              observation_status: "complete"
             },
             key_requests: [
               {
@@ -501,7 +504,8 @@ class InMemoryContentScriptRuntime {
                 ? "https://www.xiaohongshu.com/login"
                 : "https://www.xiaohongshu.com/search_result",
             title: "Search Result",
-            ready_state: "complete"
+            ready_state: "complete",
+            observation_status: "complete"
           },
           key_requests:
             simulated === "signature_entry_missing"
