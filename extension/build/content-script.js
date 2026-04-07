@@ -1899,14 +1899,451 @@ const performEditorInputValidation = async (input) => {
 };
 return { performEditorInputValidation };
 })();
+const __webenvoy_module_content_script_main_world = (() => {
+const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
+const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
+const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
+const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
+const MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
+let mainWorldEventChannel = null;
+let mainWorldResultListener = null;
+let mainWorldResultListenerEventName = null;
+const pendingMainWorldRequests = new Map();
+const encodeUtf8Base64 = (value) => {
+    if (typeof btoa === "function") {
+        return btoa(unescape(encodeURIComponent(value)));
+    }
+    const bufferCtor = globalThis.Buffer;
+    if (bufferCtor) {
+        return bufferCtor.from(value, "utf8").toString("base64");
+    }
+    throw new Error("base64 encoder is unavailable");
+};
+const encodeMainWorldPayload = (value) => encodeUtf8Base64(JSON.stringify(value));
+const hashMainWorldEventChannel = (value) => {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(36);
+};
+const normalizeMainWorldSecret = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const createMainWorldBootstrapDetail = (secret) => {
+    const names = resolveMainWorldEventNamesForSecret(secret);
+    return {
+        request_event: names.requestEvent,
+        result_event: names.resultEvent
+    };
+};
+const resolveMainWorldEventNamesForSecret = (secret) => {
+    const hashed = hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|${secret}`);
+    return {
+        requestEvent: `${MAIN_WORLD_EVENT_REQUEST_PREFIX}${hashed}`,
+        resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${hashed}`
+    };
+};
+const createWindowEvent = (type, detail) => {
+    const CustomEventCtor = globalThis.CustomEvent;
+    if (typeof CustomEventCtor === "function") {
+        return new CustomEventCtor(type, { detail });
+    }
+    return { type, detail };
+};
+const onMainWorldResultEvent = (event) => {
+    const detail = (event.detail ?? null);
+    if (!detail || typeof detail.id !== "string") {
+        return;
+    }
+    const pending = pendingMainWorldRequests.get(detail.id);
+    if (!pending) {
+        return;
+    }
+    clearTimeout(pending.timeout);
+    pendingMainWorldRequests.delete(detail.id);
+    if (detail.ok === true) {
+        pending.resolve(detail.result);
+        return;
+    }
+    const message = typeof detail.message === "string" ? detail.message : "main world call failed";
+    pending.reject(new Error(message));
+};
+const detachMainWorldResultListener = () => {
+    if (!mainWorldResultListener || !mainWorldResultListenerEventName) {
+        return;
+    }
+    try {
+        window.removeEventListener(mainWorldResultListenerEventName, mainWorldResultListener);
+    }
+    catch {
+        // noop in contract environments
+    }
+    mainWorldResultListener = null;
+    mainWorldResultListenerEventName = null;
+};
+const installMainWorldEventChannelSecret = (secret) => {
+    const normalizedSecret = normalizeMainWorldSecret(secret);
+    if (typeof window === "undefined" ||
+        typeof window.addEventListener !== "function" ||
+        typeof window.dispatchEvent !== "function") {
+        detachMainWorldResultListener();
+        mainWorldEventChannel = null;
+        return false;
+    }
+    if (!normalizedSecret) {
+        detachMainWorldResultListener();
+        mainWorldEventChannel = null;
+        return false;
+    }
+    const names = resolveMainWorldEventNamesForSecret(normalizedSecret);
+    if (mainWorldEventChannel?.secret === normalizedSecret &&
+        mainWorldResultListenerEventName === names.resultEvent) {
+        return true;
+    }
+    detachMainWorldResultListener();
+    window.addEventListener(names.resultEvent, onMainWorldResultEvent);
+    mainWorldEventChannel = {
+        secret: normalizedSecret,
+        requestEvent: names.requestEvent,
+        resultEvent: names.resultEvent
+    };
+    mainWorldResultListener = onMainWorldResultEvent;
+    mainWorldResultListenerEventName = names.resultEvent;
+    window.dispatchEvent(createWindowEvent(MAIN_WORLD_EVENT_BOOTSTRAP, createMainWorldBootstrapDetail(normalizedSecret)));
+    return true;
+};
+const resetMainWorldEventChannelForContract = () => {
+    for (const pending of pendingMainWorldRequests.values()) {
+        clearTimeout(pending.timeout);
+        pending.reject(new Error("main world request reset"));
+    }
+    pendingMainWorldRequests.clear();
+    detachMainWorldResultListener();
+    mainWorldEventChannel = null;
+};
+const mainWorldCall = async (request) => {
+    const requestId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `mw-${Date.now()}`;
+    return await new Promise((resolve, reject) => {
+        if (!mainWorldEventChannel ||
+            typeof window === "undefined" ||
+            typeof window.dispatchEvent !== "function") {
+            reject(new Error("main world event channel unavailable"));
+            return;
+        }
+        const timeout = setTimeout(() => {
+            pendingMainWorldRequests.delete(requestId);
+            reject(new Error("main world event channel response timeout"));
+        }, MAIN_WORLD_CALL_TIMEOUT_MS);
+        pendingMainWorldRequests.set(requestId, {
+            resolve: (value) => resolve(value),
+            reject,
+            timeout
+        });
+        const requestDetail = {
+            id: requestId,
+            ...request
+        };
+        try {
+            window.dispatchEvent(createWindowEvent(mainWorldEventChannel.requestEvent, requestDetail));
+        }
+        catch (error) {
+            clearTimeout(timeout);
+            pendingMainWorldRequests.delete(requestId);
+            reject(error);
+        }
+    });
+};
+const installFingerprintRuntimeViaMainWorld = async (fingerprintRuntime) => await mainWorldCall({
+    type: "fingerprint-install",
+    payload: {
+        fingerprint_runtime: fingerprintRuntime
+    }
+});
+const verifyFingerprintRuntimeViaMainWorld = async () => await mainWorldCall({
+    type: "fingerprint-verify",
+    payload: {}
+});
+return { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret, verifyFingerprintRuntimeViaMainWorld };
+})();
+const __webenvoy_module_content_script_fingerprint = (() => {
+const { ensureFingerprintRuntimeContext } = __webenvoy_module_fingerprint_profile;
+const {
+  installFingerprintRuntimeViaMainWorld,
+  verifyFingerprintRuntimeViaMainWorld
+} = __webenvoy_module_content_script_main_world;
+const AUDIO_PATCH_EPSILON = 1e-12;
+const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value
+    : null;
+const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
+const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+const cloneFingerprintRuntimeContextWithInjection = (runtime, injection) => injection
+    ? {
+        ...runtime,
+        injection: JSON.parse(JSON.stringify(injection))
+    }
+    : { ...runtime };
+const resolveAttestedFingerprintRuntimeContext = (value) => {
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    const injection = asRecord(record.injection);
+    const direct = ensureFingerprintRuntimeContext(record);
+    if (direct) {
+        return cloneFingerprintRuntimeContextWithInjection(direct, injection);
+    }
+    const sanitized = { ...record };
+    delete sanitized.injection;
+    const normalized = ensureFingerprintRuntimeContext(sanitized);
+    return normalized ? cloneFingerprintRuntimeContextWithInjection(normalized, injection) : null;
+};
+const resolveFingerprintContextFromCommandParams = (commandParams) => asRecord(commandParams.fingerprint_context) ?? asRecord(commandParams.fingerprint_runtime) ?? null;
+const resolveFingerprintContextFromMessage = (message) => {
+    const direct = resolveAttestedFingerprintRuntimeContext(message.fingerprintContext ?? null);
+    if (direct) {
+        return direct;
+    }
+    const fallback = resolveAttestedFingerprintRuntimeContext(resolveFingerprintContextFromCommandParams(message.commandParams));
+    return fallback ?? null;
+};
+const resolveRequiredFingerprintPatches = (fingerprintRuntime) => asStringArray(asRecord(fingerprintRuntime.fingerprint_patch_manifest)?.required_patches);
+const buildFailedFingerprintInjectionContext = (fingerprintRuntime, errorMessage) => {
+    const requiredPatches = resolveRequiredFingerprintPatches(fingerprintRuntime);
+    return {
+        ...fingerprintRuntime,
+        injection: {
+            installed: false,
+            required_patches: requiredPatches,
+            missing_required_patches: requiredPatches,
+            error: errorMessage
+        }
+    };
+};
+const hasInstalledFingerprintInjection = (fingerprintRuntime) => {
+    const existingInjection = asRecord(fingerprintRuntime.injection);
+    return (existingInjection?.installed === true &&
+        asStringArray(existingInjection.missing_required_patches).length === 0);
+};
+const resolveMissingRequiredFingerprintPatches = (fingerprintRuntime) => {
+    const injection = asRecord(fingerprintRuntime.injection);
+    const requiredPatches = asStringArray(injection?.required_patches);
+    const missingRequiredPatches = asStringArray(injection?.missing_required_patches);
+    if (missingRequiredPatches.length > 0) {
+        return missingRequiredPatches;
+    }
+    if (injection?.installed === true) {
+        return [];
+    }
+    return requiredPatches;
+};
+const summarizeFingerprintRuntimeContext = (fingerprintRuntime) => {
+    if (!fingerprintRuntime) {
+        return null;
+    }
+    const record = fingerprintRuntime;
+    const execution = asRecord(record.execution);
+    const injection = asRecord(record.injection);
+    return {
+        profile: asString(record.profile),
+        source: asString(record.source),
+        execution: execution
+            ? {
+                live_allowed: execution.live_allowed === true,
+                live_decision: asString(execution.live_decision),
+                allowed_execution_modes: asStringArray(execution.allowed_execution_modes),
+                reason_codes: asStringArray(execution.reason_codes)
+            }
+            : null,
+        injection: injection
+            ? {
+                installed: injection.installed === true,
+                source: asString(injection.source),
+                required_patches: asStringArray(injection.required_patches),
+                missing_required_patches: asStringArray(injection.missing_required_patches),
+                error: asString(injection.error)
+            }
+            : null
+    };
+};
+const resolveFingerprintContextForContract = (message) => resolveFingerprintContextFromMessage({
+    commandParams: message.commandParams,
+    fingerprintContext: message.fingerprintContext
+});
+const probeAudioFirstSample = async () => {
+    const offlineAudioCtor = typeof window.OfflineAudioContext === "function"
+        ? window.OfflineAudioContext
+        : typeof window
+            .webkitOfflineAudioContext === "function"
+            ? window
+                .webkitOfflineAudioContext ?? null
+            : null;
+    if (!offlineAudioCtor) {
+        return null;
+    }
+    try {
+        const offlineAudioContext = new offlineAudioCtor(1, 256, 44_100);
+        const renderedBuffer = await offlineAudioContext.startRendering();
+        if (!renderedBuffer || typeof renderedBuffer.getChannelData !== "function") {
+            return null;
+        }
+        const channelData = renderedBuffer.getChannelData(0);
+        if (!channelData || typeof channelData.length !== "number" || channelData.length < 1) {
+            return null;
+        }
+        const firstSample = Number(channelData[0]);
+        return Number.isFinite(firstSample) ? firstSample : null;
+    }
+    catch {
+        return null;
+    }
+};
+const probeBatteryApi = async () => {
+    const getBattery = window.navigator
+        .getBattery;
+    if (typeof getBattery !== "function") {
+        return false;
+    }
+    try {
+        const battery = asRecord(await getBattery());
+        return typeof battery?.level === "number" && typeof battery?.charging === "boolean";
+    }
+    catch {
+        return false;
+    }
+};
+const probeNavigatorPlugins = () => {
+    const plugins = window.navigator.plugins;
+    return (typeof plugins === "object" &&
+        plugins !== null &&
+        typeof plugins.length === "number" &&
+        Number(plugins.length) > 0);
+};
+const probeNavigatorMimeTypes = () => {
+    const mimeTypes = window.navigator.mimeTypes;
+    return (typeof mimeTypes === "object" &&
+        mimeTypes !== null &&
+        typeof mimeTypes.length === "number" &&
+        Number(mimeTypes.length) > 0);
+};
+const verifyFingerprintInstallResult = async (input) => {
+    const requiredPatches = resolveRequiredFingerprintPatches(input.fingerprintRuntime);
+    const reportedAppliedPatches = asStringArray(input.installResult?.applied_patches);
+    const mainWorldVerification = requiredPatches.includes("battery")
+        ? asRecord(await verifyFingerprintRuntimeViaMainWorld().catch(() => null))
+        : null;
+    const appliedPatches = [];
+    const missingRequiredPatches = [];
+    const probeDetails = {};
+    if (requiredPatches.includes("audio_context")) {
+        const postInstallAudioSample = await probeAudioFirstSample();
+        const audioPatched = postInstallAudioSample !== null &&
+            (input.preInstallAudioSample === null ||
+                Math.abs(postInstallAudioSample - input.preInstallAudioSample) > AUDIO_PATCH_EPSILON ||
+                reportedAppliedPatches.includes("audio_context"));
+        probeDetails.audio_context = {
+            pre_install_first_sample: input.preInstallAudioSample,
+            post_install_first_sample: postInstallAudioSample,
+            verified: audioPatched
+        };
+        if (audioPatched) {
+            appliedPatches.push("audio_context");
+        }
+        else {
+            missingRequiredPatches.push("audio_context");
+        }
+    }
+    if (requiredPatches.includes("battery")) {
+        const isolatedWorldBatteryPatched = await probeBatteryApi();
+        const mainWorldBatteryPatched = mainWorldVerification?.has_get_battery === true;
+        const batteryPatched = isolatedWorldBatteryPatched || mainWorldBatteryPatched;
+        probeDetails.battery = {
+            verified: batteryPatched,
+            isolated_world_verified: isolatedWorldBatteryPatched,
+            main_world_verified: mainWorldBatteryPatched,
+            reported_applied: reportedAppliedPatches.includes("battery")
+        };
+        if (batteryPatched) {
+            appliedPatches.push("battery");
+        }
+        else {
+            missingRequiredPatches.push("battery");
+        }
+    }
+    if (requiredPatches.includes("navigator_plugins")) {
+        const pluginsPatched = probeNavigatorPlugins();
+        probeDetails.navigator_plugins = { verified: pluginsPatched };
+        if (pluginsPatched) {
+            appliedPatches.push("navigator_plugins");
+        }
+        else {
+            missingRequiredPatches.push("navigator_plugins");
+        }
+    }
+    if (requiredPatches.includes("navigator_mime_types")) {
+        const mimeTypesPatched = probeNavigatorMimeTypes();
+        probeDetails.navigator_mime_types = { verified: mimeTypesPatched };
+        if (mimeTypesPatched) {
+            appliedPatches.push("navigator_mime_types");
+        }
+        else {
+            missingRequiredPatches.push("navigator_mime_types");
+        }
+    }
+    for (const patchName of requiredPatches) {
+        if (!appliedPatches.includes(patchName) && !missingRequiredPatches.includes(patchName)) {
+            missingRequiredPatches.push(patchName);
+        }
+    }
+    return {
+        ...(input.installResult ?? {}),
+        installed: missingRequiredPatches.length === 0,
+        required_patches: requiredPatches,
+        applied_patches: appliedPatches,
+        missing_required_patches: missingRequiredPatches,
+        verification: {
+            channel: "isolated_world_probes",
+            probes: probeDetails
+        }
+    };
+};
+const installFingerprintRuntimeWithVerification = async (fingerprintRuntime) => {
+    const requiredPatches = resolveRequiredFingerprintPatches(fingerprintRuntime);
+    const preInstallAudioSample = requiredPatches.includes("audio_context")
+        ? await probeAudioFirstSample()
+        : null;
+    const installResult = await installFingerprintRuntimeViaMainWorld(fingerprintRuntime);
+    return await verifyFingerprintInstallResult({
+        fingerprintRuntime,
+        installResult: asRecord(installResult),
+        preInstallAudioSample
+    });
+};
+return { buildFailedFingerprintInjectionContext, hasInstalledFingerprintInjection, installFingerprintRuntimeWithVerification, resolveFingerprintContextForContract, resolveFingerprintContextFromMessage, resolveMissingRequiredFingerprintPatches, summarizeFingerprintRuntimeContext };
+})();
 const __webenvoy_module_content_script_handler = (() => {
 const { executeXhsSearch } = __webenvoy_module_xhs_search;
 const { performEditorInputValidation } = __webenvoy_module_xhs_editor_input;
+const { ensureFingerprintRuntimeContext } = __webenvoy_module_fingerprint_profile;
 const {
-  DEFAULT_MIME_TYPE_DESCRIPTORS,
-  DEFAULT_PLUGIN_DESCRIPTORS,
-  ensureFingerprintRuntimeContext
-} = __webenvoy_module_fingerprint_profile;
+  buildFailedFingerprintInjectionContext,
+  hasInstalledFingerprintInjection,
+  installFingerprintRuntimeWithVerification,
+  resolveFingerprintContextForContract,
+  resolveFingerprintContextFromMessage,
+  resolveMissingRequiredFingerprintPatches,
+  summarizeFingerprintRuntimeContext
+} = __webenvoy_module_content_script_fingerprint;
+const {
+  encodeMainWorldPayload,
+  installFingerprintRuntimeViaMainWorld,
+  installMainWorldEventChannelSecret,
+  MAIN_WORLD_EVENT_BOOTSTRAP,
+  resetMainWorldEventChannelForContract,
+  resolveMainWorldEventNamesForSecret
+} = __webenvoy_module_content_script_main_world;
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;

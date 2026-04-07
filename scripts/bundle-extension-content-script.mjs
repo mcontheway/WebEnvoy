@@ -39,6 +39,12 @@ const buildContentScriptBundle = async () => {
   const riskStateSource = await readSource(join(sharedRoot, "risk-state.js"));
   const xhsSearchSource = await readSource(join(buildRoot, "xhs-search.js"));
   const xhsEditorInputSource = await readSource(join(buildRoot, "xhs-editor-input.js"));
+  const contentScriptMainWorldSource = await readSource(
+    join(buildRoot, "content-script-main-world.js")
+  );
+  const contentScriptFingerprintSource = await readSource(
+    join(buildRoot, "content-script-fingerprint.js")
+  );
   const handlerSource = await readSource(join(buildRoot, "content-script-handler.js"));
   const contentScriptSource = await readSource(join(buildRoot, "content-script.js"));
 
@@ -93,16 +99,64 @@ const buildContentScriptBundle = async () => {
     exports: ["performEditorInputValidation"]
   });
 
+  const contentScriptMainWorldModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_content_script_main_world",
+    sourceBody: contentScriptMainWorldSource,
+    exports: [
+      "encodeMainWorldPayload",
+      "installFingerprintRuntimeViaMainWorld",
+      "installMainWorldEventChannelSecret",
+      "MAIN_WORLD_EVENT_BOOTSTRAP",
+      "resetMainWorldEventChannelForContract",
+      "resolveMainWorldEventNamesForSecret",
+      "verifyFingerprintRuntimeViaMainWorld"
+    ]
+  });
+
+  const contentScriptFingerprintModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_content_script_fingerprint",
+    prelude: [
+      "const { ensureFingerprintRuntimeContext } = __webenvoy_module_fingerprint_profile;",
+      "const {",
+      "  installFingerprintRuntimeViaMainWorld,",
+      "  verifyFingerprintRuntimeViaMainWorld",
+      "} = __webenvoy_module_content_script_main_world;"
+    ].join("\n"),
+    sourceBody: contentScriptFingerprintSource,
+    exports: [
+      "buildFailedFingerprintInjectionContext",
+      "hasInstalledFingerprintInjection",
+      "installFingerprintRuntimeWithVerification",
+      "resolveFingerprintContextForContract",
+      "resolveFingerprintContextFromMessage",
+      "resolveMissingRequiredFingerprintPatches",
+      "summarizeFingerprintRuntimeContext"
+    ]
+  });
+
   const handlerModule = renderClassicModule({
     moduleVar: "__webenvoy_module_content_script_handler",
     prelude: [
       "const { executeXhsSearch } = __webenvoy_module_xhs_search;",
       "const { performEditorInputValidation } = __webenvoy_module_xhs_editor_input;",
+      "const { ensureFingerprintRuntimeContext } = __webenvoy_module_fingerprint_profile;",
       "const {",
-      "  DEFAULT_MIME_TYPE_DESCRIPTORS,",
-      "  DEFAULT_PLUGIN_DESCRIPTORS,",
-      "  ensureFingerprintRuntimeContext",
-      "} = __webenvoy_module_fingerprint_profile;"
+      "  buildFailedFingerprintInjectionContext,",
+      "  hasInstalledFingerprintInjection,",
+      "  installFingerprintRuntimeWithVerification,",
+      "  resolveFingerprintContextForContract,",
+      "  resolveFingerprintContextFromMessage,",
+      "  resolveMissingRequiredFingerprintPatches,",
+      "  summarizeFingerprintRuntimeContext",
+      "} = __webenvoy_module_content_script_fingerprint;",
+      "const {",
+      "  encodeMainWorldPayload,",
+      "  installFingerprintRuntimeViaMainWorld,",
+      "  installMainWorldEventChannelSecret,",
+      "  MAIN_WORLD_EVENT_BOOTSTRAP,",
+      "  resetMainWorldEventChannelForContract,",
+      "  resolveMainWorldEventNamesForSecret",
+      "} = __webenvoy_module_content_script_main_world;"
     ].join("\n"),
     sourceBody: handlerSource,
     exports: [
@@ -136,6 +190,8 @@ const buildContentScriptBundle = async () => {
     fingerprintModule,
     xhsSearchModule,
     xhsEditorInputModule,
+    contentScriptMainWorldModule,
+    contentScriptFingerprintModule,
     handlerModule,
     contentScriptModule
   ].join("\n");
