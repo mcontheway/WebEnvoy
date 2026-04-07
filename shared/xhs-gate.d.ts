@@ -204,7 +204,6 @@ export declare const evaluateXhsGate: (input: XhsGateCoreInput & {
     requires_manual_confirmation: boolean;
   };
   consumer_gate_result: {
-    risk_state: RiskState;
     issue_scope: IssueScope;
     target_domain: string | null;
     target_tab_id: number | null;

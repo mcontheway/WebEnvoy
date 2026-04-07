@@ -107,8 +107,7 @@ describe("extension service worker / gate and approval", () => {
           target_page: "search_result_tab",
           requested_execution_mode: "dry_run",
           effective_execution_mode: "dry_run",
-          issue_scope: "issue_209",
-          risk_state: "paused"
+          issue_scope: "issue_209"
         },
         details: {
           reason: "SESSION_EXPIRED"
@@ -200,8 +199,7 @@ describe("extension service worker / gate and approval", () => {
             requested_execution_mode: "dry_run",
             effective_execution_mode: "dry_run",
             gate_decision: "allowed",
-            issue_scope: "issue_209",
-            risk_state: "paused"
+            issue_scope: "issue_209"
           }
         }
       }
@@ -647,7 +645,6 @@ describe("extension service worker / gate and approval", () => {
             reason?: string;
           };
           consumer_gate_result?: {
-            risk_state?: string;
             issue_scope?: string;
             target_domain?: string | null;
             target_tab_id?: number | null;
@@ -685,7 +682,6 @@ describe("extension service worker / gate and approval", () => {
         },
         consumer_gate_result: {
           issue_scope: "issue_209",
-          risk_state: "allowed",
           target_domain: "www.xiaohongshu.com",
           target_tab_id: 32,
           target_page: "search_result_tab",

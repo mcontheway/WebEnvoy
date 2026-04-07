@@ -394,7 +394,6 @@ describe("extension background relay contract / forward and timeout", () => {
         requires_manual_confirmation: false
       },
       consumer_gate_result: {
-        risk_state: "paused",
         requested_execution_mode: null,
         effective_execution_mode: null,
         gate_decision: "blocked",
@@ -2529,7 +2528,6 @@ describe("extension background relay contract / forward and timeout", () => {
           blocked_actions: ["expand_new_live_surface_without_gate"]
         },
         consumer_gate_result: {
-          risk_state: "allowed",
           requested_execution_mode: "live_read_high_risk",
           effective_execution_mode: "live_read_high_risk",
           gate_decision: "allowed",

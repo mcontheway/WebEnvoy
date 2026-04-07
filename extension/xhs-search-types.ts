@@ -115,7 +115,6 @@ export interface GateOutcomeRecord {
 }
 
 export interface ConsumerGateResult {
-  risk_state: RiskState;
   issue_scope: IssueScope;
   target_domain: string | null;
   target_tab_id: number | null;

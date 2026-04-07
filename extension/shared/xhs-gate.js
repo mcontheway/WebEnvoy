@@ -710,7 +710,6 @@ const evaluateXhsGate = (input) => {
         state.requestedExecutionMode === "live_write"
     },
     consumer_gate_result: {
-      risk_state: state.riskState,
       issue_scope: state.issueScope,
       target_domain: asString(input.targetDomain),
       target_tab_id: asInteger(input.targetTabId),

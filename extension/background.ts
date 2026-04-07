@@ -254,7 +254,6 @@ interface XhsTargetGateResult {
   errorMessage: string;
   gateOnly: boolean;
   consumerGateResult: {
-    risk_state: XhsRiskState;
     issue_scope: XhsIssueScope;
     target_domain: string | null;
     target_tab_id: number | null;
@@ -3378,7 +3377,6 @@ class ChromeBackgroundBridge {
         requestedExecutionMode === "live_read_high_risk" ||
         requestedExecutionMode === "live_write");
     const consumerGateResult = {
-      risk_state: riskState,
       issue_scope: issueScope,
       target_domain: targetDomain,
       target_tab_id: targetTabId,

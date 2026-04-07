@@ -98,7 +98,6 @@ describe("extension background relay contract / gate matrix", () => {
         requires_manual_confirmation: false
       },
       consumer_gate_result: {
-        risk_state: "paused",
         requested_execution_mode: null,
         effective_execution_mode: null,
         gate_decision: "blocked",

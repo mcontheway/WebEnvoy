@@ -79,7 +79,7 @@ const extractGateAuditRecordInput = (source) => {
         asString(source.session_id);
     const profile = asString(auditRecord.profile) ?? asString(gateInput?.profile) ?? asString(source.profile);
     const eventId = asString(auditRecord.event_id);
-    const riskState = asString(auditRecord.risk_state) ?? asString(consumerGateResult?.risk_state);
+    const riskState = asString(auditRecord.risk_state) ?? asString(gateInput?.risk_state);
     const issueScope = asString(auditRecord.issue_scope) ??
         asString(gateInput?.issue_scope) ??
         asString(transitionAudit?.issue_scope) ??
