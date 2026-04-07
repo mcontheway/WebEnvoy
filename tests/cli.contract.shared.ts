@@ -24,7 +24,7 @@ const repoOwnedNativeHostEntryPath = path.join(
 const browserStateFilename = "__webenvoy_browser_instance.json";
 
 const tempDirs: string[] = [];
-type DatabaseSyncCtor = new (filePath: string) => {
+export type DatabaseSyncCtor = new (filePath: string) => {
   prepare: (sql: string) => { run: (...args: unknown[]) => unknown };
   close: () => void;
 };
@@ -563,5 +563,71 @@ Object.assign(globalThis as Record<string, unknown>, {
     scopedReadGateOptions
   }
 });
+
+export {
+  spawn,
+  spawnSync,
+  createServer,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+  createRequire,
+  tmpdir,
+  path,
+  afterEach,
+  describe,
+  expect,
+  it,
+  buildRuntimeBootstrapContextId,
+  resolveRuntimeStorePath,
+  repoRoot,
+  binPath,
+  mockBrowserPath,
+  nativeHostMockPath,
+  repoOwnedNativeHostEntryPath,
+  browserStateFilename,
+  tempDirs,
+  DatabaseSync,
+  itWithSqlite,
+  resolveDatabaseSync,
+  createRuntimeCwd,
+  createNativeHostManifest,
+  seedInstalledPersistentExtension,
+  defaultRuntimeEnv,
+  runCli,
+  expectBundledNativeHostStarts,
+  createNativeHostCommand,
+  createShellWrappedNativeHostCommand,
+  PROFILE_MODE_ROOT_PREFERRED,
+  quoteLauncherExportValue,
+  resolveCanonicalExpectedProfileDir,
+  expectProfileRootOnlyLauncherContract,
+  expectDualEnvRootPreferredLauncherContract,
+  runGit,
+  createGitWorktreePair,
+  runCliAsync,
+  parseSingleJsonLine,
+  encodeNativeBridgeEnvelope,
+  readSingleNativeBridgeEnvelope,
+  asRecord,
+  resolveCliGateEnvelope,
+  resolveWriteInteractionTier,
+  scopedXhsGateOptions,
+  assertLockMissing,
+  detectSystemChromePath,
+  wait,
+  runHeadlessDomProbe,
+  realBrowserContractsEnabled,
+  BROWSER_STATE_FILENAME,
+  BROWSER_CONTROL_FILENAME,
+  isPidAlive,
+  scopedReadGateOptions
+};
 
 export {};

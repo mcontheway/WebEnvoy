@@ -1,3 +1,3 @@
-import "./extension.relay.contract/transport.scenarios.js";
-import "./extension.relay.contract/gate.scenarios.js";
-import "./extension.relay.contract/live-approval.scenarios.js";
+import "./extension.relay.forward-timeout.suite.js";
+import "./extension.relay.gate-approval.suite.js";
+import "./extension.relay.target-binding-editor.suite.js";

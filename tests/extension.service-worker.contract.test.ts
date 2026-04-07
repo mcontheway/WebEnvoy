@@ -1,3 +1,4 @@
-import "./extension.service-worker.contract/bootstrap-trust.scenarios.js";
-import "./extension.service-worker.contract/xhs-gate.scenarios.js";
-import "./extension.service-worker.contract/recovery-signature.scenarios.js";
+import "./extension.service-worker.bootstrap-trust.suite.js";
+import "./extension.service-worker.gate-approval.suite.js";
+import "./extension.service-worker.recovery-relay.suite.js";
+import "./extension.service-worker.signature-editor.suite.js";
