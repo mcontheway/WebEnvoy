@@ -205,9 +205,16 @@ export class SQLiteRuntimeStore {
                 throw new RuntimeStoreError("ERR_RUNTIME_STORE_RUN_NOT_FOUND", "run not found");
             }
             const nowIso = new Date().toISOString();
-            const approvalId = typeof input.approvalId === "string" && input.approvalId.trim().length > 0
+            let approvalId = typeof input.approvalId === "string" && input.approvalId.trim().length > 0
                 ? input.approvalId.trim()
                 : `gate_appr_${input.decisionId}`;
+            const existingApprovalById = this.#db
+                .prepare("SELECT decision_id FROM runtime_gate_approvals WHERE approval_id = ?")
+                .get(approvalId);
+            if (existingApprovalById?.decision_id &&
+                existingApprovalById.decision_id !== input.decisionId) {
+                approvalId = `gate_appr_${input.decisionId}`;
+            }
             this.#db
                 .prepare(`
           INSERT INTO runtime_gate_approvals(

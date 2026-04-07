@@ -445,10 +445,19 @@ export class SQLiteRuntimeStore {
       }
 
       const nowIso = new Date().toISOString();
-      const approvalId =
+      let approvalId =
         typeof input.approvalId === "string" && input.approvalId.trim().length > 0
           ? input.approvalId.trim()
           : `gate_appr_${input.decisionId}`;
+      const existingApprovalById = this.#db
+        .prepare("SELECT decision_id FROM runtime_gate_approvals WHERE approval_id = ?")
+        .get(approvalId) as { decision_id?: string } | undefined;
+      if (
+        existingApprovalById?.decision_id &&
+        existingApprovalById.decision_id !== input.decisionId
+      ) {
+        approvalId = `gate_appr_${input.decisionId}`;
+      }
       this.#db
         .prepare(
           `

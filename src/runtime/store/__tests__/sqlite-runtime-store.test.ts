@@ -367,6 +367,57 @@ describeWithSqlite("sqlite-runtime-store", () => {
     expect(approval.decision_id).toBe("gate_decision_run-gate-custom-approval-001_req-1");
   });
 
+  it("falls back to a decision-scoped approval_id when a reused caller approval_id would hit a primary-key conflict", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    await store.upsertRun({
+      runId: "run-gate-conflict-approval-001",
+      sessionId: "session-gate-conflict-approval-1",
+      profileName: "profile-a",
+      command: "xhs.search",
+      status: "succeeded",
+      startedAt: "2026-03-23T10:00:00.000Z",
+      endedAt: "2026-03-23T10:00:01.000Z",
+      errorCode: null
+    });
+
+    await store.upsertApprovalRecord({
+      approvalId: "gate_appr_custom_conflict",
+      runId: "run-gate-conflict-approval-001",
+      decisionId: "gate_decision_run-gate-conflict-approval-001_req-1",
+      approved: true,
+      approver: "qa-reviewer-a",
+      approvedAt: "2026-03-23T10:00:10.000Z",
+      checks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      }
+    });
+
+    const approval = await store.upsertApprovalRecord({
+      approvalId: "gate_appr_custom_conflict",
+      runId: "run-gate-conflict-approval-001",
+      decisionId: "gate_decision_run-gate-conflict-approval-001_req-2",
+      approved: true,
+      approver: "qa-reviewer-b",
+      approvedAt: "2026-03-23T10:00:20.000Z",
+      checks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      }
+    });
+    store.close();
+
+    expect(approval.approval_id).toBe("gate_appr_gate_decision_run-gate-conflict-approval-001_req-2");
+    expect(approval.decision_id).toBe("gate_decision_run-gate-conflict-approval-001_req-2");
+  });
+
   it("keeps separate approval records for multiple decisions in the same run", async () => {
     const cwd = await createTempCwd();
     const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
