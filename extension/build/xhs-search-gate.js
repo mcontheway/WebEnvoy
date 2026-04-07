@@ -1,45 +1,39 @@
-import { buildRiskTransitionAudit, buildUnifiedRiskStateOutput, resolveIssueScope as resolveSharedIssueScope, resolveRiskState as resolveSharedRiskState } from "../shared/risk-state.js";
+import { buildRiskTransitionAudit, resolveIssueScope as resolveSharedIssueScope, resolveRiskState as resolveSharedRiskState } from "../shared/risk-state.js";
 import { evaluateXhsGate } from "../shared/xhs-gate.js";
-import { classifyPageKind } from "./xhs-search-observability.js";
+import { resolveRiskStateOutput } from "./xhs-search-telemetry.js";
+export { resolveRiskStateOutput } from "./xhs-search-telemetry.js";
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
 const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
 const resolveRiskState = (value) => resolveSharedRiskState(value);
 const resolveIssueScope = (value) => resolveSharedIssueScope(value);
-export const isIssue208EditorInputValidation = (options) => options.issue_scope === "issue_208" &&
+const isIssue208EditorInputValidation = (options) => options.issue_scope === "issue_208" &&
     options.action_type === "write" &&
     options.requested_execution_mode === "live_write" &&
     options.validation_action === "editor_input";
-export const resolveEditorValidationText = (options) => typeof options.validation_text === "string" && options.validation_text.trim().length > 0
-    ? options.validation_text.trim()
-    : "WebEnvoy editor_input validation";
-export const resolveEditorFocusAttestation = (options) => {
-    const record = asRecord(options.editor_focus_attestation);
-    if (!record) {
-        return null;
+export const resolveActualTargetGateReasons = (options) => {
+    const gateReasons = [];
+    const targetDomain = asNonEmptyString(options.target_domain);
+    const targetTabId = asInteger(options.target_tab_id);
+    const targetPage = asNonEmptyString(options.target_page);
+    const actualTargetDomain = asNonEmptyString(options.actual_target_domain);
+    const actualTargetTabId = asInteger(options.actual_target_tab_id);
+    const actualTargetPage = asNonEmptyString(options.actual_target_page);
+    if (actualTargetDomain && targetDomain && actualTargetDomain !== targetDomain) {
+        gateReasons.push("TARGET_DOMAIN_CONTEXT_MISMATCH");
     }
-    const source = typeof record.source === "string" ? record.source : null;
-    const targetTabId = typeof record.target_tab_id === "number" && Number.isInteger(record.target_tab_id)
-        ? record.target_tab_id
-        : null;
-    const editableState = record.editable_state === "entered" || record.editable_state === "already_ready"
-        ? record.editable_state
-        : null;
-    if (source !== "chrome_debugger" || targetTabId === null || editableState === null) {
-        return null;
+    if (actualTargetTabId !== null && targetTabId !== null && actualTargetTabId !== targetTabId) {
+        gateReasons.push("TARGET_TAB_CONTEXT_MISMATCH");
     }
-    return {
-        source,
-        target_tab_id: targetTabId,
-        editable_state: editableState,
-        focus_confirmed: record.focus_confirmed === true,
-        entry_button_locator: typeof record.entry_button_locator === "string" ? record.entry_button_locator : null,
-        entry_button_target_key: typeof record.entry_button_target_key === "string" ? record.entry_button_target_key : null,
-        editor_locator: typeof record.editor_locator === "string" ? record.editor_locator : null,
-        editor_target_key: typeof record.editor_target_key === "string" ? record.editor_target_key : null,
-        failure_reason: typeof record.failure_reason === "string" ? record.failure_reason : null
-    };
+    if (targetPage && !actualTargetPage) {
+        gateReasons.push("TARGET_PAGE_CONTEXT_UNRESOLVED");
+    }
+    if (actualTargetPage && targetPage && actualTargetPage !== targetPage) {
+        gateReasons.push("TARGET_PAGE_CONTEXT_MISMATCH");
+    }
+    return gateReasons;
 };
 export const resolveGate = (options) => evaluateXhsGate({
     issueScope: options.issue_scope,
@@ -58,77 +52,6 @@ export const resolveGate = (options) => evaluateXhsGate({
     issue208EditorInputValidation: isIssue208EditorInputValidation(options),
     treatMissingEditorValidationAsUnsupported: true
 });
-export const resolveRiskStateOutput = (gate, auditRecord) => buildUnifiedRiskStateOutput(resolveRiskState(auditRecord?.next_state ?? gate.gate_input.risk_state), {
-    auditRecords: auditRecord ? [auditRecord] : [],
-    now: auditRecord?.recorded_at ?? Date.now()
-});
-export const createGateOnlySuccess = (input, gate, auditRecord, env) => ({
-    ok: true,
-    payload: {
-        summary: {
-            capability_result: {
-                ability_id: input.abilityId,
-                layer: input.abilityLayer,
-                action: gate.consumer_gate_result.action_type ?? input.abilityAction,
-                outcome: "partial",
-                data_ref: {
-                    query: input.params.query
-                },
-                metrics: {
-                    count: 0
-                }
-            },
-            scope_context: gate.scope_context,
-            gate_input: {
-                run_id: auditRecord.run_id,
-                session_id: auditRecord.session_id,
-                profile: auditRecord.profile,
-                ...gate.gate_input
-            },
-            gate_outcome: gate.gate_outcome,
-            read_execution_policy: gate.read_execution_policy,
-            issue_action_matrix: gate.issue_action_matrix,
-            write_interaction_tier: gate.write_interaction_tier,
-            write_action_matrix_decisions: gate.write_action_matrix_decisions,
-            consumer_gate_result: gate.consumer_gate_result,
-            approval_record: gate.approval_record,
-            risk_state_output: resolveRiskStateOutput(gate, auditRecord),
-            audit_record: auditRecord
-        },
-        observability: {
-            page_state: {
-                page_kind: classifyPageKind(env.getLocationHref()),
-                url: env.getLocationHref(),
-                title: env.getDocumentTitle(),
-                ready_state: env.getReadyState()
-            },
-            key_requests: [],
-            failure_site: null
-        }
-    }
-});
-export const buildEditorInputEvidence = (result) => ({
-    validation_action: "editor_input",
-    target_page: "creator.xiaohongshu.com/publish",
-    validation_mode: result.mode,
-    validation_attestation: result.attestation,
-    editor_locator: result.editor_locator,
-    input_text: result.input_text,
-    before_text: result.before_text,
-    visible_text: result.visible_text,
-    post_blur_text: result.post_blur_text,
-    focus_confirmed: result.focus_confirmed,
-    focus_attestation_source: result.focus_attestation_source,
-    focus_attestation_reason: result.focus_attestation_reason,
-    preserved_after_blur: result.preserved_after_blur,
-    success_signals: result.success_signals,
-    failure_signals: result.failure_signals,
-    minimum_replay: result.minimum_replay,
-    out_of_scope_actions: ["image_upload", "submit", "publish_confirm"]
-});
-export const isTrustedEditorInputValidation = (result) => result.ok &&
-    result.mode === "controlled_editor_input_validation" &&
-    result.attestation === "controlled_real_interaction";
 export const createAuditRecord = (context, gate, env) => {
     const recordedAt = new Date(env.now()).toISOString();
     const requestedMode = gate.consumer_gate_result.requested_execution_mode;
@@ -168,8 +91,8 @@ export const createAuditRecord = (context, gate, env) => {
     const transitionAudit = buildRiskTransitionAudit({
         runId: context.runId,
         sessionId: context.sessionId,
-        issueScope: resolveIssueScope(gate.gate_input.issue_scope),
-        prevState: resolveRiskState(gate.gate_input.risk_state),
+        issueScope: gate.gate_input.issue_scope,
+        prevState: gate.gate_input.risk_state,
         decision: gate.consumer_gate_result.gate_decision,
         gateReasons: [...gate.consumer_gate_result.gate_reasons],
         requestedExecutionMode: gate.consumer_gate_result.requested_execution_mode,
@@ -181,29 +104,56 @@ export const createAuditRecord = (context, gate, env) => {
     auditRecord.transition_trigger = transitionAudit.trigger;
     return auditRecord;
 };
-export const resolveTargetContextMismatchReasons = (options) => {
-    const gateReasons = [];
-    const targetDomain = asNonEmptyString(options.target_domain);
-    const targetTabId = typeof options.target_tab_id === "number" && Number.isInteger(options.target_tab_id)
-        ? options.target_tab_id
-        : null;
-    const targetPage = asNonEmptyString(options.target_page);
-    const actualTargetDomain = asNonEmptyString(options.actual_target_domain);
-    const actualTargetTabId = typeof options.actual_target_tab_id === "number" && Number.isInteger(options.actual_target_tab_id)
-        ? options.actual_target_tab_id
-        : null;
-    const actualTargetPage = asNonEmptyString(options.actual_target_page);
-    if (actualTargetDomain && targetDomain && actualTargetDomain !== targetDomain) {
-        gateReasons.push("TARGET_DOMAIN_CONTEXT_MISMATCH");
+export const createGateOnlySuccess = (input, gate, auditRecord, env) => ({
+    ok: true,
+    payload: {
+        summary: {
+            capability_result: {
+                ability_id: input.abilityId,
+                layer: input.abilityLayer,
+                action: gate.consumer_gate_result.action_type ?? input.abilityAction,
+                outcome: "partial",
+                data_ref: {
+                    query: input.params.query
+                },
+                metrics: {
+                    count: 0
+                }
+            },
+            scope_context: gate.scope_context,
+            gate_input: {
+                run_id: auditRecord.run_id,
+                session_id: auditRecord.session_id,
+                profile: auditRecord.profile,
+                ...gate.gate_input
+            },
+            gate_outcome: gate.gate_outcome,
+            read_execution_policy: gate.read_execution_policy,
+            issue_action_matrix: gate.issue_action_matrix,
+            write_interaction_tier: gate.write_interaction_tier,
+            write_action_matrix_decisions: gate.write_action_matrix_decisions,
+            consumer_gate_result: gate.consumer_gate_result,
+            approval_record: gate.approval_record,
+            risk_state_output: resolveRiskStateOutput(gate, auditRecord),
+            audit_record: auditRecord
+        },
+        observability: {
+            page_state: {
+                page_kind: env.getLocationHref().includes("/login")
+                    ? "login"
+                    : env.getLocationHref().includes("creator.xiaohongshu.com/publish")
+                        ? "compose"
+                        : env.getLocationHref().includes("/search_result")
+                            ? "search"
+                            : env.getLocationHref().includes("/explore/")
+                                ? "detail"
+                                : "unknown",
+                url: env.getLocationHref(),
+                title: env.getDocumentTitle(),
+                ready_state: env.getReadyState()
+            },
+            key_requests: [],
+            failure_site: null
+        }
     }
-    if (actualTargetTabId !== null && targetTabId !== null && actualTargetTabId !== targetTabId) {
-        gateReasons.push("TARGET_TAB_CONTEXT_MISMATCH");
-    }
-    if (targetPage && !actualTargetPage) {
-        gateReasons.push("TARGET_PAGE_CONTEXT_UNRESOLVED");
-    }
-    if (actualTargetPage && targetPage && actualTargetPage !== targetPage) {
-        gateReasons.push("TARGET_PAGE_CONTEXT_MISMATCH");
-    }
-    return gateReasons;
-};
+});
