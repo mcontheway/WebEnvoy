@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -128,8 +129,16 @@ const defaultRuntimeEnv = (cwd: string): Record<string, string> => ({
 });
 
 let cliContractRuntimeBuilt = false;
-const runtimeBuildSession = process.env.WEBENVOY_CLI_CONTRACT_BUILD_SESSION ?? "manual";
-const runtimeBuildLockRoot = path.join(repoRoot, ".tmp", "cli-contract-runtime-build", runtimeBuildSession);
+const runtimeBuildRepoKey = createHash("sha1").update(repoRoot).digest("hex").slice(0, 12);
+const runtimeBuildSession =
+  process.env.WEBENVOY_CLI_CONTRACT_BUILD_SESSION ??
+  `ppid-${String(process.ppid)}`;
+const runtimeBuildLockRoot = path.join(
+  tmpdir(),
+  "webenvoy-cli-contract-runtime-build",
+  runtimeBuildRepoKey,
+  runtimeBuildSession
+);
 const runtimeBuildLockDir = path.join(runtimeBuildLockRoot, "lock");
 const runtimeBuildSuccessMarker = path.join(runtimeBuildLockRoot, "success");
 const runtimeBuildFailureMarker = path.join(runtimeBuildLockRoot, "failure");
