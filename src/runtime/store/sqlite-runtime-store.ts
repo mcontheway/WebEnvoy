@@ -606,15 +606,24 @@ export class SQLiteRuntimeStore {
     }
 
     const auditRecords = this.#listGateAuditRecords({ runId });
+    const latestApprovedDecisionId =
+      auditRecords.find(
+        (record): record is GateAuditRecord & { decision_id: string; approval_id: string } =>
+          typeof record.decision_id === "string" &&
+          record.decision_id.length > 0 &&
+          typeof record.approval_id === "string" &&
+          record.approval_id.length > 0
+      )?.decision_id ?? null;
     const latestDecisionId =
       auditRecords.find(
         (record): record is GateAuditRecord & { decision_id: string } =>
           typeof record.decision_id === "string" && record.decision_id.length > 0
       )?.decision_id ?? null;
+    const approvalDecisionId = latestApprovedDecisionId ?? latestDecisionId;
 
     return {
-      approvalRecord: latestDecisionId
-        ? this.#getOptionalGateApprovalByDecisionId(latestDecisionId)
+      approvalRecord: approvalDecisionId
+        ? this.#getOptionalGateApprovalByDecisionId(approvalDecisionId)
         : this.#getOptionalGateApprovalByRunId(runId),
       auditRecords
     };

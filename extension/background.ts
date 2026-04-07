@@ -756,6 +756,23 @@ const buildGateOnlyObservability = (
   };
 };
 
+const resolveGatePayloadApprovalId = (input: {
+  approvalActive: boolean;
+  approvalRecord: XhsApprovalRecord;
+  decisionId: string;
+}): string | null => {
+  if (!input.approvalActive || !isApprovalRecordComplete(input.approvalRecord)) {
+    return null;
+  }
+
+  const approvalDecisionId = asNonEmptyString(input.approvalRecord.decision_id);
+  if (approvalDecisionId && approvalDecisionId !== input.decisionId) {
+    return `gate_appr_${input.decisionId}`;
+  }
+
+  return asNonEmptyString(input.approvalRecord.approval_id) ?? `gate_appr_${input.decisionId}`;
+};
+
 const createBridgeXhsGateOnlyPayload = (
   request: BridgeRequest,
   gatePayload: Record<string, unknown>
@@ -814,10 +831,11 @@ const createRelayXhsGatePayload = (input: {
     (input.effectiveExecutionMode === "live_read_limited" ||
       input.effectiveExecutionMode === "live_read_high_risk" ||
       input.effectiveExecutionMode === "live_write");
-  const approvalId =
-    approvalActive && isApprovalRecordComplete(input.approvalRecord)
-      ? (input.approvalRecord.approval_id ?? `gate_appr_${decisionId}`)
-      : null;
+  const approvalId = resolveGatePayloadApprovalId({
+    approvalActive,
+    approvalRecord: input.approvalRecord,
+    decisionId
+  });
   const approvalRecord = {
     ...input.approvalRecord,
     approval_id: approvalId,
@@ -933,10 +951,11 @@ const createBackgroundXhsGatePayload = (input: {
     (input.effectiveExecutionMode === "live_read_limited" ||
       input.effectiveExecutionMode === "live_read_high_risk" ||
       input.effectiveExecutionMode === "live_write");
-  const approvalId =
-    approvalActive && isApprovalRecordComplete(input.approvalRecord)
-      ? (input.approvalRecord.approval_id ?? `gate_appr_${decisionId}`)
-      : null;
+  const approvalId = resolveGatePayloadApprovalId({
+    approvalActive,
+    approvalRecord: input.approvalRecord,
+    decisionId
+  });
   const approvalRecord = {
     ...input.approvalRecord,
     approval_id: approvalId,

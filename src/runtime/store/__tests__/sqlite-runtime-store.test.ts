@@ -574,6 +574,100 @@ describeWithSqlite("sqlite-runtime-store", () => {
     ]);
   });
 
+  it("keeps the latest real approval in run-level audit trails even when the newest decision is blocked", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+
+    await store.upsertRun({
+      runId: "run-gate-approval-fallback-001",
+      sessionId: "session-gate-approval-fallback-001",
+      profileName: "profile-a",
+      command: "xhs.search",
+      status: "succeeded",
+      startedAt: "2026-03-23T10:00:00.000Z",
+      endedAt: "2026-03-23T10:00:30.000Z",
+      errorCode: null
+    });
+    await store.upsertApprovalRecord({
+      approvalId: "gate_appr_run-gate-approval-fallback-001_req-1",
+      runId: "run-gate-approval-fallback-001",
+      decisionId: "gate_decision_run-gate-approval-fallback-001_req-1",
+      approved: true,
+      approver: "qa-reviewer-a",
+      approvedAt: "2026-03-23T10:00:10.000Z",
+      checks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      }
+    });
+    await store.appendAuditRecord({
+      eventId: "gate_evt_run-gate-approval-fallback-001_req-1",
+      decisionId: "gate_decision_run-gate-approval-fallback-001_req-1",
+      approvalId: "gate_appr_run-gate-approval-fallback-001_req-1",
+      runId: "run-gate-approval-fallback-001",
+      sessionId: "session-gate-approval-fallback-001",
+      profile: "profile-a",
+      issueScope: "issue_209",
+      riskState: "allowed",
+      nextState: "allowed",
+      transitionTrigger: "manual_approval",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 40,
+      targetPage: "search_result_tab",
+      actionType: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      effectiveExecutionMode: "live_read_high_risk",
+      gateDecision: "allowed",
+      gateReasons: ["LIVE_MODE_APPROVED"],
+      approver: "qa-reviewer-a",
+      approvedAt: "2026-03-23T10:00:10.000Z",
+      recordedAt: "2026-03-23T10:00:11.000Z"
+    });
+    await store.appendAuditRecord({
+      eventId: "gate_evt_run-gate-approval-fallback-001_req-2",
+      decisionId: "gate_decision_run-gate-approval-fallback-001_req-2",
+      approvalId: null,
+      runId: "run-gate-approval-fallback-001",
+      sessionId: "session-gate-approval-fallback-001",
+      profile: "profile-a",
+      issueScope: "issue_209",
+      riskState: "paused",
+      nextState: "paused",
+      transitionTrigger: "gate_evaluation",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 40,
+      targetPage: "search_result_tab",
+      actionType: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      effectiveExecutionMode: "dry_run",
+      gateDecision: "blocked",
+      gateReasons: ["RISK_STATE_PAUSED", "ISSUE_ACTION_MATRIX_BLOCKED"],
+      approver: null,
+      approvedAt: null,
+      recordedAt: "2026-03-23T10:00:21.000Z"
+    });
+
+    const trail = await store.getAuditTrailByRunId("run-gate-approval-fallback-001");
+    store.close();
+
+    expect(trail.approval_record).toMatchObject({
+      approval_id: "gate_appr_run-gate-approval-fallback-001_req-1",
+      decision_id: "gate_decision_run-gate-approval-fallback-001_req-1",
+      approver: "qa-reviewer-a"
+    });
+    expect(trail.audit_records.map((record) => record.decision_id)).toEqual([
+      "gate_decision_run-gate-approval-fallback-001_req-2",
+      "gate_decision_run-gate-approval-fallback-001_req-1"
+    ]);
+    expect(trail.audit_records.map((record) => record.approval_id)).toEqual([
+      null,
+      "gate_appr_run-gate-approval-fallback-001_req-1"
+    ]);
+  });
+
   it("backfills v6 gate linkage fields during v7 migration", async () => {
     const cwd = await createTempCwd();
     const dbPath = resolveRuntimeStorePath(cwd);
