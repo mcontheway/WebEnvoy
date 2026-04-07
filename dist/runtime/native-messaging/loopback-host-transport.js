@@ -1,3 +1,4 @@
+import { ensureBridgeRequestEnvelope } from "./protocol.js";
 export class InMemoryHostTransport {
     hostPort;
     #pending = new Map();
@@ -25,6 +26,7 @@ export class InMemoryHostTransport {
         return this.request(request);
     }
     request(request) {
+        ensureBridgeRequestEnvelope(request);
         return new Promise((resolve) => {
             this.#pending.set(request.id, { resolve, reject: () => undefined });
             this.hostPort.postMessage({

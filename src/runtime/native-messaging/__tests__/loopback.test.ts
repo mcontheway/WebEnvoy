@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { NativeMessagingBridge } from "../bridge.js";
+import type { HostMessage } from "../loopback-messages.js";
+import { createPortPair } from "../loopback-port.js";
 import { createLoopbackNativeBridgeTransport } from "../loopback.js";
+import { InMemoryHostTransport } from "../loopback-host-transport.js";
 
 describe("native messaging default loopback chain", () => {
   it("uses host -> background -> content-script -> background -> host path by default", async () => {
@@ -21,6 +24,29 @@ describe("native messaging default loopback chain", () => {
       protocol: "webenvoy.native-bridge.v1"
     });
     expect(result.message).toBe("pong");
+  });
+
+  it("fails malformed loopback requests before they reach the relay", async () => {
+    const [hostPort] = createPortPair<HostMessage>();
+    const transport = new InMemoryHostTransport(hostPort);
+    let relayed = false;
+
+    hostPort.onMessage(() => {
+      relayed = true;
+    });
+
+    expect(() =>
+      transport.forward({
+        id: "bad-forward-001",
+        method: "bridge.forward",
+        profile: "profile-a",
+        params: null
+      } as never)
+    ).toThrow("invalid request envelope");
+
+    await Promise.resolve();
+
+    expect(relayed).toBe(false);
   });
 
   it("converges pending bootstrap to ready without requiring runtime.ping", async () => {

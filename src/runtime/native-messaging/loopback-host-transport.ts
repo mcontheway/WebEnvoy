@@ -1,4 +1,8 @@
-import type { BridgeRequestEnvelope, BridgeResponseEnvelope } from "./protocol.js";
+import {
+  ensureBridgeRequestEnvelope,
+  type BridgeRequestEnvelope,
+  type BridgeResponseEnvelope
+} from "./protocol.js";
 import type { NativeBridgeTransport } from "./transport.js";
 import type { HostMessage } from "./loopback-messages.js";
 import type { InMemoryPort } from "./loopback-port.js";
@@ -41,6 +45,7 @@ export class InMemoryHostTransport implements NativeBridgeTransport {
   }
 
   private request(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+    ensureBridgeRequestEnvelope(request);
     return new Promise<BridgeResponseEnvelope>((resolve) => {
       this.#pending.set(request.id, { resolve, reject: () => undefined });
       this.hostPort.postMessage({
