@@ -75,6 +75,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - 重放是“已保存能力的再运行入口”
   - 不等于重新训练、重新学习或自动修复
   - replay 必须显式落在目标 `profile_ref` 上，不得跨 profile 复用 `last_success_input`
+  - 当 `replay_source=explicit_input_snapshot` 时，请求必须显式给出 `replay_input_ref`
 
 ### 4. 最小可信判断对象
 

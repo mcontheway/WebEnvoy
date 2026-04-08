@@ -16,13 +16,20 @@ interface AbilityValidationRequest {
 ## 2. `ability_replay_request`
 
 ```ts
-interface AbilityReplayRequest {
-  ability_ref: string
-  profile_ref: string
-  replay_source: "last_success_input" | "explicit_input_snapshot"
-  replay_input_ref?: string
-  replay_reason: string
-}
+type AbilityReplayRequest =
+  | {
+      ability_ref: string
+      profile_ref: string
+      replay_source: "last_success_input"
+      replay_reason: string
+    }
+  | {
+      ability_ref: string
+      profile_ref: string
+      replay_source: "explicit_input_snapshot"
+      replay_input_ref: string
+      replay_reason: string
+    }
 ```
 
 ## 3. `ability_health_view`
@@ -51,6 +58,7 @@ interface AbilityHealthView {
 - `health_state` 只表达最小可信判断，不表达是否可交付。
 - `failure_class` 只表达用户可读的大类，不替代低层错误码。
 - `validation_mode=replay_validation && input_source=explicit_input_snapshot` 时，`replay_input_ref` 必须存在；`input_source=last_success_input` 时不得伪造显式 snapshot 引用。
+- `replay_source=explicit_input_snapshot` 时，`ability_replay_request.replay_input_ref` 必须存在；`replay_source=last_success_input` 时不得伪造显式 snapshot 引用。
 - `profile_ref` 是 `ability_health_view` 的正式隔离维度；不同 profile 不得共享同一条聚合健康视图。
 - `ability_replay_request.profile_ref` 必须与目标 `ability_health_view.profile_ref` 一致；不得在 replay 时跨 profile 读取 `last_success_input`。
 - `run_id` 是最近一次验证成立的最小硬证据锚点，不建立第二套运行真相源。

@@ -52,6 +52,7 @@
 
 - 重放对象只说明“这次重放从哪里来的输入”，不承担自动修复语义。
 - `profile_ref` 是 replay 绑定的正式作用域；当 `replay_source=last_success_input` 时，必须只在同一 `ability_ref + profile_ref` 下解析最近成功输入。
+- 当 `replay_source=explicit_input_snapshot` 时，`replay_input_ref` 必须存在，且只能指向已保存的显式输入快照。
 
 ## 3. 与既有对象的关系
 
