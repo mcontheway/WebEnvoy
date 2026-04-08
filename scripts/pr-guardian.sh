@@ -387,6 +387,7 @@ stable_prompt_digest() {
 
 guardian_metadata_json() {
   local result_file="$1"
+  local review_file="$2"
 
   jq -cn \
     --arg head_sha "${HEAD_SHA:-}" \
@@ -395,6 +396,7 @@ guardian_metadata_json() {
     --arg review_profile "${REVIEW_PROFILE:-}" \
     --arg prompt_digest "${PROMPT_DIGEST:-}" \
     --argjson result "$(jq -c '.' "${result_file}")" \
+    --rawfile review_body "${review_file}" \
     '
       {
         head_sha: $head_sha,
@@ -403,7 +405,9 @@ guardian_metadata_json() {
         review_profile: $review_profile,
         prompt_digest: $prompt_digest,
         verdict: $result.verdict,
-        safe_to_merge: $result.safe_to_merge
+        safe_to_merge: $result.safe_to_merge,
+        result: $result,
+        review_body: $review_body
       }
     '
 }
@@ -413,7 +417,7 @@ append_guardian_metadata_comment() {
   local review_file="$2"
   local metadata_b64=""
 
-  metadata_b64="$(guardian_metadata_json "${result_file}" | base64 | tr -d '\n')"
+  metadata_b64="$(guardian_metadata_json "${result_file}" "${review_file}" | base64 | tr -d '\n')"
   printf '\n<!-- webenvoy-guardian-meta:v1 %s -->\n' "${metadata_b64}" >> "${review_file}"
 }
 
@@ -2734,6 +2738,8 @@ write_review_status_json() {
         );
       def body_without_meta($body):
         ($body // "") | gsub("\\n?<!-- webenvoy-guardian-meta:v1 [A-Za-z0-9+/=]+ -->\\n?"; "\n");
+      def normalized_review_body($body):
+        ($body // "") | gsub("[[:space:]]+$"; "");
       def normalize_review:
         (.body // "") as $body
         | body_without_meta($body) as $cleaned_body
@@ -2746,7 +2752,13 @@ write_review_status_json() {
             }
           else
             ((try ($meta_b64 | @base64d | fromjson) catch null)) as $meta
-            | if $meta == null or (($meta.verdict // "") | IN("APPROVE", "REQUEST_CHANGES") | not) or (($meta.safe_to_merge | type) != "boolean") then
+            | if $meta == null
+                or (($meta.verdict // "") | IN("APPROVE", "REQUEST_CHANGES") | not)
+                or (($meta.safe_to_merge | type) != "boolean")
+                or (($meta.result | type) != "object")
+                or (($meta.result.verdict // "") != ($meta.verdict // ""))
+                or (($meta.result.safe_to_merge // null) != ($meta.safe_to_merge // null))
+                or (normalized_review_body($meta.review_body // "") != normalized_review_body($cleaned_body)) then
                 . + {
                   meta_status: "invalid_metadata",
                   meta: $meta,
@@ -2794,6 +2806,7 @@ write_review_status_json() {
               prompt_digest: $prompt_digest,
               verdict: ($reused.meta.verdict // null),
               safe_to_merge: ($reused.meta.safe_to_merge // null),
+              result: ($reused.meta.result // null),
               base_ref: ($reused.meta.base_ref // ""),
               merge_base_sha: ($reused.meta.merge_base_sha // ""),
               review_state: ($reused.state // ""),
@@ -2834,6 +2847,7 @@ write_review_status_json() {
                 prompt_digest: $prompt_digest,
                 verdict: ($latest.meta.verdict // null),
                 safe_to_merge: ($latest.meta.safe_to_merge // null),
+                result: ($latest.meta.result // null),
                 reviewer_login: ($latest.user.login // "")
               }
             else
@@ -2861,6 +2875,7 @@ write_review_status_json() {
                 prompt_digest: $prompt_digest,
                 verdict: ($latest.meta.verdict // null),
                 safe_to_merge: ($latest.meta.safe_to_merge // null),
+                result: ($latest.meta.result // null),
                 base_ref: ($latest.meta.base_ref // ""),
                 merge_base_sha: ($latest.meta.merge_base_sha // ""),
                 review_state: ($latest.state // ""),
@@ -2880,19 +2895,23 @@ hydrate_reused_review_result() {
   export REUSED_REVIEWER_LOGIN
 
   jq -c '
-    {
-      verdict: .verdict,
-      safe_to_merge: .safe_to_merge,
-      summary: (
-        if .safe_to_merge then
-          "已复用当前 HEAD 的 guardian review 结论。"
-        else
-          "已复用当前 HEAD 的 guardian 阻断结论。"
-        end
-      ),
-      findings: [],
-      required_actions: []
-    }
+    if (.result | type) == "object" then
+      .result
+    else
+      {
+        verdict: .verdict,
+        safe_to_merge: .safe_to_merge,
+        summary: (
+          if .safe_to_merge then
+            "已复用当前 HEAD 的 guardian review 结论。"
+          else
+            "已复用当前 HEAD 的 guardian 阻断结论。"
+          end
+        ),
+        findings: [],
+        required_actions: []
+      }
+    end
   ' "${review_status_file}" > "${RESULT_FILE}"
 
   if [[ "$(jq -r '.review_body // ""' "${review_status_file}")" != "" ]]; then

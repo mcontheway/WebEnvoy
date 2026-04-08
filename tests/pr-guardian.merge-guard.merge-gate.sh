@@ -209,6 +209,29 @@ test_review_status_rejects_invalid_metadata() {
   assert_equal "$(jq -r '.reason' "${status_file}")" "invalid_metadata"
 }
 
+test_review_status_rejects_tampered_review_body() {
+  setup_review_status_fixture \
+    "review-status-tampered-review-body" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  local tampered_review_file="${TMP_DIR}/tampered-review.md"
+  local tampered_review_body_json
+  sed 's/body for review-status-tampered-review-body/tampered review body/' "${REVIEW_MD_FILE}" > "${tampered_review_file}"
+  tampered_review_body_json="$(jq -Rs . < "${tampered_review_file}")"
+  printf '[[{"id":41,"user":{"login":"review-bot"},"commit_id":"%s","state":"APPROVED","submitted_at":"2026-04-07T10:00:00Z","body":%s}]]\n' "${HEAD_SHA}" "${tampered_review_body_json}" > "${MOCK_GH_REVIEWS_JSON}"
+
+  assert_pass write_review_status_json 274 review-bot "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "invalid_metadata"
+}
+
 test_reused_request_changes_does_not_become_mergeable() {
   setup_review_status_fixture \
     "review-status-request-changes" \

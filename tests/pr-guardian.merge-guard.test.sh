@@ -170,6 +170,7 @@ main() {
   test_review_status_rejects_prompt_digest_mismatch
   test_review_status_rejects_missing_metadata
   test_review_status_rejects_invalid_metadata
+  test_review_status_rejects_tampered_review_body
   test_reused_request_changes_does_not_become_mergeable
   test_merge_if_safe_accepts_reused_review_from_other_reviewer
   test_merge_if_safe_without_post_review_respects_comment_contract
