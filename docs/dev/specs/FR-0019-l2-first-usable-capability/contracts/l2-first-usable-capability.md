@@ -7,7 +7,7 @@
 ```ts
 interface L2RiskGateContext {
   run_id: string
-  session_id: string
+  session_id?: string
   profile: string
   target_domain: string
   target_tab_id: number
@@ -21,7 +21,7 @@ type L2FirstUsableRequest =
       goal_kind: "read"
       goal_hint?: string
       risk_gate_context: L2RiskGateContext
-      allowed_actions: Array<"navigate" | "locate" | "click" | "type" | "extract" | "wait_settled">
+      allowed_actions: Array<"navigate" | "locate" | "extract" | "wait_settled">
     }
   | {
       target_url: string
@@ -41,9 +41,11 @@ type L2FirstUsableRequest =
 - 当前 FR 的请求面只冻结 `read` / `write`；`download` 仍保留在上游共享模型中，但不属于本 FR 的可请求能力。
 - 本 FR 中的最小基础交互统一归入 `write`，但不等于恢复高风险 live 写路径或账号敏感提交。
 - `risk_gate_context` 是未知网站通用 L2 的最小门禁坐标对象，不是 `FR-0010.gate_input` 的别名；XHS 或其他平台专用 gate 请求对象如需复用，必须先映射到该最小上下文。
+- `risk_gate_context.session_id` 只在 runtime 已产出稳定会话标识时携带；当前 formal baseline 下它不是构造通用 L2 请求的硬前置。
 - `risk_gate_context.target_tab_id` 与 `risk_gate_context.target_page` 必须共同存在；`target_url` 的域名必须能回链到 `risk_gate_context.target_domain`。
 - `goal_kind` 是本 FR 唯一正式的能力目标类型；请求面不得引入 `irreversible_write`、`requested_execution_mode` 或平台专用 live lane 枚举。
 - 若上游仍持有 `irreversible_write`、平台专用 live lane 或其他站点专用 gate 语义，必须在进入 `L2FirstUsableRequest` 前就阻断或归一化；FR-0019 不接受这类输入穿透到通用请求面。
+- `goal_kind=read` 时，`allowed_actions` 只允许 `navigate`、`locate`、`extract`、`wait_settled`；不得白名单放行 `click`、`type` 等会改变页面状态的动作。
 - `goal_kind=write` 且 `risk_gate_context.risk_state` 不是 `allowed` 时，不得进入成功路径；实现层必须返回 `risk_gate_blocked` 或更早阻断。
 - `goal_kind=write` 时，`write_safety_boundary` 必须存在，并且必须明确阻断不可逆控件；未知站点的 `write` 范围不允许覆盖 submit、publish、purchase、final confirm，以及更泛化的 destructive action、financial commitment、external dispatch、account binding 一类动作。
 

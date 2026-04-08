@@ -82,20 +82,25 @@
 最小字段：
 
 - `run_id`
-- `session_id`
 - `profile`
 - `target_domain`
 - `target_tab_id`
 - `target_page`
 - `risk_state`
 
+可选字段：
+
+- `session_id`
+
 补充约束：
 
 - `risk_gate_context` 只冻结站点无关的最小字段，不直接复用 `FR-0010.gate_input`、`requested_execution_mode` 或其他平台专用 gate 请求对象。
+- `session_id` 如存在，只能作为已建立会话的补充坐标；在当前 runtime baseline 仍允许其缺失时，不得把它升级为请求成立前置。
 - `goal_kind` 是本 FR 唯一正式的能力目标类型；`target_url` 必须能够回链到 `risk_gate_context.target_domain`。
 - `risk_gate_context.target_tab_id` 与 `risk_gate_context.target_page` 必须共同存在；任一缺失都不得进入 L2 首次可用请求。
 - `risk_state` 只表达统一风险状态机的站点无关输入状态；当前最小集合为 `paused | limited | allowed`。
 - 若上游门禁仍持有 `irreversible_write`、平台专用 live lane 或其他站点专用 gate 语义，必须在进入本 FR 请求面前完成阻断或归一化。
+- `goal_kind=read` 的允许动作集合只允许 `navigate`、`locate`、`extract`、`wait_settled`；`click`、`type` 只能落在 `goal_kind=write` 的请求路径内。
 - `goal_kind=write` 且 `risk_gate_context.risk_state` 不是 `allowed` 时，不得进入成功路径；实现层必须返回 `risk_gate_blocked` 或更早阻断。
 
 ## 6. `failure_result`
