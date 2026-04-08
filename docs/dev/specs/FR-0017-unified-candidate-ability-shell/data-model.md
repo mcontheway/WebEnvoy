@@ -12,10 +12,10 @@
 - `execution_layer_support`
 - `capture_origin`
 - `candidate_status`
-- `source_run_id`
-- `source_profile`
-- `source_artifact_refs`
-- `last_captured_at`
+- `capture_run_id`
+- `capture_profile`
+- `capture_artifact_refs`
+- `captured_at`
 
 生命周期：
 
@@ -44,4 +44,4 @@
 - 与 `FR-0004`：
   - 继续复用最小诊断引用
 - 与 `FR-0006`：
-  - `source_run_id` / `source_artifact_refs` 只引用既有运行证据，不在本 FR 中新增 SQLite schema
+  - `capture_run_id` / `capture_artifact_refs` 只引用既有运行证据，不在本 FR 中新增 SQLite schema

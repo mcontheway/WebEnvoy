@@ -7,7 +7,7 @@
 - 风险：一次临时成功路径缺少最小契约与来源证据，却被长期保存并当作正式候选能力使用。
 - 缓解：
   - 冻结 `draft_candidate` / `candidate_ready` 的最小区分
-  - 强制 `source_run_id` 与 `source_artifact_refs`
+  - 强制 `capture_run_id` 与 `capture_artifact_refs`
 
 ### 2. L3 / L2 双轨协议漂移
 
