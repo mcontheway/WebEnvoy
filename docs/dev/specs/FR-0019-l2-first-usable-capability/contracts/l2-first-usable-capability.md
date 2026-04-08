@@ -20,12 +20,25 @@ interface L2FirstUsableRequest {
 ## 2. `l2_first_usable_result`
 
 ```ts
+interface FirstUsableTraceStep {
+  step_id: string
+  action: string
+  target_hint: string
+  result: string
+}
+
+interface InteractionTraceStep {
+  action: string
+  target_ref: string
+  settled: boolean
+}
+
 type L2FirstUsableResult =
   | {
       success: true
       result_summary: Record<string, unknown>
-      first_usable_trace: string[]
-      interaction_trace: string[]
+      first_usable_trace: FirstUsableTraceStep[]
+      interaction_trace: InteractionTraceStep[]
       capture_hints: Record<string, unknown>
       candidate_shell_seed: {
         ability_id: string
@@ -51,8 +64,8 @@ type L2FirstUsableResult =
   | {
       success: false
       result_summary?: Record<string, unknown>
-      first_usable_trace?: string[]
-      interaction_trace?: string[]
+      first_usable_trace?: FirstUsableTraceStep[]
+      interaction_trace?: InteractionTraceStep[]
       capture_hints?: Record<string, unknown>
       candidate_shell_seed?: {
         ability_id: string
@@ -83,4 +96,5 @@ type L2FirstUsableResult =
 - `candidate_shell_seed` 只作为进入 `FR-0017` 的 handoff 输入。
 - `candidate_shell_seed` 必须足以直接物化 `FR-0017.candidate_ability_descriptor` 的必填字段，不允许只留下松散 hint。
 - `success=true` 时，`result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed` 必须同时存在。
+- `first_usable_trace` 与 `interaction_trace` 的正式类型都是结构化步骤对象数组，不允许在 contract / data-model 间一处写成对象、一处退回 `string[]`。
 - `failure_class` 只表达最小失败大类，不替代低层错误码或诊断全文。

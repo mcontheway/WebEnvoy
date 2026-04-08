@@ -69,6 +69,7 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
   - `candidate_shell_seed`
 - 必须明确：
   - 成功态必须同时返回 `result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed`
+  - `first_usable_trace` 与 `interaction_trace` 必须都是结构化步骤对象数组，而不是自由文本列表
   - `candidate_shell_seed` 是面向 `FR-0017` 的 handoff 输入
   - 它不等于候选能力描述本身
   - 但它必须已经提供足以直接物化 `FR-0017.candidate_ability_descriptor` 必填字段的结构化值，而不是仅提供临时 hint

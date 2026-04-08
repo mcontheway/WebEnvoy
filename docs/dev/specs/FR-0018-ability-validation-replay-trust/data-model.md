@@ -5,8 +5,24 @@
 核心字段：
 
 - `ability_ref`
-- `validation_mode`
 - `health_state`
+- `latest_validations`
+- `divergence_reason`
+
+说明：
+
+- 本模型冻结“每个能力的聚合健康视图 + 按 mode 的 latest 结果子视图”，不要求在本 FR 中定义完整历史版本表。
+- `health_state` 必须按 `unknown/verified/degraded/broken/stale` 的最小判定标准生成，不能由调用方自由解释。
+- `latest_validations` 中每个 `validation_mode` 最多只能保留一条 latest 记录；它们共同构成当前能力的正式 latest-validation truth source。
+- `ability_validation_record` 是每个 `ability_ref` 的唯一聚合健康视图；其 ownership 属于 FR-0018 验证层，而不是 FR-0006 runtime-store。
+- 存储 / 查询边界：实现层必须为每个 `ability_ref` 维护单条聚合视图，并在该视图下维护按 mode 的 latest 结果；查询最新健康状态时只能读取该视图，不得直接扫描 runtime-store 原始运行记录充当 truth source。
+
+### `latest_validations[*]`
+
+核心字段：
+
+- `validation_mode`
+- `result_state`
 - `failure_class`
 - `validated_at`
 - `run_id`
@@ -14,10 +30,8 @@
 
 说明：
 
-- 本模型只冻结“最近一次验证结果”的最小视图，不要求在本 FR 中定义完整历史版本表。
-- `health_state` 必须按 `unknown/verified/degraded/broken/stale` 的最小判定标准生成，不能由调用方自由解释。
-- `ability_validation_record` 是每个 `ability_ref` 的唯一 latest-validation 正式 truth source；其 ownership 属于 FR-0018 验证层，而不是 FR-0006 runtime-store。
-- 存储 / 查询边界：实现层必须为每个 `ability_ref` 维护单条 latest-view 记录；查询最新健康状态时只能读取该视图，不得直接扫描 runtime-store 原始运行记录充当 truth source。
+- `validation_mode` 只允许 `smoke_validation` 或 `replay_validation`。
+- `result_state` 只允许 `verified`、`broken`、`stale`；顶层 `degraded` 只在聚合视图中表达，不作为 mode latest 的原子状态。
 
 ## 2. `ability_replay_binding`
 

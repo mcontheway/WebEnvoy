@@ -85,11 +85,11 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - 最近一次失败属于哪类大问题
   - 是否需要重新验证或人工修复
 - 最小判定标准：
-  - `unknown`：尚不存在完成态验证证据，或缺少 `run_id` / `artifact_refs`
-  - `verified`：最近一次验证成功，且有完整 `run_id` / `artifact_refs`
-  - `degraded`：最近一次验证完成但只部分达成预期，或 smoke / replay 结果分叉，能力仍保留有限可用性
-  - `broken`：最近一次验证失败，且失败已足以阻断当前能力继续使用
-  - `stale`：存在历史验证成功或部分成功记录，但 freshness 已过期，或 descriptor/runtime/profile 基线发生变化后尚未重验
+  - `unknown`：尚不存在任何完成态 latest 记录
+  - `verified`：已有 mode latest 记录全部为 `verified`，且不存在分叉
+  - `degraded`：至少存在一个 mode latest 记录，但 smoke / replay 结果分叉，或成功/失败并存，能力仍保留有限可用性
+  - `broken`：已有 mode latest 记录全部为 `broken`，或唯一 latest 记录为 `broken`
+  - `stale`：已有 mode latest 记录全部为 `stale`，且当前没有新的 verified/broken 结果
 
 ### 5. 最小失败分类
 
@@ -105,20 +105,25 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
 
 ### 6. 最近一次验证结果与证据引用
 
-- 每个能力必须能引用“最近一次验证”的最小结果对象，至少包含：
-  - `validated_at`
+- 每个能力必须能引用“按验证模式分开保存的最近一次验证结果”，每条 mode latest 至少包含：
   - `validation_mode`
-  - `health_state`
+  - `validated_at`
+  - `result_state`
   - `failure_class`
   - `run_id`
   - `artifact_refs`
+- 每个能力还必须提供一个顶层 `ability_health_view` 聚合视图，至少包含：
+  - `ability_ref`
+  - `health_state`
+  - `latest_validations`
+  - `divergence_reason`
 - 本 FR 必须明确：
   - 结果对象可以引用运行证据，但不重建第二套运行真相源
   - 若缺少 `run_id` 或 `artifact_refs`，不得声称“最近一次验证已成立”
-  - `failure_class` 在 `broken` 场景必须存在；在 `verified` 场景必须为空；在 `degraded` / `stale` 场景可选但需与状态解释一致
+  - `failure_class` 在 mode `result_state=broken` 场景必须存在；在 mode `result_state=verified` 场景必须为空；在 mode `result_state=stale` 场景可选但需与状态解释一致
   - `artifact_refs` 的正式 truth source 是 `run_id` 对应验证运行的 run-scoped 证据载体；FR-0018 只保存引用，不另建 artifact 主数据
-  - `ability_validation_record` 是每个 `ability_ref` 的唯一 latest-validation 正式视图；消费者必须读取该视图判断 `health_state`，不得从 FR-0006 runtime-store 原始记录直接推导最新状态
-  - `ability_validation_record` 的持久化边界属于 FR-0018 验证元数据命名空间，按 `ability_ref` 提供单条 latest-view 查询；FR-0006 只作为输入证据层
+  - `ability_health_view` 是每个 `ability_ref` 的唯一聚合健康视图；消费者必须读取该视图判断顶层 `health_state`
+  - `latest_validations` 按 `validation_mode` 最多各保留一条 latest 记录；FR-0006 只作为输入证据层，不负责表达 smoke/replay 分叉
 
 ### 7. 与候选能力和 L2 首次可用的衔接
 
@@ -144,21 +149,28 @@ Then 可以看到 `health_state`
 And 可以看到最小失败大类
 And 不需要直接阅读原始运行日志才能知道大概问题
 
-### 场景 3：最小重放不是自动修复
+### 场景 3：smoke 与 replay 分叉时不会被压扁成单一结果
+
+Given 同一个能力最近一次 `smoke_validation` 成功而 `replay_validation` 失败
+When 用户查看能力当前状态
+Then 顶层 `health_state` 必须是 `degraded`
+And `latest_validations` 中必须同时保留 smoke 与 replay 各自的 latest 记录
+And `divergence_reason` 必须解释当前是 smoke/replay 分叉
+### 场景 4：最小重放不是自动修复
 
 Given 某个能力需要再次运行
 When 用户触发 `replay_validation`
 Then 系统只会基于已保存的能力与最小输入快照重放
 And 不会在同一对象里暗含自动修复或重新学习
 
-### 场景 4：验证结果继续引用运行证据
+### 场景 5：验证结果继续引用运行证据
 
 Given 某次验证已经完成
 When reviewer 检查结果对象
 Then 能看到 `run_id` 与 `artifact_refs`
 And 不会创建第二套运行真相源
 
-### 场景 5：L2 样本也能进入同一验证链路
+### 场景 6：L2 样本也能进入同一验证链路
 
 Given 后续已有一个来自 L2 首次可用的候选能力
 When 该能力进入验证链路
