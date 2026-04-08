@@ -1925,8 +1925,8 @@ test_build_lightweight_review_baseline_uses_merge_base_snapshot_files() {
   fi
 }
 
-test_build_lightweight_review_baseline_uses_running_script_when_available() {
-  setup_case_dir "lightweight-review-baseline-running-script"
+test_build_lightweight_review_baseline_uses_pr_head_script_ref_when_available() {
+  setup_case_dir "lightweight-review-baseline-pr-head-script"
 
   BASE_REF="main"
   MERGE_BASE_SHA="merge-base-sha-123"
@@ -1946,14 +1946,14 @@ test_build_lightweight_review_baseline_uses_running_script_when_available() {
     build_lightweight_review_baseline
   )"
 
-  if [[ "${baseline}" != *"guardian_script_sha256=local:${REPO_ROOT}/scripts/pr-guardian.sh"* ]]; then
-    echo "expected lightweight review baseline to hash the running guardian script when available" >&2
+  if [[ "${baseline}" != *"guardian_script_sha256=normalized:refs/remotes/origin/pr/415:scripts/pr-guardian.sh"* ]]; then
+    echo "expected lightweight review baseline to hash guardian script from normalized PR head ref content when available" >&2
     exit 1
   fi
 }
 
-test_hash_guardian_script_review_basis_sha256_prefers_running_script_path() {
-  setup_case_dir "guardian-script-hash-running-script"
+test_hash_guardian_script_review_basis_sha256_normalizes_pr_head_ref_content() {
+  setup_case_dir "guardian-script-hash-normalized-pr-head-ref"
 
   PR_HEAD_REF="refs/remotes/origin/pr/415"
   export PR_HEAD_REF
@@ -1961,16 +1961,33 @@ test_hash_guardian_script_review_basis_sha256_prefers_running_script_path() {
   unset HEAD_SHA || true
 
   local actual
+  local expected
+  actual="$(
+    git() {
+      if [[ "${1:-}" == "-C" && "${3:-}" == "show" && "${4:-}" == "refs/remotes/origin/pr/415:scripts/pr-guardian.sh" ]]; then
+        printf 'echo guardian\n\n'
+        return 0
+      fi
+      command git "$@"
+    }
+
+    hash_guardian_script_review_basis_sha256
+  )"
+  expected="$(hash_string_sha256 'echo guardian')"
+
+  assert_equal "${actual}" "${expected}"
+}
+
+test_hash_running_guardian_script_sha256_prefers_repo_checkout() {
+  setup_case_dir "guardian-runtime-hash-repo-checkout"
+
+  local actual
   actual="$(
     hash_normalized_file_sha256() {
       printf 'local:%s\n' "$1"
     }
 
-    hash_normalized_git_ref_file_sha256() {
-      printf 'ref:%s:%s\n' "$1" "$2"
-    }
-
-    hash_guardian_script_review_basis_sha256
+    hash_running_guardian_script_sha256
   )"
 
   assert_equal "${actual}" "local:${REPO_ROOT}/scripts/pr-guardian.sh"

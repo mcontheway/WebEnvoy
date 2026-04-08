@@ -598,6 +598,40 @@ test_build_markdown_review_metadata_omits_embedded_result() {
   assert_equal "$(jq -r 'has(\"result\")' "${metadata_file}")" "false"
   assert_equal "$(jq -r '.verdict' "${metadata_file}")" "APPROVE"
   assert_equal "$(jq -r '.safe_to_merge' "${metadata_file}")" "true"
+  if [[ -z "$(jq -r '.guardian_runtime_sha256 // ""' "${metadata_file}")" ]]; then
+    echo "expected guardian metadata to include guardian_runtime_sha256" >&2
+    exit 1
+  fi
+}
+
+test_review_status_rejects_guardian_runtime_sha256_mismatch() {
+  setup_review_status_fixture \
+    "review-status-runtime-hash-mismatch" \
+    "pr-author" \
+    "github-actions[bot]" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  local tampered_review_file="${TMP_DIR}/tampered-runtime-review.md"
+  local tampered_review_body_json
+
+  perl -MJSON::PP -MMIME::Base64=decode_base64,encode_base64 -0pe '
+    s/<!-- webenvoy-guardian-meta:v1 ([A-Za-z0-9+\/=]+) -->/
+      my $meta = JSON::PP->new->decode(decode_base64($1));
+      $meta->{guardian_runtime_sha256} = "other-runtime-hash";
+      "<!-- webenvoy-guardian-meta:v1 " . encode_base64(JSON::PP->new->canonical->encode($meta), q{}) . " -->"
+    /eg
+  ' "${REVIEW_MD_FILE}" > "${tampered_review_file}"
+  tampered_review_body_json="$(jq -Rs . < "${tampered_review_file}")"
+  printf '[[{"id":41,"user":{"login":"github-actions[bot]"},"commit_id":"%s","state":"APPROVED","submitted_at":"2026-04-07T10:00:00Z","body":%s}]]\n' "${HEAD_SHA}" "${tampered_review_body_json}" > "${MOCK_GH_REVIEWS_JSON}"
+
+  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "guardian_runtime_sha256_mismatch"
 }
 
 test_review_status_rejects_tampered_review_body() {

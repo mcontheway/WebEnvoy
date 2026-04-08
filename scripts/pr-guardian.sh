@@ -530,11 +530,9 @@ build_lightweight_review_baseline() {
   done < <(lightweight_review_baseline_paths)
 }
 
-hash_guardian_script_review_basis_sha256() {
-  local relative_path="scripts/pr-guardian.sh"
+hash_running_guardian_script_sha256() {
   local repo_script_path="${REPO_ROOT:-}/scripts/pr-guardian.sh"
   local running_script_path="${SCRIPT_DIR}/pr-guardian.sh"
-  local worktree_script_path=""
 
   if [[ -n "${REPO_ROOT:-}" && -f "${repo_script_path}" ]]; then
     hash_normalized_file_sha256 "${repo_script_path}"
@@ -545,6 +543,13 @@ hash_guardian_script_review_basis_sha256() {
     hash_normalized_file_sha256 "${running_script_path}"
     return 0
   fi
+
+  hash_string_sha256 "__WEBENVOY_MISSING_RUNTIME_GUARDIAN__"
+}
+
+hash_guardian_script_review_basis_sha256() {
+  local relative_path="scripts/pr-guardian.sh"
+  local worktree_script_path=""
 
   if [[ -n "${WORKTREE_DIR:-}" ]]; then
     worktree_script_path="${WORKTREE_DIR}/${relative_path}"
@@ -564,7 +569,7 @@ hash_guardian_script_review_basis_sha256() {
     return 0
   fi
 
-  hash_normalized_file_sha256 "${SCRIPT_DIR}/pr-guardian.sh"
+  hash_running_guardian_script_sha256
 }
 
 build_lightweight_issue_basis() {
@@ -635,6 +640,7 @@ guardian_metadata_json() {
     --arg merge_base_sha "${MERGE_BASE_SHA:-}" \
     --arg review_profile "${REVIEW_PROFILE:-}" \
     --arg review_basis_digest "${REVIEW_BASIS_DIGEST:-}" \
+    --arg guardian_runtime_sha256 "$(hash_running_guardian_script_sha256)" \
     --arg prompt_digest "${PROMPT_DIGEST:-}" \
     --arg review_body_sha256 "$(hash_normalized_review_body_sha256 "${review_file}")" \
     --arg verdict "$(jq -r '.verdict' "${result_file}")" \
@@ -646,6 +652,7 @@ guardian_metadata_json() {
         merge_base_sha: $merge_base_sha,
         review_profile: $review_profile,
         review_basis_digest: $review_basis_digest,
+        guardian_runtime_sha256: $guardian_runtime_sha256,
         prompt_digest: $prompt_digest,
         verdict: $verdict,
         safe_to_merge: $safe_to_merge,
@@ -3046,6 +3053,7 @@ persist_guardian_review_proof() {
     --arg merge_base_sha "${MERGE_BASE_SHA:-}" \
     --arg review_profile "${REVIEW_PROFILE:-}" \
     --arg review_basis_digest "${REVIEW_BASIS_DIGEST:-}" \
+    --arg guardian_runtime_sha256 "$(hash_running_guardian_script_sha256)" \
     --arg prompt_digest "${PROMPT_DIGEST:-}" \
     --arg review_body_sha256 "$(jq -r '.cleaned_body_sha256 // ""' "${review_file}")" \
     --arg verdict "${verdict}" \
@@ -3065,6 +3073,7 @@ persist_guardian_review_proof() {
           merge_base_sha: $merge_base_sha,
           review_profile: $review_profile,
           review_basis_digest: $review_basis_digest,
+          guardian_runtime_sha256: $guardian_runtime_sha256,
           prompt_digest: $prompt_digest,
           review_body_sha256: $review_body_sha256,
           verdict: $verdict,
@@ -3170,6 +3179,7 @@ write_review_status_json_common() {
     --arg merge_base_sha "${MERGE_BASE_SHA:-}" \
     --arg review_profile "${REVIEW_PROFILE:-}" \
     --arg review_basis_digest "${REVIEW_BASIS_DIGEST:-}" \
+    --arg guardian_runtime_sha256 "$(hash_running_guardian_script_sha256)" \
     --arg prompt_digest "${PROMPT_DIGEST:-}" \
     '
       ($proof_store[0].proofs // {}) as $proofs |
@@ -3211,6 +3221,7 @@ write_review_status_json_common() {
         and (.meta.merge_base_sha // "") == $merge_base_sha
         and (.meta.review_profile // "") == $review_profile
         and (.meta.review_basis_digest // "") == $review_basis_digest
+        and (.meta.guardian_runtime_sha256 // "") == $guardian_runtime_sha256
         and (($strict_prompt_digest != "1") or ((.meta.prompt_digest // "") == $prompt_digest))
         and ((.state // "") == (.expected_state // ""));
       def review_matches_reuse_basis:
@@ -3220,6 +3231,7 @@ write_review_status_json_common() {
         and (.meta.merge_base_sha // "") == $merge_base_sha
         and (.meta.review_profile // "") == $review_profile
         and (.meta.review_basis_digest // "") == $review_basis_digest
+        and (.meta.guardian_runtime_sha256 // "") == $guardian_runtime_sha256
         and (($strict_prompt_digest != "1") or ((.meta.prompt_digest // "") == $prompt_digest));
       def proof_matches_remote_review:
         ($proofs[review_id_string] // null) as $proof
@@ -3233,6 +3245,7 @@ write_review_status_json_common() {
         and (($proof.merge_base_sha // "") == (.meta.merge_base_sha // ""))
         and (($proof.review_profile // "") == (.meta.review_profile // ""))
         and (($proof.review_basis_digest // "") == (.meta.review_basis_digest // ""))
+        and (($proof.guardian_runtime_sha256 // "") == (.meta.guardian_runtime_sha256 // ""))
         and (($proof.prompt_digest // "") == (.meta.prompt_digest // ""))
         and (($proof.review_body_sha256 // "") == (.cleaned_body_sha256 // ""))
         and (($proof.verdict // "") == (.meta.verdict // ""))
@@ -3265,6 +3278,7 @@ write_review_status_json_common() {
             or (.meta.merge_base_sha // "") != $merge_base_sha
             or (.meta.review_profile // "") != $review_profile
             or (.meta.review_basis_digest // "") != $review_basis_digest
+            or (.meta.guardian_runtime_sha256 // "") != $guardian_runtime_sha256
             or ($strict_prompt_digest == "1" and (.meta.prompt_digest // "") != $prompt_digest)
             or ((.state // "") != (.expected_state // ""))
             or review_regresses_merge_safety($reused)
@@ -3285,6 +3299,7 @@ write_review_status_json_common() {
             | if $meta == null
                 or (($meta.verdict // "") | IN("APPROVE", "REQUEST_CHANGES") | not)
                 or (($meta.safe_to_merge | type) != "boolean")
+                or (($meta.guardian_runtime_sha256 // "") | length) == 0
                 or (
                   ($meta | has("result"))
                   and (
@@ -3441,6 +3456,8 @@ write_review_status_json_common() {
                     "review_profile_mismatch"
                   elif ($latest.meta.review_basis_digest // "") != $review_basis_digest then
                     "review_basis_digest_mismatch"
+                  elif ($latest.meta.guardian_runtime_sha256 // "") != $guardian_runtime_sha256 then
+                    "guardian_runtime_sha256_mismatch"
                   elif ($strict_prompt_digest == "1" and ($latest.meta.prompt_digest // "") != $prompt_digest) then
                     "prompt_digest_mismatch"
                   elif ($latest_reusable_review != null) and ($latest | review_regresses_merge_safety($latest_reusable_review)) then
