@@ -73,7 +73,31 @@
 - `write_safety_boundary` 只在 `goal_kind=write` 时出现，`goal_kind=read` 不得伪造。
 - 命中 `blocked_control_kinds` 的未知站点控件不得被纳入 L2 first-usable 成功路径；实现层必须返回失败或 fallback，而不是继续推进不可逆动作。
 
-## 5. `failure_result`
+## 5. `gate_input`
+
+用途：
+
+- 作为 `FR-0010.gate_input` 的直接复用输入，向 L2 first-usable 提供统一门禁上下文
+
+最小字段：
+
+- `run_id`
+- `session_id`
+- `profile`
+- `target_domain`
+- `target_tab_id`
+- `target_page`
+- `action_type`
+- `requested_execution_mode`
+- `risk_state`
+
+补充约束：
+
+- `gate_input` 必须与 `FR-0010.gate_input` 保持同字段形状与同语义，不得在 L2 first-usable request 中重新命名或拆分成私有别名。
+- `goal_kind` 必须直接等于 `gate_input.action_type`，`target_url` 必须能够回链到 `gate_input.target_domain`。
+- `gate_input.target_tab_id` 与 `gate_input.target_page` 必须共同存在；任一缺失都不得进入 `goal_kind=write` 的风险门禁消费路径。
+
+## 6. `failure_result`
 
 用途：
 
@@ -90,7 +114,7 @@
 - 失败结果不得包含 `candidate_shell_seed`；只有首次成功路径才能向 `FR-0017` 交付 handoff 输入。
 - `failure_class` 只允许 `insufficient_semantic_structure`、`target_not_located`、`state_not_settled`、`risk_gate_blocked`、`requires_l1_fallback`。
 
-## 6. `l1_fallback_payload`
+## 7. `l1_fallback_payload`
 
 用途：
 
@@ -109,11 +133,12 @@
 - `fallback_reason` 只允许 `insufficient_semantic_structure`、`target_not_located`、`state_not_settled`，用于说明触发 L2 停止的最小原因。
 - `recommended_strategy` 只允许 `visual_reacquire`、`visual_state_check`、`visual_then_physical_act`，用于冻结 L1 的最小方向，而不是完整 L1 工作流。
 
-## 7. 与既有对象的关系
+## 8. 与既有对象的关系
 
 - 与 `FR-0017`：
   - `candidate_shell_seed` 必须已经包含可直接物化 `candidate_ability_descriptor` 必填字段的结构化值
 - 与 `FR-0004`：
   - 失败大类可以引用最小诊断，但不扩展诊断 schema
 - 与 `FR-0010/0011`：
+  - `gate_input` 必须直接复用 `FR-0010.gate_input` 的冻结字段形状
   - 只继承站点无关的风险门禁结果语义，不继承 XHS 专用 gate 条件

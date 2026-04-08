@@ -97,9 +97,11 @@ interface AbilityHealthView {
 - `result_state=verified`：该 mode 最近一次验证成功，且 `failure_class` 必须为空。
 - `result_state=broken`：该 mode 最近一次验证失败，且必须给出 `failure_class`。
 - `result_state=stale`：该 mode 存在历史验证结果，但因 `validated_at` 超过 7 天 freshness window，或当前 descriptor 基线与 `baseline_descriptor` 不一致，当前不能继续宣称可信；该记录仍必须保留最近一次已完成验证的证据字段。
+- `ability_health_view.health_state` 必须按以下顺序判定，后续分支不得覆盖前序已命中的状态：
+  1. `unknown`：不存在任何 mode latest 记录
+  2. `stale`：存在 mode latest，且全部现存 latest 都是 `stale`
+  3. `verified`：`smoke_validation` 与 `replay_validation` 的 latest 都存在，且都为 `verified`
+  4. `broken`：不存在任何 `verified` latest，且所有非 `stale` latest 都是 `broken`
+  5. `degraded`：除以上情况外的其余所有视图
 - `smoke_validation` 成功可以作为“能力仍可用”的最小证据，也可以建立首个 `last_success_input_ref`，但在缺少 `replay_validation` latest 时不得单独把顶层健康状态提升为 `verified`。
-- 在同一 `ability_ref + profile_ref` 视图内，顶层 `health_state=verified`：`smoke_validation` 与 `replay_validation` 的 latest 记录都存在，且都为 `verified`，并且不存在分叉。
-- 在同一 `ability_ref + profile_ref` 视图内，顶层 `health_state=broken`：已有 mode latest 记录全部为 `broken`，或唯一 latest 记录为 `broken`。
-- 在同一 `ability_ref + profile_ref` 视图内，顶层 `health_state=degraded`：至少存在一个 mode latest 记录，但 smoke / replay 结果分叉，或成功/失败并存，或仅存在 smoke latest 而缺少 replay latest；`divergence_reason` 必须填写。
-- 在同一 `ability_ref + profile_ref` 视图内，顶层 `health_state=unknown`：尚不存在任何完成态 latest 记录。
-- 在同一 `ability_ref + profile_ref` 视图内，顶层 `health_state=stale`：已有 mode latest 记录全部为 `stale`，且当前没有新的 verified/broken 结果。
+- `degraded` 场景中，若 smoke/replay 之一缺失，则 `divergence_reason` 必须是 `missing_mode_evidence`；若两个 mode 都存在但结果不一致，`divergence_reason` 必须是 `smoke_replay_mismatch`。

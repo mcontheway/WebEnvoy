@@ -63,6 +63,8 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
   - 这些能力是为了达成首次成功路径
   - 不等于已经形成平台专用适配器或完整命令集
   - 本 FR 中的基础交互在共享枚举上归入 `write`，但不代表恢复高风险 live 写路径
+  - `L2FirstUsableRequest.gate_input` 必须直接复用 `FR-0010.gate_input` 的冻结字段形状，至少包含 `run_id`、`session_id`、`profile`、`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`risk_state`
+  - `goal_kind` 必须直接等于 `gate_input.action_type`，且请求不得缺少 `target_tab_id + target_page` 这组目标页确认坐标
   - 当 `goal_kind=write` 时，必须带有机器可读的 `write_safety_boundary`，并明确屏蔽 submit、publish、purchase、final confirm，以及更泛化的 destructive action、financial commitment、external dispatch、account binding 一类不可逆控件
 
 ### 3. 首次成功路径的结构化输出

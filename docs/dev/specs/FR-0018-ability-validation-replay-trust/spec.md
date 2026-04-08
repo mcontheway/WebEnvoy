@@ -104,13 +104,14 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - 是否最近一次验证通过
   - 最近一次失败属于哪类大问题
   - 是否需要重新验证或人工修复
-- 最小判定标准：
-  - `unknown`：在给定 `ability_ref + profile_ref` 视图内，尚不存在任何完成态 latest 记录
-  - `verified`：在给定 `ability_ref + profile_ref` 视图内，`smoke_validation` 与 `replay_validation` 的 latest 记录都存在，且都为 `verified`，并且不存在分叉
-  - `degraded`：在给定 `ability_ref + profile_ref` 视图内，至少存在一个 mode latest 记录，但 smoke / replay 结果分叉，或成功/失败并存，或仅存在 smoke latest 而缺少 replay latest；能力仍保留有限可用性
-  - `broken`：在给定 `ability_ref + profile_ref` 视图内，已有 mode latest 记录全部为 `broken`，或唯一 latest 记录为 `broken`
-  - `stale`：在给定 `ability_ref + profile_ref` 视图内，已有 mode latest 记录全部为 `stale`，且当前没有新的 verified/broken 结果；单条 mode latest 只有在 `validated_at` 超过 7 天 freshness window，或当前 descriptor 基线与该记录保存的 `baseline_descriptor` 不一致时才能被标记为 `stale`
+- 顶层 `health_state` 必须按固定顺序判定，分支互斥且穷尽：
+  1. `unknown`：在给定 `ability_ref + profile_ref` 视图内，不存在任何 mode latest 记录
+  2. `stale`：存在 mode latest，且全部现存 latest 都是 `stale`
+  3. `verified`：`smoke_validation` 与 `replay_validation` 的 latest 记录都存在，且都为 `verified`
+  4. `broken`：不存在任何 `verified` latest，且所有非 `stale` latest 都是 `broken`
+  5. `degraded`：除以上情况外的其余所有视图，包括 smoke-only verified、replay-only verified、success/failure 并存、verified/stale 并存、以及双 mode 结果分叉
 - `smoke_validation` 成功可以被下游消费为“仍有可用证据”的最小信号，但在未形成 replay latest 前，只能把顶层状态落在 `degraded`，并使用 `divergence_reason=missing_mode_evidence`。
+- `degraded` 场景中，若 smoke/replay 之一缺失，则 `divergence_reason` 必须是 `missing_mode_evidence`；若两个 mode 都存在但结果不一致，则 `divergence_reason` 必须是 `smoke_replay_mismatch`。
 
 ### 5. 最小失败分类
 
