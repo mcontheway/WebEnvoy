@@ -78,6 +78,7 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
   - `candidate_shell_seed` 是面向 `FR-0017` 的 handoff 输入
   - 它不等于候选能力描述本身
   - 但它必须已经提供足以直接物化 `FR-0017.candidate_ability_descriptor` 必填字段的结构化值，而不是仅提供临时 hint
+  - `candidate_shell_seed.ability_kind` 必须直接等于本次请求的 `goal_kind`；若目标类型与 handoff seed 不一致，不得把该结果视为首次成功成立
   - L2 首次可用成功的上报不依赖 replay artifact；首次 replay snapshot 的生成与持久化由后续 `FR-0018` 验证链路承接
 
 ### 4. 成功判定与失败分类
@@ -149,12 +150,13 @@ And 不会把它直接描述成正式可复用能力
 ## 异常与边界场景
 
 1. 只完成了一次临时读取，但未留下结构化输出或候选能力 handoff 输入：不得声称首次可用成立。
-2. `success=false` 却缺少 `failure_class`，或仍返回 `candidate_shell_seed`：视为失败回传边界未冻结。
-3. `failure_class=requires_l1_fallback` 却缺少结构化 `l1_fallback_payload`，或只给出自由文本建议：视为 L1 交接边界未冻结。
-4. 风险门禁阻断时继续推进高风险交互：视为越界到 `FR-0010/0011` 之外。
-5. 因为未知网站暂时成功一次就宣称 L2 通用平台已经完成：视为过度承诺。
-6. 在未冻结最小执行语义前，把 `download` 伪装成当前 FR 已支持的 L2 请求能力：视为超出本 FR 范围。
-7. 在本 FR 中引入完整 L1 兜底、完整导入/交付或完整版本治理：视为越界。
+2. `success=true`，但 `candidate_shell_seed.ability_kind` 与请求 `goal_kind` 不一致：视为 handoff 映射边界未冻结。
+3. `success=false` 却缺少 `failure_class`，或仍返回 `candidate_shell_seed`：视为失败回传边界未冻结。
+4. `failure_class=requires_l1_fallback` 却缺少结构化 `l1_fallback_payload`，或只给出自由文本建议：视为 L1 交接边界未冻结。
+5. 风险门禁阻断时继续推进高风险交互：视为越界到 `FR-0010/0011` 之外。
+6. 因为未知网站暂时成功一次就宣称 L2 通用平台已经完成：视为过度承诺。
+7. 在未冻结最小执行语义前，把 `download` 伪装成当前 FR 已支持的 L2 请求能力：视为超出本 FR 范围。
+8. 在本 FR 中引入完整 L1 兜底、完整导入/交付或完整版本治理：视为越界。
 
 ## 验收标准
 

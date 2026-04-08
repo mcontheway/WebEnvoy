@@ -101,6 +101,7 @@ type L2FirstUsableResult =
 
 - `candidate_shell_seed` 只作为进入 `FR-0017` 的 handoff 输入。
 - `candidate_shell_seed` 必须足以直接物化 `FR-0017.candidate_ability_descriptor` 的必填字段，不允许只留下松散 hint。
+- `success=true` 时，`candidate_shell_seed.ability_kind` 必须直接等于本次请求的 `goal_kind`；若 handoff seed 与请求目标不一致，不得返回成功结果。
 - `candidate_shell_seed.platform_scope.platform_family` 必须使用稳定、归一化的平台键；L2 未知网站默认应落在 `generic_web`，不得把新的一等平台永久冻结进 `other`。
 - `success=true` 时，`result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed` 必须同时存在。
 - `success=false` 时，`failure_class` 必须存在，且不得返回 `candidate_shell_seed`；其余字段允许按失败停点最小化返回。

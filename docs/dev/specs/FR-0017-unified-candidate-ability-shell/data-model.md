@@ -45,6 +45,7 @@
   - 继续复用最小能力壳
   - 调用入口中的 `ability` 仍为结构对象，至少包含 `id` / `layer` / `action`
   - 调用时的 `ability.layer` 必须属于 `candidate_ability_descriptor.execution_layer_support`
+  - 调用时的 `ability.action` 必须直接等于 `candidate_ability_descriptor.ability_kind`；不一致时必须按结构化输入错误拒绝
   - 成功结果继续落在 `summary.capability_result`，不新增平行结果壳
 - 与 `FR-0004`：
   - 继续复用最小诊断引用

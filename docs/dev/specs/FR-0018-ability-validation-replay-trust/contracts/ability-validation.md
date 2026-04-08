@@ -77,6 +77,7 @@ interface AbilityHealthView {
 - `health_state` 只表达最小可信判断，不表达是否可交付。
 - `failure_class` 只表达用户可读的大类，不替代低层错误码。
 - `validation_mode=smoke_validation` 时，`smoke_input` 必须存在，且必须满足 `FR-0017.candidate_ability_descriptor.input_contract_ref` 的最小输入边界。
+- `expected_capability_kind` 如保留在请求面，必须直接等于 `FR-0017.candidate_ability_descriptor.ability_kind`；若不一致，验证层必须以结构化输入错误拒绝请求，不得自行容忍或改写。
 - `replay_source=explicit_input_snapshot` 时，`ability_replay_request.replay_input_ref` 必须存在；`replay_source=last_success_input` 时不得伪造显式 snapshot 引用。
 - `ability_ref` 在本 FR 中必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`；FR-0018 不再引入独立的 ability 引用命名空间或二次映射对象。
 - `replay_input_ref` 只能引用既有的 `ReplayInputSnapshotRef.snapshot_ref`；该对象的 ownership 属于 FR-0018 replay 层，而不是 FR-0006 runtime-store。

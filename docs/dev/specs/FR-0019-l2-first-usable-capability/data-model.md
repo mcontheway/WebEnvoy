@@ -54,6 +54,7 @@
 
 - L2 首次可用成功态必须同时产出 `result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed`。
 - 当前 FR 产出的 `candidate_shell_seed.ability_kind` 只允许 `read` / `write`；`download` 仍保留给上游共享模型与后续独立 FR。
+- `candidate_shell_seed.ability_kind` 必须直接等于本次请求 `goal_kind`；若 handoff seed 与请求目标不一致，不得落成成功态结果。
 - `capture_artifact_refs` 如存在，只能作为 `capture_run_id` 下的补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 handoff 成立的强制前置。
 
 ## 4. `write_safety_boundary`

@@ -61,6 +61,7 @@ interface CandidateAbilityInvocation {
 - `ability` 必须继续保持 `FR-0007` 的结构对象，不得降格为字符串或其他别名。
 - `ability.id` 必须直接对应 `candidate_ability_descriptor.ability_id`。
 - `ability.layer` 必须落在 `candidate_ability_descriptor.execution_layer_support` 之内；若候选能力未声明支持某执行层，调用方不得以该层发起 invocation。
+- `ability.action` 必须直接等于 `candidate_ability_descriptor.ability_kind`；若调用方传入的 action 与 descriptor kind 不一致，runtime 必须以结构化输入错误拒绝该 invocation。
 - `candidate_ability_descriptor` 自身就是输入/输出/错误契约引用的正式真相源；调用对象不得再引入独立的 `descriptor_ref` 或其他平行绑定壳。
 
 ## 3. 结果挂载规则

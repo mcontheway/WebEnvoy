@@ -86,6 +86,7 @@
 
 - 与 `FR-0017`：
   - `ability_ref` 必须直接等于已存在 `candidate_ability_descriptor.ability_id`
+  - `expected_capability_kind` 如保留在请求面，只允许作为对 `candidate_ability_descriptor.ability_kind` 的显式断言；不一致请求不得写入 `latest_validations`
 - 与 `FR-0004`：
   - 最小失败大类可以继续引用最小诊断结果，但不在本 FR 中扩展诊断 schema
 - 与 `FR-0006`：

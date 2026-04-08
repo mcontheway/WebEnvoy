@@ -57,6 +57,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `smoke_validation` 用于证明能力至少还能走通最小路径
   - `validation_mode=smoke_validation` 时，请求必须显式给出满足 `input_contract_ref` 的 `smoke_input`
   - `ability_ref` 在本 FR 中必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`
+  - `expected_capability_kind` 如保留在请求面，必须直接等于该 descriptor 的 `ability_kind`；若不一致，验证层必须按结构化输入错误拒绝请求
   - `smoke_validation` 不要求预先存在 replay snapshot；同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation` 可以产出首个 `ReplayInputSnapshotRef`
   - `ability_validation_request` 是唯一的 smoke 请求契约；replay 不得复用或平行复制到该对象中
 
@@ -145,6 +146,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `ability_validation_request.profile_ref` 必须存在，验证结果与健康视图按 `ability_ref + profile_ref` 维度隔离
   - `ability_ref` 在本 FR 的请求、输入快照引用和健康视图里都必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`
   - `ability_validation_request` 只负责 `smoke_validation`；任何 replay 入口都必须走 `ability_replay_request`，不得冻结第二套 replay 请求面
+  - `expected_capability_kind` 只允许作为对 `candidate_ability_descriptor.ability_kind` 的显式断言；不一致时不得写入任何 latest 结果
   - 结果对象可以引用运行证据，但不重建第二套运行真相源
   - 若缺少 `validated_at` 或 `run_id`，不得声称“最近一次验证已成立”
   - `last_success_input_ref` 是 `replay_source=last_success_input` 的正式 truth source；它只能由同一 `ability_ref + profile_ref` 下最近一次成功验证/重放刷新
@@ -235,10 +237,11 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 5. 新能力进入验证链路时，既没有上游 `seed_replay_input_ref`，也没有通过首次成功验证/重放建立首个输入快照引用对象：不得宣称该能力已具备 replay-ready 边界。
 6. `stale` 判定未检查 7 天 freshness window，或未对比 `baseline_descriptor`：视为健康状态计算未冻结。
 7. 失败大类被写成低层错误码镜像：视为边界漂移。
-8. 只有 smoke latest 成功、但还没有 replay latest，就把顶层 `health_state` 提升为 `verified`：视为可信判断边界错误。
-9. 把 `verified` 误当成“可交付/可分享”：视为越界到 Phase 3/5。
-10. 重放对象携带自动修复、自动调参与重新学习语义：视为超出本 FR 范围。
-11. 能力尚未进入 `FR-0017` 的候选能力描述，却直接进入验证链路：视为流程违规。
+8. `expected_capability_kind` 与 `candidate_ability_descriptor.ability_kind` 不一致时仍继续验证或写入 latest：视为共享能力面边界未冻结。
+9. 只有 smoke latest 成功、但还没有 replay latest，就把顶层 `health_state` 提升为 `verified`：视为可信判断边界错误。
+10. 把 `verified` 误当成“可交付/可分享”：视为越界到 Phase 3/5。
+11. 重放对象携带自动修复、自动调参与重新学习语义：视为超出本 FR 范围。
+12. 能力尚未进入 `FR-0017` 的候选能力描述，却直接进入验证链路：视为流程违规。
 
 ## 验收标准
 
