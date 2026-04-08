@@ -55,7 +55,23 @@
 
 - L2 首次可用成功态必须同时产出 `result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed`。
 
-## 4. 与既有对象的关系
+## 4. `failure_result`
+
+用途：
+
+- 记录 L2 首次可用未完成时的最小失败回传边界
+
+最小字段：
+
+- `success=false`
+- `failure_class`
+
+补充约束：
+
+- 失败结果一旦返回，就必须包含稳定的 `failure_class`；不得只返回自由文本错误或空失败对象。
+- `failure_class` 只允许 `insufficient_semantic_structure`、`target_not_located`、`state_not_settled`、`risk_gate_blocked`、`requires_l1_fallback`。
+
+## 5. 与既有对象的关系
 
 - 与 `FR-0017`：
   - `candidate_shell_seed` 必须已经包含可直接物化 `candidate_ability_descriptor` 必填字段的结构化值

@@ -63,6 +63,7 @@ type L2FirstUsableResult =
     }
   | {
       success: false
+      failure_class: "insufficient_semantic_structure" | "target_not_located" | "state_not_settled" | "risk_gate_blocked" | "requires_l1_fallback"
       result_summary?: Record<string, unknown>
       first_usable_trace?: FirstUsableTraceStep[]
       interaction_trace?: InteractionTraceStep[]
@@ -87,7 +88,6 @@ type L2FirstUsableResult =
         captured_at: string
         candidate_status: "draft_candidate"
       }
-      failure_class?: "insufficient_semantic_structure" | "target_not_located" | "state_not_settled" | "risk_gate_blocked" | "requires_l1_fallback"
     }
 ```
 
@@ -96,5 +96,6 @@ type L2FirstUsableResult =
 - `candidate_shell_seed` 只作为进入 `FR-0017` 的 handoff 输入。
 - `candidate_shell_seed` 必须足以直接物化 `FR-0017.candidate_ability_descriptor` 的必填字段，不允许只留下松散 hint。
 - `success=true` 时，`result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed` 必须同时存在。
+- `success=false` 时，`failure_class` 必须存在；其余字段允许按失败停点最小化返回。
 - `first_usable_trace` 与 `interaction_trace` 的正式类型都是结构化步骤对象数组，不允许在 contract / data-model 间一处写成对象、一处退回 `string[]`。
 - `failure_class` 只表达最小失败大类，不替代低层错误码或诊断全文。

@@ -114,15 +114,17 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `artifact_refs`
 - 每个能力还必须提供一个顶层 `ability_health_view` 聚合视图，至少包含：
   - `ability_ref`
+  - `profile_ref`
   - `health_state`
   - `latest_validations`
   - `divergence_reason`
 - 本 FR 必须明确：
+  - `ability_validation_request.profile_ref` 必须存在，验证结果与健康视图按 `ability_ref + profile_ref` 维度隔离
   - 结果对象可以引用运行证据，但不重建第二套运行真相源
-  - 若缺少 `run_id` 或 `artifact_refs`，不得声称“最近一次验证已成立”
+  - 若缺少 `validated_at`、`run_id` 或 `artifact_refs`，不得声称“最近一次验证已成立”
   - `failure_class` 在 mode `result_state=broken` 场景必须存在；在 mode `result_state=verified` 场景必须为空；在 mode `result_state=stale` 场景可选但需与状态解释一致
   - `artifact_refs` 的正式 truth source 是 `run_id` 对应验证运行的 run-scoped 证据载体；FR-0018 只保存引用，不另建 artifact 主数据
-  - `ability_health_view` 是每个 `ability_ref` 的唯一聚合健康视图；消费者必须读取该视图判断顶层 `health_state`
+  - `ability_health_view` 是每个 `ability_ref + profile_ref` 的唯一聚合健康视图；消费者必须读取该视图判断顶层 `health_state`
   - `latest_validations` 按 `validation_mode` 最多各保留一条 latest 记录；FR-0006 只作为输入证据层，不负责表达 smoke/replay 分叉
 
 ### 7. 与候选能力和 L2 首次可用的衔接
@@ -140,6 +142,7 @@ Given 某个候选能力已存在
 When 用户请求一次 `smoke_validation`
 Then 系统能构造 `ability_validation_request`
 And 验证结果会落回稳定的 `ability_health_view`
+And 该结果只会写入本次 `profile_ref` 对应的聚合健康视图
 
 ### 场景 2：最近一次验证结果可被用户理解
 
@@ -147,6 +150,7 @@ Given 某个能力最近一次验证失败
 When 用户查看能力当前状态
 Then 可以看到 `health_state`
 And 可以看到最小失败大类
+And 可以看到 `validated_at`、`run_id` 与 `artifact_refs`
 And 不需要直接阅读原始运行日志才能知道大概问题
 
 ### 场景 3：smoke 与 replay 分叉时不会被压扁成单一结果
@@ -179,11 +183,12 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 
 ## 异常与边界场景
 
-1. 验证结果缺少 `run_id` 或 `artifact_refs`：不得宣称“最近一次验证已成立”。
-2. 失败大类被写成低层错误码镜像：视为边界漂移。
-3. 把 `verified` 误当成“可交付/可分享”：视为越界到 Phase 3/5。
-4. 重放对象携带自动修复、自动调参与重新学习语义：视为超出本 FR 范围。
-5. 能力尚未进入 `FR-0017` 的候选能力描述，却直接进入验证链路：视为流程违规。
+1. 验证结果缺少 `validated_at`、`run_id` 或 `artifact_refs`：不得宣称“最近一次验证已成立”。
+2. 同一个 `ability_ref` 在不同 `profile_ref` 下共用一条健康视图：视为跨 profile 污染。
+3. 失败大类被写成低层错误码镜像：视为边界漂移。
+4. 把 `verified` 误当成“可交付/可分享”：视为越界到 Phase 3/5。
+5. 重放对象携带自动修复、自动调参与重新学习语义：视为超出本 FR 范围。
+6. 能力尚未进入 `FR-0017` 的候选能力描述，却直接进入验证链路：视为流程违规。
 
 ## 验收标准
 
