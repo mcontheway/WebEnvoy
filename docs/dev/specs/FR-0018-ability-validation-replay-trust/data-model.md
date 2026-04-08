@@ -105,6 +105,9 @@
 - `snapshot_ref` 只能在同一 `ability_ref + profile_ref + execution_layer` 范围内被 replay 解析。
 - `captured_input_contract_ref` 必须冻结该快照 capture 时满足的 `input_contract_ref`；当前 descriptor 的 `input_contract_ref` 发生变化后，旧 snapshot 不得继续作为可执行 replay 输入。
 - `payload_locator` 是该输入快照引用对象的正式可解析 payload 边界；实现层必须通过它重新取回保存输入，不得仅靠 `source_run_id`、artifact refs 或其他带外扫描推导 payload。
+- `payload_locator` 必须是 replay-store owned 的稳定 locator，而不是临时文件路径、进程内句柄或 run-scoped artifact URL；它必须能够被不同 replay 消费者以同一解析规则解引用到唯一的 captured input payload。
+- `payload_locator` 的生命周期必须至少与所属 `snapshot_ref` 一致；只要该 snapshot 仍可被 `replay_input_ref` 或 `last_success_input_ref` 引用，locator 就不得被提前删除、覆写或回收。
+- `payload_locator` 的 cleanup 只能发生在所属 `snapshot_ref` 被正式退休，且不再被任何当前 `replay_input_ref` / `last_success_input_ref` 引用之后；它不得依赖临时目录或 run artifact 的保留时长碰运气。
 - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须直接指向首个输入快照引用对象；该 ref 必须与 `capture_run_id + capture_profile` 对应的成功捕获输入同源。
 - 生成后的首个 `snapshot_ref` 必须立即回写为同一 `ability_ref + capture_profile + capture_origin` 对应执行层视图的初始 `last_success_input_ref`；其他 profile 或其他 execution layer 视图不得复用该 seed。
 - 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref + execution_layer` 下首次成功的 `smoke_validation.smoke_input` 或成功 replay 输入必须物化为首个输入快照引用对象；仅当 `candidate_ability_descriptor.ability_kind` 属于非状态变更能力时，才允许继续把它回写为 `last_success_input_ref`。在此之前不得把 `replay_source=last_success_input` 视为已具备可执行输入来源。

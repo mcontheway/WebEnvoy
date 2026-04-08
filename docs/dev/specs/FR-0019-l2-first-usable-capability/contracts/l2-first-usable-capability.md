@@ -33,6 +33,9 @@ interface L2FirstUsableRequest {
 - `risk_gate_context.target_tab_id` 与 `risk_gate_context.target_page` 必须共同存在；`target_url` 的域名必须能回链到 `risk_gate_context.target_domain`。
 - 当前 FR 保持 read-first；未知站点通用 `write` lane 不在本次 formal baseline 内冻结，如需进入正式请求面，必须在未来独立 FR 中同时补齐验证与治理路径。
 - `goal_kind` 在当前 FR 中固定为 `read`；`interaction_safety_class` 在当前 FR 中固定为 `pure_read`。
+- `risk_gate_context.risk_state=paused` 时，请求必须直接返回 `failure_class=risk_gate_blocked`，不得进入 read-first 执行路径。
+- `risk_gate_context.risk_state=limited` 在本 FR 中表示“只允许受控范围”；当前 formal baseline 下，`goal_kind=read + interaction_safety_class=pure_read` 属于允许执行的受控路径，不得因状态为 `limited` 而默认阻断。
+- `risk_gate_context.risk_state=allowed` 时，同样允许执行当前 read-first 路径；因此对本 FR 而言，可执行状态固定为 `limited | allowed`，阻断状态固定为 `paused`。
 - `allowed_actions` 只允许 `navigate`、`locate`、`reveal_only_click`、`extract`、`wait_settled`；request-side 不再允许裸 `click`，以便在执行前就把揭示型点击和状态改变点击区分开。`reveal_only_click` 只允许 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate`。
 - `goal_kind=read` 时，`allowed_actions` 必须显式包含 `extract`；若请求没有授权 `extract`，则它与 `success=true` 所要求的读取完成条件冲突，必须在请求阶段按结构化输入错误拒绝。
 - request-side `allowed_actions=reveal_only_click` 与 trace-side `interaction_trace[*].action=click + interaction_semantics=reveal_only_click` 是同一类受允许动作的正式翻译关系；bare `action=click` 且没有 `interaction_semantics=reveal_only_click` 不得被当作已授权的 pure-read 点击。

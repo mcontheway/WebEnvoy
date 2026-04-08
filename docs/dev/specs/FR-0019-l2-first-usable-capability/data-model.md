@@ -143,6 +143,9 @@
 - `goal_kind` 在当前 FR 中固定为 `read`；`target_url` 必须能够回链到 `risk_gate_context.target_domain`。
 - `risk_gate_context.target_tab_id` 与 `risk_gate_context.target_page` 必须共同存在；任一缺失都不得进入 L2 首次可用请求。
 - `risk_state` 只表达统一风险状态机的站点无关输入状态；当前最小集合为 `paused | limited | allowed`。
+- `risk_state=paused` 时，请求必须直接返回 `failure_class=risk_gate_blocked`，不得进入 read-first 执行路径。
+- `risk_state=limited` 在本 FR 中表示“只允许受控范围”；当前 formal baseline 下，`goal_kind=read + interaction_safety_class=pure_read` 属于允许执行的受控路径，不得因状态为 `limited` 而默认阻断。
+- `risk_state=allowed` 时，同样允许执行当前 read-first 路径；因此本 FR 的可执行状态固定为 `limited | allowed`，阻断状态固定为 `paused`。
 - 若上游门禁仍持有 `irreversible_write`、平台专用 write lane 或其他站点专用 gate 语义，必须在进入本 FR 请求面前完成阻断。
 
 ## 6. `failure_result`

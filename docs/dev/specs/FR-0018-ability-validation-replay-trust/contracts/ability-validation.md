@@ -100,6 +100,9 @@ interface AbilityHealthView {
 - `replay_input_ref` 只允许出现在 `replay_source=explicit_input_snapshot` 分支，且只能引用既有的 `ReplayInputSnapshotRef.snapshot_ref`；`replay_source=last_success_input` 分支必须缺省该字段。
 - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须作为首个 `ReplayInputSnapshotRef` 的正式上游 seed，且只允许落在 `capture_profile + capture_origin` 对应执行层的健康视图内；descriptor 其他受支持执行层不得因此自动获得 replay eligibility。
 - `ReplayInputSnapshotRef.payload_locator` 是 replay snapshot 的正式可解析 payload 边界；重放层必须通过该 locator 重新取回保存输入，不得仅靠 `source_run_id`、artifact refs 或带外扫描临时反推。
+- `ReplayInputSnapshotRef.payload_locator` 必须是 FR-0018 replay-store owned 的稳定 locator，而不是临时文件路径、进程内句柄或 run-scoped artifact URL；消费者只能通过该 replay-store resolver 把它解析为唯一的 captured input payload。
+- `ReplayInputSnapshotRef.payload_locator` 的有效期必须至少与所属 `snapshot_ref` 一致；只要该 snapshot 仍可被 `replay_input_ref` 或 `last_success_input_ref` 引用，locator 就不得被提前删除、覆写或回收。
+- `ReplayInputSnapshotRef.payload_locator` 的 cleanup 只能发生在所属 `snapshot_ref` 已正式退休，且不再被任何当前 `replay_input_ref` / `last_success_input_ref` 引用之后；在此之前，实现不得把 cleanup 留给临时目录生命周期或 run artifact 保留策略碰运气。
 - `ReplayInputSnapshotRef.captured_input_contract_ref` 必须记录该快照满足的 `input_contract_ref` 版本；当前 descriptor 的 `input_contract_ref` 发生不兼容变化后，旧 snapshot 不得继续作为可执行 replay 输入。
 - `ability_validation_request` 是唯一的 smoke 请求契约；所有 replay 执行必须只通过 `ability_replay_request` 发起，`latest_validations.validation_mode=replay_validation` 也只能由 replay 请求结果写入。
 - 任何 replay 持久化 / 投影对象都只能表达 `ability_replay_request` 的存储投影，不得再冻结第二套 replay 请求契约或 `ready` 一类独立状态位。

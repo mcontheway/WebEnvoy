@@ -9,6 +9,7 @@
 - [ ] `spec.md` / `contracts/` / `data-model.md` 已统一把 health view、latest 与 replay eligibility 收口为 `ability_ref + profile_ref + execution_layer` 作用域，并要求请求显式给出 `requested_execution_layer`。
 - [ ] `spec.md` / `contracts/` / `data-model.md` 已统一明确：无关支持层的新增或删除不得单独使当前 layer 视图失效，只有 `validated_execution_layer` 本身失去覆盖时才可据此判为 `stale`。
 - [ ] `spec.md` / `contracts/` / `data-model.md` 已统一冻结 `ReplayInputSnapshotRef.captured_input_contract_ref`，并明确 `input_contract_ref` 变化会使 `last_success_input_ref` 与旧 snapshot 失效。
+- [ ] `spec.md` / `contracts/` / `data-model.md` 已统一冻结 `payload_locator` 的 resolver 边界、生命周期与 cleanup 规则，不再允许临时文件路径或 run artifact URL 充当正式 locator。
 - [ ] `plan.md` 已补齐七节最小结构，并写清与 `#157/#153` 的并行 / 串行关系。
 - [ ] `contracts/ability-validation.md` 已冻结稳定对象与边界。
 - [ ] `data-model.md` 已明确最近一次验证结果与运行证据的引用方式。

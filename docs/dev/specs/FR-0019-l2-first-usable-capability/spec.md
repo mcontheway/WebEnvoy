@@ -66,6 +66,9 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
   - `goal_kind` 是本 FR 唯一正式的能力目标类型；`interaction_safety_class` 是与之分离的正式动作纯度轴；但当前 formal baseline 只冻结 `goal_kind=read + interaction_safety_class=pure_read`
   - `target_url` 的域名必须能回链到 `risk_gate_context.target_domain`，且请求不得缺少 `target_tab_id + target_page` 这组目标页确认坐标
   - 若上游门禁请求仍携带平台专用 write lane、`irreversible_write` 或其他站点专用 gate 语义，必须在进入本 FR 前直接被阻断；FR-0019 当前不消费这类输入
+  - `risk_state=paused` 时，请求必须直接返回 `failure_class=risk_gate_blocked`，不得进入 read-first 执行路径
+  - `risk_state=limited` 在本 FR 中表示“只允许受控范围”；当前 formal baseline 下，`goal_kind=read + interaction_safety_class=pure_read` 属于允许执行的受控路径，不得因状态为 `limited` 而默认阻断
+  - `risk_state=allowed` 时，同样允许执行当前 read-first 路径；因此对本 FR 而言，可执行状态固定为 `limited | allowed`，阻断状态固定为 `paused`
   - `goal_kind=read` 必须固定映射到 `interaction_safety_class=pure_read`
   - `goal_kind=read` 时允许放行 `navigate`、`locate`、`reveal_only_click`、`extract`、`wait_settled`；request-side 不再允许裸 `click`
   - `goal_kind=read` 的 request-side `allowed_actions` 必须显式包含 `extract`；若请求没有授权 `extract`，则它与 read-success 判定矛盾，必须在请求阶段按结构化输入错误拒绝
@@ -195,7 +198,22 @@ And `success=false` 的结果对象中必须包含 `failure_class`
 And 当 `failure_class=requires_l1_fallback` 时必须同时包含结构化 `l1_fallback_payload`
 And 不会返回 `candidate_shell_seed` 冒充候选能力输入
 
-### 场景 8：L2 首次可用不等于正式复用
+### 场景 8：`risk_state=limited` 仍允许执行受控 read-first 路径
+
+Given 请求满足当前 formal baseline 的 `goal_kind=read + interaction_safety_class=pure_read`
+And `risk_gate_context.risk_state=limited`
+When 请求进入 L2 首次可用
+Then 系统不得仅因 `risk_state=limited` 就返回 `risk_gate_blocked`
+And 该请求仍可进入当前受控 read-first 执行路径
+
+### 场景 9：`risk_state=paused` 必须直接阻断
+
+Given `risk_gate_context.risk_state=paused`
+When 请求进入 L2 首次可用
+Then 系统必须返回 `failure_class=risk_gate_blocked`
+And 不得进入 read-first 执行路径
+
+### 场景 10：L2 首次可用不等于正式复用
 
 Given 某次 L2 路径已经成功一次
 When reviewer 检查本 FR 的边界
@@ -211,20 +229,22 @@ And 不会把它直接描述成正式可复用能力
 5. `success=false` 却缺少 `failure_class`，或仍返回 `candidate_shell_seed`：视为失败回传边界未冻结。
 6. `failure_class=requires_l1_fallback` 却缺少结构化 `l1_fallback_payload`，或只给出自由文本建议：视为 L1 交接边界未冻结。
 7. 风险门禁阻断时继续推进高风险交互：视为越界到 `FR-0010/0011` 之外。
-8. 因为未知网站暂时成功一次就宣称 L2 通用平台已经完成：视为过度承诺。
-9. 在未冻结最小执行语义前，把 `download` 伪装成当前 FR 已支持的 L2 请求能力：视为超出本 FR 范围。
-10. 在本 FR 中引入完整 L1 兜底、完整导入/交付或完整版本治理：视为越界。
-11. 把 `FR-0010.gate_input`、其平台专用 write lane / execution-mode 集合，或其他平台专用 gate 请求对象直接当成通用未知网站 L2 输入，而不先收敛到当前 read-first 边界：视为共享请求边界漂移。
-12. `goal_kind=read` 未引入独立的 `interaction_safety_class`，或把 `type`、submit、confirm 等状态改变动作混入 `pure_read`：视为目标类型与动作纯度仍然混轴。
-13. request-side 仍允许裸 `click`，没有在执行前把可放行的点击显式收敛为 `reveal_only_click`：视为读取边界未冻结。
-14. 在当前 FR 中引入未知站点通用 `write` 请求、write candidate 或 live-write 门禁对象：视为超出已批准的 Phase 2 read-first 基线。
-15. request-side `reveal_only_click` 与 trace-side `action=click + interaction_semantics=reveal_only_click` 没有形成稳定翻译关系：视为请求边界与执行回传边界仍然脱节。
-16. `candidate_shell_seed.contract_registry_seed` 存在重复 ref、kind 不匹配或无法唯一解引用的 entry，仍被当作成功 handoff：视为下游 contract resolver 边界未冻结。
-17. pure-read 成功路径里仍出现 `action=click + interaction_semantics=neutral`，或点击步骤缺少 `click_kind`：视为成功 trace 的机器边界未冻结。
-18. 把 `insufficient_semantic_structure`、`target_not_located`、`state_not_settled` 继续平铺为顶层 `failure_class`，而不是统一收口到 `requires_l1_fallback + l1_fallback_payload.fallback_reason`：视为 L2->L1 交接形状仍然重复。
-19. `candidate_shell_seed.execution_layer_support` 缺失、为空，或不是显式 `["L2"]`：视为成功 handoff 仍未正式声明实际支持的执行层。
-20. `success=true`，但 `interaction_trace` 中没有任何 `action=extract`，或 `result_summary` 里没有可回链到本次读取的结构化结果：视为把未完成的 read 路径误报为已成功。
-21. `goal_kind=read` 的 request-side `allowed_actions` 未显式包含 `extract`，却仍允许请求进入执行：视为请求契约与成功契约仍然矛盾。
+8. `risk_state=limited` 的请求一会儿被默认阻断、一会儿又被允许执行：视为门禁执行语义未冻结。
+9. `risk_state=paused` 的请求仍进入 read-first 执行路径：视为风险阻断边界未冻结。
+10. 因为未知网站暂时成功一次就宣称 L2 通用平台已经完成：视为过度承诺。
+11. 在未冻结最小执行语义前，把 `download` 伪装成当前 FR 已支持的 L2 请求能力：视为超出本 FR 范围。
+12. 在本 FR 中引入完整 L1 兜底、完整导入/交付或完整版本治理：视为越界。
+13. 把 `FR-0010.gate_input`、其平台专用 write lane / execution-mode 集合，或其他平台专用 gate 请求对象直接当成通用未知网站 L2 输入，而不先收敛到当前 read-first 边界：视为共享请求边界漂移。
+14. `goal_kind=read` 未引入独立的 `interaction_safety_class`，或把 `type`、submit、confirm 等状态改变动作混入 `pure_read`：视为目标类型与动作纯度仍然混轴。
+15. request-side 仍允许裸 `click`，没有在执行前把可放行的点击显式收敛为 `reveal_only_click`：视为读取边界未冻结。
+16. 在当前 FR 中引入未知站点通用 `write` 请求、write candidate 或 live-write 门禁对象：视为超出已批准的 Phase 2 read-first 基线。
+17. request-side `reveal_only_click` 与 trace-side `action=click + interaction_semantics=reveal_only_click` 没有形成稳定翻译关系：视为请求边界与执行回传边界仍然脱节。
+18. `candidate_shell_seed.contract_registry_seed` 存在重复 ref、kind 不匹配或无法唯一解引用的 entry，仍被当作成功 handoff：视为下游 contract resolver 边界未冻结。
+19. pure-read 成功路径里仍出现 `action=click + interaction_semantics=neutral`，或点击步骤缺少 `click_kind`：视为成功 trace 的机器边界未冻结。
+20. 把 `insufficient_semantic_structure`、`target_not_located`、`state_not_settled` 继续平铺为顶层 `failure_class`，而不是统一收口到 `requires_l1_fallback + l1_fallback_payload.fallback_reason`：视为 L2->L1 交接形状仍然重复。
+21. `candidate_shell_seed.execution_layer_support` 缺失、为空，或不是显式 `["L2"]`：视为成功 handoff 仍未正式声明实际支持的执行层。
+22. `success=true`，但 `interaction_trace` 中没有任何 `action=extract`，或 `result_summary` 里没有可回链到本次读取的结构化结果：视为把未完成的 read 路径误报为已成功。
+23. `goal_kind=read` 的 request-side `allowed_actions` 未显式包含 `extract`，却仍允许请求进入执行：视为请求契约与成功契约仍然矛盾。
 
 ## 验收标准
 

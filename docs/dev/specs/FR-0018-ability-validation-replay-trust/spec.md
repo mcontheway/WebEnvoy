@@ -103,6 +103,9 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `last_success_input_ref` 与 `replay_input_ref` 都必须指向同一套输入快照引用对象，而不是带外临时值
   - 输入快照引用对象必须记录自己的 `execution_layer` 与 `captured_input_contract_ref`；当前请求的 `requested_execution_layer` 或当前 descriptor 的 `input_contract_ref` 任一不匹配时，该快照不得继续复用为可执行 replay 输入
   - `payload_locator` 是 replay snapshot 的正式可解析 payload 边界；重放层必须通过它重新取回已保存输入，不得仅靠 `source_run_id`、artifact refs 或带外扫描临时反推
+  - `payload_locator` 必须是 FR-0018 replay-store owned 的稳定 locator，而不是临时文件路径、进程内句柄或 run-scoped artifact URL；消费者只能通过该 replay-store resolver 把它解析为唯一的 captured input payload
+  - `payload_locator` 的有效期必须至少与其所属 `snapshot_ref` 一致；只要该 snapshot 仍可被 `replay_input_ref` 或 `last_success_input_ref` 引用，locator 就不得被提前删除、覆写或回收
+  - `payload_locator` 的清理只能发生在所属 `snapshot_ref` 被正式退休，且不再被任何当前 `replay_input_ref` / `last_success_input_ref` 引用之后；在此之前，实现不得把 cleanup 留给临时目录生命周期或 run artifact 保留策略碰运气
   - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须作为首个输入快照引用对象，并且只允许回写为该 `capture_profile + capture_origin` 对应执行层视图的初始 `last_success_input_ref`
   - 非 `capture_profile` 的其他 profile 视图，或 descriptor 其他受支持 execution layer 视图，都不得继承这条初始 seed；它们只能在各自作用域下首次成功验证/重放后刷新自己的 `last_success_input_ref`
   - `candidate_ability_descriptor.ability_kind=write` 时，当前 formal baseline 不允许把 `seed_replay_input_ref`、`last_success_input_ref`、`replay_source=last_success_input` 或 `replay_source=explicit_input_snapshot` 冻结为可执行 replay 入口；显式 snapshot 也只能作为 capture evidence 保留，不能绕过当前缺失的 `requested_execution_mode`、`effective_execution_mode` 与 gate / audit 元数据
@@ -342,19 +345,20 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 3. `replay_source=last_success_input` 时缺少 `last_success_input_ref` 真相源：不得视为可执行 replay。
 4. `replay_input_ref` 无法解析到正式输入快照引用对象：不得视为可执行 replay。
 5. 输入快照引用对象缺少 `payload_locator`，或该 locator 无法解析到对应 payload：不得视为可执行 replay。
-6. 新能力进入验证链路时，既没有上游 `seed_replay_input_ref`，也没有通过首次成功验证/重放建立首个输入快照引用对象：不得宣称该能力已具备 replay-ready 边界。
-7. `stale` 判定未检查 7 天 freshness window，或未对比 `baseline_descriptor` 中的 descriptor/profile 基线，或未检查 `validated_execution_layer` 是否仍被当前 `execution_layer_support` 覆盖：视为健康状态计算未冻结。
-8. 失败大类被写成低层错误码镜像：视为边界漂移。
-9. `expected_capability_kind` 与 `candidate_ability_descriptor.ability_kind` 不一致时仍继续验证或写入 latest：视为共享能力面边界未冻结。
-10. 只有 smoke current latest 成功、却仍把顶层 `health_state` 压成 `degraded`，或未把覆盖度标成 `smoke_only`：视为状态轴仍然混用。
-11. 把 `healthy` 误当成“可交付/可分享”，或把 `validation_coverage_state` 当成顶层可用性结论：视为越界到 Phase 3/5。
-12. 重放对象携带自动修复、自动调参与重新学习语义：视为超出本 FR 范围。
-13. 能力尚未进入 `FR-0017` 的候选能力描述，却直接进入验证链路：视为流程违规。
-14. `ability_kind=write` 的能力仍允许通过 `seed_replay_input_ref`、`last_success_input_ref` 或 `replay_input_ref` 形成无门禁 replay 入口：视为状态变更 replay 边界未冻结。
-15. `ability_kind=write` 仍允许通过普通 `smoke_validation` rerun、写出 `healthy`，或被压成普通 `health_state=unknown`：视为状态变更验证门禁缺失。
-16. 当前 `candidate_ability_descriptor.execution_layer_support` 已不再覆盖 `validated_execution_layer`，旧 latest 仍继续被视为 current：视为执行层变更没有进入 stale baseline。
-17. 仅因为无关支持层新增或删除，就把当前 layer 视图中的 latest 判成 `stale`：视为分层健康状态被错误地绑到了整组支持层集合。
-18. `last_success_input_ref` 指向的 snapshot 在 `captured_input_contract_ref` 与当前 `input_contract_ref` 不一致时仍可执行 replay：视为 replay snapshot 没有按输入契约版本失效。
+6. `payload_locator` 被实现成临时文件路径、进程内句柄、run artifact URL，或其生命周期短于所属 `snapshot_ref`：视为 replay 输入解析边界未冻结。
+7. 新能力进入验证链路时，既没有上游 `seed_replay_input_ref`，也没有通过首次成功验证/重放建立首个输入快照引用对象：不得宣称该能力已具备 replay-ready 边界。
+8. `stale` 判定未检查 7 天 freshness window，或未对比 `baseline_descriptor` 中的 descriptor/profile 基线，或未检查 `validated_execution_layer` 是否仍被当前 `execution_layer_support` 覆盖：视为健康状态计算未冻结。
+9. 失败大类被写成低层错误码镜像：视为边界漂移。
+10. `expected_capability_kind` 与 `candidate_ability_descriptor.ability_kind` 不一致时仍继续验证或写入 latest：视为共享能力面边界未冻结。
+11. 只有 smoke current latest 成功、却仍把顶层 `health_state` 压成 `degraded`，或未把覆盖度标成 `smoke_only`：视为状态轴仍然混用。
+12. 把 `healthy` 误当成“可交付/可分享”，或把 `validation_coverage_state` 当成顶层可用性结论：视为越界到 Phase 3/5。
+13. 重放对象携带自动修复、自动调参与重新学习语义：视为超出本 FR 范围。
+14. 能力尚未进入 `FR-0017` 的候选能力描述，却直接进入验证链路：视为流程违规。
+15. `ability_kind=write` 的能力仍允许通过 `seed_replay_input_ref`、`last_success_input_ref` 或 `replay_input_ref` 形成无门禁 replay 入口：视为状态变更 replay 边界未冻结。
+16. `ability_kind=write` 仍允许通过普通 `smoke_validation` rerun、写出 `healthy`，或被压成普通 `health_state=unknown`：视为状态变更验证门禁缺失。
+17. 当前 `candidate_ability_descriptor.execution_layer_support` 已不再覆盖 `validated_execution_layer`，旧 latest 仍继续被视为 current：视为执行层变更没有进入 stale baseline。
+18. 仅因为无关支持层新增或删除，就把当前 layer 视图中的 latest 判成 `stale`：视为分层健康状态被错误地绑到了整组支持层集合。
+19. `last_success_input_ref` 指向的 snapshot 在 `captured_input_contract_ref` 与当前 `input_contract_ref` 不一致时仍可执行 replay：视为 replay snapshot 没有按输入契约版本失效。
 
 ## 验收标准
 
