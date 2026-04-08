@@ -25,6 +25,7 @@
 - [x] 统一消费对象字段已在 formal 套件内冻结：`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode`、`effective_execution_mode`、`gate_decision`、`gate_reasons`。
 - [x] 在 `#208` issue 线程同步“FR-0010 已冻结其后续 live 恢复需要消费的统一门禁对象与 review 边界”。permalink=`https://github.com/mcontheway/WebEnvoy/issues/208#issuecomment-4199076361`
 - [x] 在 `#209` issue 线程同步“FR-0010 已冻结其后续 live 扩展需要引用的统一门禁对象与 review 边界”。permalink=`https://github.com/mcontheway/WebEnvoy/issues/209#issuecomment-4199076389`
+
 ## 实施清单（spec 通过后）
 
 - [ ] 实现读域/写域分离的执行前检查。
