@@ -19,7 +19,7 @@ interface CandidateAbilityDescriptor {
   capture_origin: "l3_adapter_sample" | "l2_first_usable_sample"
   candidate_status: "draft_candidate" | "candidate_ready"
   capture_run_id: string
-  capture_profile?: string
+  capture_profile: string
   capture_artifact_refs: string[]
   captured_at: string
 }

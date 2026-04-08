@@ -114,6 +114,7 @@
   - `capture_run_id`
   - `capture_profile`
   - `capture_artifact_refs`
+- `capture_profile` 必须是形成该候选能力时实际使用的 profile 引用，不允许缺失。
 - `capture_artifact_refs` 的正式 truth source 是与 `capture_run_id` 同属一次运行的 run-scoped 证据载体；FR-0017 只保存引用，不定义新的 artifact 存储或跨 run 聚合规则。
 
 ### 7. 诊断与实现边界

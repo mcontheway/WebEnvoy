@@ -20,39 +20,67 @@ interface L2FirstUsableRequest {
 ## 2. `l2_first_usable_result`
 
 ```ts
-interface L2FirstUsableResult {
-  success: boolean
-  result_summary?: Record<string, unknown>
-  first_usable_trace?: string[]
-  interaction_trace?: string[]
-  capture_hints?: Record<string, unknown>
-  candidate_shell_seed?: {
-    ability_id: string
-    display_name: string
-    ability_kind: "read" | "write" | "download"
-    entrypoint: string
-    platform_scope: {
-      platform_family: "generic_web" | "other"
-      site_pattern?: string
+type L2FirstUsableResult =
+  | {
+      success: true
+      result_summary: Record<string, unknown>
+      first_usable_trace: string[]
+      interaction_trace: string[]
+      capture_hints: Record<string, unknown>
+      candidate_shell_seed: {
+        ability_id: string
+        display_name: string
+        ability_kind: "read" | "write" | "download"
+        entrypoint: string
+        platform_scope: {
+          platform_family: "generic_web" | "other"
+          site_pattern?: string
+        }
+        execution_layer_support: Array<"L2">
+        input_contract_ref: string
+        output_contract_ref: string
+        error_contract_ref: string
+        capture_origin: "l2_first_usable_sample"
+        capture_run_id: string
+        capture_profile: string
+        capture_artifact_refs: string[]
+        captured_at: string
+        candidate_status: "draft_candidate"
+      }
     }
-    execution_layer_support: Array<"L2">
-    input_contract_ref: string
-    output_contract_ref: string
-    error_contract_ref: string
-    capture_origin: "l2_first_usable_sample"
-    capture_run_id: string
-    capture_profile?: string
-    capture_artifact_refs: string[]
-    captured_at: string
-    candidate_status: "draft_candidate"
-  }
-  failure_class?: "insufficient_semantic_structure" | "target_not_located" | "state_not_settled" | "risk_gate_blocked" | "requires_l1_fallback"
-}
+  | {
+      success: false
+      result_summary?: Record<string, unknown>
+      first_usable_trace?: string[]
+      interaction_trace?: string[]
+      capture_hints?: Record<string, unknown>
+      candidate_shell_seed?: {
+        ability_id: string
+        display_name: string
+        ability_kind: "read" | "write" | "download"
+        entrypoint: string
+        platform_scope: {
+          platform_family: "generic_web" | "other"
+          site_pattern?: string
+        }
+        execution_layer_support: Array<"L2">
+        input_contract_ref: string
+        output_contract_ref: string
+        error_contract_ref: string
+        capture_origin: "l2_first_usable_sample"
+        capture_run_id: string
+        capture_profile: string
+        capture_artifact_refs: string[]
+        captured_at: string
+        candidate_status: "draft_candidate"
+      }
+      failure_class?: "insufficient_semantic_structure" | "target_not_located" | "state_not_settled" | "risk_gate_blocked" | "requires_l1_fallback"
+    }
 ```
 
 约束：
 
 - `candidate_shell_seed` 只作为进入 `FR-0017` 的 handoff 输入。
 - `candidate_shell_seed` 必须足以直接物化 `FR-0017.candidate_ability_descriptor` 的必填字段，不允许只留下松散 hint。
-- `success=true` 时，必须同时具备结构化结果与 handoff 输入。
+- `success=true` 时，`result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed` 必须同时存在。
 - `failure_class` 只表达最小失败大类，不替代低层错误码或诊断全文。

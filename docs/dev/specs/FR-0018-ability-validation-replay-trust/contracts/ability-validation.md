@@ -28,6 +28,7 @@ interface AbilityReplayRequest {
 ```ts
 interface AbilityHealthView {
   ability_ref: string
+  validation_mode: "smoke_validation" | "replay_validation"
   health_state: "unknown" | "verified" | "degraded" | "broken" | "stale"
   failure_class?: "page_changed" | "auth_or_session_required" | "gate_blocked" | "environment_mismatch" | "runtime_error"
   validated_at?: string

@@ -49,6 +49,10 @@
 - `captured_at`
 - `candidate_status="draft_candidate"`
 
+补充约束：
+
+- L2 首次可用成功态必须同时产出 `result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed`。
+
 ## 4. 与既有对象的关系
 
 - 与 `FR-0017`：
