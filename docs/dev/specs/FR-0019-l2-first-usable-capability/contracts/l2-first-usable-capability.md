@@ -5,11 +5,17 @@
 ```ts
 interface L2FirstUsableRequest {
   target_url: string
-  goal_kind: "read" | "interact"
+  goal_kind: "read" | "write" | "download"
   goal_hint?: string
   allowed_actions: Array<"navigate" | "snapshot" | "click" | "type" | "extract" | "wait_settled">
 }
 ```
+
+约束：
+
+- `goal_kind` 必须与 Phase 2 共享能力面保持一致：`read` / `write` / `download`。
+- 本 FR 中的最小基础交互统一归入 `write`，但不等于恢复高风险 live 写路径或账号敏感提交。
+- `download` 在当前 FR 中允许保持模型预留，但不得从对象边界中缺位。
 
 ## 2. `l2_first_usable_result`
 

@@ -35,7 +35,11 @@ interface CandidateAbilityDescriptor {
 
 ```ts
 interface CandidateAbilityInvocation {
-  ability: string
+  ability: {
+    id: string
+    layer: "L3" | "L2" | "L1"
+    action: "read" | "write" | "download"
+  }
   input: Record<string, unknown>
   options?: Record<string, unknown>
   descriptor_ref: string
@@ -45,6 +49,8 @@ interface CandidateAbilityInvocation {
 约束：
 
 - `ability`、`input`、`options` 的最小语义继续继承 `FR-0007`。
+- `ability` 必须继续保持 `FR-0007` 的结构对象，不得降格为字符串或其他别名。
+- `ability.id` 必须与 `descriptor_ref` 指向描述对象中的 `ability_id` 一致。
 - `descriptor_ref` 只负责把本次调用与候选能力描述绑定起来，不引入第二套调用壳。
 
 ## 3. `candidate_ability_result_envelope`
