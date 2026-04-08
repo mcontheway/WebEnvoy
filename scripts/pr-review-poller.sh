@@ -64,7 +64,8 @@ update_state() {
   local state_file="$1"
   local pr_number="$2"
   local head_sha="$3"
-  local repo_slug="$4"
+  local review_basis_digest="$4"
+  local repo_slug="$5"
   local reviewed_at
   local tmp_file
 
@@ -75,11 +76,19 @@ update_state() {
     --arg repo "${repo_slug}" \
     --arg pr "${pr_number}" \
     --arg sha "${head_sha}" \
+    --arg review_basis_digest "${review_basis_digest}" \
     --arg reviewed_at "${reviewed_at}" \
     '
       .repo = $repo
       | .prs[$pr] = {
           head_sha: $sha,
+          review_basis_digest: (
+            if ($review_basis_digest | length) > 0 then
+              $review_basis_digest
+            else
+              (.prs[$pr].review_basis_digest // "")
+            end
+          ),
           reviewed_at: $reviewed_at
         }
     ' "${state_file}" > "${tmp_file}"
@@ -87,15 +96,26 @@ update_state() {
   mv "${tmp_file}" "${state_file}"
 }
 
-state_has_matching_head_sha() {
+state_has_matching_review_identity() {
   local state_file="$1"
   local pr_number="$2"
   local head_sha="$3"
+  local review_basis_digest="${4:-}"
 
   jq -e \
     --arg pr "${pr_number}" \
     --arg sha "${head_sha}" \
-    '(.prs[$pr].head_sha // "") == $sha' \
+    --arg review_basis_digest "${review_basis_digest}" \
+    '
+      (.prs[$pr].head_sha // "") == $sha
+      and (
+        if ($review_basis_digest | length) > 0 then
+          (.prs[$pr].review_basis_digest // "") == $review_basis_digest
+        else
+          true
+        end
+      )
+    ' \
     "${state_file}" >/dev/null 2>&1
 }
 
@@ -204,6 +224,7 @@ main() {
     local review_status_file
     local reusable_review
     local review_status_reason
+    local review_basis_digest=""
 
     pr_number="$(jq -r '.number' <<< "${pr_row}")"
     pr_title="$(jq -r '.title' <<< "${pr_row}")"
@@ -245,22 +266,23 @@ main() {
     else
       reusable_review="$(jq -r '.reusable' "${review_status_file}")"
       review_status_reason="$(jq -r '.reason' "${review_status_file}")"
+      review_basis_digest="$(jq -r '.review_basis_digest // ""' "${review_status_file}")"
     fi
 
     if [[ "${reusable_review}" == "true" ]]; then
       echo "跳过已存在 fresh guardian review 的 PR #${pr_number}: ${pr_title} (reason=${review_status_reason})"
       if [[ "${dry_run}" != "1" ]]; then
-        update_state "${state_file}" "${pr_number}" "${head_sha}" "${repo_slug}"
+        update_state "${state_file}" "${pr_number}" "${head_sha}" "${review_basis_digest}" "${repo_slug}"
       fi
       rm -f "${review_status_file}"
       skipped_count=$((skipped_count + 1))
       continue
     fi
 
-    if [[ "${post_review}" != "1" ]] && [[ "${review_status_reason}" == "review_status_failed" ]] && state_has_matching_head_sha "${state_file}" "${pr_number}" "${head_sha}"; then
-      echo "跳过已在本地 --no-post-review 模式审查过同一 HEAD 的 PR #${pr_number}: ${pr_title} (reason=local_state_same_head)"
+    if [[ "${post_review}" != "1" ]] && [[ "${reusable_review}" != "true" ]] && state_has_matching_review_identity "${state_file}" "${pr_number}" "${head_sha}" "${review_basis_digest}"; then
+      echo "跳过已在本地 --no-post-review 模式审查过同一审查基线的 PR #${pr_number}: ${pr_title} (reason=local_state_matching_basis)"
       if [[ "${dry_run}" != "1" ]]; then
-        update_state "${state_file}" "${pr_number}" "${head_sha}" "${repo_slug}"
+        update_state "${state_file}" "${pr_number}" "${head_sha}" "${review_basis_digest}" "${repo_slug}"
       fi
       rm -f "${review_status_file}"
       skipped_count=$((skipped_count + 1))
@@ -276,7 +298,7 @@ main() {
 
     echo "开始审查 PR #${pr_number}: ${pr_title} (reason=${review_status_reason})"
     review_pr "${pr_number}" "${post_review}"
-    update_state "${state_file}" "${pr_number}" "${head_sha}" "${repo_slug}"
+    update_state "${state_file}" "${pr_number}" "${head_sha}" "${review_basis_digest}" "${repo_slug}"
     rm -f "${review_status_file}"
     reviewed_count=$((reviewed_count + 1))
   done < <(jq -c '.[]' <<< "${prs_json}")

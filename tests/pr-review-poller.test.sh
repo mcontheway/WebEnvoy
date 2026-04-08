@@ -146,12 +146,13 @@ test_poller_skips_pr_with_fresh_guardian_review() {
   export GUARDIAN_SCRIPT
 
   printf '%s\n' '[{"number":274,"title":"Fresh review","headRefOid":"head-sha-123","headRefName":"feat/fresh","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/274","baseRefName":"main","milestone":{"title":"Sprint A"}}]' > "${MOCK_GH_OPEN_PRS_JSON}"
-  printf '%s\n' '{"reusable":true,"reason":"matching_metadata","head_sha":"head-sha-123","review_profile":"high_risk_impl_profile","prompt_digest":"prompt-digest-123","verdict":"APPROVE","safe_to_merge":true}' > "${MOCK_GUARDIAN_STATUS_DIR}/274.json"
+  printf '%s\n' '{"reusable":true,"reason":"matching_metadata","head_sha":"head-sha-123","review_profile":"high_risk_impl_profile","review_basis_digest":"review-basis-digest-123","prompt_digest":"prompt-digest-123","verdict":"APPROVE","safe_to_merge":true}' > "${MOCK_GUARDIAN_STATUS_DIR}/274.json"
 
   assert_pass main --state-file "${STATE_FILE}"
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 274"
   assert_file_not_contains "${MOCK_GUARDIAN_LOG}" "review 274"
   assert_equal "$(jq -r '.prs["274"].head_sha' "${STATE_FILE}")" "head-sha-123"
+  assert_equal "$(jq -r '.prs["274"].review_basis_digest' "${STATE_FILE}")" "review-basis-digest-123"
 }
 
 test_poller_reviews_pr_when_metadata_is_missing() {
@@ -160,12 +161,13 @@ test_poller_reviews_pr_when_metadata_is_missing() {
   export GUARDIAN_SCRIPT
 
   printf '%s\n' '[{"number":275,"title":"Missing metadata","headRefOid":"head-sha-275","headRefName":"feat/missing","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/275","baseRefName":"main","milestone":{"title":"Sprint A"}}]' > "${MOCK_GH_OPEN_PRS_JSON}"
-  printf '%s\n' '{"reusable":false,"reason":"missing_metadata","head_sha":"head-sha-275","review_profile":"high_risk_impl_profile","prompt_digest":"prompt-digest-123","verdict":null,"safe_to_merge":null}' > "${MOCK_GUARDIAN_STATUS_DIR}/275.json"
+  printf '%s\n' '{"reusable":false,"reason":"missing_metadata","head_sha":"head-sha-275","review_profile":"high_risk_impl_profile","review_basis_digest":"review-basis-digest-275","prompt_digest":"prompt-digest-123","verdict":null,"safe_to_merge":null}' > "${MOCK_GUARDIAN_STATUS_DIR}/275.json"
 
   assert_pass main --state-file "${STATE_FILE}"
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 275"
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review 275"
   assert_equal "$(jq -r '.prs["275"].head_sha' "${STATE_FILE}")" "head-sha-275"
+  assert_equal "$(jq -r '.prs["275"].review_basis_digest' "${STATE_FILE}")" "review-basis-digest-275"
 }
 
 test_poller_reviews_pr_when_metadata_is_stale() {
@@ -174,11 +176,27 @@ test_poller_reviews_pr_when_metadata_is_stale() {
   export GUARDIAN_SCRIPT
 
   printf '%s\n' '[{"number":276,"title":"Stale metadata","headRefOid":"head-sha-276","headRefName":"feat/stale","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/276","baseRefName":"main","milestone":{"title":"Sprint A"}}]' > "${MOCK_GH_OPEN_PRS_JSON}"
-  printf '%s\n' '{"reusable":false,"reason":"merge_base_sha_mismatch","head_sha":"head-sha-276","review_profile":"high_risk_impl_profile","prompt_digest":"prompt-digest-new","verdict":"APPROVE","safe_to_merge":true}' > "${MOCK_GUARDIAN_STATUS_DIR}/276.json"
+  printf '%s\n' '{"reusable":false,"reason":"merge_base_sha_mismatch","head_sha":"head-sha-276","review_profile":"high_risk_impl_profile","review_basis_digest":"review-basis-digest-276","prompt_digest":"prompt-digest-new","verdict":"APPROVE","safe_to_merge":true}' > "${MOCK_GUARDIAN_STATUS_DIR}/276.json"
 
   assert_pass main --state-file "${STATE_FILE}"
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 276"
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review 276"
+  assert_equal "$(jq -r '.prs["276"].review_basis_digest' "${STATE_FILE}")" "review-basis-digest-276"
+}
+
+test_poller_reviews_pr_when_review_basis_digest_changes_on_same_head() {
+  setup_case_dir "review-stale-review-basis"
+  GUARDIAN_SCRIPT="${MOCK_GUARDIAN_SCRIPT}"
+  export GUARDIAN_SCRIPT
+
+  printf '%s\n' '[{"number":286,"title":"Same head basis changed","headRefOid":"head-sha-286","headRefName":"feat/basis","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/286","baseRefName":"main","milestone":{"title":"Sprint A"}}]' > "${MOCK_GH_OPEN_PRS_JSON}"
+  printf '%s\n' '{"reusable":false,"reason":"review_basis_digest_mismatch","head_sha":"head-sha-286","review_profile":"high_risk_impl_profile","review_basis_digest":"review-basis-digest-286-new","prompt_digest":"prompt-digest-123","verdict":"APPROVE","safe_to_merge":true}' > "${MOCK_GUARDIAN_STATUS_DIR}/286.json"
+  printf '%s\n' '{"prs":{"286":{"head_sha":"head-sha-286","review_basis_digest":"review-basis-digest-286-old","reviewed_at":"2026-04-08T01:23:45Z"}}}' > "${STATE_FILE}"
+
+  assert_pass main --state-file "${STATE_FILE}" --no-post-review
+  assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 286"
+  assert_file_contains "${MOCK_GUARDIAN_LOG}" "review 286"
+  assert_equal "$(jq -r '.prs["286"].review_basis_digest' "${STATE_FILE}")" "review-basis-digest-286-new"
 }
 
 test_poller_no_post_review_does_not_let_local_state_override_remote_stale_status() {
@@ -187,13 +205,29 @@ test_poller_no_post_review_does_not_let_local_state_override_remote_stale_status
   export GUARDIAN_SCRIPT
 
   printf '%s\n' '[{"number":277,"title":"No post review","headRefOid":"head-sha-277","headRefName":"feat/no-post","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/277","baseRefName":"main","milestone":{"title":"Sprint A"}}]' > "${MOCK_GH_OPEN_PRS_JSON}"
-  printf '%s\n' '{"reusable":false,"reason":"missing_metadata","head_sha":"head-sha-277","review_profile":"high_risk_impl_profile","prompt_digest":"prompt-digest-123","verdict":null,"safe_to_merge":null}' > "${MOCK_GUARDIAN_STATUS_DIR}/277.json"
-  printf '%s\n' '{"prs":{"277":{"head_sha":"head-sha-277","reviewed_at":"2026-04-08T01:23:45Z"}}}' > "${STATE_FILE}"
+  printf '%s\n' '{"reusable":false,"reason":"missing_metadata","head_sha":"head-sha-277","review_profile":"high_risk_impl_profile","review_basis_digest":"review-basis-digest-277-new","prompt_digest":"prompt-digest-123","verdict":null,"safe_to_merge":null}' > "${MOCK_GUARDIAN_STATUS_DIR}/277.json"
+  printf '%s\n' '{"prs":{"277":{"head_sha":"head-sha-277","review_basis_digest":"review-basis-digest-277-old","reviewed_at":"2026-04-08T01:23:45Z"}}}' > "${STATE_FILE}"
 
   assert_pass main --state-file "${STATE_FILE}" --no-post-review
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 277"
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review 277"
   assert_equal "$(jq -r '.prs["277"].head_sha' "${STATE_FILE}")" "head-sha-277"
+  assert_equal "$(jq -r '.prs["277"].review_basis_digest' "${STATE_FILE}")" "review-basis-digest-277-new"
+}
+
+test_poller_no_post_review_uses_state_as_same_basis_throttle_when_remote_review_is_stale() {
+  setup_case_dir "no-post-review-same-basis-throttle-on-remote-stale"
+  GUARDIAN_SCRIPT="${MOCK_GUARDIAN_SCRIPT}"
+  export GUARDIAN_SCRIPT
+
+  printf '%s\n' '[{"number":287,"title":"No post review same basis","headRefOid":"head-sha-287","headRefName":"feat/no-post-same-basis","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/287","baseRefName":"main","milestone":{"title":"Sprint A"}}]' > "${MOCK_GH_OPEN_PRS_JSON}"
+  printf '%s\n' '{"reusable":false,"reason":"missing_metadata","head_sha":"head-sha-287","review_profile":"high_risk_impl_profile","review_basis_digest":"review-basis-digest-287","prompt_digest":"prompt-digest-123","verdict":null,"safe_to_merge":null}' > "${MOCK_GUARDIAN_STATUS_DIR}/287.json"
+  printf '%s\n' '{"prs":{"287":{"head_sha":"head-sha-287","review_basis_digest":"review-basis-digest-287","reviewed_at":"2026-04-08T01:23:45Z"}}}' > "${STATE_FILE}"
+
+  assert_pass main --state-file "${STATE_FILE}" --no-post-review
+  assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 287"
+  assert_file_not_contains "${MOCK_GUARDIAN_LOG}" "review 287"
+  assert_equal "$(jq -r '.prs["287"].review_basis_digest' "${STATE_FILE}")" "review-basis-digest-287"
 }
 
 test_poller_no_post_review_uses_state_as_same_head_throttle_when_status_query_fails() {
@@ -204,12 +238,13 @@ test_poller_no_post_review_uses_state_as_same_head_throttle_when_status_query_fa
   export MOCK_GUARDIAN_FAIL_REVIEW_STATUS_PR
 
   printf '%s\n' '[{"number":285,"title":"Status failure with local throttle","headRefOid":"head-sha-285","headRefName":"feat/no-post-status-fail","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/285","baseRefName":"main","milestone":{"title":"Sprint A"}}]' > "${MOCK_GH_OPEN_PRS_JSON}"
-  printf '%s\n' '{"prs":{"285":{"head_sha":"head-sha-285","reviewed_at":"2026-04-08T01:23:45Z"}}}' > "${STATE_FILE}"
+  printf '%s\n' '{"prs":{"285":{"head_sha":"head-sha-285","review_basis_digest":"review-basis-digest-285","reviewed_at":"2026-04-08T01:23:45Z"}}}' > "${STATE_FILE}"
 
   assert_pass main --state-file "${STATE_FILE}" --no-post-review
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 285"
   assert_file_not_contains "${MOCK_GUARDIAN_LOG}" "review 285"
   assert_equal "$(jq -r '.prs["285"].head_sha' "${STATE_FILE}")" "head-sha-285"
+  assert_equal "$(jq -r '.prs["285"].review_basis_digest' "${STATE_FILE}")" "review-basis-digest-285"
 }
 
 test_poller_post_review_mode_does_not_use_state_as_truth() {
@@ -218,8 +253,8 @@ test_poller_post_review_mode_does_not_use_state_as_truth() {
   export GUARDIAN_SCRIPT
 
   printf '%s\n' '[{"number":278,"title":"Post review still runs","headRefOid":"head-sha-278","headRefName":"feat/post-review","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/278","baseRefName":"main","milestone":{"title":"Sprint A"}}]' > "${MOCK_GH_OPEN_PRS_JSON}"
-  printf '%s\n' '{"reusable":false,"reason":"missing_metadata","head_sha":"head-sha-278","review_profile":"high_risk_impl_profile","prompt_digest":"prompt-digest-123","verdict":null,"safe_to_merge":null}' > "${MOCK_GUARDIAN_STATUS_DIR}/278.json"
-  printf '%s\n' '{"prs":{"278":{"head_sha":"head-sha-278","reviewed_at":"2026-04-08T01:23:45Z"}}}' > "${STATE_FILE}"
+  printf '%s\n' '{"reusable":false,"reason":"missing_metadata","head_sha":"head-sha-278","review_profile":"high_risk_impl_profile","review_basis_digest":"review-basis-digest-278","prompt_digest":"prompt-digest-123","verdict":null,"safe_to_merge":null}' > "${MOCK_GUARDIAN_STATUS_DIR}/278.json"
+  printf '%s\n' '{"prs":{"278":{"head_sha":"head-sha-278","review_basis_digest":"review-basis-digest-278","reviewed_at":"2026-04-08T01:23:45Z"}}}' > "${STATE_FILE}"
 
   assert_pass main --state-file "${STATE_FILE}"
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 278"
@@ -239,7 +274,7 @@ test_poller_continues_when_review_status_query_fails() {
   {"number":284,"title":"Next PR still reviews","headRefOid":"head-sha-284","headRefName":"feat/next","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/284","baseRefName":"main","milestone":{"title":"Sprint A"}}
 ]
 EOF
-  printf '%s\n' '{"reusable":false,"reason":"missing_metadata","head_sha":"head-sha-284","review_profile":"high_risk_impl_profile","prompt_digest":"prompt-digest-123","verdict":null,"safe_to_merge":null}' > "${MOCK_GUARDIAN_STATUS_DIR}/284.json"
+  printf '%s\n' '{"reusable":false,"reason":"missing_metadata","head_sha":"head-sha-284","review_profile":"high_risk_impl_profile","review_basis_digest":"review-basis-digest-284","prompt_digest":"prompt-digest-123","verdict":null,"safe_to_merge":null}' > "${MOCK_GUARDIAN_STATUS_DIR}/284.json"
 
   assert_pass main --state-file "${STATE_FILE}"
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 279"
@@ -247,7 +282,9 @@ EOF
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 284"
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review 284"
   assert_equal "$(jq -r '.prs["279"].head_sha' "${STATE_FILE}")" "head-sha-279"
+  assert_equal "$(jq -r '.prs["279"].review_basis_digest' "${STATE_FILE}")" ""
   assert_equal "$(jq -r '.prs["284"].head_sha' "${STATE_FILE}")" "head-sha-284"
+  assert_equal "$(jq -r '.prs["284"].review_basis_digest' "${STATE_FILE}")" "review-basis-digest-284"
 }
 
 test_poller_preserves_draft_base_branch_and_milestone_filters() {
@@ -277,7 +314,9 @@ main() {
   test_poller_skips_pr_with_fresh_guardian_review
   test_poller_reviews_pr_when_metadata_is_missing
   test_poller_reviews_pr_when_metadata_is_stale
+  test_poller_reviews_pr_when_review_basis_digest_changes_on_same_head
   test_poller_no_post_review_does_not_let_local_state_override_remote_stale_status
+  test_poller_no_post_review_uses_state_as_same_basis_throttle_when_remote_review_is_stale
   test_poller_no_post_review_uses_state_as_same_head_throttle_when_status_query_fails
   test_poller_post_review_mode_does_not_use_state_as_truth
   test_poller_continues_when_review_status_query_fails

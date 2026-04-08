@@ -333,12 +333,17 @@ hash_string_sha256() {
   die "缺少 SHA256 计算工具（sha256sum/shasum/openssl）。"
 }
 
-hash_normalized_review_body_sha256() {
-  local review_file="$1"
+hash_normalized_file_sha256() {
+  local file="$1"
   local normalized_body
 
-  normalized_body="$(perl -0pe 's/\s+\z//s' "${review_file}")"
+  normalized_body="$(perl -0pe 's/\s+\z//s' "${file}")"
   hash_string_sha256 "${normalized_body}"
+}
+
+hash_normalized_review_body_sha256() {
+  local review_file="$1"
+  hash_normalized_file_sha256 "${review_file}"
 }
 
 trusted_guardian_reviewers_json() {
@@ -390,6 +395,56 @@ stable_prompt_digest() {
   hash_string_sha256 "${normalized_prompt}"
 }
 
+build_lightweight_issue_basis() {
+  local issue_number=""
+  local issue_file=""
+  local issue_title=""
+  local issue_body=""
+  local issue_body_file=""
+  local issue_title_hash=""
+  local issue_body_hash=""
+  local issue_updated_at=""
+
+  while IFS= read -r issue_number; do
+    [[ -n "${issue_number}" ]] || continue
+
+    issue_file="${TMP_DIR}/issue-${issue_number}-review-basis.json"
+    if ! gh issue view "${issue_number}" --json number,title,body,updatedAt > "${issue_file}" 2>/dev/null; then
+      printf 'issue=%s\tlookup=failed\n' "${issue_number}"
+      continue
+    fi
+
+    issue_title="$(jq -r '.title // ""' "${issue_file}")"
+    issue_body="$(jq -r '.body // ""' "${issue_file}")"
+    issue_updated_at="$(jq -r '.updatedAt // ""' "${issue_file}")"
+    issue_title_hash="$(hash_string_sha256 "$(sanitize_issue_prompt_line "${issue_title}")")"
+    issue_body_file="${TMP_DIR}/issue-${issue_number}-review-basis.md"
+    printf '%s\n' "${issue_body}" | slim_issue_body > "${issue_body_file}"
+    issue_body_hash="$(hash_normalized_file_sha256 "${issue_body_file}")"
+
+    printf 'issue=%s\tupdated_at=%s\ttitle_sha256=%s\tbody_sha256=%s\n' \
+      "${issue_number}" \
+      "${issue_updated_at}" \
+      "${issue_title_hash}" \
+      "${issue_body_hash}"
+  done < <(list_linked_issue_numbers)
+}
+
+compute_review_basis_digest() {
+  local pr_title_hash=""
+  local pr_body_hash=""
+  local issue_basis_file=""
+  local issue_basis=""
+
+  issue_basis_file="${TMP_DIR}/review-basis-issues.txt"
+  pr_title_hash="$(hash_string_sha256 "$(sanitize_user_prompt_line "${PR_TITLE:-}")")"
+  pr_body_hash="$(hash_normalized_file_sha256 "${SLIM_PR_FILE}")"
+  build_lightweight_issue_basis > "${issue_basis_file}"
+  issue_basis="$(cat "${issue_basis_file}")"
+  REVIEW_BASIS_DIGEST="$(hash_string_sha256 "$(printf 'pr_title_sha256=%s\npr_body_sha256=%s\n%s' "${pr_title_hash}" "${pr_body_hash}" "${issue_basis}")")"
+  export REVIEW_BASIS_DIGEST
+}
+
 guardian_metadata_json() {
   local result_file="$1"
   local review_file="$2"
@@ -399,6 +454,7 @@ guardian_metadata_json() {
     --arg base_ref "${BASE_REF:-}" \
     --arg merge_base_sha "${MERGE_BASE_SHA:-}" \
     --arg review_profile "${REVIEW_PROFILE:-}" \
+    --arg review_basis_digest "${REVIEW_BASIS_DIGEST:-}" \
     --arg prompt_digest "${PROMPT_DIGEST:-}" \
     --arg review_body_sha256 "$(hash_normalized_review_body_sha256 "${review_file}")" \
     --argjson result "$(jq -c '.' "${result_file}")" \
@@ -408,6 +464,7 @@ guardian_metadata_json() {
         base_ref: $base_ref,
         merge_base_sha: $merge_base_sha,
         review_profile: $review_profile,
+        review_basis_digest: $review_basis_digest,
         prompt_digest: $prompt_digest,
         verdict: $result.verdict,
         safe_to_merge: $result.safe_to_merge,
@@ -518,6 +575,7 @@ prepare_pr_workspace() {
     ISSUE_NUMBER=""
   fi
   slim_pr_body > "${SLIM_PR_FILE}"
+  compute_review_basis_digest
   fetch_issue_summary > "${ISSUE_SUMMARY_FILE}"
   collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
 }
@@ -532,11 +590,15 @@ prepare_review_status_context() {
   TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/webenvoy-pr-guardian.XXXXXX")"
   META_FILE="${TMP_DIR}/pr.json"
   CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+  SLIM_PR_FILE="${TMP_DIR}/pr-summary.md"
+  LINKED_ISSUES_FILE="${TMP_DIR}/linked-issues.txt"
 
   gh pr view "${pr_number}" --json \
-    baseRefName,headRefOid,author \
+    title,body,baseRefName,headRefOid,author,closingIssuesReferences \
     > "${META_FILE}"
 
+  PR_TITLE="$(jq -r '.title // ""' "${META_FILE}")"
+  PR_BODY="$(jq -r '.body // ""' "${META_FILE}")"
   BASE_REF="$(jq -r '.baseRefName' "${META_FILE}")"
   HEAD_SHA="$(jq -r '.headRefOid' "${META_FILE}")"
   PR_AUTHOR="$(jq -r '.author.login // ""' "${META_FILE}")"
@@ -551,6 +613,9 @@ prepare_review_status_context() {
 
   git -C "${REPO_ROOT}" diff --name-only "${base_branch_ref}...${pr_head_ref}" > "${CHANGED_FILES_FILE}"
   REVIEW_PROFILE="$(classify_review_profile "${CHANGED_FILES_FILE}")"
+  resolve_linked_issue_numbers > "${LINKED_ISSUES_FILE}"
+  slim_pr_body > "${SLIM_PR_FILE}"
+  compute_review_basis_digest
   PROMPT_DIGEST=""
 }
 
@@ -1604,6 +1669,7 @@ build_review_prompt() {
 
   {
     printf 'profile=%s\n' "${REVIEW_PROFILE}"
+    printf 'review_basis_digest=%s\n' "${REVIEW_BASIS_DIGEST:-}"
     PROMPT_DIGEST="$(stable_prompt_digest "${PROMPT_RUN_FILE}")"
     printf 'prompt_digest=%s\n' "${PROMPT_DIGEST}"
     printf 'prompt_bytes=%s\n' "$(wc -c < "${PROMPT_RUN_FILE}" | tr -d '[:space:]')"
@@ -2779,6 +2845,7 @@ write_review_status_json_common() {
     --arg base_ref "${BASE_REF:-}" \
     --arg merge_base_sha "${MERGE_BASE_SHA:-}" \
     --arg review_profile "${REVIEW_PROFILE:-}" \
+    --arg review_basis_digest "${REVIEW_BASIS_DIGEST:-}" \
     --arg prompt_digest "${PROMPT_DIGEST:-}" \
     '
       def completed_state:
@@ -2852,6 +2919,7 @@ write_review_status_json_common() {
           | select((.meta.base_ref // "") == $base_ref)
           | select((.meta.merge_base_sha // "") == $merge_base_sha)
           | select((.meta.review_profile // "") == $review_profile)
+          | select((.meta.review_basis_digest // "") == $review_basis_digest)
           | select(($strict_prompt_digest != "1") or ((.meta.prompt_digest // "") == $prompt_digest))
           | select((.state // "") == (.expected_state // ""))
         ] as $reusable_reviews
@@ -2862,6 +2930,7 @@ write_review_status_json_common() {
               reason: "matching_metadata",
               head_sha: $head_sha,
               review_profile: $review_profile,
+              review_basis_digest: ($reused.meta.review_basis_digest // ""),
               prompt_digest: ($reused.meta.prompt_digest // ""),
               verdict: ($reused.meta.verdict // null),
               safe_to_merge: ($reused.meta.safe_to_merge // null),
@@ -2879,6 +2948,7 @@ write_review_status_json_common() {
             reason: "missing_review",
             head_sha: $head_sha,
             review_profile: $review_profile,
+            review_basis_digest: $review_basis_digest,
             prompt_digest: "",
             verdict: null,
             safe_to_merge: null,
@@ -2892,6 +2962,7 @@ write_review_status_json_common() {
                 reason: "missing_metadata",
                 head_sha: $head_sha,
                 review_profile: $review_profile,
+                review_basis_digest: $review_basis_digest,
                 prompt_digest: ($latest.meta.prompt_digest // ""),
                 verdict: null,
                 safe_to_merge: null,
@@ -2903,6 +2974,7 @@ write_review_status_json_common() {
                 reason: "invalid_metadata",
                 head_sha: $head_sha,
                 review_profile: $review_profile,
+                review_basis_digest: $review_basis_digest,
                 prompt_digest: ($latest.meta.prompt_digest // ""),
                 verdict: ($latest.meta.verdict // null),
                 safe_to_merge: ($latest.meta.safe_to_merge // null),
@@ -2921,6 +2993,8 @@ write_review_status_json_common() {
                     "merge_base_sha_mismatch"
                   elif ($latest.meta.review_profile // "") != $review_profile then
                     "review_profile_mismatch"
+                  elif ($latest.meta.review_basis_digest // "") != $review_basis_digest then
+                    "review_basis_digest_mismatch"
                   elif ($strict_prompt_digest == "1" and ($latest.meta.prompt_digest // "") != $prompt_digest) then
                     "prompt_digest_mismatch"
                   elif ($latest.state // "") != ($latest.expected_state // "") then
@@ -2931,6 +3005,7 @@ write_review_status_json_common() {
                 ),
                 head_sha: $head_sha,
                 review_profile: $review_profile,
+                review_basis_digest: $review_basis_digest,
                 prompt_digest: ($latest.meta.prompt_digest // ""),
                 verdict: ($latest.meta.verdict // null),
                 safe_to_merge: ($latest.meta.safe_to_merge // null),

@@ -14,9 +14,10 @@ setup_review_status_fixture() {
   BASE_REF="main"
   MERGE_BASE_SHA="merge-base-sha-123"
   REVIEW_PROFILE="high_risk_impl_profile"
+  REVIEW_BASIS_DIGEST="review-basis-digest-123"
   PROMPT_DIGEST="prompt-digest-123"
   PR_AUTHOR="${pr_author}"
-  export HEAD_SHA BASE_REF MERGE_BASE_SHA REVIEW_PROFILE PROMPT_DIGEST PR_AUTHOR
+  export HEAD_SHA BASE_REF MERGE_BASE_SHA REVIEW_PROFILE REVIEW_BASIS_DIGEST PROMPT_DIGEST PR_AUTHOR
 
   RESULT_FILE="${TMP_DIR}/review.json"
   REVIEW_MD_FILE="${TMP_DIR}/review.md"
@@ -74,6 +75,7 @@ test_review_status_reports_reusable_review_for_matching_metadata() {
   assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
   assert_equal "$(jq -r '.verdict' "${status_file}")" "APPROVE"
   assert_equal "$(jq -r '.safe_to_merge' "${status_file}")" "true"
+  assert_equal "$(jq -r '.review_basis_digest' "${status_file}")" "review-basis-digest-123"
   assert_file_not_contains "${MOCK_GH_CALLS_LOG}" "collaborators/"
 }
 
@@ -172,7 +174,29 @@ test_light_review_status_ignores_prompt_digest_mismatch() {
   assert_pass write_light_review_status_json 274 review-bot "${status_file}"
   assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
   assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
+  assert_equal "$(jq -r '.review_basis_digest' "${status_file}")" "review-basis-digest-123"
   assert_equal "$(jq -r '.prompt_digest' "${status_file}")" "prompt-digest-123"
+}
+
+test_review_status_rejects_review_basis_digest_mismatch() {
+  setup_review_status_fixture \
+    "review-status-review-basis-digest-mismatch" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  REVIEW_BASIS_DIGEST="review-basis-digest-new"
+  export REVIEW_BASIS_DIGEST
+
+  local status_file="${TMP_DIR}/review-status.json"
+  assert_pass write_review_status_json 274 review-bot "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "review_basis_digest_mismatch"
+  assert_equal "$(jq -r '.review_basis_digest' "${status_file}")" "review-basis-digest-new"
 }
 
 test_review_status_rejects_missing_metadata() {

@@ -169,6 +169,7 @@ main() {
   test_review_status_rejects_dismissed_latest_review
   test_review_status_rejects_prompt_digest_mismatch
   test_light_review_status_ignores_prompt_digest_mismatch
+  test_review_status_rejects_review_basis_digest_mismatch
   test_review_status_rejects_missing_metadata
   test_review_status_rejects_invalid_metadata
   test_review_status_rejects_tampered_review_body
