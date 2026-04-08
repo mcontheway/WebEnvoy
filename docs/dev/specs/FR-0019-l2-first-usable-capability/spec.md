@@ -63,7 +63,7 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
   - 这些能力是为了达成首次成功路径
   - 不等于已经形成平台专用适配器或完整命令集
   - 本 FR 中的基础交互在共享枚举上归入 `write`，但不代表恢复高风险 live 写路径
-  - 当 `goal_kind=write` 时，必须带有机器可读的 `write_safety_boundary`，并明确屏蔽 submit、publish、purchase、final confirm 一类不可逆控件
+  - 当 `goal_kind=write` 时，必须带有机器可读的 `write_safety_boundary`，并明确屏蔽 submit、publish、purchase、final confirm，以及更泛化的 destructive action、financial commitment、external dispatch、account binding 一类不可逆控件
 
 ### 3. 首次成功路径的结构化输出
 

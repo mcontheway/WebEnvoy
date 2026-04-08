@@ -33,6 +33,8 @@ interface CandidateAbilityDescriptor {
 - `candidate_status` 只表达“是否已形成候选能力”，不表达验证通过与否。
 - `execution_layer_support` 至少能表达当前候选能力支持哪些执行层；不得用它替代验证结果。
 - `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 都必须指向稳定、机器可读的契约标识；它们的 ownership 属于 `candidate_ability_descriptor` 命名空间，而不是 runtime-store、validation view 或下游实现私有映射。
+- `*_contract_ref` 的 canonical namespace 必须统一为 `cad::<ability_id>::<input|output|error>::v<major>`；其中 `cad` 固定表示 `candidate_ability_descriptor` contract namespace，`ability_id` 必须直接等于当前 descriptor 的 `ability_id`，`<input|output|error>` 只能表达该 ref 的契约种类，`v<major>` 只在发生不兼容变化时递增。
+- `*_contract_ref` 的 authoritative resolver 只能是该 `ability_id` 对应的 descriptor-owned contract registry；lookup 必须按完整 ref 精确匹配，并校验 `ability_id` 与契约种类同时一致。下游实现不得把 ref 自行解释成 repo 路径、runtime-store 主键或私有别名。
 - 同一个 `*_contract_ref` 在所有实现中都必须代表同一份兼容契约边界；若输入、输出或错误语义发生不兼容变化，必须生成新的 ref，不得静默复用旧值。
 - `capture_run_id` 是候选能力来源证据的最小硬锚点。
 - `seed_replay_input_ref` 如存在，必须指向首个 `FR-0018.ReplayInputSnapshotRef.snapshot_ref`；它是可选的上游 replay seed，而不是 `draft_candidate` 的强制前置。

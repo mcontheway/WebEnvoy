@@ -21,6 +21,8 @@
 - 存储 / 查询边界：实现层必须为每个 `ability_ref + profile_ref` 维护单条聚合视图，并在该视图下维护按 mode 的 latest 结果；查询最新健康状态时只能读取该视图，不得直接扫描 runtime-store 原始运行记录充当 truth source。
 - `ability_ref` 在本模型中必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`；FR-0018 不定义独立 ability ref 命名空间。
 - `last_success_input_ref` 是 `replay_source=last_success_input` 的正式 truth source；它只能由同一 `ability_ref + profile_ref` 下最近一次成功验证/重放刷新。
+- `divergence_reason` 至少支持 `smoke_replay_mismatch` 与 `missing_mode_evidence`；其中后者专用于“已有 smoke latest，但 replay latest 尚未建立”的状态。
+- 顶层 `health_state=verified` 只允许在 smoke/replay 两个 mode latest 都存在且都为 `verified` 时出现；smoke-only 成功仍属于可用证据，但顶层状态必须保持 `degraded`。
 
 ### `latest_validations[*]`
 
@@ -37,6 +39,7 @@
 说明：
 
 - `validation_mode` 只允许 `smoke_validation` 或 `replay_validation`。
+- `validation_mode=smoke_validation` 的 latest 只允许来自 `ability_validation_request`；`validation_mode=replay_validation` 的 latest 只允许来自 `ability_replay_request`。
 - `result_state` 只允许 `verified`、`broken`、`stale`；顶层 `degraded` 只在聚合视图中表达，不作为 mode latest 的原子状态。
 - `validated_at` 与 `run_id` 是 latest 记录成立的必填证据字段；缺少任一字段时不得落成 `latest_validations[*]`。
 - `baseline_descriptor` 必须冻结该条 latest 结果生成时的 descriptor/profile 基线，至少包含 `entrypoint`、`input_contract_ref`、`output_contract_ref`、`error_contract_ref`、`profile_ref`。

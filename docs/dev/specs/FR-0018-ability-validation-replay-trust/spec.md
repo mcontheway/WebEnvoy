@@ -51,18 +51,14 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `profile_ref`
   - `expected_capability_kind`
   - `smoke_input`
-  - `input_source`
-  - `replay_input_ref`
 - `validation_mode` 在本 FR 中至少支持：
   - `smoke_validation`
-  - `replay_validation`
 - 必须明确：
   - `smoke_validation` 用于证明能力至少还能走通最小路径
-  - `replay_validation` 用于重放上一次成功边界或显式指定的最小输入
   - `validation_mode=smoke_validation` 时，请求必须显式给出满足 `input_contract_ref` 的 `smoke_input`
-  - 当 `validation_mode=replay_validation` 且 `input_source=explicit_input_snapshot` 时，请求必须显式给出 `replay_input_ref`
   - `ability_ref` 在本 FR 中必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`
   - `smoke_validation` 不要求预先存在 replay snapshot；同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation` 可以产出首个 `ReplayInputSnapshotRef`
+  - `ability_validation_request` 是唯一的 smoke 请求契约；replay 不得复用或平行复制到该对象中
 
 ### 3. 最小重放对象
 
@@ -78,6 +74,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
 - 必须明确：
   - 重放是“已保存能力的再运行入口”
   - 不等于重新训练、重新学习或自动修复
+  - `ability_replay_request` 是唯一的 replay 请求契约；`latest_validations.validation_mode=replay_validation` 只能由 replay 请求结果产出
   - replay 必须显式落在目标 `profile_ref` 上，不得跨 profile 复用 `last_success_input`
   - 当 `replay_source=explicit_input_snapshot` 时，请求必须显式给出 `replay_input_ref`
   - `replay_source=last_success_input` 时，正式 truth source 是同一 `ability_ref + profile_ref` 视图内的 `last_success_input_ref`
@@ -92,7 +89,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `last_success_input_ref` 与 `replay_input_ref` 都必须指向同一套输入快照引用对象，而不是带外临时值
   - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须作为首个输入快照引用对象，并回写为该 `capture_profile` 视图的初始 `last_success_input_ref`
   - 非 `capture_profile` 的其他 profile 视图不得继承这条初始 seed；它们只能在各自 profile 下首次成功验证/重放后刷新自己的 `last_success_input_ref`
-- 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation.smoke_input` 或成功 `replay_validation` 的已解析输入必须物化为首个 `ReplayInputSnapshotRef`，并建立 `last_success_input_ref`
+- 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation.smoke_input` 或成功 replay 的已解析输入必须物化为首个 `ReplayInputSnapshotRef`，并建立 `last_success_input_ref`
 
 ### 4. 最小可信判断对象
 
@@ -108,10 +105,11 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - 是否需要重新验证或人工修复
 - 最小判定标准：
   - `unknown`：在给定 `ability_ref + profile_ref` 视图内，尚不存在任何完成态 latest 记录
-  - `verified`：在给定 `ability_ref + profile_ref` 视图内，至少存在一条 mode latest 记录，且现有 latest 记录全部为 `verified`，并且不存在分叉
-  - `degraded`：在给定 `ability_ref + profile_ref` 视图内，至少存在一个 mode latest 记录，但 smoke / replay 结果分叉，或成功/失败并存，能力仍保留有限可用性
+  - `verified`：在给定 `ability_ref + profile_ref` 视图内，`smoke_validation` 与 `replay_validation` 的 latest 记录都存在，且都为 `verified`，并且不存在分叉
+  - `degraded`：在给定 `ability_ref + profile_ref` 视图内，至少存在一个 mode latest 记录，但 smoke / replay 结果分叉，或成功/失败并存，或仅存在 smoke latest 而缺少 replay latest；能力仍保留有限可用性
   - `broken`：在给定 `ability_ref + profile_ref` 视图内，已有 mode latest 记录全部为 `broken`，或唯一 latest 记录为 `broken`
   - `stale`：在给定 `ability_ref + profile_ref` 视图内，已有 mode latest 记录全部为 `stale`，且当前没有新的 verified/broken 结果；单条 mode latest 只有在 `validated_at` 超过 7 天 freshness window，或当前 descriptor 基线与该记录保存的 `baseline_descriptor` 不一致时才能被标记为 `stale`
+- `smoke_validation` 成功可以被下游消费为“仍有可用证据”的最小信号，但在未形成 replay latest 前，只能把顶层状态落在 `degraded`，并使用 `divergence_reason=missing_mode_evidence`。
 
 ### 5. 最小失败分类
 
@@ -146,6 +144,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
 - 本 FR 必须明确：
   - `ability_validation_request.profile_ref` 必须存在，验证结果与健康视图按 `ability_ref + profile_ref` 维度隔离
   - `ability_ref` 在本 FR 的请求、输入快照引用和健康视图里都必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`
+  - `ability_validation_request` 只负责 `smoke_validation`；任何 replay 入口都必须走 `ability_replay_request`，不得冻结第二套 replay 请求面
   - 结果对象可以引用运行证据，但不重建第二套运行真相源
   - 若缺少 `validated_at` 或 `run_id`，不得声称“最近一次验证已成立”
   - `last_success_input_ref` 是 `replay_source=last_success_input` 的正式 truth source；它只能由同一 `ability_ref + profile_ref` 下最近一次成功验证/重放刷新
@@ -193,16 +192,26 @@ When 用户查看能力当前状态
 Then 顶层 `health_state` 必须是 `degraded`
 And `latest_validations` 中必须同时保留 smoke 与 replay 各自的 latest 记录
 And `divergence_reason` 必须解释当前是 smoke/replay 分叉
-### 场景 4：最小重放不是自动修复
+
+### 场景 4：只有 smoke 成功时不会被误判为 verified
+
+Given 同一个能力在同一个 `profile_ref` 下已经成功完成一次 `smoke_validation`
+And 当前还没有任何 `replay_validation` latest
+When 用户查看能力当前状态
+Then 顶层 `health_state` 必须是 `degraded`
+And `divergence_reason` 必须是 `missing_mode_evidence`
+And 该次 smoke 成功仍可作为最小可用证据并建立 `last_success_input_ref`
+
+### 场景 5：最小重放不是自动修复
 
 Given 某个能力需要再次运行
-When 用户触发 `replay_validation`
+When 用户提交一次 `ability_replay_request`
 Then 系统只会基于已保存的能力与最小输入快照重放
 And 当输入来源是 `explicit_input_snapshot` 时会显式引用 `replay_input_ref`
 And 当输入来源是 `last_success_input` 时会读取当前 `last_success_input_ref`
 And 不会在同一对象里暗含自动修复或重新学习
 
-### 场景 5：验证结果继续引用运行证据
+### 场景 6：验证结果继续引用运行证据
 
 Given 某次验证已经完成
 When reviewer 检查结果对象
@@ -210,7 +219,7 @@ Then 能看到 `validated_at` 与 `run_id`
 And 在存在 run-scoped evidence refs 时能看到 `artifact_refs`
 And 不会创建第二套运行真相源
 
-### 场景 6：L2 样本也能进入同一验证链路
+### 场景 7：L2 样本也能进入同一验证链路
 
 Given 后续已有一个来自 L2 首次可用的候选能力
 When 该能力进入验证链路
@@ -226,9 +235,10 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 5. 新能力进入验证链路时，既没有上游 `seed_replay_input_ref`，也没有通过首次成功验证/重放建立首个输入快照引用对象：不得宣称该能力已具备 replay-ready 边界。
 6. `stale` 判定未检查 7 天 freshness window，或未对比 `baseline_descriptor`：视为健康状态计算未冻结。
 7. 失败大类被写成低层错误码镜像：视为边界漂移。
-8. 把 `verified` 误当成“可交付/可分享”：视为越界到 Phase 3/5。
-9. 重放对象携带自动修复、自动调参与重新学习语义：视为超出本 FR 范围。
-10. 能力尚未进入 `FR-0017` 的候选能力描述，却直接进入验证链路：视为流程违规。
+8. 只有 smoke latest 成功、但还没有 replay latest，就把顶层 `health_state` 提升为 `verified`：视为可信判断边界错误。
+9. 把 `verified` 误当成“可交付/可分享”：视为越界到 Phase 3/5。
+10. 重放对象携带自动修复、自动调参与重新学习语义：视为超出本 FR 范围。
+11. 能力尚未进入 `FR-0017` 的候选能力描述，却直接进入验证链路：视为流程违规。
 
 ## 验收标准
 

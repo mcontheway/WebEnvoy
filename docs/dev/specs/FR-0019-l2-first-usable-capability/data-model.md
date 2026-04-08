@@ -65,7 +65,7 @@
 最小字段：
 
 - `irreversible_controls_blocked=true`
-- `blocked_control_kinds=["submit" | "publish" | "purchase" | "confirm_final"]`
+- `blocked_control_kinds=["submit" | "publish" | "purchase" | "confirm_final" | "destructive_action" | "financial_commitment" | "external_dispatch" | "account_binding"]`
 
 补充约束：
 
