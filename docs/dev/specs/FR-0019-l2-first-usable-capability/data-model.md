@@ -111,6 +111,7 @@
 
 - `goal_kind=read` 时必须固定映射到 `interaction_safety_class=pure_read`。
 - `interaction_safety_class=pure_read` 的允许动作集合只允许 `navigate`、`locate`、`reveal_only_click`、`extract`、`wait_settled`；request-side 不再允许裸 `click`，以便在执行前就把揭示型点击与状态改变点击区分开。
+- `goal_kind=read` 的 request-side `allowed_actions` 必须显式包含 `extract`；缺少该动作时，请求不得进入执行，因为它无法满足当前 formal baseline 的读取成功条件。
 - `reveal_only_click` 只允许 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate` 四类揭示型点击。
 - `interaction_safety_class=pure_read` 明确禁止 `type`、submit、confirm、publish、purchase、dispatch、bind，以及任何会持久改变账号、内容或表单状态的点击。
 - 当前 formal baseline 下，未知站点通用 `write` lane 不在本 FR 的正式数据模型内；如需纳入，必须在未来独立 FR 中补齐其 execution、validation 与治理边界。

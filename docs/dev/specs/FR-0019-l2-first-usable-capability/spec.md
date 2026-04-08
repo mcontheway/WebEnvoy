@@ -68,6 +68,7 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
   - 若上游门禁请求仍携带平台专用 write lane、`irreversible_write` 或其他站点专用 gate 语义，必须在进入本 FR 前直接被阻断；FR-0019 当前不消费这类输入
   - `goal_kind=read` 必须固定映射到 `interaction_safety_class=pure_read`
   - `goal_kind=read` 时允许放行 `navigate`、`locate`、`reveal_only_click`、`extract`、`wait_settled`；request-side 不再允许裸 `click`
+  - `goal_kind=read` 的 request-side `allowed_actions` 必须显式包含 `extract`；若请求没有授权 `extract`，则它与 read-success 判定矛盾，必须在请求阶段按结构化输入错误拒绝
   - 当前 formal baseline 下，`goal_kind=read` 是唯一成功目标；`navigate`、`locate`、`reveal_only_click`、`wait_settled`、`extract` 只定义 read-first 路径允许使用的步骤，其中除 `extract` 外均不得单独构成成功终态
   - `reveal_only_click` 只允许承接 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate`
   - request-side `reveal_only_click` 与 trace-side `action=click + interaction_semantics=reveal_only_click` 是同一类受允许动作的正式翻译关系；bare `action=click` 且没有 `interaction_semantics=reveal_only_click` 不得被视为已授权的 pure-read 点击
@@ -223,6 +224,7 @@ And 不会把它直接描述成正式可复用能力
 18. 把 `insufficient_semantic_structure`、`target_not_located`、`state_not_settled` 继续平铺为顶层 `failure_class`，而不是统一收口到 `requires_l1_fallback + l1_fallback_payload.fallback_reason`：视为 L2->L1 交接形状仍然重复。
 19. `candidate_shell_seed.execution_layer_support` 缺失、为空，或不是显式 `["L2"]`：视为成功 handoff 仍未正式声明实际支持的执行层。
 20. `success=true`，但 `interaction_trace` 中没有任何 `action=extract`，或 `result_summary` 里没有可回链到本次读取的结构化结果：视为把未完成的 read 路径误报为已成功。
+21. `goal_kind=read` 的 request-side `allowed_actions` 未显式包含 `extract`，却仍允许请求进入执行：视为请求契约与成功契约仍然矛盾。
 
 ## 验收标准
 

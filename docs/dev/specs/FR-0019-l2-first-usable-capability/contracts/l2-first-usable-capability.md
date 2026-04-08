@@ -34,6 +34,7 @@ interface L2FirstUsableRequest {
 - 当前 FR 保持 read-first；未知站点通用 `write` lane 不在本次 formal baseline 内冻结，如需进入正式请求面，必须在未来独立 FR 中同时补齐验证与治理路径。
 - `goal_kind` 在当前 FR 中固定为 `read`；`interaction_safety_class` 在当前 FR 中固定为 `pure_read`。
 - `allowed_actions` 只允许 `navigate`、`locate`、`reveal_only_click`、`extract`、`wait_settled`；request-side 不再允许裸 `click`，以便在执行前就把揭示型点击和状态改变点击区分开。`reveal_only_click` 只允许 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate`。
+- `goal_kind=read` 时，`allowed_actions` 必须显式包含 `extract`；若请求没有授权 `extract`，则它与 `success=true` 所要求的读取完成条件冲突，必须在请求阶段按结构化输入错误拒绝。
 - request-side `allowed_actions=reveal_only_click` 与 trace-side `interaction_trace[*].action=click + interaction_semantics=reveal_only_click` 是同一类受允许动作的正式翻译关系；bare `action=click` 且没有 `interaction_semantics=reveal_only_click` 不得被当作已授权的 pure-read 点击。
 - `interaction_safety_class=pure_read` 时，不得放行 `type`、submit、confirm、publish、purchase、dispatch、bind，或任何会持久改变账号、内容或表单状态的点击。
 - 若上游门禁请求仍携带平台专用 write lane、`irreversible_write` 或其他站点专用 gate 语义，必须在进入 `L2FirstUsableRequest` 前直接被阻断；FR-0019 当前不消费这类输入。
