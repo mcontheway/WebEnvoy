@@ -48,13 +48,22 @@ interface FirstUsableTraceStep {
   result: string
 }
 
-interface InteractionTraceStep {
-  action: "navigate" | "locate" | "click" | "extract" | "wait_settled"
+interface NonClickInteractionTraceStep {
+  action: "navigate" | "locate" | "extract" | "wait_settled"
   target_ref: string
   settled: boolean
-  interaction_semantics: "neutral" | "reveal_only_click"
-  click_kind?: "expand_or_collapse" | "switch_content_tab" | "open_detail_view" | "load_more_or_paginate"
+  interaction_semantics: "neutral"
 }
+
+interface RevealOnlyClickInteractionTraceStep {
+  action: "click"
+  target_ref: string
+  settled: boolean
+  interaction_semantics: "reveal_only_click"
+  click_kind: "expand_or_collapse" | "switch_content_tab" | "open_detail_view" | "load_more_or_paginate"
+}
+
+type InteractionTraceStep = NonClickInteractionTraceStep | RevealOnlyClickInteractionTraceStep
 
 interface L1FallbackPayload {
   fallback_goal: "read"
@@ -84,7 +93,7 @@ type L2FirstUsableResult =
           platform_family: string
           site_pattern?: string
         }
-        execution_layer_support: Array<"L2">
+        execution_layer_support: ["L2"]
         input_contract_ref: string
         output_contract_ref: string
         error_contract_ref: string
@@ -102,7 +111,7 @@ type L2FirstUsableResult =
     }
   | {
       success: false
-      failure_class: "insufficient_semantic_structure" | "target_not_located" | "state_not_settled" | "risk_gate_blocked"
+      failure_class: "risk_gate_blocked"
       result_summary?: Record<string, unknown>
       first_usable_trace?: FirstUsableTraceStep[]
       interaction_trace?: InteractionTraceStep[]
@@ -125,18 +134,20 @@ type L2FirstUsableResult =
 - `candidate_shell_seed` 必须足以直接物化 `FR-0017.candidate_ability_descriptor` 的必填字段，并同时提供 descriptor-owned `candidate_ability_contract_registry` 的最小 seed，不允许只留下松散 hint 或无法解引用的 `*_contract_ref`。
 - `success=true` 时，`candidate_shell_seed.ability_kind` 必须直接等于本次请求的 `goal_kind=read`；若 handoff seed 与请求目标不一致，不得返回成功结果。
 - `interaction_safety_class` 只描述本次首次可用路径的动作纯度，不改变 `candidate_shell_seed.ability_kind`；当前 formal baseline 下，`pure_read` 必须自然映射回 `read`。
+- `candidate_shell_seed.execution_layer_support` 必须显式声明为单元素 `["L2"]`；成功 handoff 不得省略该字段，也不得以空数组冒充支持 L2。
 - `candidate_shell_seed.platform_scope.platform_family` 必须使用稳定、归一化的平台键；L2 未知网站默认应落在 `generic_web`，不得把新的一等平台永久冻结进 `other`。
 - `candidate_shell_seed.contract_registry_seed.ability_id` 必须直接等于 `candidate_shell_seed.ability_id`；`entries[*].contract_ref` 必须至少覆盖 `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 三个被引用的正式 contract ref。
 - `success=true` 还要求 `candidate_shell_seed.contract_registry_seed` 先满足 `FR-0017.candidate_ability_contract_registry` 的有效性规则：同一 `contract_ref` 不得出现多条冲突 entry，`entries[*].contract_kind` 必须与 ref kind 一致，且下游对 `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 的 lookup 都必须能得到唯一有效结果。
 - `success=true` 时，`result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed` 必须同时存在。
 - `success=false` 时，`failure_class` 必须存在，且不得返回 `candidate_shell_seed`；其余字段允许按失败停点最小化返回。
 - `failure_class=requires_l1_fallback` 时，`l1_fallback_payload` 必须存在，并至少冻结 `fallback_goal`、`fallback_reason`、`recommended_strategy`；不得只返回自由文本建议。
+- 当 L2 因 `insufficient_semantic_structure`、`target_not_located`、`state_not_settled` 三类原因停止时，顶层 `failure_class` 必须统一写成 `requires_l1_fallback`，并通过 `l1_fallback_payload.fallback_reason` 细分，不得再平铺成独立失败分支。
 - `l1_fallback_payload.fallback_reason` 只允许表达触发 L2 停止并移交 L1 的最小原因：语义结构不足、目标连续无法定位、或状态始终无法收敛。
 - `l1_fallback_payload.recommended_strategy` 只描述 L1 下一步最小方向，不在本 FR 中扩张成完整 L1 工作流或自动切换编排。
 - 非 `requires_l1_fallback` 的失败分支不得伪造 `l1_fallback_payload`。
 - 当前 FR 只允许把 `read` 首次成功路径交给 `FR-0017`；`write` / `download` 如需进入 L2 first-usable，必须在独立 FR 中先冻结其最小执行语义、验证与治理边界。
 - `first_usable_trace` 与 `interaction_trace` 的正式类型都是结构化步骤对象数组，不允许在 contract / data-model 间一处写成对象、一处退回 `string[]`。
-- `interaction_trace[*].interaction_semantics` 是正式机器字段：`reveal_only_click` 只允许出现在 `action=click` 且 `goal_kind=read` / `interaction_safety_class=pure_read` 的路径中。
-- `interaction_trace[*].click_kind` 只允许在 `interaction_semantics=reveal_only_click` 时出现，且必须显式落在 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate` 四类枚举之内。
+- `interaction_trace[*].interaction_semantics` 是正式机器字段：`neutral` 只允许出现在非点击步骤；`reveal_only_click` 只允许出现在 `action=click` 且 `goal_kind=read` / `interaction_safety_class=pure_read` 的路径中。
+- `interaction_trace[*].click_kind` 只允许在 `interaction_semantics=reveal_only_click` 时出现，且当前 pure-read 成功路径中的点击步骤必须显式落在 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate` 四类枚举之内。
 - 当 request-side `allowed_actions` 里放行 `reveal_only_click` 时，trace-side 必须把该动作编码为 `action=click + interaction_semantics=reveal_only_click`；两侧不得各自发明平行动作词汇。
 - `failure_class` 只表达最小失败大类，不替代低层错误码或诊断全文。

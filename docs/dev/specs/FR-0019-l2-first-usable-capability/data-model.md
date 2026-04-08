@@ -35,8 +35,9 @@
 补充约束：
 
 - `interaction_semantics` 是正式机器字段，只允许 `neutral`、`reveal_only_click`。
+- `interaction_semantics=neutral` 只允许与 `navigate`、`locate`、`extract`、`wait_settled` 这类非点击步骤一起出现；pure-read 成功路径不得上报 `neutral click`。
 - `interaction_semantics=reveal_only_click` 只允许与 `action=click` 一起出现，且当前正式 `click_kind` 只允许 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate`。
-- `click_kind` 只允许在 `interaction_semantics=reveal_only_click` 时出现；其他交互不得伪造该字段。
+- `click_kind` 只允许在 `interaction_semantics=reveal_only_click` 时出现；当前 pure-read 成功路径里的点击步骤必须显式携带该字段，其他交互不得伪造。
 - request-side `allowed_actions=reveal_only_click` 与 trace-side `action=click + interaction_semantics=reveal_only_click` 是同一类受允许动作的正式翻译关系；两侧不得把同一动作写成无法互相映射的平行词汇。
 
 ## 3. `candidate_shell_seed`
@@ -81,6 +82,7 @@
 - L2 首次可用成功态必须同时产出 `result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed`。
 - 当前 FR 产出的 `candidate_shell_seed.ability_kind` 只允许 `read`；`write` / `download` 仍保留给上游共享模型与后续独立 FR。
 - `candidate_shell_seed.ability_kind` 必须直接等于本次请求 `goal_kind=read`；若 handoff seed 与请求目标不一致，不得落成成功态结果。
+- `candidate_shell_seed.execution_layer_support` 必须显式声明为单元素 `["L2"]`；成功 handoff 不得省略该字段，也不得以空数组冒充支持 L2。
 - `candidate_shell_seed` 不仅要提供 descriptor 字段，还必须同时提供 `contract_registry_seed`，以便下游按 `FR-0017.candidate_ability_contract_registry` 的 resolver 正式解引用 `input_contract_ref`、`output_contract_ref`、`error_contract_ref`。
 - `candidate_shell_seed.contract_registry_seed.ability_id` 必须直接等于 `candidate_shell_seed.ability_id`。
 - `candidate_shell_seed.contract_registry_seed.entries[*].contract_ref` 必须至少覆盖 `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 三个被引用的 ref；若任一 ref 缺少对应 entry，该 handoff 不得视为完成。
@@ -154,7 +156,8 @@
 
 - 失败结果一旦返回，就必须包含稳定的 `failure_class`；不得只返回自由文本错误或空失败对象。
 - 失败结果不得包含 `candidate_shell_seed`；只有首次成功路径才能向 `FR-0017` 交付 handoff 输入。
-- `failure_class` 只允许 `insufficient_semantic_structure`、`target_not_located`、`state_not_settled`、`risk_gate_blocked`、`requires_l1_fallback`。
+- `failure_class` 只允许 `risk_gate_blocked`、`requires_l1_fallback`。
+- 当 L2 因 `insufficient_semantic_structure`、`target_not_located`、`state_not_settled` 停止并移交 L1 时，顶层 `failure_class` 必须统一写成 `requires_l1_fallback`；这三类停点原因只允许出现在 `l1_fallback_payload.fallback_reason` 中。
 
 ## 7. `l1_fallback_payload`
 
