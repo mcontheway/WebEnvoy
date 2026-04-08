@@ -40,6 +40,7 @@
 - `failure_class`
 - `validated_at`
 - `run_id`
+- `validated_execution_layer`
 - `baseline_descriptor`
 - `artifact_refs`
 
@@ -50,10 +51,13 @@
 - `candidate_ability_descriptor.ability_kind=write` 时，`validation_mode=smoke_validation` 不得落成 current latest；实现层必须在请求阶段拒绝该组合，历史遗留的无门禁 write smoke 结果也不得再被消费为 `health_state=healthy` 的依据。
 - `result_state` 只允许 `verified`、`broken`、`stale`；顶层 `degraded` 只在聚合视图中表达，不作为 mode latest 的原子状态。
 - `validated_at` 与 `run_id` 是 latest 记录成立的必填证据字段；缺少任一字段时不得落成 `latest_validations[*]`。
-- `baseline_descriptor` 必须冻结该条 latest 结果生成时的 descriptor/profile 基线，至少包含 `entrypoint`、`input_contract_ref`、`output_contract_ref`、`error_contract_ref`、`profile_ref`。
+- `validated_execution_layer` 必须记录该条 latest 实际跑通的执行层；它来自 invocation layer，而不是 descriptor 的支持层集合。
+- `baseline_descriptor` 必须冻结该条 latest 结果生成时的 descriptor/profile 基线，至少包含 `entrypoint`、`input_contract_ref`、`output_contract_ref`、`error_contract_ref`、`profile_ref`、`execution_layer_support`。
 - `artifact_refs` 只作为补充的 run-scoped evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 latest 记录成立的强制前置。
 - `failure_class` 在 `result_state=broken` 时必填，在 `result_state=verified` 时必须为空；`stale` 只允许在解释过期原因时保留兼容的大类信息。
-- `stale` 计算规则冻结为：`validated_at` 超过 7 天 freshness window，或当前 descriptor/view 基线与 `baseline_descriptor` 任一字段不一致。
+- `stale` 计算规则冻结为：`validated_at` 超过 7 天 freshness window，或当前 descriptor/view 基线与 `baseline_descriptor` 任一字段不一致，或当前 `execution_layer_support` 已不再覆盖 `validated_execution_layer`。
+- `execution_layer_support` 的 stale/current 比较必须按归一化集合语义完成，而不是按数组顺序比较。
+- 每条 latest 只证明自己的 `validated_execution_layer` 曾被验证；不得把同一条 latest 自动外推为 descriptor 其他支持层也已被验证。
 
 ## 2. `ability_replay_request_projection`
 

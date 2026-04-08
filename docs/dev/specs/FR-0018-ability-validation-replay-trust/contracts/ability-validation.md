@@ -55,12 +55,14 @@ interface LatestValidationByMode {
   failure_class?: "page_changed" | "auth_or_session_required" | "gate_blocked" | "environment_mismatch" | "runtime_error"
   validated_at: string
   run_id: string
+  validated_execution_layer: "L3" | "L2" | "L1"
   baseline_descriptor: {
     entrypoint: string
     input_contract_ref: string
     output_contract_ref: string
     error_contract_ref: string
     profile_ref: string
+    execution_layer_support: ["L3" | "L2" | "L1", ...Array<"L3" | "L2" | "L1">]
   }
   artifact_refs?: string[]
 }
@@ -104,11 +106,14 @@ interface AbilityHealthView {
 - `artifact_refs` 只作为补充的 run-scoped evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它当作 latest 记录成立的前置条件。
 - 在同一 `ability_ref + profile_ref` 视图内，`latest_validations` 中每个 `validation_mode` 最多只能出现一条 latest 记录。
 - `latest_validations[*]` 一旦存在，就必须同时具备 `validated_at` 与 `run_id`；若存在 run-scoped evidence refs，可再补充 `artifact_refs`。
-- `latest_validations[*].baseline_descriptor` 必须冻结该条 latest 结果生成时的 descriptor/profile 基线，至少包含 `entrypoint`、`input_contract_ref`、`output_contract_ref`、`error_contract_ref`、`profile_ref`。
+- `latest_validations[*].validated_execution_layer` 必须记录该条 latest 实际跑通的执行层；它来自 invocation layer，而不是 descriptor 的支持层集合。
+- `latest_validations[*].baseline_descriptor` 必须冻结该条 latest 结果生成时的 descriptor/profile 基线，至少包含 `entrypoint`、`input_contract_ref`、`output_contract_ref`、`error_contract_ref`、`profile_ref`、`execution_layer_support`。
 - `result_state=verified`：该 mode 最近一次验证成功，且 `failure_class` 必须为空。
 - `result_state=broken`：该 mode 最近一次验证失败，且必须给出 `failure_class`。
-- `result_state=stale`：该 mode 存在历史验证结果，但因 `validated_at` 超过 7 天 freshness window，或当前 descriptor 基线与 `baseline_descriptor` 不一致，当前不能继续宣称可信；该记录仍必须保留最近一次已完成验证的证据字段。
+- `result_state=stale`：该 mode 存在历史验证结果，但因 `validated_at` 超过 7 天 freshness window，或当前 descriptor 基线与 `baseline_descriptor` 不一致，或当前 `execution_layer_support` 已不再覆盖 `validated_execution_layer`，当前不能继续宣称可信；该记录仍必须保留最近一次已完成验证的证据字段。
 - “current latest” 只指 `latest_validations[*].result_state` 不为 `stale` 的 mode latest；其 freshness window 与 `baseline_descriptor` 一致性由 stale 规则统一收敛。
+- `execution_layer_support` 的 stale/current 比较必须按归一化集合语义完成，而不是按数组顺序比较。
+- 每条 latest 只证明自己的 `validated_execution_layer` 曾被验证；不得把同一条 latest 自动外推为 descriptor 其他支持层也已被验证。
 - `ability_health_view.health_state` 必须按以下顺序判定，后续分支不得覆盖前序已命中的状态：
   1. `unknown`：不存在任何 mode latest 记录
   2. `stale`：存在 mode latest，且全部现存 latest 都是 `stale`

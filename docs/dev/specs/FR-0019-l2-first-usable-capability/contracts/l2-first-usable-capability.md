@@ -139,6 +139,9 @@ type L2FirstUsableResult =
 - `candidate_shell_seed.contract_registry_seed.ability_id` 必须直接等于 `candidate_shell_seed.ability_id`；`entries[*].contract_ref` 必须至少覆盖 `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 三个被引用的正式 contract ref。
 - `success=true` 还要求 `candidate_shell_seed.contract_registry_seed` 先满足 `FR-0017.candidate_ability_contract_registry` 的有效性规则：同一 `contract_ref` 不得出现多条冲突 entry，`entries[*].contract_kind` 必须与 ref kind 一致，且下游对 `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 的 lookup 都必须能得到唯一有效结果。
 - `success=true` 时，`result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed` 必须同时存在。
+- 当前 read-first baseline 下，`success=true` 必须已经完成实际读取，而不是只完成 reveal-only click、导航、定位或等待收敛等支持步骤。
+- `success=true` 时，`result_summary` 必须携带满足 `output_contract_ref` 的实际读取结果，且 `interaction_trace` 中必须至少出现一条 `action=extract` 的读取步骤。
+- `reveal_only_click` 仍然合法，但只允许作为 `extract` 之前的支持步骤；不得单独充当 `success=true` 的证明。
 - `success=false` 时，`failure_class` 必须存在，且不得返回 `candidate_shell_seed`；其余字段允许按失败停点最小化返回。
 - `failure_class=requires_l1_fallback` 时，`l1_fallback_payload` 必须存在，并至少冻结 `fallback_goal`、`fallback_reason`、`recommended_strategy`；不得只返回自由文本建议。
 - 当 L2 因 `insufficient_semantic_structure`、`target_not_located`、`state_not_settled` 三类原因停止时，顶层 `failure_class` 必须统一写成 `requires_l1_fallback`，并通过 `l1_fallback_payload.fallback_reason` 细分，不得再平铺成独立失败分支。

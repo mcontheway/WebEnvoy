@@ -5,6 +5,7 @@
 - [ ] `spec.md` 已明确 FR-0019 只承接 L2 首次可用，不混入完整 L2 平台、L1 兜底或导入/交付。
 - [ ] `spec.md` 已明确继承 `FR-0017`、现有运行主链与风控边界，不重定义既有对象。
 - [ ] `spec.md` 已冻结最小能力面、最小成功判定与最小失败大类。
+- [ ] reviewer 已确认 `goal_kind=read` 的 `success=true` 必须完成 `extract` 并返回实际读取结果；`reveal_only_click` 仅为支持步骤，不构成独立成功终态。
 - [ ] `spec.md` 已冻结 `candidate_shell_seed` 等 handoff 输出，并明确它不等于候选能力描述本身。
 - [ ] `plan.md` 已补齐七节最小结构，并写清与 `#155/#153`、L1 fallback 的并行 / 串行关系。
 - [ ] `contracts/l2-first-usable-capability.md` 已冻结稳定对象与边界。

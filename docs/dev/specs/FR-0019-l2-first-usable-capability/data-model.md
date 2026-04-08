@@ -34,6 +34,9 @@
 
 补充约束：
 
+- 当前 read-first baseline 下，只有在形成实际读取结果后，才允许把本次 L2 路径标记为 `success=true`；reveal-only click、导航、定位、等待收敛都只能作为读取前的支持步骤。
+- `success=true` 时，`result_summary` 必须携带满足 `output_contract_ref` 的结构化读取结果，且 `interaction_trace` 中必须至少出现一条 `action=extract` 的读取步骤。
+- `first_usable_trace` 的最终成功步骤必须表示读取完成，不得停在展开、切换、打开详情或其他支持性交互。
 - `interaction_semantics` 是正式机器字段，只允许 `neutral`、`reveal_only_click`。
 - `interaction_semantics=neutral` 只允许与 `navigate`、`locate`、`extract`、`wait_settled` 这类非点击步骤一起出现；pure-read 成功路径不得上报 `neutral click`。
 - `interaction_semantics=reveal_only_click` 只允许与 `action=click` 一起出现，且当前正式 `click_kind` 只允许 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate`。

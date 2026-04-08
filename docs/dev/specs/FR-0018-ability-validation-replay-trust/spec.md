@@ -119,6 +119,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `smoke_plus_replay`
   - `divergent`
 - “当前 latest” 继续沿用现有 stale 规则：只有同时满足 7 天 freshness window 且 `baseline_descriptor` 与当前 descriptor/view 基线一致的 mode latest，才可被视为 current latest；其余 latest 必须失效为 `stale`。
+- `baseline_descriptor` 的 current/stale 判定必须把执行层支持视为正式基线的一部分；候选能力的 `execution_layer_support` 发生变化时，旧 latest 不得继续被视为 current。
 - 顶层 `health_state` 必须按固定顺序判定，分支互斥且穷尽：
   1. `unknown`：在给定 `ability_ref + profile_ref` 的受支持视图内，不存在任何 mode latest 记录
   2. `stale`：存在 mode latest，且全部现存 latest 都是 `stale`
@@ -154,6 +155,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `result_state`
   - `failure_class`
   - `run_id`
+  - `validated_execution_layer`
   - `baseline_descriptor`
 - 每条 mode latest 可在上游 evidence carrier 已冻结时补充：
   - `artifact_refs`
@@ -179,7 +181,11 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `replay_input_ref` 只能解析到同一 `ability_ref + profile_ref` 下的输入快照引用对象；引用不存在、owner 不符或 profile 不符时，请求必须视为无效
   - `failure_class` 在 mode `result_state=broken` 场景必须存在；在 mode `result_state=verified` 场景必须为空；在 mode `result_state=stale` 场景可选但需与状态解释一致
   - `artifact_refs` 只作为 run-scoped 补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 latest 记录成立的强制前置
-  - `baseline_descriptor` 必须至少冻结 `entrypoint`、`input_contract_ref`、`output_contract_ref`、`error_contract_ref`、`profile_ref`；任一字段与当前 descriptor/view 基线不一致时，该条 latest 结果必须失效为 `stale`
+  - `validated_execution_layer` 必须记录该次验证实际走通的执行层；它来自实际 invocation layer，而不是 descriptor 的支持层集合
+  - `baseline_descriptor` 必须至少冻结 `entrypoint`、`input_contract_ref`、`output_contract_ref`、`error_contract_ref`、`profile_ref`、`execution_layer_support`；任一字段与当前 descriptor/view 基线不一致时，该条 latest 结果必须失效为 `stale`
+  - `execution_layer_support` 的 current/stale 比较必须按归一化集合语义完成，而不是按数组顺序比较
+  - 若当前 `candidate_ability_descriptor.execution_layer_support` 不再覆盖该条 latest 的 `validated_execution_layer`，该条 latest 结果也必须失效为 `stale`
+  - 每条 latest 只证明自己的 `validated_execution_layer` 曾经被验证成功或失败；不得把同一条 latest 自动外推为 descriptor 其他支持层也已被验证
   - `ability_health_view` 是每个 `ability_ref + profile_ref` 的唯一聚合健康视图；消费者必须读取该视图判断顶层 `health_state` 与 `validation_coverage_state`
   - 在同一 `ability_ref + profile_ref` 视图内，`latest_validations` 按 `validation_mode` 最多各保留一条 latest 记录；FR-0006 只作为输入证据层，不负责表达 smoke/replay 分叉
 
@@ -284,6 +290,15 @@ When 用户查看能力当前状态
 Then 顶层 `health_state` 必须是 `stale`
 And `validation_coverage_state` 必须是 `none`
 
+### 场景 11：执行层支持变化会使旧验证失效
+
+Given 某个能力在同一个 `profile_ref` 下已有一条 `validated_execution_layer=L2` 的 current latest
+And 该条 latest 生成时记录的 `baseline_descriptor.execution_layer_support` 仍包含 `L2`
+When 当前 `candidate_ability_descriptor.execution_layer_support` 发生变化
+And 新的执行层支持集合与该条 latest 的 `baseline_descriptor.execution_layer_support` 不一致
+Then 该条 latest 必须失效为 `stale`
+And 不得继续被当作 current healthy evidence
+
 ### 场景 11：L2 样本也能进入同一验证链路
 
 Given 后续已有一个来自 L2 首次可用的候选能力
@@ -299,7 +314,7 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 4. `replay_input_ref` 无法解析到正式输入快照引用对象：不得视为可执行 replay。
 5. 输入快照引用对象缺少 `payload_locator`，或该 locator 无法解析到对应 payload：不得视为可执行 replay。
 6. 新能力进入验证链路时，既没有上游 `seed_replay_input_ref`，也没有通过首次成功验证/重放建立首个输入快照引用对象：不得宣称该能力已具备 replay-ready 边界。
-7. `stale` 判定未检查 7 天 freshness window，或未对比 `baseline_descriptor`：视为健康状态计算未冻结。
+7. `stale` 判定未检查 7 天 freshness window，或未对比 `baseline_descriptor` 中的 descriptor/profile/执行层支持基线：视为健康状态计算未冻结。
 8. 失败大类被写成低层错误码镜像：视为边界漂移。
 9. `expected_capability_kind` 与 `candidate_ability_descriptor.ability_kind` 不一致时仍继续验证或写入 latest：视为共享能力面边界未冻结。
 10. 只有 smoke current latest 成功、却仍把顶层 `health_state` 压成 `degraded`，或未把覆盖度标成 `smoke_only`：视为状态轴仍然混用。
@@ -308,6 +323,7 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 13. 能力尚未进入 `FR-0017` 的候选能力描述，却直接进入验证链路：视为流程违规。
 14. `ability_kind=write` 的能力仍允许通过 `seed_replay_input_ref`、`last_success_input_ref` 或 `replay_input_ref` 形成无门禁 replay 入口：视为状态变更 replay 边界未冻结。
 15. `ability_kind=write` 仍允许通过普通 `smoke_validation` rerun、写出 `healthy`，或被压成普通 `health_state=unknown`：视为状态变更验证门禁缺失。
+16. `candidate_ability_descriptor.execution_layer_support` 发生变化后，旧 latest 仍继续被视为 current：视为执行层变更没有进入 stale baseline。
 
 ## 验收标准
 
