@@ -577,6 +577,29 @@ test_review_status_rejects_invalid_metadata() {
   assert_equal "$(jq -r '.reason' "${status_file}")" "invalid_metadata"
 }
 
+test_build_markdown_review_metadata_omits_embedded_result() {
+  setup_review_status_fixture \
+    "review-status-metadata-omits-result" \
+    "pr-author" \
+    "github-actions[bot]" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local metadata_file="${TMP_DIR}/guardian-meta.json"
+  perl -MMIME::Base64=decode_base64 -0ne '
+    if (/<!-- webenvoy-guardian-meta:v1 ([A-Za-z0-9+\/=]+) -->/) {
+      print decode_base64($1);
+    }
+  ' "${REVIEW_MD_FILE}" > "${metadata_file}"
+
+  assert_equal "$(jq -r 'has(\"result\")' "${metadata_file}")" "false"
+  assert_equal "$(jq -r '.verdict' "${metadata_file}")" "APPROVE"
+  assert_equal "$(jq -r '.safe_to_merge' "${metadata_file}")" "true"
+}
+
 test_review_status_rejects_tampered_review_body() {
   setup_review_status_fixture \
     "review-status-tampered-review-body" \

@@ -625,7 +625,8 @@ guardian_metadata_json() {
     --arg review_basis_digest "${REVIEW_BASIS_DIGEST:-}" \
     --arg prompt_digest "${PROMPT_DIGEST:-}" \
     --arg review_body_sha256 "$(hash_normalized_review_body_sha256 "${review_file}")" \
-    --argjson result "$(jq -c '.' "${result_file}")" \
+    --arg verdict "$(jq -r '.verdict' "${result_file}")" \
+    --argjson safe_to_merge "$(jq -r '.safe_to_merge' "${result_file}")" \
     '
       {
         head_sha: $head_sha,
@@ -634,9 +635,8 @@ guardian_metadata_json() {
         review_profile: $review_profile,
         review_basis_digest: $review_basis_digest,
         prompt_digest: $prompt_digest,
-        verdict: $result.verdict,
-        safe_to_merge: $result.safe_to_merge,
-        result: $result,
+        verdict: $verdict,
+        safe_to_merge: $safe_to_merge,
         review_body_sha256: $review_body_sha256
       }
     '
@@ -3273,9 +3273,14 @@ write_review_status_json_common() {
             | if $meta == null
                 or (($meta.verdict // "") | IN("APPROVE", "REQUEST_CHANGES") | not)
                 or (($meta.safe_to_merge | type) != "boolean")
-                or (($meta.result | type) != "object")
-                or (($meta.result.verdict // "") != ($meta.verdict // ""))
-                or (($meta.result.safe_to_merge // null) != ($meta.safe_to_merge // null))
+                or (
+                  ($meta | has("result"))
+                  and (
+                    (($meta.result | type) != "object")
+                    or (($meta.result.verdict // "") != ($meta.verdict // ""))
+                    or (($meta.result.safe_to_merge // null) != ($meta.safe_to_merge // null))
+                  )
+                )
                 or (($meta.review_body_sha256 // "") != (.cleaned_body_sha256 // "")) then
                 . + {
                   meta_status: "invalid_metadata",
