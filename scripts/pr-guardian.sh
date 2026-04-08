@@ -446,7 +446,7 @@ build_lightweight_review_baseline() {
   local git_ref="${MERGE_BASE_SHA}"
   local file_path=""
 
-  printf 'guardian_script_sha256=%s\n' "$(hash_normalized_file_sha256 "${SCRIPT_DIR}/pr-guardian.sh")"
+  printf 'guardian_script_sha256=%s\n' "$(hash_guardian_script_review_basis_sha256)"
 
   while IFS= read -r file_path; do
     [[ -n "${file_path}" ]] || continue
@@ -455,6 +455,31 @@ build_lightweight_review_baseline() {
       "${file_path}" \
       "$(hash_git_ref_file_sha256 "${git_ref}" "${file_path}")"
   done < <(lightweight_review_baseline_paths)
+}
+
+hash_guardian_script_review_basis_sha256() {
+  local relative_path="scripts/pr-guardian.sh"
+  local worktree_script_path=""
+
+  if [[ -n "${WORKTREE_DIR:-}" ]]; then
+    worktree_script_path="${WORKTREE_DIR}/${relative_path}"
+    if [[ -f "${worktree_script_path}" ]]; then
+      hash_normalized_file_sha256 "${worktree_script_path}"
+      return 0
+    fi
+  fi
+
+  if [[ -n "${PR_HEAD_REF:-}" ]]; then
+    hash_git_ref_file_sha256 "${PR_HEAD_REF}" "${relative_path}"
+    return 0
+  fi
+
+  if [[ -n "${HEAD_SHA:-}" ]]; then
+    hash_git_ref_file_sha256 "${HEAD_SHA}" "${relative_path}"
+    return 0
+  fi
+
+  hash_normalized_file_sha256 "${SCRIPT_DIR}/pr-guardian.sh"
 }
 
 build_lightweight_issue_basis() {
@@ -630,6 +655,7 @@ prepare_pr_workspace() {
 
   fetch_origin_tracking_ref "refs/heads/${BASE_REF}" "refs/remotes/origin/${BASE_REF}"
   fetch_origin_tracking_ref "pull/${pr_number}/head" "refs/remotes/origin/pr/${pr_number}"
+  PR_HEAD_REF="refs/remotes/origin/pr/${pr_number}"
 
   WORKTREE_DIR="${TMP_DIR}/worktree"
   git -C "${REPO_ROOT}" worktree add --detach "${WORKTREE_DIR}" "origin/pr/${pr_number}" >/dev/null
@@ -677,6 +703,7 @@ prepare_review_status_context() {
   fetch_origin_tracking_ref "pull/${pr_number}/head" "refs/remotes/origin/pr/${pr_number}"
 
   pr_head_ref="refs/remotes/origin/pr/${pr_number}"
+  PR_HEAD_REF="${pr_head_ref}"
   base_branch_ref="refs/remotes/origin/${BASE_REF}"
   ensure_merge_base_available_for_refs "${pr_number}" "${pr_head_ref}" "${base_branch_ref}" \
     || die "无法计算 PR 与 ${BASE_REF} 的 merge-base，无法判断 review-status。"
@@ -3157,7 +3184,7 @@ write_review_status_json() {
 }
 
 write_light_review_status_json() {
-  write_review_status_json_common "$1" "$2" "$3" "0" "0"
+  write_review_status_json_common "$1" "$2" "$3" "0" "1"
 }
 
 hydrate_reused_review_result() {

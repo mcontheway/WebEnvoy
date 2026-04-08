@@ -150,11 +150,29 @@ test_review_status_allows_invoking_human_reviewer_in_strict_mode() {
   assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "human-reviewer"
 }
 
-test_light_review_status_rejects_invoking_human_reviewer_without_allowlist() {
+test_light_review_status_allows_invoking_human_reviewer() {
   setup_review_status_fixture \
     "review-status-invoking-human-light" \
     "pr-author" \
     "human-reviewer" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  local status_file="${TMP_DIR}/review-status.json"
+  assert_pass write_light_review_status_json 274 human-reviewer "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
+  assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "human-reviewer"
+}
+
+test_light_review_status_rejects_other_human_reviewer() {
+  setup_review_status_fixture \
+    "review-status-other-human-light" \
+    "pr-author" \
+    "other-human" \
     "APPROVED" \
     "APPROVE" \
     "true" \

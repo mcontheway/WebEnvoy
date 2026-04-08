@@ -1925,6 +1925,33 @@ test_build_lightweight_review_baseline_uses_merge_base_snapshot_files() {
   fi
 }
 
+test_build_lightweight_review_baseline_uses_pr_head_script_ref_when_available() {
+  setup_case_dir "lightweight-review-baseline-pr-head-script"
+
+  BASE_REF="main"
+  MERGE_BASE_SHA="merge-base-sha-123"
+  PR_HEAD_REF="refs/remotes/origin/pr/415"
+  export BASE_REF MERGE_BASE_SHA PR_HEAD_REF
+
+  local baseline
+  baseline="$(
+    hash_git_ref_file_sha256() {
+      printf 'hash:%s:%s\n' "$1" "$2"
+    }
+
+    hash_normalized_file_sha256() {
+      printf 'local:%s\n' "$1"
+    }
+
+    build_lightweight_review_baseline
+  )"
+
+  if [[ "${baseline}" != *"guardian_script_sha256=hash:refs/remotes/origin/pr/415:scripts/pr-guardian.sh"* ]]; then
+    echo "expected lightweight review baseline to hash guardian script from PR head ref when available" >&2
+    exit 1
+  fi
+}
+
 test_compute_review_basis_digest_changes_when_lightweight_review_baseline_changes() {
   setup_case_dir "review-basis-digest-baseline-change"
 
