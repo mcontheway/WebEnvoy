@@ -53,7 +53,6 @@
   - `input_contract_ref`
   - `output_contract_ref`
   - `error_contract_ref`
-  - `default_input_ref`
   - `capture_origin`
   - `capture_run_id`
   - `capture_artifact_refs`
@@ -72,7 +71,6 @@
   - 运行选项如何映射到 `options`
   - 结果如何继续落回 `summary.capability_result`
   - 错误如何继续复用 `error.details`
-  - 默认验证输入如何通过 `default_input_ref` 暴露给 `FR-0018.input_source=descriptor_default`
 - 调用时的 `ability` 必须继续保持 `FR-0007` 的结构对象：
   - `ability.id` 对应 `candidate_ability_descriptor.ability_id`
   - `ability.layer` 表达本次执行所走的实际执行层，不能被 `execution_layer_support` 替代
@@ -113,10 +111,10 @@
   - “候选能力已存在”不等于“验证已通过”
   - “候选能力已存在”也不等于“可分享/可交付”
 - 每个候选能力必须保留最小来源证据字段，以支持后续验证、重放和诊断：
-  - `default_input_ref`
   - `capture_run_id`
   - `capture_profile`
   - `capture_artifact_refs`
+- `capture_artifact_refs` 的正式 truth source 是与 `capture_run_id` 同属一次运行的 run-scoped 证据载体；FR-0017 只保存引用，不定义新的 artifact 存储或跨 run 聚合规则。
 
 ### 7. 诊断与实现边界
 

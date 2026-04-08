@@ -10,7 +10,6 @@
 - `entrypoint`
 - `platform_scope`
 - `execution_layer_support`
-- `default_input_ref`
 - `capture_origin`
 - `candidate_status`
 - `capture_run_id`
@@ -42,9 +41,8 @@
 - 与 `FR-0007`：
   - 继续复用最小能力壳
   - 调用入口中的 `ability` 仍为结构对象，至少包含 `id` / `layer` / `action`
-- 与 `FR-0018`：
-  - `default_input_ref` 是 `input_source=descriptor_default` 的唯一正式来源
 - 与 `FR-0004`：
   - 继续复用最小诊断引用
 - 与 `FR-0006`：
-  - `capture_run_id` / `capture_artifact_refs` 只引用既有运行证据，不在本 FR 中新增 SQLite schema
+  - `capture_run_id` 通过 runtime-store 提供最小运行证据锚点
+  - `capture_artifact_refs` 的正式 truth source 是该 `capture_run_id` 对应运行的 run-scoped 证据载体；FR-0017 不把 SQLite 或候选能力描述升级为 artifact 真相源

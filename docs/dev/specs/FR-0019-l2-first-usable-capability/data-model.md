@@ -42,7 +42,6 @@
 - `input_contract_ref`
 - `output_contract_ref`
 - `error_contract_ref`
-- `default_input_ref`
 - `capture_origin="l2_first_usable_sample"`
 - `capture_run_id`
 - `capture_profile`

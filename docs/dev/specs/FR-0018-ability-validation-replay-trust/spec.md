@@ -57,7 +57,6 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
 - 必须明确：
   - `smoke_validation` 用于证明能力至少还能走通最小路径
   - `replay_validation` 用于重放上一次成功边界或显式指定的最小输入
-  - `input_source=descriptor_default` 只允许引用 `FR-0017.default_input_ref`，不得临时猜测默认输入
 
 ### 3. 最小重放对象
 
@@ -117,6 +116,9 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - 结果对象可以引用运行证据，但不重建第二套运行真相源
   - 若缺少 `run_id` 或 `artifact_refs`，不得声称“最近一次验证已成立”
   - `failure_class` 在 `broken` 场景必须存在；在 `verified` 场景必须为空；在 `degraded` / `stale` 场景可选但需与状态解释一致
+  - `artifact_refs` 的正式 truth source 是 `run_id` 对应验证运行的 run-scoped 证据载体；FR-0018 只保存引用，不另建 artifact 主数据
+  - `ability_validation_record` 是每个 `ability_ref` 的唯一 latest-validation 正式视图；消费者必须读取该视图判断 `health_state`，不得从 FR-0006 runtime-store 原始记录直接推导最新状态
+  - `ability_validation_record` 的持久化边界属于 FR-0018 验证元数据命名空间，按 `ability_ref` 提供单条 latest-view 查询；FR-0006 只作为输入证据层
 
 ### 7. 与候选能力和 L2 首次可用的衔接
 

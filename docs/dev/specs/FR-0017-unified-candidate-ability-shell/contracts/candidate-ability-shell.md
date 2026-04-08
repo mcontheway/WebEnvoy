@@ -16,7 +16,6 @@ interface CandidateAbilityDescriptor {
   input_contract_ref: string
   output_contract_ref: string
   error_contract_ref: string
-  default_input_ref: string
   capture_origin: "l3_adapter_sample" | "l2_first_usable_sample"
   candidate_status: "draft_candidate" | "candidate_ready"
   capture_run_id: string
@@ -31,7 +30,7 @@ interface CandidateAbilityDescriptor {
 - `ability_id` 在本地能力空间内稳定唯一。
 - `candidate_status` 只表达“是否已形成候选能力”，不表达验证通过与否。
 - `execution_layer_support` 至少能表达当前候选能力支持哪些执行层；不得用它替代验证结果。
-- `default_input_ref` 必须指向可直接用于 `FR-0018.input_source=descriptor_default` 的最小输入快照。
+- `capture_artifact_refs` 必须是与 `capture_run_id` 同属一次运行的 run-scoped 证据引用；FR-0017 只保留 opaque ref，不定义第二套 artifact 真相源。
 
 ## 2. `candidate_ability_invocation`
 

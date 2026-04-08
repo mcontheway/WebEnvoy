@@ -39,7 +39,6 @@ interface L2FirstUsableResult {
     input_contract_ref: string
     output_contract_ref: string
     error_contract_ref: string
-    default_input_ref: string
     capture_origin: "l2_first_usable_sample"
     capture_run_id: string
     capture_profile?: string
