@@ -174,7 +174,7 @@ test_poller_reviews_pr_when_metadata_is_stale() {
   export GUARDIAN_SCRIPT
 
   printf '%s\n' '[{"number":276,"title":"Stale metadata","headRefOid":"head-sha-276","headRefName":"feat/stale","author":{"login":"author"},"isDraft":false,"url":"https://example.test/pr/276","baseRefName":"main","milestone":{"title":"Sprint A"}}]' > "${MOCK_GH_OPEN_PRS_JSON}"
-  printf '%s\n' '{"reusable":false,"reason":"prompt_digest_mismatch","head_sha":"head-sha-276","review_profile":"high_risk_impl_profile","prompt_digest":"prompt-digest-new","verdict":"APPROVE","safe_to_merge":true}' > "${MOCK_GUARDIAN_STATUS_DIR}/276.json"
+  printf '%s\n' '{"reusable":false,"reason":"merge_base_sha_mismatch","head_sha":"head-sha-276","review_profile":"high_risk_impl_profile","prompt_digest":"prompt-digest-new","verdict":"APPROVE","safe_to_merge":true}' > "${MOCK_GUARDIAN_STATUS_DIR}/276.json"
 
   assert_pass main --state-file "${STATE_FILE}"
   assert_file_contains "${MOCK_GUARDIAN_LOG}" "review-status 276"

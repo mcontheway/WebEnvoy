@@ -74,6 +74,7 @@ test_review_status_reports_reusable_review_for_matching_metadata() {
   assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
   assert_equal "$(jq -r '.verdict' "${status_file}")" "APPROVE"
   assert_equal "$(jq -r '.safe_to_merge' "${status_file}")" "true"
+  assert_file_not_contains "${MOCK_GH_CALLS_LOG}" "collaborators/"
 }
 
 test_review_status_reports_reusable_review_from_other_reviewer() {
@@ -92,28 +93,7 @@ test_review_status_reports_reusable_review_from_other_reviewer() {
   assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
   assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
   assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "poller[bot]"
-}
-
-test_review_status_reports_reusable_review_from_other_maintainer() {
-  setup_review_status_fixture \
-    "review-status-reusable-other-maintainer" \
-    "pr-author" \
-    "maintainer-human" \
-    "APPROVED" \
-    "APPROVE" \
-    "true" \
-    "1" \
-    "valid"
-
-  MOCK_GH_COLLABORATOR_PERMISSIONS_JSON="${TEST_TMP_DIR}/review-status-reusable-other-maintainer/mock/collaborator-permissions.json"
-  printf '%s\n' '{"maintainer-human":{"permission":"write","role_name":"maintain"}}' > "${MOCK_GH_COLLABORATOR_PERMISSIONS_JSON}"
-  export MOCK_GH_COLLABORATOR_PERMISSIONS_JSON
-
-  local status_file="${TMP_DIR}/review-status.json"
-  assert_pass write_review_status_json 274 human-reviewer "${status_file}"
-  assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
-  assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
-  assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "maintainer-human"
+  assert_file_not_contains "${MOCK_GH_CALLS_LOG}" "collaborators/"
 }
 
 test_review_status_rejects_untrusted_other_reviewer() {
@@ -172,6 +152,27 @@ test_review_status_rejects_prompt_digest_mismatch() {
   assert_pass write_review_status_json 274 review-bot "${status_file}"
   assert_equal "$(jq -r '.reusable' "${status_file}")" "false"
   assert_equal "$(jq -r '.reason' "${status_file}")" "prompt_digest_mismatch"
+}
+
+test_light_review_status_ignores_prompt_digest_mismatch() {
+  setup_review_status_fixture \
+    "review-status-light-prompt-digest-mismatch" \
+    "pr-author" \
+    "review-bot" \
+    "APPROVED" \
+    "APPROVE" \
+    "true" \
+    "1" \
+    "valid"
+
+  PROMPT_DIGEST="prompt-digest-new"
+  export PROMPT_DIGEST
+
+  local status_file="${TMP_DIR}/review-status.json"
+  assert_pass write_light_review_status_json 274 review-bot "${status_file}"
+  assert_equal "$(jq -r '.reusable' "${status_file}")" "true"
+  assert_equal "$(jq -r '.reason' "${status_file}")" "matching_metadata"
+  assert_equal "$(jq -r '.prompt_digest' "${status_file}")" "prompt-digest-123"
 }
 
 test_review_status_rejects_missing_metadata() {
@@ -258,7 +259,7 @@ test_merge_if_safe_accepts_reused_review_from_other_reviewer() {
   setup_review_status_fixture \
     "merge-reused-review-other-reviewer" \
     "pr-author" \
-    "maintainer-human" \
+    "poller[bot]" \
     "APPROVED" \
     "APPROVE" \
     "true" \
@@ -268,13 +269,10 @@ test_merge_if_safe_accepts_reused_review_from_other_reviewer() {
   local status_file="${TMP_DIR}/review-status.json"
   MOCK_GH_USER_LOGIN="human-reviewer"
   export MOCK_GH_USER_LOGIN
-  MOCK_GH_COLLABORATOR_PERMISSIONS_JSON="${TEST_TMP_DIR}/merge-reused-review-other-reviewer/mock/collaborator-permissions.json"
-  printf '%s\n' '{"maintainer-human":{"permission":"write","role_name":"maintain"}}' > "${MOCK_GH_COLLABORATOR_PERMISSIONS_JSON}"
-  export MOCK_GH_COLLABORATOR_PERMISSIONS_JSON
 
   assert_pass write_review_status_json 274 human-reviewer "${status_file}"
-  assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "maintainer-human"
-  REUSED_REVIEWER_LOGIN="maintainer-human"
+  assert_equal "$(jq -r '.reviewer_login' "${status_file}")" "poller[bot]"
+  REUSED_REVIEWER_LOGIN="poller[bot]"
   export REUSED_REVIEWER_LOGIN
   assert_pass merge_if_safe 274 0
   assert_file_contains "${MOCK_GH_MERGE_LOG}" "--match-head-commit head-sha-123"

@@ -173,6 +173,13 @@ compute_merge_base_sha() {
   git -C "${WORKTREE_DIR}" merge-base HEAD "origin/${BASE_REF}" 2>/dev/null || true
 }
 
+compute_merge_base_sha_for_refs() {
+  local head_ref="$1"
+  local base_ref="$2"
+
+  git -C "${REPO_ROOT}" merge-base "${head_ref}" "${base_ref}" 2>/dev/null || true
+}
+
 ensure_merge_base_available() {
   local pr_number="$1"
   local fetch_arg=""
@@ -198,6 +205,39 @@ ensure_merge_base_available() {
     fetch_origin_tracking_ref "refs/heads/${BASE_REF}" "refs/remotes/origin/${BASE_REF}" "--unshallow" || true
     fetch_origin_tracking_ref "pull/${pr_number}/head" "refs/remotes/origin/pr/${pr_number}" "--unshallow" || true
     MERGE_BASE_SHA="$(compute_merge_base_sha)"
+    [[ -n "${MERGE_BASE_SHA}" ]] && return 0
+  fi
+
+  return 1
+}
+
+ensure_merge_base_available_for_refs() {
+  local pr_number="$1"
+  local head_ref="$2"
+  local base_ref="$3"
+  local fetch_arg=""
+  local is_shallow=""
+
+  MERGE_BASE_SHA="$(compute_merge_base_sha_for_refs "${head_ref}" "${base_ref}")"
+  [[ -n "${MERGE_BASE_SHA}" ]] && return 0
+
+  is_shallow="$(git -C "${REPO_ROOT}" rev-parse --is-shallow-repository 2>/dev/null || printf 'false\n')"
+  [[ "${is_shallow}" == "true" ]] || return 1
+
+  for fetch_arg in "--deepen=200" "--deepen=1000"; do
+    warn "检测到浅历史且缺少 merge-base，正在尝试补齐提交历史: ${fetch_arg}"
+    fetch_origin_tracking_ref "refs/heads/${BASE_REF}" "refs/remotes/origin/${BASE_REF}" "${fetch_arg}" || true
+    fetch_origin_tracking_ref "pull/${pr_number}/head" "refs/remotes/origin/pr/${pr_number}" "${fetch_arg}" || true
+    MERGE_BASE_SHA="$(compute_merge_base_sha_for_refs "${head_ref}" "${base_ref}")"
+    [[ -n "${MERGE_BASE_SHA}" ]] && return 0
+  done
+
+  is_shallow="$(git -C "${REPO_ROOT}" rev-parse --is-shallow-repository 2>/dev/null || printf 'false\n')"
+  if [[ "${is_shallow}" == "true" ]]; then
+    warn "浅历史补齐后仍缺少 merge-base，正在尝试完整拉取历史。"
+    fetch_origin_tracking_ref "refs/heads/${BASE_REF}" "refs/remotes/origin/${BASE_REF}" "--unshallow" || true
+    fetch_origin_tracking_ref "pull/${pr_number}/head" "refs/remotes/origin/pr/${pr_number}" "--unshallow" || true
+    MERGE_BASE_SHA="$(compute_merge_base_sha_for_refs "${head_ref}" "${base_ref}")"
     [[ -n "${MERGE_BASE_SHA}" ]] && return 0
   fi
 
@@ -301,39 +341,8 @@ hash_normalized_review_body_sha256() {
   hash_string_sha256 "${normalized_body}"
 }
 
-reviewer_has_guardian_reuse_permission() {
-  local reviewer="$1"
-  local permission_json
-  local permission=""
-  local role_name=""
-
-  [[ -n "${reviewer}" ]] || return 1
-
-  if ! permission_json="$(gh api "repos/:owner/:repo/collaborators/${reviewer}/permission" 2>/dev/null)"; then
-    return 1
-  fi
-
-  permission="$(jq -r '.permission // ""' <<< "${permission_json}")"
-  role_name="$(jq -r '.role_name // ""' <<< "${permission_json}")"
-
-  case "${permission}" in
-    admin|write)
-      return 0
-      ;;
-  esac
-
-  case "${role_name}" in
-    admin|maintain|write)
-      return 0
-      ;;
-  esac
-
-  return 1
-}
-
 trusted_guardian_reviewers_json() {
   local requesting_user="$1"
-  local reviews_file="${2:-}"
   local extra_reviewers="${WEBENVOY_GUARDIAN_TRUSTED_REVIEWERS:-}"
   local reviewer=""
   local -a trusted_reviewers=()
@@ -347,18 +356,6 @@ trusted_guardian_reviewers_json() {
       [[ -n "${reviewer}" ]] || continue
       trusted_reviewers+=("${reviewer}")
     done < <(printf '%s\n' "${extra_reviewers}" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-  fi
-
-  if [[ -n "${reviews_file}" && -f "${reviews_file}" ]]; then
-    while IFS= read -r reviewer; do
-      [[ -n "${reviewer}" ]] || continue
-      [[ "${reviewer}" == "${requesting_user}" ]] && continue
-      [[ "${reviewer}" == *"[bot]" ]] && continue
-
-      if reviewer_has_guardian_reuse_permission "${reviewer}"; then
-        trusted_reviewers+=("${reviewer}")
-      fi
-    done < <(jq -r '.[][] | .user.login // empty' "${reviews_file}" | sort -u)
   fi
 
   jq -nc '$ARGS.positional | map(select(length > 0)) | unique' --args "${trusted_reviewers[@]}"
@@ -523,6 +520,38 @@ prepare_pr_workspace() {
   slim_pr_body > "${SLIM_PR_FILE}"
   fetch_issue_summary > "${ISSUE_SUMMARY_FILE}"
   collect_context_docs "${CHANGED_FILES_FILE}" "${CONTEXT_DOCS_FILE}"
+}
+
+prepare_review_status_context() {
+  local pr_number="$1"
+  local pr_head_ref=""
+  local base_branch_ref=""
+
+  unset WORKTREE_DIR || true
+  unset BASELINE_SNAPSHOT_ROOT || true
+  TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/webenvoy-pr-guardian.XXXXXX")"
+  META_FILE="${TMP_DIR}/pr.json"
+  CHANGED_FILES_FILE="${TMP_DIR}/changed-files.txt"
+
+  gh pr view "${pr_number}" --json \
+    baseRefName,headRefOid,author \
+    > "${META_FILE}"
+
+  BASE_REF="$(jq -r '.baseRefName' "${META_FILE}")"
+  HEAD_SHA="$(jq -r '.headRefOid' "${META_FILE}")"
+  PR_AUTHOR="$(jq -r '.author.login // ""' "${META_FILE}")"
+
+  fetch_origin_tracking_ref "refs/heads/${BASE_REF}" "refs/remotes/origin/${BASE_REF}"
+  fetch_origin_tracking_ref "pull/${pr_number}/head" "refs/remotes/origin/pr/${pr_number}"
+
+  pr_head_ref="refs/remotes/origin/pr/${pr_number}"
+  base_branch_ref="refs/remotes/origin/${BASE_REF}"
+  ensure_merge_base_available_for_refs "${pr_number}" "${pr_head_ref}" "${base_branch_ref}" \
+    || die "无法计算 PR 与 ${BASE_REF} 的 merge-base，无法判断 review-status。"
+
+  git -C "${REPO_ROOT}" diff --name-only "${base_branch_ref}...${pr_head_ref}" > "${CHANGED_FILES_FILE}"
+  REVIEW_PROFILE="$(classify_review_profile "${CHANGED_FILES_FILE}")"
+  PROMPT_DIGEST=""
 }
 
 hydrate_worktree_dependencies() {
@@ -2728,21 +2757,23 @@ head_has_expected_review_state() {
     ' "${reviews_file}" >/dev/null 2>&1
 }
 
-write_review_status_json() {
+write_review_status_json_common() {
   local pr_number="$1"
   local requesting_user="$2"
   local output_file="$3"
+  local strict_prompt_digest="${4:-1}"
   local raw_reviews_file="${TMP_DIR}/reviews-status.raw.json"
   local reviews_file="${TMP_DIR}/reviews-status.json"
   local trusted_reviewers_json
 
   load_pull_reviews "${pr_number}" "${raw_reviews_file}"
   annotate_pull_reviews_for_reuse "${raw_reviews_file}" "${reviews_file}"
-  trusted_reviewers_json="$(trusted_guardian_reviewers_json "${requesting_user}" "${reviews_file}")"
+  trusted_reviewers_json="$(trusted_guardian_reviewers_json "${requesting_user}")"
 
   jq -c \
     --arg requesting_user "${requesting_user}" \
     --argjson trusted_reviewers "${trusted_reviewers_json}" \
+    --arg strict_prompt_digest "${strict_prompt_digest}" \
     --arg pr_author "${PR_AUTHOR:-}" \
     --arg head_sha "${HEAD_SHA:-}" \
     --arg base_ref "${BASE_REF:-}" \
@@ -2821,7 +2852,7 @@ write_review_status_json() {
           | select((.meta.base_ref // "") == $base_ref)
           | select((.meta.merge_base_sha // "") == $merge_base_sha)
           | select((.meta.review_profile // "") == $review_profile)
-          | select((.meta.prompt_digest // "") == $prompt_digest)
+          | select(($strict_prompt_digest != "1") or ((.meta.prompt_digest // "") == $prompt_digest))
           | select((.state // "") == (.expected_state // ""))
         ] as $reusable_reviews
       | if ($reusable_reviews | length) > 0 then
@@ -2831,7 +2862,7 @@ write_review_status_json() {
               reason: "matching_metadata",
               head_sha: $head_sha,
               review_profile: $review_profile,
-              prompt_digest: $prompt_digest,
+              prompt_digest: ($reused.meta.prompt_digest // ""),
               verdict: ($reused.meta.verdict // null),
               safe_to_merge: ($reused.meta.safe_to_merge // null),
               result: ($reused.meta.result // null),
@@ -2848,7 +2879,7 @@ write_review_status_json() {
             reason: "missing_review",
             head_sha: $head_sha,
             review_profile: $review_profile,
-            prompt_digest: $prompt_digest,
+            prompt_digest: "",
             verdict: null,
             safe_to_merge: null,
             reviewer_login: ($requesting_user // "")
@@ -2861,7 +2892,7 @@ write_review_status_json() {
                 reason: "missing_metadata",
                 head_sha: $head_sha,
                 review_profile: $review_profile,
-                prompt_digest: $prompt_digest,
+                prompt_digest: ($latest.meta.prompt_digest // ""),
                 verdict: null,
                 safe_to_merge: null,
                 reviewer_login: ($latest.user.login // "")
@@ -2872,7 +2903,7 @@ write_review_status_json() {
                 reason: "invalid_metadata",
                 head_sha: $head_sha,
                 review_profile: $review_profile,
-                prompt_digest: $prompt_digest,
+                prompt_digest: ($latest.meta.prompt_digest // ""),
                 verdict: ($latest.meta.verdict // null),
                 safe_to_merge: ($latest.meta.safe_to_merge // null),
                 result: ($latest.meta.result // null),
@@ -2890,7 +2921,7 @@ write_review_status_json() {
                     "merge_base_sha_mismatch"
                   elif ($latest.meta.review_profile // "") != $review_profile then
                     "review_profile_mismatch"
-                  elif ($latest.meta.prompt_digest // "") != $prompt_digest then
+                  elif ($strict_prompt_digest == "1" and ($latest.meta.prompt_digest // "") != $prompt_digest) then
                     "prompt_digest_mismatch"
                   elif ($latest.state // "") != ($latest.expected_state // "") then
                     "review_state_mismatch"
@@ -2900,7 +2931,7 @@ write_review_status_json() {
                 ),
                 head_sha: $head_sha,
                 review_profile: $review_profile,
-                prompt_digest: $prompt_digest,
+                prompt_digest: ($latest.meta.prompt_digest // ""),
                 verdict: ($latest.meta.verdict // null),
                 safe_to_merge: ($latest.meta.safe_to_merge // null),
                 result: ($latest.meta.result // null),
@@ -2914,6 +2945,14 @@ write_review_status_json() {
             end
         end
     ' "${reviews_file}" > "${output_file}"
+}
+
+write_review_status_json() {
+  write_review_status_json_common "$1" "$2" "$3" "1"
+}
+
+write_light_review_status_json() {
+  write_review_status_json_common "$1" "$2" "$3" "0"
 }
 
 hydrate_reused_review_result() {
@@ -3295,19 +3334,21 @@ main() {
   esac
 
   check_gh_auth
-  prepare_pr_workspace "${pr_number}"
-  assert_required_review_context_available
-  ensure_review_prompt_prepared "${pr_number}"
 
   if [[ "${mode}" == "review-status" ]]; then
     local current_user
     local review_status_file="${TMP_DIR}/review-status.json"
 
+    prepare_review_status_context "${pr_number}"
     current_user="$(gh api user --jq '.login')"
-    write_review_status_json "${pr_number}" "${current_user}" "${review_status_file}"
+    write_light_review_status_json "${pr_number}" "${current_user}" "${review_status_file}"
     cat "${review_status_file}"
     exit 0
   fi
+
+  prepare_pr_workspace "${pr_number}"
+  assert_required_review_context_available
+  ensure_review_prompt_prepared "${pr_number}"
 
   local current_user=""
   local review_status_file="${TMP_DIR}/review-status.json"

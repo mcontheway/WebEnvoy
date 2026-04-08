@@ -113,7 +113,7 @@ if [[ "${1:-}" == "api" ]]; then
     if [[ "${arg}" == "--paginate" ]]; then
       has_paginate=1
     fi
-    if [[ "${arg}" == "user" || "${arg}" == repos/:owner/:repo/pulls/*/reviews || "${arg}" == repos/:owner/:repo/collaborators/*/permission ]]; then
+    if [[ "${arg}" == "user" || "${arg}" == repos/:owner/:repo/pulls/*/reviews ]]; then
       endpoint="${arg}"
     fi
   done
@@ -137,17 +137,6 @@ if [[ "${1:-}" == "api" ]]; then
       cat "${MOCK_GH_REVIEWS_FIRST_PAGE_JSON:?missing MOCK_GH_REVIEWS_FIRST_PAGE_JSON}"
     else
       cat "${MOCK_GH_REVIEWS_JSON:?missing MOCK_GH_REVIEWS_JSON}"
-    fi
-    exit 0
-  fi
-
-  if [[ "${endpoint}" == repos/:owner/:repo/collaborators/*/permission ]]; then
-    reviewer="${endpoint#repos/:owner/:repo/collaborators/}"
-    reviewer="${reviewer%/permission}"
-    if [[ -n "${MOCK_GH_COLLABORATOR_PERMISSIONS_JSON:-}" ]]; then
-      jq -c --arg reviewer "${reviewer}" '.[$reviewer] // {"permission":"read","role_name":"read"}' "${MOCK_GH_COLLABORATOR_PERMISSIONS_JSON}"
-    else
-      printf '%s\n' '{"permission":"read","role_name":"read"}'
     fi
     exit 0
   fi
@@ -251,7 +240,6 @@ setup_case_dir() {
   unset MOCK_GH_REQUIRED_CHECKS_STDERR || true
   unset MOCK_GH_ISSUE_VIEW_EXIT_CODE || true
   unset MOCK_GH_ISSUE_VIEW_STDERR || true
-  unset MOCK_GH_COLLABORATOR_PERMISSIONS_JSON || true
   unset MOCK_CODEX_REVIEW_BASE_PROMPT_UNSUPPORTED || true
   unset MOCK_CODEX_FORCE_FAIL || true
   unset MOCK_CODEX_OUTPUT_SEQUENCE_FILE || true
