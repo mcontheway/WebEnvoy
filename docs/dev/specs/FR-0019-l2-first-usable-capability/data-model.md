@@ -47,13 +47,13 @@
 - `capture_origin="l2_first_usable_sample"`
 - `capture_run_id`
 - `capture_profile`
-- `capture_artifact_refs`
 - `captured_at`
 - `candidate_status="draft_candidate"`
 
 补充约束：
 
 - L2 首次可用成功态必须同时产出 `result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed`。
+- `capture_artifact_refs` 如存在，只能作为 `capture_run_id` 下的补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 handoff 成立的强制前置。
 
 ## 4. `failure_result`
 

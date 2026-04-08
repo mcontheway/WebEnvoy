@@ -9,7 +9,7 @@ interface CandidateAbilityDescriptor {
   ability_kind: "read" | "write" | "download"
   entrypoint: string
   platform_scope: {
-    platform_family: "xhs" | "generic_web" | "other"
+    platform_family: string
     site_pattern?: string
   }
   execution_layer_support: Array<"L3" | "L2">
@@ -20,7 +20,7 @@ interface CandidateAbilityDescriptor {
   candidate_status: "draft_candidate" | "candidate_ready"
   capture_run_id: string
   capture_profile: string
-  capture_artifact_refs: string[]
+  capture_artifact_refs?: string[]
   captured_at: string
 }
 ```
@@ -28,9 +28,11 @@ interface CandidateAbilityDescriptor {
 约束：
 
 - `ability_id` 在本地能力空间内稳定唯一。
+- `platform_family` 必须使用稳定、归一化的平台键；`generic_web` 用于站点无关场景，`other` 只能作为临时兜底，不得把新的一等平台永久冻结进 `other`。
 - `candidate_status` 只表达“是否已形成候选能力”，不表达验证通过与否。
 - `execution_layer_support` 至少能表达当前候选能力支持哪些执行层；不得用它替代验证结果。
-- `capture_artifact_refs` 必须是与 `capture_run_id` 同属一次运行的 run-scoped 证据引用；FR-0017 只保留 opaque ref，不定义第二套 artifact 真相源。
+- `capture_run_id` 是候选能力来源证据的最小硬锚点。
+- `capture_artifact_refs` 如存在，必须是与 `capture_run_id` 同属一次运行的补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 candidate 成立的强制前置。
 
 ## 2. `candidate_ability_invocation`
 

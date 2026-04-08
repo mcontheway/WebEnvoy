@@ -49,6 +49,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `ability_ref`
   - `validation_mode`
   - `input_source`
+  - `replay_input_ref`
   - `profile_ref`
   - `expected_capability_kind`
 - `validation_mode` 在本 FR 中至少支持：
@@ -57,6 +58,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
 - 必须明确：
   - `smoke_validation` 用于证明能力至少还能走通最小路径
   - `replay_validation` 用于重放上一次成功边界或显式指定的最小输入
+  - 当 `validation_mode=replay_validation` 且 `input_source=explicit_input_snapshot` 时，请求必须显式给出 `replay_input_ref`
 
 ### 3. 最小重放对象
 
@@ -113,6 +115,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - `result_state`
   - `failure_class`
   - `run_id`
+- 每条 mode latest 可在上游 evidence carrier 已冻结时补充：
   - `artifact_refs`
 - 每个 `ability_ref + profile_ref` 组合还必须提供一个顶层 `ability_health_view` 聚合视图，至少包含：
   - `ability_ref`
@@ -123,9 +126,9 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
 - 本 FR 必须明确：
   - `ability_validation_request.profile_ref` 必须存在，验证结果与健康视图按 `ability_ref + profile_ref` 维度隔离
   - 结果对象可以引用运行证据，但不重建第二套运行真相源
-  - 若缺少 `validated_at`、`run_id` 或 `artifact_refs`，不得声称“最近一次验证已成立”
+  - 若缺少 `validated_at` 或 `run_id`，不得声称“最近一次验证已成立”
   - `failure_class` 在 mode `result_state=broken` 场景必须存在；在 mode `result_state=verified` 场景必须为空；在 mode `result_state=stale` 场景可选但需与状态解释一致
-  - `artifact_refs` 的正式 truth source 是 `run_id` 对应验证运行的 run-scoped 证据载体；FR-0018 只保存引用，不另建 artifact 主数据
+  - `artifact_refs` 只作为 run-scoped 补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 latest 记录成立的强制前置
   - `ability_health_view` 是每个 `ability_ref + profile_ref` 的唯一聚合健康视图；消费者必须读取该视图判断顶层 `health_state`
   - 在同一 `ability_ref + profile_ref` 视图内，`latest_validations` 按 `validation_mode` 最多各保留一条 latest 记录；FR-0006 只作为输入证据层，不负责表达 smoke/replay 分叉
 
@@ -152,7 +155,8 @@ Given 某个能力最近一次验证失败
 When 用户查看能力当前状态
 Then 可以看到 `health_state`
 And 可以看到最小失败大类
-And 可以看到 `validated_at`、`run_id` 与 `artifact_refs`
+And 至少可以看到 `validated_at` 与 `run_id`
+And 在存在 run-scoped evidence refs 时可以看到 `artifact_refs`
 And 不需要直接阅读原始运行日志才能知道大概问题
 
 ### 场景 3：smoke 与 replay 分叉时不会被压扁成单一结果
@@ -167,13 +171,15 @@ And `divergence_reason` 必须解释当前是 smoke/replay 分叉
 Given 某个能力需要再次运行
 When 用户触发 `replay_validation`
 Then 系统只会基于已保存的能力与最小输入快照重放
+And 当输入来源是 `explicit_input_snapshot` 时会显式引用 `replay_input_ref`
 And 不会在同一对象里暗含自动修复或重新学习
 
 ### 场景 5：验证结果继续引用运行证据
 
 Given 某次验证已经完成
 When reviewer 检查结果对象
-Then 能看到 `validated_at`、`run_id` 与 `artifact_refs`
+Then 能看到 `validated_at` 与 `run_id`
+And 在存在 run-scoped evidence refs 时能看到 `artifact_refs`
 And 不会创建第二套运行真相源
 
 ### 场景 6：L2 样本也能进入同一验证链路
@@ -185,7 +191,7 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 
 ## 异常与边界场景
 
-1. 验证结果缺少 `validated_at`、`run_id` 或 `artifact_refs`：不得宣称“最近一次验证已成立”。
+1. 验证结果缺少 `validated_at` 或 `run_id`：不得宣称“最近一次验证已成立”。
 2. 同一个 `ability_ref` 在不同 `profile_ref` 下共用一条健康视图：视为跨 profile 污染。
 3. 失败大类被写成低层错误码镜像：视为边界漂移。
 4. 把 `verified` 误当成“可交付/可分享”：视为越界到 Phase 3/5。
@@ -196,7 +202,7 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 
 1. FR-0018 套件完整，至少包含 `spec.md`、`plan.md`、`TODO.md`、`contracts/`、`data-model.md`、`research.md`、`risks.md`。
 2. `ability_validation_request`、`ability_replay_request`、`ability_health_view` 的稳定边界已冻结，且健康视图按 `ability_ref + profile_ref` 唯一隔离。
-3. 最近一次验证结果、失败大类与运行证据引用关系已冻结，且 mode latest 的 `validated_at`、`run_id`、`artifact_refs` 为强制字段。
+3. 最近一次验证结果、失败大类与运行证据引用关系已冻结，且 mode latest 的 `validated_at`、`run_id` 为强制字段。
 4. 本 FR 已明确继承 `FR-0017`、`FR-0004`、`FR-0006`，而不是并行重定义。
 5. 文档明确不承诺版本治理、导入/安装、自动修复或分享网络。
 6. 本 PR 只冻结规约，不混入实现代码。

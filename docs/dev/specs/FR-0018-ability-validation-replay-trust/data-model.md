@@ -34,7 +34,8 @@
 
 - `validation_mode` 只允许 `smoke_validation` 或 `replay_validation`。
 - `result_state` 只允许 `verified`、`broken`、`stale`；顶层 `degraded` 只在聚合视图中表达，不作为 mode latest 的原子状态。
-- `validated_at`、`run_id`、`artifact_refs` 是 latest 记录成立的必填证据字段；缺少任一字段时不得落成 `latest_validations[*]`。
+- `validated_at` 与 `run_id` 是 latest 记录成立的必填证据字段；缺少任一字段时不得落成 `latest_validations[*]`。
+- `artifact_refs` 只作为补充的 run-scoped evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 latest 记录成立的强制前置。
 - `failure_class` 在 `result_state=broken` 时必填，在 `result_state=verified` 时必须为空；`stale` 只允许在解释过期原因时保留兼容的大类信息。
 
 ## 2. `ability_replay_binding`
@@ -60,4 +61,4 @@
   - 最小失败大类可以继续引用最小诊断结果，但不在本 FR 中扩展诊断 schema
 - 与 `FR-0006`：
   - `run_id` 提供最小运行证据锚点
-  - `artifact_refs` 的正式 truth source 是该 `run_id` 对应验证运行的 run-scoped 证据载体；FR-0018 不把 SQLite 升级为 artifact 或 validation state 真相源
+  - `artifact_refs` 如存在，只能引用该 `run_id` 对应验证运行的补充证据；FR-0018 不把 SQLite 升级为 artifact 或 validation state 真相源

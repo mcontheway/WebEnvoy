@@ -46,7 +46,7 @@ type L2FirstUsableResult =
         ability_kind: "read" | "write" | "download"
         entrypoint: string
         platform_scope: {
-          platform_family: "generic_web" | "other"
+          platform_family: string
           site_pattern?: string
         }
         execution_layer_support: Array<"L2">
@@ -56,7 +56,7 @@ type L2FirstUsableResult =
         capture_origin: "l2_first_usable_sample"
         capture_run_id: string
         capture_profile: string
-        capture_artifact_refs: string[]
+        capture_artifact_refs?: string[]
         captured_at: string
         candidate_status: "draft_candidate"
       }
@@ -74,7 +74,7 @@ type L2FirstUsableResult =
         ability_kind: "read" | "write" | "download"
         entrypoint: string
         platform_scope: {
-          platform_family: "generic_web" | "other"
+          platform_family: string
           site_pattern?: string
         }
         execution_layer_support: Array<"L2">
@@ -84,7 +84,7 @@ type L2FirstUsableResult =
         capture_origin: "l2_first_usable_sample"
         capture_run_id: string
         capture_profile: string
-        capture_artifact_refs: string[]
+        capture_artifact_refs?: string[]
         captured_at: string
         candidate_status: "draft_candidate"
       }
@@ -95,6 +95,7 @@ type L2FirstUsableResult =
 
 - `candidate_shell_seed` 只作为进入 `FR-0017` 的 handoff 输入。
 - `candidate_shell_seed` 必须足以直接物化 `FR-0017.candidate_ability_descriptor` 的必填字段，不允许只留下松散 hint。
+- `candidate_shell_seed.platform_scope.platform_family` 必须使用稳定、归一化的平台键；L2 未知网站默认应落在 `generic_web`，不得把新的一等平台永久冻结进 `other`。
 - `success=true` 时，`result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed` 必须同时存在。
 - `success=false` 时，`failure_class` 必须存在；其余字段允许按失败停点最小化返回。
 - `first_usable_trace` 与 `interaction_trace` 的正式类型都是结构化步骤对象数组，不允许在 contract / data-model 间一处写成对象、一处退回 `string[]`。

@@ -19,7 +19,8 @@
 
 - 风险：验证结果另建一套与 `run_id` / artifact 无关的运行记录。
 - 缓解：
-  - 强制引用 `run_id` 与 `artifact_refs`
+  - 强制引用 `run_id`
+  - `artifact_refs` 只作为补充 evidence refs，不提前假定上游 artifact carrier 已冻结
 
 ### 4. 失败大类过细或过粗
 
