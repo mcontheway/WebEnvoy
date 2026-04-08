@@ -5,7 +5,7 @@
 ```ts
 interface L2FirstUsableRequest {
   target_url: string
-  goal_kind: "read" | "write" | "download"
+  goal_kind: "read" | "write"
   goal_hint?: string
   allowed_actions: Array<"navigate" | "locate" | "click" | "type" | "extract" | "wait_settled">
 }
@@ -13,9 +13,8 @@ interface L2FirstUsableRequest {
 
 约束：
 
-- `goal_kind` 必须与 Phase 2 共享能力面保持一致：`read` / `write` / `download`。
+- 当前 FR 的请求面只冻结 `read` / `write`；`download` 仍保留在上游共享模型中，但不属于本 FR 的可请求能力。
 - 本 FR 中的最小基础交互统一归入 `write`，但不等于恢复高风险 live 写路径或账号敏感提交。
-- `download` 在当前 FR 中允许保持模型预留，但不得从对象边界中缺位。
 
 ## 2. `l2_first_usable_result`
 
@@ -43,7 +42,7 @@ type L2FirstUsableResult =
       candidate_shell_seed: {
         ability_id: string
         display_name: string
-        ability_kind: "read" | "write" | "download"
+        ability_kind: "read" | "write"
         entrypoint: string
         platform_scope: {
           platform_family: string
@@ -78,5 +77,6 @@ type L2FirstUsableResult =
 - `candidate_shell_seed.platform_scope.platform_family` 必须使用稳定、归一化的平台键；L2 未知网站默认应落在 `generic_web`，不得把新的一等平台永久冻结进 `other`。
 - `success=true` 时，`result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed` 必须同时存在。
 - `success=false` 时，`failure_class` 必须存在，且不得返回 `candidate_shell_seed`；其余字段允许按失败停点最小化返回。
+- 当前 FR 只允许把 `read` / `write` 首次成功路径交给 `FR-0017`；`download` 如需进入 L2 first-usable，必须在独立 FR 中先冻结其最小执行语义与结果形态。
 - `first_usable_trace` 与 `interaction_trace` 的正式类型都是结构化步骤对象数组，不允许在 contract / data-model 间一处写成对象、一处退回 `string[]`。
 - `failure_class` 只表达最小失败大类，不替代低层错误码或诊断全文。

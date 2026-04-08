@@ -59,7 +59,23 @@
 - `profile_ref` 是 replay 绑定的正式作用域；当 `replay_source=last_success_input` 时，必须只在同一 `ability_ref + profile_ref` 下解析最近成功输入。
 - 当 `replay_source=explicit_input_snapshot` 时，`replay_input_ref` 必须存在，且只能指向已保存的显式输入快照。
 
-## 3. 与既有对象的关系
+## 3. `replay_input_snapshot_ref`
+
+核心字段：
+
+- `snapshot_ref`
+- `ability_ref`
+- `profile_ref`
+- `source_run_id`
+- `captured_at`
+
+说明：
+
+- `replay_input_ref` 与 `last_success_input_ref` 的正式 truth source 都是该输入快照引用对象。
+- 输入快照引用对象的 ownership 属于 FR-0018 replay 层，而不是 FR-0006 runtime-store。
+- `snapshot_ref` 只能在同一 `ability_ref + profile_ref` 范围内被 replay 解析。
+
+## 4. 与既有对象的关系
 
 - 与 `FR-0017`：
   - `ability_ref` 必须引用已存在的候选能力描述

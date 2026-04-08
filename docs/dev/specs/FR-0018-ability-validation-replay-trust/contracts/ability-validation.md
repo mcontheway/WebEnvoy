@@ -32,7 +32,19 @@ type AbilityReplayRequest =
     }
 ```
 
-## 3. `ability_health_view`
+## 3. `replay_input_snapshot_ref`
+
+```ts
+interface ReplayInputSnapshotRef {
+  snapshot_ref: string
+  ability_ref: string
+  profile_ref: string
+  source_run_id: string
+  captured_at: string
+}
+```
+
+## 4. `ability_health_view`
 
 ```ts
 interface LatestValidationByMode {
@@ -67,9 +79,11 @@ interface AbilityHealthView {
 - `failure_class` 只表达用户可读的大类，不替代低层错误码。
 - `validation_mode=replay_validation && input_source=explicit_input_snapshot` 时，`replay_input_ref` 必须存在；`input_source=last_success_input` 时不得伪造显式 snapshot 引用。
 - `replay_source=explicit_input_snapshot` 时，`ability_replay_request.replay_input_ref` 必须存在；`replay_source=last_success_input` 时不得伪造显式 snapshot 引用。
+- `replay_input_ref` 只能引用既有的 `ReplayInputSnapshotRef.snapshot_ref`；该对象的 ownership 属于 FR-0018 replay 层，而不是 FR-0006 runtime-store。
 - `profile_ref` 是 `ability_health_view` 的正式隔离维度；不同 profile 不得共享同一条聚合健康视图。
 - `ability_replay_request.profile_ref` 必须与目标 `ability_health_view.profile_ref` 一致；不得在 replay 时跨 profile 读取 `last_success_input`。
 - `last_success_input` 的正式 truth source 是同一 `ability_ref + profile_ref` 视图内的 `ability_health_view.last_success_input_ref`；该值为空时，请求不得被视为可执行 replay。
+- `ability_health_view.last_success_input_ref` 如存在，也必须指向同一 `ability_ref + profile_ref` 视图内的 `ReplayInputSnapshotRef.snapshot_ref`。
 - `run_id` 是最近一次验证成立的最小硬证据锚点，不建立第二套运行真相源。
 - `artifact_refs` 只作为补充的 run-scoped evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它当作 latest 记录成立的前置条件。
 - 在同一 `ability_ref + profile_ref` 视图内，`latest_validations` 中每个 `validation_mode` 最多只能出现一条 latest 记录。

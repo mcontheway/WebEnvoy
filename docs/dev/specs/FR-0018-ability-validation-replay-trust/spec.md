@@ -77,6 +77,15 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - replay 必须显式落在目标 `profile_ref` 上，不得跨 profile 复用 `last_success_input`
   - 当 `replay_source=explicit_input_snapshot` 时，请求必须显式给出 `replay_input_ref`
   - `replay_source=last_success_input` 时，正式 truth source 是同一 `ability_ref + profile_ref` 视图内的 `last_success_input_ref`
+- 必须冻结 `replay_input_ref` 背后的最小输入快照引用对象，至少包含：
+  - `snapshot_ref`
+  - `ability_ref`
+  - `profile_ref`
+  - `source_run_id`
+  - `captured_at`
+- 必须明确：
+  - `replay_input_ref` 只能引用已存在的输入快照引用对象
+  - `last_success_input_ref` 与 `replay_input_ref` 都必须指向同一套输入快照引用对象，而不是带外临时值
 
 ### 4. 最小可信判断对象
 
@@ -132,6 +141,7 @@ Phase 2 的目标不是“把一次成功路径存下来就结束”，而是让
   - 结果对象可以引用运行证据，但不重建第二套运行真相源
   - 若缺少 `validated_at` 或 `run_id`，不得声称“最近一次验证已成立”
   - `last_success_input_ref` 是 `replay_source=last_success_input` 的正式 truth source；它只能由同一 `ability_ref + profile_ref` 下最近一次成功验证/重放刷新
+  - `replay_input_ref` 只能解析到同一 `ability_ref + profile_ref` 下的输入快照引用对象；引用不存在、owner 不符或 profile 不符时，请求必须视为无效
   - `failure_class` 在 mode `result_state=broken` 场景必须存在；在 mode `result_state=verified` 场景必须为空；在 mode `result_state=stale` 场景可选但需与状态解释一致
   - `artifact_refs` 只作为 run-scoped 补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 latest 记录成立的强制前置
   - `baseline_descriptor` 必须至少冻结 `entrypoint`、`input_contract_ref`、`output_contract_ref`、`error_contract_ref`、`profile_ref`；任一字段与当前 descriptor/view 基线不一致时，该条 latest 结果必须失效为 `stale`
@@ -201,11 +211,12 @@ And 不会因为来源是 L2 而拆出第二套健康状态模型
 1. 验证结果缺少 `validated_at` 或 `run_id`：不得宣称“最近一次验证已成立”。
 2. 同一个 `ability_ref` 在不同 `profile_ref` 下共用一条健康视图：视为跨 profile 污染。
 3. `replay_source=last_success_input` 时缺少 `last_success_input_ref` 真相源：不得视为可执行 replay。
-4. `stale` 判定未检查 7 天 freshness window，或未对比 `baseline_descriptor`：视为健康状态计算未冻结。
-5. 失败大类被写成低层错误码镜像：视为边界漂移。
-6. 把 `verified` 误当成“可交付/可分享”：视为越界到 Phase 3/5。
-7. 重放对象携带自动修复、自动调参与重新学习语义：视为超出本 FR 范围。
-8. 能力尚未进入 `FR-0017` 的候选能力描述，却直接进入验证链路：视为流程违规。
+4. `replay_input_ref` 无法解析到正式输入快照引用对象：不得视为可执行 replay。
+5. `stale` 判定未检查 7 天 freshness window，或未对比 `baseline_descriptor`：视为健康状态计算未冻结。
+6. 失败大类被写成低层错误码镜像：视为边界漂移。
+7. 把 `verified` 误当成“可交付/可分享”：视为越界到 Phase 3/5。
+8. 重放对象携带自动修复、自动调参与重新学习语义：视为超出本 FR 范围。
+9. 能力尚未进入 `FR-0017` 的候选能力描述，却直接进入验证链路：视为流程违规。
 
 ## 验收标准
 
