@@ -26,6 +26,18 @@
 - `action`
 - `target_ref`
 - `settled`
+- `interaction_semantics`
+
+可选字段：
+
+- `click_kind`
+
+补充约束：
+
+- `interaction_semantics` 是正式机器字段，只允许 `neutral`、`reveal_only_click`、`state_changing_write`。
+- `interaction_semantics=reveal_only_click` 只允许与 `action=click` 一起出现，且当前正式 `click_kind` 只允许 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate`。
+- `interaction_semantics=state_changing_write` 只允许出现在 `goal_kind=write` 的交互路径中。
+- `click_kind` 只允许在 `interaction_semantics=reveal_only_click` 时出现；其他交互不得伪造该字段。
 
 ## 3. `candidate_shell_seed`
 
@@ -73,7 +85,26 @@
 - `write_safety_boundary` 只在 `goal_kind=write` 时出现，`goal_kind=read` 不得伪造。
 - 命中 `blocked_control_kinds` 的未知站点控件不得被纳入 L2 first-usable 成功路径；实现层必须返回失败或 fallback，而不是继续推进不可逆动作。
 
-## 5. `interaction_safety_class`
+## 5. `write_gate_audit_refs`
+
+用途：
+
+- 在未知站点 `goal_kind=write` 时，把审批与审计链路以机器可读引用留在通用 L2 写入门禁上，避免写路径脱离正式 gate/audit 体系
+
+最小字段：
+
+- `decision_id`
+- `approval_record_ref`
+- `audit_record_ref`
+
+补充约束：
+
+- `write_gate_audit_refs` 只在 `goal_kind=write` 时出现，`goal_kind=read` 不得伪造。
+- 三个字段的正式语义必须分别对齐 `FR-0010.gate_outcome.decision_id`、`FR-0010.approval_record.approval_id`、`FR-0010.audit_record.event_id`。
+- 三个字段必须回链到同一次 `gate_decision=allowed` 的放行结论；任一引用缺失、失配或不能回链到同一决策时，不得进入 L2 first-usable 成功路径。
+- `write_gate_audit_refs` 只承担门禁追溯与审计回链，不替代 `write_safety_boundary` 对未知站点控件边界的限制。
+
+## 6. `interaction_safety_class`
 
 用途：
 
@@ -94,10 +125,10 @@
 - `interaction_safety_class=pure_read` 的允许动作集合只允许 `navigate`、`locate`、`click`、`extract`、`wait_settled`；其中 `click` 的正式语义必须收敛为 `reveal_only_click`。
 - `reveal_only_click` 只允许 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate` 四类揭示型点击。
 - `interaction_safety_class=pure_read` 明确禁止 `type`、submit、confirm、publish、purchase、dispatch、bind，以及任何会持久改变账号、内容或表单状态的点击。
-- `interaction_safety_class=state_changing_write` 时，允许动作集合可以包含 `navigate`、`locate`、`click`、`type`、`extract`、`wait_settled`，但仍必须受 `risk_state=allowed` 与 `write_safety_boundary` 约束。
+- `interaction_safety_class=state_changing_write` 时，允许动作集合可以包含 `navigate`、`locate`、`click`、`type`、`extract`、`wait_settled`，但仍必须受 `risk_state=allowed`、`write_gate_audit_refs` 与 `write_safety_boundary` 约束。
 - `interaction_safety_class` 只描述动作纯度，不改变 `candidate_shell_seed.ability_kind`；后者必须继续直接等于 `goal_kind`，并自然回落到 `FR-0017.ability_kind=read|write`。
 
-## 6. `risk_gate_context`
+## 7. `risk_gate_context`
 
 用途：
 
@@ -126,7 +157,7 @@
 - 若上游门禁仍持有 `irreversible_write`、平台专用 live lane 或其他站点专用 gate 语义，必须在进入本 FR 请求面前完成阻断或归一化。
 - `goal_kind=write` 且 `risk_gate_context.risk_state` 不是 `allowed` 时，不得进入成功路径；实现层必须返回 `risk_gate_blocked` 或更早阻断。
 
-## 7. `failure_result`
+## 8. `failure_result`
 
 用途：
 
@@ -143,7 +174,7 @@
 - 失败结果不得包含 `candidate_shell_seed`；只有首次成功路径才能向 `FR-0017` 交付 handoff 输入。
 - `failure_class` 只允许 `insufficient_semantic_structure`、`target_not_located`、`state_not_settled`、`risk_gate_blocked`、`requires_l1_fallback`。
 
-## 8. `l1_fallback_payload`
+## 9. `l1_fallback_payload`
 
 用途：
 
@@ -162,7 +193,7 @@
 - `fallback_reason` 只允许 `insufficient_semantic_structure`、`target_not_located`、`state_not_settled`，用于说明触发 L2 停止的最小原因。
 - `recommended_strategy` 只允许 `visual_reacquire`、`visual_state_check`、`visual_then_physical_act`，用于冻结 L1 的最小方向，而不是完整 L1 工作流。
 
-## 9. 与既有对象的关系
+## 10. 与既有对象的关系
 
 - 与 `FR-0017`：
   - `candidate_shell_seed` 必须已经包含可直接物化 `candidate_ability_descriptor` 必填字段的结构化值
@@ -171,4 +202,5 @@
   - 失败大类可以引用最小诊断，但不扩展诊断 schema
 - 与 `FR-0010/0011`：
   - `risk_gate_context` 只继承站点无关的风险门禁原则与最小坐标，不直接复用 `FR-0010.gate_input`
+  - `write_gate_audit_refs` 继续沿用 `FR-0010` 的 `decision_id` / `approval_record_ref` / `audit_record_ref` 语义，不得派生第二套私有审批或审计字段
   - 平台专用 gate 请求对象如需进入本 FR，必须先映射为站点无关的最小门禁上下文

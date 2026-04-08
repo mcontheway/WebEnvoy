@@ -129,6 +129,7 @@
 - `capture_profile` 必须是形成该候选能力时实际使用的 profile 引用，不允许缺失。
 - `seed_replay_input_ref` 如存在，必须是首个 replay 输入快照的正式引用字段，稳定指向 `FR-0018.ReplayInputSnapshotRef.snapshot_ref`；后续验证/重放不得再依赖从 `capture_run_id` 或 artifact 引用中临时反推初始输入。
 - `seed_replay_input_ref` 如存在，必须与 `capture_run_id + capture_profile` 对应的成功捕获输入同源；但它不是 `draft_candidate` 的强制前置。
+- `ability_kind=write` 时，`seed_replay_input_ref` 只允许作为 capture evidence 引用保留；在后续 FR 没有正式冻结 write replay 的 gate 元数据或 dry-run 语义前，不得把它解释成可执行 replay seed。
 - `capture_artifact_refs` 如存在，其正式 truth source 必须与 `capture_run_id` 同属一次运行的补充 evidence refs；FR-0017 只保存引用，不定义新的 artifact 存储或跨 run 聚合规则。
 
 ### 7. 诊断与实现边界

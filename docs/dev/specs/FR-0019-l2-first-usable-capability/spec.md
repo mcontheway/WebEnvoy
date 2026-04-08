@@ -73,7 +73,10 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
   - `goal_kind=read` 时允许放行 `navigate`、`locate`、`click`、`extract`、`wait_settled`，但其中 `click` 的正式语义必须收敛为 `reveal_only_click`
   - `reveal_only_click` 只允许承接 `expand_or_collapse`、`switch_content_tab`、`open_detail_view`、`load_more_or_paginate`
   - `interaction_safety_class=pure_read` 时，必须显式禁止 `type`、submit、confirm、publish、purchase、dispatch、bind，以及任何会持久改变账号、内容或表单状态的点击
-  - 当 `goal_kind=write` 时，必须带有机器可读的 `write_safety_boundary`，并明确屏蔽 submit、publish、purchase、final confirm，以及更泛化的 destructive action、financial commitment、external dispatch、account binding 一类不可逆控件
+  - 当 `goal_kind=write` 时，必须同时带有机器可读的 `write_gate_audit_refs` 与 `write_safety_boundary`
+  - `write_gate_audit_refs` 必须保留对同一次放行门禁结论的 `decision_id`、`approval_record_ref`、`audit_record_ref` 三条回链，正式语义分别对齐 `FR-0010.gate_outcome.decision_id`、`FR-0010.approval_record.approval_id`、`FR-0010.audit_record.event_id`
+  - `goal_kind=write` 的成功路径不得绕开审批与审计链路；缺少上述回链，或三者不能回到同一次 `gate_decision=allowed` 时，不得宣称首次可用成立
+  - `write_safety_boundary` 必须明确屏蔽 submit、publish、purchase、final confirm，以及更泛化的 destructive action、financial commitment、external dispatch、account binding 一类不可逆控件
 
 ### 3. 首次成功路径的结构化输出
 
@@ -85,6 +88,7 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
 - 必须明确：
   - 成功态必须同时返回 `result_summary`、`first_usable_trace`、`interaction_trace`、`capture_hints`、`candidate_shell_seed`
   - `first_usable_trace` 与 `interaction_trace` 必须都是结构化步骤对象数组，而不是自由文本列表
+  - `interaction_trace` 必须显式编码 `interaction_semantics`；当路径使用揭示型点击时，还必须显式编码 `click_kind`
   - `candidate_shell_seed` 是面向 `FR-0017` 的 handoff 输入
   - 它不等于候选能力描述本身
   - 但它必须已经提供足以直接物化 `FR-0017.candidate_ability_descriptor` 必填字段的结构化值，而不是仅提供临时 hint
@@ -157,16 +161,25 @@ When 请求进入 L2 首次可用
 Then 正式动作纯度必须是 `interaction_safety_class=state_changing_write`
 And `click` 与 `type` 可以被纳入成功路径
 And `risk_gate_context.risk_state` 必须是 `allowed`
+And `write_gate_audit_refs` 必须能回链到同一次 `gate_decision=allowed` 的审批与审计记录
 And `write_safety_boundary` 必须继续约束不可逆控件
 
-### 场景 5：首次成功路径可以进入候选能力链路
+### 场景 5：read 中的揭示型点击必须能被机器识别
+
+Given 某个读取路径使用了 `open_detail_view` 或 `load_more_or_paginate`
+When 系统输出 `interaction_trace`
+Then 相应交互必须显式标记 `interaction_semantics=reveal_only_click`
+And 必须显式给出对应的 `click_kind`
+And 不得把这类点击退回为无法区分语义的泛化 `click`
+
+### 场景 6：首次成功路径可以进入候选能力链路
 
 Given 某次 L2 首次可用执行成功
 When reviewer 检查本 FR 的输出对象
 Then 能看到 `candidate_shell_seed`
 And 该输出能作为 `FR-0017` 的 handoff 输入
 
-### 场景 6：L2 失败时不会伪装为成功
+### 场景 7：L2 失败时不会伪装为成功
 
 Given 页面缺少足够语义结构或连续无法定位目标
 When L2 无法稳定完成首次成功路径
@@ -175,7 +188,7 @@ And `success=false` 的结果对象中必须包含 `failure_class`
 And 当 `failure_class=requires_l1_fallback` 时必须同时包含结构化 `l1_fallback_payload`
 And 不会返回 `candidate_shell_seed` 冒充候选能力输入
 
-### 场景 7：L2 首次可用不等于正式复用
+### 场景 8：L2 首次可用不等于正式复用
 
 Given 某次 L2 路径已经成功一次
 When reviewer 检查本 FR 的边界
@@ -195,6 +208,8 @@ And 不会把它直接描述成正式可复用能力
 9. 把 `FR-0010.gate_input`、`requested_execution_mode` 或其他平台专用 gate 请求对象直接当成通用未知网站 L2 输入：视为共享请求边界漂移。
 10. `goal_kind=read` 未引入独立的 `interaction_safety_class`，或把 `type`、submit、confirm 等状态改变动作混入 `pure_read`：视为目标类型与动作纯度仍然混轴。
 11. `goal_kind=read` 中允许的 `click` 没有被正式收敛为 `reveal_only_click`，或放行了会持久改变账号、内容或表单状态的点击：视为读取边界未冻结。
+12. `goal_kind=write` 缺少 `write_gate_audit_refs`，或这些引用不能回链到同一次 `gate_decision=allowed` 的审批/审计记录：视为通用 L2 写入门禁脱离正式审计链路。
+13. `interaction_trace` 没有把揭示型点击编码为 `interaction_semantics=reveal_only_click + click_kind`：视为读写边界仍停留在文字约束，未冻结成机器字段。
 
 ## 验收标准
 

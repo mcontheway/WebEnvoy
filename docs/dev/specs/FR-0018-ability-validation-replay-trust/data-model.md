@@ -22,6 +22,7 @@
 - 存储 / 查询边界：实现层必须为每个 `ability_ref + profile_ref` 维护单条聚合视图，并在该视图下维护按 mode 的 latest 结果；查询最新健康状态时只能读取该视图，不得直接扫描 runtime-store 原始运行记录充当 truth source。
 - `ability_ref` 在本模型中必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`；FR-0018 不定义独立 ability ref 命名空间。
 - `last_success_input_ref` 是 `replay_source=last_success_input` 的正式 truth source；它只能由同一 `ability_ref + profile_ref` 下最近一次成功验证/重放刷新。
+- 当 `FR-0017.candidate_ability_descriptor.ability_kind=write` 时，`last_success_input_ref` 不得被冻结为可执行 replay truth source；写能力的输入快照只能作为 capture evidence 保留，不能自动升级为无门禁 replay 种子。
 - `divergence_reason` 只允许 `smoke_replay_mismatch`，且只能用于表达 smoke/replay current latest 的真实冲突。
 - 顶层 `health_state` 必须按固定顺序计算：`unknown -> stale -> healthy -> degraded -> broken`；一旦命中前序状态，后续状态不得再覆盖。
 - `health_state=stale` 只允许在全部现存 latest 都为 `stale` 时出现；`health_state=healthy` 只允许在至少存在一条 current `verified` latest 且不存在任何 current `broken` latest 时出现；`health_state=degraded` 只允许在 current `verified` 与 current `broken` latest 并存时出现；`health_state=broken` 只允许在不存在任何 current `verified` latest 且至少存在一条 current `broken` latest 时出现。
@@ -86,7 +87,8 @@
 - `snapshot_ref` 只能在同一 `ability_ref + profile_ref` 范围内被 replay 解析。
 - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须直接指向首个输入快照引用对象；该 ref 必须与 `capture_run_id + capture_profile` 对应的成功捕获输入同源。
 - 生成后的首个 `snapshot_ref` 必须立即回写为同一 `ability_ref + capture_profile` 视图的初始 `last_success_input_ref`；其他 profile 视图不得复用该 seed。
-- 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation.smoke_input` 或成功 replay 输入必须物化为首个输入快照引用对象；在此之前不得把 `replay_source=last_success_input` 视为已具备可执行输入来源。
+- 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation.smoke_input` 或成功 replay 输入必须物化为首个输入快照引用对象；仅当 `candidate_ability_descriptor.ability_kind` 属于非状态变更能力时，才允许继续把它回写为 `last_success_input_ref`。在此之前不得把 `replay_source=last_success_input` 视为已具备可执行输入来源。
+- 当 `FR-0017.candidate_ability_descriptor.ability_kind=write` 时，上述输入快照引用对象只能作为 capture evidence 保留；当前 formal baseline 下不得把它解析为可执行 replay 输入来源，也不得自动回写 `last_success_input_ref`。
 
 ## 4. 与既有对象的关系
 

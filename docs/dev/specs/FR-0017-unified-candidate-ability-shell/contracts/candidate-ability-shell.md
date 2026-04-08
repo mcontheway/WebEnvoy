@@ -39,6 +39,7 @@ interface CandidateAbilityDescriptor {
 - `capture_run_id` 是候选能力来源证据的最小硬锚点。
 - `seed_replay_input_ref` 如存在，必须指向首个 `FR-0018.ReplayInputSnapshotRef.snapshot_ref`；它是可选的上游 replay seed，而不是 `draft_candidate` 的强制前置。
 - `seed_replay_input_ref` 如存在，必须与 `capture_run_id + capture_profile` 对应的成功捕获输入同源；`capture_artifact_refs` 不能充当该字段的替代值。
+- `ability_kind=write` 时，`seed_replay_input_ref` 只允许作为 capture evidence 引用保留；在后续 FR 没有正式冻结 write replay 的 gate 元数据或 dry-run 语义前，不得把它解释成可执行 replay seed。
 - `capture_artifact_refs` 如存在，必须是与 `capture_run_id` 同属一次运行的补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 candidate 成立的强制前置。
 
 ## 2. `candidate_ability_contract_registry`

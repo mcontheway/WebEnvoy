@@ -40,6 +40,7 @@
 - `candidate_ability_contract_registry` 是该 `ability_id` 下 `*_contract_ref` 的唯一正式解引用模型；它必须与 descriptor 同 owner 落库或原子发布。
 - `*_contract_ref` 的 authoritative resolver 是该 `ability_id` 对应的 descriptor-owned `candidate_ability_contract_registry`；实现层只能按完整 ref 精确 lookup `entries[*].contract_ref`，并校验 `contract_kind`，不得把 ref 退化为路径推断、runtime-store 主键或私有缓存键。
 - `seed_replay_input_ref` 如存在，是首个 replay 输入快照的正式引用字段；它必须稳定指向 `FR-0018.ReplayInputSnapshotRef.snapshot_ref`，但缺失时不得阻塞 `draft_candidate` 落库。
+- `ability_kind=write` 时，`seed_replay_input_ref` 只允许作为 capture evidence 引用保留；在后续 FR 没有正式冻结 write replay 的 gate 元数据或 dry-run 语义前，不得把它解释为可执行 replay seed。
 - `capture_artifact_refs` 如存在，只能作为 `capture_run_id` 下的补充 evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 descriptor 成立的强制前置。
 
 ## 2. 与既有对象的关系

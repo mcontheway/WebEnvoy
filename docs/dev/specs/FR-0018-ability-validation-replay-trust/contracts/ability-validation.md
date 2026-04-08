@@ -85,12 +85,14 @@ interface AbilityHealthView {
 - 对新进入 `FR-0018` 的能力，若 `FR-0017.candidate_ability_descriptor.seed_replay_input_ref` 已存在，则它必须作为首个 `ReplayInputSnapshotRef` 的正式上游 seed，且只允许落在 `capture_profile` 对应的健康视图内。
 - `ability_validation_request` 是唯一的 smoke 请求契约；所有 replay 执行必须只通过 `ability_replay_request` 发起，`latest_validations.validation_mode=replay_validation` 也只能由 replay 请求结果写入。
 - 任何 replay 持久化 / 投影对象都只能表达 `ability_replay_request` 的存储投影，不得再冻结第二套 replay 请求契约或 `ready` 一类独立状态位。
-- 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation.smoke_input` 或成功 replay 的已解析输入必须物化为首个 `ReplayInputSnapshotRef`，并回写为 `ability_health_view.last_success_input_ref`。
+- 若上游未提供 `seed_replay_input_ref`，则同一 `ability_ref + profile_ref` 下首次成功的 `smoke_validation.smoke_input` 或成功 replay 的已解析输入必须物化为首个 `ReplayInputSnapshotRef`；仅当 `candidate_ability_descriptor.ability_kind` 属于非状态变更能力时，才允许继续回写为 `ability_health_view.last_success_input_ref`。
 - 非 `capture_profile` 的其他 profile 视图不得继承这条初始 seed；它们只能在各自 profile 下首次成功验证/重放后刷新自己的 `last_success_input_ref`。
+- `candidate_ability_descriptor.ability_kind=write` 时，当前 formal baseline 不允许把 `seed_replay_input_ref`、`last_success_input_ref` 或 `replay_source=last_success_input` 解释为可执行 replay 入口；状态变更能力若要进入 replay，必须通过后续独立 FR 先冻结专门 gate 元数据或 dry-run 语义。
 - `profile_ref` 是 `ability_health_view` 的正式隔离维度；不同 profile 不得共享同一条聚合健康视图。
 - `ability_replay_request.profile_ref` 必须与目标 `ability_health_view.profile_ref` 一致；不得在 replay 时跨 profile 读取 `last_success_input`。
 - `last_success_input` 的正式 truth source 是同一 `ability_ref + profile_ref` 视图内的 `ability_health_view.last_success_input_ref`；该值为空时，请求不得被视为可执行 replay。
 - `ability_health_view.last_success_input_ref` 如存在，也必须指向同一 `ability_ref + profile_ref` 视图内的 `ReplayInputSnapshotRef.snapshot_ref`。
+- `candidate_ability_descriptor.ability_kind=write` 时，`ability_health_view.last_success_input_ref` 必须保持为空；写能力的输入快照可以作为 capture evidence 保存，但不得被冻结成无门禁 replay truth source。
 - `run_id` 是最近一次验证成立的最小硬证据锚点，不建立第二套运行真相源。
 - `artifact_refs` 只作为补充的 run-scoped evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它当作 latest 记录成立的前置条件。
 - 在同一 `ability_ref + profile_ref` 视图内，`latest_validations` 中每个 `validation_mode` 最多只能出现一条 latest 记录。
@@ -112,5 +114,5 @@ interface AbilityHealthView {
   3. `replay_only`：只有 `replay_validation` 的 current latest 为 `verified`
   4. `smoke_plus_replay`：`smoke_validation` 与 `replay_validation` 的 current latest 都存在，且都为 `verified`
   5. `divergent`：除以上情况外的其余所有 current latest 组合，包括任一 current latest 为 `broken`，或 smoke/replay current latest 结果不一致
-- `smoke_validation` 成功可以作为“能力仍可用”的最小证据，也可以建立首个 `last_success_input_ref`；当只有 smoke current latest 为 `verified` 时，顶层必须呈现 `health_state=healthy`，同时把 `validation_coverage_state` 标为 `smoke_only`。
+- `smoke_validation` 成功可以作为“能力仍可用”的最小证据；仅当 `candidate_ability_descriptor.ability_kind` 属于非状态变更能力时，才允许建立首个 `last_success_input_ref`。当只有 smoke current latest 为 `verified` 时，顶层必须呈现 `health_state=healthy`，同时把 `validation_coverage_state` 标为 `smoke_only`。
 - `divergence_reason` 只允许在 `validation_coverage_state=divergent` 的真实冲突场景出现；当前正式枚举只允许 `smoke_replay_mismatch`。
