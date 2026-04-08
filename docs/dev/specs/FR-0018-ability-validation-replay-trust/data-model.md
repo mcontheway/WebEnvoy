@@ -8,6 +8,7 @@
 - `profile_ref`
 - `health_state`
 - `latest_validations`
+- `last_success_input_ref`
 - `divergence_reason`
 
 说明：
@@ -18,6 +19,7 @@
 - 在同一 `ability_ref + profile_ref` 视图内，`latest_validations` 中每个 `validation_mode` 最多只能保留一条 latest 记录；它们共同构成当前能力的正式 latest-validation truth source。
 - `ability_validation_record` 是每个 `ability_ref + profile_ref` 的唯一聚合健康视图；其 ownership 属于 FR-0018 验证层，而不是 FR-0006 runtime-store。
 - 存储 / 查询边界：实现层必须为每个 `ability_ref + profile_ref` 维护单条聚合视图，并在该视图下维护按 mode 的 latest 结果；查询最新健康状态时只能读取该视图，不得直接扫描 runtime-store 原始运行记录充当 truth source。
+- `last_success_input_ref` 是 `replay_source=last_success_input` 的正式 truth source；它只能由同一 `ability_ref + profile_ref` 下最近一次成功验证/重放刷新。
 
 ### `latest_validations[*]`
 
@@ -28,6 +30,7 @@
 - `failure_class`
 - `validated_at`
 - `run_id`
+- `baseline_descriptor`
 - `artifact_refs`
 
 说明：
@@ -35,8 +38,10 @@
 - `validation_mode` 只允许 `smoke_validation` 或 `replay_validation`。
 - `result_state` 只允许 `verified`、`broken`、`stale`；顶层 `degraded` 只在聚合视图中表达，不作为 mode latest 的原子状态。
 - `validated_at` 与 `run_id` 是 latest 记录成立的必填证据字段；缺少任一字段时不得落成 `latest_validations[*]`。
+- `baseline_descriptor` 必须冻结该条 latest 结果生成时的 descriptor/profile 基线，至少包含 `entrypoint`、`input_contract_ref`、`output_contract_ref`、`error_contract_ref`、`profile_ref`。
 - `artifact_refs` 只作为补充的 run-scoped evidence refs；在上游等价 evidence carrier 正式冻结前，不得把它设为 latest 记录成立的强制前置。
 - `failure_class` 在 `result_state=broken` 时必填，在 `result_state=verified` 时必须为空；`stale` 只允许在解释过期原因时保留兼容的大类信息。
+- `stale` 计算规则冻结为：`validated_at` 超过 7 天 freshness window，或当前 descriptor/view 基线与 `baseline_descriptor` 任一字段不一致。
 
 ## 2. `ability_replay_binding`
 
