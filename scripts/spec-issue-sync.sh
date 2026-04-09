@@ -142,6 +142,7 @@ strip_legacy_generated_header() {
   perl -0pe '
     s/^此 Issue 由 CI 自动同步维护。\n\n(?:## 类型定位\n(?:- .*\n)+\n)?(?:- 规范路径：`[^`]+`\n)?(?:- 对应正式规约：`[^`]+`\n)?(?:- 目录标识：`[^`]+`\n)?\n?(?:如需修订正式契约，请修改对应 `spec\.md` 并通过独立 PR 合入。\n?)?//s;
     s/<\!-- webenvoy-spec-meta:start -->\n.*?\n<\!-- webenvoy-spec-meta:end -->\n?//s;
+    s/^\n*(?:此 Issue 为 canonical FR 容器；正式契约由 `spec\.md` 合入主干后受控同步。\n\n)+//s;
   ' "${input_file}"
 }
 

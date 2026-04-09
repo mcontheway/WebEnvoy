@@ -19,6 +19,7 @@ warn() {
 }
 
 SPEC_SUITE_FILE_REGEX='^docs/dev/specs/FR-[0-9][0-9][0-9][0-9]-[^/]+/'
+SPEC_SUPPORT_FILE_REGEX='^\.github/spec-issue-sync-map\.yml$'
 GOVERNANCE_FILE_REGEX='^(docs/dev/roadmap\.md|docs/dev/architecture/|docs/dev/templates/|docs/dev/AGENTS\.md|docs/dev/review/guardian-review-addendum\.md|docs/AGENTS\.md|docs/research/ref/AGENTS\.md|AGENTS\.md|vision\.md|code_review\.md|spec_review\.md|scripts/spec-guard\.sh|scripts/spec-issue-sync-map\.sh|scripts/spec-issue-sync\.sh|\.github/workflows/spec-guard\.yml|\.github/workflows/spec-issue-sync\.yml|\.github/spec-issue-sync-map\.yml|\.github/PULL_REQUEST_TEMPLATE\.md|\.githooks/)'
 
 resolve_base_ref() {
@@ -208,7 +209,7 @@ main() {
   spec_files="$(grep -E "${SPEC_SUITE_FILE_REGEX}" <<< "${changed}" || true)"
   governance_files="$(grep -E "${GOVERNANCE_FILE_REGEX}" <<< "${changed}" || true)"
 
-  if [[ -n "${spec_files}" ]] && [[ -n "${governance_files}" ]]; then
+  if [[ -n "${spec_files}" ]] && [[ -n "$(grep -Ev "${SPEC_SUPPORT_FILE_REGEX}" <<< "${governance_files}" || true)" ]]; then
     die "正式 FR 套件与治理/架构规则文件不得混在同一 PR 中。"
   fi
 
@@ -231,7 +232,7 @@ main() {
       bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" assert-mapped "${spec_file}"
     done < <(grep -E '^docs/dev/specs/FR-[^/]+/spec\.md$' <<< "${spec_files}" | sort -u)
 
-    disallowed="$(grep -Ev "${SPEC_SUITE_FILE_REGEX}" <<< "${changed}" || true)"
+    disallowed="$(grep -Ev "${SPEC_SUITE_FILE_REGEX}|${SPEC_SUPPORT_FILE_REGEX}" <<< "${changed}" || true)"
     if [[ -n "${disallowed}" ]]; then
       echo "[spec-guard] 以下变更将正式 spec 与实现/非规约文件混在同一 PR 中：" >&2
       echo "${disallowed}" >&2
