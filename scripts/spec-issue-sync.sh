@@ -268,9 +268,10 @@ can_sync_map_remap() {
     printf 'Issue #%s 已带 FR 锚定，但 formal suite 仍未显式引用 #%s；跳过 map-only remap sync 到 %s\n' \
       "${issue_number}" "${issue_number}" "${spec_path}" >&2
     return "${SAFE_REMAP_REQUIRED_EXIT}"
+  else
+    status=$?
   fi
 
-  status=$?
   if [[ "${status}" -eq "${ANCHOR_MISSING_EXIT}" ]]; then
     return 0
   fi

@@ -197,12 +197,13 @@ validate_issue_targets() {
 
     if output="$(bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" check-anchor "${repo}" "${spec_path}" "${issue_number}" 2>&1)"; then
       continue
+    else
+      status=$?
     fi
 
-    status=$?
     if [[ "${status}" -eq "${ANCHOR_MISSING_EXIT}" ]] && spec_allows_anchor_bootstrap "${allow_bootstrap_file}" "${spec_path}"; then
       warn "跳过 ${spec_path} -> #${issue_number} 的锚点预校验；允许首次受控同步补齐 FR 锚点"
-        continue
+      continue
     fi
 
     printf '%s\n' "${output}" >&2

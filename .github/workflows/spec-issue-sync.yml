@@ -119,9 +119,10 @@ jobs:
               echo "同步 remapped ${file} -> canonical issue #${issue_number}"
               bash scripts/spec-issue-sync.sh sync-bootstrap "${{ github.repository }}" "$file" "${issue_number}"
               continue
+            else
+              status=$?
             fi
 
-            status=$?
             if [ "$status" -eq 44 ]; then
               echo "跳过 remapped ${file} -> #${issue_number}：formal suite 尚未切到 canonical anchor"
               continue
