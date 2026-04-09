@@ -69,6 +69,7 @@
 - 必须冻结 `anti_detection_baseline_snapshot`，至少包含：
   - `baseline_ref`
   - `validation_scope`
+  - `probe_bundle_ref`
   - `profile_ref`
   - `browser_channel`
   - `execution_surface`
@@ -79,6 +80,8 @@
   - `record_ref`
   - `target_fr_ref`
   - `validation_scope`
+  - `probe_bundle_ref`
+  - `sample_ref`
   - `baseline_ref`（存在可用 baseline 时必填；`drift_state=insufficient_baseline` 且当前无可用 baseline 时允许为空）
   - `result_state`
   - `drift_state`
@@ -96,6 +99,8 @@
   - `insufficient_baseline`
 - 必须明确：
   - baseline snapshot 与 validation record 是两类对象，不得混写成同一条 run 日志
+  - `sample_ref` 必须指向已持久化的结构化样本载体；`result_state=captured` 时不得只剩自由文本结论
+  - `probe_bundle_ref` 必须随 baseline snapshot 与 validation record 一起持久化，不能只停留在 request 输入侧
   - `signal_vector` 必须是结构化信号集合，不得退化为自由文本摘要
   - `failure_class` 只在 `result_state=broken` 时必填；成功态必须为空
 

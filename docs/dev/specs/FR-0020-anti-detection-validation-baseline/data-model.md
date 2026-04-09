@@ -23,6 +23,7 @@
 
 - `baseline_ref`
 - `validation_scope`
+- `probe_bundle_ref`
 - `profile_ref`
 - `browser_channel`
 - `execution_surface`
@@ -41,6 +42,8 @@
 - `record_ref`
 - `target_fr_ref`
 - `validation_scope`
+- `probe_bundle_ref`
+- `sample_ref`
 - `baseline_ref`
 - `result_state`
 - `drift_state`
@@ -50,7 +53,7 @@
 
 ### 状态语义
 
-- `result_state=captured`：已持久化样本但尚未完成有效对比，`drift_state` 必须为 `insufficient_baseline`。
+- `result_state=captured`：已通过 `sample_ref` 持久化样本但尚未完成有效对比，`drift_state` 必须为 `insufficient_baseline`。
 - `result_state=verified`：已完成对比且无偏离，`drift_state` 必须为 `no_drift`。
 - `result_state=broken`：对比失败或验证流程不可通过，`failure_class` 必填，`drift_state` 为 `drift_detected` 或 `insufficient_baseline`。
 - `result_state=stale`：记录因基线被替换、时间窗过期或关键样本缺失而失效，`drift_state` 必须为 `insufficient_baseline`。
@@ -60,6 +63,11 @@
 - 当记录引用了可用 baseline 并完成对比时，`baseline_ref` 必填且一经写入不得改写。
 - 当 `drift_state=insufficient_baseline` 且当前不存在可用 baseline 时，`baseline_ref` 允许为空。
 - 当记录因原基线已 `superseded` 而进入 `stale` 语义时，必须保留原 `baseline_ref`，不得清空。
+
+### `sample_ref` 与 `probe_bundle_ref` 规则
+
+- `sample_ref` 必须指向已持久化的结构化样本载体；`result_state=captured` 时必填。
+- `probe_bundle_ref` 必须在 baseline snapshot 与 validation record 中同时保留，以保证落库后仍可追溯探针身份。
 
 ## 4. `AntiDetectionValidationView`
 

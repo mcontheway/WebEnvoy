@@ -16,6 +16,7 @@
 
 - `baseline_ref`
 - `validation_scope`
+- `probe_bundle_ref`
 - `profile_ref`
 - `browser_channel`
 - `execution_surface`
@@ -28,6 +29,8 @@
 - `record_ref`
 - `target_fr_ref`
 - `validation_scope`
+- `probe_bundle_ref`
+- `sample_ref`
 - `baseline_ref`
 - `result_state`
 - `drift_state`
@@ -59,7 +62,7 @@
 
 ### `result_state`
 
-- `captured`：已完成采样并持久化 `signal_vector`，但尚未完成基线对比或基线不足；此时 `drift_state` 必须为 `insufficient_baseline`，`failure_class` 为空。
+- `captured`：已完成采样并持久化 `sample_ref` 指向的结构化样本，但尚未完成基线对比或基线不足；此时 `drift_state` 必须为 `insufficient_baseline`，`failure_class` 为空。
 - `verified`：基线对比已完成且在容差内；此时 `drift_state` 必须为 `no_drift`，`failure_class` 必须为空。
 - `broken`：基线对比已完成且判定失败，或验证流程确认不可通过；此时 `failure_class` 必须填写，`drift_state` 必须为 `drift_detected` 或 `insufficient_baseline`。
 - `stale`：记录因基线被替换、时间窗过期或关键样本缺失而失效；此时 `drift_state` 必须为 `insufficient_baseline`，`failure_class` 为空。
@@ -75,6 +78,12 @@
 - 在存在可用 baseline 且验证已绑定该 baseline 时必须填写。
 - 当 `drift_state=insufficient_baseline` 且当前不存在可用 baseline 时允许为空，不得伪造引用。
 - 当记录因已有 baseline 被替换而进入 `stale` 语义时，应继续保留原 `baseline_ref` 以支持 superseded 判定。
+
+### `sample_ref`
+
+- `sample_ref` 必须引用已持久化的结构化样本载体，不得退化为 issue comment、自由文本摘要或临时控制台输出。
+- 在 `result_state=captured` 时必须填写。
+- 在 `result_state=verified/broken/stale` 时允许继续保留，用于追溯本次判定所依据的样本。
 
 ### `failure_class`
 
