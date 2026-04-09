@@ -184,13 +184,8 @@ jobs:
             fi
 
             if bash scripts/spec-issue-sync.sh can-sync-map-remap "${{ github.repository }}" "$file" "${old_issue_number}" "${new_issue_number}"; then
-              if grep -Fxq "$file" "$changed_spec_file"; then
-                echo "remapped ${file} 已在 changed-suite 流程同步新 canonical issue #${new_issue_number}"
-                continue
-              fi
-
               echo "同步 remapped ${file} -> canonical issue #${new_issue_number}"
-              bash scripts/spec-issue-sync.sh sync "${{ github.repository }}" "$file" "${new_issue_number}"
+              bash scripts/spec-issue-sync.sh sync-map-remap "${{ github.repository }}" "$file" "${old_issue_number}" "${new_issue_number}"
               continue
             else
               status=$?

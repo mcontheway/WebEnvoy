@@ -7,7 +7,6 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ANCHOR_CONFLICT_EXIT=42
 ANCHOR_MISSING_EXIT=43
 SAFE_REMAP_REQUIRED_EXIT=44
-OLD_CANONICAL_STILL_ANCHORED_EXIT=45
 ANCHOR_STATUS_MESSAGE=""
 
 die() {
@@ -105,6 +104,19 @@ extract_spec_path_from_title() {
   if [[ -n "${normalized}" ]]; then
     printf '%s\n' "${normalized}"
   fi
+}
+
+demoted_issue_title() {
+  local title="$1"
+  local stripped
+
+  stripped="$(sed 's/^\[[^]]*\][[:space:]]*//' <<< "${title}")"
+  if [[ -n "${stripped}" ]]; then
+    printf '%s\n' "${stripped}"
+    return
+  fi
+
+  printf '%s\n' "${title}"
 }
 
 default_meta_value() {
@@ -264,14 +276,12 @@ can_sync_map_remap() {
   issue_title="$(gh issue view "${old_issue_number}" --repo "${repo}" --json title --jq .title)"
 
   if issue_anchor_status "${old_issue_number}" "${issue_title}" "${tmp_body}" "${spec_path}"; then
-    printf 'Issue #%s 仍锚定 %s；remap 前必须先去锚定旧 canonical issue\n' \
-      "${old_issue_number}" "${spec_path}" >&2
-    return "${OLD_CANONICAL_STILL_ANCHORED_EXIT}"
+    :
   else
     status=$?
   fi
 
-  if [[ "${status}" -ne "${ANCHOR_MISSING_EXIT}" ]] && [[ "${status}" -ne "${ANCHOR_CONFLICT_EXIT}" ]]; then
+  if [[ "${status}" -ne 0 ]] && [[ "${status}" -ne "${ANCHOR_MISSING_EXIT}" ]] && [[ "${status}" -ne "${ANCHOR_CONFLICT_EXIT}" ]]; then
     [[ -n "${ANCHOR_STATUS_MESSAGE}" ]] && printf '%s\n' "${ANCHOR_STATUS_MESSAGE}" >&2
     return "${status}"
   fi
@@ -293,6 +303,48 @@ can_sync_map_remap() {
 
   [[ -n "${ANCHOR_STATUS_MESSAGE}" ]] && printf '%s\n' "${ANCHOR_STATUS_MESSAGE}" >&2
   return "${status}"
+}
+
+sync_map_remap() {
+  local repo="$1"
+  local spec_path="$2"
+  local old_issue_number="$3"
+  local new_issue_number="$4"
+  local tmp_body cleaned_body final_body old_issue_title status=0
+
+  tmp_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-body.XXXXXX")"
+  cleaned_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-clean.XXXXXX")"
+  final_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-final.XXXXXX")"
+  trap 'rm -f "${tmp_body:-}" "${cleaned_body:-}" "${final_body:-}"' RETURN
+
+  gh issue view "${old_issue_number}" --repo "${repo}" --json body --jq .body > "${tmp_body}"
+  old_issue_title="$(gh issue view "${old_issue_number}" --repo "${repo}" --json title --jq .title)"
+
+  if issue_anchor_status "${old_issue_number}" "${old_issue_title}" "${tmp_body}" "${spec_path}"; then
+    strip_legacy_generated_header "${tmp_body}" > "${cleaned_body}"
+    {
+      printf 'canonical FR 已迁移到 #%s；此 issue 不再作为 `%s` 的 canonical anchor。\n' \
+        "${new_issue_number}" "${spec_path}"
+      if [[ -s "${cleaned_body}" ]]; then
+        printf '\n'
+        cat "${cleaned_body}"
+        printf '\n'
+      fi
+    } > "${final_body}"
+
+    gh issue edit "${old_issue_number}" \
+      --repo "${repo}" \
+      --title "$(demoted_issue_title "${old_issue_title}")" \
+      --body-file "${final_body}"
+  else
+    status=$?
+    if [[ "${status}" -ne "${ANCHOR_MISSING_EXIT}" ]] && [[ "${status}" -ne "${ANCHOR_CONFLICT_EXIT}" ]]; then
+      [[ -n "${ANCHOR_STATUS_MESSAGE}" ]] && printf '%s\n' "${ANCHOR_STATUS_MESSAGE}" >&2
+      return "${status}"
+    fi
+  fi
+
+  sync_issue "${repo}" "${spec_path}" "${new_issue_number}"
 }
 
 sync_issue() {
@@ -343,6 +395,7 @@ usage() {
   bash scripts/spec-issue-sync.sh sync-bootstrap <repo> <spec_path> <issue_number>
   bash scripts/spec-issue-sync.sh check-anchor <repo> <spec_path> <issue_number>
   bash scripts/spec-issue-sync.sh can-sync-map-remap <repo> <spec_path> <old_issue_number> <new_issue_number>
+  bash scripts/spec-issue-sync.sh sync-map-remap <repo> <spec_path> <old_issue_number> <new_issue_number>
   bash scripts/spec-issue-sync.sh suite-mentions-issue <spec_path> <issue_number>
 EOF
 }
@@ -373,6 +426,11 @@ main() {
       shift
       [[ "$#" -eq 4 ]] || die "can-sync-map-remap 需要 <repo> <spec_path> <old_issue_number> <new_issue_number>"
       can_sync_map_remap "$1" "$2" "$3" "$4"
+      ;;
+    sync-map-remap)
+      shift
+      [[ "$#" -eq 4 ]] || die "sync-map-remap 需要 <repo> <spec_path> <old_issue_number> <new_issue_number>"
+      sync_map_remap "$1" "$2" "$3" "$4"
       ;;
     suite-mentions-issue)
       shift
