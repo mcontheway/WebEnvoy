@@ -66,7 +66,12 @@ jobs:
                 "scripts/pr-guardian.sh"|\
                 "scripts/merge-pr.sh"|\
                 "scripts/pr-review-poller.sh"|\
+                "scripts/spec-guard.sh"|\
+                "scripts/spec-issue-sync.sh"|\
+                "scripts/spec-issue-sync-map.sh"|\
                 "tests/pr-review-poller.test.sh"|\
+                "tests/spec-issue-sync.contract.test.sh"|\
+                tests/spec-issue-sync.contract/*.sh|\
                 tests/pr-guardian.merge-guard*.sh)
                   merge_guard_validation_required="yes"
                   governance_docs_only="no"
@@ -81,7 +86,12 @@ jobs:
                 "scripts/pr-guardian.sh"|\
                 "scripts/merge-pr.sh"|\
                 "scripts/pr-review-poller.sh"|\
+                "scripts/spec-guard.sh"|\
+                "scripts/spec-issue-sync.sh"|\
+                "scripts/spec-issue-sync-map.sh"|\
                 "tests/pr-review-poller.test.sh"|\
+                "tests/spec-issue-sync.contract.test.sh"|\
+                tests/spec-issue-sync.contract/*.sh|\
                 tests/pr-guardian.merge-guard*.sh|\
                 tests/pr-guardian*.test.sh)
                   guardrail_changed="yes"
@@ -175,8 +185,9 @@ jobs:
           echo "Guardrail-related change detected, running merge-guard checks."
           bash tests/pr-guardian.merge-guard.test.sh
           bash tests/pr-review-poller.test.sh
+          bash tests/spec-issue-sync.contract.test.sh
 
-          for script in scripts/pr-guardian.sh scripts/pr-review-poller.sh scripts/merge-pr.sh; do
+          for script in scripts/pr-guardian.sh scripts/pr-review-poller.sh scripts/merge-pr.sh scripts/spec-guard.sh scripts/spec-issue-sync.sh scripts/spec-issue-sync-map.sh; do
             if [ -f "$script" ]; then
               echo "Syntax check: $script"
               bash -n "$script"

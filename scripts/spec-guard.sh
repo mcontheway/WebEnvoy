@@ -130,7 +130,7 @@ validate_canonical_issue_targets() {
 owning_spec_paths_from_suite_changes() {
   local changed="$1"
 
-  sed -n 's#^\(docs/dev/specs/FR-[^/]\+\)/.*$#\1/spec.md#p' <<< "${changed}" | sort -u
+  sed -n 's#^\(docs/dev/specs/FR-[^/][^/]*\)/.*$#\1/spec.md#p' <<< "${changed}" | sort -u
 }
 
 build_anchor_bootstrap_allowlist() {
@@ -486,7 +486,7 @@ main() {
     owning_spec_files="$(owning_spec_paths_from_suite_changes "${spec_files}")"
 
     fr_dirs="$(
-      sed -n 's#^\(docs/dev/specs/FR-[^/]\+\)/.*#\1#p' <<< "${spec_files}" | sort -u
+      sed -n 's#^\(docs/dev/specs/FR-[^/][^/]*\)/.*#\1#p' <<< "${spec_files}" | sort -u
     )"
 
     while IFS= read -r dir; do

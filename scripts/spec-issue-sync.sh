@@ -143,7 +143,14 @@ suite_mentions_issue() {
   [[ -f "${spec_file}" ]] || return 1
 
   marker_lines="$(
-    sed -n 's/^[[:space:]]*\(-[[:space:]]*\)\?Canonical Issue:[[:space:]]*#\([0-9][0-9]*\)[[:space:]]*$/\2/p' "${spec_file}"
+    awk '
+      /^[[:space:]]*(-[[:space:]]*)?Canonical Issue:[[:space:]]*#[0-9]+[[:space:]]*$/ {
+        value = $0
+        sub(/^[[:space:]]*(-[[:space:]]*)?Canonical Issue:[[:space:]]*#/, "", value)
+        sub(/[[:space:]]*$/, "", value)
+        print value
+      }
+    ' "${spec_file}"
   )"
   marker_lines="$(printf '%s\n' "${marker_lines}" | sed '/^$/d')"
   marker_count="$(printf '%s\n' "${marker_lines}" | sed '/^$/d' | wc -l | tr -d ' ')"
@@ -156,7 +163,7 @@ extract_spec_path_from_title() {
   local title="$1"
   local candidate normalized
 
-  candidate="$(sed -n 's/^\[\([^]]\+\)\].*/\1/p' <<< "${title}")"
+  candidate="$(sed -n 's/^\[\([^]][^]]*\)\].*/\1/p' <<< "${title}")"
   normalized="$(normalize_spec_path "${candidate}" || true)"
   if [[ -n "${normalized}" ]]; then
     printf '%s\n' "${normalized}"

@@ -51,7 +51,7 @@ jobs:
             fi
 
             grep -E '^docs/dev/specs/FR-[^/]+/.+$' <<< "$changed_files" \
-              | sed -n 's#^\(docs/dev/specs/FR-[^/]\+\)/.*$#\1/spec.md#p' \
+              | sed -n 's#^\(docs/dev/specs/FR-[^/][^/]*\)/.*$#\1/spec.md#p' \
               | sort -u > "$changed_spec_file" || true
 
             if grep -Fxq '.github/spec-issue-sync-map.yml' <<< "$changed_files"; then
