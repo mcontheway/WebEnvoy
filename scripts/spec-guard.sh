@@ -435,6 +435,9 @@ main() {
 
   if [[ -n "${spec_files}" ]]; then
     local disallowed
+    local allow_bootstrap_file
+    local map_bootstrap_file
+    local skip_validation_file
 
     echo "[spec-guard] 检测到正式 FR 规约变更"
 
@@ -456,10 +459,21 @@ main() {
 
     validate_changed_spec_targets "${base_ref}" "${owning_spec_files}"
 
-    local allow_bootstrap_file
     allow_bootstrap_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-bootstrap.XXXXXX")"
     build_anchor_bootstrap_allowlist "${base_ref}" "${changed}" "${allow_bootstrap_file}"
-    validate_canonical_issue_targets "${allow_bootstrap_file}"
+
+    if grep -Fxq '.github/spec-issue-sync-map.yml' <<< "${changed}"; then
+      map_bootstrap_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-map-bootstrap.XXXXXX")"
+      skip_validation_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-skip-validation.XXXXXX")"
+      classify_map_diff_targets "${base_ref}" "${map_bootstrap_file}" "${skip_validation_file}"
+      cat "${map_bootstrap_file}" >> "${allow_bootstrap_file}"
+      sort -u -o "${allow_bootstrap_file}" "${allow_bootstrap_file}"
+      validate_remapped_issue_transitions "${base_ref}"
+      validate_canonical_issue_targets "${allow_bootstrap_file}" "${skip_validation_file}"
+      rm -f "${map_bootstrap_file}" "${skip_validation_file}"
+    else
+      validate_canonical_issue_targets "${allow_bootstrap_file}"
+    fi
     rm -f "${allow_bootstrap_file}"
 
     disallowed="$(grep -Ev "${SPEC_SUITE_FILE_REGEX}|${SPEC_SUPPORT_FILE_REGEX}" <<< "${changed}" || true)"
