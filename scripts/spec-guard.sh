@@ -106,36 +106,14 @@ validate_canonical_issue_targets() {
 }
 
 build_anchor_bootstrap_allowlist() {
-  local base_ref="$1"
+  local _base_ref="$1"
   local changed="$2"
   local output_file="$3"
-  local old_map_file new_map_file map_diff_file
 
   : > "${output_file}"
 
   grep -E '^docs/dev/specs/FR-[^/]+/spec\.md$' <<< "${changed}" | sort -u >> "${output_file}" || true
-
-  if ! grep -Fxq '.github/spec-issue-sync-map.yml' <<< "${changed}"; then
-    sort -u -o "${output_file}" "${output_file}"
-    return 0
-  fi
-
-  old_map_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-old-map.XXXXXX")"
-  new_map_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-new-map.XXXXXX")"
-  map_diff_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-map-diff.XXXXXX")"
-
-  if git cat-file -e "${base_ref}:.github/spec-issue-sync-map.yml" 2>/dev/null; then
-    git show "${base_ref}:.github/spec-issue-sync-map.yml" > "${old_map_file}"
-  else
-    : > "${old_map_file}"
-  fi
-  cp "${REPO_ROOT}/.github/spec-issue-sync-map.yml" "${new_map_file}"
-
-  bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" diff-specs "${old_map_file}" "${new_map_file}" > "${map_diff_file}"
-  cut -f1 "${map_diff_file}" >> "${output_file}" || true
   sort -u -o "${output_file}" "${output_file}"
-
-  rm -f "${old_map_file}" "${new_map_file}" "${map_diff_file}"
 }
 
 changed_files() {

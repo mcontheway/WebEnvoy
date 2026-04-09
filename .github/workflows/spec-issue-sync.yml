@@ -64,7 +64,7 @@ jobs:
             fi
           fi
 
-          cat "$changed_spec_file" "$remapped_spec_file" | sed '/^$/d' | sort -u > "$allow_bootstrap_file"
+          sed '/^$/d' "$changed_spec_file" | sort -u > "$allow_bootstrap_file"
 
           {
             echo 'files<<EOF'

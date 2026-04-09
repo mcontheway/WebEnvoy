@@ -187,13 +187,14 @@ validate_issue_targets() {
 
   while IFS=$'\t' read -r spec_path issue_number; do
     [[ -n "${spec_path}" ]] || continue
-    gh issue view "${issue_number}" --repo "${repo}" --json number >/dev/null
 
     spec_abs="${REPO_ROOT}/${spec_path}"
     if [[ ! -f "${spec_abs}" ]]; then
       warn "跳过未来映射项 ${spec_path} -> #${issue_number} 的锚点预校验；对应 spec.md 尚未落地"
       continue
     fi
+
+    gh issue view "${issue_number}" --repo "${repo}" --json number >/dev/null
 
     if output="$(bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" check-anchor "${repo}" "${spec_path}" "${issue_number}" 2>&1)"; then
       continue

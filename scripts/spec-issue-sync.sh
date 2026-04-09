@@ -273,7 +273,9 @@ can_sync_map_remap() {
   fi
 
   if [[ "${status}" -eq "${ANCHOR_MISSING_EXIT}" ]]; then
-    return 0
+    printf 'Issue #%s 缺少 FR 锚定信息；map-only remap 不允许首次补锚到 %s\n' \
+      "${issue_number}" "${spec_path}" >&2
+    return "${SAFE_REMAP_REQUIRED_EXIT}"
   fi
 
   [[ -n "${ANCHOR_STATUS_MESSAGE}" ]] && printf '%s\n' "${ANCHOR_STATUS_MESSAGE}" >&2
