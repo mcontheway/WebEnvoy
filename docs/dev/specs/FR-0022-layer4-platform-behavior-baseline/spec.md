@@ -1,0 +1,231 @@
+# FR-0022 Layer 4 平台行为基线（Platform Behavior Baseline）
+
+## 背景
+
+`anti-detection.md` 已把 Layer 4（平台行为模型与长期基线）标记为核心差异化，并在当前 GitHub 单一主树中固定到 `Phase 4 -> FR-0022`：canonical FR issue 为 `#238`，父级 Phase 为 `#423`，相关验证前置由 `FR-0020`（`#239`）承接。与此同时，`roadmap.md` 也明确：Phase 2 不承诺在近期完成完整 Layer 4 实现，当前需要先冻结正式边界，避免后续把 Layer 4 能力与 Layer 1/2/3、或与上层账号运营系统混写。
+
+当前仓库已有的正式规约已经覆盖：
+
+- Layer 1：`FR-0012`
+- Layer 2：`FR-0013`
+- Layer 3：`FR-0014`
+- 风险门禁主链：`FR-0010`、`FR-0011`
+
+但 Layer 4 仍缺 formal FR 套件，导致“长期行为基线”只停留在架构描述，尚无可审查、可实现、可回滚的正式输入。`FR-0022` 的目标就是补齐这条缺口。
+
+本 FR 所在 PR 仅用于 spec review，不承诺在本 PR 内提交运行时代码。
+
+## 目标
+
+1. 冻结 `FR-0022` / `#238` 的正式范围：Layer 4 只承接“平台历史行为基线与偏移评估”。
+2. 冻结 Layer 4 与 Layer 1/2/3、`FR-0010/0011` 风险门禁链路的衔接边界。
+3. 冻结 Layer 4 的最小稳定对象：行为信号、基线状态、偏移评估、决策建议。
+4. 冻结冷启动与学习期（learning）语义，避免“无基线即放行”。
+5. 冻结 Layer 4 的审计与数据最小化约束，避免写入无关隐私数据或多套真相源。
+6. 为后续实现 PR 提供 implementation-ready 前置条件。
+
+## 非目标
+
+- 不在本 FR 中实现账号矩阵调度、养号运营、健康评分运营系统。
+- 不在本 FR 中实现完整 Persona 生成、内容编排或跨平台运营策略。
+- 不在本 FR 中重写 `FR-0010/0011` 的风险状态机真相源。
+- 不在本 FR 中承诺自动放行高风险 write/live 动作。
+- 不在本 FR 中实现 Layer 5（Camoufox/C++）能力。
+- 不在本 FR 中混入实现代码或真实平台实验脚本。
+
+## 功能需求
+
+### 1. 事项定位与继承关系
+
+- 本 FR 必须显式关联：
+  - `#423`（Parent Phase: Phase 4）
+  - `#238`（Canonical FR issue: FR-0022）
+  - `#239`（Validation FR: FR-0020）
+- 本 FR 必须显式继承：
+  - `FR-0010/0011`：风险门禁和状态机主语义
+  - `FR-0014`：session 节律输出边界
+  - `FR-0003`：profile/session 最小身份边界
+- Layer 4 输出只能作为 `risk decision hint`，不能直接覆盖门禁最终判定。
+
+### 2. Layer 4 最小对象与状态机
+
+- 必须冻结以下正式对象：
+  - `platform_behavior_signal_batch`
+  - `platform_behavior_baseline_state`
+  - `platform_behavior_assessment`
+- 必须冻结 `baseline_state` 最小状态集合：
+  - `unseeded`
+  - `learning`
+  - `ready`
+  - `degraded`
+  - `suspended`
+- 必须冻结 `drift_level` 最小等级集合：
+  - `none`
+  - `low`
+  - `medium`
+  - `high`
+  - `critical`
+- 必须定义状态迁移最低条件：进入学习、学习完成、偏移降级、重播种（reseed）触发。
+
+### 3. 信号采集与归一化边界
+
+- Layer 4 只接收结构化行为摘要，不接收页面原文、用户输入原文或媒体内容。
+- `platform_behavior_signal_batch` 最小字段必须包含：
+  - `run_id`
+  - `session_id`
+  - `profile`
+  - `platform`
+  - `target_domain`
+  - `goal_kind`
+  - `interaction_safety_class`
+  - `observed_at`
+  - `action_mix`
+  - `timing_summary`
+  - `risk_feedback_signals`
+- 信号必须可回链到 `runtime.audit` 与 session 证据，不允许“无来源信号”进入基线计算。
+- 缺少 `run_id/session_id/profile/platform` 任一主键坐标时，必须拒绝入库并输出结构化错误。
+
+### 4. 偏移评估与输出边界
+
+- 必须冻结 `platform_behavior_assessment` 输出对象，至少包含：
+  - `assessment_id`
+  - `baseline_state`
+  - `drift_level`
+  - `decision_hint`
+  - `confidence`
+  - `evidence_refs`
+  - `assessed_at`
+- `decision_hint` 最小枚举：
+  - `allow_read_only`
+  - `hold_live_write`
+  - `require_manual_review`
+  - `require_reseed`
+- Layer 4 输出是“建议”而不是“门禁最终裁决”：
+  - 不得直接把风险状态从 `paused|limited|allowed` 改写为其他值
+  - 必须经 `FR-0010/0011` 既有门禁链路消费
+
+### 5. 冷启动（cold start）与学习期约束
+
+- 新 profile + 新 platform 默认 `baseline_state=unseeded`。
+- 未完成最小学习窗口前，必须保持保守策略：
+  - 允许 read 路径评估采样
+  - 不允许把 Layer 4 结果用于自动放行高风险 write/live
+- 学习期进入 `ready` 必须同时满足：
+  - 最小样本量阈值
+  - 最小时间跨度阈值
+  - 样本完整性阈值（关键字段覆盖率）
+- 任一阈值未满足时，`decision_hint` 必须返回 `require_manual_review` 或 `allow_read_only`。
+
+### 6. 审计、留痕与数据最小化
+
+- 每次 assessment 必须生成可检索审计对象，并记录：
+  - 输入来源摘要
+  - 评估版本
+  - 阈值配置快照
+  - 输出建议与证据引用
+- Layer 4 不得新增并行审批对象替代 `approval_record/audit_record`。
+- 原始行为信号保留期与聚合保留期必须可配置，且默认优先保留聚合摘要而非原始明细。
+
+### 7. PR 与实现边界
+
+- 本 FR 仅冻结 formal 套件，不混入实现代码。
+- 后续实现 PR 必须先满足本 FR 的“进入实现前条件”。
+- 若实现需要扩展 `FR-0010/0011` 正式字段，必须先补充 spec review，不得边实现边改主契约。
+
+## GWT 验收场景
+
+### 场景 1：冷启动 profile 不会被误判为 ready
+
+Given 一个 profile 首次进入某平台且没有历史样本  
+When 触发 Layer 4 评估  
+Then `baseline_state` 必须是 `unseeded` 或 `learning`  
+And `decision_hint` 不能直接放行为高风险 live write
+
+### 场景 2：学习窗口达标后可进入 ready
+
+Given 某 profile/platform 已满足最小样本量、时间跨度和字段完整性阈值  
+When 触发评估  
+Then `baseline_state` 可以进入 `ready`  
+And 输出必须包含可追溯 `evidence_refs`
+
+### 场景 3：高偏移会触发保守建议
+
+Given 当前行为分布与基线偏移达到 `high` 或 `critical`  
+When 生成 assessment  
+Then `decision_hint` 必须是 `hold_live_write`、`require_manual_review` 或 `require_reseed`  
+And 不得自动把门禁状态写成放行
+
+### 场景 4：Layer 4 不能直接改写门禁真相源
+
+Given Layer 4 评估输出了 `hold_live_write`  
+When 门禁链路消费该结果  
+Then 最终状态仍由 `FR-0010/0011` 的流程判定  
+And Layer 4 只作为风险证据输入
+
+### 场景 5：无来源信号会被拒绝
+
+Given 输入信号缺少 `run_id` 或 `session_id`  
+When 尝试写入 `platform_behavior_signal_batch`  
+Then 系统必须拒绝入库  
+And 返回结构化错误而不是静默跳过
+
+### 场景 6：跨 profile 隔离成立
+
+Given `profile_A` 与 `profile_B` 同平台并行运行  
+When Layer 4 进行基线评估  
+Then 两者的基线状态与偏移评估必须完全隔离  
+And 不得共享同一条可写基线真相源
+
+### 场景 7：评估过期会降级
+
+Given 某 profile/platform 长时间未产生有效样本  
+When 再次请求评估  
+Then `baseline_state` 必须回退到 `degraded` 或 `learning`  
+And 结果不能伪装成稳定 ready
+
+### 场景 8：本 PR 只做 spec review
+
+Given 当前 PR 对应 `FR-0022`  
+When reviewer 检查变更范围  
+Then 只能看到 formal FR 套件文档  
+And 不应包含运行时实现代码
+
+## 异常与边界场景
+
+1. 学习样本不足却输出 `ready + allow_read_only`：视为学习阈值失效。  
+2. 漂移达到 `critical` 仍输出放行建议：视为风险边界失效。  
+3. assessment 无 `evidence_refs`：视为审计链断裂。  
+4. Layer 4 直接改写 `risk_state_output`：视为契约越界。  
+5. 把 Layer 4 误写成“账号运营系统”：视为范围漂移。  
+6. 采集了页面原文/私密输入明文：视为数据最小化违规。  
+7. 跨 profile 共享可写基线导致污染：视为隔离违规。  
+8. Layer 4 与 Layer 3 重复造状态机：视为并行真相源违规。  
+9. 把 `require_reseed` 当成自动执行播种脚本：视为越过人工确认边界。  
+10. 将 `FR-0020`（`#239`）验证前置缺失状态误标为 implementation-ready：视为流程违规。
+
+## 验收标准
+
+1. FR-0022 套件完整，至少包含 `spec.md`、`plan.md`、`TODO.md`、`research.md`、`risks.md`、`data-model.md`、`contracts/`。  
+2. 文档已明确 Layer 4 的当前正式挂接为 `#423 -> #238`，并以 `FR-0020`（`#239`）作为验证前置。  
+3. Layer 4 最小对象、状态机、漂移等级、决策建议已冻结。  
+4. 文档已明确 Layer 4 不直接改写 `FR-0010/0011` 门禁真相源。  
+5. 冷启动、学习期、ready、降级与 reseed 触发边界已冻结。  
+6. 审计留痕与数据最小化边界已冻结。  
+7. 本 PR 边界明确为 spec review，不混入实现代码。  
+
+## 依赖与前置条件
+
+- GitHub 事项：
+  - `#423`
+  - `#238`
+  - `#239`
+- 上游规约：
+  - `FR-0003-min-session`
+  - `FR-0010-xhs-risk-gates-hardening`
+  - `FR-0011-xhs-min-anti-detection-execution`
+  - `FR-0014-layer3-session-rhythm-engine`
+- 架构依据：
+  - `docs/dev/architecture/anti-detection.md`
+  - `docs/dev/architecture/system-design/account.md`
+  - `docs/dev/architecture/system-design/execution.md`
+  - `docs/dev/roadmap.md`
