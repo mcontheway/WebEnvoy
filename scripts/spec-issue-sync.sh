@@ -167,6 +167,24 @@ assert_issue_anchor() {
   if [[ -n "${title_spec}" ]] && [[ "${title_spec}" != "${spec_path}" ]]; then
     die "Issue #${issue_number} 标题锚定 ${title_spec}，拒绝同步到 ${spec_path}"
   fi
+
+  if [[ -z "${meta_spec}" ]] && [[ -z "${title_spec}" ]]; then
+    die "Issue #${issue_number} 缺少 FR 锚定信息，拒绝同步到 ${spec_path}"
+  fi
+}
+
+check_issue_anchor() {
+  local repo="$1"
+  local spec_path="$2"
+  local issue_number="$3"
+  local tmp_body issue_title
+
+  tmp_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-body.XXXXXX")"
+  trap 'rm -f "${tmp_body:-}"' RETURN
+
+  gh issue view "${issue_number}" --repo "${repo}" --json body --jq .body > "${tmp_body}"
+  issue_title="$(gh issue view "${issue_number}" --repo "${repo}" --json title --jq .title)"
+  assert_issue_anchor "${issue_number}" "${issue_title}" "${tmp_body}" "${spec_path}"
 }
 
 sync_issue() {
@@ -184,7 +202,7 @@ sync_issue() {
   tmp_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-body.XXXXXX")"
   cleaned_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-clean.XXXXXX")"
   final_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-final.XXXXXX")"
-  trap 'rm -f "${tmp_body}" "${cleaned_body}" "${final_body}"' RETURN
+  trap 'rm -f "${tmp_body:-}" "${cleaned_body:-}" "${final_body:-}"' RETURN
 
   gh issue view "${issue_number}" --repo "${repo}" --json body --jq .body > "${tmp_body}"
   issue_title_raw="$(gh issue view "${issue_number}" --repo "${repo}" --json title --jq .title)"
@@ -213,6 +231,7 @@ usage() {
   cat <<'EOF'
 用法:
   bash scripts/spec-issue-sync.sh sync <repo> <spec_path> <issue_number>
+  bash scripts/spec-issue-sync.sh check-anchor <repo> <spec_path> <issue_number>
 EOF
 }
 
@@ -227,6 +246,11 @@ main() {
       shift
       [[ "$#" -eq 3 ]] || die "sync 需要 <repo> <spec_path> <issue_number>"
       sync_issue "$1" "$2" "$3"
+      ;;
+    check-anchor)
+      shift
+      [[ "$#" -eq 3 ]] || die "check-anchor 需要 <repo> <spec_path> <issue_number>"
+      check_issue_anchor "$1" "$2" "$3"
       ;;
     *)
       usage

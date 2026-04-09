@@ -84,6 +84,7 @@ jobs:
           set -euo pipefail
 
           bash scripts/spec-issue-sync-map.sh validate
+          bash scripts/spec-issue-sync-map.sh validate-issues "${{ github.repository }}"
 
           while IFS= read -r file; do
             if [ ! -f "$file" ]; then continue; fi

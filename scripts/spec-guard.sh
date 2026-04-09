@@ -175,6 +175,7 @@ validate_governance_changes() {
         ;;
       .github/workflows/spec-issue-sync.yml)
         grep -q 'bash scripts/spec-issue-sync-map.sh validate' "${abs_path}" || die "${file} 未校验同步映射"
+        grep -q 'bash scripts/spec-issue-sync-map.sh validate-issues' "${abs_path}" || die "${file} 未校验 canonical issue 目标"
         grep -q 'bash scripts/spec-issue-sync.sh sync' "${abs_path}" || die "${file} 未调用 canonical FR 同步脚本"
         ;;
       .github/spec-issue-sync-map.yml)

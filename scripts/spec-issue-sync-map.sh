@@ -133,6 +133,19 @@ resolve_issue_number() {
   return 4
 }
 
+validate_issue_targets() {
+  local repo="$1"
+  local spec_path issue_number
+
+  require_cmd gh
+  validate_map
+
+  while IFS=$'\t' read -r spec_path issue_number; do
+    [[ -n "${spec_path}" ]] || continue
+    bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" check-anchor "${repo}" "${spec_path}" "${issue_number}"
+  done < <(parse_map_entries)
+}
+
 assert_mapped() {
   local target issue_number
 
@@ -151,6 +164,7 @@ usage() {
   cat <<'EOF'
 用法:
   bash scripts/spec-issue-sync-map.sh validate
+  bash scripts/spec-issue-sync-map.sh validate-issues <repo>
   bash scripts/spec-issue-sync-map.sh resolve <spec_path>
   bash scripts/spec-issue-sync-map.sh assert-mapped <spec_path> [spec_path...]
 EOF
@@ -170,6 +184,11 @@ main() {
       shift
       [[ "$#" -eq 0 ]] || die "validate 不接受额外参数"
       validate_map
+      ;;
+    validate-issues)
+      shift
+      [[ "$#" -eq 1 ]] || die "validate-issues 需要 <repo>"
+      validate_issue_targets "$1"
       ;;
     resolve)
       shift
