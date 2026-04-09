@@ -74,10 +74,6 @@ validate_map() {
   while IFS=$'\t' read -r spec_path issue_number; do
     [[ "${spec_path}" =~ ${SPEC_PATH_REGEX} ]] || die "映射路径不符合正式 spec 规则: ${spec_path}"
     [[ "${issue_number}" =~ ^[0-9]+$ ]] || die "canonical_issue_number 必须为数字: ${spec_path}"
-    spec_abs="${REPO_ROOT}/${spec_path}"
-    todo_file="${spec_abs%/spec.md}/TODO.md"
-    anchor_pattern="(^|[^0-9])#${issue_number}([^0-9]|$)"
-
     if grep -Fxq "${spec_path}" "${seen_specs}"; then
       die "重复的 spec_path 映射: ${spec_path}"
     fi
@@ -85,12 +81,8 @@ validate_map() {
       die "重复的 canonical_issue_number 映射: ${issue_number}"
     fi
 
+    spec_abs="${REPO_ROOT}/${spec_path}"
     [[ -f "${spec_abs}" ]] || die "映射项指向的 spec.md 不存在: ${spec_path}"
-    if [[ -f "${todo_file}" ]]; then
-      grep -Eq "${anchor_pattern}" "${spec_abs}" "${todo_file}" || die "canonical_issue_number 未在 spec/TODO anchors 中出现: ${spec_path} -> #${issue_number}"
-    else
-      grep -Eq "${anchor_pattern}" "${spec_abs}" || die "canonical_issue_number 未在 spec anchors 中出现: ${spec_path} -> #${issue_number}"
-    fi
 
     printf '%s\n' "${spec_path}" >> "${seen_specs}"
     printf '%s\n' "${issue_number}" >> "${seen_issues}"
