@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'docs/dev/specs/**/spec.md'
+      - 'docs/dev/specs/**/*.md'
       - '.github/spec-issue-sync-map.yml'
       - 'scripts/spec-issue-sync.sh'
       - 'scripts/spec-issue-sync-map.sh'
@@ -48,7 +48,9 @@ jobs:
               changed_files="$(git diff --name-only "$before_sha" "$after_sha" || true)"
             fi
 
-            grep '^docs/dev/specs/.*/spec\.md$' <<< "$changed_files" | sort -u > "$changed_spec_file" || true
+            grep -E '^docs/dev/specs/FR-[^/]+/.+\.md$' <<< "$changed_files" \
+              | sed -n 's#^\(docs/dev/specs/FR-[^/]\+\)/.*\.md$#\1/spec.md#p' \
+              | sort -u > "$changed_spec_file" || true
 
             if grep -Fxq '.github/spec-issue-sync-map.yml' <<< "$changed_files"; then
               old_map_file="$(mktemp)"
@@ -59,7 +61,7 @@ jobs:
               fi
 
               bash scripts/spec-issue-sync-map.sh diff-specs "$old_map_file" .github/spec-issue-sync-map.yml \
-                | cut -f1 \
+                | awk -F'\t' 'NF == 3 && $2 != "" && $3 != ""' \
                 | sort -u > "$remapped_spec_file"
 
               rm -f "$old_map_file"
@@ -132,27 +134,28 @@ jobs:
             exit "$status"
           done < "$changed_spec_file"
 
-          while IFS= read -r file; do
+          while IFS=$'\t' read -r file old_issue_number new_issue_number; do
             [ -n "$file" ] || continue
-            if grep -Fxq "$file" "$changed_spec_file"; then
-              continue
-            fi
             if [ ! -f "$file" ]; then
               echo "跳过 ${file}：对应 spec.md 尚未落地"
               continue
             fi
 
-            issue_number="$(bash scripts/spec-issue-sync-map.sh resolve "$file")"
-            if bash scripts/spec-issue-sync.sh can-sync-map-remap "${{ github.repository }}" "$file" "${issue_number}"; then
-              echo "同步 remapped ${file} -> canonical issue #${issue_number}"
-              bash scripts/spec-issue-sync.sh sync-bootstrap "${{ github.repository }}" "$file" "${issue_number}"
+            if bash scripts/spec-issue-sync.sh can-sync-map-remap "${{ github.repository }}" "$file" "${old_issue_number}" "${new_issue_number}"; then
+              if grep -Fxq "$file" "$changed_spec_file"; then
+                echo "remapped ${file} 已在 changed-suite 流程同步新 canonical issue #${new_issue_number}"
+                continue
+              fi
+
+              echo "同步 remapped ${file} -> canonical issue #${new_issue_number}"
+              bash scripts/spec-issue-sync.sh sync "${{ github.repository }}" "$file" "${new_issue_number}"
               continue
             else
               status=$?
             fi
 
             if [ "$status" -eq 44 ]; then
-              echo "跳过 remapped ${file} -> #${issue_number}：formal suite 尚未切到 canonical anchor"
+              echo "跳过 remapped ${file} -> #${new_issue_number}：新 canonical issue 尚未满足受控同步前置"
               continue
             fi
             exit "$status"

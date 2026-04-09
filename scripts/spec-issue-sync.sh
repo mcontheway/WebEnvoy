@@ -7,6 +7,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ANCHOR_CONFLICT_EXIT=42
 ANCHOR_MISSING_EXIT=43
 SAFE_REMAP_REQUIRED_EXIT=44
+OLD_CANONICAL_STILL_ANCHORED_EXIT=45
 ANCHOR_STATUS_MESSAGE=""
 
 die() {
@@ -251,23 +252,34 @@ check_issue_anchor() {
 can_sync_map_remap() {
   local repo="$1"
   local spec_path="$2"
-  local issue_number="$3"
+  local old_issue_number="$3"
+  local issue_number="$4"
   local tmp_body issue_title status=0
 
   tmp_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-body.XXXXXX")"
   trap 'rm -f "${tmp_body:-}"' RETURN
 
+  gh issue view "${old_issue_number}" --repo "${repo}" --json body --jq .body > "${tmp_body}"
+  issue_title="$(gh issue view "${old_issue_number}" --repo "${repo}" --json title --jq .title)"
+
+  if issue_anchor_status "${old_issue_number}" "${issue_title}" "${tmp_body}" "${spec_path}"; then
+    printf 'Issue #%s 仍锚定 %s；remap 前必须先去锚定旧 canonical issue\n' \
+      "${old_issue_number}" "${spec_path}" >&2
+    return "${OLD_CANONICAL_STILL_ANCHORED_EXIT}"
+  else
+    status=$?
+  fi
+
+  if [[ "${status}" -ne "${ANCHOR_MISSING_EXIT}" ]] && [[ "${status}" -ne "${ANCHOR_CONFLICT_EXIT}" ]]; then
+    [[ -n "${ANCHOR_STATUS_MESSAGE}" ]] && printf '%s\n' "${ANCHOR_STATUS_MESSAGE}" >&2
+    return "${status}"
+  fi
+
   gh issue view "${issue_number}" --repo "${repo}" --json body --jq .body > "${tmp_body}"
   issue_title="$(gh issue view "${issue_number}" --repo "${repo}" --json title --jq .title)"
 
   if issue_anchor_status "${issue_number}" "${issue_title}" "${tmp_body}" "${spec_path}"; then
-    if suite_mentions_issue "${spec_path}" "${issue_number}"; then
-      return 0
-    fi
-
-    printf 'Issue #%s 已带 FR 锚定，但 formal suite 仍未显式引用 #%s；跳过 map-only remap sync 到 %s\n' \
-      "${issue_number}" "${issue_number}" "${spec_path}" >&2
-    return "${SAFE_REMAP_REQUIRED_EXIT}"
+    return 0
   else
     status=$?
   fi
@@ -329,7 +341,7 @@ usage() {
   bash scripts/spec-issue-sync.sh sync <repo> <spec_path> <issue_number>
   bash scripts/spec-issue-sync.sh sync-bootstrap <repo> <spec_path> <issue_number>
   bash scripts/spec-issue-sync.sh check-anchor <repo> <spec_path> <issue_number>
-  bash scripts/spec-issue-sync.sh can-sync-map-remap <repo> <spec_path> <issue_number>
+  bash scripts/spec-issue-sync.sh can-sync-map-remap <repo> <spec_path> <old_issue_number> <new_issue_number>
   bash scripts/spec-issue-sync.sh suite-mentions-issue <spec_path> <issue_number>
 EOF
 }
@@ -358,8 +370,8 @@ main() {
       ;;
     can-sync-map-remap)
       shift
-      [[ "$#" -eq 3 ]] || die "can-sync-map-remap 需要 <repo> <spec_path> <issue_number>"
-      can_sync_map_remap "$1" "$2" "$3"
+      [[ "$#" -eq 4 ]] || die "can-sync-map-remap 需要 <repo> <spec_path> <old_issue_number> <new_issue_number>"
+      can_sync_map_remap "$1" "$2" "$3" "$4"
       ;;
     suite-mentions-issue)
       shift

@@ -105,6 +105,12 @@ validate_canonical_issue_targets() {
   bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" validate-issues "${repo}" >/dev/null
 }
 
+owning_spec_paths_from_suite_changes() {
+  local changed="$1"
+
+  sed -n 's#^\(docs/dev/specs/FR-[^/]\+\)/.*\.md$#\1/spec.md#p' <<< "${changed}" | sort -u
+}
+
 build_anchor_bootstrap_allowlist() {
   local _base_ref="$1"
   local changed="$2"
@@ -119,7 +125,7 @@ build_anchor_bootstrap_allowlist() {
     if bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" suite-mentions-issue "${spec_path}" "${issue_number}"; then
       printf '%s\n' "${spec_path}" >> "${output_file}"
     fi
-  done < <(grep -E '^docs/dev/specs/FR-[^/]+/spec\.md$' <<< "${changed}" | sort -u || true)
+  done < <(owning_spec_paths_from_suite_changes "${changed}")
 
   sort -u -o "${output_file}" "${output_file}"
 }
@@ -159,7 +165,51 @@ validate_changed_spec_targets() {
 
     [[ -n "${output}" ]] && printf '%s\n' "${output}" >&2
     exit "${status}"
-  done < <(grep -E '^docs/dev/specs/FR-[^/]+/spec\.md$' <<< "${spec_files}" | sort -u)
+  done < <(owning_spec_paths_from_suite_changes "${spec_files}")
+}
+
+validate_remapped_issue_transitions() {
+  local base_ref="$1"
+  local repo old_map_file spec_path old_issue_number new_issue_number status
+
+  repo="$(resolve_github_repo || true)"
+  [[ -n "${repo}" ]] || die "无法解析 GitHub 仓库标识；请设置 GITHUB_REPOSITORY 或 SPEC_GUARD_GITHUB_REPOSITORY"
+
+  require_cmd gh
+  gh auth status >/dev/null 2>&1 || die "spec-guard 需要可用的 gh 认证来校验 remap 迁移"
+
+  old_map_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-old-map.XXXXXX")"
+  trap 'rm -f "${old_map_file:-}"' RETURN
+
+  if git cat-file -e "${base_ref}:.github/spec-issue-sync-map.yml" 2>/dev/null; then
+    git show "${base_ref}:.github/spec-issue-sync-map.yml" > "${old_map_file}"
+  else
+    : > "${old_map_file}"
+  fi
+
+  while IFS=$'\t' read -r spec_path old_issue_number new_issue_number; do
+    [[ -n "${spec_path}" ]] || continue
+    [[ -n "${old_issue_number}" ]] || continue
+    [[ -n "${new_issue_number}" ]] || continue
+    [[ -f "${REPO_ROOT}/${spec_path}" ]] || continue
+
+    if bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" can-sync-map-remap "${repo}" "${spec_path}" "${old_issue_number}" "${new_issue_number}" >/dev/null 2>&1; then
+      continue
+    else
+      status=$?
+    fi
+
+    if [[ "${status}" -eq 44 ]]; then
+      die "${spec_path} 的 remap 目标 #${new_issue_number} 尚未满足受控同步前置；请先完成新 canonical issue 锚定，再更新映射。"
+    fi
+
+    exit "${status}"
+  done < <(
+    bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" diff-specs \
+      "${old_map_file}" \
+      "${REPO_ROOT}/.github/spec-issue-sync-map.yml" \
+      | awk -F'\t' 'NF == 3 && $2 != "" && $3 != ""'
+  )
 }
 
 changed_files() {
@@ -311,6 +361,7 @@ main() {
   local base_ref
   local changed
   local spec_files
+  local owning_spec_files
   local governance_files
   local fr_dirs
 
@@ -341,6 +392,8 @@ main() {
 
     echo "[spec-guard] 检测到正式 FR 规约变更"
 
+    owning_spec_files="$(owning_spec_paths_from_suite_changes "${spec_files}")"
+
     fr_dirs="$(
       sed -n 's#^\(docs/dev/specs/FR-[^/]\+\)/.*#\1#p' <<< "${spec_files}" | sort -u
     )"
@@ -353,9 +406,9 @@ main() {
     while IFS= read -r spec_file; do
       [[ -n "${spec_file}" ]] || continue
       bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" assert-mapped "${spec_file}"
-    done < <(grep -E '^docs/dev/specs/FR-[^/]+/spec\.md$' <<< "${spec_files}" | sort -u)
+    done <<< "${owning_spec_files}"
 
-    validate_changed_spec_targets "${spec_files}"
+    validate_changed_spec_targets "${owning_spec_files}"
 
     local allow_bootstrap_file
     allow_bootstrap_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-bootstrap.XXXXXX")"
@@ -377,6 +430,9 @@ main() {
   if [[ -n "${governance_files}" ]]; then
     echo "[spec-guard] 检测到治理/架构规则变更"
     validate_governance_changes "${changed}" "${base_ref}"
+    if grep -Fxq '.github/spec-issue-sync-map.yml' <<< "${changed}"; then
+      validate_remapped_issue_transitions "${base_ref}"
+    fi
     echo "[spec-guard] 通过"
     exit 0
   fi
