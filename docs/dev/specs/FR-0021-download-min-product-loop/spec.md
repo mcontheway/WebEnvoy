@@ -34,6 +34,7 @@ Canonical Issue: #153
 
 - 本 FR 归属 `Phase 2`，以 `#153` 作为 canonical FR 容器。
 - 本 FR 必须显式继承：
+  - `FR-0007` 的统一能力调用壳（`params.ability/input/options` 与 `summary.capability_result`）
   - `FR-0017` 的候选能力描述与统一能力壳
   - `FR-0018` 的最小验证与可信判断对象
   - `FR-0004` 的诊断与错误分类边界
@@ -58,6 +59,9 @@ Canonical Issue: #153
   - `conflict_policy`
 - 必须明确：
   - 下载能力仍属于统一能力面中的 `download`
+  - `download_ability_request` 只能作为 `FR-0007` `params.input` 下的下载输入对象，不得提升为新的顶层请求壳
+  - `params.ability.id` 必须直接等于 `download_ability_request.ability_ref`
+  - `params.ability.action` 必须固定为 `download`
   - `ability_ref` 在进入候选能力描述后必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`
   - `requested_execution_layer` 当前至少支持 `L3` 与 `L2`，不得绕过浏览器内执行边界
   - 下载目标必须来自浏览器内可达路径，不得把浏览器外异构抓取器写成正式主路径
@@ -87,6 +91,8 @@ Canonical Issue: #153
   - `mime_type`
   - `size_bytes`
 - 必须明确：
+  - `download_result_summary` 只能作为 `FR-0007` 成功壳的 `summary.capability_result.data_ref` 所指向的能力级结果摘要，不得作为新的平行顶层返回结构
+  - `summary.capability_result.action` 必须固定为 `download`，且 `outcome` 只能与 `download_result_summary.result_state` 做一致映射（`downloaded->success`，`partial->partial`）
   - 在上游 artifact carrier 尚未正式冻结前，`saved_artifact_refs` 只作为可选的 run-scoped evidence refs，不得被提升为新的正式真相源
   - `resolved_output_path` 是本次执行结果的落盘结果，不等于能力定义时的固定安装路径
   - `source_url` 必须回传本次下载最终使用的源 URL（可归一化），用于审计与复现定位
@@ -140,6 +146,7 @@ Given 仓库已经存在 `read` 与 `write` 的统一能力方向
 When reviewer 检查本 FR
 Then 能明确看到下载能力通过 `ability_kind=download` 进入同一套模型
 And 不会再建立下载特例协议
+And `download_ability_request` / `download_result_summary` 继续挂接在 `FR-0007` 统一能力调用壳内
 
 ### 场景 2：下载成功必须落盘
 
