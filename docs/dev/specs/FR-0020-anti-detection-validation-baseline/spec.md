@@ -79,7 +79,7 @@
   - `record_ref`
   - `target_fr_ref`
   - `validation_scope`
-  - `baseline_ref`
+  - `baseline_ref`（存在可用 baseline 时必填；`drift_state=insufficient_baseline` 且当前无可用 baseline 时允许为空）
   - `result_state`
   - `drift_state`
   - `failure_class`
@@ -104,6 +104,9 @@
 - 必须冻结 `anti_detection_validation_view`，至少包含：
   - `target_fr_ref`
   - `validation_scope`
+  - `profile_ref`
+  - `browser_channel`
+  - `execution_surface`
   - `latest_record_ref`
   - `baseline_status`
   - `current_result_state`

@@ -39,6 +39,9 @@
 
 - `target_fr_ref`
 - `validation_scope`
+- `profile_ref`
+- `browser_channel`
+- `execution_surface`
 - `latest_record_ref`
 - `baseline_status`
 - `current_result_state`
@@ -66,6 +69,12 @@
 - `no_drift`：已完成基线对比且未发现偏离；只允许与 `result_state=verified` 同时出现。
 - `drift_detected`：已完成基线对比且发现偏离；只允许与 `result_state=broken` 同时出现。
 - `insufficient_baseline`：基线缺失、样本不足或基线已被替换导致无法给出有效对比；只允许与 `result_state=captured`、`result_state=stale` 或 `result_state=broken` 同时出现。
+
+### `baseline_ref`
+
+- 在存在可用 baseline 且验证已绑定该 baseline 时必须填写。
+- 当 `drift_state=insufficient_baseline` 且当前不存在可用 baseline 时允许为空，不得伪造引用。
+- 当记录因已有 baseline 被替换而进入 `stale` 语义时，应继续保留原 `baseline_ref` 以支持 superseded 判定。
 
 ### `failure_class`
 

@@ -55,10 +55,19 @@
 - `result_state=broken`：对比失败或验证流程不可通过，`failure_class` 必填，`drift_state` 为 `drift_detected` 或 `insufficient_baseline`。
 - `result_state=stale`：记录因基线被替换、时间窗过期或关键样本缺失而失效，`drift_state` 必须为 `insufficient_baseline`。
 
+### `baseline_ref` 绑定规则
+
+- 当记录引用了可用 baseline 并完成对比时，`baseline_ref` 必填且一经写入不得改写。
+- 当 `drift_state=insufficient_baseline` 且当前不存在可用 baseline 时，`baseline_ref` 允许为空。
+- 当记录因原基线已 `superseded` 而进入 `stale` 语义时，必须保留原 `baseline_ref`，不得清空。
+
 ## 4. `AntiDetectionValidationView`
 
 - `target_fr_ref`
 - `validation_scope`
+- `profile_ref`
+- `browser_channel`
+- `execution_surface`
 - `latest_record_ref`
 - `baseline_status`
 - `current_result_state`
