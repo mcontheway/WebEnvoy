@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ANCHOR_CONFLICT_EXIT=42
 ANCHOR_MISSING_EXIT=43
-SUITE_ANCHOR_MISMATCH_EXIT=44
+SAFE_REMAP_REQUIRED_EXIT=44
 ANCHOR_STATUS_MESSAGE=""
 
 die() {
@@ -92,19 +92,6 @@ suite_mentions_issue() {
   [[ -d "${suite_dir}" ]] || return 1
 
   find "${suite_dir}" -type f -name '*.md' -exec grep -F -q -- "#${issue_number}" {} +
-}
-
-assert_missing_anchor_seed_safe() {
-  local spec_path="$1"
-  local issue_number="$2"
-
-  if suite_mentions_issue "${spec_path}" "${issue_number}"; then
-    return 0
-  fi
-
-  printf 'Issue #%s 缺少 FR 锚定信息，且 formal suite 未显式引用 #%s，拒绝首次受控补锚到 %s\n' \
-    "${issue_number}" "${issue_number}" "${spec_path}" >&2
-  return "${SUITE_ANCHOR_MISMATCH_EXIT}"
 }
 
 extract_spec_path_from_title() {
@@ -229,6 +216,7 @@ assert_syncable_issue_anchor() {
   local status=0
   local issue_number="$1"
   local spec_path="$4"
+  local allow_missing_anchor_bootstrap="${5:-false}"
 
   if issue_anchor_status "$@"; then
     return 0
@@ -237,8 +225,9 @@ assert_syncable_issue_anchor() {
   fi
 
   if [[ "${status}" -eq "${ANCHOR_MISSING_EXIT}" ]]; then
-    assert_missing_anchor_seed_safe "${spec_path}" "${issue_number}" || exit "$?"
-    return 0
+    if [[ "${allow_missing_anchor_bootstrap}" == "true" ]]; then
+      return 0
+    fi
   fi
 
   [[ -n "${ANCHOR_STATUS_MESSAGE}" ]] && printf '%s\n' "${ANCHOR_STATUS_MESSAGE}" >&2
@@ -259,10 +248,42 @@ check_issue_anchor() {
   assert_issue_anchor "${issue_number}" "${issue_title}" "${tmp_body}" "${spec_path}"
 }
 
+can_sync_map_remap() {
+  local repo="$1"
+  local spec_path="$2"
+  local issue_number="$3"
+  local tmp_body issue_title status=0
+
+  tmp_body="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-issue-body.XXXXXX")"
+  trap 'rm -f "${tmp_body:-}"' RETURN
+
+  gh issue view "${issue_number}" --repo "${repo}" --json body --jq .body > "${tmp_body}"
+  issue_title="$(gh issue view "${issue_number}" --repo "${repo}" --json title --jq .title)"
+
+  if issue_anchor_status "${issue_number}" "${issue_title}" "${tmp_body}" "${spec_path}"; then
+    if suite_mentions_issue "${spec_path}" "${issue_number}"; then
+      return 0
+    fi
+
+    printf 'Issue #%s 已带 FR 锚定，但 formal suite 仍未显式引用 #%s；跳过 map-only remap sync 到 %s\n' \
+      "${issue_number}" "${issue_number}" "${spec_path}" >&2
+    return "${SAFE_REMAP_REQUIRED_EXIT}"
+  fi
+
+  status=$?
+  if [[ "${status}" -eq "${ANCHOR_MISSING_EXIT}" ]]; then
+    return 0
+  fi
+
+  [[ -n "${ANCHOR_STATUS_MESSAGE}" ]] && printf '%s\n' "${ANCHOR_STATUS_MESSAGE}" >&2
+  return "${status}"
+}
+
 sync_issue() {
   local repo="$1"
   local spec_path="$2"
   local issue_number="$3"
+  local allow_missing_anchor_bootstrap="${4:-false}"
   local title issue_title tmp_body cleaned_body final_body meta_block issue_title_raw
 
   title="$(extract_title "${spec_path}")"
@@ -278,7 +299,7 @@ sync_issue() {
 
   gh issue view "${issue_number}" --repo "${repo}" --json body --jq .body > "${tmp_body}"
   issue_title_raw="$(gh issue view "${issue_number}" --repo "${repo}" --json title --jq .title)"
-  assert_syncable_issue_anchor "${issue_number}" "${issue_title_raw}" "${tmp_body}" "${spec_path}"
+  assert_syncable_issue_anchor "${issue_number}" "${issue_title_raw}" "${tmp_body}" "${spec_path}" "${allow_missing_anchor_bootstrap}"
   strip_legacy_generated_header "${tmp_body}" > "${cleaned_body}"
   meta_block="$(normalized_meta_block "${tmp_body}" "${spec_path}")"
 
@@ -303,8 +324,9 @@ usage() {
   cat <<'EOF'
 用法:
   bash scripts/spec-issue-sync.sh sync <repo> <spec_path> <issue_number>
+  bash scripts/spec-issue-sync.sh sync-bootstrap <repo> <spec_path> <issue_number>
   bash scripts/spec-issue-sync.sh check-anchor <repo> <spec_path> <issue_number>
-  bash scripts/spec-issue-sync.sh can-seed-missing-anchor <spec_path> <issue_number>
+  bash scripts/spec-issue-sync.sh can-sync-map-remap <repo> <spec_path> <issue_number>
 EOF
 }
 
@@ -320,15 +342,20 @@ main() {
       [[ "$#" -eq 3 ]] || die "sync 需要 <repo> <spec_path> <issue_number>"
       sync_issue "$1" "$2" "$3"
       ;;
+    sync-bootstrap)
+      shift
+      [[ "$#" -eq 3 ]] || die "sync-bootstrap 需要 <repo> <spec_path> <issue_number>"
+      sync_issue "$1" "$2" "$3" true
+      ;;
     check-anchor)
       shift
       [[ "$#" -eq 3 ]] || die "check-anchor 需要 <repo> <spec_path> <issue_number>"
       check_issue_anchor "$1" "$2" "$3"
       ;;
-    can-seed-missing-anchor)
+    can-sync-map-remap)
       shift
-      [[ "$#" -eq 2 ]] || die "can-seed-missing-anchor 需要 <spec_path> <issue_number>"
-      assert_missing_anchor_seed_safe "$1" "$2"
+      [[ "$#" -eq 3 ]] || die "can-sync-map-remap 需要 <repo> <spec_path> <issue_number>"
+      can_sync_map_remap "$1" "$2" "$3"
       ;;
     *)
       usage

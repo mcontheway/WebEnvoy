@@ -30,8 +30,12 @@ jobs:
         run: |
           set -euo pipefail
 
+          changed_spec_file="$(mktemp)"
+          remapped_spec_file="$(mktemp)"
+          allow_bootstrap_file="$(mktemp)"
+
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            spec_files="$(git ls-files 'docs/dev/specs/**/spec.md' | sort -u)"
+            git ls-files 'docs/dev/specs/**/spec.md' | sort -u > "$changed_spec_file"
           else
             before_sha="${{ github.event.before }}"
             after_sha="${{ github.sha }}"
@@ -42,14 +46,39 @@ jobs:
               changed_files="$(git diff --name-only "$before_sha" "$after_sha" || true)"
             fi
 
-            spec_files="$(grep '^docs/dev/specs/.*/spec\.md$' <<< "$changed_files" | sort -u || true)"
+            grep '^docs/dev/specs/.*/spec\.md$' <<< "$changed_files" | sort -u > "$changed_spec_file" || true
+
+            if grep -Fxq '.github/spec-issue-sync-map.yml' <<< "$changed_files"; then
+              old_map_file="$(mktemp)"
+              if git cat-file -e "${before_sha}:.github/spec-issue-sync-map.yml" 2>/dev/null; then
+                git show "${before_sha}:.github/spec-issue-sync-map.yml" > "$old_map_file"
+              else
+                : > "$old_map_file"
+              fi
+
+              bash scripts/spec-issue-sync-map.sh diff-specs "$old_map_file" .github/spec-issue-sync-map.yml \
+                | cut -f1 \
+                | sort -u > "$remapped_spec_file"
+
+              rm -f "$old_map_file"
+            fi
           fi
+
+          cat "$changed_spec_file" "$remapped_spec_file" | sed '/^$/d' | sort -u > "$allow_bootstrap_file"
 
           {
             echo 'files<<EOF'
-            printf '%s\n' "$spec_files"
+            cat "$changed_spec_file"
+            echo 'EOF'
+            echo 'remapped<<EOF'
+            cat "$remapped_spec_file"
+            echo 'EOF'
+            echo 'allow_bootstrap<<EOF'
+            cat "$allow_bootstrap_file"
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
+
+          rm -f "$changed_spec_file" "$remapped_spec_file" "$allow_bootstrap_file"
 
       - name: Process Each Spec
         env:
@@ -58,11 +87,46 @@ jobs:
           set -euo pipefail
 
           bash scripts/spec-issue-sync-map.sh validate
-          bash scripts/spec-issue-sync-map.sh validate-issues "${{ github.repository }}"
+          allow_bootstrap_file="$(mktemp)"
+          changed_spec_file="$(mktemp)"
+          remapped_spec_file="$(mktemp)"
+
+          printf '%s\n' "${{ steps.changed-specs.outputs.allow_bootstrap }}" | sed '/^$/d' | sort -u > "$allow_bootstrap_file"
+          printf '%s\n' "${{ steps.changed-specs.outputs.files }}" | sed '/^$/d' | sort -u > "$changed_spec_file"
+          printf '%s\n' "${{ steps.changed-specs.outputs.remapped }}" | sed '/^$/d' | sort -u > "$remapped_spec_file"
+
+          bash scripts/spec-issue-sync-map.sh validate-issues "${{ github.repository }}" "$allow_bootstrap_file"
 
           while IFS= read -r file; do
             if [ ! -f "$file" ]; then continue; fi
             issue_number="$(bash scripts/spec-issue-sync-map.sh resolve "$file")"
             echo "同步 ${file} -> canonical issue #${issue_number}"
-            bash scripts/spec-issue-sync.sh sync "${{ github.repository }}" "$file" "${issue_number}"
-          done <<< "${{ steps.changed-specs.outputs.files }}"
+            bash scripts/spec-issue-sync.sh sync-bootstrap "${{ github.repository }}" "$file" "${issue_number}"
+          done < "$changed_spec_file"
+
+          while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            if grep -Fxq "$file" "$changed_spec_file"; then
+              continue
+            fi
+            if [ ! -f "$file" ]; then
+              echo "跳过 ${file}：对应 spec.md 尚未落地"
+              continue
+            fi
+
+            issue_number="$(bash scripts/spec-issue-sync-map.sh resolve "$file")"
+            if bash scripts/spec-issue-sync.sh can-sync-map-remap "${{ github.repository }}" "$file" "${issue_number}"; then
+              echo "同步 remapped ${file} -> canonical issue #${issue_number}"
+              bash scripts/spec-issue-sync.sh sync-bootstrap "${{ github.repository }}" "$file" "${issue_number}"
+              continue
+            fi
+
+            status=$?
+            if [ "$status" -eq 44 ]; then
+              echo "跳过 remapped ${file} -> #${issue_number}：formal suite 尚未切到 canonical anchor"
+              continue
+            fi
+            exit "$status"
+          done < "$remapped_spec_file"
+
+          rm -f "$allow_bootstrap_file" "$changed_spec_file" "$remapped_spec_file"

@@ -89,6 +89,7 @@ resolve_github_repo() {
 
 validate_canonical_issue_targets() {
   local repo
+  local allow_bootstrap_file="${1:-}"
 
   repo="$(resolve_github_repo || true)"
   [[ -n "${repo}" ]] || die "无法解析 GitHub 仓库标识；请设置 GITHUB_REPOSITORY 或 SPEC_GUARD_GITHUB_REPOSITORY"
@@ -96,7 +97,45 @@ validate_canonical_issue_targets() {
   require_cmd gh
   gh auth status >/dev/null 2>&1 || die "spec-guard 需要可用的 gh 认证来校验 canonical issue 目标"
 
+  if [[ -n "${allow_bootstrap_file}" ]]; then
+    bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" validate-issues "${repo}" "${allow_bootstrap_file}" >/dev/null
+    return
+  fi
+
   bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" validate-issues "${repo}" >/dev/null
+}
+
+build_anchor_bootstrap_allowlist() {
+  local base_ref="$1"
+  local changed="$2"
+  local output_file="$3"
+  local old_map_file new_map_file map_diff_file
+
+  : > "${output_file}"
+
+  grep -E '^docs/dev/specs/FR-[^/]+/spec\.md$' <<< "${changed}" | sort -u >> "${output_file}" || true
+
+  if ! grep -Fxq '.github/spec-issue-sync-map.yml' <<< "${changed}"; then
+    sort -u -o "${output_file}" "${output_file}"
+    return 0
+  fi
+
+  old_map_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-old-map.XXXXXX")"
+  new_map_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-new-map.XXXXXX")"
+  map_diff_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-map-diff.XXXXXX")"
+
+  if git cat-file -e "${base_ref}:.github/spec-issue-sync-map.yml" 2>/dev/null; then
+    git show "${base_ref}:.github/spec-issue-sync-map.yml" > "${old_map_file}"
+  else
+    : > "${old_map_file}"
+  fi
+  cp "${REPO_ROOT}/.github/spec-issue-sync-map.yml" "${new_map_file}"
+
+  bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" diff-specs "${old_map_file}" "${new_map_file}" > "${map_diff_file}"
+  cut -f1 "${map_diff_file}" >> "${output_file}" || true
+  sort -u -o "${output_file}" "${output_file}"
+
+  rm -f "${old_map_file}" "${new_map_file}" "${map_diff_file}"
 }
 
 changed_files() {
@@ -196,6 +235,7 @@ validate_fr_suite() {
 
 validate_governance_changes() {
   local changed="$1"
+  local base_ref="$2"
   local disallowed
 
   disallowed="$(grep -Ev "${GOVERNANCE_FILE_REGEX}" <<< "${changed}" || true)"
@@ -227,11 +267,17 @@ validate_governance_changes() {
       .github/workflows/spec-issue-sync.yml)
         grep -q 'bash scripts/spec-issue-sync-map.sh validate' "${abs_path}" || die "${file} 未校验同步映射"
         grep -q 'bash scripts/spec-issue-sync-map.sh validate-issues' "${abs_path}" || die "${file} 未校验 canonical issue 目标"
-        grep -q 'bash scripts/spec-issue-sync.sh sync' "${abs_path}" || die "${file} 未调用 canonical FR 同步脚本"
+        grep -q 'bash scripts/spec-issue-sync-map.sh diff-specs' "${abs_path}" || die "${file} 未按映射差异检测 remapped specs"
+        grep -q 'bash scripts/spec-issue-sync.sh can-sync-map-remap' "${abs_path}" || die "${file} 未对 map-only remap 做安全校验"
+        grep -Eq 'bash scripts/spec-issue-sync.sh (sync|sync-bootstrap)' "${abs_path}" || die "${file} 未调用 canonical FR 同步脚本"
         ;;
       .github/spec-issue-sync-map.yml)
         bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" validate >/dev/null
-        validate_canonical_issue_targets
+        local allow_bootstrap_file
+        allow_bootstrap_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-bootstrap.XXXXXX")"
+        build_anchor_bootstrap_allowlist "${base_ref}" "${changed}" "${allow_bootstrap_file}"
+        validate_canonical_issue_targets "${allow_bootstrap_file}"
+        rm -f "${allow_bootstrap_file}"
         ;;
     esac
   done <<< "${changed}"
@@ -285,7 +331,11 @@ main() {
       bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" assert-mapped "${spec_file}"
     done < <(grep -E '^docs/dev/specs/FR-[^/]+/spec\.md$' <<< "${spec_files}" | sort -u)
 
-    validate_canonical_issue_targets
+    local allow_bootstrap_file
+    allow_bootstrap_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-bootstrap.XXXXXX")"
+    build_anchor_bootstrap_allowlist "${base_ref}" "${changed}" "${allow_bootstrap_file}"
+    validate_canonical_issue_targets "${allow_bootstrap_file}"
+    rm -f "${allow_bootstrap_file}"
 
     disallowed="$(grep -Ev "${SPEC_SUITE_FILE_REGEX}|${SPEC_SUPPORT_FILE_REGEX}" <<< "${changed}" || true)"
     if [[ -n "${disallowed}" ]]; then
@@ -300,7 +350,7 @@ main() {
 
   if [[ -n "${governance_files}" ]]; then
     echo "[spec-guard] 检测到治理/架构规则变更"
-    validate_governance_changes "${changed}"
+    validate_governance_changes "${changed}" "${base_ref}"
     echo "[spec-guard] 通过"
     exit 0
   fi

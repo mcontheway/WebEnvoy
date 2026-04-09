@@ -21,7 +21,11 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "缺少依赖命令: $1"
 }
 
-parse_map_entries() {
+parse_map_entries_file() {
+  local map_file="$1"
+
+  [[ -f "${map_file}" ]] || return 0
+
   awk '
     /^[[:space:]]*#/ || /^[[:space:]]*$/ || /^[[:space:]]*mappings:[[:space:]]*$/ { next }
     /^[[:space:]]*-[[:space:]]+spec_path:[[:space:]]*/ {
@@ -48,7 +52,11 @@ parse_map_entries() {
         exit 23
       }
     }
-  ' "${MAP_FILE}"
+  ' "${map_file}"
+}
+
+parse_map_entries() {
+  parse_map_entries_file "${MAP_FILE}"
 }
 
 list_spec_files() {
@@ -134,9 +142,45 @@ resolve_issue_number() {
   return 4
 }
 
+diff_specs() {
+  local old_map_file="$1"
+  local new_map_file="$2"
+  local old_entries new_entries
+
+  old_entries="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-sync-map-old.XXXXXX")"
+  new_entries="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-sync-map-new.XXXXXX")"
+  trap 'rm -f "${old_entries:-}" "${new_entries:-}"' RETURN
+
+  parse_map_entries_file "${old_map_file}" | sort -k1,1 > "${old_entries}"
+  parse_map_entries_file "${new_map_file}" | sort -k1,1 > "${new_entries}"
+
+  awk -F'\t' '
+    FILENAME == ARGV[1] {
+      old[$1] = $2
+      next
+    }
+    {
+      if (!($1 in old) || old[$1] != $2) {
+        printf "%s\t%s\t%s\n", $1, (($1 in old) ? old[$1] : ""), $2
+      }
+    }
+  ' "${old_entries}" "${new_entries}"
+}
+
+spec_allows_anchor_bootstrap() {
+  local allowlist_file="$1"
+  local spec_path="$2"
+
+  [[ -n "${allowlist_file}" ]] || return 1
+  [[ -f "${allowlist_file}" ]] || return 1
+
+  grep -Fxq "${spec_path}" "${allowlist_file}"
+}
+
 validate_issue_targets() {
   local repo="$1"
-  local spec_path issue_number spec_abs output status seed_output seed_status
+  local allow_bootstrap_file="${2:-}"
+  local spec_path issue_number spec_abs output status
 
   require_cmd gh
   validate_map
@@ -156,15 +200,9 @@ validate_issue_targets() {
     fi
 
     status=$?
-    if [[ "${status}" -eq "${ANCHOR_MISSING_EXIT}" ]]; then
-      if seed_output="$(bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" can-seed-missing-anchor "${spec_path}" "${issue_number}" 2>&1)"; then
-        warn "跳过 ${spec_path} -> #${issue_number} 的锚点预校验；允许首次受控同步补齐 FR 锚点"
+    if [[ "${status}" -eq "${ANCHOR_MISSING_EXIT}" ]] && spec_allows_anchor_bootstrap "${allow_bootstrap_file}" "${spec_path}"; then
+      warn "跳过 ${spec_path} -> #${issue_number} 的锚点预校验；允许首次受控同步补齐 FR 锚点"
         continue
-      fi
-
-      seed_status=$?
-      printf '%s\n' "${seed_output}" >&2
-      return "${seed_status}"
     fi
 
     printf '%s\n' "${output}" >&2
@@ -190,7 +228,8 @@ usage() {
   cat <<'EOF'
 用法:
   bash scripts/spec-issue-sync-map.sh validate
-  bash scripts/spec-issue-sync-map.sh validate-issues <repo>
+  bash scripts/spec-issue-sync-map.sh validate-issues <repo> [allow_bootstrap_list_file]
+  bash scripts/spec-issue-sync-map.sh diff-specs <old_map_file> <new_map_file>
   bash scripts/spec-issue-sync-map.sh resolve <spec_path>
   bash scripts/spec-issue-sync-map.sh assert-mapped <spec_path> [spec_path...]
 EOF
@@ -213,8 +252,13 @@ main() {
       ;;
     validate-issues)
       shift
-      [[ "$#" -eq 1 ]] || die "validate-issues 需要 <repo>"
-      validate_issue_targets "$1"
+      [[ "$#" -ge 1 && "$#" -le 2 ]] || die "validate-issues 需要 <repo> [allow_bootstrap_list_file]"
+      validate_issue_targets "$@"
+      ;;
+    diff-specs)
+      shift
+      [[ "$#" -eq 2 ]] || die "diff-specs 需要 <old_map_file> <new_map_file>"
+      diff_specs "$1" "$2"
       ;;
     resolve)
       shift
