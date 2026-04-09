@@ -4,6 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ANCHOR_CONFLICT_EXIT=42
+ANCHOR_MISSING_EXIT=43
 
 die() {
   echo "错误: $*" >&2
@@ -146,7 +148,7 @@ strip_legacy_generated_header() {
   ' "${input_file}"
 }
 
-assert_issue_anchor() {
+issue_anchor_status() {
   local issue_number="$1"
   local issue_title="$2"
   local issue_body_file="$3"
@@ -161,16 +163,33 @@ assert_issue_anchor() {
   fi
 
   if [[ -n "${meta_spec}" ]] && [[ "${meta_spec}" != "${spec_path}" ]]; then
-    die "Issue #${issue_number} 已绑定 ${meta_spec}，拒绝同步到 ${spec_path}"
+    echo "Issue #${issue_number} 已绑定 ${meta_spec}，拒绝同步到 ${spec_path}" >&2
+    return "${ANCHOR_CONFLICT_EXIT}"
   fi
 
   if [[ -n "${title_spec}" ]] && [[ "${title_spec}" != "${spec_path}" ]]; then
-    die "Issue #${issue_number} 标题锚定 ${title_spec}，拒绝同步到 ${spec_path}"
+    echo "Issue #${issue_number} 标题锚定 ${title_spec}，拒绝同步到 ${spec_path}" >&2
+    return "${ANCHOR_CONFLICT_EXIT}"
   fi
 
   if [[ -z "${meta_spec}" ]] && [[ -z "${title_spec}" ]]; then
-    die "Issue #${issue_number} 缺少 FR 锚定信息，拒绝同步到 ${spec_path}"
+    echo "Issue #${issue_number} 缺少 FR 锚定信息，拒绝同步到 ${spec_path}" >&2
+    return "${ANCHOR_MISSING_EXIT}"
   fi
+
+  return 0
+}
+
+assert_issue_anchor() {
+  local status=0
+
+  if issue_anchor_status "$@"; then
+    return 0
+  else
+    status=$?
+  fi
+
+  exit "${status}"
 }
 
 check_issue_anchor() {

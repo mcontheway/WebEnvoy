@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MAP_FILE="${REPO_ROOT}/.github/spec-issue-sync-map.yml"
 SPEC_PATH_REGEX='^docs/dev/specs/FR-[0-9][0-9][0-9][0-9]-[^/]+/spec\.md$'
+ANCHOR_MISSING_EXIT=43
 
 die() {
   echo "错误: $*" >&2
@@ -135,14 +136,31 @@ resolve_issue_number() {
 
 validate_issue_targets() {
   local repo="$1"
-  local spec_path issue_number
+  local spec_path issue_number spec_abs output status
 
   require_cmd gh
   validate_map
 
   while IFS=$'\t' read -r spec_path issue_number; do
     [[ -n "${spec_path}" ]] || continue
-    bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" check-anchor "${repo}" "${spec_path}" "${issue_number}"
+    spec_abs="${REPO_ROOT}/${spec_path}"
+    if [[ ! -f "${spec_abs}" ]]; then
+      warn "跳过未来映射项 ${spec_path} -> #${issue_number} 的锚点预校验；对应 spec.md 尚未落地"
+      continue
+    fi
+
+    if output="$(bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" check-anchor "${repo}" "${spec_path}" "${issue_number}" 2>&1)"; then
+      continue
+    fi
+
+    status=$?
+    if [[ "${status}" -eq "${ANCHOR_MISSING_EXIT}" ]]; then
+      warn "跳过 ${spec_path} -> #${issue_number} 的锚点预校验；canonical issue 尚未带 FR 锚点，待首次受控同步落地"
+      continue
+    fi
+
+    printf '%s\n' "${output}" >&2
+    return "${status}"
   done < <(parse_map_entries)
 }
 
