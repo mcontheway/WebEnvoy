@@ -20,7 +20,7 @@ warn() {
 
 SPEC_SUITE_FILE_REGEX='^docs/dev/specs/FR-[0-9][0-9][0-9][0-9]-[^/]+/'
 SPEC_SUPPORT_FILE_REGEX='^\.github/spec-issue-sync-map\.yml$'
-GOVERNANCE_FILE_REGEX='^(docs/dev/roadmap\.md|docs/dev/architecture/|docs/dev/templates/|docs/dev/AGENTS\.md|docs/dev/review/guardian-review-addendum\.md|docs/AGENTS\.md|docs/research/ref/AGENTS\.md|AGENTS\.md|vision\.md|code_review\.md|spec_review\.md|scripts/spec-guard\.sh|scripts/spec-issue-sync-map\.sh|scripts/spec-issue-sync\.sh|\.github/workflows/spec-guard\.yml|\.github/workflows/spec-issue-sync\.yml|\.github/spec-issue-sync-map\.yml|\.github/PULL_REQUEST_TEMPLATE\.md|\.githooks/)'
+GOVERNANCE_FILE_REGEX='^(docs/dev/roadmap\.md|docs/dev/architecture/|docs/dev/templates/|docs/dev/AGENTS\.md|docs/dev/review/guardian-review-addendum\.md|docs/AGENTS\.md|docs/research/ref/AGENTS\.md|AGENTS\.md|vision\.md|code_review\.md|spec_review\.md|scripts/spec-guard\.sh|scripts/spec-issue-sync-map\.sh|scripts/spec-issue-sync\.sh|\.github/workflows/spec-guard\.yml|\.github/workflows/spec-issue-sync\.yml|\.github/workflows/test-gate\.yml|\.github/spec-issue-sync-map\.yml|\.github/PULL_REQUEST_TEMPLATE\.md|\.githooks/|tests/pr-review-poller\.test\.sh|tests/pr-guardian\.merge-guard(\.test\.sh|/)|tests/spec-issue-sync\.contract(\.test\.sh|/))'
 
 resolve_base_ref() {
   if [[ -n "${SPEC_GUARD_BASE_REF:-}" ]]; then
@@ -436,6 +436,9 @@ validate_governance_changes() {
         grep -q 'bash scripts/spec-issue-sync-map.sh diff-specs' "${abs_path}" || die "${file} 未按映射差异检测 remapped specs"
         grep -q 'bash scripts/spec-issue-sync.sh can-sync-map-remap' "${abs_path}" || die "${file} 未对 map-only remap 做安全校验"
         grep -Eq 'bash scripts/spec-issue-sync.sh (sync|sync-bootstrap)' "${abs_path}" || die "${file} 未调用 canonical FR 同步脚本"
+        ;;
+      .github/workflows/test-gate.yml)
+        grep -q 'bash tests/spec-issue-sync.contract.test.sh' "${abs_path}" || die "${file} 未执行 spec-issue-sync contract 测试"
         ;;
       .github/spec-issue-sync-map.yml)
         bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" validate >/dev/null
