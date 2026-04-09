@@ -83,7 +83,7 @@
   - `mime_type`
   - `size_bytes`
 - 必须明确：
-  - `saved_artifact_refs` 是正式产物引用，而不是临时路径列表
+  - 在上游 artifact carrier 尚未正式冻结前，`saved_artifact_refs` 只作为可选的 run-scoped evidence refs，不得被提升为新的正式真相源
   - `resolved_output_path` 是本次执行结果的落盘结果，不等于能力定义时的固定安装路径
   - `partial` 只能用于存在可保留产物但整体目标未完全满足的场景
 
@@ -97,6 +97,7 @@
   - `ability_id`
   - `ability_kind=download`
   - `entrypoint`
+  - `contract_registry_seed`
   - `input_contract_ref`
   - `output_contract_ref`
   - `error_contract_ref`
@@ -130,7 +131,8 @@ And 不会再建立下载特例协议
 Given 某次下载请求成功
 When 系统返回 `download_result_summary`
 Then `result_state=downloaded`
-And `resolved_output_path` 与 `saved_artifact_refs` 都存在
+And `resolved_output_path` 存在
+And `saved_artifact_refs` 若存在，只作为 run-scoped evidence refs 返回
 And 不会只返回源 URL 冒充成功
 
 ### 场景 3：存在部分结果时不能伪装为完整成功
@@ -138,7 +140,7 @@ And 不会只返回源 URL 冒充成功
 Given 远程资源只完成了部分保存
 When 系统返回结果
 Then `result_state=partial`
-And 仍会明确返回 `saved_artifact_refs`
+And `saved_artifact_refs` 若存在，只作为 run-scoped evidence refs 返回
 And 不会被误标为完整下载成功
 
 ### 场景 4：下载能力可继续进入验证链路

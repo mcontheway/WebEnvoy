@@ -20,6 +20,11 @@
 - `resolved_output_path`
 - `content_descriptor`
 
+### `saved_artifact_refs` 语义
+
+- 在 artifact carrier 尚未由上游 FR 正式冻结前，`saved_artifact_refs` 只作为可选的 run-scoped evidence refs。
+- `saved_artifact_refs` 不得被解释为新的正式产物注册表、全局 resolver 或长期真相源。
+
 ## 3. `OutputPolicy`
 
 - `destination_root`
@@ -34,6 +39,6 @@
 
 ## 约束
 
-- `result_state=downloaded` 时，`resolved_output_path` 与 `saved_artifact_refs` 必须同时存在。
+- `result_state=downloaded` 时，`resolved_output_path` 必须存在；`saved_artifact_refs` 仅在存在已冻结的 run-scoped evidence refs 时返回。
 - `partial` 只能用于已有可保留产物但整体未满足目标的场景。
 - 下载能力进入 `FR-0017` 时，`ability_kind` 固定为 `download`。
