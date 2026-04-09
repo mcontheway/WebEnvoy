@@ -1,0 +1,45 @@
+mappings:
+  - spec_path: docs/dev/specs/FR-0001-runtime-cli-entry/spec.md
+    canonical_issue_number: 428
+  - spec_path: docs/dev/specs/FR-0002-native-messaging/spec.md
+    canonical_issue_number: 429
+  - spec_path: docs/dev/specs/FR-0003-min-session/spec.md
+    canonical_issue_number: 430
+  - spec_path: docs/dev/specs/FR-0004-runtime-observability/spec.md
+    canonical_issue_number: 431
+  - spec_path: docs/dev/specs/FR-0005-xhs-read-spike/spec.md
+    canonical_issue_number: 432
+  - spec_path: docs/dev/specs/FR-0006-runtime-sqlite-store/spec.md
+    canonical_issue_number: 433
+  - spec_path: docs/dev/specs/FR-0007-min-capability-shell/spec.md
+    canonical_issue_number: 434
+  - spec_path: docs/dev/specs/FR-0008-xhs-write-spike/spec.md
+    canonical_issue_number: 212
+  - spec_path: docs/dev/specs/FR-0009-xhs-read-write-risk-gates/spec.md
+    canonical_issue_number: 215
+  - spec_path: docs/dev/specs/FR-0010-xhs-risk-gates-hardening/spec.md
+    canonical_issue_number: 230
+  - spec_path: docs/dev/specs/FR-0011-xhs-min-anti-detection-execution/spec.md
+    canonical_issue_number: 231
+  - spec_path: docs/dev/specs/FR-0012-layer1-fingerprint-profile-consistency/spec.md
+    canonical_issue_number: 265
+  - spec_path: docs/dev/specs/FR-0013-layer2-humanized-events/spec.md
+    canonical_issue_number: 267
+  - spec_path: docs/dev/specs/FR-0014-layer3-session-rhythm-engine/spec.md
+    canonical_issue_number: 266
+  - spec_path: docs/dev/specs/FR-0015-official-chrome-runtime-migration/spec.md
+    canonical_issue_number: 435
+  - spec_path: docs/dev/specs/FR-0016-live-evidence-governance-gate/spec.md
+    canonical_issue_number: 343
+  - spec_path: docs/dev/specs/FR-0017-unified-candidate-ability-shell/spec.md
+    canonical_issue_number: 418
+  - spec_path: docs/dev/specs/FR-0018-ability-validation-replay-trust/spec.md
+    canonical_issue_number: 420
+  - spec_path: docs/dev/specs/FR-0019-l2-first-usable-capability/spec.md
+    canonical_issue_number: 419
+  - spec_path: docs/dev/specs/FR-0020-anti-detection-validation-baseline/spec.md
+    canonical_issue_number: 239
+  - spec_path: docs/dev/specs/FR-0021-download-min-product-loop/spec.md
+    canonical_issue_number: 153
+  - spec_path: docs/dev/specs/FR-0022-layer4-platform-behavior-baseline/spec.md
+    canonical_issue_number: 238

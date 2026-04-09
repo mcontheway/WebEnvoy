@@ -16,7 +16,11 @@ on:
       - 'code_review.md'
       - 'spec_review.md'
       - 'scripts/spec-guard.sh'
+      - 'scripts/spec-issue-sync-map.sh'
+      - 'scripts/spec-issue-sync.sh'
       - '.github/workflows/spec-guard.yml'
+      - '.github/workflows/spec-issue-sync.yml'
+      - '.github/spec-issue-sync-map.yml'
       - '.github/PULL_REQUEST_TEMPLATE.md'
       - '.githooks/**'
 
@@ -26,6 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      issues: read
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -40,6 +45,7 @@ jobs:
 
       - name: Run spec guard
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SPEC_GUARD_BASE_REF: "origin/${{ github.base_ref }}"
         run: |
           set -euo pipefail
