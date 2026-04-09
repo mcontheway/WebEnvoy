@@ -6,6 +6,11 @@ on:
       - main
     paths:
       - 'docs/dev/specs/**/spec.md'
+      - '.github/spec-issue-sync-map.yml'
+      - 'scripts/spec-issue-sync.sh'
+      - 'scripts/spec-issue-sync-map.sh'
+      - '.github/workflows/spec-issue-sync.yml'
+  workflow_dispatch:
 
 jobs:
   sync-issue:
@@ -25,18 +30,50 @@ jobs:
         run: |
           set -euo pipefail
 
-          before_sha="${{ github.event.before }}"
-          after_sha="${{ github.sha }}"
+          full_sync=false
 
-          if [ -z "$before_sha" ] || [ "$before_sha" = "0000000000000000000000000000000000000000" ]; then
-            changed_files="$(git diff-tree --no-commit-id --name-only -r "$after_sha" | grep '^docs/dev/specs/.*/spec\.md$' || true)"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            full_sync=true
+            changed_files=""
           else
-            changed_files="$(git diff --name-only "$before_sha" "$after_sha" | grep '^docs/dev/specs/.*/spec\.md$' || true)"
+            before_sha="${{ github.event.before }}"
+            after_sha="${{ github.sha }}"
+
+            if [ -z "$before_sha" ] || [ "$before_sha" = "0000000000000000000000000000000000000000" ]; then
+              changed_files="$(git diff-tree --no-commit-id --name-only -r "$after_sha" || true)"
+            else
+              changed_files="$(git diff --name-only "$before_sha" "$after_sha" || true)"
+            fi
+          fi
+
+          map_changed=false
+          sync_logic_changed=false
+
+          while IFS= read -r changed_file; do
+            [ -n "$changed_file" ] || continue
+            case "$changed_file" in
+              .github/spec-issue-sync-map.yml)
+                map_changed=true
+                ;;
+              scripts/spec-issue-sync.sh|scripts/spec-issue-sync-map.sh|.github/workflows/spec-issue-sync.yml)
+                sync_logic_changed=true
+                ;;
+            esac
+          done <<< "$changed_files"
+
+          if [ "$map_changed" = true ] || [ "$sync_logic_changed" = true ]; then
+            full_sync=true
+          fi
+
+          if [ "$full_sync" = true ]; then
+            spec_files="$(git ls-files 'docs/dev/specs/**/spec.md' | sort -u)"
+          else
+            spec_files="$(grep '^docs/dev/specs/.*/spec\.md$' <<< "$changed_files" | sort -u || true)"
           fi
 
           {
             echo 'files<<EOF'
-            printf '%s\n' "$changed_files"
+            printf '%s\n' "$spec_files"
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 

@@ -34,6 +34,50 @@ extract_meta_value() {
   ' "${key}" "${body_file}"
 }
 
+extract_issue_spec_path() {
+  local body_file="$1"
+
+  perl -0ne '
+    if (/<\!-- webenvoy-spec-meta:start -->\n(.*?)\n<\!-- webenvoy-spec-meta:end -->/s) {
+      my $block = $1;
+      if ($block =~ /^Spec Path:\s*(.+)$/m) {
+        print $1;
+      }
+    }
+  ' "${body_file}"
+}
+
+normalize_spec_path() {
+  local value="$1"
+
+  if [[ -z "${value}" ]]; then
+    return 1
+  fi
+
+  if [[ "${value}" =~ ^docs/dev/specs/FR-[0-9]{4}-[^/]+/spec\.md$ ]]; then
+    printf '%s\n' "${value}"
+    return 0
+  fi
+
+  if [[ "${value}" =~ ^FR-[0-9]{4}-[^/]+/spec\.md$ ]]; then
+    printf 'docs/dev/specs/%s\n' "${value}"
+    return 0
+  fi
+
+  return 1
+}
+
+extract_spec_path_from_title() {
+  local title="$1"
+  local candidate normalized
+
+  candidate="$(sed -n 's/^\[\([^]]\+\)\].*/\1/p' <<< "${title}")"
+  normalized="$(normalize_spec_path "${candidate}" || true)"
+  if [[ -n "${normalized}" ]]; then
+    printf '%s\n' "${normalized}"
+  fi
+}
+
 default_meta_value() {
   local key="$1"
 
@@ -94,11 +138,34 @@ strip_legacy_generated_header() {
   ' "${input_file}"
 }
 
+assert_issue_anchor() {
+  local issue_number="$1"
+  local issue_title="$2"
+  local issue_body_file="$3"
+  local spec_path="$4"
+  local meta_spec title_spec
+
+  meta_spec="$(extract_issue_spec_path "${issue_body_file}" || true)"
+  title_spec="$(extract_spec_path_from_title "${issue_title}" || true)"
+
+  if [[ -n "${meta_spec}" ]]; then
+    meta_spec="$(normalize_spec_path "${meta_spec}" || true)"
+  fi
+
+  if [[ -n "${meta_spec}" ]] && [[ "${meta_spec}" != "${spec_path}" ]]; then
+    die "Issue #${issue_number} 已绑定 ${meta_spec}，拒绝同步到 ${spec_path}"
+  fi
+
+  if [[ -n "${title_spec}" ]] && [[ "${title_spec}" != "${spec_path}" ]]; then
+    die "Issue #${issue_number} 标题锚定 ${title_spec}，拒绝同步到 ${spec_path}"
+  fi
+}
+
 sync_issue() {
   local repo="$1"
   local spec_path="$2"
   local issue_number="$3"
-  local title issue_title tmp_body cleaned_body final_body meta_block
+  local title issue_title tmp_body cleaned_body final_body meta_block issue_title_raw
 
   title="$(extract_title "${spec_path}")"
   [[ -n "${title}" ]] || die "无法从 ${spec_path} 提取标题"
@@ -112,6 +179,8 @@ sync_issue() {
   trap 'rm -f "${tmp_body}" "${cleaned_body}" "${final_body}"' RETURN
 
   gh issue view "${issue_number}" --repo "${repo}" --json body --jq .body > "${tmp_body}"
+  issue_title_raw="$(gh issue view "${issue_number}" --repo "${repo}" --json title --jq .title)"
+  assert_issue_anchor "${issue_number}" "${issue_title_raw}" "${tmp_body}" "${spec_path}"
   strip_legacy_generated_header "${tmp_body}" > "${cleaned_body}"
   meta_block="$(normalized_meta_block "${tmp_body}" "${spec_path}")"
 
