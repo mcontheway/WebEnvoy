@@ -12,6 +12,10 @@ die() {
   exit 1
 }
 
+warn() {
+  echo "[spec-issue-sync-map] 提示: $*" >&2
+}
+
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "缺少依赖命令: $1"
 }
