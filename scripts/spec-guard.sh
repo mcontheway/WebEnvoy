@@ -122,13 +122,6 @@ owning_spec_paths_from_suite_changes() {
   sed -n 's#^\(docs/dev/specs/FR-[^/]\+\)/.*\.md$#\1/spec.md#p' <<< "${changed}" | sort -u
 }
 
-spec_exists_in_ref() {
-  local ref="$1"
-  local spec_path="$2"
-
-  git cat-file -e "${ref}:${spec_path}" 2>/dev/null
-}
-
 build_anchor_bootstrap_allowlist() {
   local _base_ref="$1"
   local changed="$2"
@@ -140,8 +133,7 @@ build_anchor_bootstrap_allowlist() {
   while IFS= read -r spec_path; do
     [[ -n "${spec_path}" ]] || continue
     issue_number="$(bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" resolve "${spec_path}")"
-    if ! spec_exists_in_ref "${_base_ref}" "${spec_path}" || \
-      bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" suite-mentions-issue "${spec_path}" "${issue_number}"; then
+    if bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" suite-mentions-issue "${spec_path}" "${issue_number}"; then
       printf '%s\n' "${spec_path}" >> "${output_file}"
     fi
   done < <(owning_spec_paths_from_suite_changes "${changed}")
@@ -176,8 +168,7 @@ validate_changed_spec_targets() {
     fi
 
     if [[ "${status}" -eq 43 ]]; then
-      if ! spec_exists_in_ref "${base_ref}" "${spec_path}" || \
-        bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" suite-mentions-issue "${spec_path}" "${issue_number}"; then
+      if bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" suite-mentions-issue "${spec_path}" "${issue_number}"; then
         continue
       fi
 

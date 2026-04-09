@@ -92,7 +92,8 @@ suite_mentions_issue() {
   suite_dir="$(suite_dir_for_spec "${spec_path}")"
   [[ -d "${suite_dir}" ]] || return 1
 
-  find "${suite_dir}" -type f -name '*.md' -exec grep -F -q -- "#${issue_number}" {} +
+  find "${suite_dir}" -type f -name '*.md' \
+    -exec grep -E -q -- "^[[:space:]]*(-[[:space:]]*)?Canonical Issue:[[:space:]]*#${issue_number}[[:space:]]*$" {} +
 }
 
 extract_spec_path_from_title() {

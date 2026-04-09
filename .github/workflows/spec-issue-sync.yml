@@ -77,9 +77,7 @@ jobs:
           while IFS= read -r file; do
             [ -n "$file" ] || continue
             issue_number="$(bash scripts/spec-issue-sync-map.sh resolve "$file")"
-            if { [ "${{ github.event_name }}" != "workflow_dispatch" ] && \
-              { [ -z "$before_sha" ] || ! git cat-file -e "${before_sha}:${file}" 2>/dev/null; }; } || \
-              bash scripts/spec-issue-sync.sh suite-mentions-issue "$file" "$issue_number"; then
+            if bash scripts/spec-issue-sync.sh suite-mentions-issue "$file" "$issue_number"; then
               printf '%s\n' "$file" >> "$allow_bootstrap_file"
             fi
           done < "$changed_spec_file"
