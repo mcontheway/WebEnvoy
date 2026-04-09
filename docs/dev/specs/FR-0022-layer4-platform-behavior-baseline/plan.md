@@ -13,6 +13,7 @@
 - 目标：
   - 明确 Layer 4 的职责是长期行为基线与偏移评估，不是账号运营系统。
   - 明确 Layer 4 只输出建议，不直接改写门禁状态真相源。
+  - 明确 read lane 继承 `FR-0019` 的 pure-read 语义与动作白名单。
 
 ### 阶段 B：稳定对象与数据模型冻结
 
@@ -21,7 +22,7 @@
   - `data-model.md`
 - 目标：
   - 冻结 `platform_behavior_signal_batch`、`platform_behavior_baseline_state`、`platform_behavior_assessment`。
-  - 冻结 `baseline_state`、`drift_level`、`decision_hint` 枚举和最小必填字段。
+  - 冻结 `baseline_state`、`drift_level`、`decision_hint` 枚举和最小必填字段，并完成 `browser_channel/execution_surface/proxy_binding_ref` 分区隔离。
 
 ### 阶段 C：风险、审计与回滚冻结
 
@@ -37,7 +38,7 @@
 - 产出：
   - “进入实现前条件”审查结论
 - 目标：
-  - 保证 `FR-0020`（`#239`）的验证前置、阈值与证据链可复核后再进入实现。
+  - 保证 `FR-0020`（`#239`）已合入且验证前置、阈值与证据链可复核后再进入实现。
 
 ## 实现约束
 
@@ -47,6 +48,7 @@
 4. 不得把 Layer 4 结果直接当作放行裁决，必须经既有门禁链路消费。  
 5. 不得在本 FR 中混入 Layer 5、Camoufox 或 C++ 内核级方案承诺。  
 6. 采集字段必须遵守数据最小化，不写入页面正文、私密输入明文或媒体内容。  
+7. `goal_kind=read` 的采样必须继承 `FR-0019` pure-read 语义；出现 `type`/`submit` 时不得继续标记为 `pure_read`。  
 
 ## 测试与验证策略
 
@@ -57,6 +59,7 @@
 - 评审重点：
   - Layer 4 与 Layer 1/2/3 及门禁主链边界是否清晰
   - 状态枚举与对象字段是否足够稳定
+  - 可写基线主键是否已收敛到 `(profile, platform, browser_channel, execution_surface, proxy_binding_ref)`
   - 冷启动/学习期/降级/reseed 语义是否可直接写成实现断言
 - 实现前验证前置（由后续 PR 承担）：
   - 样本完整性阈值可复核
@@ -80,7 +83,7 @@
 ### 串行前置
 
 - `FR-0022` spec review 未通过前，不进入 Layer 4 实现 PR。  
-- `FR-0020`（`#239`）验证基线前置未冻结前，不进入 implementation-ready。  
+- `FR-0020`（`#239`）未合入且验证基线前置未冻结前，不进入 implementation-ready。  
 - 若需要扩展 `FR-0010/0011` 正式对象，必须先补充 spec review。  
 
 ### 可并行
@@ -100,7 +103,7 @@
 2. reviewer 确认 Layer 4 未越界到账号运营系统。  
 3. reviewer 确认 Layer 4 不直接改写门禁真相源。  
 4. `contracts/` 与 `data-model.md` 被确认足以支撑实现与测试。  
-5. `FR-0020`（`#239`）至少冻结：
+5. `FR-0020`（`#239`）已合入，且至少冻结：
   - 漂移判定阈值的验证方法
   - 假阳性/漏报的最小评估口径
 6. 后续实现 PR 必须明确：

@@ -1,5 +1,7 @@
 # FR-0022 Layer 4 平台行为基线（Platform Behavior Baseline）
 
+Canonical Issue: #238
+
 ## 背景
 
 `anti-detection.md` 已把 Layer 4（平台行为模型与长期基线）标记为核心差异化，并在当前 GitHub 单一主树中固定到 `Phase 4 -> FR-0022`：canonical FR issue 为 `#238`，父级 Phase 为 `#423`，相关验证前置由 `FR-0020`（`#239`）承接。与此同时，`roadmap.md` 也明确：Phase 2 不承诺在近期完成完整 Layer 4 实现，当前需要先冻结正式边界，避免后续把 Layer 4 能力与 Layer 1/2/3、或与上层账号运营系统混写。
@@ -44,8 +46,12 @@
 - 本 FR 必须显式继承：
   - `FR-0010/0011`：风险门禁和状态机主语义
   - `FR-0014`：session 节律输出边界
+  - `FR-0019`：read lane 语义继承
   - `FR-0003`：profile/session 最小身份边界
 - Layer 4 输出只能作为 `risk decision hint`，不能直接覆盖门禁最终判定。
+- `goal_kind=read` 时必须继承 `FR-0019` 的 `interaction_safety_class=pure_read` 语义：
+  - 仅允许动作 `navigate | locate | reveal_only_click | extract | wait_settled`
+  - 只要出现 `type` 或 `submit`，不得标记为 `pure_read`
 
 ### 2. Layer 4 最小对象与状态机
 
@@ -58,7 +64,6 @@
   - `learning`
   - `ready`
   - `degraded`
-  - `suspended`
 - 必须冻结 `drift_level` 最小等级集合：
   - `none`
   - `low`
@@ -75,6 +80,10 @@
   - `session_id`
   - `profile`
   - `platform`
+  - `browser_channel`
+  - `execution_surface`
+  - `runtime_context_id`
+  - `proxy_binding_ref`
   - `target_domain`
   - `goal_kind`
   - `interaction_safety_class`
@@ -84,14 +93,27 @@
   - `risk_feedback_signals`
 - 信号必须可回链到 `runtime.audit` 与 session 证据，不允许“无来源信号”进入基线计算。
 - 缺少 `run_id/session_id/profile/platform` 任一主键坐标时，必须拒绝入库并输出结构化错误。
+- `action_mix` 必须显式包含 `wait_settled` 计数。
+- `platform_behavior_baseline_state` 可写主键必须为 `(profile, platform, browser_channel, execution_surface, proxy_binding_ref)`。
+- `runtime_context_id` 只允许作为 run/session 证据回链字段，不能进入可写基线主键。
 
 ### 4. 偏移评估与输出边界
 
 - 必须冻结 `platform_behavior_assessment` 输出对象，至少包含：
   - `assessment_id`
+  - `browser_channel`
+  - `execution_surface`
+  - `runtime_context_id`
+  - `proxy_binding_ref`
   - `baseline_state`
   - `drift_level`
+  - `issue_scope`
+  - `action_type`
+  - `requested_execution_mode`
+  - `effective_execution_mode`
   - `decision_hint`
+  - `decision_id`
+  - `audit_record_ref`
   - `confidence`
   - `evidence_refs`
   - `assessed_at`
@@ -130,6 +152,7 @@
 
 - 本 FR 仅冻结 formal 套件，不混入实现代码。
 - 后续实现 PR 必须先满足本 FR 的“进入实现前条件”。
+- 在 `FR-0020`（`#239`）完成合并前，不得将 `FR-0022` 标记为 implementation-ready。
 - 若实现需要扩展 `FR-0010/0011` 正式字段，必须先补充 spec review，不得边实现边改主契约。
 
 ## GWT 验收场景
@@ -201,7 +224,7 @@ And 不应包含运行时实现代码
 7. 跨 profile 共享可写基线导致污染：视为隔离违规。  
 8. Layer 4 与 Layer 3 重复造状态机：视为并行真相源违规。  
 9. 把 `require_reseed` 当成自动执行播种脚本：视为越过人工确认边界。  
-10. 将 `FR-0020`（`#239`）验证前置缺失状态误标为 implementation-ready：视为流程违规。
+10. 将 `FR-0020`（`#239`）未合入状态误标为 implementation-ready：视为流程违规。
 
 ## 验收标准
 
@@ -211,7 +234,8 @@ And 不应包含运行时实现代码
 4. 文档已明确 Layer 4 不直接改写 `FR-0010/0011` 门禁真相源。  
 5. 冷启动、学习期、ready、降级与 reseed 触发边界已冻结。  
 6. 审计留痕与数据最小化边界已冻结。  
-7. 本 PR 边界明确为 spec review，不混入实现代码。  
+7. `goal_kind=read` 的 pure-read 动作约束已按 `FR-0019` 继承冻结。  
+8. 本 PR 边界明确为 spec review，不混入实现代码。  
 
 ## 依赖与前置条件
 
@@ -224,6 +248,7 @@ And 不应包含运行时实现代码
   - `FR-0010-xhs-risk-gates-hardening`
   - `FR-0011-xhs-min-anti-detection-execution`
   - `FR-0014-layer3-session-rhythm-engine`
+  - `FR-0019-layer4-read-lane-gating-and-audit`
 - 架构依据：
   - `docs/dev/architecture/anti-detection.md`
   - `docs/dev/architecture/system-design/account.md`

@@ -20,7 +20,8 @@
 - 影响：
   - 基线失真，后续评估不可用。
 - 缓解：
-  - 以 `(profile, platform)` 作为隔离主键。
+  - 以 `(profile, platform, browser_channel, execution_surface, proxy_binding_ref)` 作为隔离主键。
+  - `runtime_context_id` 仅用于 run/session 证据回链，不参与可写基线主键。
   - 缺少主键坐标的信号一律拒绝入库。
 - 回滚：
   - 发现污染后冻结对应基线，回退 `baseline_state=learning` 并触发 `require_reseed`。
@@ -72,3 +73,15 @@
   - 将评估与门禁消费保持可拆卸边界。
 - 回滚：
   - 关闭 Layer 4 消费开关，门禁退回 `FR-0010/0011` 既有策略。
+
+## 风险 7：pure-read 误标导致 read lane 边界失效
+
+- 场景：
+  - `goal_kind=read` 的批次包含 `type` 或 `submit`，却仍被标记为 `pure_read`。
+- 影响：
+  - `FR-0019` 的 read lane 边界被绕过，评估结果不可解释。
+- 缓解：
+  - 强制执行 pure-read 动作白名单：`navigate | locate | reveal_only_click | extract | wait_settled`。
+  - 只要 `type` 或 `submit` 非零，立即禁止标记为 `pure_read`。
+- 回滚：
+  - 发现误标后回滚该批次评估，重算并强制转入 `require_manual_review`。
