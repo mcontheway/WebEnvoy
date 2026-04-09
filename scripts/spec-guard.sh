@@ -54,12 +54,6 @@ changed_files() {
   git -C "${REPO_ROOT}" diff --name-only "${base_ref}...HEAD"
 }
 
-file_exists_in_ref() {
-  local ref="$1"
-  local path="$2"
-  git -C "${REPO_ROOT}" cat-file -e "${ref}:${path}" >/dev/null 2>&1
-}
-
 require_section() {
   local file="$1"
   local pattern="$2"
@@ -234,11 +228,7 @@ main() {
 
     while IFS= read -r spec_file; do
       [[ -n "${spec_file}" ]] || continue
-      if file_exists_in_ref "${base_ref}" "${spec_file}"; then
-        bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" assert-mapped "${spec_file}"
-      else
-        warn "检测到新建 FR 套件 ${spec_file}；首次 formal spec PR 不强制要求预置 canonical 映射，后续修订必须先完成映射。"
-      fi
+      bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" assert-mapped "${spec_file}"
     done < <(grep -E '^docs/dev/specs/FR-[^/]+/spec\.md$' <<< "${spec_files}" | sort -u)
 
     disallowed="$(grep -Ev "${SPEC_SUITE_FILE_REGEX}" <<< "${changed}" || true)"

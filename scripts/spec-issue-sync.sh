@@ -24,14 +24,16 @@ extract_meta_value() {
   local key="$2"
 
   perl -0ne '
-    my ($key) = @ARGV;
+    BEGIN {
+      $key = shift @ARGV;
+    }
     if (/<\!-- webenvoy-spec-meta:start -->\n(.*?)\n<\!-- webenvoy-spec-meta:end -->/s) {
       my $block = $1;
       if ($block =~ /^\Q$key\E:\s*(.+)$/m) {
         print $1;
       }
     }
-  ' "${key}" "${body_file}"
+  ' -- "${key}" "${body_file}"
 }
 
 extract_issue_spec_path() {
