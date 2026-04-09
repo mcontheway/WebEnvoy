@@ -130,7 +130,7 @@ validate_canonical_issue_targets() {
 owning_spec_paths_from_suite_changes() {
   local changed="$1"
 
-  sed -n 's#^\(docs/dev/specs/FR-[^/]\+\)/.*\.md$#\1/spec.md#p' <<< "${changed}" | sort -u
+  sed -n 's#^\(docs/dev/specs/FR-[^/]\+\)/.*$#\1/spec.md#p' <<< "${changed}" | sort -u
 }
 
 build_anchor_bootstrap_allowlist() {
@@ -276,6 +276,27 @@ append_explicit_bootstrap_specs() {
     [[ -n "${spec_path}" ]] || continue
     issue_number="$(SPEC_SYNC_MAP_SKIP_VALIDATE=1 bash "${REPO_ROOT}/scripts/spec-issue-sync-map.sh" resolve "${spec_path}")"
     if bash "${REPO_ROOT}/scripts/spec-issue-sync.sh" suite-mentions-issue "${spec_path}" "${issue_number}"; then
+      printf '%s\n' "${spec_path}" >> "${output_file}"
+    fi
+  done < "${candidate_file}"
+
+  sort -u -o "${output_file}" "${output_file}"
+}
+
+append_legacy_initial_bootstrap_specs() {
+  local base_ref="$1"
+  local candidate_file="$2"
+  local output_file="$3"
+  local spec_path
+
+  [[ -f "${candidate_file}" ]] || return 0
+  if git cat-file -e "${base_ref}:.github/spec-issue-sync-map.yml" 2>/dev/null; then
+    return 0
+  fi
+
+  while IFS= read -r spec_path; do
+    [[ -n "${spec_path}" ]] || continue
+    if git cat-file -e "${base_ref}:${spec_path}" 2>/dev/null; then
       printf '%s\n' "${spec_path}" >> "${output_file}"
     fi
   done < "${candidate_file}"
@@ -490,6 +511,7 @@ main() {
       skip_validation_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-skip-validation.XXXXXX")"
       classify_map_diff_targets "${base_ref}" "${map_bootstrap_file}" "${skip_validation_file}"
       append_explicit_bootstrap_specs "${map_bootstrap_file}" "${allow_bootstrap_file}"
+      append_legacy_initial_bootstrap_specs "${base_ref}" "${map_bootstrap_file}" "${allow_bootstrap_file}"
       cat "${map_bootstrap_file}" >> "${target_validation_file}"
       sort -u -o "${target_validation_file}" "${target_validation_file}"
       validate_remapped_issue_transitions "${base_ref}"
@@ -526,6 +548,7 @@ main() {
       target_validation_file="$(mktemp "${TMPDIR:-/tmp}/webenvoy-spec-guard-targets.XXXXXX")"
       classify_map_diff_targets "${base_ref}" "${map_bootstrap_file}" "${skip_validation_file}"
       append_explicit_bootstrap_specs "${map_bootstrap_file}" "${allow_bootstrap_file}"
+      append_legacy_initial_bootstrap_specs "${base_ref}" "${map_bootstrap_file}" "${allow_bootstrap_file}"
       cp "${map_bootstrap_file}" "${target_validation_file}"
       validate_remapped_issue_transitions "${base_ref}"
       validate_canonical_issue_targets "${allow_bootstrap_file}" "${skip_validation_file}" "${target_validation_file}"

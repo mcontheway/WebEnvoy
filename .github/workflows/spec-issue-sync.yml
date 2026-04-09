@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'docs/dev/specs/**/*.md'
+      - 'docs/dev/specs/**'
       - '.github/spec-issue-sync-map.yml'
       - 'scripts/spec-issue-sync.sh'
       - 'scripts/spec-issue-sync-map.sh'
@@ -50,8 +50,8 @@ jobs:
               changed_files="$(git diff --name-only "$before_sha" "$after_sha" || true)"
             fi
 
-            grep -E '^docs/dev/specs/FR-[^/]+/.+\.md$' <<< "$changed_files" \
-              | sed -n 's#^\(docs/dev/specs/FR-[^/]\+\)/.*\.md$#\1/spec.md#p' \
+            grep -E '^docs/dev/specs/FR-[^/]+/.+$' <<< "$changed_files" \
+              | sed -n 's#^\(docs/dev/specs/FR-[^/]\+\)/.*$#\1/spec.md#p' \
               | sort -u > "$changed_spec_file" || true
 
             if grep -Fxq '.github/spec-issue-sync-map.yml' <<< "$changed_files"; then
@@ -89,6 +89,15 @@ jobs:
               printf '%s\n' "$file" >> "$allow_bootstrap_file"
             fi
           done < "$initial_mapped_spec_file"
+
+          if [ -n "$before_sha" ] && ! git cat-file -e "${before_sha}:.github/spec-issue-sync-map.yml" 2>/dev/null; then
+            while IFS= read -r file; do
+              [ -n "$file" ] || continue
+              if git cat-file -e "${before_sha}:${file}" 2>/dev/null; then
+                printf '%s\n' "$file" >> "$allow_bootstrap_file"
+              fi
+            done < "$initial_mapped_spec_file"
+          fi
           sort -u -o "$allow_bootstrap_file" "$allow_bootstrap_file"
 
           {
