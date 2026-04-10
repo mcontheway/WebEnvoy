@@ -13,7 +13,7 @@
 - `sample_ref`
 - `record_ref`
 - `run_id`
-- `profile`
+- `profile_ref`
 - `platform`
 - `browser_channel`
 - `execution_surface`
@@ -35,10 +35,11 @@
 
 补充约束：
 
-- 输入必须可回链 `runtime.audit`；缺少 `run_id/profile/platform` 任一字段时拒绝入库。
+- 输入必须可回链 `runtime.audit`；缺少 `run_id/profile_ref/platform` 任一字段时拒绝入库。
 - `session_id` 只在 runtime 已提供稳定会话坐标时回填；其缺失不得单独阻断合法 batch 入库。
 - `browser_channel` 当前 formal baseline 只允许 `Google Chrome stable`，并必须与 `FR-0015`、`FR-0016`、`FR-0020` 共享同一 canonical label。
 - `execution_surface` 必须复用 `FR-0016` 已冻结枚举：`real_browser | stub | fake_host | other`。
+- `profile_ref` 必须直接复用 `FR-0020` / `FR-0003` 的 canonical profile namespace，不得并行发明 `profile` 正式键。
 - 仅允许摘要字段，不允许页面正文、输入明文、媒体内容等高敏原文数据。
 - `action_mix` 至少覆盖 `navigate`、`locate`、`extract`、`click`、`wait_settled`、`type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 的计数或比率。
 - `goal_kind=read` 时，`interaction_safety_class` 必须为 `pure_read`，且只允许 `navigate | locate | click | extract | wait_settled` 出现非零值；若出现 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 任一动作，不得标记为 `pure_read`。
@@ -49,6 +50,7 @@
 - 下载链路进入 `platform_behavior_assessment` 后，`action_type` 必须继续记录实际交互动作，不得另起 `download` 作为新的 Layer 4 action shortcut。
 - 该对象只能承接已可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的共享验证输入，不得自行扩写第二套 baseline 作用域。
 - `request_ref`、`sample_ref`、`record_ref` 必须直接回链到同一条 `FR-0020` formal lineage：`sample_ref` 所指向的 structured sample 必须回链到同一个 `request_ref`，且 `record_ref` 所指向的 validation record 必须同时回链该 `request_ref` 并引用该 `sample_ref`；不得只依赖 `run_id/runtime_context_id` 维持 lineage。
+- `request_ref` 与 `sample_ref` 的 formal ownership 仍分别属于 `FR-0020.anti_detection_validation_request` 与 `FR-0020.anti_detection_structured_sample`；Layer 4 只允许读取这些上游对象以完成 lineage 校验，不得在本 FR 中复制它们的真相源。
 - `effective_execution_mode` 与 `probe_bundle_ref` 必须继续保留在 Layer 4 输入 identity 中；不得把不同 recon/live scope 或不同 probe bundle 的共享输入合并到同一条 baseline / assessment。
 - 当前 formal baseline 不把 proxy binding 作为 Layer 4 必填输入；若未来需要纳入 `proxy_binding_ref`，必须先由上游 formal contract 冻结 canonical 字段，再通过独立 spec review 引入。
 - 若后续评估需要选择当前 active baseline，必须先通过 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 解析，再回链对应 snapshot / record。
@@ -57,11 +59,11 @@
 
 用途：
 
-- 记录 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 维度的长期行为基线状态。
+- 记录 `(profile_ref, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 维度的长期行为基线状态。
 
 最小字段：
 
-- `profile`
+- `profile_ref`
 - `platform`
 - `browser_channel`
 - `execution_surface`
@@ -101,7 +103,7 @@
 
 补充约束：
 
-- `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 是可写隔离主键，不允许跨 profile、浏览器通道、执行面、执行模式或 probe bundle 共用同一可写状态对象。
+- `(profile_ref, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 是可写隔离主键，不允许跨 profile、浏览器通道、执行面、执行模式或 probe bundle 共用同一可写状态对象。
 - `runtime_context_id` 仅用于 run/session 证据回链，不进入可写基线主键。
 - `baseline_ref` 一旦存在，必须直接等于同 scope `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref`，不得再用未定义的 `baseline_version` 作为并行标识。
 - `ready` 只能在学习阈值达标后进入；阈值不足必须保持在 `learning` 或降级为 `degraded`。
@@ -120,7 +122,7 @@
 最小字段：
 
 - `assessment_id`
-- `profile`
+- `profile_ref`
 - `platform`
 - `browser_channel`
 - `execution_surface`
@@ -168,13 +170,13 @@
 - `decision_id` 与 `audit_record_ref` 仅用于门禁消费后的审计回链，不构成新的 gate result 对象。
 - `action_type` 必须落在稳定动作集合 `navigate | locate | click | extract | wait_settled | type | submit | confirm | publish | purchase | dispatch | bind` 内，不得并行引入 `download` 等新的 Layer 4 动作快捷值。
 - `action_type=click` 时，`interaction_semantics` 必须固定为 `reveal_only_click`，且 `click_kind` 必须保留对应的 `FR-0019` reveal-only click kind。
-- `platform_behavior_assessment` 只能比较同一 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 内、由 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 选中的 active baseline。
+- `platform_behavior_assessment` 只能比较同一 `(profile_ref, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 内、由 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 选中的 active baseline。
 - `confidence` 必须在 `[0,1]`，用于表达评估可信度，不可当作放行开关。
 
 ## 4. 与既有对象的关系
 
 - 与 `FR-0020`：
-  - Layer 4 只消费 `anti_detection_baseline_snapshot`、`anti_detection_baseline_registry_entry` 与 `anti_detection_validation_record`。
+  - Layer 4 只消费 `anti_detection_validation_request`、`anti_detection_structured_sample`、`anti_detection_baseline_snapshot`、`anti_detection_baseline_registry_entry` 与 `anti_detection_validation_record`。
   - `validation_scope=cross_layer_baseline` 是唯一正式输入入口；`FR-0022` 不得并行定义第二套 baseline snapshot / validation record 真相源。
   - active baseline 的唯一正式判定来源是 `anti_detection_baseline_registry_entry.active_baseline_ref`；Layer 4 不得仅凭 snapshot / record 自行宣布某条 baseline 仍为当前生效。
   - `platform_behavior_signal_batch` 必须携带 `request_ref`、`sample_ref`、`record_ref`，并保持三者属于同一条 `FR-0020` formal lineage。
@@ -189,4 +191,4 @@
   - `action_mix.click` 与 `action_type=click` 必须继续保留 `interaction_semantics=reveal_only_click` 与对应 `click_kind`，不得把 reveal-only click 退化成不可解释的裸点击计数。
   - `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 都属于当前 formal baseline 必须稳定编码的非读动作；只要出现，均不得继续落在 `pure_read`。
 - 与 `FR-0003`：
-  - `profile/session` 维度是 Layer 4 的身份坐标真相源。
+  - `profile_ref/session` 维度是 Layer 4 的身份坐标真相源。
