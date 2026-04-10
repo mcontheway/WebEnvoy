@@ -84,14 +84,14 @@
 
 ### 串行前置
 
-- `FR-0022` spec review 未通过前，不进入 Layer 4 实现 PR。  
-- `FR-0020`（`#239`）未合入且验证基线前置未冻结前，不进入 implementation-ready。  
-- 若需要扩展 `FR-0010/0011` 正式对象，必须先补充 spec review。  
+- `FR-0022` spec review 未通过前，不进入 Layer 4 实现 PR。
+- `FR-0020`（`#239`）未合入，或尚未提供 Layer 4 可消费的正式共享验证输入前，不进入 implementation-ready。
+- 若需要扩展 `FR-0010/0011` 正式对象，必须先补充 spec review。
 
 ### 可并行
 
 - Layer 4 指标阈值研究可与 `FR-0020`（`#239`）并行推进；若后续需要把阈值、假阳性/漏报口径升级为正式共享契约，应再进入独立 spec review。
-- 数据保留策略细化可与实现设计并行，但最终以本 FR 冻结对象为准。  
+- 数据保留策略细化可与实现设计并行，但最终以本 FR 冻结对象为准。
 
 ### 串行后置
 
@@ -101,10 +101,10 @@
 
 ## 进入实现前条件
 
-1. `FR-0022` spec review 通过且无阻断项。  
-2. reviewer 确认 Layer 4 未越界到账号运营系统。  
-3. reviewer 确认 Layer 4 不直接改写门禁真相源。  
-4. `contracts/` 与 `data-model.md` 被确认足以支撑实现与测试。  
+1. `FR-0022` spec review 通过且无阻断项。
+2. reviewer 确认 Layer 4 未越界到账号运营系统。
+3. reviewer 确认 Layer 4 不直接改写门禁真相源。
+4. `contracts/` 与 `data-model.md` 被确认足以支撑实现与测试。
 5. `FR-0020`（`#239`）已合入，且至少冻结：
   - Layer 4 可消费的 `anti_detection_baseline_snapshot`
   - Layer 4 可消费的 `anti_detection_validation_record`
