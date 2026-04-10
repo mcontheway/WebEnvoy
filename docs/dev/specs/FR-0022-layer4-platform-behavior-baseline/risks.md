@@ -37,7 +37,7 @@
   - 审计不可解释，门禁行为不一致，或重新打开并行真相源。
 - 缓解：
   - Layer 4 只输出 `decision_hint`，不写门禁最终状态。
-  - `platform_behavior_signal_batch` 必须携带 `request_ref`、`sample_ref`、`record_ref`，直接回链 `FR-0020` formal objects。
+  - `platform_behavior_signal_batch` 必须携带 `request_ref`、`sample_ref`、`record_ref`，并保证三者属于同一条 `FR-0020` formal lineage。
   - 审计中明确“建议输出”和“最终决策”两个对象。
 - Stop-ship：
   - 任何实现若出现 Layer 4 直接改写门禁状态，必须阻断合并。

@@ -107,7 +107,7 @@ interface PlatformBehaviorSignalBatch {
 - 若下载链路包含 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 或其他写入型交互，必须映射为 `goal_kind=write`，且不得标记为 `pure_read`。
 - 下载链路进入 assessment 时，`action_type` 必须继续记录实际交互动作，不得再平行定义 `download` 作为新的 Layer 4 action shortcut。
 - 该对象必须可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的共享验证输入，不得独立形成第二套 baseline scope。
-- `request_ref`、`sample_ref`、`record_ref` 必须直接引用同 scope 的 `FR-0020` formal objects；不得只靠 `run_id/runtime_context_id` 维持 Layer 4 lineage。
+- `request_ref`、`sample_ref`、`record_ref` 必须直接引用同一条 `FR-0020` formal lineage：`sample_ref` 所指向的 structured sample 必须回链到同一个 `request_ref`，且 `record_ref` 所指向的 validation record 必须同时回链该 `request_ref` 并引用该 `sample_ref`；不得只靠 `run_id/runtime_context_id` 维持 Layer 4 lineage。
 - `effective_execution_mode` 与 `probe_bundle_ref` 必须直接继承 `FR-0020` 的 formal baseline scope；不得把不同 recon/live scope 或不同 probe bundle 归一化到同一批 Layer 4 输入。
 - 当前 Layer 4 formal contract 不把 proxy binding 作为必填输入；若未来要纳入 `proxy_binding_ref`，必须先由上游 formal contract 冻结 canonical 字段，再通过独立 spec review 引入。
 - 只允许结构化摘要，不允许正文/敏感原文字段进入该契约。
