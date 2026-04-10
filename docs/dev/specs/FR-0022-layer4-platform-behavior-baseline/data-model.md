@@ -56,7 +56,39 @@
 - 当前 formal baseline 不把 proxy binding 作为 Layer 4 必填输入；若未来需要纳入 `proxy_binding_ref`，必须先由上游 formal contract 冻结 canonical 字段，再通过独立 spec review 引入。
 - 若后续评估需要选择当前 active baseline，必须先通过 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 解析，再回链对应 snapshot / record。
 
-## 2. `platform_behavior_baseline_state`
+## 2. `platform_behavior_baseline_snapshot`
+
+用途：
+
+- 记录某个 downstream scope 的 Layer 4 drift baseline 快照；它是 `FR-0022` 自有的比较对象，不等于 `FR-0020` 的 shared upstream baseline snapshot。
+
+最小字段：
+
+- `baseline_ref`
+- `profile_ref`
+- `platform`
+- `target_domain`
+- `browser_channel`
+- `execution_surface`
+- `effective_execution_mode`
+- `probe_bundle_ref`
+- `goal_kind`
+- `upstream_active_baseline_ref`
+- `threshold_config_snapshot_ref`
+- `behavior_vector`
+- `source_batch_refs`
+- `captured_at`
+
+补充约束：
+
+- `baseline_ref` 是 `FR-0022` 自有的 downstream drift baseline 标识，不得与 `FR-0020.anti_detection_baseline_snapshot.baseline_ref` 复用为同一对象。
+- `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind, baseline_ref)` 必须唯一；不同 downstream scope 不得共享同一条 `baseline_ref`。
+- `upstream_active_baseline_ref` 必须直接记录生成该 downstream baseline 时，对应 shared upstream scope 的 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref`。
+- 多个 downstream scope 允许并行引用同一条 `upstream_active_baseline_ref`，但必须各自拥有独立的 `baseline_ref`。
+- `source_batch_refs` 必须非空，且只能引用同一 downstream scope 内的 `platform_behavior_signal_batch`。
+- `behavior_vector` 只允许保留结构化聚合字段，不得退化为页面正文、私密输入或自由文本摘要。
+
+## 3. `platform_behavior_baseline_state`
 
 用途：
 
@@ -87,8 +119,8 @@
   - 尚未形成 assessment 前允许为空
   - 一旦状态对象已被至少一次 assessment 消费，后续写回不得继续缺失
 - `baseline_ref`
-  - 当前状态已对应到 shared upstream scope 的 `FR-0020` active baseline 时必填
-  - 记录该 downstream scope 当前绑定的 shared upstream baseline snapshot，但不构成 downstream state 自身的唯一 identity
+  - 当前状态已绑定到该 downstream scope 的 `platform_behavior_baseline_snapshot.baseline_ref` 时必填
+  - 记录当前可写状态正在消费的下游 drift baseline，而不是 shared upstream baseline 本身
   - `unseeded | learning` 阶段允许为空
 
 `baseline_state` 允许值：
@@ -110,17 +142,17 @@
 
 - `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` 是可写隔离主键，不允许跨 profile、域名、浏览器通道、执行面、执行模式、probe bundle 或 read/write 目标共用同一可写状态对象。
 - `runtime_context_id` 仅用于 run/session 证据回链，不进入可写基线主键。
-- `baseline_ref` 一旦存在，必须直接等于对应 shared upstream scope `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref`，不得再用未定义的 `baseline_version` 作为并行标识。
-- `platform`、`target_domain` 与 `goal_kind` 是 `FR-0022` 自己的 downstream writable scope keys，不属于 `FR-0020` registry 的 shared upstream scope；同一条上游 `active_baseline_ref` 可以被多个 downstream scope 作为 shared lineage 输入并行引用，但不得把这些 scope 的学习状态、漂移状态或 assessment 历史折叠到同一条可写状态对象。
+- `baseline_ref` 一旦存在，必须引用同 scope 的 `platform_behavior_baseline_snapshot.baseline_ref`，不得再用未定义的 `baseline_version` 作为并行标识。
+- `platform`、`target_domain` 与 `goal_kind` 是 `FR-0022` 自己的 downstream writable scope keys，不属于 `FR-0020` registry 的 shared upstream scope；同一条上游 `active_baseline_ref` 可以被多个 downstream scope 作为 shared lineage 输入并行引用，但不得把这些 scope 的学习状态、漂移状态或 assessment 历史折叠到同一条可写状态对象，也不得共用同一条 downstream `baseline_ref`。
 - `threshold_config_snapshot_ref` 必须指向最近一次生成该状态所用的不可变阈值快照；若阈值快照变化，必须重新评估该状态是否继续有效，必要时降级或触发 reseed。
 - `ready` 只能在学习阈值达标后进入；阈值不足必须保持在 `learning` 或降级为 `degraded`。
 - 若先前 `ready` 基线已超过当前阈值快照定义的 freshness window，或同 scope 最新 assessment 返回 `drift_level=high|critical`，则必须降级为 `degraded`。
 - 若最新样本批次未通过字段完整性或证据回链校验，导致 ready 基线不再可直接信任，则必须降级为 `degraded` 或回退到 `learning`。
-- 当 registry 已 supersede / invalidate 当前 baseline、检测到 scope 污染/隔离破坏，或同 scope 持续 `degraded`/重复 `high|critical` 已达到当前阈值快照定义的 reseed threshold 时，必须置 `reseed_required=true`。
+- 当当前 `baseline_ref` 所指向的 `platform_behavior_baseline_snapshot.upstream_active_baseline_ref` 已不再等于对应 shared upstream scope 的 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref`、检测到 scope 污染/隔离破坏，或同 scope 持续 `degraded`/重复 `high|critical` 已达到当前阈值快照定义的 reseed threshold 时，必须置 `reseed_required=true`。
 - `reseed_required=true` 时不得把状态误报为稳定 `ready`。
 - `reseed_required=true` 时，下游评估只能收敛到 `require_manual_review` 或 `require_reseed`，直到新学习周期重新建立。
 
-## 3. `platform_behavior_assessment`
+## 4. `platform_behavior_assessment`
 
 用途：
 
@@ -153,8 +185,8 @@
 条件字段：
 
 - `baseline_ref`
-  - 本次 assessment 实际比较了 active baseline 时必填
-  - 仅在当前 scope 尚无 active baseline、assessment 处于冷启动/学习期保守判定时允许为空
+  - 本次 assessment 实际比较了 `platform_behavior_baseline_snapshot` 时必填
+  - 仅在当前 scope 尚无可用 downstream drift baseline、assessment 处于冷启动/学习期保守判定时允许为空
 - `decision_id`
 - `audit_record_ref`
   - 仅在门禁链路已消费 assessment 并产出正式决策/审计对象时必填
@@ -181,20 +213,21 @@
 - `decision_id` 与 `audit_record_ref` 仅用于门禁消费后的审计回链，不构成新的 gate result 对象。
 - `action_type` 必须落在稳定动作集合 `navigate | locate | click | extract | wait_settled | type | submit | confirm | publish | purchase | dispatch | bind` 内，不得并行引入 `download` 等新的 Layer 4 动作快捷值。
 - `action_type=click` 时，`interaction_semantics` 必须固定为 `reveal_only_click`，且 `click_kind` 必须保留对应的 `FR-0019` reveal-only click kind。
-- `platform_behavior_assessment` 只能比较同一 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` downstream scope 内、由对应 shared upstream scope `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 选中的 active baseline。
-- 同一条 shared upstream `active_baseline_ref` 可以被多个 downstream scope 的 assessment 并行引用，但不得因此合并不同 scope 的学习/ready/degraded/reseed 状态。
+- `platform_behavior_assessment` 只能比较同一 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` downstream scope 内的 `platform_behavior_baseline_snapshot`。
+- `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 只负责 upstream active baseline ownership 与 lineage admission；它不是 Layer 4 drift evaluation 直接比较的 downstream baseline object。
+- 同一条 shared upstream `active_baseline_ref` 可以被多个 downstream scope 的 assessment 并行引用，但不得因此合并不同 scope 的学习/ready/degraded/reseed 状态，也不得共用同一条 downstream `baseline_ref`。
 - `confidence` 必须在 `[0,1]`，用于表达评估可信度，不可当作放行开关。
 
-## 4. 与既有对象的关系
+## 5. 与既有对象的关系
 
 - 与 `FR-0020`：
   - Layer 4 只消费 `anti_detection_validation_request`、`anti_detection_structured_sample`、`anti_detection_baseline_snapshot`、`anti_detection_baseline_registry_entry` 与 `anti_detection_validation_record`。
   - `anti_detection_validation_view` 是上游派生读模型，不作为 Layer 4 baseline identity 的正式输入或真相源。
-  - `validation_scope=cross_layer_baseline` 是唯一正式输入入口；`FR-0022` 不得并行定义第二套 baseline snapshot / validation record 真相源。
+  - `validation_scope=cross_layer_baseline` 是唯一正式输入入口；`FR-0022` 可以拥有自己的 downstream `platform_behavior_baseline_snapshot`，但不得并行重定义 `FR-0020` 已拥有的 baseline snapshot / registry / validation record 真相源。
   - `FR-0022` 当前把 `target_fr_ref=FR-0022` 与 `validation_scope=cross_layer_baseline` 视为固定 lane 常量；`target_fr_ref` 必须继续复用 `FR-0020` 的 FR 标识语义，不得改写为 GitHub issue 号；二者必须受上游 formal contract 约束，但不在 Layer 4 writable identity 中重复落库。
   - active baseline 的唯一正式判定来源是 `anti_detection_baseline_registry_entry.active_baseline_ref`；Layer 4 不得仅凭 snapshot / record 自行宣布某条 baseline 仍为当前生效。
   - `FR-0020` registry 的 shared upstream scope 只有 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`；`platform`、`target_domain` 与 `goal_kind` 只属于 `FR-0022` downstream writable scope，不得被倒灌为上游 registry key。
-  - 同一条 shared upstream `active_baseline_ref` 可以被多个 `(platform, target_domain, goal_kind)` downstream scope 作为共同 lineage 输入并行引用；隔离要求约束的是下游状态对象与历史，不是禁止共享该上游引用本身。
+  - 同一条 shared upstream `active_baseline_ref` 可以被多个 `(platform, target_domain, goal_kind)` downstream scope 作为共同 lineage 输入并行引用；隔离要求约束的是下游 `platform_behavior_baseline_snapshot` / `platform_behavior_baseline_state` / assessment 对象与历史，不是禁止共享该上游引用本身。
   - `platform_behavior_signal_batch` 必须携带 `request_ref`、`sample_ref`、`record_ref`，并保持三者属于同一条 `FR-0020` formal lineage。
   - `effective_execution_mode` 与 `probe_bundle_ref` 是 shared scope keys；Layer 4 baseline identity 必须保留这两个维度，不得把不同 mode / bundle 的 baseline 混写到同一状态对象。
   - 当前 `FR-0022` 不把 proxy binding 纳入 implementation-ready formal 输入；若未来需要 canonical `proxy_binding_ref`，必须先由上游 formal contract 暴露后再进入独立 spec review。

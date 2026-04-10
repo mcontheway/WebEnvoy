@@ -49,14 +49,14 @@ Canonical Issue: #238
   - `FR-0019`：read lane 语义继承
   - `FR-0003`：profile/session 最小身份边界
 - `FR-0020` 必须是 Layer 4 共享验证输入的唯一 formal owner：
-  - `FR-0022` 只消费 `FR-0020` 已冻结的 formal object family：`anti_detection_validation_request`、`anti_detection_structured_sample`、`anti_detection_baseline_snapshot`、`anti_detection_baseline_registry_entry` 与 `anti_detection_validation_record`
+  - `FR-0022` 只把 `FR-0020` 已冻结的 formal object family 作为 shared upstream input：`anti_detection_validation_request`、`anti_detection_structured_sample`、`anti_detection_baseline_snapshot`、`anti_detection_baseline_registry_entry` 与 `anti_detection_validation_record`
   - `anti_detection_validation_view` 是上游派生读模型，不作为 Layer 4 baseline identity 的正式输入或真相源
   - `validation_scope=cross_layer_baseline` 是 Layer 4 唯一正式编码入口
-  - `FR-0022` 不得再平行定义第二套 baseline snapshot / validation record 真相源
+  - `FR-0022` 允许拥有自己的 downstream behavior object family：`platform_behavior_signal_batch`、`platform_behavior_baseline_snapshot`、`platform_behavior_baseline_state`、`platform_behavior_assessment`；但不得重定义 `FR-0020` 已拥有的 baseline snapshot / registry / validation record 真相源
   - `FR-0022` 当前把 `target_fr_ref=FR-0022` 与 `validation_scope=cross_layer_baseline` 视为固定 lane 常量；`target_fr_ref` 必须继续复用 `FR-0020` 的 FR 标识语义，而不是改写成 GitHub issue 号；二者必须显式受上游 formal contract 约束，但不在 Layer 4 writable identity 中重复落库
   - `anti_detection_baseline_registry_entry.active_baseline_ref` 是 Layer 4 唯一允许消费的 active baseline 判定来源；不得仅凭 snapshot / validation record 自行宣布某条 baseline 仍为当前生效
-  - `FR-0020` registry 的 shared upstream scope 固定为 `(target_fr_ref=FR-0022, validation_scope=cross_layer_baseline, profile_ref, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`；`platform`、`target_domain` 与 `goal_kind` 属于 `FR-0022` 自己的 downstream writable scope，不得被倒灌成上游 registry key
-  - 同一条上游 `active_baseline_ref` 可以被多个 `(platform, target_domain, goal_kind)` downstream scope 并行引用为 shared lineage input；真正需要禁止的是把多个 downstream scope 的 `platform_behavior_baseline_state` / assessment 历史折叠到同一条可写状态对象
+  - `FR-0020` registry 的 shared upstream scope 固定为 `(target_fr_ref=FR-0022, validation_scope=cross_layer_baseline, profile_ref, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`；`platform`、`target_domain` 与 `goal_kind` 属于 `FR-0022` 自己的 downstream drift baseline scope，不得被倒灌成上游 registry key
+  - 同一条上游 `active_baseline_ref` 可以被多个 `(platform, target_domain, goal_kind)` downstream scope 并行引用为 shared lineage input；但每个 downstream scope 都必须生成并维护自己的 `platform_behavior_baseline_snapshot` / `platform_behavior_baseline_state`，不得把多个 scope 的 drift baseline 折叠为同一条 `baseline_ref`
 - Layer 4 输出只能作为 `risk decision hint`，不能直接覆盖门禁最终判定。
 - `goal_kind=read` 时必须继承 `FR-0019` 的 `interaction_safety_class=pure_read` 语义：
   - 仅允许动作 `navigate | locate | click | extract | wait_settled`
@@ -73,8 +73,29 @@ Canonical Issue: #238
 
 - 必须冻结以下正式对象：
   - `platform_behavior_signal_batch`
+  - `platform_behavior_baseline_snapshot`
   - `platform_behavior_baseline_state`
   - `platform_behavior_assessment`
+- `platform_behavior_baseline_snapshot` 的最小必填字段至少包含：
+  - `baseline_ref`
+  - `profile_ref`
+  - `platform`
+  - `target_domain`
+  - `browser_channel`
+  - `execution_surface`
+  - `effective_execution_mode`
+  - `probe_bundle_ref`
+  - `goal_kind`
+  - `upstream_active_baseline_ref`
+  - `threshold_config_snapshot_ref`
+  - `behavior_vector`
+  - `source_batch_refs`
+  - `captured_at`
+- `platform_behavior_baseline_snapshot` 的正式边界必须冻结为：
+  - `baseline_ref` 是 `FR-0022` 自有的 downstream drift baseline 标识，不得与 `FR-0020.anti_detection_baseline_snapshot.baseline_ref` 混用为同一对象
+  - `upstream_active_baseline_ref` 必须记录生成该 downstream baseline 时所依赖的 `FR-0020` shared upstream active baseline
+  - 多个 `(platform, target_domain, goal_kind)` downstream scope 可以共享同一条 `upstream_active_baseline_ref`，但必须拥有各自独立的 `baseline_ref`
+  - `source_batch_refs` 必须非空，且只能引用同一 downstream scope 内的 `platform_behavior_signal_batch`
 - `platform_behavior_baseline_state` 的最小必填字段至少包含：
   - `profile_ref`
   - `platform`
@@ -93,7 +114,7 @@ Canonical Issue: #238
 - `platform_behavior_baseline_state` 的条件字段必须固定为：
   - `ready_at`：仅 `baseline_state=ready` 时必填
   - `last_assessed_at`：只要该状态对象已被至少一次 assessment 消费，就必须可回填
-  - `baseline_ref`：当前状态已绑定到对应 shared upstream scope 的 `FR-0020` active baseline 时必填；它记录该 downstream scope 当前对齐的 shared upstream baseline snapshot，但不构成 downstream state 自身的唯一 identity；`unseeded | learning` 阶段允许为空
+  - `baseline_ref`：当前状态已绑定到该 downstream scope 的 `platform_behavior_baseline_snapshot.baseline_ref` 时必填；它记录当前可写状态正在消费的下游 drift baseline，而不是 shared upstream baseline 本身；`unseeded | learning` 阶段允许为空
 - 必须冻结 `baseline_state` 最小状态集合：
   - `unseeded`
   - `learning`
@@ -111,8 +132,8 @@ Canonical Issue: #238
   - 同 scope 最新一次 assessment 返回 `drift_level=high|critical`
   - 同 scope 最新样本批次未通过正式的字段完整性或证据回链校验，导致 ready 基线不再可直接信任
 - `reseed_required=true` 的最小触发准则必须冻结为：
-  - 对应 shared upstream scope 的 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 已不再指向当前 `baseline_ref`，或该 baseline 被显式 supersede / invalidate
-  - 检测到多个 `(platform, target_domain, goal_kind)` downstream scope 的样本、学习状态或 assessment 历史被错误折叠到同一条可写状态对象
+  - 当前 `platform_behavior_baseline_state.baseline_ref` 所指向的 `platform_behavior_baseline_snapshot.upstream_active_baseline_ref` 已不再等于对应 shared upstream scope 的 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref`
+  - 检测到多个 `(platform, target_domain, goal_kind)` downstream scope 的样本、downstream baseline 或学习状态被错误折叠到同一条可写状态对象
   - 检测到跨 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` scope 的样本污染或隔离破坏
   - 同 scope 持续处于 `degraded`，或重复出现 `high|critical` 漂移，且已达到当前 `threshold_config_snapshot_ref` 定义的 reseed threshold
 - 一旦 `reseed_required=true`，`baseline_state` 不得继续保持稳定 `ready`；下游 `decision_hint` 只能收敛到 `require_manual_review` 或 `require_reseed`，直到新学习周期重新建立。
@@ -203,13 +224,14 @@ Canonical Issue: #238
 - Layer 4 输出是“建议”而不是“门禁最终裁决”：
   - 不得直接把风险状态从 `paused|limited|allowed` 改写为其他值
   - 必须经 `FR-0010/0011` 既有门禁链路消费
-- `baseline_ref` 必须指向本次 assessment 实际比较所用的 baseline snapshot；只有在当前 scope 尚无 active baseline、assessment 处于冷启动/学习期保守判定时才允许为空。
+- `baseline_ref` 必须指向本次 assessment 实际比较所用的 `platform_behavior_baseline_snapshot.baseline_ref`；只有在当前 scope 尚无可用 downstream drift baseline、assessment 处于冷启动/学习期保守判定时才允许为空。
 - `threshold_config_snapshot_ref` 必须指向本次 assessment 使用的不可变阈值配置快照，确保漂移判定可重放、可审计。
 - `platform_behavior_baseline_state` 也必须持久化 `threshold_config_snapshot_ref`，明确该状态最后一次被学习/降级/reseed 判定时使用的阈值快照；阈值变更后不得静默沿用旧状态解释新结果。
 - `decision_id` 与 `audit_record_ref` 只允许作为门禁消费后的审计回链，不得被解释为新增 gate result。
 - `action_type=click` 时，`interaction_semantics` 必须固定为 `reveal_only_click`，且 `click_kind` 必须保留对应的 `FR-0019` reveal-only click kind。
-- `platform_behavior_assessment` 只能比较同一 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` downstream scope 内、由对应 shared upstream scope registry 选中的 active baseline；不得跨域、跨 mode、跨 probe bundle 或跨 goal 混用。
-- 多个 downstream scope 可以各自比较同一条 shared upstream `active_baseline_ref`，但每个 scope 仍必须维护独立的学习/ready/degraded/reseed 状态，不得因为上游 lineage 共用而折叠状态真相源。
+- `platform_behavior_assessment` 只能比较同一 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` downstream scope 内的 `platform_behavior_baseline_snapshot`；不得跨域、跨 mode、跨 probe bundle 或跨 goal 混用。
+- `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 只负责 upstream active baseline ownership 与 lineage admission；它不是 Layer 4 drift evaluation 直接比较的 downstream baseline object。
+- 多个 downstream scope 可以各自绑定到同一条 shared upstream `active_baseline_ref`，但每个 scope 都必须比较自己的 `platform_behavior_baseline_snapshot.baseline_ref`，不得因为上游 lineage 共用而复用同一条下游 drift baseline。
 
 ### 5. 冷启动（cold start）与学习期约束
 
@@ -298,12 +320,13 @@ When 尝试写入 `platform_behavior_signal_batch`
 Then 系统不得仅因缺少 `session_id` 就拒绝该批次
 And 仍需保持 `runtime.audit` 回链与 `FR-0020` lineage keys 完整
 
-### 场景 6：跨 profile 隔离成立
+### 场景 6：共享 upstream lineage 不会折叠下游 baseline
 
-Given `profile_A` 与 `profile_B` 同平台并行运行  
-When Layer 4 进行基线评估  
-Then 两者的基线状态与偏移评估必须完全隔离  
-And 不得共享同一条可写基线真相源
+Given 同一 profile/browser/mode/probe bundle 下有两个不同的 `(platform, target_domain, goal_kind)` downstream scope
+And 它们当前引用同一条 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref`
+When Layer 4 为这两个 scope 建立 drift baseline
+Then 两者必须生成不同的 `platform_behavior_baseline_snapshot.baseline_ref`
+And 两者的 `platform_behavior_baseline_state` 与 assessment 历史必须完全隔离
 
 ### 场景 7：评估过期会降级
 
@@ -344,7 +367,8 @@ And 不应包含运行时实现代码
 
 1. 学习样本不足却输出 `ready + allow_read_only`，或 write-path 输出 `ready + no_additional_restriction`：视为学习阈值失效。
 2. `goal_kind=write` 在 `drift_level=high|critical`、`reseed_required=true` 或其他保守条件下仍输出 `no_additional_restriction`：视为风险边界失效。
-3. assessment 无 `evidence_refs`：视为审计链断裂。  
+3. 把 `FR-0020.active_baseline_ref` 直接当作多个 platform/domain/goal scope 共用的 downstream `baseline_ref`：视为 drift baseline 边界设计错误。
+4. assessment 无 `evidence_refs`：视为审计链断裂。
 4. Layer 4 直接改写 `risk_state_output`：视为契约越界。  
 5. 把 Layer 4 误写成“账号运营系统”：视为范围漂移。  
 6. 采集了页面原文/私密输入明文：视为数据最小化违规。  
