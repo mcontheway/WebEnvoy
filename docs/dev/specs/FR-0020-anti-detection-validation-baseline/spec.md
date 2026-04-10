@@ -64,9 +64,15 @@ Canonical Issue: #239
   - `layer2_interaction`
   - `layer3_session_rhythm`
   - `cross_layer_baseline`（Layer 4 平台行为基线的唯一编码，跨 Layer 1-3 统一聚合信号）
+- `validation_scope × target_fr_ref` 的合法组合至少冻结为：
+  - `layer1_consistency -> FR-0012`
+  - `layer2_interaction -> FR-0013`
+  - `layer3_session_rhythm -> FR-0014`
+  - `cross_layer_baseline -> 后续 Layer 4 FR`
 - 必须明确：
   - `request_ref` 是 validation request 的稳定标识；即使参数元组完全相同，不同请求也必须使用不同 `request_ref`
   - 当前 formal baseline 下，`target_fr_ref` 只允许命中 `FR-0012`、`FR-0013`、`FR-0014` 或后续 Layer 4 FR
+  - 不合法的 `validation_scope × target_fr_ref` 组合必须在 request 阶段直接阻断，不得进入 sample / baseline / record
   - `execution_surface` 只描述样本采集执行面，不等于 `FR-0016` 的 merge gate verdict
   - `sample_goal` 只描述本次验证目标，不承载产品功能请求
   - `requested_execution_mode` 继承 `FR-0010/0011` 已冻结的 execution mode 语义；本 FR 不并行发明私有模式
@@ -114,6 +120,7 @@ Canonical Issue: #239
   - `browser_channel`
   - `execution_surface`
   - `effective_execution_mode`
+  - `probe_bundle_ref`
   - `active_baseline_ref`
   - `superseded_baseline_refs`
   - `replacement_reason`
@@ -151,13 +158,15 @@ Canonical Issue: #239
   - baseline snapshot 与 validation record 是两类对象，不得混写成同一条 run 日志
   - `anti_detection_baseline_registry_entry` 是 baseline replacement 的唯一正式真相源；baseline snapshot 本身不得自带“当前生效”或 `superseded` 的可写状态
   - `effective_execution_mode` 继承 `FR-0010/0011` 的正式语义，并作为 baseline/sample/record/view 的共享分区维度；不得把 `dry_run`、`recon` 与任意 live 模式落入同一 baseline scope
-  - `anti_detection_validation_record` 必须携带 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode)` 的完整作用域键；不得把正确归属只留给 `sample_ref` 或 `baseline_ref` 间接推断
-  - 只有当同一 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode)` 作用域下的 `active_baseline_ref` 被切换到新的 `baseline_ref` 时，旧 baseline 才进入 `superseded` 语义
+  - `probe_bundle_ref` 是 baseline/sample/record/view 的正式分区维度；不同 probe bundle 默认不得复用同一 baseline scope
+  - `anti_detection_validation_record` 必须携带 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 的完整作用域键；不得把正确归属只留给 `sample_ref` 或 `baseline_ref` 间接推断
+  - 只有当同一 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 作用域下的 `active_baseline_ref` 被切换到新的 `baseline_ref` 时，旧 baseline 才进入 `superseded` 语义
   - `sample_ref` 必须指向已持久化的结构化样本载体，并在 `captured|verified|broken|stale` 全部终态中保留；不得在完成态丢失 replay / compare / diagnose 所需的样本引用
   - `source_sample_refs` 必须记录形成 baseline snapshot 所消费的结构化样本集合，`source_run_ids` 只作为补充审计引用
   - `probe_bundle_ref` 必须随 baseline snapshot 与 validation record 一起持久化，不能只停留在 request 输入侧
   - `signal_vector` 必须是结构化信号集合，不得退化为自由文本摘要
   - `failure_class` 只在 `result_state=broken` 时必填；成功态必须为空
+  - `browser_channel`、`execution_surface`、`profile_ref` 必须使用唯一 canonical encoding；当前 formal baseline 下分别由 `FR-0015`（browser identity binding）、`FR-0016`（execution_surface 枚举）与稳定 profile namespace 负责归一化
 
 ### 4. 最小共享视图
 
@@ -168,6 +177,7 @@ Canonical Issue: #239
   - `browser_channel`
   - `execution_surface`
   - `effective_execution_mode`
+  - `probe_bundle_ref`
   - `latest_record_ref`
   - `baseline_status`
   - `current_result_state`
@@ -181,6 +191,7 @@ Canonical Issue: #239
   - 该视图是面向 reviewer、实现 PR 与后续诊断链路的最小共享视图
   - 该视图必须由 baseline snapshot、baseline registry entry 与 validation record 共同投影；不得把任一单独对象误当成完整真相源
   - `baseline_status` 是 closed enum；下游 FR 不得各自扩写私有取值或重新解释兼容性
+  - `anti_detection_validation_view` 只在首条 `anti_detection_validation_record` 生成后才允许物化；empty scope 或“只有 request/sample 尚无 record”的阶段不得伪造 view 行
   - 它不替代 `FR-0016` 的 PR 级 `live_evidence_record`
   - 它也不等于最终的账号健康度或平台长期评分
 

@@ -83,6 +83,7 @@
 - `browser_channel`
 - `execution_surface`
 - `effective_execution_mode`
+- `probe_bundle_ref`
 - `active_baseline_ref`
 - `superseded_baseline_refs`
 - `replacement_reason`
@@ -90,7 +91,7 @@
 
 ### 作用域键与 ownership
 
-- registry entry 的唯一作用域键为 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode)`。
+- registry entry 的唯一作用域键为 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`。
 - `active_baseline_ref` 是该作用域下唯一正式生效的 baseline。
 - `superseded_baseline_refs` 记录此前被该 entry 替换掉的 baseline；允许为空数组，但不得为 `null`。
 - `replacement_reason` 记录当前 active baseline 成为正式基线的原因。
@@ -101,6 +102,7 @@
 - 若生成新的基线，应创建新的 `baseline_ref`，并通过更新同作用域 registry entry 的 `active_baseline_ref` 来完成替换。
 - 只有当旧 `baseline_ref` 不再等于 registry entry 的 `active_baseline_ref`，并被纳入 `superseded_baseline_refs` 后，旧 baseline 才进入 `superseded` 语义。
 - 视图层的 `stale`、`insufficient_baseline` 判定必须消费 registry entry，而不能只依赖记录自身状态。
+- 不同 `probe_bundle_ref` 默认不得复用同一 registry entry；若未来要支持跨 bundle 复用，必须在独立 spec review 中补齐兼容等级规则。
 
 ## 5. `AntiDetectionValidationRecord`
 
@@ -141,7 +143,7 @@
 
 ### 完整作用域键
 
-- `AntiDetectionValidationRecord` 必须显式携带 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode)` 的完整作用域键。
+- `AntiDetectionValidationRecord` 必须显式携带 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 的完整作用域键。
 - 当 `baseline_ref` 为空或 `sample_ref` 缺失时，仍必须能够只依赖记录自身字段被确定性归入正确的共享视图与 baseline scope。
 - `request_ref` 必须把 record 与其来源 request 关联起来，不能只依赖时间或参数推断。
 
@@ -153,6 +155,7 @@
 - `browser_channel`
 - `execution_surface`
 - `effective_execution_mode`
+- `probe_bundle_ref`
 - `latest_record_ref`
 - `baseline_status`
 - `current_result_state`
@@ -162,6 +165,7 @@
 ### 派生规则
 
 - `baseline_status` 是 closed enum，只允许 `ready`、`insufficient`、`superseded`。
+- 只有在首条 validation record 已落库后，`AntiDetectionValidationView` 才允许物化；empty scope 不生成 view 行。
 - 当当前作用域存在 active baseline，且 `latest_record_ref` 未绑定已被替换的 baseline 时，`baseline_status=ready`。
 - 当 `latest_record_ref` 指向的记录所引用 `baseline_ref` 不再等于同作用域 registry entry 的 `active_baseline_ref` 时，视图应将 `current_result_state` 置为 `stale`，并将 `current_drift_state` 置为 `insufficient_baseline`。
 - 上述场景下，`baseline_status` 也必须为 `superseded`。
@@ -172,5 +176,6 @@
 - baseline snapshot 与 validation record 不得共用同一对象。
 - baseline replacement 的 active/superseded 判定只能来自 `AntiDetectionBaselineRegistryEntry`。
 - `dry_run`、`recon` 与 live 证据必须按 `effective_execution_mode` 分开建 baseline，不得共享同一 registry entry。
+- 不同 `probe_bundle_ref` 的证据必须按独立 registry/view scope 管理，不得混入同一 baseline。
 - `target_fr_ref` 只允许指向反风控能力 FR。
 - 本 FR 的对象只承载能力级验证，不承载 PR 级 merge gate。

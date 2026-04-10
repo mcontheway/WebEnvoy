@@ -71,6 +71,7 @@
 | `browser_channel` | 是 | 否 | registry 作用域的浏览器通道 |
 | `execution_surface` | 是 | 否 | registry 作用域的执行面 |
 | `effective_execution_mode` | 是 | 否 | 继承 `FR-0010/0011` 的正式 execution mode；是 active baseline 分区维度之一 |
+| `probe_bundle_ref` | 是 | 否 | 当前 baseline 作用域所绑定的 probe bundle；不同 bundle 默认不得混用 |
 | `active_baseline_ref` | 是 | 否 | 当前唯一生效的 baseline；是 active/superseded 判定的正式真相源 |
 | `superseded_baseline_refs` | 是 | 否 | 已被该 entry 替换掉的 baseline 列表；可为空数组，但不得为 `null` |
 | `replacement_reason` | 是 | 否 | 当前 active baseline 成为生效基线的原因，如 `initial_seed`、`reseed_after_drift` |
@@ -107,6 +108,7 @@
 | `browser_channel` | 是 | 否 | 视图作用域的浏览器通道 |
 | `execution_surface` | 是 | 否 | 视图作用域的执行面 |
 | `effective_execution_mode` | 是 | 否 | 视图作用域的真实 execution mode 分区 |
+| `probe_bundle_ref` | 是 | 否 | 视图作用域的 probe bundle 分区 |
 | `latest_record_ref` | 是 | 否 | 当前作用域最新一条 validation record |
 | `baseline_status` | 是 | 否 | closed enum：`ready` \| `insufficient` \| `superseded` |
 | `current_result_state` | 是 | 否 | latest record 在当前 registry 语义下的有效结果态 |
@@ -116,10 +118,14 @@
 ## 契约约束
 
 - `validation_scope=cross_layer_baseline` 是唯一 Layer 4 编码入口，仅用于跨 Layer 1-3 信号聚合后的基线评估，不承载 Layer 4 模型本体输出。
+- `validation_scope × target_fr_ref` 的合法组合固定为：`layer1_consistency -> FR-0012`、`layer2_interaction -> FR-0013`、`layer3_session_rhythm -> FR-0014`、`cross_layer_baseline -> 后续 Layer 4 FR`。
 - baseline snapshot 不得仅以自由文本或 issue comment 充当正式载体。
 - baseline replacement 的唯一正式真相源是 `anti_detection_baseline_registry_entry.active_baseline_ref`；snapshot 与 record 都不得自带可写的 active/superseded 状态。
 - `requested_execution_mode` / `effective_execution_mode` 的正式语义一律继承 `FR-0010/0011`；本 FR 只把 `effective_execution_mode` 作为 baseline/sample/record/view 的分区维度，不并行重定义 mode 枚举。
 - `dry_run`、`recon` 与任意 live 模式不得落入同一条 baseline registry scope。
+- `probe_bundle_ref` 是 registry / view 的正式分区键；不同 probe bundle 默认不得落入同一条 baseline scope。
+- `browser_channel` 必须复用 `FR-0015` 归一化后的 canonical channel label；当前示例与正式对象统一使用 `Google Chrome stable`。
+- `execution_surface` 必须复用 `FR-0016` 已冻结枚举：`real_browser`、`stub`、`fake_host`、`other`。
 - validation record 不得替代 `FR-0016` 的 PR 级 gate 对象。
 - Layer 4 只能消费本契约对象，不得借此引入长期运营系统对象。
 
@@ -163,6 +169,7 @@
 - `insufficient`：当前作用域不存在可用 active baseline，或样本覆盖不足以形成有效对比。
 - `superseded`：latest record 绑定的 baseline 已不再是当前 active baseline；此时 `current_result_state` 应投影为 `stale`。
 - `baseline_status` 是 closed enum；新增取值只能通过新的 spec review 引入。
+- `anti_detection_validation_view` 只在首条 validation record 生成后才允许物化；empty scope 不得伪造 `latest_record_ref`。
 
 ### `structured_payload`
 
@@ -183,7 +190,7 @@
     "validation_scope": "layer2_interaction",
     "target_fr_ref": "FR-0013",
     "profile_ref": "profile/default",
-    "browser_channel": "chrome-stable",
+    "browser_channel": "Google Chrome stable",
     "execution_surface": "real_browser",
     "sample_goal": "capture interaction safety baseline",
     "requested_execution_mode": "recon",
@@ -197,7 +204,7 @@
     "target_fr_ref": "FR-0013",
     "validation_scope": "layer2_interaction",
     "profile_ref": "profile/default",
-    "browser_channel": "chrome-stable",
+    "browser_channel": "Google Chrome stable",
     "execution_surface": "real_browser",
     "effective_execution_mode": "recon",
     "probe_bundle_ref": "probe-bundle/layer2-min-v1",
@@ -216,7 +223,7 @@
     "validation_scope": "layer2_interaction",
     "probe_bundle_ref": "probe-bundle/layer2-min-v1",
     "profile_ref": "profile/default",
-    "browser_channel": "chrome-stable",
+    "browser_channel": "Google Chrome stable",
     "execution_surface": "real_browser",
     "effective_execution_mode": "recon",
     "signal_vector": {
@@ -231,9 +238,10 @@
     "target_fr_ref": "FR-0013",
     "validation_scope": "layer2_interaction",
     "profile_ref": "profile/default",
-    "browser_channel": "chrome-stable",
+    "browser_channel": "Google Chrome stable",
     "execution_surface": "real_browser",
     "effective_execution_mode": "recon",
+    "probe_bundle_ref": "probe-bundle/layer2-min-v1",
     "active_baseline_ref": "baseline/layer2/2026-04-10T10:00:00Z",
     "superseded_baseline_refs": [],
     "replacement_reason": "initial_seed",
@@ -245,7 +253,7 @@
     "target_fr_ref": "FR-0013",
     "validation_scope": "layer2_interaction",
     "profile_ref": "profile/default",
-    "browser_channel": "chrome-stable",
+    "browser_channel": "Google Chrome stable",
     "execution_surface": "real_browser",
     "effective_execution_mode": "recon",
     "probe_bundle_ref": "probe-bundle/layer2-min-v1",
@@ -261,9 +269,10 @@
     "target_fr_ref": "FR-0013",
     "validation_scope": "layer2_interaction",
     "profile_ref": "profile/default",
-    "browser_channel": "chrome-stable",
+    "browser_channel": "Google Chrome stable",
     "execution_surface": "real_browser",
     "effective_execution_mode": "recon",
+    "probe_bundle_ref": "probe-bundle/layer2-min-v1",
     "latest_record_ref": "validation/layer2/2026-04-10T10:06:00Z",
     "baseline_status": "ready",
     "current_result_state": "verified",
