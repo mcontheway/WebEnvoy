@@ -43,7 +43,7 @@
 
 用途：
 
-- 记录 `(profile, platform, browser_channel, execution_surface, proxy_binding_ref)` 维度的长期行为基线状态。
+- 记录 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)` 维度的长期行为基线状态。
 
 最小字段：
 

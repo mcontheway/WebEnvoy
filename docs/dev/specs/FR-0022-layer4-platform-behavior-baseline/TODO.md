@@ -18,7 +18,7 @@
 - [ ] reviewer 已确认冷启动、学习期、ready、degraded、reseed 条件描述可形成实现断言。
 - [ ] `plan.md` 已补齐七节最小结构并写清实现前前置。
 - [ ] `contracts/layer4-platform-behavior-baseline.md` 已冻结稳定对象与约束。
-- [ ] `data-model.md` 已明确 profile/platform 维度隔离与审计回链。
+- [ ] `data-model.md` 已明确 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)` 维度隔离与审计回链。
 - [ ] `risks.md` 已覆盖假阳性、样本污染、并行真相源和隐私最小化风险。
 
 ## 进入实现前必须完成

@@ -63,7 +63,7 @@
 - 评审重点：
   - Layer 4 与 Layer 1/2/3 及门禁主链边界是否清晰
   - 状态枚举与对象字段是否足够稳定
-  - 可写基线主键是否已收敛到 `(profile, platform, browser_channel, execution_surface, proxy_binding_ref)`
+  - 可写基线主键是否已收敛到 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)`
   - 冷启动/学习期/降级/reseed 语义是否可直接写成实现断言
 - 实现前验证前置（由后续 PR 承担）：
   - 样本完整性阈值可复核
@@ -76,7 +76,7 @@
   - 基线状态迁移逻辑
   - 漂移等级判定逻辑
   - 决策建议映射逻辑
-  - 基线数据隔离（profile/platform 维度）
+  - 基线数据隔离（profile/platform/browser_channel/execution_surface/effective_execution_mode/probe_bundle_ref/proxy_binding_ref 维度）
   - 审计对象生成与回链
 - 不在本 FR 强制 TDD：
   - 真实平台长期运营实验
