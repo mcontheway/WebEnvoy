@@ -95,6 +95,9 @@
 - `record_ref`
 - `target_fr_ref`
 - `validation_scope`
+- `profile_ref`
+- `browser_channel`
+- `execution_surface`
 - `effective_execution_mode`
 - `probe_bundle_ref`
 - `sample_ref`
@@ -123,6 +126,11 @@
 - `sample_ref` 必须指向 `AntiDetectionStructuredSample.sample_ref`；`result_state=captured` 时必填。
 - `probe_bundle_ref` 必须在 baseline snapshot 与 validation record 中同时保留，以保证落库后仍可追溯探针身份。
 
+### 完整作用域键
+
+- `AntiDetectionValidationRecord` 必须显式携带 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode)` 的完整作用域键。
+- 当 `baseline_ref` 为空或 `sample_ref` 缺失时，仍必须能够只依赖记录自身字段被确定性归入正确的共享视图与 baseline scope。
+
 ## 6. `AntiDetectionValidationView`
 
 - `target_fr_ref`
@@ -139,7 +147,10 @@
 
 ### 派生规则
 
+- `baseline_status` 是 closed enum，只允许 `ready`、`insufficient`、`superseded`。
+- 当当前作用域存在 active baseline，且 `latest_record_ref` 未绑定已被替换的 baseline 时，`baseline_status=ready`。
 - 当 `latest_record_ref` 指向的记录所引用 `baseline_ref` 不再等于同作用域 registry entry 的 `active_baseline_ref` 时，视图应将 `current_result_state` 置为 `stale`，并将 `current_drift_state` 置为 `insufficient_baseline`。
+- 上述场景下，`baseline_status` 也必须为 `superseded`。
 - 当目标 scope 不存在可用基线或样本覆盖不足时，视图应将 `baseline_status` 标记为 `insufficient`，并将 `current_drift_state` 置为 `insufficient_baseline`。
 
 ## 约束

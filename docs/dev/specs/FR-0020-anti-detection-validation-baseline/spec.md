@@ -110,6 +110,9 @@ Canonical Issue: #239
   - `record_ref`
   - `target_fr_ref`
   - `validation_scope`
+  - `profile_ref`
+  - `browser_channel`
+  - `execution_surface`
   - `effective_execution_mode`
   - `probe_bundle_ref`
   - `sample_ref`
@@ -134,6 +137,7 @@ Canonical Issue: #239
   - baseline snapshot 与 validation record 是两类对象，不得混写成同一条 run 日志
   - `anti_detection_baseline_registry_entry` 是 baseline replacement 的唯一正式真相源；baseline snapshot 本身不得自带“当前生效”或 `superseded` 的可写状态
   - `effective_execution_mode` 继承 `FR-0010/0011` 的正式语义，并作为 baseline/sample/record/view 的共享分区维度；不得把 `dry_run`、`recon` 与任意 live 模式落入同一 baseline scope
+  - `anti_detection_validation_record` 必须携带 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode)` 的完整作用域键；不得把正确归属只留给 `sample_ref` 或 `baseline_ref` 间接推断
   - 只有当同一 `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode)` 作用域下的 `active_baseline_ref` 被切换到新的 `baseline_ref` 时，旧 baseline 才进入 `superseded` 语义
   - `sample_ref` 必须指向已持久化的结构化样本载体；`result_state=captured` 时不得只剩自由文本结论
   - `probe_bundle_ref` 必须随 baseline snapshot 与 validation record 一起持久化，不能只停留在 request 输入侧
@@ -154,9 +158,14 @@ Canonical Issue: #239
   - `current_result_state`
   - `current_drift_state`
   - `last_success_at`
+- `baseline_status` 至少支持：
+  - `ready`：当前作用域存在 active baseline，且 latest record 未指向已被替换的 baseline
+  - `insufficient`：当前作用域不存在可用 active baseline，或样本覆盖不足以形成有效对比
+  - `superseded`：latest record 绑定的 baseline 已不再是当前 active baseline
 - 必须明确：
   - 该视图是面向 reviewer、实现 PR 与后续诊断链路的最小共享视图
   - 该视图必须由 baseline snapshot、baseline registry entry 与 validation record 共同投影；不得把任一单独对象误当成完整真相源
+  - `baseline_status` 是 closed enum；下游 FR 不得各自扩写私有取值或重新解释兼容性
   - 它不替代 `FR-0016` 的 PR 级 `live_evidence_record`
   - 它也不等于最终的账号健康度或平台长期评分
 
@@ -221,6 +230,13 @@ When reviewer 检查本 FR 的共享 key
 Then 能看到 `effective_execution_mode` 是 baseline/sample/record/view 的正式分区维度
 And `dry_run`、`recon` 与 live 证据不会落入同一条 baseline
 
+### 场景 7：共享视图的 baseline_status 语义闭合
+
+Given 下游 `FR-0012/0013/0014` 需要直接消费共享视图
+When reviewer 检查 `anti_detection_validation_view`
+Then 能看到 `baseline_status` 的允许取值与兼容性规则已经冻结
+And 下游 FR 不需要各自发明新的状态枚举
+
 ## 异常与边界场景
 
 1. 只有一次 live 试验截图，没有 `signal_vector` 或 `source_run_ids`：不得视为 baseline。
@@ -230,7 +246,9 @@ And `dry_run`、`recon` 与 live 证据不会落入同一条 baseline
 5. `sample_ref` 只指向截图、issue comment 或自由文本，没有正式 `anti_detection_structured_sample`：视为共享输入未冻结。
 6. 通过 snapshot、record 或自由文本直接宣布某条 baseline 已被替换，但未更新 `anti_detection_baseline_registry_entry`：视为真相源冲突。
 7. `dry_run`、`recon` 与 live 证据被落入同一 baseline scope：视为 execution mode 维度缺失。
-8. Layer 4 需求被直接塞入账号健康、长期养号或运营系统：视为越过当前产品边界。
+8. `anti_detection_validation_record` 缺少完整作用域键，需要依赖外部对象才能归属到正确 baseline scope：视为共享对象未冻结完整。
+9. `baseline_status` 没有 closed enum 而被下游 FR 各自扩写：视为共享视图语义失控。
+10. Layer 4 需求被直接塞入账号健康、长期养号或运营系统：视为越过当前产品边界。
 
 ## 验收标准
 
@@ -239,8 +257,9 @@ And `dry_run`、`recon` 与 live 证据不会落入同一条 baseline
 3. 已明确 `FR-0012/0013/0014` 与后续 Layer 4 的共享方式。
 4. 已明确 baseline replacement 的唯一正式真相源，以及 `stale/superseded` 的判定来源。
 5. 已明确 `requested_execution_mode/effective_execution_mode` 的继承关系与 baseline 分区边界。
-6. 已明确与 `FR-0016`、`FR-0015` 的边界，不混入 PR 门禁或 runtime 主链。
-7. 本 PR 只冻结规约，不混入实现代码。
+6. 已明确 validation record 的完整作用域键与 `baseline_status` 的 closed enum 语义。
+7. 已明确与 `FR-0016`、`FR-0015` 的边界，不混入 PR 门禁或 runtime 主链。
+8. 本 PR 只冻结规约，不混入实现代码。
 
 ## 依赖与前置条件
 

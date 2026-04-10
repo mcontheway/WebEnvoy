@@ -78,6 +78,9 @@
 | `record_ref` | 是 | 否 | 验证记录主标识 |
 | `target_fr_ref` | 是 | 否 | 该次验证服务的 FR |
 | `validation_scope` | 是 | 否 | 与 request 同源的 closed enum |
+| `profile_ref` | 是 | 否 | 该次验证所属 profile 维度 |
+| `browser_channel` | 是 | 否 | 该次验证所属浏览器通道 |
+| `execution_surface` | 是 | 否 | 该次验证所属执行面 |
 | `effective_execution_mode` | 是 | 否 | 与实际采样/验证结果一致的 execution mode |
 | `probe_bundle_ref` | 是 | 否 | 实际用于本次验证的探针集合 |
 | `sample_ref` | 条件 | 是 | `result_state=captured` 时必填；其他状态允许保留但不得伪造 |
@@ -99,7 +102,7 @@
 | `execution_surface` | 是 | 否 | 视图作用域的执行面 |
 | `effective_execution_mode` | 是 | 否 | 视图作用域的真实 execution mode 分区 |
 | `latest_record_ref` | 是 | 否 | 当前作用域最新一条 validation record |
-| `baseline_status` | 是 | 否 | 基于 registry entry 与 latest record 派生出的基线可用状态 |
+| `baseline_status` | 是 | 否 | closed enum：`ready` \| `insufficient` \| `superseded` |
 | `current_result_state` | 是 | 否 | latest record 在当前 registry 语义下的有效结果态 |
 | `current_drift_state` | 是 | 否 | latest record 在当前 registry 语义下的有效漂移态 |
 | `last_success_at` | 否 | 是 | 最近一次 `result_state=verified` 的时间；不存在成功记录时允许为空 |
@@ -140,6 +143,13 @@
 - `sample_ref` 必须引用 `anti_detection_structured_sample.sample_ref`，不得退化为 issue comment、自由文本摘要或临时控制台输出。
 - 在 `result_state=captured` 时必须填写。
 - 在 `result_state=verified/broken/stale` 时允许继续保留，用于追溯本次判定所依据的样本。
+
+### `baseline_status`
+
+- `ready`：当前作用域存在 active baseline，且 latest record 未绑定已被替换的 baseline。
+- `insufficient`：当前作用域不存在可用 active baseline，或样本覆盖不足以形成有效对比。
+- `superseded`：latest record 绑定的 baseline 已不再是当前 active baseline；此时 `current_result_state` 应投影为 `stale`。
+- `baseline_status` 是 closed enum；新增取值只能通过新的 spec review 引入。
 
 ### `structured_payload`
 
@@ -215,6 +225,9 @@
     "record_ref": "validation/layer2/2026-04-10T10:06:00Z",
     "target_fr_ref": "FR-0013",
     "validation_scope": "layer2_interaction",
+    "profile_ref": "profile/default",
+    "browser_channel": "chrome-stable",
+    "execution_surface": "real_browser",
     "effective_execution_mode": "recon",
     "probe_bundle_ref": "probe-bundle/layer2-min-v1",
     "sample_ref": "sample/layer2/2026-04-10T10:02:00Z",
@@ -224,6 +237,19 @@
     "failure_class": null,
     "run_id": "run-20260410-100600-001",
     "validated_at": "2026-04-10T10:06:30Z"
+  },
+  "anti_detection_validation_view": {
+    "target_fr_ref": "FR-0013",
+    "validation_scope": "layer2_interaction",
+    "profile_ref": "profile/default",
+    "browser_channel": "chrome-stable",
+    "execution_surface": "real_browser",
+    "effective_execution_mode": "recon",
+    "latest_record_ref": "validation/layer2/2026-04-10T10:06:00Z",
+    "baseline_status": "ready",
+    "current_result_state": "verified",
+    "current_drift_state": "no_drift",
+    "last_success_at": "2026-04-10T10:06:30Z"
   }
 }
 ```

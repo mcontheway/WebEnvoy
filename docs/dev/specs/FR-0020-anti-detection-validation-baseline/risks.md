@@ -35,3 +35,15 @@
 - 表现：不同下游 FR 各自把 `sample_ref` 解释为截图、临时日志或私有 JSON，导致 replay、比对与诊断失去统一输入
 - 缓解：冻结 `AntiDetectionStructuredSample` 的最小字段和 ownership，要求 `structured_payload` 为正式承载
 - 回滚：拒绝消费不符合正式样本结构的记录，只保留原始 evidence
+
+## 风险 7：validation record 无法被确定性归入正确 scope
+
+- 表现：record 缺少 profile/browser/surface 等作用域键，只能依赖 `baseline_ref` 或 `sample_ref` 间接归属，导致 latest view 漂移
+- 缓解：要求 `AntiDetectionValidationRecord` 自身携带完整作用域键
+- 回滚：拒绝消费缺键记录，回退到仅保留原始 evidence
+
+## 风险 8：`baseline_status` 被下游 FR 各自扩写
+
+- 表现：共享视图的 `baseline_status` 没有 closed enum，`FR-0012/0013/0014` 为同一字段各自发明不同取值
+- 缓解：把 `baseline_status` 冻结为 `ready | insufficient | superseded`，并要求新增取值必须重新走 spec review
+- 回滚：移除未冻结状态，回到正式枚举集合
