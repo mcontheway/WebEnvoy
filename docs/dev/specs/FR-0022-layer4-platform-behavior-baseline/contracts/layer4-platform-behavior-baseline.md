@@ -8,7 +8,7 @@ type ActionType =
   | "navigate"
   | "locate"
   | "extract"
-  | "reveal_only_click"
+  | "click"
   | "wait_settled"
   | "type"
   | "submit"
@@ -25,7 +25,7 @@ interface ActionMix {
   navigate: number
   locate: number
   extract: number
-  reveal_only_click: number
+  click: number
   wait_settled: number
   type: number
   submit: number
@@ -80,11 +80,12 @@ interface PlatformBehaviorSignalBatch {
 - `browser_channel` 当前只允许 `Google Chrome stable`，且必须与 `FR-0015`、`FR-0016`、`FR-0020` 复用同一 canonical label。
 - `execution_surface` 必须直接复用 `FR-0016` 的正式枚举，不得回退为本 FR 私有取值。
 - `goal_kind` 与 `interaction_safety_class` 必须保持可解释映射，不得出现“高风险写动作却标成 `pure_read`”。
-- `goal_kind=read` 时，`interaction_safety_class` 必须为 `pure_read`，且 `ActionMix` 仅允许 `navigate | locate | reveal_only_click | extract | wait_settled` 出现非零值。
-- `ActionMix` 的最小稳定动作集合必须至少覆盖 `navigate | locate | reveal_only_click | extract | wait_settled | type | submit | confirm | publish | purchase | dispatch | bind`。
+- `goal_kind=read` 时，`interaction_safety_class` 必须为 `pure_read`，且 `ActionMix` 仅允许 `navigate | locate | click | extract | wait_settled` 出现非零值。
+- `ActionMix` 的最小稳定动作集合必须至少覆盖 `navigate | locate | click | extract | wait_settled | type | submit | confirm | publish | purchase | dispatch | bind`。
+- `ActionMix.click` 与 `action_type=click` 只允许复用 `FR-0019` trace-side 的 `action=click + interaction_semantics=reveal_only_click`；request-side `allowed_actions=reveal_only_click` 是上游授权语义，不得在 Layer 4 被复制成新的 action enum。
 - 只要 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 任一出现非零值，该批次就不得标记为 `pure_read`。
 - 本 FR 不冻结 `download` 为独立 Layer 4 goal；下载链路在进入本对象前必须先完成 `read/write` 映射。
-- 若下载链路仅包含 `navigate | locate | reveal_only_click | extract | wait_settled`，必须映射为 `goal_kind=read`。
+- 若下载链路仅包含 `navigate | locate | click | extract | wait_settled`，必须映射为 `goal_kind=read`。
 - 若下载链路包含 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 或其他写入型交互，必须映射为 `goal_kind=write`，且不得标记为 `pure_read`。
 - 下载链路进入 assessment 时，`action_type` 必须继续记录实际交互动作，不得再平行定义 `download` 作为新的 Layer 4 action shortcut。
 - 该对象必须可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的共享验证输入，不得独立形成第二套 baseline scope。
@@ -175,7 +176,7 @@ interface PlatformBehaviorAssessment {
 - `threshold_config_snapshot_ref` 必须指向本次 assessment 使用的不可变阈值配置快照。
 - `decision_id` 与 `audit_record_ref` 仅用于门禁消费后的回链，不得被解释为新增 gate result。
 - `decision_id` 与 `audit_record_ref` 必须同进同退：门禁尚未消费时二者都为空；门禁已消费并形成正式决策/审计对象后二者都必须可回填。
-- `action_type` 的最小稳定动作集合必须至少覆盖 `navigate | locate | reveal_only_click | extract | wait_settled | type | submit | confirm | publish | purchase | dispatch | bind`，不得并行引入 `download` 等新的 Layer 4 动作快捷值。
+- `action_type` 的最小稳定动作集合必须至少覆盖 `navigate | locate | click | extract | wait_settled | type | submit | confirm | publish | purchase | dispatch | bind`，不得并行引入 `download` 等新的 Layer 4 动作快捷值。
 - `proxy_binding_ref` 只用于记录本次 assessment 所对应批次的代理绑定证据，不参与 active baseline 选择。
 - 该对象只能比较同一 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 内、由 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 选中的 active baseline。
 - 当 `drift_level=high|critical` 时，不得返回会扩大风险的建议（例如直接放行高风险 live write）。

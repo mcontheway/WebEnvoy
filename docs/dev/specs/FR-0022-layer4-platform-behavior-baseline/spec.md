@@ -55,13 +55,14 @@ Canonical Issue: #238
   - `anti_detection_baseline_registry_entry.active_baseline_ref` 是 Layer 4 唯一允许消费的 active baseline 判定来源；不得仅凭 snapshot / validation record 自行宣布某条 baseline 仍为当前生效
 - Layer 4 输出只能作为 `risk decision hint`，不能直接覆盖门禁最终判定。
 - `goal_kind=read` 时必须继承 `FR-0019` 的 `interaction_safety_class=pure_read` 语义：
-  - 仅允许动作 `navigate | locate | reveal_only_click | extract | wait_settled`
+  - 仅允许动作 `navigate | locate | click | extract | wait_settled`
+  - 其中 Layer 4 的 `click` 只复用 `FR-0019` trace-side 的 `action=click + interaction_semantics=reveal_only_click`；request-side `allowed_actions=reveal_only_click` 仍留在上游授权语义，不在本 FR 内复制为新的 action enum
   - 只要出现 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch` 或 `bind`，不得标记为 `pure_read`
 - 本 FR 当前只冻结 `goal_kind=read|write` 两类 Layer 4 输入；`download` 不作为独立 Layer 4 goal 枚举冻结。
 - 下载链路在进入 Layer 4 前必须完成正式映射：
-  - 若下载来源解析只包含 `navigate | locate | reveal_only_click | extract | wait_settled`，必须映射为 `goal_kind=read` 并继续满足 `pure_read`
+  - 若下载来源解析只包含 `navigate | locate | click | extract | wait_settled`，必须映射为 `goal_kind=read` 并继续满足 `pure_read`
   - 若下载链路包含 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 或其他写入型交互，必须映射为 `goal_kind=write`，且不得标记为 `pure_read`
-- 下载链路进入 `platform_behavior_assessment` 后，`action_type` 必须继续记录实际交互动作（至少覆盖 `navigate`、`locate`、`reveal_only_click`、`extract`、`wait_settled`、`type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind`），不得平行引入 `download` 作为新的 Layer 4 action shortcut。
+- 下载链路进入 `platform_behavior_assessment` 后，`action_type` 必须继续记录实际交互动作（至少覆盖 `navigate`、`locate`、`click`、`extract`、`wait_settled`、`type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind`），不得平行引入 `download` 作为新的 Layer 4 action shortcut。
 
 ### 2. Layer 4 最小对象与状态机
 
@@ -137,7 +138,7 @@ Canonical Issue: #238
 - `proxy_binding_ref` 只允许作为本次运行批次与 assessment 的代理绑定证据；在 `FR-0020` registry scope 未正式扩展前，Layer 4 不得把它提升为 active baseline key 或 `platform_behavior_baseline_state` 可写主键。
 - 信号必须可回链到 `runtime.audit` 与 session 证据，不允许“无来源信号”进入基线计算。
 - 缺少 `run_id/session_id/profile/platform` 任一主键坐标时，必须拒绝入库并输出结构化错误。
-- `action_mix` 必须显式包含 `wait_settled`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 等动作计数，确保 `FR-0019` 的 pure-read 禁止集合可以被稳定编码。
+- `action_mix` 必须显式包含 `click`、`wait_settled`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 等动作计数，确保 `FR-0019` 的 trace 语义与 pure-read 禁止集合可以被稳定编码。
 - `platform_behavior_baseline_state` 可写主键必须为 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`。
 - `runtime_context_id` 与 `proxy_binding_ref` 只允许作为 run/session 证据回链字段，不能进入可写基线主键。
 
@@ -280,7 +281,7 @@ And `decision_hint` 只能是 `require_manual_review` 或 `require_reseed`
 
 ### 场景 9：下载链路不会绕过 Layer 4 goal 映射
 
-Given 一条下载链路只包含 `navigate | locate | reveal_only_click | extract | wait_settled`
+Given 一条下载链路只包含 `navigate | locate | click | extract | wait_settled`
 When 进入 Layer 4 信号采样
 Then 该链路必须被映射为 `goal_kind=read`
 And 仍可标记为 `pure_read`

@@ -33,10 +33,11 @@
 - `browser_channel` 当前 formal baseline 只允许 `Google Chrome stable`，并必须与 `FR-0015`、`FR-0016`、`FR-0020` 共享同一 canonical label。
 - `execution_surface` 必须复用 `FR-0016` 已冻结枚举：`real_browser | stub | fake_host | other`。
 - 仅允许摘要字段，不允许页面正文、输入明文、媒体内容等高敏原文数据。
-- `action_mix` 至少覆盖 `navigate`、`locate`、`extract`、`reveal_only_click`、`wait_settled`、`type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 的计数或比率。
-- `goal_kind=read` 时，`interaction_safety_class` 必须为 `pure_read`，且只允许 `navigate | locate | reveal_only_click | extract | wait_settled` 出现非零值；若出现 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 任一动作，不得标记为 `pure_read`。
+- `action_mix` 至少覆盖 `navigate`、`locate`、`extract`、`click`、`wait_settled`、`type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 的计数或比率。
+- `goal_kind=read` 时，`interaction_safety_class` 必须为 `pure_read`，且只允许 `navigate | locate | click | extract | wait_settled` 出现非零值；若出现 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 任一动作，不得标记为 `pure_read`。
+- `action_mix.click` 只允许复用 `FR-0019` trace-side 的 `action=click + interaction_semantics=reveal_only_click`；request-side `allowed_actions=reveal_only_click` 是上游授权语义，不得在 Layer 4 被复制为新的动作枚举。
 - 本 FR 当前只冻结 `goal_kind=read|write`；下载链路在进入 Layer 4 前必须先被映射到这两个 goal 之一。
-- 若下载链路只包含 `navigate | locate | reveal_only_click | extract | wait_settled`，必须映射为 `goal_kind=read`；若包含 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 或其他写入型交互，必须映射为 `goal_kind=write`。
+- 若下载链路只包含 `navigate | locate | click | extract | wait_settled`，必须映射为 `goal_kind=read`；若包含 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 或其他写入型交互，必须映射为 `goal_kind=write`。
 - 下载链路进入 `platform_behavior_assessment` 后，`action_type` 必须继续记录实际交互动作，不得另起 `download` 作为新的 Layer 4 action shortcut。
 - 该对象只能承接已可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的共享验证输入，不得自行扩写第二套 baseline 作用域。
 - `effective_execution_mode` 与 `probe_bundle_ref` 必须继续保留在 Layer 4 输入 identity 中；不得把不同 recon/live scope 或不同 probe bundle 的共享输入合并到同一条 baseline / assessment。
@@ -150,7 +151,7 @@
 - `evidence_refs` 至少能回链到输入批次或运行审计记录，禁止“无证据评估”。
 - `threshold_config_snapshot_ref` 必须指向本次 assessment 使用的不可变阈值配置快照，确保漂移判定可重放、可审计。
 - `decision_id` 与 `audit_record_ref` 仅用于门禁消费后的审计回链，不构成新的 gate result 对象。
-- `action_type` 必须落在稳定动作集合 `navigate | locate | reveal_only_click | extract | wait_settled | type | submit | confirm | publish | purchase | dispatch | bind` 内，不得并行引入 `download` 等新的 Layer 4 动作快捷值。
+- `action_type` 必须落在稳定动作集合 `navigate | locate | click | extract | wait_settled | type | submit | confirm | publish | purchase | dispatch | bind` 内，不得并行引入 `download` 等新的 Layer 4 动作快捷值。
 - `proxy_binding_ref` 只用于记录本次 assessment 所对应批次的代理绑定证据，不参与 active baseline 选择。
 - `platform_behavior_assessment` 只能比较同一 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 内、由 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 选中的 active baseline。
 - `confidence` 必须在 `[0,1]`，用于表达评估可信度，不可当作放行开关。
