@@ -13,9 +13,10 @@
 - [ ] reviewer 已确认 Layer 4 结果只作为 `decision_hint`，不直接改写门禁真相源。
 - [ ] reviewer 已确认当前 implementation-ready formal 输入不再把未 canonical 的 proxy binding 标为 Layer 4 必填字段；如未来要引入 `proxy_binding_ref`，必须先补上游 formal contract。
 - [ ] reviewer 已确认 `platform_behavior_signal_batch`、`platform_behavior_baseline_state`、`platform_behavior_assessment` 已保留 `profile_ref`、`effective_execution_mode` 与 `probe_bundle_ref`，不再丢失 `FR-0020` formal baseline scope keys。
+- [ ] reviewer 已确认 `FR-0019.risk_gate_context.target_domain` 已被保留到 `platform_behavior_baseline_state` / `platform_behavior_assessment` identity，不会把不同域名样本合并到同一 Layer 4 baseline。
 - [ ] reviewer 已确认 `platform_behavior_assessment` 已补齐 `baseline_ref` 与 `threshold_config_snapshot_ref`，满足 replay / audit 对基线快照与阈值快照的最小回链要求。
 - [ ] reviewer 已确认 `platform_behavior_baseline_state` 以 `baseline_ref` 对齐上游 `active_baseline_ref`，不再使用未定义的 `baseline_version` 作为并行标识。
-- [ ] reviewer 已确认 `browser_channel` 与 `execution_surface` 已分别收敛到 `Google Chrome stable` 与 `FR-0016` 共享枚举，不再并行发明私有编码。
+- [ ] reviewer 已确认 `browser_channel` 与 `execution_surface` 已分别收敛到 `Google Chrome stable` 与 `FR-0016.execution_surface=real_browser`，`stub | fake_host | other` 不再被当作当前 Layer 4 formal input。
 - [ ] reviewer 已确认 `platform_behavior_baseline_state` 与 `platform_behavior_assessment` 的条件字段语义一致：`ready_at/last_assessed_at`、`decision_id/audit_record_ref` 不再跨文档漂移。
 - [ ] reviewer 已确认 `session_id` 只作为可选会话坐标，不再被写成每个 Layer 4 signal batch 的硬前置。
 - [ ] reviewer 已确认 pure-read 继承 `FR-0019`：只允许 `navigate|locate|click|extract|wait_settled`，且 `click` 只复用 `action=click + interaction_semantics=reveal_only_click`；出现 `type|submit|confirm|publish|purchase|dispatch|bind` 任一动作即不得标记为 `pure_read`。
@@ -25,14 +26,16 @@
 - [ ] reviewer 已确认 `degraded` 与 `reseed_required` 的触发准则已冻结到 freshness、连续高漂移、污染/invalidated baseline 三类场景。
 - [ ] `plan.md` 已补齐七节最小结构并写清实现前前置。
 - [ ] `contracts/layer4-platform-behavior-baseline.md` 已冻结稳定对象与约束。
-- [ ] `data-model.md` 已明确 `(profile_ref, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 维度隔离，且未把未 canonical 的 proxy binding 写成当前 formal 必填输入。
+- [ ] `data-model.md` 已明确 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 维度隔离，且未把未 canonical 的 proxy binding 写成当前 formal 必填输入。
 - [ ] `risks.md` 已覆盖假阳性、样本污染、并行真相源和隐私最小化风险。
 
 ## 进入实现前必须完成
 
 - [ ] FR-0022 spec review 通过并形成明确结论。
 - [ ] `FR-0020`（`#239`）已合入 `main`，并提供 Layer 4 可消费的 `anti_detection_validation_request`、`anti_detection_structured_sample`、`anti_detection_baseline_snapshot`、`anti_detection_baseline_registry_entry`、`anti_detection_validation_record` 与 `validation_scope=cross_layer_baseline` 正式输入。
+- [ ] `FR-0019.risk_gate_context.target_domain` 已在 `FR-0022` baseline identity 中被保留，不会把不同域名的 baseline 合并。
 - [ ] `FR-0020` 的 `profile_ref`、`effective_execution_mode` 与 `probe_bundle_ref` 已在 `FR-0022` baseline identity 中被保留，不会把不同 scope 的 baseline 合并。
+- [ ] 当前 formal input 已明确收紧到 `execution_surface=real_browser`。
 - [ ] reviewer 确认 Layer 4 与 `FR-0010/0011` 门禁链路兼容。
 - [ ] reviewer 确认 Layer 4 的数据最小化约束可执行。
 

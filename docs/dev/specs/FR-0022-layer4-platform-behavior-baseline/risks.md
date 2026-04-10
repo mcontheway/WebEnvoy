@@ -16,12 +16,12 @@
 ## 风险 2：样本污染与跨 profile 串扰
 
 - 场景：
-  - 不同 profile/platform，或不同 `effective_execution_mode` / `probe_bundle_ref` 的行为样本被合并写入同一基线。
+  - 不同 profile/platform/target_domain，或不同 `effective_execution_mode` / `probe_bundle_ref` 的行为样本被合并写入同一基线。
   - Layer 4 把上游尚未 canonical 的 proxy binding 直接写成 formal 必填输入或并行 active baseline key。
 - 影响：
   - 基线失真，后续评估不可用，或引入第二条 active baseline 真相源。
 - 缓解：
-  - 以 `(profile_ref, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 作为可写隔离主键。
+  - 以 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 作为可写隔离主键。
   - `runtime_context_id` 仅用于 run/session 证据回链，不参与可写基线主键。
   - 当前 FR 不把 proxy binding 纳入 implementation-ready formal 输入；如未来需要 `proxy_binding_ref`，必须先补上游 canonical contract。
   - 缺少主键坐标的信号一律拒绝入库。
@@ -60,11 +60,13 @@
 
 - 场景：
   - 将页面原文、输入明文等敏感信息写入 Layer 4 样本。
+  - 将 `stub | fake_host | other` 这类非真实浏览器执行面样本混入当前 Layer 4 implementation-ready formal baseline。
 - 影响：
   - 数据治理风险和审查阻断。
 - 缓解：
   - 合同层只允许行为摘要字段。
   - 引入字段白名单与入库校验。
+  - 当前 formal input 只接受 `execution_surface=real_browser`；其余执行面必须在上游证据层被拒绝或隔离，不得进入 Layer 4 baseline。
 - 回滚：
   - 立即停写违规字段并清理对应历史样本分区。
 

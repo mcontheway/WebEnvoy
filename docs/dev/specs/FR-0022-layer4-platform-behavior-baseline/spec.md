@@ -50,14 +50,17 @@ Canonical Issue: #238
   - `FR-0003`：profile/session 最小身份边界
 - `FR-0020` 必须是 Layer 4 共享验证输入的唯一 formal owner：
   - `FR-0022` 只消费 `FR-0020` 已冻结的 formal object family：`anti_detection_validation_request`、`anti_detection_structured_sample`、`anti_detection_baseline_snapshot`、`anti_detection_baseline_registry_entry` 与 `anti_detection_validation_record`
+  - `anti_detection_validation_view` 是上游派生读模型，不作为 Layer 4 baseline identity 的正式输入或真相源
   - `validation_scope=cross_layer_baseline` 是 Layer 4 唯一正式编码入口
   - `FR-0022` 不得再平行定义第二套 baseline snapshot / validation record 真相源
+  - `FR-0022` 当前把 `target_fr_ref=#238` 与 `validation_scope=cross_layer_baseline` 视为固定 lane 常量；它们必须显式受上游 formal contract 约束，但不在 Layer 4 writable identity 中重复落库
   - `anti_detection_baseline_registry_entry.active_baseline_ref` 是 Layer 4 唯一允许消费的 active baseline 判定来源；不得仅凭 snapshot / validation record 自行宣布某条 baseline 仍为当前生效
 - Layer 4 输出只能作为 `risk decision hint`，不能直接覆盖门禁最终判定。
 - `goal_kind=read` 时必须继承 `FR-0019` 的 `interaction_safety_class=pure_read` 语义：
   - 仅允许动作 `navigate | locate | click | extract | wait_settled`
   - 其中 Layer 4 的 `click` 只复用 `FR-0019` trace-side 的 `action=click + interaction_semantics=reveal_only_click`；request-side `allowed_actions=reveal_only_click` 仍留在上游授权语义，不在本 FR 内复制为新的 action enum
   - 只要出现 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch` 或 `bind`，不得标记为 `pure_read`
+- Layer 4 baseline identity 必须继续保留 `FR-0019.risk_gate_context.target_domain` 的正式域隔离，不得把不同域名的样本、基线或 assessment 混入同一条可写状态。
 - 本 FR 当前只冻结 `goal_kind=read|write` 两类 Layer 4 输入；`download` 不作为独立 Layer 4 goal 枚举冻结。
 - 下载链路在进入 Layer 4 前必须完成正式映射：
   - 若下载来源解析只包含 `navigate | locate | click | extract | wait_settled`，必须映射为 `goal_kind=read` 并继续满足 `pure_read`
@@ -73,6 +76,7 @@ Canonical Issue: #238
 - `platform_behavior_baseline_state` 的最小必填字段至少包含：
   - `profile_ref`
   - `platform`
+  - `target_domain`
   - `browser_channel`
   - `execution_surface`
   - `effective_execution_mode`
@@ -104,7 +108,7 @@ Canonical Issue: #238
   - 同 scope 最新样本批次未通过正式的字段完整性或证据回链校验，导致 ready 基线不再可直接信任
 - `reseed_required=true` 的最小触发准则必须冻结为：
   - `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 已不再指向当前 `baseline_ref`，或该 baseline 被显式 supersede / invalidate
-  - 检测到跨 `(profile_ref, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 的样本污染或隔离破坏
+  - 检测到跨 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 的样本污染或隔离破坏
   - 同 scope 持续处于 `degraded`，或重复出现 `high|critical` 漂移，且已达到当前 `threshold_config_snapshot_ref` 定义的 reseed threshold
 - 一旦 `reseed_required=true`，`baseline_state` 不得继续保持稳定 `ready`；下游 `decision_hint` 只能收敛到 `require_manual_review` 或 `require_reseed`，直到新学习周期重新建立。
 
@@ -133,8 +137,9 @@ Canonical Issue: #238
   - `risk_feedback_signals`
 - `click_kind_mix` 只在 `action_mix.click > 0` 时必填。
 - `browser_channel` 在当前 formal baseline 下只允许 `Google Chrome stable`，并必须与 `FR-0015`、`FR-0016`、`FR-0020` 共享同一 canonical label。
-- `execution_surface` 必须直接复用 `FR-0016` 已冻结枚举：`real_browser | stub | fake_host | other`。
+- `execution_surface` 的语义必须复用 `FR-0016` 已冻结枚举；但当前 implementation-ready formal input 只接受 `real_browser`，`stub | fake_host | other` 只允许停留在上游 live evidence，不得进入 Layer 4 signal batch / baseline / assessment。
 - `profile_ref` 必须直接复用 `FR-0020` / `FR-0003` 的 canonical profile namespace，不得并行发明 `profile` 正式键。
+- `target_domain` 必须直接复用 `FR-0019.risk_gate_context.target_domain` 的 canonical 域坐标，不得在 Layer 4 baseline identity 中被丢弃。
 - `platform_behavior_signal_batch` 只能承接已可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的运行摘要输入，不得独立形成并行 baseline 作用域。
 - Layer 4 若需要判定当前 active baseline，必须通过 `FR-0020.anti_detection_baseline_registry_entry` 解析，而不是直接把任意 snapshot / record 当作当前生效基线。
 - Layer 4 不得把不同 `effective_execution_mode` 或不同 `probe_bundle_ref` 的共享输入合并到同一条 baseline state / drift assessment。
@@ -146,7 +151,7 @@ Canonical Issue: #238
 - 缺少 `run_id/profile_ref/platform` 任一主键坐标时，必须拒绝入库并输出结构化错误。
 - `action_mix` 必须显式包含 `click`、`wait_settled`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 等动作计数，确保 `FR-0019` 的 trace 语义与 pure-read 禁止集合可以被稳定编码。
 - 当 `action_mix.click > 0` 时，必须同时保留 `click_kind_mix`，其计数总和必须等于 `action_mix.click`，并只允许承接 `FR-0019` reveal-only click kinds。
-- `platform_behavior_baseline_state` 可写主键必须为 `(profile_ref, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`。
+- `platform_behavior_baseline_state` 可写主键必须为 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`。
 - `runtime_context_id` 只允许作为 run/session 证据回链字段，不能进入可写基线主键。
 
 ### 4. 偏移评估与输出边界
@@ -155,6 +160,7 @@ Canonical Issue: #238
   - `assessment_id`
   - `profile_ref`
   - `platform`
+  - `target_domain`
   - `browser_channel`
   - `execution_surface`
   - `probe_bundle_ref`
@@ -191,7 +197,7 @@ Canonical Issue: #238
 - `threshold_config_snapshot_ref` 必须指向本次 assessment 使用的不可变阈值配置快照，确保漂移判定可重放、可审计。
 - `decision_id` 与 `audit_record_ref` 只允许作为门禁消费后的审计回链，不得被解释为新增 gate result。
 - `action_type=click` 时，`interaction_semantics` 必须固定为 `reveal_only_click`，且 `click_kind` 必须保留对应的 `FR-0019` reveal-only click kind。
-- `platform_behavior_assessment` 只能比较同一 `(profile_ref, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 内、由 registry 选中的 active baseline；不得跨 mode / probe bundle 混用。
+- `platform_behavior_assessment` 只能比较同一 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 内、由 registry 选中的 active baseline；不得跨域、跨 mode 或跨 probe bundle 混用。
 
 ### 5. 冷启动（cold start）与学习期约束
 
@@ -228,6 +234,8 @@ Canonical Issue: #238
   - `FR-0020` 已提供 `anti_detection_baseline_registry_entry`
   - `FR-0020` 已提供 `anti_detection_validation_record`
   - `FR-0020.validation_scope=cross_layer_baseline` 已可作为 Layer 4 正式输入
+  - `FR-0019.risk_gate_context.target_domain` 已在 Layer 4 baseline identity 中被保留
+  - 当前 formal input 已明确收紧到 `execution_surface=real_browser`
 - 更细的阈值冻结、假阳性/漏报研究若需进入正式契约，必须通过后续独立 spec review，不得反向要求本 FR 先承诺这些细节已冻结。
 - 若实现需要扩展 `FR-0010/0011` 正式字段，必须先补充 spec review，不得边实现边改主契约。
 

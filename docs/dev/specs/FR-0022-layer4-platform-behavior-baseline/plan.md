@@ -15,8 +15,9 @@
   - 明确 Layer 4 只输出建议，不直接改写门禁状态真相源。
   - 明确 Layer 4 只消费 `FR-0020` 的 `anti_detection_validation_request` / `anti_detection_structured_sample` / `anti_detection_baseline_snapshot` / `anti_detection_baseline_registry_entry` / `anti_detection_validation_record`，且 `validation_scope=cross_layer_baseline` 是唯一正式输入入口。
   - 明确 active baseline 判定只能通过 `anti_detection_baseline_registry_entry.active_baseline_ref` 解析，不能由 Layer 4 直接根据 snapshot / record 自行决定。
-  - 明确 `profile_ref`、`effective_execution_mode` 与 `probe_bundle_ref` 仍属于 Layer 4 baseline identity，不能在跨层评估时被折叠丢失。
+  - 明确 `profile_ref`、`target_domain`、`effective_execution_mode` 与 `probe_bundle_ref` 仍属于 Layer 4 baseline identity，不能在跨层评估时被折叠丢失。
   - 明确 read lane 继承 `FR-0019` 的 pure-read 语义与动作白名单。
+  - 明确当前 implementation-ready formal input 只接受 `execution_surface=real_browser`；`stub | fake_host | other` 不进入 Layer 4 baseline 输入。
 
 ### 阶段 B：稳定对象与数据模型冻结
 
@@ -25,7 +26,7 @@
   - `data-model.md`
 - 目标：
   - 冻结 `platform_behavior_signal_batch`、`platform_behavior_baseline_state`、`platform_behavior_assessment`。
-  - 冻结 `baseline_state`、`drift_level`、`decision_hint` 枚举和最小必填字段，并完成 `browser_channel/execution_surface/effective_execution_mode/probe_bundle_ref` 分区隔离；proxy binding 暂不纳入 implementation-ready formal 输入。
+  - 冻结 `baseline_state`、`drift_level`、`decision_hint` 枚举和最小必填字段，并完成 `target_domain/browser_channel/execution_surface/effective_execution_mode/probe_bundle_ref` 分区隔离；proxy binding 暂不纳入 implementation-ready formal 输入。
   - 冻结 `platform_behavior_signal_batch` 对 `FR-0020` 的 lineage keys：`request_ref`、`sample_ref`、`record_ref`。
   - 冻结 reveal-only click 的保真字段，确保 `FR-0019` 的 `interaction_semantics` 与 `click_kind` 不在 Layer 4 汇总时丢失。
   - 冻结 `degraded` 与 `reseed_required` 的最小触发准则，使 freshness window、连续高漂移与污染场景都能直接形成实现断言。
@@ -69,9 +70,11 @@
 - 评审重点：
   - Layer 4 与 Layer 1/2/3 及门禁主链边界是否清晰
   - 状态枚举与对象字段是否足够稳定
-  - 可写基线主键是否已收敛到 `(profile_ref, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`
+  - 可写基线主键是否已收敛到 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`
   - suite 是否已明确未 canonical 的 proxy binding 不属于当前 implementation-ready formal 输入
   - `platform_behavior_signal_batch` 是否已携带 `FR-0020` lineage keys，而不是只靠 runtime 坐标回链
+  - `target_domain` 是否已从 signal batch 继续保留到 baseline / assessment identity
+  - 当前 formal input 是否已明确只接受 `execution_surface=real_browser`
   - pure-read 场景中的 `click` 是否继续保留 `interaction_semantics=reveal_only_click` 与 `click_kind`
   - 冷启动/学习期/降级/reseed 语义是否可直接写成实现断言
   - 下载链路进入 Layer 4 前的 `goal_kind` 映射是否已与 pure-read / write 边界保持一致
@@ -86,7 +89,7 @@
   - 基线状态迁移逻辑
   - 漂移等级判定逻辑
   - 决策建议映射逻辑
-  - 基线数据隔离（profile_ref/platform/browser_channel/execution_surface/effective_execution_mode/probe_bundle_ref 维度）
+  - 基线数据隔离（profile_ref/platform/target_domain/browser_channel/execution_surface/effective_execution_mode/probe_bundle_ref 维度）
   - proxy binding 在上游 canonical contract 落地前不会被误当作当前 formal 必填输入的约束
   - `FR-0020` lineage keys 到 Layer 4 signal batch 的回链约束
   - pure-read click 语义与 `click_kind` 的保真约束
@@ -127,7 +130,9 @@
   - Layer 4 可消费的 `anti_detection_baseline_registry_entry`
   - Layer 4 可消费的 `anti_detection_validation_record`
   - `validation_scope=cross_layer_baseline` 作为 Layer 4 唯一正式输入入口
-  - `profile_ref`、`effective_execution_mode` 与 `probe_bundle_ref` 继续作为 Layer 4 baseline identity 的正式 scope keys
+  - `FR-0019.risk_gate_context.target_domain` 已在 Layer 4 baseline identity 中被保留
+  - `profile_ref`、`target_domain`、`effective_execution_mode` 与 `probe_bundle_ref` 继续作为 Layer 4 baseline identity 的正式 scope keys
+  - 当前 formal input 已明确收紧到 `execution_surface=real_browser`
 6. 后续实现 PR 必须明确：
   - 持久化落点
   - 审计落点
