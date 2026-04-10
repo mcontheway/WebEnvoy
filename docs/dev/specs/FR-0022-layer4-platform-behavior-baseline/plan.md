@@ -121,11 +121,13 @@
 3. reviewer 确认 Layer 4 不直接改写门禁真相源。
 4. `contracts/` 与 `data-model.md` 被确认足以支撑实现与测试。
 5. `FR-0020`（`#239`）已合入，且至少冻结：
+  - Layer 4 可消费的 `anti_detection_validation_request`
+  - Layer 4 可消费的 `anti_detection_structured_sample`
   - Layer 4 可消费的 `anti_detection_baseline_snapshot`
   - Layer 4 可消费的 `anti_detection_baseline_registry_entry`
   - Layer 4 可消费的 `anti_detection_validation_record`
   - `validation_scope=cross_layer_baseline` 作为 Layer 4 唯一正式输入入口
-  - `effective_execution_mode` 与 `probe_bundle_ref` 继续作为 Layer 4 baseline identity 的正式 scope keys
+  - `profile_ref`、`effective_execution_mode` 与 `probe_bundle_ref` 继续作为 Layer 4 baseline identity 的正式 scope keys
 6. 后续实现 PR 必须明确：
   - 持久化落点
   - 审计落点
