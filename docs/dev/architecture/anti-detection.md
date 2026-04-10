@@ -709,7 +709,7 @@ AI 发出第一条操作命令
 | 风险审查与保护门禁基线 | `Phase 1.x / #426 -> FR-0009 / #215` |
 | Sprint 2 风险门禁与执行硬化 | `Phase 1.x / #426 -> FR-0010 / #230` |
 | Sprint 3 最小反风控执行能力 | `Phase 1.x / #426 -> FR-0011 / #231` |
-| official Chrome runtime migration implementation-prep | `Phase 1.x / #426 -> FR-0015 / #435`（formal suite cleanup PR 合入前，repo formal suite 仍可能保留 `#281/#361` 作为 historical refs） |
+| official Chrome runtime migration implementation-prep | `Phase 1.x / #426 -> FR-0015 / #435`（在对应 formal suite cleanup PR 合入前，repo formal suite 仍可能保留 `#281/#361` 作为 historical refs） |
 
 ### 11.4 当前 GitHub 主树与 formal suite 收口状态
 
@@ -732,7 +732,7 @@ AI 发出第一条操作命令
 
 **进入后层扩展，但现在就冻结到蓝图：**
 
-- Layer 4 平台行为模型与长期基线（`Phase 4 / #423 -> #238`；formal FR 套件待独立 spec review PR 合入）
+- Layer 4 平台行为模型与长期基线（`Phase 4 / #423 -> #238`；formal FR 套件已合入）
 - 行为人格（Behavior Persona）
 - 长期行为画像与跨平台策略扩展
 - Layer 5 / Camoufox 级极端场景策略
