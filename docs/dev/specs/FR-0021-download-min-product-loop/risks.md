@@ -17,3 +17,9 @@
 - 表现：`replace_existing` 被默认启用
 - 缓解：明确其为高风险路径，后续实现必须显式审计
 - 回滚：退回 `fail_if_exists` 或 `rename_with_suffix`
+
+## 风险 4：下载失败被挂入成功能力壳
+
+- 表现：`summary.capability_result` 下继续承载 `failed` 下载结果，导致与 `FR-0007` 的成功/错误分层冲突
+- 缓解：规定 `download_result_summary` 只承载 `downloaded|partial`，失败统一走 `status=error + error.*`
+- 回滚：移除失败态成功壳映射，回到 FR-0007 单一错误承载

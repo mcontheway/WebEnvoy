@@ -71,7 +71,6 @@ Canonical Issue: #153
 - 必须冻结 `download_result_summary`，至少包含：
   - `download_ref`
   - `result_state`
-  - `failure_class`
   - `saved_artifact_refs`
   - `resolved_output_path`
   - `source_url`
@@ -80,12 +79,6 @@ Canonical Issue: #153
 - `result_state` 至少支持：
   - `downloaded`
   - `partial`
-  - `failed`
-- `failure_class` 至少支持：
-  - `source_unavailable`
-  - `auth_or_session_required`
-  - `write_blocked`
-  - `runtime_error`
 - `content_descriptor` 至少包含：
   - `content_kind`
   - `mime_type`
@@ -93,6 +86,12 @@ Canonical Issue: #153
 - 必须明确：
   - `download_result_summary` 只能作为 `FR-0007` 成功壳的 `summary.capability_result.data_ref` 所指向的能力级结果摘要，不得作为新的平行顶层返回结构
   - `summary.capability_result.action` 必须固定为 `download`，且 `outcome` 只能与 `download_result_summary.result_state` 做一致映射（`downloaded->success`，`partial->partial`）
+  - 下载失败路径必须复用 `FR-0007` 的错误壳：`status=error` + `error.*`；不得把 `failed` 结果继续挂到 `summary.capability_result` 成功壳下
+  - 下载能力的最小失败分类必须通过 `error.details.reason` 表达，至少支持：
+    - `SOURCE_UNAVAILABLE`
+    - `AUTH_OR_SESSION_REQUIRED`
+    - `WRITE_BLOCKED`
+    - `RUNTIME_ERROR`
   - 在上游 artifact carrier 尚未正式冻结前，`saved_artifact_refs` 只作为可选的 run-scoped evidence refs，不得被提升为新的正式真相源
   - `resolved_output_path` 是本次执行结果的落盘结果，不等于能力定义时的固定安装路径
   - `source_url` 必须回传本次下载最终使用的源 URL（可归一化），用于审计与复现定位
@@ -173,22 +172,32 @@ When reviewer 检查与 `FR-0018` 的关系
 Then 能明确看到下载能力属于普通 `read|download` trust 域
 And 不需要为下载能力另建第二套验证协议
 
+### 场景 5：下载失败走统一错误壳
+
+Given 某次下载执行失败
+When 系统返回结果
+Then 外层必须是 `status=error`
+And 下载失败原因通过 `error.details.reason` 表达
+And 不会把 `failed` 结果挂在 `summary.capability_result` 成功壳下
+
 ## 异常与边界场景
 
 1. 只返回远程链接，没有本地产物或 `resolved_output_path`：不得视为下载成功。
 2. 使用浏览器外异构抓取器作为正式主路径：视为与浏览器内执行边界冲突。
 3. `replace_existing` 被默认放行但没有风险对齐说明：视为高风险边界未冻结。
 4. 下载结果另起顶层返回壳：视为与 `FR-0017` 冲突。
-5. 下载能力被排除在 `FR-0018` 普通 trust 域之外：视为与既有验证模型冲突。
-6. `candidate_shell_seed.contract_registry_seed` 存在重复 ref、kind 不匹配或无法唯一解引用的 entry，仍被标为成功 handoff：视为与 `FR-0017` 契约冲突。
+5. 下载失败继续被挂在 `summary.capability_result` 成功壳下：视为与 `FR-0007` 能力壳冲突。
+6. 下载能力被排除在 `FR-0018` 普通 trust 域之外：视为与既有验证模型冲突。
+7. `candidate_shell_seed.contract_registry_seed` 存在重复 ref、kind 不匹配或无法唯一解引用的 entry，仍被标为成功 handoff：视为与 `FR-0017` 契约冲突。
 
 ## 验收标准
 
 1. FR-0021 套件完整，至少包含 `spec.md`、`plan.md`、`TODO.md`、`contracts/`、`data-model.md`、`research.md`、`risks.md`。
 2. 下载请求、结果、产物引用与最小落盘边界已冻结。
 3. 已明确与 `FR-0017/0018/0004/0006` 的继承关系。
-4. 已明确下载能力不再是模型外特例。
-5. 本 PR 只冻结规约，不混入实现代码。
+4. 已明确成功/部分成功继续挂在 `summary.capability_result`，失败统一走 `status=error + error.*`。
+5. 已明确下载能力不再是模型外特例。
+6. 本 PR 只冻结规约，不混入实现代码。
 
 ## 依赖与前置条件
 

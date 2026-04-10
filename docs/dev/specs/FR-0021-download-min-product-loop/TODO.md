@@ -3,6 +3,7 @@
 - [ ] 将 `#153` 从 Phase 2 子级 issue 收口为 canonical FR 容器
 - [ ] reviewer 确认下载能力已进入统一能力模型，不再是特例协议
 - [ ] reviewer 确认最小落盘与冲突策略边界已冻结
+- [ ] reviewer 确认下载失败统一走 `status=error + error.*`，不再挂到 `summary.capability_result`
 - [ ] spec review 通过并形成明确结论
 - [ ] 后续实现 Work Item ownership 与高风险路径切片冻结
 

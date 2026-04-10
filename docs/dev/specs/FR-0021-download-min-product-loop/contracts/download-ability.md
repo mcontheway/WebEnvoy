@@ -57,8 +57,7 @@ interface DownloadAbilityRequest {
 ```ts
 interface DownloadResultSummary {
   download_ref: string
-  result_state: "downloaded" | "partial" | "failed"
-  failure_class?: "source_unavailable" | "auth_or_session_required" | "write_blocked" | "runtime_error"
+  result_state: "downloaded" | "partial"
   saved_artifact_refs?: string[]
   resolved_output_path?: string
   source_url?: string
@@ -78,10 +77,10 @@ interface DownloadResultSummary {
 - `summary.capability_result.outcome` 与 `result_state` 映射固定：
   - `downloaded -> success`
   - `partial -> partial`
+- 下载失败必须复用 `FR-0007` 外层错误壳：`status=error` + `error.*`。
 - `result_state=downloaded` 时，`resolved_output_path`、`source_url`、`file_name_hint` 必须存在。
 - `saved_artifact_refs` 仅可作为 run-scoped evidence refs 的可选补充，不得被提升为新的正式真相源。
 - `result_state=partial` 只用于存在可保留产物但目标未完全满足的场景。
-- `result_state=failed` 时必须返回 `failure_class`。
 
 ## 3. `candidate_shell_seed`
 
@@ -117,8 +116,12 @@ interface CandidateShellSeed {
 
 ## 4. 错误与状态契约
 
-- 状态集合固定为 `downloaded` / `partial` / `failed`，不得扩展为自由文本状态。
-- `failed` 分支的失败大类仅用 `failure_class` 表达，不替代低层诊断细节。
+- 成功壳内的状态集合固定为 `downloaded` / `partial`，不得扩展为自由文本状态。
+- 下载失败必须通过 `FR-0007.error.details.reason` 表达，至少支持：
+  - `SOURCE_UNAVAILABLE`
+  - `AUTH_OR_SESSION_REQUIRED`
+  - `WRITE_BLOCKED`
+  - `RUNTIME_ERROR`
 - 若同一响应携带 `FR-0004.error.diagnosis`，其职责仍是诊断；不得覆盖 `download_result_summary` 语义。
 
 ## 5. 兼容策略
@@ -164,12 +167,14 @@ interface CandidateShellSeed {
 
 ```json
 {
-  "download_ref": "dl-003",
-  "result_state": "failed",
-  "failure_class": "write_blocked",
-  "content_descriptor": {
-    "content_kind": "file",
-    "mime_type": "application/octet-stream"
+  "status": "error",
+  "error": {
+    "code": "ERR_EXECUTION_FAILED",
+    "details": {
+      "ability_id": "download.asset.v1",
+      "stage": "execution",
+      "reason": "WRITE_BLOCKED"
+    }
   }
 }
 ```
