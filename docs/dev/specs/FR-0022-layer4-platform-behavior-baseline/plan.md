@@ -28,12 +28,12 @@
   - `data-model.md`
 - 目标：
   - 冻结 `platform_behavior_signal_batch`、`platform_behavior_baseline_state`、`platform_behavior_assessment`。
-  - 冻结 `baseline_state`、`drift_level`、`decision_hint` 枚举和最小必填字段，并完成 `target_domain/browser_channel/execution_surface/effective_execution_mode/probe_bundle_ref` 分区隔离；proxy binding 暂不纳入 implementation-ready formal 输入。
+  - 冻结 `baseline_state`、`drift_level`、`decision_hint` 枚举和最小必填字段，并完成 `target_domain/browser_channel/execution_surface/effective_execution_mode/probe_bundle_ref/goal_kind` 分区隔离；proxy binding 暂不纳入 implementation-ready formal 输入。
   - 冻结 `platform_behavior_signal_batch` 对 `FR-0020` 的 lineage keys：`request_ref`、`sample_ref`、`record_ref`。
   - 冻结 reveal-only click 的保真字段，确保 `FR-0019` 的 `interaction_semantics` 与 `click_kind` 不在 Layer 4 汇总时丢失。
   - 冻结 `degraded` 与 `reseed_required` 的最小触发准则，使 freshness window、连续高漂移与污染场景都能直接形成实现断言。
   - 冻结下载链路进入 Layer 4 前的 `goal_kind` 映射，避免把 `download` 另起为独立 Layer 4 goal 枚举。
-  - 明确 `platform_behavior_assessment` 的审计回放字段：`baseline_ref` 与 `threshold_config_snapshot_ref`。
+  - 明确 `platform_behavior_baseline_state` 与 `platform_behavior_assessment` 的审计回放字段：`baseline_ref` 与 `threshold_config_snapshot_ref`。
   - 统一 `baseline_state` / `assessment` 的条件字段语义，避免 `ready_at`、`last_assessed_at`、`decision_id`、`audit_record_ref` 在 spec、contracts、data-model 之间漂移。
 
 ### 阶段 C：风险、审计与回滚冻结
@@ -72,11 +72,13 @@
 - 评审重点：
   - Layer 4 与 Layer 1/2/3 及门禁主链边界是否清晰
   - 状态枚举与对象字段是否足够稳定
-  - 可写基线主键是否已收敛到 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`
+  - 可写基线主键是否已收敛到 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)`
   - suite 是否已明确未 canonical 的 proxy binding 不属于当前 implementation-ready formal 输入
   - `platform_behavior_signal_batch` 是否已携带 `FR-0020` lineage keys，而不是只靠 runtime 坐标回链
   - `target_domain` 是否已从 signal batch 继续保留到 baseline / assessment identity
+  - `goal_kind=read|write` 是否已进入 baseline / assessment 隔离，避免读写历史混用
   - shared upstream scope 与 downstream writable scope 是否已被清晰拆分，不再把 `platform/target_domain` 误写成 `FR-0020` registry key
+  - `platform_behavior_baseline_state` 是否已持久化 `threshold_config_snapshot_ref`
   - 当前 formal input 是否已明确只接受 `execution_surface=real_browser`
   - pure-read 场景中的 `click` 是否继续保留 `interaction_semantics=reveal_only_click` 与 `click_kind`
   - 冷启动/学习期/降级/reseed 语义是否可直接写成实现断言
@@ -92,7 +94,7 @@
   - 基线状态迁移逻辑
   - 漂移等级判定逻辑
   - 决策建议映射逻辑
-  - 基线数据隔离（profile_ref/platform/target_domain/browser_channel/execution_surface/effective_execution_mode/probe_bundle_ref 维度）
+  - 基线数据隔离（profile_ref/platform/target_domain/browser_channel/execution_surface/effective_execution_mode/probe_bundle_ref/goal_kind 维度）
   - proxy binding 在上游 canonical contract 落地前不会被误当作当前 formal 必填输入的约束
   - `FR-0020` lineage keys 到 Layer 4 signal batch 的回链约束
   - pure-read click 语义与 `click_kind` 的保真约束

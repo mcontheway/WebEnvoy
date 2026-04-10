@@ -131,6 +131,8 @@ interface PlatformBehaviorBaselineState {
   execution_surface: ExecutionSurface
   effective_execution_mode: string
   probe_bundle_ref: string
+  goal_kind: GoalKind
+  threshold_config_snapshot_ref: string
   baseline_state: BaselineState
   baseline_ref?: string
   learned_sample_count: number
@@ -144,11 +146,13 @@ interface PlatformBehaviorBaselineState {
 
 约束：
 
-- `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 是可写隔离主键。
+- `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` 是可写隔离主键。
 - `runtime_context_id` 仅属于 run/session 证据回链，不得进入可写基线主键。
 - `baseline_ref` 在当前状态已对应到 shared upstream scope 的 `FR-0020` active baseline 时必填，并且必须直接等于该 shared upstream scope 的 `active_baseline_ref`；`unseeded | learning` 阶段允许为空。
-- 同一条 shared upstream `active_baseline_ref` 可以被多个 `(platform, target_domain)` 下游状态对象合法引用；这属于 lineage 共享，不等于把不同 Layer 4 可写状态合并。
+- 同一条 shared upstream `active_baseline_ref` 可以被多个 `(platform, target_domain, goal_kind)` 下游状态对象合法引用；这属于 lineage 共享，不等于把不同 Layer 4 可写状态合并。
+- `threshold_config_snapshot_ref` 必须指向最近一次生成该状态所用的不可变阈值快照；阈值快照变化后，不得静默沿用旧状态解释新漂移结果。
 - 不同 `effective_execution_mode` 或不同 `probe_bundle_ref` 的 Layer 4 baseline 不得共享同一条可写状态对象。
+- 不同 `goal_kind` 的 Layer 4 baseline 不得共享同一条可写状态对象；`read` 与 `write` 必须分别学习与评估。
 - `baseline_state=ready` 时，`learned_sample_count` 必须满足学习阈值且 `ready_at` 不得缺失。
 - `baseline_state!=ready` 时，`ready_at` 不得伪装为稳定就绪时间。
 - `last_assessed_at` 在尚未形成 assessment 前允许为空；一旦该状态对象被 assessment 消费，后续写回不得继续缺失。
@@ -175,6 +179,7 @@ interface PlatformBehaviorAssessment {
   browser_channel: BrowserChannel
   execution_surface: ExecutionSurface
   probe_bundle_ref: string
+  goal_kind: GoalKind
   runtime_context_id: string
   baseline_ref?: string
   baseline_state: BaselineState
@@ -207,6 +212,6 @@ interface PlatformBehaviorAssessment {
 - `decision_id` 与 `audit_record_ref` 必须同进同退：门禁尚未消费时二者都为空；门禁已消费并形成正式决策/审计对象后二者都必须可回填。
 - `action_type` 的最小稳定动作集合必须至少覆盖 `navigate | locate | click | extract | wait_settled | type | submit | confirm | publish | purchase | dispatch | bind`，不得并行引入 `download` 等新的 Layer 4 动作快捷值。
 - 当 `action_type=click` 时，`interaction_semantics` 必须固定为 `reveal_only_click`，且 `click_kind` 必填。
-- 该对象只能比较同一 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` downstream scope 内、由对应 shared upstream scope `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 选中的 active baseline。
+- 该对象只能比较同一 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` downstream scope 内、由对应 shared upstream scope `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 选中的 active baseline。
 - `anti_detection_validation_view` 是上游派生读模型，不作为该 assessment 对象的正式输入或回写真相源。
 - 当 `drift_level=high|critical` 时，不得返回会扩大风险的建议（例如直接放行高风险 live write）。

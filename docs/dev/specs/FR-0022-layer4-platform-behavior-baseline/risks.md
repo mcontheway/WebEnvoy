@@ -9,6 +9,7 @@
 - 缓解：
   - 冷启动和学习期与 ready 分离。
   - 对 `high/critical` 判定要求最小样本阈值与证据回链。
+  - `platform_behavior_baseline_state` 与 `platform_behavior_assessment` 都必须持久化 `threshold_config_snapshot_ref`，避免阈值变更后静默重解释旧状态。
   - Layer 4 的共享证据输入必须回链 `FR-0020`（`#239`）的 `anti_detection_validation_request` / `anti_detection_structured_sample` / `anti_detection_baseline_snapshot` / `anti_detection_baseline_registry_entry` / `anti_detection_validation_record`；active baseline 只能通过 registry 判定；若后续需要冻结更细的阈值、假阳性/漏报口径，必须单独进入 spec review。
 - 回滚：
   - 临时关闭 Layer 4 高偏移强约束，只保留 `allow_read_only` 建议输出。
@@ -16,12 +17,12 @@
 ## 风险 2：样本污染与跨 profile 串扰
 
 - 场景：
-  - 不同 profile/platform/target_domain，或不同 `effective_execution_mode` / `probe_bundle_ref` 的行为样本被合并写入同一基线。
+  - 不同 profile/platform/target_domain/goal_kind，或不同 `effective_execution_mode` / `probe_bundle_ref` 的行为样本被合并写入同一基线。
   - Layer 4 把上游尚未 canonical 的 proxy binding 直接写成 formal 必填输入或并行 active baseline key。
 - 影响：
   - 基线失真，后续评估不可用，或引入第二条 active baseline 真相源。
 - 缓解：
-  - 以 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 作为可写隔离主键。
+  - 以 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` 作为可写隔离主键。
   - `runtime_context_id` 仅用于 run/session 证据回链，不参与可写基线主键。
   - 明确 `FR-0020` registry 只拥有 shared upstream scope；`platform/target_domain` 继续属于 `FR-0022` downstream writable isolation，不得被误写成上游 active baseline selector。
   - 当前 FR 不把 proxy binding 纳入 implementation-ready formal 输入；如未来需要 `proxy_binding_ref`，必须先补上游 canonical contract。
