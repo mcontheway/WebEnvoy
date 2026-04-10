@@ -17,6 +17,7 @@
   - 明确固定 lane 常量是 `target_fr_ref=FR-0022`，继续复用 `FR-0020` 的 FR 标识语义，而不是写成 GitHub issue 号。
   - 明确 active baseline 判定只能通过 `anti_detection_baseline_registry_entry.active_baseline_ref` 解析，不能由 Layer 4 直接根据 snapshot / record 自行决定。
   - 明确 `FR-0020` registry 只拥有 shared upstream scope，`platform/target_domain` 仍属于 `FR-0022` 自己的 downstream writable isolation。
+  - 明确同一条上游 `active_baseline_ref` 不得跨多个 `(platform, target_domain, goal_kind)` downstream scope 复用；若发生则按隔离破坏处理。
   - 明确 `profile_ref`、`target_domain`、`effective_execution_mode` 与 `probe_bundle_ref` 仍属于 Layer 4 baseline identity，不能在跨层评估时被折叠丢失。
   - 明确 read lane 继承 `FR-0019` 的 pure-read 语义与动作白名单。
   - 明确当前 implementation-ready formal input 只接受 `execution_surface=real_browser`；`stub | fake_host | other` 不进入 Layer 4 baseline 输入。
@@ -78,6 +79,7 @@
   - `target_domain` 是否已从 signal batch 继续保留到 baseline / assessment identity
   - `goal_kind=read|write` 是否已进入 baseline / assessment 隔离，避免读写历史混用
   - shared upstream scope 与 downstream writable scope 是否已被清晰拆分，不再把 `platform/target_domain` 误写成 `FR-0020` registry key
+  - 是否已明确禁止同一 `active_baseline_ref` 跨 domain/goal downstream scope 复用
   - `platform_behavior_baseline_state` 是否已持久化 `threshold_config_snapshot_ref`
   - 当前 formal input 是否已明确只接受 `execution_surface=real_browser`
   - pure-read 场景中的 `click` 是否继续保留 `interaction_semantics=reveal_only_click` 与 `click_kind`

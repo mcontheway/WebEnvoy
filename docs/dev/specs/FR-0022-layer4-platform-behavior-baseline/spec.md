@@ -56,7 +56,7 @@ Canonical Issue: #238
   - `FR-0022` 当前把 `target_fr_ref=FR-0022` 与 `validation_scope=cross_layer_baseline` 视为固定 lane 常量；`target_fr_ref` 必须继续复用 `FR-0020` 的 FR 标识语义，而不是改写成 GitHub issue 号；二者必须显式受上游 formal contract 约束，但不在 Layer 4 writable identity 中重复落库
   - `anti_detection_baseline_registry_entry.active_baseline_ref` 是 Layer 4 唯一允许消费的 active baseline 判定来源；不得仅凭 snapshot / validation record 自行宣布某条 baseline 仍为当前生效
   - `FR-0020` registry 的 shared upstream scope 固定为 `(target_fr_ref=FR-0022, validation_scope=cross_layer_baseline, profile_ref, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`；`platform` 与 `target_domain` 属于 `FR-0022` 自己的 downstream writable scope，不得被倒灌成上游 registry key
-  - 多个 `(platform, target_domain, goal_kind)` Layer 4 状态对象可以合法引用同一条上游 `active_baseline_ref`；这属于共享 lineage，不等于把不同下游可写状态折叠到同一条 Layer 4 baseline
+  - 同一条上游 `active_baseline_ref` 不得跨多个 `(platform, target_domain, goal_kind)` downstream scope 被复用；一旦发生跨域或跨 goal 复用，必须视为隔离破坏，而不是当作合法共享 lineage
 - Layer 4 输出只能作为 `risk decision hint`，不能直接覆盖门禁最终判定。
 - `goal_kind=read` 时必须继承 `FR-0019` 的 `interaction_safety_class=pure_read` 语义：
   - 仅允许动作 `navigate | locate | click | extract | wait_settled`
@@ -112,6 +112,7 @@ Canonical Issue: #238
   - 同 scope 最新样本批次未通过正式的字段完整性或证据回链校验，导致 ready 基线不再可直接信任
 - `reseed_required=true` 的最小触发准则必须冻结为：
   - 对应 shared upstream scope 的 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 已不再指向当前 `baseline_ref`，或该 baseline 被显式 supersede / invalidate
+  - 观测到同一 `baseline_ref` 被复用到另一个 `(platform, target_domain, goal_kind)` downstream scope
   - 检测到跨 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` scope 的样本污染或隔离破坏
   - 同 scope 持续处于 `degraded`，或重复出现 `high|critical` 漂移，且已达到当前 `threshold_config_snapshot_ref` 定义的 reseed threshold
 - 一旦 `reseed_required=true`，`baseline_state` 不得继续保持稳定 `ready`；下游 `decision_hint` 只能收敛到 `require_manual_review` 或 `require_reseed`，直到新学习周期重新建立。

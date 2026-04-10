@@ -149,7 +149,7 @@ interface PlatformBehaviorBaselineState {
 - `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` 是可写隔离主键。
 - `runtime_context_id` 仅属于 run/session 证据回链，不得进入可写基线主键。
 - `baseline_ref` 在当前状态已对应到 shared upstream scope 的 `FR-0020` active baseline 时必填，并且必须直接等于该 shared upstream scope 的 `active_baseline_ref`；`unseeded | learning` 阶段允许为空。
-- 同一条 shared upstream `active_baseline_ref` 可以被多个 `(platform, target_domain, goal_kind)` 下游状态对象合法引用；这属于 lineage 共享，不等于把不同 Layer 4 可写状态合并。
+- 同一条 shared upstream `active_baseline_ref` 不得跨多个 `(platform, target_domain, goal_kind)` 下游状态对象复用；若发生则视为隔离破坏，而不是合法 lineage 共享。
 - `threshold_config_snapshot_ref` 必须指向最近一次生成该状态所用的不可变阈值快照；阈值快照变化后，不得静默沿用旧状态解释新漂移结果。
 - 不同 `effective_execution_mode` 或不同 `probe_bundle_ref` 的 Layer 4 baseline 不得共享同一条可写状态对象。
 - 不同 `goal_kind` 的 Layer 4 baseline 不得共享同一条可写状态对象；`read` 与 `write` 必须分别学习与评估。

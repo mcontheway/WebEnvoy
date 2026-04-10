@@ -29,7 +29,7 @@
 - [ ] `plan.md` 已补齐七节最小结构并写清实现前前置。
 - [ ] `contracts/layer4-platform-behavior-baseline.md` 已冻结稳定对象与约束。
 - [ ] `data-model.md` 已明确 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` 维度隔离，且未把未 canonical 的 proxy binding 写成当前 formal 必填输入。
-- [ ] `data-model.md` 与 `contracts/` 已明确：同一条上游 `active_baseline_ref` 可以被多个 `(platform, target_domain, goal_kind)` 下游 Layer 4 状态对象合法引用，但不得把这些下游键伪装成 `FR-0020` registry scope。
+- [ ] `data-model.md` 与 `contracts/` 已明确：同一条上游 `active_baseline_ref` 不得跨多个 `(platform, target_domain, goal_kind)` 下游 Layer 4 状态对象复用；若发生则视为隔离破坏，而不是合法共享。
 - [ ] `risks.md` 已覆盖假阳性、样本污染、并行真相源和隐私最小化风险。
 
 ## 进入实现前必须完成

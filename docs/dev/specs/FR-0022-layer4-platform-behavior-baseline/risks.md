@@ -25,6 +25,7 @@
   - 以 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` 作为可写隔离主键。
   - `runtime_context_id` 仅用于 run/session 证据回链，不参与可写基线主键。
   - 明确 `FR-0020` registry 只拥有 shared upstream scope；`platform/target_domain` 继续属于 `FR-0022` downstream writable isolation，不得被误写成上游 active baseline selector。
+  - 同一条上游 `active_baseline_ref` 不得跨多个 `(platform, target_domain, goal_kind)` downstream scope 复用；一旦发现，必须按隔离破坏处理并触发 reseed。
   - 当前 FR 不把 proxy binding 纳入 implementation-ready formal 输入；如未来需要 `proxy_binding_ref`，必须先补上游 canonical contract。
   - 缺少主键坐标的信号一律拒绝入库。
 - 回滚：

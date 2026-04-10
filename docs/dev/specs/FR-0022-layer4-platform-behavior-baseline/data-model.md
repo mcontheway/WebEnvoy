@@ -110,7 +110,7 @@
 - `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, goal_kind)` 是可写隔离主键，不允许跨 profile、域名、浏览器通道、执行面、执行模式、probe bundle 或 read/write 目标共用同一可写状态对象。
 - `runtime_context_id` 仅用于 run/session 证据回链，不进入可写基线主键。
 - `baseline_ref` 一旦存在，必须直接等于对应 shared upstream scope `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref`，不得再用未定义的 `baseline_version` 作为并行标识。
-- `platform`、`target_domain` 与 `goal_kind` 是 `FR-0022` 自己的 downstream writable scope keys，不属于 `FR-0020` registry 的 shared upstream scope；同一条上游 `active_baseline_ref` 可以被多个 `(platform, target_domain, goal_kind)` 下游状态对象合法复用。
+- `platform`、`target_domain` 与 `goal_kind` 是 `FR-0022` 自己的 downstream writable scope keys，不属于 `FR-0020` registry 的 shared upstream scope；同一条上游 `active_baseline_ref` 不得跨多个 `(platform, target_domain, goal_kind)` 下游状态对象复用，若发生则视为隔离破坏。
 - `threshold_config_snapshot_ref` 必须指向最近一次生成该状态所用的不可变阈值快照；若阈值快照变化，必须重新评估该状态是否继续有效，必要时降级或触发 reseed。
 - `ready` 只能在学习阈值达标后进入；阈值不足必须保持在 `learning` 或降级为 `degraded`。
 - 若先前 `ready` 基线已超过当前阈值快照定义的 freshness window，或同 scope 最新 assessment 返回 `drift_level=high|critical`，则必须降级为 `degraded`。
