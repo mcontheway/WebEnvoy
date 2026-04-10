@@ -14,7 +14,7 @@
 
 ### 阶段 A：定位与边界冻结
 
-- 产出：`spec.md` 中的 Phase 2 定位、`#233` 挂载关系、与 `FR-0011` 的边界条款。
+- 产出：`spec.md` 中的 Phase 2 -> FR-0013 主树定位、与 `FR-0011` 的边界条款。
 - 依赖：`vision.md`、`roadmap.md`、`anti-detection.md`、`FR-0011` 已存在。
 
 ### 阶段 B：稳定对象与调用链冻结
@@ -74,7 +74,7 @@
 
 ### 可并行
 
-- 与 `#233` 下其他延续项的规约工作可并行，例如 Layer 1 指纹补全、Layer 3 完整 session 节律引擎的独立立项。
+- 与 Phase 2 主树下其他延续项的规约工作可并行，例如 Layer 1 指纹补全、Layer 3 完整 session 节律引擎的独立立项。
 - 与平台适配器或能力封装范围设计可并行讨论，但不得抢跑实现。
 
 ### 串行后置
@@ -88,4 +88,4 @@
 2. `contracts/layer2-humanized-events.md` 中的稳定对象语义无歧义，且 reviewer 明确认可被实现直接消费。
 3. `data-model.md` 中的共享实体已明确哪些字段继承 `FR-0011`，哪些为 FR-0013 新增对象。
 4. `risks.md` 中“回退绕过门禁”“Layer 2 膨胀成 Layer 3”“平台专用需求污染通用边界”等风险已有 stop-ship 与回滚策略。
-5. 后续实现 issue / PR 明确使用 `Refs #236`，且不把 `#236` 误写为 `Fixes`。
+5. 后续实现 issue / PR 明确使用对 Layer 2 owning Work Item 的 `Refs`，且不把该 Work Item 误写为 `Fixes`。

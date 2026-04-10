@@ -4,7 +4,7 @@
 
 `FR-0011`（含 `#226`）已经冻结了 Sprint 3 的最小可执行前置：最小 session 节律、冷却与恢复规则、以及 `paused/limited/allowed` 三态风险状态机。该前置目标是“先可执行、可门禁、可审计”，不是完整 Layer 3 行为节律引擎。
 
-`#237` 是 Phase 2 反风控延续主线中的 Layer 3 主线事项，上挂 `#233`（Phase 2 延续 umbrella）并归属于 `#232`（反风控总控）。因此 `FR-0014` 的定位是：在不重定义既有稳定契约的前提下，为 Layer 3 完整 session 节律引擎补齐延续规约。
+当前 Layer 3 owning Work Item 是 Phase 2 主树下、由 `FR-0014` 承接的 Layer 3 scope。因此 `FR-0014` 的定位是：在不重定义既有稳定契约的前提下，为 Layer 3 完整 session 节律引擎补齐延续规约。
 
 本 FR 所在 PR 仅用于 spec review，非实现 PR，不承诺在本 PR 内提交运行时代码。
 
@@ -87,9 +87,9 @@
 ### 6. Issue 映射与 PR 边界
 
 - 本 FR 必须显式引用：
-  - `#232`（反风控总控）
-  - `#233`（Phase 2 延续 umbrella）
-  - `#237`（Layer 3 主线）
+  - `#427`（Phase 2）
+  - `#266`（Canonical FR issue: FR-0014）
+  - `#237`（Owning Work Item: Layer 3 scope）
 - 本 PR 仅完成 `FR-0014` 规约评审输入，不混入实现代码，不关闭实现 issue。
 
 ## GWT 验收场景
@@ -154,13 +154,13 @@ And 不包含 Layer 3 引擎实现承诺
 4. 与 `profile/session/runtime.audit/approval_record/audit_record` 的关系已冻结，且未并行重定义审批/审计对象。
 5. 非目标已明确排除 Layer1/2 细节、Layer4、`#208` 实现。
 6. `warmup/afterglow` 被限定为 Phase 2 阶段挂点，不构成完整 persona/内容编排实现承诺。
-7. 已引用 `#232/#233/#237`，并明确本 PR 为 spec review 而非实现 PR。
+7. 已引用 `#427/#266/#237`，并明确本 PR 为 spec review 而非实现 PR。
 
 ## 依赖与前置条件
 
 - 最小可执行前置：`#226` / `FR-0011`
 - 门禁与审批审计基线：`FR-0010`
-- 总控与阶段映射：`#232`（总控）、`#233`（Phase 2 延续）、`#237`（Layer 3 主线）
+- 父级与映射：`#427`（Phase 2）、`#266`（Canonical FR issue）、`#237`（Layer 3 Work Item）
 - 架构依据：
   - `docs/dev/architecture/anti-detection.md`
   - `docs/dev/architecture/system-design/execution.md`
