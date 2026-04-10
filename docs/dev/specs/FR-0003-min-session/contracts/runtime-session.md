@@ -189,7 +189,6 @@ disconnected -> starting
 - `ERR_PROFILE_META_CORRUPT`
 - `ERR_PROFILE_PROXY_CONFLICT`
 - `ERR_BROWSER_LAUNCH_FAILED`
-- `ERR_PROFILE_LOGIN_TIMEOUT`
 - `ERR_PROFILE_STATE_CONFLICT`
 
 白名单约束：
@@ -206,8 +205,13 @@ disconnected -> starting
 - `ERR_PROFILE_META_CORRUPT`：最小元数据无法解析或恢复
 - `ERR_PROFILE_PROXY_CONFLICT`：显式代理与既有绑定不一致
 - `ERR_BROWSER_LAUNCH_FAILED`：浏览器拉起失败
-- `ERR_PROFILE_LOGIN_TIMEOUT`：等待用户登录确认超时
 - `ERR_PROFILE_STATE_CONFLICT`：请求与当前状态不兼容
+
+登录确认补充约束：
+
+- `runtime.login` 采用显式二次确认模型：首次调用只进入 `logging_in` 并返回 `confirmationRequired`，不会在单次命令内等待用户登录确认直到超时。
+- `runtime.login --confirm` 当前只承接显式确认收口；若确认时登录浏览器已断开、锁持有状态失效或当前状态不再兼容，统一返回 `ERR_PROFILE_STATE_CONFLICT`。
+- 如需引入登录确认 deadline / timeout 语义，必须在后续 formal 变更中新增对应状态机、错误码与测试；在该变更落地前，不得把 `ERR_PROFILE_LOGIN_TIMEOUT` 视为稳定契约。
 
 ## 持久化边界
 
