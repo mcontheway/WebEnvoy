@@ -25,13 +25,13 @@
 - `interaction_safety_class`
 - `observed_at`
 - `action_mix`
-- `click_kind_mix`
 - `timing_summary`
 - `risk_feedback_signals`
 
 可选字段：
 
 - `session_id`
+- `click_kind_mix`
 
 补充约束：
 
@@ -131,8 +131,6 @@
 - `drift_level`
 - `issue_scope`
 - `action_type`
-- `interaction_semantics`
-- `click_kind`
 - `requested_execution_mode`
 - `effective_execution_mode`
 - `decision_hint`

@@ -129,9 +129,9 @@ Canonical Issue: #238
   - `interaction_safety_class`
   - `observed_at`
   - `action_mix`
-  - `click_kind_mix`
   - `timing_summary`
   - `risk_feedback_signals`
+- `click_kind_mix` 只在 `action_mix.click > 0` 时必填。
 - `browser_channel` 在当前 formal baseline 下只允许 `Google Chrome stable`，并必须与 `FR-0015`、`FR-0016`、`FR-0020` 共享同一 canonical label。
 - `execution_surface` 必须直接复用 `FR-0016` 已冻结枚举：`real_browser | stub | fake_host | other`。
 - `platform_behavior_signal_batch` 只能承接已可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的运行摘要输入，不得独立形成并行 baseline 作用域。
@@ -161,8 +161,6 @@ Canonical Issue: #238
   - `drift_level`
   - `issue_scope`
   - `action_type`
-  - `interaction_semantics`
-  - `click_kind`
   - `requested_execution_mode`
   - `effective_execution_mode`
   - `threshold_config_snapshot_ref`
