@@ -14,7 +14,9 @@
   - 明确 Layer 4 的职责是长期行为基线与偏移评估，不是账号运营系统。
   - 明确 Layer 4 只输出建议，不直接改写门禁状态真相源。
   - 明确 Layer 4 只消费 `FR-0020` 的 `anti_detection_validation_request` / `anti_detection_structured_sample` / `anti_detection_baseline_snapshot` / `anti_detection_baseline_registry_entry` / `anti_detection_validation_record`，且 `validation_scope=cross_layer_baseline` 是唯一正式输入入口。
+  - 明确固定 lane 常量是 `target_fr_ref=FR-0022`，继续复用 `FR-0020` 的 FR 标识语义，而不是写成 GitHub issue 号。
   - 明确 active baseline 判定只能通过 `anti_detection_baseline_registry_entry.active_baseline_ref` 解析，不能由 Layer 4 直接根据 snapshot / record 自行决定。
+  - 明确 `FR-0020` registry 只拥有 shared upstream scope，`platform/target_domain` 仍属于 `FR-0022` 自己的 downstream writable isolation。
   - 明确 `profile_ref`、`target_domain`、`effective_execution_mode` 与 `probe_bundle_ref` 仍属于 Layer 4 baseline identity，不能在跨层评估时被折叠丢失。
   - 明确 read lane 继承 `FR-0019` 的 pure-read 语义与动作白名单。
   - 明确当前 implementation-ready formal input 只接受 `execution_surface=real_browser`；`stub | fake_host | other` 不进入 Layer 4 baseline 输入。
@@ -74,6 +76,7 @@
   - suite 是否已明确未 canonical 的 proxy binding 不属于当前 implementation-ready formal 输入
   - `platform_behavior_signal_batch` 是否已携带 `FR-0020` lineage keys，而不是只靠 runtime 坐标回链
   - `target_domain` 是否已从 signal batch 继续保留到 baseline / assessment identity
+  - shared upstream scope 与 downstream writable scope 是否已被清晰拆分，不再把 `platform/target_domain` 误写成 `FR-0020` registry key
   - 当前 formal input 是否已明确只接受 `execution_surface=real_browser`
   - pure-read 场景中的 `click` 是否继续保留 `interaction_semantics=reveal_only_click` 与 `click_kind`
   - 冷启动/学习期/降级/reseed 语义是否可直接写成实现断言

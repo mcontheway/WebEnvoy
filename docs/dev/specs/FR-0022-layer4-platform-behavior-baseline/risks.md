@@ -23,6 +23,7 @@
 - 缓解：
   - 以 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 作为可写隔离主键。
   - `runtime_context_id` 仅用于 run/session 证据回链，不参与可写基线主键。
+  - 明确 `FR-0020` registry 只拥有 shared upstream scope；`platform/target_domain` 继续属于 `FR-0022` downstream writable isolation，不得被误写成上游 active baseline selector。
   - 当前 FR 不把 proxy binding 纳入 implementation-ready formal 输入；如未来需要 `proxy_binding_ref`，必须先补上游 canonical contract。
   - 缺少主键坐标的信号一律拒绝入库。
 - 回滚：
@@ -38,6 +39,7 @@
 - 缓解：
   - Layer 4 只输出 `decision_hint`，不写门禁最终状态。
   - `platform_behavior_signal_batch` 必须携带 `request_ref`、`sample_ref`、`record_ref`，并保证三者属于同一条 `FR-0020` formal lineage。
+  - 固定 lane 常量必须写为 `target_fr_ref=FR-0022 + validation_scope=cross_layer_baseline`，不得把 GitHub issue 号写进 formal lineage。
   - 审计中明确“建议输出”和“最终决策”两个对象。
 - Stop-ship：
   - 任何实现若出现 Layer 4 直接改写门禁状态，必须阻断合并。

@@ -98,6 +98,7 @@ interface PlatformBehaviorSignalBatch {
 - `execution_surface` 当前只允许 `real_browser`；`stub | fake_host | other` 仍属于 `FR-0016` 的上游证据枚举，但不得进入 FR-0022 formal input。
 - `profile_ref` 必须直接复用 `FR-0020` / `FR-0003` 的 canonical profile namespace，不得并行发明 `profile` 正式键。
 - `target_domain` 必须直接复用 `FR-0019.risk_gate_context.target_domain`，并继续作为 downstream baseline / assessment identity 的正式域隔离键。
+- `FR-0020` registry 只负责 shared upstream scope `(target_fr_ref, validation_scope, profile_ref, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 的 active baseline ownership；`platform` 与 `target_domain` 继续属于 `FR-0022` 的 downstream writable isolation，不得被倒灌为上游 registry selector。
 - `goal_kind` 与 `interaction_safety_class` 必须保持可解释映射，不得出现“高风险写动作却标成 `pure_read`”。
 - `goal_kind=read` 时，`interaction_safety_class` 必须为 `pure_read`，且 `ActionMix` 仅允许 `navigate | locate | click | extract | wait_settled` 出现非零值。
 - `ActionMix` 的最小稳定动作集合必须至少覆盖 `navigate | locate | click | extract | wait_settled | type | submit | confirm | publish | purchase | dispatch | bind`。
@@ -109,7 +110,7 @@ interface PlatformBehaviorSignalBatch {
 - 若下载链路包含 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 或其他写入型交互，必须映射为 `goal_kind=write`，且不得标记为 `pure_read`。
 - 下载链路进入 assessment 时，`action_type` 必须继续记录实际交互动作，不得再平行定义 `download` 作为新的 Layer 4 action shortcut。
 - 该对象必须可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的共享验证输入，不得独立形成第二套 baseline scope。
-- `FR-0022` 当前把 `target_fr_ref=#238` 与 `validation_scope=cross_layer_baseline` 视为固定 lane 常量；它们必须受上游 formal contract 约束，但不在 Layer 4 writable identity 中重复落库。
+- `FR-0022` 当前把 `target_fr_ref=FR-0022` 与 `validation_scope=cross_layer_baseline` 视为固定 lane 常量；`target_fr_ref` 必须继续复用 `FR-0020` 的 FR 标识语义，不得改写为 GitHub issue 号；二者必须受上游 formal contract 约束，但不在 Layer 4 writable identity 中重复落库。
 - `request_ref`、`sample_ref`、`record_ref` 必须直接引用同一条 `FR-0020` formal lineage：`sample_ref` 所指向的 structured sample 必须回链到同一个 `request_ref`，且 `record_ref` 所指向的 validation record 必须同时回链该 `request_ref` 并引用该 `sample_ref`；不得只靠 `run_id/runtime_context_id` 维持 Layer 4 lineage。
 - `request_ref` 与 `sample_ref` 的 formal ownership 仍分别属于 `FR-0020.anti_detection_validation_request` 与 `FR-0020.anti_detection_structured_sample`；Layer 4 只允许读取这些上游对象以完成 lineage 校验，不得在本 FR 中复制它们的真相源。
 - `effective_execution_mode` 与 `probe_bundle_ref` 必须直接继承 `FR-0020` 的 formal baseline scope；不得把不同 recon/live scope 或不同 probe bundle 归一化到同一批 Layer 4 输入。
@@ -145,7 +146,8 @@ interface PlatformBehaviorBaselineState {
 
 - `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 是可写隔离主键。
 - `runtime_context_id` 仅属于 run/session 证据回链，不得进入可写基线主键。
-- `baseline_ref` 在当前状态已对应到 `FR-0020` registry 的 active baseline 时必填，并且必须直接等于该 scope 的 `active_baseline_ref`；`unseeded | learning` 阶段允许为空。
+- `baseline_ref` 在当前状态已对应到 shared upstream scope 的 `FR-0020` active baseline 时必填，并且必须直接等于该 shared upstream scope 的 `active_baseline_ref`；`unseeded | learning` 阶段允许为空。
+- 同一条 shared upstream `active_baseline_ref` 可以被多个 `(platform, target_domain)` 下游状态对象合法引用；这属于 lineage 共享，不等于把不同 Layer 4 可写状态合并。
 - 不同 `effective_execution_mode` 或不同 `probe_bundle_ref` 的 Layer 4 baseline 不得共享同一条可写状态对象。
 - `baseline_state=ready` 时，`learned_sample_count` 必须满足学习阈值且 `ready_at` 不得缺失。
 - `baseline_state!=ready` 时，`ready_at` 不得伪装为稳定就绪时间。
@@ -205,6 +207,6 @@ interface PlatformBehaviorAssessment {
 - `decision_id` 与 `audit_record_ref` 必须同进同退：门禁尚未消费时二者都为空；门禁已消费并形成正式决策/审计对象后二者都必须可回填。
 - `action_type` 的最小稳定动作集合必须至少覆盖 `navigate | locate | click | extract | wait_settled | type | submit | confirm | publish | purchase | dispatch | bind`，不得并行引入 `download` 等新的 Layer 4 动作快捷值。
 - 当 `action_type=click` 时，`interaction_semantics` 必须固定为 `reveal_only_click`，且 `click_kind` 必填。
-- 该对象只能比较同一 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 内、由 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 选中的 active baseline。
+- 该对象只能比较同一 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` downstream scope 内、由对应 shared upstream scope `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 选中的 active baseline。
 - `anti_detection_validation_view` 是上游派生读模型，不作为该 assessment 对象的正式输入或回写真相源。
 - 当 `drift_level=high|critical` 时，不得返回会扩大风险的建议（例如直接放行高风险 live write）。

@@ -6,7 +6,9 @@
 - [ ] `spec.md` 已明确 `#238` 的 Layer 4 范围是“平台历史行为基线与偏移评估”，不越界为账号运营系统。
 - [ ] `spec.md` 已明确挂接 `#423 -> #238` 与 `FR-0020`（`#239`）验证前置，且继承 `FR-0010/0011/0014` 边界。
 - [ ] `spec.md` 已明确 `FR-0022` 只消费 `FR-0020` 的 `anti_detection_validation_request` / `anti_detection_structured_sample` / `anti_detection_baseline_snapshot` / `anti_detection_baseline_registry_entry` / `anti_detection_validation_record`，且 `validation_scope=cross_layer_baseline` 是唯一正式输入入口。
+- [ ] `spec.md` 已明确 Layer 4 当前固定 lane 常量是 `target_fr_ref=FR-0022 + validation_scope=cross_layer_baseline`，且 `target_fr_ref` 继续复用 `FR-0020` 的 FR 标识语义，不写成 GitHub issue 号。
 - [ ] `spec.md` 已明确 active baseline 判定只能通过 `anti_detection_baseline_registry_entry.active_baseline_ref` 解析，不得由 Layer 4 仅凭 snapshot / record 自行宣布当前生效基线。
+- [ ] `spec.md` 已明确 `FR-0020` registry 只拥有 shared upstream scope，`platform/target_domain` 继续属于 `FR-0022` downstream writable isolation，不会被倒灌为上游 registry key。
 - [ ] `spec.md` 已明确 `platform_behavior_signal_batch` 必须携带 `request_ref/sample_ref/record_ref`，且三者必须属于同一条 `FR-0020` formal lineage。
 - [ ] `spec.md` 已明确 `effective_execution_mode` 与 `probe_bundle_ref` 仍属于 Layer 4 baseline identity，不得把不同 recon/live scope 或不同 probe bundle 的 baseline 合并到同一 state / assessment。
 - [ ] `spec.md` 已冻结 `baseline_state`（仅 `unseeded|learning|ready|degraded`）、`drift_level`、`decision_hint` 最小枚举。
@@ -27,6 +29,7 @@
 - [ ] `plan.md` 已补齐七节最小结构并写清实现前前置。
 - [ ] `contracts/layer4-platform-behavior-baseline.md` 已冻结稳定对象与约束。
 - [ ] `data-model.md` 已明确 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 维度隔离，且未把未 canonical 的 proxy binding 写成当前 formal 必填输入。
+- [ ] `data-model.md` 与 `contracts/` 已明确：同一条上游 `active_baseline_ref` 可以被多个 `(platform, target_domain)` 下游 Layer 4 状态对象合法引用，但不得把这些下游键伪装成 `FR-0020` registry scope。
 - [ ] `risks.md` 已覆盖假阳性、样本污染、并行真相源和隐私最小化风险。
 
 ## 进入实现前必须完成
@@ -35,6 +38,7 @@
 - [ ] `FR-0020`（`#239`）已合入 `main`，并提供 Layer 4 可消费的 `anti_detection_validation_request`、`anti_detection_structured_sample`、`anti_detection_baseline_snapshot`、`anti_detection_baseline_registry_entry`、`anti_detection_validation_record` 与 `validation_scope=cross_layer_baseline` 正式输入。
 - [ ] `FR-0019.risk_gate_context.target_domain` 已在 `FR-0022` baseline identity 中被保留，不会把不同域名的 baseline 合并。
 - [ ] `FR-0020` 的 `profile_ref`、`effective_execution_mode` 与 `probe_bundle_ref` 已在 `FR-0022` baseline identity 中被保留，不会把不同 scope 的 baseline 合并。
+- [ ] `FR-0020` shared upstream scope 与 `FR-0022` downstream writable scope 已被拆清，不会再把 `platform/target_domain` 误当成上游 active baseline owner key。
 - [ ] 当前 formal input 已明确收紧到 `execution_surface=real_browser`。
 - [ ] reviewer 确认 Layer 4 与 `FR-0010/0011` 门禁链路兼容。
 - [ ] reviewer 确认 Layer 4 的数据最小化约束可执行。

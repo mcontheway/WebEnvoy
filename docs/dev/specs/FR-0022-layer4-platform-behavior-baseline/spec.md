@@ -53,8 +53,10 @@ Canonical Issue: #238
   - `anti_detection_validation_view` 是上游派生读模型，不作为 Layer 4 baseline identity 的正式输入或真相源
   - `validation_scope=cross_layer_baseline` 是 Layer 4 唯一正式编码入口
   - `FR-0022` 不得再平行定义第二套 baseline snapshot / validation record 真相源
-  - `FR-0022` 当前把 `target_fr_ref=#238` 与 `validation_scope=cross_layer_baseline` 视为固定 lane 常量；它们必须显式受上游 formal contract 约束，但不在 Layer 4 writable identity 中重复落库
+  - `FR-0022` 当前把 `target_fr_ref=FR-0022` 与 `validation_scope=cross_layer_baseline` 视为固定 lane 常量；`target_fr_ref` 必须继续复用 `FR-0020` 的 FR 标识语义，而不是改写成 GitHub issue 号；二者必须显式受上游 formal contract 约束，但不在 Layer 4 writable identity 中重复落库
   - `anti_detection_baseline_registry_entry.active_baseline_ref` 是 Layer 4 唯一允许消费的 active baseline 判定来源；不得仅凭 snapshot / validation record 自行宣布某条 baseline 仍为当前生效
+  - `FR-0020` registry 的 shared upstream scope 固定为 `(target_fr_ref=FR-0022, validation_scope=cross_layer_baseline, profile_ref, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`；`platform` 与 `target_domain` 属于 `FR-0022` 自己的 downstream writable scope，不得被倒灌成上游 registry key
+  - 多个 `(platform, target_domain)` Layer 4 状态对象可以合法引用同一条上游 `active_baseline_ref`；这属于共享 lineage，不等于把不同下游可写状态折叠到同一条 Layer 4 baseline
 - Layer 4 输出只能作为 `risk decision hint`，不能直接覆盖门禁最终判定。
 - `goal_kind=read` 时必须继承 `FR-0019` 的 `interaction_safety_class=pure_read` 语义：
   - 仅允许动作 `navigate | locate | click | extract | wait_settled`
@@ -89,7 +91,7 @@ Canonical Issue: #238
 - `platform_behavior_baseline_state` 的条件字段必须固定为：
   - `ready_at`：仅 `baseline_state=ready` 时必填
   - `last_assessed_at`：只要该状态对象已被至少一次 assessment 消费，就必须可回填
-  - `baseline_ref`：当前状态已对应到 `FR-0020` registry 的 active baseline 时必填；`unseeded | learning` 阶段允许为空
+  - `baseline_ref`：当前状态已绑定到对应 shared upstream scope 的 `FR-0020` active baseline 时必填；`unseeded | learning` 阶段允许为空
 - 必须冻结 `baseline_state` 最小状态集合：
   - `unseeded`
   - `learning`
@@ -107,7 +109,7 @@ Canonical Issue: #238
   - 同 scope 最新一次 assessment 返回 `drift_level=high|critical`
   - 同 scope 最新样本批次未通过正式的字段完整性或证据回链校验，导致 ready 基线不再可直接信任
 - `reseed_required=true` 的最小触发准则必须冻结为：
-  - `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 已不再指向当前 `baseline_ref`，或该 baseline 被显式 supersede / invalidate
+  - 对应 shared upstream scope 的 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 已不再指向当前 `baseline_ref`，或该 baseline 被显式 supersede / invalidate
   - 检测到跨 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 的样本污染或隔离破坏
   - 同 scope 持续处于 `degraded`，或重复出现 `high|critical` 漂移，且已达到当前 `threshold_config_snapshot_ref` 定义的 reseed threshold
 - 一旦 `reseed_required=true`，`baseline_state` 不得继续保持稳定 `ready`；下游 `decision_hint` 只能收敛到 `require_manual_review` 或 `require_reseed`，直到新学习周期重新建立。
@@ -142,6 +144,7 @@ Canonical Issue: #238
 - `target_domain` 必须直接复用 `FR-0019.risk_gate_context.target_domain` 的 canonical 域坐标，不得在 Layer 4 baseline identity 中被丢弃。
 - `platform_behavior_signal_batch` 只能承接已可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的运行摘要输入，不得独立形成并行 baseline 作用域。
 - Layer 4 若需要判定当前 active baseline，必须通过 `FR-0020.anti_detection_baseline_registry_entry` 解析，而不是直接把任意 snapshot / record 当作当前生效基线。
+- Layer 4 必须区分两层 scope：`FR-0020` registry 负责 shared upstream scope 的 active baseline ownership；`FR-0022` 自己负责 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` 的 downstream writable isolation。不得把 `platform/target_domain` 倒灌为上游 registry selector。
 - Layer 4 不得把不同 `effective_execution_mode` 或不同 `probe_bundle_ref` 的共享输入合并到同一条 baseline state / drift assessment。
 - `request_ref`、`sample_ref`、`record_ref` 必须直接回链到同一条 `FR-0020` formal lineage：`sample_ref` 所指向的 structured sample 必须回链到同一个 `request_ref`，且 `record_ref` 所指向的 validation record 必须同时回链该 `request_ref` 并引用该 `sample_ref`；不得只靠 `run_id/runtime_context_id` 维持 Layer 4 lineage。
 - `request_ref` 与 `sample_ref` 的 formal ownership 仍分别属于 `anti_detection_validation_request` 与 `anti_detection_structured_sample`；Layer 4 只允许读取这些上游对象以完成 lineage 校验，不得在本 FR 内复制它们的真相源。
@@ -197,7 +200,7 @@ Canonical Issue: #238
 - `threshold_config_snapshot_ref` 必须指向本次 assessment 使用的不可变阈值配置快照，确保漂移判定可重放、可审计。
 - `decision_id` 与 `audit_record_ref` 只允许作为门禁消费后的审计回链，不得被解释为新增 gate result。
 - `action_type=click` 时，`interaction_semantics` 必须固定为 `reveal_only_click`，且 `click_kind` 必须保留对应的 `FR-0019` reveal-only click kind。
-- `platform_behavior_assessment` 只能比较同一 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 内、由 registry 选中的 active baseline；不得跨域、跨 mode 或跨 probe bundle 混用。
+- `platform_behavior_assessment` 只能比较同一 `(profile_ref, platform, target_domain, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` downstream scope 内、由对应 shared upstream scope registry 选中的 active baseline；不得跨域、跨 mode 或跨 probe bundle 混用。
 
 ### 5. 冷启动（cold start）与学习期约束
 

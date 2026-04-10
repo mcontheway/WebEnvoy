@@ -20,8 +20,10 @@
 3. 冷启动与学习期必须保守处理，否则会出现“无基线自动放行”的高风险缺陷。  
 4. 评估对象必须坚持数据最小化，行为模型只消费结构化摘要，不消费页面原文/私密原文。  
 5. `FR-0020`（`#239`）是 Layer 4 共享验证输入的唯一 formal owner；`FR-0022` 只消费 `anti_detection_validation_request`、`anti_detection_structured_sample`、`anti_detection_baseline_snapshot`、`anti_detection_baseline_registry_entry`、`anti_detection_validation_record` 与 `validation_scope=cross_layer_baseline`。
-6. active baseline 的唯一正式判定来源是 `anti_detection_baseline_registry_entry.active_baseline_ref`；Layer 4 不得仅凭 snapshot / record 自行声明当前生效基线。
-7. `profile_ref`、`target_domain`、`effective_execution_mode` 与 `probe_bundle_ref` 仍属于 Layer 4 baseline identity；不同域名、不同 recon/live scope 或不同 probe bundle 不得被折叠到同一条 Layer 4 baseline / assessment。
-8. `browser_channel` 与 `execution_surface` 必须复用共享 canonical 编码，但当前 implementation-ready formal input 只接受 `Google Chrome stable + real_browser`；`stub | fake_host | other` 只保留在上游 `FR-0016` 证据对象中。
-9. `platform_behavior_assessment` 需要显式保留 `baseline_ref` 与 `threshold_config_snapshot_ref`，否则漂移判定无法稳定回放或审计。
-10. `FR-0022` 进入 implementation-ready 的必要前置是 `FR-0020` 已合入并提供上述正式输入；更细的阈值、假阳性/漏报口径如需冻结，应另行进入 spec review。
+6. `FR-0022` 当前固定 lane 必须写成 `target_fr_ref=FR-0022 + validation_scope=cross_layer_baseline`；`target_fr_ref` 继续复用 `FR-0020` 的 FR 标识语义，不得写成 GitHub issue 号。
+7. active baseline 的唯一正式判定来源是 `anti_detection_baseline_registry_entry.active_baseline_ref`；Layer 4 不得仅凭 snapshot / record 自行声明当前生效基线。
+8. `FR-0020` registry 的 shared upstream scope 不包含 `platform` 或 `target_domain`；这两个键继续属于 `FR-0022` 的 downstream writable isolation，同一条上游 `active_baseline_ref` 可以被多个 `(platform, target_domain)` Layer 4 状态对象合法引用。
+9. `profile_ref`、`target_domain`、`effective_execution_mode` 与 `probe_bundle_ref` 仍属于 Layer 4 baseline identity；不同域名、不同 recon/live scope 或不同 probe bundle 不得被折叠到同一条 Layer 4 baseline / assessment。
+10. `browser_channel` 与 `execution_surface` 必须复用共享 canonical 编码，但当前 implementation-ready formal input 只接受 `Google Chrome stable + real_browser`；`stub | fake_host | other` 只保留在上游 `FR-0016` 证据对象中。
+11. `platform_behavior_assessment` 需要显式保留 `baseline_ref` 与 `threshold_config_snapshot_ref`，否则漂移判定无法稳定回放或审计。
+12. `FR-0022` 进入 implementation-ready 的必要前置是 `FR-0020` 已合入并提供上述正式输入；更细的阈值、假阳性/漏报口径如需冻结，应另行进入 spec review。
