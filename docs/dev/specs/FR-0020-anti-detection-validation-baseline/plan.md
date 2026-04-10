@@ -14,7 +14,7 @@
 ### 阶段 2：spec review 收口
 
 - 产出：review 结论、范围澄清、与 `FR-0015/0016` 的边界确认
-- 重点：阻断把 PR gate 或 runtime migration 混进本 FR，并冻结 baseline replacement 的唯一真相源与 execution mode 分区
+- 重点：阻断把 PR gate 或 runtime migration 混进本 FR，并冻结 baseline replacement 的唯一真相源、execution mode 分区与 `browser_channel` 的当前 canonical label
 
 ### 阶段 3：实现前冻结
 
@@ -33,6 +33,7 @@
 - 规约阶段：
   - 对照 `anti-detection.md`、`roadmap.md` 与 `#239` 检查是否仍存在第二棵父树心智
   - 对照 `FR-0012/0013/0014/0016/0015` 检查继承边界是否清楚
+  - 检查 `browser_channel` 是否已在本 FR 内冻结当前 canonical label，且与 `FR-0015/0016` 保持同值
 - 校验：
   - `bash scripts/docs-guard.sh`
   - `bash scripts/spec-guard.sh`
@@ -66,3 +67,4 @@
 - `sample_ref` 指向的结构化 sample payload 与 execution mode 分区无阻断争议。
 - validation record 的完整作用域键与 `baseline_status` 的 closed enum 无阻断争议。
 - validation request 的稳定 identity / lifecycle 与 request-sample-record 的相关性无阻断争议。
+- `browser_channel` 的 canonical label 已在本 FR 内闭合，不再依赖 `FR-0015` 尚未冻结的枚举真相。

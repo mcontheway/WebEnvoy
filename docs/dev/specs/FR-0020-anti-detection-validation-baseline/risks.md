@@ -53,3 +53,9 @@
 - 表现：同一参数元组的不同请求无法被稳定区分，导致持久化、审计与下游相关性漂移
 - 缓解：冻结 `request_ref`、`request_state`、`requested_at`，并要求 sample / record 回链到 request
 - 回滚：拒绝消费缺少稳定 request identity 的对象，只保留原始 evidence
+
+## 风险 10：`browser_channel` 作用域键出现别名漂移
+
+- 表现：`FR-0015`、`FR-0016` 与本 FR 分别写成 `stable`、`chrome-stable`、`Google Chrome stable` 等不同值，导致同一环境被落入多条 baseline scope
+- 缓解：在本 FR 内冻结 `browser_channel` 当前 closed enum 为 `Google Chrome stable`，并要求持久 binding / live evidence / validation 对象复用同值
+- 回滚：拒绝消费未 canonicalize 的 channel label，统一回写到正式值后再重建 scope

@@ -178,7 +178,10 @@ Canonical Issue: #239
   - `signal_vector` 必须是结构化信号集合，不得退化为自由文本摘要
   - `failure_class` 只在 `result_state=broken` 时必填；成功态必须为空，且取值必须来自已冻结枚举
   - `replacement_reason` 是 closed enum；新增 reason 必须重新进入 spec review
-  - `browser_channel`、`execution_surface`、`profile_ref` 必须使用唯一 canonical encoding；当前 formal baseline 下分别由 `FR-0015`（browser identity binding）、`FR-0016`（execution_surface 枚举）与稳定 profile namespace 负责归一化
+  - `browser_channel`、`execution_surface`、`profile_ref` 必须使用唯一 canonical encoding
+  - `browser_channel` 在当前 formal baseline 下由本 FR 冻结为 closed enum，当前只允许 `Google Chrome stable`
+  - `FR-0015.persistentExtensionBinding.browserChannel` 与 `FR-0016.live_evidence_record.browser_channel` 必须直接复用同一 canonical label，不得各自再发明 `stable`、`chrome-stable` 或其他并行写法
+  - `execution_surface` 与 `profile_ref` 继续分别复用 `FR-0016` 已冻结枚举与稳定 profile namespace
 
 ### 4. 最小共享视图
 

@@ -29,6 +29,7 @@
 - `request_ref` 是 validation request 的稳定标识；即使参数元组完全相同，不同请求也必须生成新的 `request_ref`。
 - `request_state` 只允许 `accepted -> sampling -> completed` 或 `accepted -> sampling -> aborted` 两类单向推进，不得回退。
 - request 的审计与相关性应以 `request_ref` 为主键，而不是依赖参数元组去重。
+- `browser_channel` 是本 FR 当前冻结的 closed enum，现阶段只允许 `Google Chrome stable`；写入 request 前必须完成 canonicalization。
 
 ## 2. `AntiDetectionStructuredSample`
 
@@ -188,5 +189,6 @@
 - baseline replacement 的 active/superseded 判定只能来自 `AntiDetectionBaselineRegistryEntry`。
 - `dry_run`、`recon` 与 live 证据必须按 `effective_execution_mode` 分开建 baseline，不得共享同一 registry entry。
 - 不同 `probe_bundle_ref` 的证据必须按独立 registry/view scope 管理，不得混入同一 baseline。
+- `browser_channel` 作为共享 scope key 时，当前只允许 `Google Chrome stable`；`FR-0015.persistentExtensionBinding.browserChannel` 与 `FR-0016.live_evidence_record.browser_channel` 必须直接复用同值，不得引入并行别名。
 - `target_fr_ref` 只允许指向反风控能力 FR。
 - 本 FR 的对象只承载能力级验证，不承载 PR 级 merge gate。

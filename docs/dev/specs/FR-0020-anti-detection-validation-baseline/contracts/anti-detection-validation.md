@@ -124,7 +124,8 @@
 - `requested_execution_mode` / `effective_execution_mode` 的正式语义一律继承 `FR-0010/0011`；本 FR 只把 `effective_execution_mode` 作为 baseline/sample/record/view 的分区维度，不并行重定义 mode 枚举。
 - `dry_run`、`recon` 与任意 live 模式不得落入同一条 baseline registry scope。
 - `probe_bundle_ref` 是 registry / view 的正式分区键；不同 probe bundle 默认不得落入同一条 baseline scope。
-- `browser_channel` 必须复用 `FR-0015` 归一化后的 canonical channel label；当前示例与正式对象统一使用 `Google Chrome stable`。
+- `browser_channel` 是本 FR 当前冻结的 closed enum，现阶段只允许 `Google Chrome stable`。
+- `FR-0015.persistentExtensionBinding.browserChannel` 与 `FR-0016.live_evidence_record.browser_channel` 必须直接复用该 canonical label，不得并行写成 `stable`、`chrome-stable` 或其他别名。
 - `execution_surface` 必须复用 `FR-0016` 已冻结枚举：`real_browser`、`stub`、`fake_host`、`other`。
 - validation record 不得替代 `FR-0016` 的 PR 级 gate 对象。
 - Layer 4 只能消费本契约对象，不得借此引入长期运营系统对象。
@@ -170,6 +171,12 @@
 - `superseded`：latest record 绑定的 baseline 已不再是当前 active baseline；此时 `current_result_state` 应投影为 `stale`。
 - `baseline_status` 是 closed enum；新增取值只能通过新的 spec review 引入。
 - `anti_detection_validation_view` 只在首条 validation record 生成后才允许物化；empty scope 不得伪造 `latest_record_ref`。
+
+### `browser_channel`
+
+- `browser_channel` 是本 FR 当前冻结的 closed enum，只允许 `Google Chrome stable`。
+- 当前 formal baseline 把它作为共享作用域键使用，因此 producer 必须在落库前完成 canonicalization，不得把 `stable`、`chrome-stable` 或带平台后缀的变体直接写入共享对象。
+- 如未来要支持更多浏览器通道，必须先通过新的 spec review 显式扩写允许值，再由 `FR-0015` 持久 binding 与 `FR-0016` live evidence 同步跟进。
 
 ### `structured_payload`
 

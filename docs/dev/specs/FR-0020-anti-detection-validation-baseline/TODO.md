@@ -9,6 +9,7 @@
 - [ ] reviewer 确认 validation record 已携带完整作用域键
 - [ ] reviewer 确认完成态 validation record 不会丢失 `sample_ref`
 - [ ] reviewer 确认 `baseline_status` 的 closed enum 语义已冻结
+- [ ] reviewer 确认 `browser_channel` 的 current canonical label 已在本 FR 内闭合，并与 `FR-0015/0016` 保持同值
 - [ ] reviewer 确认与 `FR-0015` / `FR-0016` 的边界无冲突
 - [ ] spec review 通过并形成明确结论
 - [ ] 后续实现 Work Item 命名与 ownership 建议冻结
