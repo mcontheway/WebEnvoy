@@ -18,8 +18,14 @@ type ActionType =
   | "dispatch"
   | "bind"
 type InteractionSafetyClass = "pure_read" | "controlled_write" | "high_risk_write"
+type InteractionSemantics = "reveal_only_click"
 type BrowserChannel = "Google Chrome stable"
 type ExecutionSurface = "real_browser" | "stub" | "fake_host" | "other"
+type ClickKind =
+  | "expand_or_collapse"
+  | "switch_content_tab"
+  | "open_detail_view"
+  | "load_more_or_paginate"
 
 interface ActionMix {
   navigate: number
@@ -34,6 +40,13 @@ interface ActionMix {
   purchase: number
   dispatch: number
   bind: number
+}
+
+interface ClickKindMix {
+  expand_or_collapse: number
+  switch_content_tab: number
+  open_detail_view: number
+  load_more_or_paginate: number
 }
 
 interface TimingSummary {
@@ -53,6 +66,9 @@ interface RiskFeedbackSignals {
 
 interface PlatformBehaviorSignalBatch {
   batch_id: string
+  request_ref: string
+  sample_ref: string
+  record_ref: string
   run_id: string
   session_id?: string
   profile: string
@@ -67,6 +83,7 @@ interface PlatformBehaviorSignalBatch {
   interaction_safety_class: InteractionSafetyClass
   observed_at: string
   action_mix: ActionMix
+  click_kind_mix?: ClickKindMix
   timing_summary: TimingSummary
   risk_feedback_signals: RiskFeedbackSignals
 }
@@ -83,12 +100,14 @@ interface PlatformBehaviorSignalBatch {
 - `goal_kind=read` 时，`interaction_safety_class` 必须为 `pure_read`，且 `ActionMix` 仅允许 `navigate | locate | click | extract | wait_settled` 出现非零值。
 - `ActionMix` 的最小稳定动作集合必须至少覆盖 `navigate | locate | click | extract | wait_settled | type | submit | confirm | publish | purchase | dispatch | bind`。
 - `ActionMix.click` 与 `action_type=click` 只允许复用 `FR-0019` trace-side 的 `action=click + interaction_semantics=reveal_only_click`；request-side `allowed_actions=reveal_only_click` 是上游授权语义，不得在 Layer 4 被复制成新的 action enum。
+- 当 `action_mix.click > 0` 时，`click_kind_mix` 必填，且其计数总和必须直接等于 `action_mix.click`。
 - 只要 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 任一出现非零值，该批次就不得标记为 `pure_read`。
 - 本 FR 不冻结 `download` 为独立 Layer 4 goal；下载链路在进入本对象前必须先完成 `read/write` 映射。
 - 若下载链路仅包含 `navigate | locate | click | extract | wait_settled`，必须映射为 `goal_kind=read`。
 - 若下载链路包含 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 或其他写入型交互，必须映射为 `goal_kind=write`，且不得标记为 `pure_read`。
 - 下载链路进入 assessment 时，`action_type` 必须继续记录实际交互动作，不得再平行定义 `download` 作为新的 Layer 4 action shortcut。
 - 该对象必须可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的共享验证输入，不得独立形成第二套 baseline scope。
+- `request_ref`、`sample_ref`、`record_ref` 必须直接引用同 scope 的 `FR-0020` formal objects；不得只靠 `run_id/runtime_context_id` 维持 Layer 4 lineage。
 - `effective_execution_mode` 与 `probe_bundle_ref` 必须直接继承 `FR-0020` 的 formal baseline scope；不得把不同 recon/live scope 或不同 probe bundle 归一化到同一批 Layer 4 输入。
 - 当前 Layer 4 formal contract 不把 proxy binding 作为必填输入；若未来要纳入 `proxy_binding_ref`，必须先由上游 formal contract 冻结 canonical 字段，再通过独立 spec review 引入。
 - 只允许结构化摘要，不允许正文/敏感原文字段进入该契约。
@@ -154,6 +173,8 @@ interface PlatformBehaviorAssessment {
   drift_level: DriftLevel
   issue_scope: string
   action_type: ActionType
+  interaction_semantics?: InteractionSemantics
+  click_kind?: ClickKind
   requested_execution_mode: string
   effective_execution_mode: string
   threshold_config_snapshot_ref: string
@@ -177,5 +198,6 @@ interface PlatformBehaviorAssessment {
 - `decision_id` 与 `audit_record_ref` 仅用于门禁消费后的回链，不得被解释为新增 gate result。
 - `decision_id` 与 `audit_record_ref` 必须同进同退：门禁尚未消费时二者都为空；门禁已消费并形成正式决策/审计对象后二者都必须可回填。
 - `action_type` 的最小稳定动作集合必须至少覆盖 `navigate | locate | click | extract | wait_settled | type | submit | confirm | publish | purchase | dispatch | bind`，不得并行引入 `download` 等新的 Layer 4 动作快捷值。
+- 当 `action_type=click` 时，`interaction_semantics` 必须固定为 `reveal_only_click`，且 `click_kind` 必填。
 - 该对象只能比较同一 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 内、由 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 选中的 active baseline。
 - 当 `drift_level=high|critical` 时，不得返回会扩大风险的建议（例如直接放行高风险 live write）。

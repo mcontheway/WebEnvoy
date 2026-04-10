@@ -9,6 +9,9 @@
 最小字段：
 
 - `batch_id`
+- `request_ref`
+- `sample_ref`
+- `record_ref`
 - `run_id`
 - `profile`
 - `platform`
@@ -22,6 +25,7 @@
 - `interaction_safety_class`
 - `observed_at`
 - `action_mix`
+- `click_kind_mix`
 - `timing_summary`
 - `risk_feedback_signals`
 
@@ -39,10 +43,12 @@
 - `action_mix` 至少覆盖 `navigate`、`locate`、`extract`、`click`、`wait_settled`、`type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 的计数或比率。
 - `goal_kind=read` 时，`interaction_safety_class` 必须为 `pure_read`，且只允许 `navigate | locate | click | extract | wait_settled` 出现非零值；若出现 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 任一动作，不得标记为 `pure_read`。
 - `action_mix.click` 只允许复用 `FR-0019` trace-side 的 `action=click + interaction_semantics=reveal_only_click`；request-side `allowed_actions=reveal_only_click` 是上游授权语义，不得在 Layer 4 被复制为新的动作枚举。
+- `click_kind_mix` 用于保留 `FR-0019` 的 `click_kind` 语义；当 `action_mix.click > 0` 时必填，且其计数总和必须等于 `action_mix.click`。
 - 本 FR 当前只冻结 `goal_kind=read|write`；下载链路在进入 Layer 4 前必须先被映射到这两个 goal 之一。
 - 若下载链路只包含 `navigate | locate | click | extract | wait_settled`，必须映射为 `goal_kind=read`；若包含 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 或其他写入型交互，必须映射为 `goal_kind=write`。
 - 下载链路进入 `platform_behavior_assessment` 后，`action_type` 必须继续记录实际交互动作，不得另起 `download` 作为新的 Layer 4 action shortcut。
 - 该对象只能承接已可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的共享验证输入，不得自行扩写第二套 baseline 作用域。
+- `request_ref`、`sample_ref`、`record_ref` 必须直接回链到同 scope 的 `FR-0020` formal objects；不得只依赖 `run_id/runtime_context_id` 维持 lineage。
 - `effective_execution_mode` 与 `probe_bundle_ref` 必须继续保留在 Layer 4 输入 identity 中；不得把不同 recon/live scope 或不同 probe bundle 的共享输入合并到同一条 baseline / assessment。
 - 当前 formal baseline 不把 proxy binding 作为 Layer 4 必填输入；若未来需要纳入 `proxy_binding_ref`，必须先由上游 formal contract 冻结 canonical 字段，再通过独立 spec review 引入。
 - 若后续评估需要选择当前 active baseline，必须先通过 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 解析，再回链对应 snapshot / record。
@@ -125,6 +131,8 @@
 - `drift_level`
 - `issue_scope`
 - `action_type`
+- `interaction_semantics`
+- `click_kind`
 - `requested_execution_mode`
 - `effective_execution_mode`
 - `decision_hint`
@@ -142,6 +150,10 @@
 - `audit_record_ref`
   - 仅在门禁链路已消费 assessment 并产出正式决策/审计对象时必填
   - 未消费前必须同时为空
+- `interaction_semantics`
+- `click_kind`
+  - 仅在 `action_type=click` 时必填
+  - `interaction_semantics` 当前只允许 `reveal_only_click`
 
 `decision_hint` 允许值：
 
@@ -157,6 +169,7 @@
 - `threshold_config_snapshot_ref` 必须指向本次 assessment 使用的不可变阈值配置快照，确保漂移判定可重放、可审计。
 - `decision_id` 与 `audit_record_ref` 仅用于门禁消费后的审计回链，不构成新的 gate result 对象。
 - `action_type` 必须落在稳定动作集合 `navigate | locate | click | extract | wait_settled | type | submit | confirm | publish | purchase | dispatch | bind` 内，不得并行引入 `download` 等新的 Layer 4 动作快捷值。
+- `action_type=click` 时，`interaction_semantics` 必须固定为 `reveal_only_click`，且 `click_kind` 必须保留对应的 `FR-0019` reveal-only click kind。
 - `platform_behavior_assessment` 只能比较同一 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 内、由 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 选中的 active baseline。
 - `confidence` 必须在 `[0,1]`，用于表达评估可信度，不可当作放行开关。
 
@@ -166,6 +179,7 @@
   - Layer 4 只消费 `anti_detection_baseline_snapshot`、`anti_detection_baseline_registry_entry` 与 `anti_detection_validation_record`。
   - `validation_scope=cross_layer_baseline` 是唯一正式输入入口；`FR-0022` 不得并行定义第二套 baseline snapshot / validation record 真相源。
   - active baseline 的唯一正式判定来源是 `anti_detection_baseline_registry_entry.active_baseline_ref`；Layer 4 不得仅凭 snapshot / record 自行宣布某条 baseline 仍为当前生效。
+  - `platform_behavior_signal_batch` 必须携带 `request_ref`、`sample_ref`、`record_ref`，确保每条 Layer 4 输入都能回链到 `FR-0020` formal lineage。
   - `effective_execution_mode` 与 `probe_bundle_ref` 是 shared scope keys；Layer 4 baseline identity 必须保留这两个维度，不得把不同 mode / bundle 的 baseline 混写到同一状态对象。
   - 当前 `FR-0022` 不把 proxy binding 纳入 implementation-ready formal 输入；若未来需要 canonical `proxy_binding_ref`，必须先由上游 formal contract 暴露后再进入独立 spec review。
 - 与 `FR-0014`：
@@ -174,6 +188,7 @@
   - Layer 4 仅提供 `decision_hint` 与证据，不替代审批/门禁主链。
 - 与 `FR-0019`：
   - read lane 必须继承 `goal_kind=read -> interaction_safety_class=pure_read`，且遵守 pure-read 动作白名单。
+  - `action_mix.click` 与 `action_type=click` 必须继续保留 `interaction_semantics=reveal_only_click` 与对应 `click_kind`，不得把 reveal-only click 退化成不可解释的裸点击计数。
   - `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 都属于当前 formal baseline 必须稳定编码的非读动作；只要出现，均不得继续落在 `pure_read`。
 - 与 `FR-0003`：
   - `profile/session` 维度是 Layer 4 的身份坐标真相源。

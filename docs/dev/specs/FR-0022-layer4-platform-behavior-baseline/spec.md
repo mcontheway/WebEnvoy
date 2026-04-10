@@ -113,6 +113,9 @@ Canonical Issue: #238
 - Layer 4 只接收结构化行为摘要，不接收页面原文、用户输入原文或媒体内容。
 - `platform_behavior_signal_batch` 最小字段必须包含：
   - `batch_id`
+  - `request_ref`
+  - `sample_ref`
+  - `record_ref`
   - `run_id`
   - `profile`
   - `platform`
@@ -126,6 +129,7 @@ Canonical Issue: #238
   - `interaction_safety_class`
   - `observed_at`
   - `action_mix`
+  - `click_kind_mix`
   - `timing_summary`
   - `risk_feedback_signals`
 - `browser_channel` 在当前 formal baseline 下只允许 `Google Chrome stable`，并必须与 `FR-0015`、`FR-0016`、`FR-0020` 共享同一 canonical label。
@@ -133,11 +137,13 @@ Canonical Issue: #238
 - `platform_behavior_signal_batch` 只能承接已可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的运行摘要输入，不得独立形成并行 baseline 作用域。
 - Layer 4 若需要判定当前 active baseline，必须通过 `FR-0020.anti_detection_baseline_registry_entry` 解析，而不是直接把任意 snapshot / record 当作当前生效基线。
 - Layer 4 不得把不同 `effective_execution_mode` 或不同 `probe_bundle_ref` 的共享输入合并到同一条 baseline state / drift assessment。
+- `request_ref`、`sample_ref`、`record_ref` 必须直接回链到同 scope 的 `FR-0020` formal objects；不得只靠 `run_id/runtime_context_id` 维持 Layer 4 lineage。
 - 当前 `FR-0022` 不把 proxy binding 纳入 implementation-ready formal 输入；若未来需要 canonical `proxy_binding_ref`，必须先由上游 formal contract 冻结后再进入独立 spec review。
 - 信号必须可回链到 `runtime.audit` 与 session 证据，不允许“无来源信号”进入基线计算。
 - `session_id` 只在 runtime 已提供稳定会话坐标时回填；缺少 `session_id` 不得单独阻断合法 batch 入库。
 - 缺少 `run_id/profile/platform` 任一主键坐标时，必须拒绝入库并输出结构化错误。
 - `action_mix` 必须显式包含 `click`、`wait_settled`、`confirm`、`publish`、`purchase`、`dispatch`、`bind` 等动作计数，确保 `FR-0019` 的 trace 语义与 pure-read 禁止集合可以被稳定编码。
+- 当 `action_mix.click > 0` 时，必须同时保留 `click_kind_mix`，其计数总和必须等于 `action_mix.click`，并只允许承接 `FR-0019` reveal-only click kinds。
 - `platform_behavior_baseline_state` 可写主键必须为 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)`。
 - `runtime_context_id` 只允许作为 run/session 证据回链字段，不能进入可写基线主键。
 
@@ -155,6 +161,8 @@ Canonical Issue: #238
   - `drift_level`
   - `issue_scope`
   - `action_type`
+  - `interaction_semantics`
+  - `click_kind`
   - `requested_execution_mode`
   - `effective_execution_mode`
   - `threshold_config_snapshot_ref`
@@ -168,6 +176,9 @@ Canonical Issue: #238
 - 当门禁链路已消费 assessment 并产出正式决策/审计对象时，还必须回填条件字段：
   - `decision_id`
   - `audit_record_ref`
+- 当 `action_type=click` 时，还必须回填条件字段：
+  - `interaction_semantics`
+  - `click_kind`
 - `decision_hint` 最小枚举：
   - `allow_read_only`
   - `hold_live_write`
@@ -179,6 +190,7 @@ Canonical Issue: #238
 - `baseline_ref` 必须指向本次 assessment 实际比较所用的 baseline snapshot；只有在当前 scope 尚无 active baseline、assessment 处于冷启动/学习期保守判定时才允许为空。
 - `threshold_config_snapshot_ref` 必须指向本次 assessment 使用的不可变阈值配置快照，确保漂移判定可重放、可审计。
 - `decision_id` 与 `audit_record_ref` 只允许作为门禁消费后的审计回链，不得被解释为新增 gate result。
+- `action_type=click` 时，`interaction_semantics` 必须固定为 `reveal_only_click`，且 `click_kind` 必须保留对应的 `FR-0019` reveal-only click kind。
 - `platform_behavior_assessment` 只能比较同一 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref)` scope 内、由 registry 选中的 active baseline；不得跨 mode / probe bundle 混用。
 
 ### 5. 冷启动（cold start）与学习期约束
@@ -255,10 +267,10 @@ Then 系统必须拒绝入库
 And 返回结构化错误而不是静默跳过
 
 Given 输入信号缺少 `session_id`
-And 仍具备 `run_id/profile/platform`
+And 仍具备 `run_id/profile/platform/request_ref/sample_ref/record_ref`
 When 尝试写入 `platform_behavior_signal_batch`
 Then 系统不得仅因缺少 `session_id` 就拒绝该批次
-And 仍需保持 `runtime.audit` 回链与其他主键坐标完整
+And 仍需保持 `runtime.audit` 回链与 `FR-0020` lineage keys 完整
 
 ### 场景 6：跨 profile 隔离成立
 
@@ -288,6 +300,7 @@ Given 一条下载链路只包含 `navigate | locate | click | extract | wait_se
 When 进入 Layer 4 信号采样
 Then 该链路必须被映射为 `goal_kind=read`
 And 仍可标记为 `pure_read`
+And 若存在 `click`，则必须同时保留 `interaction_semantics=reveal_only_click` 与对应 `click_kind`
 
 Given 一条下载链路包含 `type`、`submit`、`confirm`、`publish`、`purchase`、`dispatch` 或 `bind`
 When 进入 Layer 4 信号采样

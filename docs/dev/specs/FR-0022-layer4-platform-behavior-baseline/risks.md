@@ -32,10 +32,12 @@
 
 - 场景：
   - Layer 4 与 `FR-0010/0011` 各自维护一套放行状态。
+  - Layer 4 signal batch 只靠 `run_id/runtime_context_id`，却无法回链到 `FR-0020` formal lineage。
 - 影响：
-  - 审计不可解释，门禁行为不一致。
+  - 审计不可解释，门禁行为不一致，或重新打开并行真相源。
 - 缓解：
   - Layer 4 只输出 `decision_hint`，不写门禁最终状态。
+  - `platform_behavior_signal_batch` 必须携带 `request_ref`、`sample_ref`、`record_ref`，直接回链 `FR-0020` formal objects。
   - 审计中明确“建议输出”和“最终决策”两个对象。
 - Stop-ship：
   - 任何实现若出现 Layer 4 直接改写门禁状态，必须阻断合并。
@@ -87,6 +89,7 @@
   - `FR-0019` 的 read lane 边界被绕过，评估结果不可解释。
 - 缓解：
   - 强制执行 pure-read 动作白名单：`navigate | locate | click | extract | wait_settled`，其中 `click` 只允许复用 `FR-0019` 的 `action=click + interaction_semantics=reveal_only_click`。
+  - `click_kind_mix` 与 assessment 上的 `interaction_semantics/click_kind` 必须保留 reveal-only click 语义，不得把合法点击退化为不可解释的裸 `click`。
   - `ActionMix` 与 `action_type` 必须稳定编码 `type | submit | confirm | publish | purchase | dispatch | bind` 等非读动作。
   - 只要上述非读动作任一非零，立即禁止标记为 `pure_read`。
   - 下载链路进入 Layer 4 前必须先映射到 `goal_kind=read|write`；若包含上述非读动作，只能映射为 `write`。
