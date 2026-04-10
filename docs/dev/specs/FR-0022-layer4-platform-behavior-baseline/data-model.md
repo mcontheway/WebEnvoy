@@ -180,7 +180,6 @@
 - `threshold_config_snapshot_ref`
 - `baseline_state`
 - `drift_level`
-- `issue_scope`
 - `action_type`
 - `requested_execution_mode`
 - `effective_execution_mode`
@@ -216,7 +215,7 @@
 
 - `decision_hint` 是建议，不是门禁最终结果；不得直接覆盖 `FR-0010/0011` 最终状态字段。
 - `decision_hint=no_additional_restriction` 只表示 Layer 4 对当前 write-path assessment 不新增额外降级/阻断建议，不等于 live write 自动放行。
-- `issue_scope` 必须直接复用 `FR-0011` 已冻结的 issue scope 枚举：`issue_208 | issue_209 | shared`。
+- `FR-0022` 作为平台通用的 Layer 4 assessment 数据模型，不冻结 XHS 专用 `issue_scope`；若 `FR-0011` 等下游 gate consumer 需要 `issue_208 | issue_209 | shared` 之类的 issue taxonomy，必须在消费 assessment 时由 consumer context 派生或补充，不得写回 Layer 4 核心对象。
 - `requested_execution_mode` 与 `effective_execution_mode` 必须直接复用 `FR-0010/0011` 已冻结的 execution mode 枚举：`dry_run | recon | live_read_limited | live_read_high_risk | live_write`；不得在 Layer 4 assessment 中扩写私有 mode。
 - `decision_hint=no_additional_restriction` 仅允许在 `goal_kind=write`、对应 downstream `platform_behavior_baseline_state` 已处于 `ready`、未标记 `reseed_required=true`，并且本次 assessment 的 `drift_level=none|low` 时出现；它不得被解释为 write-ready 例外规则或 `gate_decision=allowed` 代理。
 - `evidence_refs` 至少能回链到输入批次或运行审计记录，禁止“无证据评估”。

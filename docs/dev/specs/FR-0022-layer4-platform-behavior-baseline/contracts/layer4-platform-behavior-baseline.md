@@ -21,7 +21,6 @@ type InteractionSafetyClass = "pure_read" | "controlled_write" | "high_risk_writ
 type InteractionSemantics = "reveal_only_click"
 type BrowserChannel = "Google Chrome stable"
 type ExecutionSurface = "real_browser"
-type IssueScope = "issue_208" | "issue_209" | "shared"
 type GateExecutionMode =
   | "dry_run"
   | "recon"
@@ -236,7 +235,6 @@ interface PlatformBehaviorAssessment {
   baseline_ref?: string
   baseline_state: BaselineState
   drift_level: DriftLevel
-  issue_scope: IssueScope
   action_type: ActionType
   interaction_semantics?: InteractionSemantics
   click_kind?: ClickKind
@@ -259,7 +257,7 @@ interface PlatformBehaviorAssessment {
 - `evidence_refs` 不得为空，且至少包含一条可回链信号批次或审计记录的引用。
 - `decision_hint` 仅为建议输出，不能直接改写 `FR-0010/0011` 的门禁最终状态。
 - `decision_hint=no_additional_restriction` 只表示 Layer 4 对当前 write-path assessment 不新增额外降级/阻断建议，不等于 live write 自动放行。
-- `issue_scope` 必须直接复用 `FR-0011` 已冻结的 issue scope 枚举：`issue_208 | issue_209 | shared`。
+- `FR-0022` 是平台通用的 Layer 4 contract，不冻结 XHS 专用 `issue_scope`；若 `FR-0011` 等下游 gate consumer 需要 `issue_208 | issue_209 | shared` 之类的 issue taxonomy，必须在消费 assessment 时由 consumer context 派生或补充，不得写回 Layer 4 核心对象。
 - `requested_execution_mode` 与 `effective_execution_mode` 必须直接复用 `FR-0010/0011` 已冻结的 execution mode 枚举：`dry_run | recon | live_read_limited | live_read_high_risk | live_write`；不得在 Layer 4 assessment 中扩写私有 mode。
 - `baseline_ref` 必须指向本次 assessment 实际比较所用的 `platform_behavior_baseline_snapshot.baseline_ref`；仅在当前 scope 尚无可用 downstream drift baseline、assessment 处于冷启动/学习期保守判定时允许为空。
 - `threshold_config_snapshot_ref` 必须指向本次 assessment 使用的不可变阈值配置快照。

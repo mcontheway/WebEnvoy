@@ -21,7 +21,7 @@
 - [ ] reviewer 已确认 `platform_behavior_baseline_state.baseline_ref` 现已指向 `platform_behavior_baseline_snapshot.baseline_ref`，不再把 `FR-0020.active_baseline_ref` 直接误写成 downstream drift baseline identity。
 - [ ] reviewer 已确认同一条 shared upstream `active_baseline_ref` 可以被多个 `(platform, target_domain, goal_kind)` downstream scope 并行引用，但这些 scope 仍拥有彼此独立的 `platform_behavior_baseline_snapshot` 与学习/漂移/审计历史。
 - [ ] reviewer 已确认 `decision_hint=no_additional_restriction` 只表示 Layer 4 不新增 gate restriction，不等于 write-ready 例外规则或 live write 自动放行。
-- [ ] reviewer 已确认 `platform_behavior_signal_batch`、`platform_behavior_baseline_snapshot`、`platform_behavior_baseline_state`、`platform_behavior_assessment` 中的 `effective_execution_mode`，以及 assessment 中的 `issue_scope` / `requested_execution_mode`，都已直接复用 `FR-0010/0011` 的冻结枚举，不存在 Layer 4 私有 gate 消费字段取值。
+- [ ] reviewer 已确认 `platform_behavior_signal_batch`、`platform_behavior_baseline_snapshot`、`platform_behavior_baseline_state`、`platform_behavior_assessment` 中的 `effective_execution_mode`，以及 assessment 中的 `requested_execution_mode`，都已直接复用 `FR-0010/0011` 的冻结枚举；XHS 专用 `issue_scope` 已被移出 `FR-0022` 平台通用合同，仅允许由 `FR-0011` 等下游 gate consumer 在消费时派生。
 - [ ] reviewer 已确认 `browser_channel` 与 `execution_surface` 已分别收敛到 `Google Chrome stable` 与 `FR-0016.execution_surface=real_browser`，`stub | fake_host | other` 不再被当作当前 Layer 4 formal input。
 - [ ] reviewer 已确认 `platform_behavior_baseline_state` 与 `platform_behavior_assessment` 的条件字段语义一致：`ready_at/last_assessed_at`、`decision_id/audit_record_ref` 不再跨文档漂移。
 - [ ] reviewer 已确认 `baseline_state=unseeded` 时 `learning_window_started_at` 允许为空或缺失，不会把“尚未开始学习窗口”的状态误写成已进入 learning。

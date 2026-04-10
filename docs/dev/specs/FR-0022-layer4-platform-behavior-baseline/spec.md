@@ -200,7 +200,6 @@ Canonical Issue: #238
   - `runtime_context_id`
   - `baseline_state`
   - `drift_level`
-  - `issue_scope`
   - `action_type`
   - `requested_execution_mode`
   - `effective_execution_mode`
@@ -225,7 +224,7 @@ Canonical Issue: #238
   - `require_manual_review`
   - `require_reseed`
 - `decision_hint=no_additional_restriction` 只表示 Layer 4 对当前 write-path assessment 不新增额外降级/阻断建议；它不是 live write 自动放行信号，最终门禁状态仍必须由 `FR-0010/0011` 决定。
-- `issue_scope` 必须直接复用 `FR-0011` 已冻结的 issue scope 枚举：`issue_208 | issue_209 | shared`；不得为 Layer 4 gate 消费链路新增私有 issue scope。
+- `FR-0022` 是平台通用的 Layer 4 contract，不冻结 XHS 专用 `issue_scope`；若 `FR-0011` 等下游 gate consumer 需要 `issue_208 | issue_209 | shared` 之类的 issue taxonomy，必须在消费 assessment 时由 consumer context 派生或补充，不得写回 Layer 4 核心对象。
 - `requested_execution_mode` 与 `effective_execution_mode` 必须直接复用 `FR-0010/0011` 已冻结的 execution mode 枚举：`dry_run | recon | live_read_limited | live_read_high_risk | live_write`；不得在 Layer 4 assessment 中扩写私有 mode。
 - Layer 4 输出是“建议”而不是“门禁最终裁决”：
   - 不得直接把风险状态从 `paused|limited|allowed` 改写为其他值
