@@ -199,18 +199,26 @@ And 现有登录态不应被无谓清空
 ### 场景 3：首次登录可以直接创建并回写最小身份边界
 
 Given 一个尚未初始化的 Profile 名称  
-When 调用 `runtime.login --profile <name>` 并完成手动登录确认  
+When 首次调用 `runtime.login --profile <name>`  
 Then 系统会创建对应的 Profile 目录与最小元数据文件  
 And 浏览器会绑定到该 Named Profile 启动  
-And Profile 状态会从 `uninitialized` 进入 `logging_in` 再回到 `ready`  
-And 登录态相关的最小持久化摘要会被保存到该 Profile 元数据
+And Profile 状态进入 `logging_in`  
+And 返回结果会明确要求调用方后续执行 `runtime.login --confirm`
 
 ### 场景 4：手动登录后的状态可以回写到 Profile
 
-Given 一个处于 `ready` 状态但尚未完成目标站点登录的 Profile  
-When 调用 `runtime.login --profile <name>` 并完成手动登录确认  
-Then Profile 状态会从 `ready` 进入 `logging_in` 再回到 `ready`  
+Given 一个已经通过首次 `runtime.login --profile <name>` 进入 `logging_in` 的 Profile  
+When 用户完成手动登录后调用 `runtime.login --profile <name> --confirm`  
+Then Profile 状态会从 `logging_in` 回到 `ready`  
 And 登录态相关的最小持久化摘要会被保存到该 Profile 元数据
+
+### 场景 4b：确认阶段若浏览器已断开则收敛为状态冲突
+
+Given 一个已经进入 `logging_in` 的 Profile  
+When 调用 `runtime.login --profile <name> --confirm` 时登录浏览器已断开  
+Then 命令必须失败  
+And 失败错误码为 `ERR_PROFILE_STATE_CONFLICT`  
+And Profile 状态会收敛到 `disconnected`
 
 ### 场景 5：同一 Profile 的并发启动会被拒绝
 
@@ -275,7 +283,7 @@ And 本 FR 不要求自动把该快照回写到浏览器会话
 ## 验收标准
 
 1. 能按指定 `profile` 启动浏览器，并进入可读回的 `ready` 状态。
-2. `runtime.login` 能在首次使用时创建最小身份边界，并把手动登录结果保存回同一 Profile。
+2. `runtime.login` 能在首次使用时创建最小身份边界，并通过显式 `--confirm` 收口手动登录结果。
 3. 同一 Profile 的并发启动能被稳定拒绝，且拒绝原因可读。
 4. 代理绑定能随 Profile 持久化并在后续启动中复用。
 5. `runtime.status` 能稳定返回浏览器态、Profile 态和代理绑定信息。

@@ -129,11 +129,19 @@ disconnected -> starting
 - 打开或保持可见浏览器
 - 将 Profile 置入 `logging_in`
 - 若 Profile 尚未初始化，则先创建最小目录与最小元数据
-- 等待用户手动完成登录
-- 确认后回写最小持久化摘要到 `__webenvoy_meta.json` 并回到 `ready`
+- 首次调用返回 `confirmationRequired`，由调用方在用户完成手动登录后显式发起 `runtime.login --confirm`
+- `runtime.login --confirm` 确认成功后回写最小持久化摘要到 `__webenvoy_meta.json` 并回到 `ready`
 - 本 FR 不要求把 `localStorageSnapshots` 自动回写到后续浏览器会话
 
-成功结果至少包含：
+首次调用成功结果至少包含：
+
+- `profile`
+- `profileState`
+- `browserState`
+- `confirmationRequired`
+- `confirmPath`
+
+确认调用成功结果至少包含：
 
 - `profile`
 - `profileState`
@@ -193,7 +201,7 @@ disconnected -> starting
 
 白名单约束：
 
-- FR-0003 只冻结上述七个最小错误码；实现不得在 formal 收口前把其他 Profile / session 错误码当作默认稳定契约。
+- FR-0003 只冻结上述六个最小错误码；实现不得在 formal 收口前把其他 Profile / session 错误码当作默认稳定契约。
 - 这些错误码属于 FR-0001 CLI 错误响应壳内部的 `error.code` 值扩展，不改写 FR-0001 的 `status/error/timestamp/run_id` 外层结构。
 - FR-0002 的 `ERR_TRANSPORT_*` 属于通信层错误码，不纳入本白名单。
 - 若后续 FR 需要新增会话相关错误码，必须以加性方式进入对应 formal contract，且不得改写上述七个基线错误的语义。
