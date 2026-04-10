@@ -27,11 +27,9 @@
 - [x] 2026-04-06 中午已按 WebEnvoy-managed profile 口径复查本地执行现场；当时 `.webenvoy/profiles` 不存在可用于 XHS live 复核的已登录 profile
 - [x] 由于 2026-04-06 中午缺少 WebEnvoy-managed XHS 会话，本轮曾按 `No-Go/paused` 收口，不绕过 `#362/#363/#365` 继续 live 扩展
 - [x] 2026-04-06 晚间起，不再把作者本机 `.webenvoy/profiles/**` 的恢复状态直接写成正式结论；正式状态只跟随 FR-0005 已收口的 managed-profile 同口径复核结论变化
-- [x] 2026-04-10 晚间已确认仓库内存在 `xhs_001` 受管 profile，且保留 `lastLoginAt` 与 `persistentExtensionBinding`
 - [x] 2026-04-10/2026-04-11 已确认此前 `IDENTITY_MANIFEST_MISSING` 属于 worktree/main 路径污染后的中间现场，不再作为最终停点
-- [x] 2026-04-11 已在 `main` 目录恢复 `xhs_001` 的 managed-profile official runtime 绑定，并通过 `runtime.status/runtime.start/runtime.ping/runtime.tabs` 完成只读预检与真实 tab 回读
-- [x] 2026-04-11 已确认当前 latest head 的 fresh rerun 新阻断点不是 profile root，而是 XHS read 执行 bundle 在 `search` 首次同口径 rerun 中返回 `executeXhsSearchImpl is not defined`
-- [x] 当前 formal FR 的本地停点已更新为：managed-profile 准入预检与 `search` 首次同口径 fresh rerun 已完成，但 `detail/user_home` 仍未获得合法 fresh rerun 样本，且三场景仍缺 API primary 成功与矩阵证据，正式结论继续 `No-Go/paused`
+- [x] 2026-04-11 已按 managed-profile official runtime 口径完成最新一轮正式复核，并确认当前正式阻断点不再是 profile root / identity preflight，而是已验证提交 `e8e686d3ecc5924770131264671bc4da5713ef57` 的 XHS read 执行 bundle 在 `search` 首次同口径 rerun 中返回 `executeXhsSearchImpl is not defined`
+- [x] 当前 formal FR 的本地停点已更新为：`search/detail/user_home` 仍缺 API primary 成功与矩阵证据，其中 `detail/user_home` 尚未获得合法 fresh rerun 样本，正式结论继续 `No-Go/paused`
 
 ## #185 阻断点吸收（本次规约修订）
 

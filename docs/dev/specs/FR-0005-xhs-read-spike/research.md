@@ -480,7 +480,7 @@
 - `profile=xhs_001`
 - `browser_channel=chrome`
 - `execution_surface=real_browser`
-- latest head：2026-04-11 本地 main 当前头
+- `tested_head_sha=e8e686d3ecc5924770131264671bc4da5713ef57`
 - Chrome 页面：`https://www.xiaohongshu.com/search_result?keyword=AI&type=51`
 
 运行时 tab 诊断：
@@ -520,12 +520,12 @@
   - `blocker_level=repo_latest_head_execution_bundle`
 - 成熟度结论：
   - 本轮只证明 managed-profile + official runtime + real browser + explicit target gate 已恢复
-  - 但 latest head 的执行 bundle 在 fresh rerun 首次进入 content script 时即失败，`search` 不能升级为 `reproduced_multi_round`，也不能补齐 required headers 矩阵
+  - 但 `tested_head_sha=e8e686d3ecc5924770131264671bc4da5713ef57` 的执行 bundle 在 fresh rerun 首次进入 content script 时即失败，`search` 不能升级为 `reproduced_multi_round`，也不能补齐 required headers 矩阵
 
 `detail`
 
 - 本轮未获得合法 fresh rerun 样本
-- 阻断原因不是 profile 不存在，而是 latest head 在共享执行 bundle 层已出现 `executeXhsSearchImpl is not defined`
+- 阻断原因不是 profile 不存在，而是 `tested_head_sha=e8e686d3ecc5924770131264671bc4da5713ef57` 在共享执行 bundle 层已出现 `executeXhsSearchImpl is not defined`
 - 由于 `search` 的同口径 fresh rerun 尚未通过，`detail` 无法在同一 managed-profile official runtime 边界内继续补做 API primary 复核
 - 需与早期 `#306` 语义区分：此前“详情页可读取”的成功，指向的是 `detail-fallback-01` 这类 page-state/fallback 证据（`window.__INITIAL_STATE__.note.noteDetailMap` 可读），不是 `detail primary api` 已成功，更不是 `search` 主路径已成功
 - 当前维持既有结论：`fallback-only + candidate/failed`，未新增 primary success 样本
@@ -533,7 +533,7 @@
 `user_home`
 
 - 本轮未获得合法 fresh rerun 样本
-- 阻断原因同上：共享执行 bundle 已在最早的 XHS read fresh rerun 中失败
+- 阻断原因同上：`tested_head_sha=e8e686d3ecc5924770131264671bc4da5713ef57` 的共享执行 bundle 已在最早的 XHS read fresh rerun 中失败
 - 当前维持既有结论：`fallback-only + candidate/failed`，未新增 `/api/sns/web/v1/user/otherinfo` 或候选聚合端点的 primary success 样本
 
 #### 5.3.4 required headers / 关键字段矩阵是否提升
@@ -548,7 +548,7 @@
 
 - `xhs_001` 现在可被认定为可启动的 WebEnvoy-managed official runtime profile。
 - `real_browser` fresh rerun 已成功达到 `runtime.start ready`、`runtime.tabs` 成功回读真实 tab、`runtime.ping` 成功回读真实 relay path。
-- 但是 latest head 的 XHS read 执行 bundle 在 `search` 首次 fresh rerun 就失败，错误为 `executeXhsSearchImpl is not defined`；这属于当前仓库 latest head 的执行层阻断，不是外部 profile 根目录问题。
+- 但是 `tested_head_sha=e8e686d3ecc5924770131264671bc4da5713ef57` 的 XHS read 执行 bundle 在 `search` 首次 fresh rerun 就失败，错误为 `executeXhsSearchImpl is not defined`；这属于当前仓库该提交的执行层阻断，不是外部 profile 根目录问题。
 - 同时，`risk_state_output.current_state=paused` 仍未解除，本轮也没有新增 approval / headers matrix / API primary success 样本。
 - 因此 `search/detail/user_home` 三类场景都没有达到 `route_role=primary + path_kind=api + evidence_status=success + reproduced_multi_round`。
 - issue `#445` 本轮正式 Go/No-Go 结论继续维持：`No-Go/paused`。
