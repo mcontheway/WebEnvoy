@@ -28,8 +28,8 @@
 - [x] 由于 2026-04-06 中午缺少 WebEnvoy-managed XHS 会话，本轮曾按 `No-Go/paused` 收口，不绕过 `#362/#363/#365` 继续 live 扩展
 - [x] 2026-04-06 晚间起，不再把作者本机 `.webenvoy/profiles/**` 的恢复状态直接写成正式结论；正式状态只跟随 FR-0005 已收口的 managed-profile 同口径复核结论变化
 - [x] 2026-04-10/2026-04-11 已确认此前 `IDENTITY_MANIFEST_MISSING` 属于 worktree/main 路径污染后的中间现场，不再作为最终停点
-- [x] 2026-04-11 已按 managed-profile official runtime 口径完成最新一轮正式复核，并确认当前正式阻断点不再是 profile root / identity preflight，而是已验证提交 `e8e686d3ecc5924770131264671bc4da5713ef57` 的 XHS read 执行 bundle 在 `search` 首次同口径 rerun 中返回 `executeXhsSearchImpl is not defined`
-- [x] 当前 formal FR 的文档收口已完成；功能停点已更新为：`search/detail/user_home` 仍缺 API primary 成功与矩阵证据，其中 `detail/user_home` 尚未获得合法 fresh rerun 样本，正式结论继续 `No-Go/paused`
+- [x] 2026-04-11 已按 managed-profile official runtime 口径完成最新一轮正式复核，并确认当前正式阻断点不再是 profile root / identity preflight；该轮 fresh rerun 的失败事实已在 `research.md` 记录
+- [x] 当前 formal FR 的文档收口已完成；正式功能停点仍为：`search/detail/user_home` 仍缺 API primary 成功与矩阵证据，其中 `detail/user_home` 尚未获得合法 fresh rerun 样本，正式结论继续 `No-Go/paused`
 
 ## #185 阻断点吸收（本次规约修订）
 
