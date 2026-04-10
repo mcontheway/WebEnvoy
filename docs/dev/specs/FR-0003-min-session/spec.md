@@ -283,7 +283,7 @@ And 本 FR 不要求自动把该快照回写到浏览器会话
 ## 验收标准
 
 1. 能按指定 `profile` 启动浏览器，并进入可读回的 `ready` 状态。
-2. `runtime.login` 能在首次使用时创建最小身份边界，并通过显式 `--confirm` 收口手动登录结果。
+2. `runtime.login` 能在首次使用时创建最小身份边界，并通过再次调用 `runtime.login` 且传入 `params.confirm=true` 收口手动登录结果。
 3. 同一 Profile 的并发启动能被稳定拒绝，且拒绝原因可读。
 4. 代理绑定能随 Profile 持久化并在后续启动中复用。
 5. `runtime.status` 能稳定返回浏览器态、Profile 态和代理绑定信息。

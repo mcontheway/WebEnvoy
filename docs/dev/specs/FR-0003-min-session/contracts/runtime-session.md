@@ -123,6 +123,7 @@ disconnected -> starting
 
 - `profile`：必填
 - `params.proxyUrl`：可选，但不得绕过既有绑定冲突检查
+- `params.confirm`：可选；仅在二次确认调用时传入 `true`
 
 语义：
 
