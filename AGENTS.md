@@ -162,14 +162,6 @@ spec review 的执行约束：
 - PR：本次改动范围、关闭语义、验证证据
 - `TODO.md` / handoff：实现停点、恢复入口、阻断项；不表达项目真相源状态
 
-GitHub 单一结构补充约束：
-
-- GitHub 正式主树固定为 `Phase -> FR -> Work Item`
-- `Issue` 页面是关系、状态与关闭语义真相源；`Project` 只负责视图与筛选
-- repo 级治理、工具链、门禁事项也必须挂到某个 `FR`，不得长期漂浮在主树之外
-- 旧结构标签如 `类型: umbrella`、`类型: FR锚点`、`类型: 主线`、`类型: follow-up`、`类型: sidecar` 只保留历史兼容，不再承担当前结构语义
-- `spec.md` 写回 GitHub 时，只允许通过 `.github/spec-issue-sync-map.yml` 命中 canonical FR issue；禁止按目录名搜索、自动创建 issue，或继续回写旧 anchor
-
 ## 轻量改动通道
 
 以下改动可以走“轻量改动通道”，但**仍必须走分支 + PR + review + squash merge**：

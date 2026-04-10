@@ -100,7 +100,6 @@
   - 是否引入提示词注入、命令注入、越权执行、错误自动合并、敏感信息泄露或对不可信输入的错误信任
 - 流程与元数据合规
   - 是否满足提交信息规范、PR 描述规范、`Fixes #...` / `refs #...` 使用时机、目标分支与仓库合并策略
-  - 若 PR 改动 `docs/dev/specs/**/spec.md`，是否已在 `.github/spec-issue-sync-map.yml` 中声明对应的 `spec_path -> canonical_issue_number` 映射；缺失映射时应直接阻断
   - 若 PR 属于 formal spec review PR、治理落库 PR 或落入“真实 Live Evidence 专项门禁”，PR 描述是否完整提供必需的结构化 `gate_applicability`
   - 若 PR 自报或实质上属于 `governance_landing_pr`，是否同时满足“显式引用 `#310` + 精确五文件治理落库范围”；若不满足，是否已按 blocker 处理，而不是退回普通 PR
   - 若 PR 落入“真实 Live Evidence 专项门禁”，PR 描述是否完整提供 `live_evidence_record`，且字段、来源和 latest head 一致性可复核
@@ -214,7 +213,6 @@
 - 存在安全、滥用、权限或数据风险
 - 流程与元数据不合规，且会影响合并判断，例如在 `spike/spec-ready` 阶段误用 `Fixes #...`
 - formal spec review PR、治理落库 PR 或落入“真实 Live Evidence 专项门禁”的 PR 缺少必需的 `gate_applicability`
-- 改动 `docs/dev/specs/**/spec.md` 的 PR 缺少 `.github/spec-issue-sync-map.yml` 中的对应 `spec_path -> canonical_issue_number` 映射
 - 治理落库 PR 未显式引用 `#310`、未精确命中五处冻结治理落库目标文件，或 formal spec review 尚未通过
 - 同一 PR 同时触碰 FR-0016 正式契约文件，或触碰 `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md`，且又触碰任一治理落库目标文件
 - 落入“真实 Live Evidence 专项门禁”的 PR 缺少 latest head 新鲜复验，或把 stub/fake host / `runtime.ping` / `runtime.bootstrap` 误写成真实闭环证据
