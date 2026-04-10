@@ -69,6 +69,8 @@ interface DownloadAbilityRequest {
 - `download_ability_request` 只能挂接在 `FR-0007.params.input`，不得新增下载专用顶层请求壳。
 - `FR-0007.params.ability.id` 必须直接等于 `ability_ref`。
 - `FR-0007.params.ability.action` 必须固定为 `download`。
+- `FR-0007.params.ability.layer` 是本次 invocation 的权威执行层；`requested_execution_layer` 只是下载输入对象内的显式镜像字段，必须与 `ability.layer` 严格相等。
+- 若 `ability.layer` 与 `requested_execution_layer` 不一致，请求必须在 `input_validation` 阶段直接拒绝；实现不得自行猜测优先级或静默改写。
 - 下载目标必须来自浏览器内可达路径，不得把浏览器外异构抓取器作为正式主路径。
 - `output_policy.destination_root` 只允许表达 CLI-owned trusted download base 内的目标子目录，不得直接表达任意宿主绝对路径。
 - 实现必须先对 `destination_root` 做本地规范化，再拼接到 trusted download base；若输入为绝对路径、`..`、`~`、Windows drive/UNC 前缀，或规范化后逃逸 trusted base，必须在 `input_validation` 阶段直接拒绝。

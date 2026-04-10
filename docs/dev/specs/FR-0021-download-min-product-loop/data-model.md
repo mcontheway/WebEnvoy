@@ -61,6 +61,8 @@
 
 - `download_ability_request` 只能作为 `FR-0007.params.input` 下的下载输入对象；能力外层调用仍固定为 `params.ability/input/options`。
 - `params.ability.id` 必须等于 `download_ability_request.ability_ref`，且 `params.ability.action` 固定为 `download`。
+- `params.ability.layer` 是本次 invocation 的权威执行层；`download_ability_request.requested_execution_layer` 只是下载输入对象内的镜像字段，必须与 `params.ability.layer` 严格相等。
+- 若 `params.ability.layer` 与 `requested_execution_layer` 不一致，请求必须在 `input_validation` 阶段直接拒绝。
 - `result_state=downloaded` 时，`resolved_output_path` 必须存在；`saved_artifact_refs` 仅在运行期已有可用 run-scoped evidence refs 时返回。
 - `result_state=downloaded` 时，`source_url` 与 `file_name_hint` 必须存在；其中 `source_url` 用于回传本次下载最终使用的浏览器侧来源标识，可为 direct URL、`blob:` URL 或页面执行后解析出的最终来源。
 - `partial` 只能用于已有可保留产物但整体未满足目标的场景。

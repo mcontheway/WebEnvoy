@@ -68,6 +68,8 @@ Canonical Issue: #153
   - `download_ability_request` 只能作为 `FR-0007` `params.input` 下的下载输入对象，不得提升为新的顶层请求壳
   - `params.ability.id` 必须直接等于 `download_ability_request.ability_ref`
   - `params.ability.action` 必须固定为 `download`
+  - `params.ability.layer` 仍是本次 invocation 的权威执行层；`download_ability_request.requested_execution_layer` 只作为下载输入对象内的显式镜像字段，且必须与 `params.ability.layer` 严格相等
+  - 若 `params.ability.layer` 与 `download_ability_request.requested_execution_layer` 不一致，请求必须在 `input_validation` 阶段直接拒绝，不得由实现自行猜测优先级或静默改写
   - `ability_ref` 在进入候选能力描述后必须直接等于 `FR-0017.candidate_ability_descriptor.ability_id`
   - `requested_execution_layer` 的共享正式枚举必须保留 `L1`、`L2`、`L3`；当前最小实现切片可优先 `L3/L2`，但不得在 formal 契约层排除 `L1`
   - `download_source` 只描述“当前浏览器执行上下文内可解析的请求输入”，不得被提升为新的全局 artifact/ref 真相源

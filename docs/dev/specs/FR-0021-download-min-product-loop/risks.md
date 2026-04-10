@@ -42,6 +42,12 @@
 - 缓解：formal 契约统一保留 `L1/L2/L3`，并明确“保留枚举不等于本 FR 已承诺完成 L1 实现”
 - 回滚：将分叉枚举回滚到共享正式枚举并重审 suite 内所有相关字段
 
+## 风险 6.1：`requested_execution_layer` 与 `ability.layer` 冲突
+
+- 表现：调用对象同时携带 `params.ability.layer` 与 `download_ability_request.requested_execution_layer`，但 formal 契约没有冻结两者关系，导致实现方各自猜测谁是权威执行层
+- 缓解：冻结 `params.ability.layer` 为权威 invocation layer；`requested_execution_layer` 仅作镜像字段，且必须与之严格相等；冲突输入统一在 `input_validation` 阶段拒绝
+- 回滚：撤销模糊双字段语义，恢复单一权威执行层表达
+
 ## 风险 7：`source_url` 被误写为调用方预填稳定 URL
 
 - 表现：结果对象沿用“请求时已知 URL”假设，无法审计 `blob:` 或页面执行后才解析出的真实下载来源
