@@ -46,6 +46,8 @@
   - 高风险动作在无基线下放行，账号风险上升。
 - 缓解：
   - 学习完成条件需同时满足样本量、时间跨度、字段完整性。
+  - freshness window 过期、连续高漂移或样本完整性失效时，必须显式降级到 `degraded`，不得继续伪装为 `ready`。
+  - 命中 reseed threshold、registry invalidation 或污染场景时，必须把 `reseed_required` 置为 `true`。
   - 未达标前默认 `allow_read_only` 或 `require_manual_review`。
 - 回滚：
   - 发现误放行后统一降级到 `learning`，并暂停 Layer 4 放行建议消费。
@@ -78,10 +80,12 @@
 
 - 场景：
   - `goal_kind=read` 的批次包含 `type` 或 `submit`，却仍被标记为 `pure_read`。
+  - 下载链路未经正式映射就被直接写成独立 `download` goal，导致与 `action_type`/pure-read 边界脱节。
 - 影响：
   - `FR-0019` 的 read lane 边界被绕过，评估结果不可解释。
 - 缓解：
   - 强制执行 pure-read 动作白名单：`navigate | locate | reveal_only_click | extract | wait_settled`。
   - 只要 `type` 或 `submit` 非零，立即禁止标记为 `pure_read`。
+  - 下载链路进入 Layer 4 前必须先映射到 `goal_kind=read|write`；若包含 `type|submit`，只能映射为 `write`。
 - 回滚：
   - 发现误标后回滚该批次评估，重算并强制转入 `require_manual_review`。

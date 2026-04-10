@@ -3,7 +3,7 @@
 ## 1. `platform_behavior_signal_batch`
 
 ```ts
-type GoalKind = "read" | "write" | "download"
+type GoalKind = "read" | "write"
 type InteractionSafetyClass = "pure_read" | "controlled_write" | "high_risk_write"
 type BrowserChannel = "Google Chrome stable"
 type ExecutionSurface = "real_browser" | "stub" | "fake_host" | "other"
@@ -64,6 +64,10 @@ interface PlatformBehaviorSignalBatch {
 - `goal_kind` 与 `interaction_safety_class` 必须保持可解释映射，不得出现“高风险写动作却标成 `pure_read`”。
 - `goal_kind=read` 时，`interaction_safety_class` 必须为 `pure_read`，且 `ActionMix` 仅允许 `navigate | locate | reveal_only_click | extract | wait_settled` 出现非零值。
 - 只要 `type` 或 `submit` 出现非零值，该批次就不得标记为 `pure_read`。
+- 本 FR 不冻结 `download` 为独立 Layer 4 goal；下载链路在进入本对象前必须先完成 `read/write` 映射。
+- 若下载链路仅包含 `navigate | locate | reveal_only_click | extract | wait_settled`，必须映射为 `goal_kind=read`。
+- 若下载链路包含 `type`、`submit` 或其他写入型交互，必须映射为 `goal_kind=write`，且不得标记为 `pure_read`。
+- 下载链路进入 assessment 时，`action_type` 必须继续记录实际交互动作，不得再平行定义 `download` 作为新的 Layer 4 action shortcut。
 - 该对象必须可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的共享验证输入，不得独立形成第二套 baseline scope。
 - `effective_execution_mode` 与 `probe_bundle_ref` 必须直接继承 `FR-0020` 的 formal baseline scope；不得把不同 recon/live scope 或不同 probe bundle 归一化到同一批 Layer 4 输入。
 - 只允许结构化摘要，不允许正文/敏感原文字段进入该契约。
@@ -101,7 +105,11 @@ interface PlatformBehaviorBaselineState {
 - `baseline_state=ready` 时，`learned_sample_count` 必须满足学习阈值且 `ready_at` 不得缺失。
 - `baseline_state!=ready` 时，`ready_at` 不得伪装为稳定就绪时间。
 - `last_assessed_at` 在尚未形成 assessment 前允许为空；一旦该状态对象被 assessment 消费，后续写回不得继续缺失。
+- 若先前 `ready` 基线的 `last_assessed_at` 已超过当前 `threshold_config_snapshot_ref` 定义的 freshness window，或同 scope 最新 assessment 返回 `drift_level=high|critical`，状态必须降级为 `degraded`。
+- 若最新样本批次未通过字段完整性或证据回链校验，导致 ready 基线不再可直接信任，状态必须降级为 `degraded` 或重新进入 `learning`。
+- 当 registry 已 supersede / invalidate 当前 baseline、检测到 scope 污染/隔离破坏，或同 scope 持续 `degraded`/重复 `high|critical` 已达到当前阈值快照定义的 reseed threshold 时，`reseed_required` 必须置为 `true`。
 - `reseed_required=true` 时，不得把状态当作稳定 ready 消费。
+- `reseed_required=true` 时，`baseline_state` 不得继续保持稳定 `ready`。
 
 ## 3. `platform_behavior_assessment`
 

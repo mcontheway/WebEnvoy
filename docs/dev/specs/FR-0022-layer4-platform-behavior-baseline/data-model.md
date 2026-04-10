@@ -35,6 +35,9 @@
 - 仅允许摘要字段，不允许页面正文、输入明文、媒体内容等高敏原文数据。
 - `action_mix` 至少覆盖 `navigate`、`locate`、`extract`、`reveal_only_click`、`wait_settled`、`type`、`submit` 的计数或比率。
 - `goal_kind=read` 时，`interaction_safety_class` 必须为 `pure_read`，且只允许 `navigate | locate | reveal_only_click | extract | wait_settled` 出现非零值；若出现 `type` 或 `submit`，不得标记为 `pure_read`。
+- 本 FR 当前只冻结 `goal_kind=read|write`；下载链路在进入 Layer 4 前必须先被映射到这两个 goal 之一。
+- 若下载链路只包含 `navigate | locate | reveal_only_click | extract | wait_settled`，必须映射为 `goal_kind=read`；若包含 `type`、`submit` 或其他写入型交互，必须映射为 `goal_kind=write`。
+- 下载链路进入 `platform_behavior_assessment` 后，`action_type` 必须继续记录实际交互动作，不得另起 `download` 作为新的 Layer 4 action shortcut。
 - 该对象只能承接已可回链到 `FR-0020.validation_scope=cross_layer_baseline` 的共享验证输入，不得自行扩写第二套 baseline 作用域。
 - `effective_execution_mode` 与 `probe_bundle_ref` 必须继续保留在 Layer 4 输入 identity 中；不得把不同 recon/live scope 或不同 probe bundle 的共享输入合并到同一条 baseline / assessment。
 - 若后续评估需要选择当前 active baseline，必须先通过 `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 解析，再回链对应 snapshot / record。
@@ -89,7 +92,11 @@
 - `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)` 是可写隔离主键，不允许跨 profile、浏览器通道、执行面、执行模式、probe bundle 或代理绑定共用同一可写状态对象。
 - `runtime_context_id` 仅用于 run/session 证据回链，不进入可写基线主键。
 - `ready` 只能在学习阈值达标后进入；阈值不足必须保持在 `learning` 或降级为 `degraded`。
+- 若先前 `ready` 基线已超过当前阈值快照定义的 freshness window，或同 scope 最新 assessment 返回 `drift_level=high|critical`，则必须降级为 `degraded`。
+- 若最新样本批次未通过字段完整性或证据回链校验，导致 ready 基线不再可直接信任，则必须降级为 `degraded` 或回退到 `learning`。
+- 当 registry 已 supersede / invalidate 当前 baseline、检测到 scope 污染/隔离破坏，或同 scope 持续 `degraded`/重复 `high|critical` 已达到当前阈值快照定义的 reseed threshold 时，必须置 `reseed_required=true`。
 - `reseed_required=true` 时不得把状态误报为稳定 `ready`。
+- `reseed_required=true` 时，下游评估只能收敛到 `require_manual_review` 或 `require_reseed`，直到新学习周期重新建立。
 
 ## 3. `platform_behavior_assessment`
 

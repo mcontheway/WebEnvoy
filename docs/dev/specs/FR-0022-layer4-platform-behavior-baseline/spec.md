@@ -57,6 +57,11 @@ Canonical Issue: #238
 - `goal_kind=read` 时必须继承 `FR-0019` 的 `interaction_safety_class=pure_read` 语义：
   - 仅允许动作 `navigate | locate | reveal_only_click | extract | wait_settled`
   - 只要出现 `type` 或 `submit`，不得标记为 `pure_read`
+- 本 FR 当前只冻结 `goal_kind=read|write` 两类 Layer 4 输入；`download` 不作为独立 Layer 4 goal 枚举冻结。
+- 下载链路在进入 Layer 4 前必须完成正式映射：
+  - 若下载来源解析只包含 `navigate | locate | reveal_only_click | extract | wait_settled`，必须映射为 `goal_kind=read` 并继续满足 `pure_read`
+  - 若下载链路包含 `type`、`submit` 或其他写入型交互，必须映射为 `goal_kind=write`，且不得标记为 `pure_read`
+- 下载链路进入 `platform_behavior_assessment` 后，`action_type` 必须继续记录实际交互动作（例如 `extract`、`reveal_only_click`、`type`、`submit`），不得平行引入 `download` 作为新的 Layer 4 action shortcut。
 
 ### 2. Layer 4 最小对象与状态机
 
@@ -93,6 +98,15 @@ Canonical Issue: #238
   - `high`
   - `critical`
 - 必须定义状态迁移最低条件：进入学习、学习完成、偏移降级、重播种（reseed）触发。
+- `baseline_state=degraded` 的最小触发准则必须冻结为：
+  - 先前处于 `ready` 的同 scope 基线，其 `last_assessed_at` 已超过当前 `threshold_config_snapshot_ref` 定义的 freshness window
+  - 同 scope 最新一次 assessment 返回 `drift_level=high|critical`
+  - 同 scope 最新样本批次未通过正式的字段完整性或证据回链校验，导致 ready 基线不再可直接信任
+- `reseed_required=true` 的最小触发准则必须冻结为：
+  - `FR-0020.anti_detection_baseline_registry_entry.active_baseline_ref` 已不再指向当前 baseline version，或该 baseline 被显式 supersede / invalidate
+  - 检测到跨 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)` scope 的样本污染或隔离破坏
+  - 同 scope 持续处于 `degraded`，或重复出现 `high|critical` 漂移，且已达到当前 `threshold_config_snapshot_ref` 定义的 reseed threshold
+- 一旦 `reseed_required=true`，`baseline_state` 不得继续保持稳定 `ready`；下游 `decision_hint` 只能收敛到 `require_manual_review` 或 `require_reseed`，直到新学习周期重新建立。
 
 ### 3. 信号采集与归一化边界
 
@@ -250,12 +264,32 @@ And 不得共享同一条可写基线真相源
 
 ### 场景 7：评估过期会降级
 
-Given 某 profile/platform 长时间未产生有效样本  
+Given 某 profile/platform 已有 `ready` 基线
+And `last_assessed_at` 已超过当前阈值快照定义的 freshness window
 When 再次请求评估  
-Then `baseline_state` 必须回退到 `degraded` 或 `learning`  
+Then `baseline_state` 必须回退到 `degraded`
 And 结果不能伪装成稳定 ready
 
-### 场景 8：本 PR 只做 spec review
+### 场景 8：reseed 阈值命中后必须要求重新播种
+
+Given 某 scope 连续命中高漂移并达到当前阈值快照定义的 reseed threshold
+When 生成新的 assessment
+Then `reseed_required` 必须为 `true`
+And `decision_hint` 只能是 `require_manual_review` 或 `require_reseed`
+
+### 场景 9：下载链路不会绕过 Layer 4 goal 映射
+
+Given 一条下载链路只包含 `navigate | locate | reveal_only_click | extract | wait_settled`
+When 进入 Layer 4 信号采样
+Then 该链路必须被映射为 `goal_kind=read`
+And 仍可标记为 `pure_read`
+
+Given 一条下载链路包含 `type` 或 `submit`
+When 进入 Layer 4 信号采样
+Then 该链路必须被映射为 `goal_kind=write`
+And 不得标记为 `pure_read`
+
+### 场景 10：本 PR 只做 spec review
 
 Given 当前 PR 对应 `FR-0022`  
 When reviewer 检查变更范围  
@@ -284,7 +318,8 @@ And 不应包含运行时实现代码
 5. 冷启动、学习期、ready、降级与 reseed 触发边界已冻结。  
 6. 审计留痕与数据最小化边界已冻结。  
 7. `goal_kind=read` 的 pure-read 动作约束已按 `FR-0019` 继承冻结。  
-8. 本 PR 边界明确为 spec review，不混入实现代码。  
+8. 下载链路进入 Layer 4 前的 `goal_kind` 映射已冻结，不再把 `download` 作为独立 Layer 4 goal 枚举。
+9. 本 PR 边界明确为 spec review，不混入实现代码。
 
 ## 依赖与前置条件
 

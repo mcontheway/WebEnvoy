@@ -16,7 +16,9 @@
 - [ ] reviewer 已确认 `browser_channel` 与 `execution_surface` 已分别收敛到 `Google Chrome stable` 与 `FR-0016` 共享枚举，不再并行发明私有编码。
 - [ ] reviewer 已确认 `platform_behavior_baseline_state` 与 `platform_behavior_assessment` 的条件字段语义一致：`ready_at/last_assessed_at`、`decision_id/audit_record_ref` 不再跨文档漂移。
 - [ ] reviewer 已确认 pure-read 继承 `FR-0019`：只允许 `navigate|locate|reveal_only_click|extract|wait_settled`，出现 `type|submit` 即不得标记为 `pure_read`。
+- [ ] reviewer 已确认下载链路进入 Layer 4 前必须先映射到 `goal_kind=read|write`，不再把 `download` 冻结为独立 Layer 4 goal。
 - [ ] reviewer 已确认冷启动、学习期、ready、degraded、reseed 条件描述可形成实现断言。
+- [ ] reviewer 已确认 `degraded` 与 `reseed_required` 的触发准则已冻结到 freshness、连续高漂移、污染/invalidated baseline 三类场景。
 - [ ] `plan.md` 已补齐七节最小结构并写清实现前前置。
 - [ ] `contracts/layer4-platform-behavior-baseline.md` 已冻结稳定对象与约束。
 - [ ] `data-model.md` 已明确 `(profile, platform, browser_channel, execution_surface, effective_execution_mode, probe_bundle_ref, proxy_binding_ref)` 维度隔离与审计回链。
