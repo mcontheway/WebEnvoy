@@ -75,21 +75,26 @@ Canonical Issue: #153
 
 ### 3. 最小下载结果对象
 
-- 必须冻结 `download_result_summary`，至少包含：
-  - `download_ref`
-  - `result_state`
-  - `saved_artifact_refs`
-  - `resolved_output_path`
-  - `source_url`
-  - `file_name_hint`
-  - `content_descriptor`
+- 必须冻结 `download_result_summary`，并把字段语义分层写清：
+  - 始终必填：
+    - `download_ref`
+    - `result_state`
+    - `content_descriptor`
+  - `result_state=downloaded` 时条件必填：
+    - `resolved_output_path`
+    - `source_url`
+    - `file_name_hint`
+  - `result_state=partial` 时条件必填：
+    - `resolved_output_path` 与 `saved_artifact_refs` 至少其一
+  - 可选 run-scoped evidence refs：
+    - `saved_artifact_refs`
 - `result_state` 至少支持：
   - `downloaded`
   - `partial`
 - `content_descriptor` 至少包含：
   - `content_kind`
   - `mime_type`
-  - `size_bytes`
+- `size_bytes` 在当前 formal baseline 下为可选字段；当运行期已知稳定字节数时应返回
 - 必须明确：
   - `download_result_summary` 只能作为 `FR-0007` 成功壳内 `summary.capability_result.download_result_summary` 的下载专用结构化结果对象，不得再声明为 `summary.capability_result.data_ref` 的解引用结果，也不得作为新的平行顶层返回结构
   - `summary.capability_result.action` 必须固定为 `download`，且 `outcome` 只能与 `download_result_summary.result_state` 做一致映射（`downloaded->success`，`partial->partial`）
@@ -112,16 +117,25 @@ Canonical Issue: #153
   - 下载能力进入 `FR-0017` 时，`ability_kind` 固定为 `download`
   - 下载结果继续复用统一能力壳，不得发明平行顶层结果结构
   - 下载能力进入 `FR-0018` 时，允许使用普通 `read|download` trust 域
-- `candidate_shell_seed` 必须至少提供：
+- `candidate_shell_seed` 必须足以直接物化 `FR-0017.candidate_ability_descriptor` 的必填字段，并同时提供 descriptor-owned `candidate_ability_contract_registry` 的最小 seed；不得依赖带外补字段或私有默认值。其正式字段至少包括：
   - `ability_id`
+  - `display_name`
   - `ability_kind=download`
   - `entrypoint`
-  - `contract_registry_seed`
+  - `platform_scope`
   - `input_contract_ref`
   - `output_contract_ref`
   - `error_contract_ref`
   - `execution_layer_support`
+  - `capture_origin`
+  - `capture_run_id`
+  - `capture_profile`
+  - `captured_at`
+  - `candidate_status`
+  - `capture_artifact_refs`（可选）
+  - `contract_registry_seed`
 - `candidate_shell_seed.execution_layer_support` 的共享正式枚举必须保留 `L1`、`L2`、`L3`；当前最小实现切片可优先 `L3/L2`，但 formal 契约层不得排除 `L1`
+- `candidate_shell_seed.platform_scope.platform_family` 必须使用稳定、归一化的平台键；站点无关下载能力默认应落在 `generic_web`
 - `candidate_shell_seed` 中的 `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 必须遵循 `FR-0017` 的 canonical namespace：
   - 格式固定为 `cad::<ability_id>::<input|output|error>::v<major>`
   - `ability_id` 必须直接等于当前 `candidate_shell_seed.ability_id`
@@ -221,6 +235,7 @@ And 不会继续进入文件落盘阶段
 8. 把下载输入冻结为 direct-URL-only，排除 `blob:` 或页面导出路径：视为与既有下载架构冲突。
 9. `destination_root` 允许调用方直接写任意宿主绝对路径，或规范化后可逃逸 trusted download base：视为高风险写入边界未冻结。
 10. 把 `download_result_summary` 继续声明为 opaque `data_ref` 的解引用结果：视为与 `FR-0007` 的 opaque reference 契约冲突。
+11. `candidate_shell_seed` 缺少 `display_name`、`platform_scope`、`capture_origin`、`capture_run_id`、`capture_profile`、`captured_at` 或 `candidate_status` 等 descriptor 必填字段，却仍被当作成功 handoff：视为与 `FR-0017` 的 descriptor 物化边界冲突。
 
 ## 验收标准
 

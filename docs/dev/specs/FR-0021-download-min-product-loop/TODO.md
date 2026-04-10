@@ -5,6 +5,7 @@
 - [ ] reviewer 确认最小落盘与冲突策略边界已冻结
 - [ ] reviewer 确认 `download_ability_request` 已接纳 `direct_url`、`page_blob`、`page_derived` 三类输入，不再要求调用方预先提供最终 `target_url`
 - [ ] reviewer 确认 `requested_execution_layer` 与 `candidate_shell_seed.execution_layer_support` 已与 `FR-0017` 对齐为 `L1/L2/L3` 共享正式枚举（且未过度承诺 L1 已实现）
+- [ ] reviewer 确认 `candidate_shell_seed` 已足以直接物化 `FR-0017.candidate_ability_descriptor` 的必填字段，并同时携带 descriptor-owned `contract_registry_seed`
 - [ ] reviewer 确认 `destination_root` 已冻结为 CLI trusted download base 内的目标子目录，而不是任意宿主路径
 - [ ] reviewer 确认下载失败统一走 `status=error + error.*`，不再挂到 `summary.capability_result`
 - [ ] reviewer 确认 `source_url` 语义已覆盖 direct URL、`blob:`、页面执行后解析出的浏览器侧最终来源标识

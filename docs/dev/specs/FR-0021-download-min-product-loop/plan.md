@@ -31,6 +31,7 @@
 - 不把下载结果从统一能力壳中拆出去。
 - `download_result_summary` 必须直接挂在 `summary.capability_result` 内，不得继续依赖 opaque `data_ref` 作为结构化结果载体。
 - `requested_execution_layer` 与 `candidate_shell_seed.execution_layer_support` 共享正式枚举保留 `L1/L2/L3`，但当前最小实现切片可优先 `L3/L2`。
+- `candidate_shell_seed` 必须足以直接物化 `FR-0017.candidate_ability_descriptor` 的必填字段，不得把 provenance / lifecycle 字段留给带外补写。
 - `replace_existing` 属于高风险路径，后续实现必须显式审计。
 
 ## 测试与验证策略
@@ -42,6 +43,7 @@
   - 检查 `source_url` 是否被定义为下载时最终浏览器侧来源标识，而非调用方预填稳定 URL
   - 检查 `destination_root` 是否已冻结为 trusted download base 内的子目录语义
   - 检查结构化下载结果是否直接暴露在 `summary.capability_result.download_result_summary`，不再依赖 opaque `data_ref`
+  - 检查 `candidate_shell_seed` 是否已能直接物化 `FR-0017` descriptor 必填字段，并同时提供 descriptor-owned `contract_registry_seed`
 - 校验：
   - `bash scripts/docs-guard.sh`
   - `bash scripts/spec-guard.sh`

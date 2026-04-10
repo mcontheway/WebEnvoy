@@ -53,3 +53,9 @@
 - 表现：`resolved_output_path`、`source_url`、`file_name_hint` 等字段只被声明为 `summary.capability_result.data_ref` 的解引用结果，下游实现无法一致消费
 - 缓解：冻结 `download_result_summary` 直接挂在 `summary.capability_result.download_result_summary`；`data_ref` 如存在只承载 opaque `download_ref`
 - 回滚：撤销对 `data_ref` 的结构化绑定，恢复 capability shell 内显式结果字段
+
+## 风险 10：`candidate_shell_seed` 不能直接物化 `FR-0017` descriptor
+
+- 表现：下载 handoff 只返回 `ability_id/entrypoint/*_contract_ref`，却缺少 `display_name`、`platform_scope`、`capture_origin`、`capture_run_id`、`capture_profile`、`captured_at`、`candidate_status` 等正式 descriptor 必填字段，导致下游仍依赖带外补写。
+- 缓解：冻结 `candidate_shell_seed` 必须足以直接物化 `FR-0017.candidate_ability_descriptor` 的必填字段，并同时携带 descriptor-owned `contract_registry_seed`。
+- 回滚：撤销不完整 handoff 形状，回到与 `FR-0017` 必填字段一一对齐的 seed。

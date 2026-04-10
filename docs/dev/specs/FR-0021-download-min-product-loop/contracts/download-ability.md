@@ -108,6 +108,7 @@ interface DownloadResultSummary {
 - `source_url` 必须回传本次下载最终使用的浏览器侧 source identity，可为 direct URL、`blob:` URL 或页面执行后解析出的最终来源。
 - `resolved_output_path` 必须是仍位于 trusted download base 内的实际落盘路径。
 - `saved_artifact_refs` 仅可作为 run-scoped evidence refs 的可选补充，不得被提升为新的正式真相源。
+- `result_state=partial` 时，`resolved_output_path` 与 `saved_artifact_refs` 至少其一必须存在；但该结果仍必须内联挂在 `summary.capability_result.download_result_summary`，不得退回平行顶层结果壳。
 - `result_state=partial` 只用于存在可保留产物但目标未完全满足的场景。
 
 ## 3. `candidate_shell_seed`
@@ -121,12 +122,23 @@ interface CandidateContractRegistrySeedEntry {
 
 interface CandidateShellSeed {
   ability_id: string
+  display_name: string
   ability_kind: "download"
   entrypoint: string
+  platform_scope: {
+    platform_family: string
+    site_pattern?: string
+  }
   execution_layer_support: ["L3" | "L2" | "L1", ...Array<"L3" | "L2" | "L1">]
   input_contract_ref: string
   output_contract_ref: string
   error_contract_ref: string
+  capture_origin: "l3_adapter_sample" | "l2_first_usable_sample" | "l1_fallback_sample"
+  capture_run_id: string
+  capture_profile: string
+  capture_artifact_refs?: string[]
+  captured_at: string
+  candidate_status: "draft_candidate" | "candidate_ready"
   contract_registry_seed: {
     ability_id: string
     entries: CandidateContractRegistrySeedEntry[]
@@ -136,7 +148,9 @@ interface CandidateShellSeed {
 
 约束：
 
+- `candidate_shell_seed` 必须足以直接物化 `FR-0017.candidate_ability_descriptor` 的必填字段，并同时提供 descriptor-owned `candidate_ability_contract_registry` 的最小 seed；不得依赖带外补字段、隐式默认值或私有 resolver 约定。
 - `input_contract_ref`、`output_contract_ref`、`error_contract_ref` 必须使用 `cad::<ability_id>::<input|output|error>::v<major>` 命名空间。
+- `platform_scope.platform_family` 必须使用稳定、归一化的平台键；站点无关下载能力默认应落在 `generic_web`。
 - `contract_registry_seed.ability_id` 必须直接等于 `ability_id`。
 - `entries[*].contract_ref` 必须至少覆盖三类 `*_contract_ref`。
 - 同一 `contract_ref` 不得出现冲突 entry，且 `contract_kind` 必须与 ref kind 一致。
@@ -195,12 +209,25 @@ interface CandidateShellSeed {
 
 ```json
 {
-  "download_ref": "dl-002",
-  "result_state": "partial",
-  "saved_artifact_refs": ["run:abc:artifact:1"],
-  "content_descriptor": {
-    "content_kind": "file",
-    "mime_type": "application/octet-stream"
+  "summary": {
+    "capability_result": {
+      "ability_id": "download.asset.v1",
+      "layer": "L2",
+      "action": "download",
+      "outcome": "partial",
+      "data_ref": {
+        "download_ref": "dl-002"
+      },
+      "download_result_summary": {
+        "download_ref": "dl-002",
+        "result_state": "partial",
+        "saved_artifact_refs": ["run:abc:artifact:1"],
+        "content_descriptor": {
+          "content_kind": "file",
+          "mime_type": "application/octet-stream"
+        }
+      }
+    }
   }
 }
 ```
