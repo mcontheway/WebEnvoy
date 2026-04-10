@@ -43,7 +43,7 @@
 3. 不得重写 FR-0002 的 link-layer handshake、heartbeat、relay 基线。
 4. 不得把 FR-0003 的最小 profile/session 边界扩成完整账号系统或安装资产仓库。
 5. 不得把 `runtime_bootstrap_envelope` 写回 profile 永久元数据，或继续通过 staged extension 文件承载。
-6. 不得把 `#239` 的验证体系、baseline 框架与 live/recon/dry_run 分层混入本 FR。
+6. 不得把 `FR-0020` 的验证体系、baseline 框架与 live/recon/dry_run 分层混入本 FR。
 
 ## 测试与验证策略
 
@@ -119,7 +119,7 @@
 - 最终安装器 UI / 引导流程
 - candidate 分发路径产品化
 - Chrome Web Store / 合规上架流程
-- `#239` 的 live / recon / dry_run 验证框架
+- `FR-0020` 的 live / recon / dry_run 验证框架
 
 ## 并行 / 串行关系
 
@@ -132,13 +132,13 @@
   - 必须先冻结 bootstrap contract 与 readiness 边界，才能开始 runtime.start / runtime.login 的迁移实现。
   - 必须先明确 identity preflight 失败面的 stop-ship 规则，才能做写路径或更大范围的 live 验证。
 - 明确拆开：
-  - `#281` 的实现 PR 与 `#239` 的验证 PR 必须分开推进。
+  - FR-0015 的后续实现 PR 与 `FR-0020` 的验证 PR 必须分开推进。
   - candidate 安装/分发路径若要产品化，必须另开后续事项，不挂在本 FR 的第一刀实现中。
 
 ## 进入实现前条件
 
 1. FR-0015 的 spec review 通过，且 reviewer 明确认可其足以支撑 `#281` implementation-prep。
 2. `contracts/runtime-bootstrap.md`、`contracts/runtime-readiness-status.md`、`data-model.md` 与 `risks.md` 被 reviewer 认可，能解释 bootstrap / identity / readiness 的共享边界。
-3. 后续实现 PR 明确只围绕 runtime migration 第一刀切片，同时使用 `Refs #281` 与 `Refs #361`；其中 `#281` 保留主线约束归属，`#361` 承接当前 backlog 挂接，不混入 `#239`、安装器产品化或 candidate 分发产品化。
+3. 后续实现 PR 明确只围绕 runtime migration 第一刀切片，并显式 `Refs` FR-0015 当前 canonical issue；如需追溯历史实现链路，可补充 `Refs #281` 或 `Refs #361`，但不得再用它们充当当前结构父级，也不得混入 `FR-0020`、安装器产品化或 candidate 分发产品化。
 4. 后续实现 PR 预先声明 stop-ship 条件、回滚入口与最小验证矩阵。
 5. 在这些条件满足前，禁止把 `#281` 视为已闭环，也禁止使用 `Fixes #281`。

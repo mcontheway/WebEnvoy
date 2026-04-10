@@ -4,13 +4,13 @@
 
 `FR-0011` 已为 Sprint 3 冻结最小反风控执行能力，重点是门禁主落点、最小风险状态机、读路径模式收敛，以及写路径的最小交互分级与阻断边界。它解决的是“哪些动作可以在什么风险状态下进入最小 live”，而不是“进入 live 后，事件层如何尽量接近真实用户”。
 
-`#236` 对应的缺口正处在这之后：`docs/dev/architecture/anti-detection.md` 已写出 Layer 2 事件级拟人模拟的方向，但当前 backlog 仍主要围绕“是否放行”而非“放行后的执行是否足够真实”。如果继续只沿用 Sprint 3 最小边界，后续 Phase 2 的读写封装、未知站点探索与页面预热会缺少统一的事件层增强策略。
+当前 Layer 2 owning Work Item 对应的缺口正处在这之后：`docs/dev/architecture/anti-detection.md` 已写出 Layer 2 事件级拟人模拟的方向，但当前 backlog 仍主要围绕“是否放行”而非“放行后的执行是否足够真实”。如果继续只沿用 Sprint 3 最小边界，后续 Phase 2 的读写封装、未知站点探索与页面预热会缺少统一的事件层增强策略。
 
-因此，本 FR 作为 `#233` 的子项、`#232` 总蓝图在 Phase 2 的延续能力之一，负责把 Layer 2 的事件级拟人模拟增强收敛成可供后续实现 PR 消费的正式规约输入。
+因此，本 FR 作为 Phase 2 主树中的正式 FR 之一，负责把 Layer 2 的事件级拟人模拟增强收敛成可供后续实现 PR 消费的正式规约输入；对应的 owning Work Item 为 Layer 2 scope。
 
 ## 目标
 
-1. 冻结 Layer 2 事件级拟人模拟增强的正式范围，明确其在 Phase 2 / `#233` 下的定位。
+1. 冻结 Layer 2 事件级拟人模拟增强的正式范围，明确其在 Phase 2 -> FR-0013 主树中的定位。
 2. 冻结“真实交互优先、合成交互回退”的更细粒度策略对象，避免后续实现各写一套判断。
 3. 冻结 `focus/input/change/blur` 等事件链一致性要求，以及滚动、悬停、输入节奏等最小拟人化边界。
 4. 冻结 Layer 2 与读路径、写路径调用链的衔接方式，使后续实现可在不改写 FR-0011 状态机的前提下接入。
@@ -29,7 +29,7 @@
 
 ### 1. Phase 2 定位与 FR-0011 边界冻结
 
-- 必须明确本 FR 属于 Phase 2 的反风控延续建设，并挂在 umbrella `#233` 之下。
+- 必须明确本 FR 属于 Phase 2 主树中的 Layer 2 反风控延续建设，对应 owning Work Item 为 Layer 2 scope。
 - 必须明确 `FR-0011` 是本 FR 的最小前置：
   - `FR-0011` 负责冻结最小风险门禁、最小写路径分级与阻断边界。
   - 本 FR 负责在这些前置已存在的前提下，补齐更完整的 Layer 2 事件级拟人模拟增强。
@@ -164,7 +164,7 @@ And 不需要新增另一套 CLI 或风险门禁契约
 ## 验收标准
 
 1. FR-0013 套件完整，至少包含 `spec.md`、`plan.md`、`TODO.md`、`research.md`、`risks.md`、`data-model.md`，并按需创建 `contracts/`。
-2. Phase 2 / `#233` / `#232` / `FR-0011` 的边界与依赖关系已明确冻结。
+2. Phase 2 / `FR-0013` / Layer 2 owning Work Item / `FR-0011` 的边界与依赖关系已明确冻结。
 3. 真实交互优先、合成交互回退、混合路径、事件链一致性与最小拟人化节奏均已形成稳定规约对象。
 4. 读路径/写路径调用链的接入顺序与状态收敛要求已明确，后续实现无需再自造新边界。
 5. 文档明确不承诺 Layer 3、Layer 4、小红书完整发布闭环或 `#208` live 恢复。
@@ -172,8 +172,9 @@ And 不需要新增另一套 CLI 或风险门禁契约
 
 ## 依赖与前置条件
 
-- 总蓝图：`#232`
-- Phase 2 umbrella：`#233`
+- 父级 Phase：Phase 2 parent issue
+- Canonical FR issue：FR-0013 canonical issue
+- Owning Work Item：Layer 2 owning Work Item
 - 最小前置：`FR-0011` / `#217`
 - 相关背景：
   - `docs/dev/architecture/anti-detection.md`

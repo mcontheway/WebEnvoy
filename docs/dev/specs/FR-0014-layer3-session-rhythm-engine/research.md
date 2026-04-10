@@ -18,7 +18,7 @@
 - `docs/dev/specs/FR-0010-xhs-risk-gates-hardening/`
 - `docs/dev/specs/FR-0011-xhs-min-anti-detection-execution/`
 - 当前 `main` 已合入的 `#226` 相关共享对象与 `runtime.audit` 返回结构
-- GitHub issues：`#232`、`#233`、`#237`
+- GitHub 结构页面：Phase 2 parent issue、FR-0014 canonical issue、Layer 3 owning Work Item
 
 ## 关键结论
 
@@ -26,7 +26,7 @@
 
 - 依据：
   - `roadmap.md` 已将 Layer 3 完整 session 行为节律引擎列为 Phase 2 延续能力。
-  - `anti-detection.md` 第 11 章已把 `#237` 映射为 Layer 3 主线。
+  - `anti-detection.md` 第 11 章已把 Layer 3 scope 映射为当前 owning Work Item。
 - 结论：
   - 可直接进入正式 FR 套件，而不是再走 spike-only 路径。
 

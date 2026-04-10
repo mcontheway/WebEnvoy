@@ -6,18 +6,18 @@
 - [ ] `spec.md` 已明确 FR-0017 继承 `FR-0007`，不重定义最小能力壳。
 - [ ] `spec.md` 已明确同一套候选能力描述可同时承载 L3 与 L2 样本。
 - [ ] `spec.md` 已明确读 / 写 / 下载三类能力面进入统一表达边界。
-- [ ] `plan.md` 已补齐七节最小结构，并写清 `#156/#155/#157/#153` 的并行 / 串行关系。
+- [ ] `plan.md` 已补齐七节最小结构，并写清 `FR-0018/0019/0021` 的并行 / 串行关系，以及 owning Work Item 的实现承接关系。
 - [ ] `contracts/candidate-ability-shell.md` 已冻结稳定对象与最小生命周期边界。
 - [ ] `data-model.md` 已明确候选能力描述字段与来源证据字段。
-- [ ] `research.md` 已说明为何当前需要正式 FR，而不是继续停留在 umbrella/issue 层。
+- [ ] `research.md` 已说明为何当前需要正式 FR，而不是继续停留在历史结构化 issue 讨论层。
 - [ ] `risks.md` 已覆盖“临时样本被误当成正式能力”“L3/L2 双轨协议漂移”“下载能力缺位”等风险。
 
 ## 进入实现前必须完成
 
 - [ ] FR-0017 spec review 通过并形成明确结论。
-- [ ] reviewer 确认 `#156` 在 `#368` 下的定位已表述清楚。
+- [ ] reviewer 确认 FR-0017 owning Work Item 在 Phase 2 -> FR-0017 主树中的定位已表述清楚。
 - [ ] reviewer 确认 FR-0017 没有重写 `FR-0007` 的既有对象语义。
-- [ ] reviewer 确认 `#155/#157/#153` 的消费边界在 review 中无冲突。
+- [ ] reviewer 确认 `FR-0018/0019/0021` 的消费边界在 review 中无冲突。
 
 ## spec 通过后的实施清单（非本 PR）
 
@@ -29,8 +29,9 @@
 
 ## 关联事项
 
-- [ ] Refs #368
-- [ ] Refs #156
-- [ ] Refs #155
-- [ ] Refs #157
-- [ ] Refs #153
+- [ ] Refs Phase 2 parent issue
+- [ ] Refs FR-0017 canonical issue
+- [ ] Refs FR-0017 owning Work Item
+- [ ] Refs FR-0018 downstream issue
+- [ ] Refs FR-0019 downstream issue
+- [ ] Refs FR-0021 downstream issue

@@ -2,7 +2,7 @@
 
 ## 评审阻断项
 
-- [x] 明确 FR-0013 在 Phase 2 / `#233` 下的定位
+- [x] 明确 FR-0013 在 Phase 2 -> FR-0013 主树中的定位
 - [x] 明确 FR-0013 与 `FR-0011` 的边界，不重定义最小状态机/审批/审计对象
 - [x] 补齐 `spec.md` 的目标、非目标、GWT、异常边界、验收标准与依赖前置
 - [x] 补齐 `plan.md` 的七节最小结构
@@ -16,8 +16,8 @@
 ## 进入实现前必须完成
 
 - [ ] FR-0013 spec review 通过并形成明确 review 结论
-- [ ] 后续实现 issue/PR 明确引用 FR-0013，且保持 `Refs #236`
-- [ ] 与 `#233` 下其它延续项的范围边界在 review 中无冲突
+- [ ] 后续实现 issue/PR 明确引用 FR-0013，且保持对 Layer 2 owning Work Item 的 `Refs`
+- [ ] 与 Phase 2 主树下其它延续项的范围边界在 review 中无冲突
 
 ## spec 通过后的实施清单（非本 PR）
 
@@ -31,8 +31,8 @@
 
 ## 关联
 
-- Issue: `#236`
-- Umbrella: `#233`
-- Blueprint: `#232`
+- Parent Phase issue
+- Canonical FR issue
+- Owning Work Item
 - Upstream: `FR-0011`
 - Downstream: Layer 2 实现 PR（待立项）

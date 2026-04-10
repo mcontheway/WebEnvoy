@@ -46,13 +46,13 @@
 ## 风险 4：范围漂移到安装器产品化或验证体系
 
 - 触发条件：
-  - 实现 PR 同时引入安装器产品化、candidate 分发路径或 `#239` 验证框架
+  - 实现 PR 同时引入安装器产品化、candidate 分发路径或 `FR-0020` 验证框架
 - 影响：
   - `#281` 失去 implementation-prep 纯度
   - review 无法判断真正的 runtime migration 是否成立
 - 缓解：
   - PR 只允许覆盖 identity preflight、bootstrap contract、runtime readiness 第一刀
-  - 安装器产品化与 `#239` 验证体系分开建后续事项
+  - 安装器产品化与 `FR-0020` 验证体系分开建后续事项
 - 回滚：
   - 拆 PR，保留 runtime migration 主链，移出扩 scope 内容
 
@@ -118,4 +118,4 @@
 - 任何实现仍依赖 staged extension 承载正式 bootstrap
 - `allowed_origins` 不能稳定绑定正式 `extension_id`
 - runtime readiness 仍然缺少多信号收敛
-- PR 把安装器产品化或 `#239` 验证体系混入 runtime migration 第一刀
+- PR 把安装器产品化或 `FR-0020` 验证体系混入 runtime migration 第一刀

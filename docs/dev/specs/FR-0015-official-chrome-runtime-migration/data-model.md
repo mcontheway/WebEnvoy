@@ -14,7 +14,7 @@
 
 - 最终安装器持久化结构
 - candidate 分发路径的配置仓库
-- `#239` 的验证样本、baseline 或回归仓库
+- `FR-0020` 的验证样本、baseline 或回归仓库
 
 ## 实体 1：PersistentIdentityBinding
 

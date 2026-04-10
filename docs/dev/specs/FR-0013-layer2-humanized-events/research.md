@@ -23,7 +23,7 @@
 
 | ID | Claim | Evidence Artifact | Method | Maturity | Confidence | Notes |
 |----|-------|-------------------|--------|----------|------------|-------|
-| C1 | Layer 2 属于 Phase 2 的延续反风控主线 | `docs/dev/roadmap.md`、`#233` | 路线图与 issue 对齐 | M2 | 95% | 不是 Sprint 3 的回写，也不是后层扩展 |
+| C1 | Layer 2 属于 Phase 2 -> FR-0013 主树中的延续反风控 Work Item | `docs/dev/roadmap.md`、GitHub parent/FR/Work Item 页面 | 路线图与 issue 对齐 | M2 | 95% | 不是 Sprint 3 的回写，也不是后层扩展 |
 | C2 | `FR-0011` 只冻结最小写路径分级与阻断边界 | `FR-0011/spec.md` | 套件边界审查 | M2 | 95% | 其重点是门禁与状态机，不是完整事件模拟 |
 | C3 | Layer 2 已形成稳定对象，值得创建 `contracts/` | `anti-detection.md`、`read-write.md`、`execution.md` | 架构边界审查 | M2 | 88% | 事件策略、事件链、节奏配置会被多个模块共享 |
 | C4 | FR-0013 需要独立 `data-model.md` 说明共享实体语义 | `spec_review.md`、`FR-0011/data-model.md` | 套件深度对齐 | M2 | 82% | 虽非持久化 schema，但属于跨模块共享对象 |

@@ -154,4 +154,4 @@ bootstrap 成功至少要求同时满足：
 
 - 不在本契约中定稿最终安装器协议。
 - 不把 candidate 分发路径写成正式 contract。
-- 不在这里引入 `#239` 的验证基线或 live/recon/dry_run 体系。
+- 不在这里引入 `FR-0020` 的验证基线或 live/recon/dry_run 体系。

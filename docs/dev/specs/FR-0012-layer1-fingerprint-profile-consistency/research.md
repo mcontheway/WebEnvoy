@@ -18,7 +18,7 @@
   - `FR-0011`：插件层门禁主落点、最小节律、三态状态机已冻结
 - roadmap 现状：
   - Phase 2 明确承接 Layer 1/2/3 的反风控延续建设
-  - `#235` 被明确映射为 Layer 1 主线
+- 当前 Layer 1 owning Work Item 已被明确映射到 FR-0012 主树下
 - 架构现状：
   - `anti-detection.md` 已列出 Layer 1 已有/待实现矩阵
   - `account.md` 已确认 `__webenvoy_meta.json` 可承载指纹种子等最小元数据
@@ -27,7 +27,7 @@
 
 | ID | Claim/Unknown | Evidence Artifact | Method | Maturity | Confidence | Notes |
 |---|---|---|---|---|---|---|
-| U1 | `#235` 属于 Phase 2 延续能力，而非独立主线 | `roadmap.md`、`#233`、`#235` | roadmap/issue 对齐审查 | M2 | 94% | 已在 roadmap 与 issue 中双重确认 |
+| U1 | Layer 1 owning Work Item 属于 Phase 2 -> FR-0012 主树，而非独立结构父级 | `roadmap.md`、GitHub parent/FR/Work Item 页面 | roadmap/issue 对齐审查 | M2 | 94% | 已在 roadmap 与 issue 中双重确认 |
 | U2 | Layer 1 必须先冻结 profile 级指纹包 | `anti-detection.md` §2.3、`account.md` §7.1 | 架构约束审查 | M2 | 92% | 否则补丁字段会散落在实现细节里 |
 | U3 | Layer 1 不能重定义 gate/status 对象 | `FR-0010`、`FR-0011` | 上游 FR 审查 | M2 | 95% | 门禁与状态机已在 Sprint 2/3 冻结 |
 | U4 | profile 与运行环境强绑定必须进入正式规约 | `anti-detection.md` §2.3 | 风险边界审查 | M2 | 90% | 跨 OS/架构迁移会造成指纹突变 |

@@ -12,7 +12,7 @@
 - [ ] `spec.md` / `contracts/` / `data-model.md` 已统一冻结 `payload_locator` 的 resolver 边界、生命周期与 cleanup 规则，不再允许临时文件路径或 run artifact URL 充当正式 locator。
 - [ ] `spec.md` / `contracts/` / `data-model.md` 已统一明确：无上游 `seed_replay_input_ref` 时，首个 `ReplayInputSnapshotRef` 只允许由首次成功 `smoke_validation` 建立；成功 replay 只能刷新后续 snapshot，不能承担 bootstrap。
 - [ ] `spec.md` / `contracts/` / `data-model.md` 已统一明确：FR-0018 当前 formal baseline 不允许 cross-layer auto-fallback，`requested_execution_layer` 与 `validated_execution_layer` 必须一致，且结果只能写回对应 layer 视图。
-- [ ] `plan.md` 已补齐七节最小结构，并写清与 `#157/#153` 的并行 / 串行关系。
+- [ ] `plan.md` 已补齐七节最小结构，并写清与 `FR-0019/0021` 的并行 / 串行关系。
 - [ ] `contracts/ability-validation.md` 已冻结稳定对象与边界。
 - [ ] `data-model.md` 已明确最近一次验证结果与运行证据的引用方式。
 - [ ] `risks.md` 已覆盖“验证通过被误读为可交付”“重放被误写成自动修复”等风险。
@@ -20,7 +20,7 @@
 ## 进入实现前必须完成
 
 - [ ] FR-0018 spec review 通过并形成明确结论。
-- [ ] reviewer 确认 `#155` 在 `#368` 下的定位已表述清楚。
+- [ ] reviewer 确认 FR-0018 owning Work Item 在 Phase 2 -> FR-0018 主树中的定位已表述清楚。
 - [ ] reviewer 确认本 FR 未与 `FR-0017` 生命周期边界冲突。
 - [ ] reviewer 确认健康状态与失败大类足以支撑最小用户判断，不需要再临时补第二套状态。
 
@@ -34,7 +34,8 @@
 
 ## 关联事项
 
-- [ ] Refs #368
-- [ ] Refs #155
-- [ ] Refs #157
-- [ ] Refs #153
+- [ ] Refs Phase 2 parent issue
+- [ ] Refs FR-0018 canonical issue
+- [ ] Refs FR-0018 owning Work Item
+- [ ] Refs FR-0019 downstream issue
+- [ ] Refs FR-0021 downstream issue

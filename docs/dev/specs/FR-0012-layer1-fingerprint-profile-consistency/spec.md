@@ -4,7 +4,7 @@
 
 `docs/dev/architecture/anti-detection.md` 已冻结 Layer 1 的目标能力与 profile 级一致性约束，但当前 roadmap 与正式 FR 只覆盖了最小门禁与最小反风控执行前置：Sprint 2 的 `FR-0010` 负责门禁、审批与审计，Sprint 3 的 `FR-0011` 负责插件层门禁主落点、最小节律与三态状态机。
 
-`#235` 不是重开一套反风控体系，而是承接 `#233` umbrella 在 Phase 2 的延续主线：在最小前置已经具备后，优先把 Layer 1 中仍缺失、但会直接影响 live 扩展与能力封装安全性的 JS 指纹补丁和 profile 一致性固化下来，形成后续实现 PR 的正式输入。
+当前 Layer 1 owning Work Item 不是重开一套反风控体系，而是 Phase 2 主树下、由 `FR-0012` 承接的 Layer 1 scope：在最小前置已经具备后，优先把 Layer 1 中仍缺失、但会直接影响 live 扩展与能力封装安全性的 JS 指纹补丁和 profile 一致性固化下来，形成后续实现 PR 的正式输入。
 
 本 FR 只定义 Layer 1 正式规约，不重定义以下既有对象语义：
 
@@ -33,7 +33,7 @@
 
 ### 1. Phase 2 定位与继承边界
 
-- 本 FR 明确归属 `#233` 的 Phase 2 反风控延续能力，不是独立 phase，也不表示“反风控建设重新从 Layer 1 开始”。
+- 本 FR 明确归属 Phase 2 主树中的 `FR-0012` 节点，对应 Layer 1 owning Work Item；它不是独立 phase，也不表示“反风控建设重新从 Layer 1 开始”。
 - 本 FR 的所有 live 进入条件必须继续服从 `FR-0010` 与 `FR-0011`，包括但不限于：
   - `gate_input.risk_state`
   - `gate_outcome.gate_decision`
@@ -171,9 +171,9 @@ And 不会把本 FR 表述成完整 JS 指纹闭环
 ## 依赖与前置条件
 
 - GitHub 事项：
-  - `#232` 反风控能力总蓝图与分层落地总控
-  - `#233` Phase 2 反风控延续能力 umbrella
-  - `#235` Layer 1 主线
+  - Phase 2 parent issue
+  - FR-0012 canonical issue
+  - Layer 1 owning Work Item
 - 上游 FR：
   - `FR-0010-xhs-risk-gates-hardening`
   - `FR-0011-xhs-min-anti-detection-execution`

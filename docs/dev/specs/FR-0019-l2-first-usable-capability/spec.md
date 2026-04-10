@@ -4,9 +4,9 @@
 
 Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站，用户至少要能先做成一次，然后才能谈候选能力、验证与复用。当前架构文档已经为 L2 通用能力留出了明确占位，但 GitHub backlog 里还缺对应的正式规约入口。
 
-`#157` 承接的就是这条缺口：在不依赖站点专用规则的前提下，为未知网站提供最小读取与基础交互能力，并把首次成功路径整理成可进入统一能力壳的输入。如果这一层继续停留在 roadmap 和研究占位，Phase 2 的“再变成可复用能力”会只对已有 L3 样本成立，无法证明 WebEnvoy 对长尾网站也具备生产力。
+FR-0019 的 owning Work Item 承接的就是这条缺口：在不依赖站点专用规则的前提下，为未知网站提供最小读取与基础交互能力，并把首次成功路径整理成可进入统一能力壳的输入。如果这一层继续停留在 roadmap 和研究占位，Phase 2 的“再变成可复用能力”会只对已有 L3 样本成立，无法证明 WebEnvoy 对长尾网站也具备生产力。
 
-因此，本 FR 作为 `#157` 的正式规约入口，负责冻结 L2 未知网站首次可用能力的正式边界、成功判定与向候选能力描述的 handoff 输入。
+因此，本 FR 作为 FR-0019 owning Work Item 的正式规约入口，负责冻结 L2 未知网站首次可用能力的正式边界、成功判定与向候选能力描述的 handoff 输入。
 
 ## 目标
 
@@ -29,7 +29,7 @@ Phase 2 的另一条主价值线是：面对没有现成适配器的未知网站
 
 ### 1. Phase 2 定位与继承边界
 
-- 本 FR 归属 `#368`，承接 `#157` 的 L2 首次可用主线。
+- 本 FR 归属 Phase 2 主树中的 `FR-0019` 节点，对应 owning Work Item 为 L2 首次可用闭环。
 - 本 FR 必须显式继承以下既有边界：
   - `FR-0017` 的候选能力描述输入
   - 现有 CLI / Extension / Native Messaging 主链
@@ -260,14 +260,15 @@ And 不会把它直接描述成正式可复用能力
 ## 依赖与前置条件
 
 - GitHub 事项：
-  - `#368`
-  - `#157`
+  - Phase 2 parent issue
+  - FR-0019 canonical issue
+  - FR-0019 owning Work Item
 - 上游 FR：
   - `FR-0017-unified-candidate-ability-shell`
   - `FR-0004-runtime-observability`
 - 相关但不由本 FR 关闭的事项：
-  - `#155`
-  - `#153`
+  - `FR-0018`
+  - `FR-0021`
   - 后续 L1 兜底与交付类事项
   - `FR-0010-xhs-risk-gates-hardening`
   - `FR-0011-xhs-min-anti-detection-execution`
