@@ -175,6 +175,10 @@ const rewriteStagedContentScriptSourceForBridge = (input: {
   extensionBootstrap: Record<string, unknown> | null;
 }): string => {
   let rewritten = input.source;
+  rewritten = rewritten.replace(
+    "/* WebEnvoy classic content script bundle for Chrome MV3 content_scripts. */",
+    "/* WebEnvoy staged content script bundle: generated at runtime for MV3 classic script compatibility. */"
+  );
   const startupTrustRuntime = asRecord(input.extensionBootstrap?.fingerprint_runtime ?? null);
   const startupTrustRunId =
     typeof input.extensionBootstrap?.run_id === "string"
@@ -281,131 +285,10 @@ const rewriteStagedMainWorldBridgeSourceForBridge = (input: {
   return rewritten;
 };
 
-const stripEsmSyntaxForClassicScript = (source: string): string => {
-  let transformed = source;
-  transformed = transformed.replace(/^\s*import\s+[^;]+;\s*$/gm, "");
-  transformed = transformed.replace(/^\s*export\s*\{[^;]*\};\s*$/gm, "");
-  transformed = transformed.replace(/\bexport\s+const\s+/g, "const ");
-  transformed = transformed.replace(/\bexport\s+class\s+/g, "class ");
-  transformed = transformed.replace(/\bexport\s+function\s+/g, "function ");
-  transformed = transformed.replace(/\nexport\s*\{[\s\S]*?\};?\s*$/m, "\n");
-  return transformed.trim();
-};
-
-const renderClassicModule = (input: {
-  moduleVar: string;
-  prelude?: string;
-  sourceBody: string;
-  exports: string[];
-}): string =>
-  [
-    `const ${input.moduleVar} = (() => {`,
-    input.prelude ?? "",
-    input.sourceBody,
-    `return { ${input.exports.join(", ")} };`,
-    "})();",
-    ""
-  ]
-    .filter((line) => line.length > 0)
-    .join("\n");
-
 const buildStagedContentScriptBundle = async (input: {
   extensionSourceDir: string;
-  sharedSourceDir: string;
 }): Promise<string> => {
-  const readSource = async (path: string): Promise<string> =>
-    stripEsmSyntaxForClassicScript(await readFile(path, "utf8"));
-
-  const fingerprintSource = await readSource(
-    join(input.sharedSourceDir, SHARED_FINGERPRINT_PROFILE_PATH)
-  );
-  const riskStateSource = await readSource(join(input.sharedSourceDir, SHARED_RISK_STATE_PATH));
-  const xhsSearchSource = await readSource(join(input.extensionSourceDir, "build", "xhs-search.js"));
-  const handlerSource = await readSource(
-    join(input.extensionSourceDir, "build", "content-script-handler.js")
-  );
-  const contentScriptSource = await readSource(
-    join(input.extensionSourceDir, CONTENT_SCRIPT_ENTRY_PATH)
-  );
-
-  const riskStateModule = renderClassicModule({
-    moduleVar: "__webenvoy_module_risk_state",
-    sourceBody: riskStateSource,
-    exports: [
-      "APPROVAL_CHECK_KEYS",
-      "EXECUTION_MODES",
-      "WRITE_INTERACTION_TIER",
-      "buildRiskTransitionAudit",
-      "buildUnifiedRiskStateOutput",
-      "getWriteActionMatrixDecisions",
-      "getIssueActionMatrixEntry",
-      "resolveIssueScope",
-      "resolveRiskState"
-    ]
-  });
-
-  const fingerprintModule = renderClassicModule({
-    moduleVar: "__webenvoy_module_fingerprint_profile",
-    sourceBody: fingerprintSource,
-    exports: [
-      "DEFAULT_MIME_TYPE_DESCRIPTORS",
-      "DEFAULT_PLUGIN_DESCRIPTORS",
-      "ensureFingerprintRuntimeContext"
-    ]
-  });
-
-  const xhsSearchModule = renderClassicModule({
-    moduleVar: "__webenvoy_module_xhs_search",
-    prelude: [
-      "const {",
-      "  APPROVAL_CHECK_KEYS,",
-      "  EXECUTION_MODES,",
-      "  WRITE_INTERACTION_TIER,",
-      "  buildRiskTransitionAudit,",
-      "  buildUnifiedRiskStateOutput,",
-      "  getWriteActionMatrixDecisions,",
-      "  getIssueActionMatrixEntry,",
-      "  resolveIssueScope: resolveSharedIssueScope,",
-      "  resolveRiskState: resolveSharedRiskState",
-      "} = __webenvoy_module_risk_state;"
-    ].join("\n"),
-    sourceBody: xhsSearchSource,
-    exports: ["executeXhsSearch"]
-  });
-
-  const handlerModule = renderClassicModule({
-    moduleVar: "__webenvoy_module_content_script_handler",
-    prelude: [
-      "const { executeXhsSearch } = __webenvoy_module_xhs_search;",
-      "const {",
-      "  DEFAULT_MIME_TYPE_DESCRIPTORS,",
-      "  DEFAULT_PLUGIN_DESCRIPTORS,",
-      "  ensureFingerprintRuntimeContext",
-      "} = __webenvoy_module_fingerprint_profile;"
-    ].join("\n"),
-    sourceBody: handlerSource,
-    exports: ["ContentScriptHandler", "encodeMainWorldPayload", "resolveFingerprintContextForContract"]
-  });
-
-  const contentScriptModule = renderClassicModule({
-    moduleVar: "__webenvoy_module_content_script",
-    prelude: [
-      "const { ContentScriptHandler } = __webenvoy_module_content_script_handler;",
-      "const { ensureFingerprintRuntimeContext } = __webenvoy_module_fingerprint_profile;"
-    ].join("\n"),
-    sourceBody: contentScriptSource,
-    exports: ["bootstrapContentScript"]
-  });
-
-  return [
-    "/* WebEnvoy staged content script bundle: generated at runtime for MV3 classic script compatibility. */",
-    "",
-    riskStateModule,
-    fingerprintModule,
-    xhsSearchModule,
-    handlerModule,
-    contentScriptModule
-  ].join("\n");
+  return readFile(join(input.extensionSourceDir, CONTENT_SCRIPT_ENTRY_PATH), "utf8");
 };
 
 export const resolveExtensionSourceDir = async (): Promise<string> => {
@@ -426,26 +309,6 @@ export const resolveExtensionSourceDir = async (): Promise<string> => {
   throw new BrowserLaunchError(
     "BROWSER_LAUNCH_FAILED",
     "缺少可加载 extension 构建产物，请先构建 extension"
-  );
-};
-
-export const resolveSharedSourceDir = async (extensionSourceDir: string): Promise<string> => {
-  const moduleDir = dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    join(extensionSourceDir, "..", "shared"),
-    join(moduleDir, "..", "..", "shared"),
-    join(process.cwd(), "shared")
-  ];
-  for (const candidate of candidates) {
-    const fingerprintPath = join(candidate, SHARED_FINGERPRINT_PROFILE_PATH);
-    const riskStatePath = join(candidate, SHARED_RISK_STATE_PATH);
-    if ((await pathExists(fingerprintPath)) && (await pathExists(riskStatePath))) {
-      return candidate;
-    }
-  }
-  throw new BrowserLaunchError(
-    "BROWSER_LAUNCH_FAILED",
-    "缺少 shared 指纹/risk-state 构建产物，无法生成 staged content script bundle"
   );
 };
 
@@ -490,10 +353,8 @@ const rewriteStagedContentScriptForRuntime = async (input: {
   bridgeSecret: string;
   extensionBootstrap: Record<string, unknown> | null;
 }): Promise<void> => {
-  const sharedSourceDir = await resolveSharedSourceDir(input.extensionSourceDir);
   const bundleSource = await buildStagedContentScriptBundle({
-    extensionSourceDir: input.extensionSourceDir,
-    sharedSourceDir
+    extensionSourceDir: input.extensionSourceDir
   });
   const rewrittenBundleSource = rewriteStagedContentScriptSourceForBridge({
     source: bundleSource,

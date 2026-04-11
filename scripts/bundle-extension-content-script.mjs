@@ -11,6 +11,7 @@ const sharedRoot = join(extensionRoot, "shared");
 const stripEsmSyntaxForClassicScript = (source) => {
   let transformed = source;
   transformed = transformed.replace(/^\s*import\s+[^;]+;\s*$/gm, "");
+  transformed = transformed.replace(/^\s*export\s*\{[^;]*\}\s*from\s*["'][^"']+["'];\s*$/gm, "");
   transformed = transformed.replace(/^\s*export\s*\{[^;]*\};\s*$/gm, "");
   transformed = transformed.replace(/\bexport\s+const\s+/g, "const ");
   transformed = transformed.replace(/\bexport\s+class\s+/g, "class ");
@@ -37,6 +38,11 @@ const readSource = async (path) =>
 const buildContentScriptBundle = async () => {
   const fingerprintSource = await readSource(join(sharedRoot, "fingerprint-profile.js"));
   const riskStateSource = await readSource(join(sharedRoot, "risk-state.js"));
+  const sharedXhsGateSource = await readSource(join(sharedRoot, "xhs-gate.js"));
+  const xhsSearchTypesSource = await readSource(join(buildRoot, "xhs-search-types.js"));
+  const xhsSearchTelemetrySource = await readSource(join(buildRoot, "xhs-search-telemetry.js"));
+  const xhsSearchGateSource = await readSource(join(buildRoot, "xhs-search-gate.js"));
+  const xhsSearchExecutionSource = await readSource(join(buildRoot, "xhs-search-execution.js"));
   const xhsSearchSource = await readSource(join(buildRoot, "xhs-search.js"));
   const xhsEditorInputSource = await readSource(join(buildRoot, "xhs-editor-input.js"));
   const contentScriptMainWorldSource = await readSource(
@@ -74,21 +80,101 @@ const buildContentScriptBundle = async () => {
     ]
   });
 
-  const xhsSearchModule = renderClassicModule({
-    moduleVar: "__webenvoy_module_xhs_search",
+  const sharedXhsGateModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_shared_xhs_gate",
     prelude: [
       "const {",
       "  APPROVAL_CHECK_KEYS,",
       "  EXECUTION_MODES,",
       "  WRITE_INTERACTION_TIER,",
-      "  buildRiskTransitionAudit,",
-      "  buildUnifiedRiskStateOutput,",
-      "  getWriteActionMatrixDecisions,",
       "  getIssueActionMatrixEntry,",
+      "  getWriteActionMatrixDecisions,",
       "  resolveIssueScope: resolveSharedIssueScope,",
       "  resolveRiskState: resolveSharedRiskState",
       "} = __webenvoy_module_risk_state;"
     ].join("\n"),
+    sourceBody: sharedXhsGateSource,
+    exports: ["XHS_ALLOWED_DOMAINS", "evaluateXhsGate"]
+  });
+
+  const xhsSearchTypesModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_xhs_search_types",
+    sourceBody: xhsSearchTypesSource,
+    exports: ["SEARCH_ENDPOINT"]
+  });
+
+  const xhsSearchTelemetryModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_xhs_search_telemetry",
+    prelude: [
+      "const { SEARCH_ENDPOINT } = __webenvoy_module_xhs_search_types;",
+      "const {",
+      "  buildUnifiedRiskStateOutput,",
+      "  resolveRiskState: resolveSharedRiskState",
+      "} = __webenvoy_module_risk_state;"
+    ].join("\n"),
+    sourceBody: xhsSearchTelemetrySource,
+    exports: [
+      "buildEditorInputEvidence",
+      "containsCookie",
+      "createDiagnosis",
+      "createFailure",
+      "createObservability",
+      "inferFailure",
+      "inferRequestException",
+      "isTrustedEditorInputValidation",
+      "parseCount",
+      "resolveSimulatedResult",
+      "resolveRiskStateOutput",
+      "resolveXsCommon"
+    ]
+  });
+
+  const xhsSearchGateModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_xhs_search_gate",
+    prelude: [
+      "const {",
+      "  buildRiskTransitionAudit,",
+      "  resolveIssueScope: resolveSharedIssueScope,",
+      "  resolveRiskState: resolveSharedRiskState",
+      "} = __webenvoy_module_risk_state;",
+      "const { evaluateXhsGate } = __webenvoy_module_shared_xhs_gate;",
+      "const { resolveRiskStateOutput } = __webenvoy_module_xhs_search_telemetry;"
+    ].join("\n"),
+    sourceBody: xhsSearchGateSource,
+    exports: ["createAuditRecord", "createGateOnlySuccess", "resolveGate"]
+  });
+
+  const xhsSearchExecutionModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_xhs_search_execution",
+    prelude: [
+      "const { SEARCH_ENDPOINT } = __webenvoy_module_xhs_search_types;",
+      "const {",
+      "  createAuditRecord,",
+      "  createGateOnlySuccess,",
+      "  resolveGate",
+      "} = __webenvoy_module_xhs_search_gate;",
+      "const {",
+      "  buildEditorInputEvidence,",
+      "  containsCookie,",
+      "  createDiagnosis,",
+      "  createFailure,",
+      "  createObservability,",
+      "  inferFailure,",
+      "  inferRequestException,",
+      "  isTrustedEditorInputValidation,",
+      "  parseCount,",
+      "  resolveSimulatedResult,",
+      "  resolveRiskStateOutput,",
+      "  resolveXsCommon",
+      "} = __webenvoy_module_xhs_search_telemetry;"
+    ].join("\n"),
+    sourceBody: xhsSearchExecutionSource,
+    exports: ["executeXhsSearch"]
+  });
+
+  const xhsSearchModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_xhs_search",
+    prelude: "const { executeXhsSearch: executeXhsSearchImpl } = __webenvoy_module_xhs_search_execution;",
     sourceBody: xhsSearchSource,
     exports: ["executeXhsSearch"]
   });
@@ -188,6 +274,11 @@ const buildContentScriptBundle = async () => {
     "",
     riskStateModule,
     fingerprintModule,
+    sharedXhsGateModule,
+    xhsSearchTypesModule,
+    xhsSearchTelemetryModule,
+    xhsSearchGateModule,
+    xhsSearchExecutionModule,
     xhsSearchModule,
     xhsEditorInputModule,
     contentScriptMainWorldModule,

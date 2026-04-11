@@ -1111,18 +1111,1744 @@ const ensureFingerprintRuntimeContext = (value) => {
 };
 return { DEFAULT_MIME_TYPE_DESCRIPTORS, DEFAULT_PLUGIN_DESCRIPTORS, ensureFingerprintRuntimeContext };
 })();
-const __webenvoy_module_xhs_search = (() => {
+const __webenvoy_module_shared_xhs_gate = (() => {
 const {
   APPROVAL_CHECK_KEYS,
   EXECUTION_MODES,
   WRITE_INTERACTION_TIER,
-  buildRiskTransitionAudit,
-  buildUnifiedRiskStateOutput,
-  getWriteActionMatrixDecisions,
   getIssueActionMatrixEntry,
+  getWriteActionMatrixDecisions,
   resolveIssueScope: resolveSharedIssueScope,
   resolveRiskState: resolveSharedRiskState
 } = __webenvoy_module_risk_state;
+const XHS_READ_DOMAIN = "www.xiaohongshu.com";
+const XHS_WRITE_DOMAIN = "creator.xiaohongshu.com";
+const XHS_ALLOWED_DOMAINS = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
+const XHS_ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
+const XHS_EXECUTION_MODE_SET = new Set(EXECUTION_MODES);
+const XHS_REQUIRED_APPROVAL_CHECKS = APPROVAL_CHECK_KEYS;
+const XHS_WRITE_APPROVAL_REQUIREMENTS = [
+  "approval_record_approved_true",
+  "approval_record_approver_present",
+  "approval_record_approved_at_present",
+  "approval_record_checks_all_true"
+];
+const XHS_SCOPE_CONTEXT = {
+  platform: "xhs",
+  read_domain: XHS_READ_DOMAIN,
+  write_domain: XHS_WRITE_DOMAIN,
+  domain_mixing_forbidden: true
+};
+const XHS_READ_EXECUTION_POLICY = {
+  default_mode: "dry_run",
+  allowed_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+  blocked_actions: ["expand_new_live_surface_without_gate"],
+  live_entry_requirements: [
+    "gate_input_risk_state_limited_or_allowed",
+    "risk_state_checked",
+    "target_domain_confirmed",
+    "target_tab_confirmed",
+    "target_page_confirmed",
+    "action_type_confirmed",
+    "approval_record_approved_true",
+    "approval_record_approver_present",
+    "approval_record_approved_at_present",
+    "approval_record_checks_all_true"
+  ]
+};
+
+const asRecord = (value) =>
+  typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
+
+const asBoolean = (value) => value === true;
+
+const asString = (value) => (typeof value === "string" && value.trim().length > 0 ? value.trim() : null);
+
+const asInteger = (value) => (typeof value === "number" && Number.isInteger(value) ? value : null);
+
+const deriveGateDecisionId = (input) => {
+  const explicitDecisionId = asString(input.decisionId);
+  if (explicitDecisionId) {
+    return explicitDecisionId;
+  }
+
+  const runId = asString(input.runId);
+  if (runId) {
+    return `gate_decision_${runId}`;
+  }
+
+  const issueScope = asString(input.issueScope) ?? "unknown_scope";
+  const targetPage = asString(input.targetPage) ?? "unknown_page";
+  const targetTabId = asInteger(input.targetTabId);
+  return `gate_decision_${issueScope}_${targetPage}_${targetTabId ?? "unknown_tab"}`;
+};
+
+const deriveApprovalId = (input, decisionId) => {
+  const approvalRecord = normalizeXhsApprovalRecord(input.approvalRecord);
+  const hasRealApproval =
+    approvalRecord.approved &&
+    approvalRecord.approver &&
+    approvalRecord.approved_at &&
+    XHS_REQUIRED_APPROVAL_CHECKS.every((key) => approvalRecord.checks[key] === true);
+  if (!hasRealApproval) {
+    return null;
+  }
+
+  const approvalRecordHasConflictingLinkage = hasApprovalRecordConflictingLinkage(
+    approvalRecord,
+    decisionId
+  );
+  if (approvalRecordHasConflictingLinkage) {
+    return null;
+  }
+
+  const approvalRecordMatchesDecision = approvalRecord.decision_id === decisionId;
+
+  const explicitApprovalId = asString(input.approvalId);
+  if (explicitApprovalId && approvalRecordMatchesDecision) {
+    return explicitApprovalId;
+  }
+
+  const record = asRecord(input.approvalRecord);
+  const recordApprovalId = asString(record?.approval_id);
+  if (recordApprovalId && approvalRecordMatchesDecision) {
+    return recordApprovalId;
+  }
+
+  return `gate_appr_${decisionId}`;
+};
+
+const pushReason = (target, reason) => {
+  if (!target.includes(reason)) {
+    target.push(reason);
+  }
+};
+
+const resolveXhsActionType = (value) =>
+  typeof value === "string" && XHS_ACTION_TYPES.has(value) ? value : null;
+
+const resolveXhsExecutionMode = (value) =>
+  typeof value === "string" && XHS_EXECUTION_MODE_SET.has(value) ? value : null;
+
+const resolveXhsRiskState = (value) => resolveSharedRiskState(value);
+
+const resolveXhsIssueScope = (value) => resolveSharedIssueScope(value);
+
+const normalizeXhsApprovalRecord = (value) => {
+  const record = asRecord(value);
+  const checksRecord = asRecord(record?.checks);
+  return {
+    approval_id: asString(record?.approval_id),
+    decision_id: asString(record?.decision_id),
+    approved: asBoolean(record?.approved),
+    approver: asString(record?.approver),
+    approved_at: asString(record?.approved_at),
+    checks: Object.fromEntries(
+      XHS_REQUIRED_APPROVAL_CHECKS.map((key) => [key, asBoolean(checksRecord?.[key])])
+    )
+  };
+};
+
+const resolveXhsIssueActionMatrixEntry = (issueScope, state) => {
+  return getIssueActionMatrixEntry(issueScope, state);
+};
+
+const resolveXhsWriteActionMatrixDecisions = (issueScope, actionType, requestedExecutionMode) =>
+  actionType === null ? null : getWriteActionMatrixDecisions(issueScope, actionType, requestedExecutionMode);
+
+const resolveXhsWriteMatrixDecision = (output, state) =>
+  output.decisions.find((entry) => entry.state === state) ?? {
+    state,
+    decision: "blocked",
+    requires: []
+  };
+
+const resolveXhsWriteTierReason = (writeActionMatrixDecisions) =>
+  writeActionMatrixDecisions === null
+    ? null
+    : `WRITE_INTERACTION_TIER_${writeActionMatrixDecisions.write_interaction_tier.toUpperCase()}`;
+
+const resolveXhsApprovalRequirementGaps = (requirements, approvalRecord) => {
+  const gaps = [];
+  for (const requirement of requirements) {
+    if (requirement === "approval_record_approved_true") {
+      if (!approvalRecord.approved) {
+        gaps.push(requirement);
+      }
+      continue;
+    }
+    if (requirement === "approval_record_approver_present") {
+      if (!approvalRecord.approver) {
+        gaps.push(requirement);
+      }
+      continue;
+    }
+    if (requirement === "approval_record_approved_at_present") {
+      if (!approvalRecord.approved_at) {
+        gaps.push(requirement);
+      }
+      continue;
+    }
+    if (requirement === "approval_record_checks_all_true") {
+      const allChecksComplete = XHS_REQUIRED_APPROVAL_CHECKS.every((key) => approvalRecord.checks[key]);
+      if (!allChecksComplete) {
+        gaps.push(requirement);
+      }
+      continue;
+    }
+    gaps.push(requirement);
+  }
+  return gaps;
+};
+
+const hasApprovalRecordConflictingLinkage = (approvalRecord, decisionId) => {
+  if (typeof decisionId !== "string" || decisionId.length === 0) {
+    return true;
+  }
+
+  if (approvalRecord.decision_id && approvalRecord.decision_id !== decisionId) {
+    return true;
+  }
+
+  return approvalRecord.approval_id !== null && approvalRecord.decision_id === null;
+};
+
+const resolveXhsFallbackMode = (requestedExecutionMode, riskState) => {
+  if (requestedExecutionMode === "recon") {
+    return "recon";
+  }
+  if (requestedExecutionMode === "live_write") {
+    return "dry_run";
+  }
+  return riskState === "limited" ? "recon" : "dry_run";
+};
+
+const evaluateXhsGateCore = (input) => {
+  const issueScope = resolveXhsIssueScope(input.issueScope);
+  const riskState = resolveXhsRiskState(input.riskState);
+  const actionType = resolveXhsActionType(input.actionType);
+  const requestedExecutionMode = resolveXhsExecutionMode(input.requestedExecutionMode);
+  const targetDomain = asString(input.targetDomain);
+  const targetTabId = asInteger(input.targetTabId);
+  const targetPage = asString(input.targetPage);
+  const actualTargetDomain = asString(input.actualTargetDomain);
+  const actualTargetTabId = asInteger(input.actualTargetTabId);
+  const actualTargetPage = asString(input.actualTargetPage);
+  const abilityAction = asString(input.abilityAction ?? input.abilityActionType);
+  const approvalRecord = normalizeXhsApprovalRecord(input.approvalRecord);
+  const issueActionMatrix = resolveXhsIssueActionMatrixEntry(issueScope, riskState);
+  const writeActionMatrixDecisions = resolveXhsWriteActionMatrixDecisions(
+    issueScope,
+    actionType,
+    requestedExecutionMode
+  );
+  const writeMatrixDecision =
+    writeActionMatrixDecisions === null
+      ? null
+      : resolveXhsWriteMatrixDecision(writeActionMatrixDecisions, riskState);
+  const issue208WriteGateOnly =
+    issueScope === "issue_208" &&
+    actionType !== null &&
+    writeActionMatrixDecisions !== null &&
+    writeActionMatrixDecisions.write_interaction_tier !== "observe_only";
+  const issue208EditorInputValidation = input.issue208EditorInputValidation === true;
+  const fallbackMode = resolveXhsFallbackMode(requestedExecutionMode, riskState);
+  const gateReasons = [];
+  const writeTierReason = resolveXhsWriteTierReason(writeActionMatrixDecisions);
+  const isLiveReadMode =
+    requestedExecutionMode === "live_read_limited" ||
+    requestedExecutionMode === "live_read_high_risk";
+  const isBlockedByStateMatrix =
+    !issue208WriteGateOnly &&
+    requestedExecutionMode !== null &&
+    issueActionMatrix.blocked_actions.includes(requestedExecutionMode);
+  const conditionalRequirement =
+    issue208WriteGateOnly || requestedExecutionMode === null
+      ? null
+      : issueActionMatrix.conditional_actions.find((entry) => entry.action === requestedExecutionMode) ??
+        null;
+  const liveModeCanEnter =
+    requestedExecutionMode !== null &&
+    conditionalRequirement !== null &&
+    isLiveReadMode;
+  let writeGateOnlyEligible = false;
+  let writeGateOnlyDecision = null;
+
+  if (!targetDomain) {
+    pushReason(gateReasons, "TARGET_DOMAIN_NOT_EXPLICIT");
+  } else if (!XHS_ALLOWED_DOMAINS.has(targetDomain)) {
+    pushReason(gateReasons, "TARGET_DOMAIN_OUT_OF_SCOPE");
+  }
+  if (targetTabId === null || targetTabId <= 0) {
+    pushReason(gateReasons, "TARGET_TAB_NOT_EXPLICIT");
+  }
+  if (!targetPage) {
+    pushReason(gateReasons, "TARGET_PAGE_NOT_EXPLICIT");
+  }
+  if (actualTargetDomain && targetDomain && actualTargetDomain !== targetDomain) {
+    pushReason(gateReasons, "TARGET_DOMAIN_CONTEXT_MISMATCH");
+  }
+  if (actualTargetTabId !== null && targetTabId !== null && actualTargetTabId !== targetTabId) {
+    pushReason(gateReasons, "TARGET_TAB_CONTEXT_MISMATCH");
+  }
+  if (targetPage && actualTargetPage === null && input.requireActualTargetPage === true) {
+    pushReason(gateReasons, "TARGET_PAGE_CONTEXT_UNRESOLVED");
+  }
+  if (actualTargetPage && targetPage && actualTargetPage !== targetPage) {
+    pushReason(gateReasons, "TARGET_PAGE_CONTEXT_MISMATCH");
+  }
+  if (!actionType) {
+    pushReason(gateReasons, "ACTION_TYPE_NOT_EXPLICIT");
+  }
+  if (!requestedExecutionMode) {
+    pushReason(gateReasons, "REQUESTED_EXECUTION_MODE_NOT_EXPLICIT");
+  }
+  if (abilityAction && actionType && abilityAction !== actionType) {
+    pushReason(gateReasons, "ABILITY_ACTION_CONTEXT_MISMATCH");
+  }
+  if (requestedExecutionMode === "live_write" && actionType === "irreversible_write") {
+    pushReason(gateReasons, "IRREVERSIBLE_WRITE_NOT_ALLOWED");
+  }
+  if (
+    requestedExecutionMode === "live_write" &&
+    (!issue208WriteGateOnly ||
+      (input.treatMissingEditorValidationAsUnsupported === true && !issue208EditorInputValidation))
+  ) {
+    pushReason(gateReasons, "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
+  }
+  if (targetDomain === XHS_WRITE_DOMAIN && actionType === "read") {
+    pushReason(gateReasons, "ACTION_DOMAIN_MISMATCH");
+  }
+  if (targetDomain === XHS_READ_DOMAIN && actionType !== null && actionType !== "read") {
+    pushReason(gateReasons, "ACTION_DOMAIN_MISMATCH");
+  }
+
+  if (gateReasons.length === 0) {
+    if (isBlockedByStateMatrix) {
+      if (isLiveReadMode) {
+        pushReason(gateReasons, `RISK_STATE_${riskState.toUpperCase()}`);
+        pushReason(gateReasons, "ISSUE_ACTION_MATRIX_BLOCKED");
+      } else {
+        pushReason(gateReasons, "ISSUE_ACTION_BLOCKED_BY_STATE_MATRIX");
+      }
+    }
+
+    if (issue208WriteGateOnly && actionType !== null && requestedExecutionMode !== null) {
+      const approvalRequirementGaps = resolveXhsApprovalRequirementGaps(
+        [...XHS_WRITE_APPROVAL_REQUIREMENTS],
+        approvalRecord
+      );
+      const approvalSatisfied = approvalRequirementGaps.length === 0;
+      if (issue208EditorInputValidation && riskState === "allowed" && approvalSatisfied) {
+        writeGateOnlyEligible = true;
+      } else {
+        if (!issue208EditorInputValidation) {
+          pushReason(gateReasons, "EDITOR_INPUT_VALIDATION_REQUIRED");
+        }
+        if (riskState !== "allowed") {
+          pushReason(gateReasons, `RISK_STATE_${riskState.toUpperCase()}`);
+          pushReason(gateReasons, "ISSUE_ACTION_MATRIX_BLOCKED");
+        }
+        if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
+          pushReason(gateReasons, "MANUAL_CONFIRMATION_MISSING");
+        }
+        if (
+          XHS_REQUIRED_APPROVAL_CHECKS.some((key) => approvalRecord.checks[key] !== true)
+        ) {
+          pushReason(gateReasons, "APPROVAL_CHECKS_INCOMPLETE");
+        }
+      }
+      writeGateOnlyDecision = {
+        issue_scope: issueScope,
+        state: riskState,
+        write_interaction_tier: writeActionMatrixDecisions?.write_interaction_tier ?? null,
+        matrix_decision: writeGateOnlyEligible ? "conditional" : "blocked",
+        matrix_actions: writeActionMatrixDecisions?.matrix_actions ?? [],
+        required_approval: writeGateOnlyEligible ? [...XHS_WRITE_APPROVAL_REQUIREMENTS] : [],
+        approval_satisfied: approvalSatisfied,
+        approval_missing_requirements: approvalRequirementGaps,
+        execution_enabled: writeGateOnlyEligible
+      };
+    } else if (actionType && actionType !== "read") {
+      if (isLiveReadMode) {
+        pushReason(gateReasons, "ACTION_TYPE_MODE_MISMATCH");
+      }
+      pushReason(gateReasons, `RISK_STATE_${riskState.toUpperCase()}`);
+      pushReason(gateReasons, "ISSUE_ACTION_MATRIX_BLOCKED");
+    } else if (liveModeCanEnter) {
+      if (!approvalRecord.approved || !approvalRecord.approver || !approvalRecord.approved_at) {
+        pushReason(gateReasons, "MANUAL_CONFIRMATION_MISSING");
+      }
+      if (XHS_REQUIRED_APPROVAL_CHECKS.some((key) => approvalRecord.checks[key] !== true)) {
+        pushReason(gateReasons, "APPROVAL_CHECKS_INCOMPLETE");
+      }
+    }
+  }
+
+  if (input.includeWriteInteractionTierReason === true && issue208WriteGateOnly) {
+    pushReason(gateReasons, writeTierReason);
+  }
+
+  return {
+    targetDomain,
+    targetTabId,
+    targetPage,
+    actionType,
+    requestedExecutionMode,
+    issueScope,
+    riskState,
+    approvalRecord,
+    issueActionMatrix,
+    writeActionMatrixDecisions,
+    writeMatrixDecision,
+    issue208WriteGateOnly,
+    issue208EditorInputValidation,
+    writeTierReason,
+    gateReasons,
+    isLiveReadMode,
+    isBlockedByStateMatrix,
+    liveModeCanEnter,
+    fallbackMode,
+    writeGateOnlyEligible,
+    writeGateOnlyDecision
+  };
+};
+
+const finalizeXhsGateOutcome = (input) => {
+  const state = input.state ?? {};
+  const gateReasons = [...(Array.isArray(input.gateReasons) ? input.gateReasons : [])];
+  const {
+    requestedExecutionMode = state.requestedExecutionMode ?? null,
+    fallbackMode = state.fallbackMode ?? "dry_run",
+    issue208WriteGateOnly = state.issue208WriteGateOnly === true,
+    actionType = state.actionType ?? null,
+    writeMatrixDecision = state.writeMatrixDecision ?? null,
+    writeGateOnlyEligible,
+    liveModeCanEnter = state.liveModeCanEnter === true
+  } = input;
+  const nonBlockingReasons = Array.isArray(input.nonBlockingReasons) ? input.nonBlockingReasons : [];
+  const blockingReasons = gateReasons.filter((reason) => !nonBlockingReasons.includes(reason));
+  let gateDecision = "allowed";
+  let effectiveExecutionMode = requestedExecutionMode;
+
+  if (blockingReasons.length > 0) {
+    gateDecision = "blocked";
+    if (
+      requestedExecutionMode === "live_read_limited" ||
+      requestedExecutionMode === "live_read_high_risk" ||
+      requestedExecutionMode === "live_write"
+    ) {
+      effectiveExecutionMode = fallbackMode;
+    }
+    return {
+      allowed: gateDecision === "allowed",
+      gateDecision,
+      effectiveExecutionMode,
+      gateReasons
+    };
+  }
+
+  if (issue208WriteGateOnly && actionType && actionType !== "read" && requestedExecutionMode !== null) {
+    if (writeGateOnlyEligible) {
+      if (
+        input.writeGateOnlyEligibleBehavior === "block" ||
+        input.allowIssue208EligibleExecution === false ||
+        input.supportsIssue208ValidatedLiveWrite === false
+      ) {
+        gateDecision = "blocked";
+        effectiveExecutionMode = fallbackMode;
+        pushReason(gateReasons, "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
+      } else {
+        gateDecision = "allowed";
+        effectiveExecutionMode = requestedExecutionMode;
+        pushReason(gateReasons, "WRITE_INTERACTION_APPROVED");
+        pushReason(gateReasons, "ISSUE_208_EDITOR_INPUT_VALIDATION_APPROVED");
+      }
+    } else {
+      gateDecision = "blocked";
+      effectiveExecutionMode = fallbackMode;
+    }
+    return {
+      allowed: gateDecision === "allowed",
+      gateDecision,
+      effectiveExecutionMode,
+      gateReasons
+    };
+  }
+
+  if (requestedExecutionMode === "dry_run" || requestedExecutionMode === "recon") {
+    pushReason(
+      gateReasons,
+      requestedExecutionMode === "recon" ? "DEFAULT_MODE_RECON" : "DEFAULT_MODE_DRY_RUN"
+    );
+    return {
+      allowed: gateDecision === "allowed",
+      gateDecision,
+      effectiveExecutionMode,
+      gateReasons
+    };
+  }
+
+  gateDecision = "blocked";
+  effectiveExecutionMode = fallbackMode;
+  if (liveModeCanEnter) {
+    gateDecision = "allowed";
+    effectiveExecutionMode = requestedExecutionMode;
+    pushReason(gateReasons, "LIVE_MODE_APPROVED");
+  }
+
+  return {
+    allowed: gateDecision === "allowed",
+    gateDecision,
+    effectiveExecutionMode,
+    gateReasons
+  };
+};
+
+const buildXhsGatePolicyState = (input) => {
+  const issueScope = resolveXhsIssueScope(input.issueScope);
+  const riskState = resolveXhsRiskState(input.riskState);
+  const actionType = resolveXhsActionType(input.actionType);
+  const requestedExecutionMode = resolveXhsExecutionMode(input.requestedExecutionMode);
+  const issueActionMatrix = resolveXhsIssueActionMatrixEntry(issueScope, riskState);
+  const writeActionMatrixDecisions = resolveXhsWriteActionMatrixDecisions(
+    issueScope,
+    actionType,
+    requestedExecutionMode
+  );
+  const writeMatrixDecision =
+    writeActionMatrixDecisions === null
+      ? null
+      : resolveXhsWriteMatrixDecision(writeActionMatrixDecisions, riskState);
+  const issue208WriteGateOnly =
+    issueScope === "issue_208" &&
+    actionType !== null &&
+    writeActionMatrixDecisions !== null &&
+    writeActionMatrixDecisions.write_interaction_tier !== "observe_only";
+  const writeTierReason = resolveXhsWriteTierReason(writeActionMatrixDecisions);
+  const isLiveReadMode =
+    requestedExecutionMode === "live_read_limited" ||
+    requestedExecutionMode === "live_read_high_risk";
+  const isBlockedByStateMatrix =
+    !issue208WriteGateOnly &&
+    requestedExecutionMode !== null &&
+    issueActionMatrix.blocked_actions.includes(requestedExecutionMode);
+  const liveModeCanEnter =
+    requestedExecutionMode !== null &&
+    issueActionMatrix.conditional_actions.some((entry) => entry.action === requestedExecutionMode) &&
+    isLiveReadMode;
+
+  return {
+    issueScope,
+    riskState,
+    actionType,
+    requestedExecutionMode,
+    issueActionMatrix,
+    writeActionMatrixDecisions,
+    writeMatrixDecision,
+    issue208WriteGateOnly,
+    writeTierReason,
+    isLiveReadMode,
+    isBlockedByStateMatrix,
+    liveModeCanEnter,
+    fallbackMode: resolveXhsFallbackMode(requestedExecutionMode, riskState)
+  };
+};
+
+const collectXhsCommandGateReasons = (input) => {
+  const gateReasons = Array.isArray(input.gateReasons) ? input.gateReasons : [];
+  const actionType = resolveXhsActionType(input.actionType);
+  const requestedExecutionMode = resolveXhsExecutionMode(input.requestedExecutionMode);
+  const targetDomain = asString(input.targetDomain);
+  const targetTabId = asInteger(input.targetTabId);
+  const targetPage = asString(input.targetPage);
+  const actualTargetDomain = asString(input.actualTargetDomain);
+  const actualTargetTabId = asInteger(input.actualTargetTabId);
+  const actualTargetPage = asString(input.actualTargetPage);
+  const abilityAction = asString(input.abilityAction ?? input.abilityActionType);
+
+  if (!targetDomain) {
+    pushReason(gateReasons, "TARGET_DOMAIN_NOT_EXPLICIT");
+  } else if (!XHS_ALLOWED_DOMAINS.has(targetDomain)) {
+    pushReason(gateReasons, "TARGET_DOMAIN_OUT_OF_SCOPE");
+  }
+  if (targetTabId === null || targetTabId <= 0) {
+    pushReason(gateReasons, "TARGET_TAB_NOT_EXPLICIT");
+  }
+  if (!targetPage) {
+    pushReason(gateReasons, "TARGET_PAGE_NOT_EXPLICIT");
+  }
+  if (actualTargetDomain && targetDomain && actualTargetDomain !== targetDomain) {
+    pushReason(gateReasons, "TARGET_DOMAIN_CONTEXT_MISMATCH");
+  }
+  if (actualTargetTabId !== null && targetTabId !== null && actualTargetTabId !== targetTabId) {
+    pushReason(gateReasons, "TARGET_TAB_CONTEXT_MISMATCH");
+  }
+  if (targetPage && actualTargetPage === null && input.requireActualTargetPage === true) {
+    pushReason(gateReasons, "TARGET_PAGE_CONTEXT_UNRESOLVED");
+  }
+  if (actualTargetPage && targetPage && actualTargetPage !== targetPage) {
+    pushReason(gateReasons, "TARGET_PAGE_CONTEXT_MISMATCH");
+  }
+  if (!actionType) {
+    pushReason(gateReasons, "ACTION_TYPE_NOT_EXPLICIT");
+  }
+  if (!requestedExecutionMode) {
+    pushReason(gateReasons, "REQUESTED_EXECUTION_MODE_NOT_EXPLICIT");
+  }
+  if (abilityAction && actionType && abilityAction !== actionType) {
+    pushReason(gateReasons, "ABILITY_ACTION_CONTEXT_MISMATCH");
+  }
+  if (requestedExecutionMode === "live_write" && actionType === "irreversible_write") {
+    pushReason(gateReasons, "IRREVERSIBLE_WRITE_NOT_ALLOWED");
+  }
+  if (
+    requestedExecutionMode === "live_write" &&
+    (!input.issue208WriteGateOnly ||
+      (input.treatMissingEditorValidationAsUnsupported === true &&
+        input.issue208EditorInputValidation !== true))
+  ) {
+    pushReason(gateReasons, "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND");
+  }
+  if (targetDomain === XHS_WRITE_DOMAIN && actionType === "read") {
+    pushReason(gateReasons, "ACTION_DOMAIN_MISMATCH");
+  }
+  if (targetDomain === XHS_READ_DOMAIN && actionType !== null && actionType !== "read") {
+    pushReason(gateReasons, "ACTION_DOMAIN_MISMATCH");
+  }
+  return gateReasons;
+};
+
+const collectXhsMatrixGateReasons = (input) => {
+  const gateReasons = Array.isArray(input.gateReasons) ? input.gateReasons : [];
+  const state = input.state;
+  const approvalRecord = normalizeXhsApprovalRecord(input.approvalRecord);
+  const approvalRecordHasConflictingLinkage = hasApprovalRecordConflictingLinkage(
+    approvalRecord,
+    input.decisionId
+  );
+  let writeGateOnlyEligible = false;
+  let writeGateOnlyDecision = null;
+
+  if (gateReasons.length === 0) {
+    if (state.isBlockedByStateMatrix) {
+      if (state.isLiveReadMode) {
+        pushReason(gateReasons, `RISK_STATE_${state.riskState.toUpperCase()}`);
+        pushReason(gateReasons, "ISSUE_ACTION_MATRIX_BLOCKED");
+      } else {
+        pushReason(gateReasons, "ISSUE_ACTION_BLOCKED_BY_STATE_MATRIX");
+      }
+    }
+
+    if (state.issue208WriteGateOnly && state.actionType !== null && state.requestedExecutionMode !== null) {
+      const approvalRequirementGaps = resolveXhsApprovalRequirementGaps(
+        [...XHS_WRITE_APPROVAL_REQUIREMENTS],
+        approvalRecord
+      );
+      const approvalSatisfied =
+        !approvalRecordHasConflictingLinkage && approvalRequirementGaps.length === 0;
+      if (
+        state.writeMatrixDecision?.decision === "blocked" ||
+        state.writeMatrixDecision?.decision === "not_applicable"
+      ) {
+        if (input.issue208EditorInputValidation !== true) {
+          pushReason(gateReasons, "EDITOR_INPUT_VALIDATION_REQUIRED");
+        }
+        if (
+          approvalRecordHasConflictingLinkage ||
+          !approvalRecord.approved ||
+          !approvalRecord.approver ||
+          !approvalRecord.approved_at
+        ) {
+          pushReason(gateReasons, "MANUAL_CONFIRMATION_MISSING");
+        }
+        if (XHS_REQUIRED_APPROVAL_CHECKS.some((key) => approvalRecord.checks[key] !== true)) {
+          pushReason(gateReasons, "APPROVAL_CHECKS_INCOMPLETE");
+        }
+        pushReason(gateReasons, `RISK_STATE_${state.riskState.toUpperCase()}`);
+        pushReason(gateReasons, "ISSUE_ACTION_MATRIX_BLOCKED");
+      } else if (
+        input.issue208EditorInputValidation === true &&
+        state.riskState === "allowed" &&
+        approvalSatisfied
+      ) {
+        writeGateOnlyEligible = true;
+      } else {
+        if (input.issue208EditorInputValidation !== true) {
+          pushReason(gateReasons, "EDITOR_INPUT_VALIDATION_REQUIRED");
+        }
+        if (state.riskState !== "allowed") {
+          pushReason(gateReasons, `RISK_STATE_${state.riskState.toUpperCase()}`);
+          pushReason(gateReasons, "ISSUE_ACTION_MATRIX_BLOCKED");
+        }
+        if (
+          approvalRecordHasConflictingLinkage ||
+          !approvalRecord.approved ||
+          !approvalRecord.approver ||
+          !approvalRecord.approved_at
+        ) {
+          pushReason(gateReasons, "MANUAL_CONFIRMATION_MISSING");
+        }
+        if (XHS_REQUIRED_APPROVAL_CHECKS.some((key) => approvalRecord.checks[key] !== true)) {
+          pushReason(gateReasons, "APPROVAL_CHECKS_INCOMPLETE");
+        }
+      }
+      writeGateOnlyDecision = {
+        issue_scope: state.issueScope,
+        state: state.riskState,
+        write_interaction_tier: state.writeActionMatrixDecisions?.write_interaction_tier ?? null,
+        matrix_decision: writeGateOnlyEligible ? "conditional" : "blocked",
+        matrix_actions: state.writeActionMatrixDecisions?.matrix_actions ?? [],
+        required_approval: writeGateOnlyEligible ? [...XHS_WRITE_APPROVAL_REQUIREMENTS] : [],
+        approval_satisfied: approvalSatisfied,
+        approval_missing_requirements: approvalRequirementGaps,
+        execution_enabled: writeGateOnlyEligible
+      };
+    } else if (state.actionType && state.actionType !== "read") {
+      if (state.isLiveReadMode) {
+        pushReason(gateReasons, "ACTION_TYPE_MODE_MISMATCH");
+      }
+      pushReason(gateReasons, `RISK_STATE_${state.riskState.toUpperCase()}`);
+      pushReason(gateReasons, "ISSUE_ACTION_MATRIX_BLOCKED");
+    } else if (state.liveModeCanEnter) {
+      if (
+        approvalRecordHasConflictingLinkage ||
+        !approvalRecord.approved ||
+        !approvalRecord.approver ||
+        !approvalRecord.approved_at
+      ) {
+        pushReason(gateReasons, "MANUAL_CONFIRMATION_MISSING");
+      }
+      if (XHS_REQUIRED_APPROVAL_CHECKS.some((key) => approvalRecord.checks[key] !== true)) {
+        pushReason(gateReasons, "APPROVAL_CHECKS_INCOMPLETE");
+      }
+    }
+  }
+
+  return {
+    gateReasons,
+    approvalRecord,
+    writeGateOnlyEligible,
+    writeGateOnlyDecision,
+    writeGateOnlyApprovalDecision: writeGateOnlyDecision
+  };
+};
+
+const evaluateXhsGate = (input) => {
+  const state = buildXhsGatePolicyState(input);
+  const decisionId = deriveGateDecisionId(input);
+  const gateReasons = Array.isArray(input.additionalGateReasons)
+    ? input.additionalGateReasons.filter((reason) => typeof reason === "string")
+    : [];
+  collectXhsCommandGateReasons({
+    gateReasons,
+    actionType: input.actionType,
+    requestedExecutionMode: input.requestedExecutionMode,
+    abilityAction: input.abilityAction ?? input.abilityActionType,
+    targetDomain: input.targetDomain,
+    targetTabId: input.targetTabId,
+    targetPage: input.targetPage,
+    actualTargetDomain: input.actualTargetDomain,
+    actualTargetTabId: input.actualTargetTabId,
+    actualTargetPage: input.actualTargetPage,
+    requireActualTargetPage: input.requireActualTargetPage,
+    issue208WriteGateOnly: state.issue208WriteGateOnly,
+    issue208EditorInputValidation: input.issue208EditorInputValidation === true,
+    treatMissingEditorValidationAsUnsupported:
+      input.treatMissingEditorValidationAsUnsupported === true,
+    includeWriteInteractionTierReason: input.includeWriteInteractionTierReason === true,
+    writeTierReason: state.writeTierReason
+  });
+  const { approvalRecord, writeGateOnlyEligible } = collectXhsMatrixGateReasons({
+    gateReasons,
+    state,
+    decisionId,
+    approvalRecord: input.approvalRecord,
+    issue208EditorInputValidation: input.issue208EditorInputValidation === true,
+    includeWriteInteractionTierReason: input.includeWriteInteractionTierReason === true
+  });
+  const approvalId = deriveApprovalId(input, decisionId);
+  approvalRecord.approval_id = approvalId;
+  approvalRecord.decision_id = decisionId;
+  const outcome = finalizeXhsGateOutcome({
+    gateReasons,
+    state,
+    writeGateOnlyEligible,
+    writeGateOnlyEligibleBehavior:
+      input.writeGateOnlyEligibleBehavior === "block" ? "block" : "allow"
+  });
+  const approvalActive =
+    outcome.gateDecision === "allowed" &&
+    (outcome.effectiveExecutionMode === "live_read_limited" ||
+      outcome.effectiveExecutionMode === "live_read_high_risk" ||
+      outcome.effectiveExecutionMode === "live_write");
+  if (
+    input.includeWriteInteractionTierReason === true &&
+    state.issue208WriteGateOnly &&
+    state.writeTierReason
+  ) {
+    pushReason(outcome.gateReasons, state.writeTierReason);
+  }
+  approvalRecord.approval_id = approvalActive ? approvalId : null;
+  return {
+    scope_context: { ...XHS_SCOPE_CONTEXT },
+    read_execution_policy: {
+      default_mode: XHS_READ_EXECUTION_POLICY.default_mode,
+      allowed_modes: [...XHS_READ_EXECUTION_POLICY.allowed_modes],
+      blocked_actions: [...XHS_READ_EXECUTION_POLICY.blocked_actions],
+      live_entry_requirements: [...XHS_READ_EXECUTION_POLICY.live_entry_requirements]
+    },
+    issue_action_matrix: state.issueActionMatrix,
+    write_interaction_tier: WRITE_INTERACTION_TIER,
+    write_action_matrix_decisions: state.writeActionMatrixDecisions,
+    gate_input: {
+      issue_scope: state.issueScope,
+      target_domain: asString(input.targetDomain),
+      target_tab_id: asInteger(input.targetTabId),
+      target_page: asString(input.targetPage),
+      action_type: state.actionType,
+      requested_execution_mode: state.requestedExecutionMode,
+      risk_state: state.riskState
+    },
+    gate_outcome: {
+      decision_id: decisionId,
+      effective_execution_mode: outcome.effectiveExecutionMode,
+      gate_decision: outcome.gateDecision,
+      gate_reasons: outcome.gateReasons,
+      requires_manual_confirmation:
+        state.requestedExecutionMode === "live_read_limited" ||
+        state.requestedExecutionMode === "live_read_high_risk" ||
+        state.requestedExecutionMode === "live_write"
+    },
+    consumer_gate_result: {
+      issue_scope: state.issueScope,
+      target_domain: asString(input.targetDomain),
+      target_tab_id: asInteger(input.targetTabId),
+      target_page: asString(input.targetPage),
+      action_type: state.actionType,
+      requested_execution_mode: state.requestedExecutionMode,
+      effective_execution_mode: outcome.effectiveExecutionMode,
+      gate_decision: outcome.gateDecision,
+      gate_reasons: outcome.gateReasons,
+      write_interaction_tier: state.writeActionMatrixDecisions?.write_interaction_tier ?? null
+    },
+    approval_record: approvalRecord
+  };
+};
+return { XHS_ALLOWED_DOMAINS, evaluateXhsGate };
+})();
+const __webenvoy_module_xhs_search_types = (() => {
+const SEARCH_ENDPOINT = "/api/sns/web/v1/search/notes";
+return { SEARCH_ENDPOINT };
+})();
+const __webenvoy_module_xhs_search_telemetry = (() => {
+const { SEARCH_ENDPOINT } = __webenvoy_module_xhs_search_types;
+const {
+  buildUnifiedRiskStateOutput,
+  resolveRiskState: resolveSharedRiskState
+} = __webenvoy_module_risk_state;
+const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value
+    : null;
+const asArray = (value) => (Array.isArray(value) ? value : null);
+const resolveRiskState = (value) => resolveSharedRiskState(value);
+const SEARCH_FAILURE_SEMANTICS = {
+    SIGNATURE_ENTRY_MISSING: {
+        category: "page_changed",
+        stage: "action",
+        component: "page",
+        target: "window._webmsxyw",
+        includeKeyRequest: false
+    },
+    SESSION_EXPIRED: {
+        category: "request_failed",
+        stage: "request",
+        component: "network",
+        target: SEARCH_ENDPOINT,
+        includeKeyRequest: true
+    },
+    ACCOUNT_ABNORMAL: {
+        category: "request_failed",
+        stage: "request",
+        component: "network",
+        target: SEARCH_ENDPOINT,
+        includeKeyRequest: true
+    },
+    BROWSER_ENV_ABNORMAL: {
+        category: "request_failed",
+        stage: "request",
+        component: "network",
+        target: SEARCH_ENDPOINT,
+        includeKeyRequest: true
+    },
+    GATEWAY_INVOKER_FAILED: {
+        category: "request_failed",
+        stage: "request",
+        component: "network",
+        target: SEARCH_ENDPOINT,
+        includeKeyRequest: true
+    },
+    CAPTCHA_REQUIRED: {
+        category: "request_failed",
+        stage: "request",
+        component: "network",
+        target: SEARCH_ENDPOINT,
+        includeKeyRequest: true
+    }
+};
+const classifyPageKind = (href) => {
+    if (href.includes("/login")) {
+        return "login";
+    }
+    if (href.includes("creator.xiaohongshu.com/publish")) {
+        return "compose";
+    }
+    if (href.includes("/search_result")) {
+        return "search";
+    }
+    if (href.includes("/explore/")) {
+        return "detail";
+    }
+    return "unknown";
+};
+const resolveDiagnosisSemantics = (reason, fallbackCategory) => SEARCH_FAILURE_SEMANTICS[reason] ?? {
+    category: fallbackCategory ?? "request_failed",
+    stage: "request",
+    component: "network",
+    target: SEARCH_ENDPOINT,
+    includeKeyRequest: true
+};
+const createObservability = (input) => ({
+    page_state: {
+        page_kind: classifyPageKind(input.href),
+        url: input.href,
+        title: input.title,
+        ready_state: input.readyState
+    },
+    key_requests: input.includeKeyRequest === false
+        ? []
+        : [
+            {
+                request_id: input.requestId,
+                stage: "request",
+                method: "POST",
+                url: SEARCH_ENDPOINT,
+                outcome: input.outcome,
+                ...(typeof input.statusCode === "number" ? { status_code: input.statusCode } : {}),
+                ...(input.failureReason ? { failure_reason: input.failureReason, request_class: "xhs.search" } : {})
+            }
+        ],
+    failure_site: input.outcome === "failed"
+        ? (input.failureSite ?? {
+            stage: "request",
+            component: "network",
+            target: SEARCH_ENDPOINT,
+            summary: input.failureReason ?? "request failed"
+        })
+        : null
+});
+const createDiagnosis = (input) => {
+    const semantics = resolveDiagnosisSemantics(input.reason, input.category);
+    return {
+        category: semantics.category,
+        stage: semantics.stage,
+        component: semantics.component,
+        failure_site: {
+            stage: semantics.stage,
+            component: semantics.component,
+            target: semantics.target,
+            summary: input.summary
+        },
+        evidence: [input.reason, input.summary]
+    };
+};
+const createFailure = (code, message, details, observability, diagnosis, gate, auditRecord) => ({
+    ok: false,
+    error: {
+        code,
+        message
+    },
+    payload: {
+        details,
+        observability,
+        diagnosis,
+        ...(gate
+            ? {
+                scope_context: gate.scope_context,
+                gate_input: {
+                    run_id: auditRecord?.run_id ?? "unknown",
+                    session_id: auditRecord?.session_id ?? "unknown",
+                    profile: auditRecord?.profile ?? "unknown",
+                    ...gate.gate_input
+                },
+                gate_outcome: gate.gate_outcome,
+                read_execution_policy: gate.read_execution_policy,
+                issue_action_matrix: gate.issue_action_matrix,
+                write_interaction_tier: gate.write_interaction_tier,
+                write_action_matrix_decisions: gate.write_action_matrix_decisions,
+                consumer_gate_result: gate.consumer_gate_result,
+                approval_record: gate.approval_record,
+                risk_state_output: resolveRiskStateOutput(gate, auditRecord),
+                ...(auditRecord ? { audit_record: auditRecord } : {})
+            }
+            : {})
+    }
+});
+const resolveRiskStateOutput = (gate, auditRecord) => buildUnifiedRiskStateOutput(resolveRiskState(auditRecord?.next_state ?? gate.gate_input.risk_state), {
+    auditRecords: auditRecord ? [auditRecord] : [],
+    now: auditRecord?.recorded_at ?? Date.now()
+});
+const buildEditorInputEvidence = (result) => ({
+    validation_action: "editor_input",
+    target_page: "creator.xiaohongshu.com/publish",
+    validation_mode: result.mode,
+    validation_attestation: result.attestation,
+    editor_locator: result.editor_locator,
+    input_text: result.input_text,
+    before_text: result.before_text,
+    visible_text: result.visible_text,
+    post_blur_text: result.post_blur_text,
+    focus_confirmed: result.focus_confirmed,
+    focus_attestation_source: result.focus_attestation_source,
+    focus_attestation_reason: result.focus_attestation_reason,
+    preserved_after_blur: result.preserved_after_blur,
+    success_signals: result.success_signals,
+    failure_signals: result.failure_signals,
+    minimum_replay: result.minimum_replay,
+    out_of_scope_actions: ["image_upload", "submit", "publish_confirm"]
+});
+const isTrustedEditorInputValidation = (result) => result.ok &&
+    result.mode === "controlled_editor_input_validation" &&
+    result.attestation === "controlled_real_interaction";
+const resolveSimulatedResult = (simulated, params, options, env) => {
+    if (!simulated) {
+        return null;
+    }
+    const requestId = `req-${env.randomId()}`;
+    if (simulated === "success") {
+        const observability = createObservability({
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId,
+            outcome: "completed"
+        });
+        return {
+            ok: true,
+            payload: {
+                summary: {
+                    capability_result: {
+                        ability_id: "xhs.note.search.v1",
+                        layer: "L3",
+                        action: "read",
+                        outcome: "success",
+                        data_ref: {
+                            query: params.query,
+                            search_id: params.search_id ?? "simulated-search-id"
+                        },
+                        metrics: {
+                            count: Number(options.timeout_ms ?? 2) > 0 ? 2 : 2
+                        }
+                    }
+                },
+                observability
+            }
+        };
+    }
+    const reasonMap = {
+        login_required: {
+            reason: "SESSION_EXPIRED",
+            message: "登录态缺失，无法执行 xhs.search"
+        },
+        signature_entry_missing: {
+            reason: "SIGNATURE_ENTRY_MISSING",
+            message: "页面签名入口不可用"
+        },
+        account_abnormal: {
+            reason: "ACCOUNT_ABNORMAL",
+            message: "账号异常，平台拒绝当前请求"
+        },
+        browser_env_abnormal: {
+            reason: "BROWSER_ENV_ABNORMAL",
+            message: "浏览器环境异常，平台拒绝当前请求"
+        },
+        captcha_required: {
+            reason: "CAPTCHA_REQUIRED",
+            message: "平台要求额外人机验证，无法继续执行"
+        },
+        gateway_invoker_failed: {
+            reason: "GATEWAY_INVOKER_FAILED",
+            message: "网关调用失败，当前上下文不足以完成搜索请求"
+        }
+    };
+    const mapped = reasonMap[simulated] ?? reasonMap.gateway_invoker_failed;
+    const semantics = resolveDiagnosisSemantics(mapped.reason);
+    const observability = createObservability({
+        href: env.getLocationHref(),
+        title: env.getDocumentTitle(),
+        readyState: env.getReadyState(),
+        requestId,
+        outcome: "failed",
+        statusCode: simulated === "account_abnormal"
+            ? 461
+            : simulated === "browser_env_abnormal"
+                ? 200
+                : simulated === "captcha_required"
+                    ? 429
+                    : simulated === "gateway_invoker_failed"
+                        ? 500
+                        : undefined,
+        failureReason: simulated,
+        includeKeyRequest: semantics.includeKeyRequest,
+        failureSite: {
+            stage: semantics.stage,
+            component: semantics.component,
+            target: semantics.target,
+            summary: mapped.message
+        }
+    });
+    return createFailure("ERR_EXECUTION_FAILED", mapped.message, {
+        stage: "execution",
+        reason: mapped.reason
+    }, observability, createDiagnosis({
+        reason: mapped.reason,
+        summary: mapped.message
+    }));
+};
+const parseCount = (body) => {
+    const record = asRecord(body);
+    if (!record) {
+        return 0;
+    }
+    const data = asRecord(record.data);
+    const candidateArrays = [
+        asArray(record.items),
+        asArray(record.notes),
+        data ? asArray(data.items) : null,
+        data ? asArray(data.notes) : null
+    ];
+    for (const candidate of candidateArrays) {
+        if (candidate) {
+            return candidate.length;
+        }
+    }
+    const total = data?.total;
+    return typeof total === "number" && Number.isFinite(total) ? total : 0;
+};
+const inferFailure = (status, body) => {
+    const record = asRecord(body);
+    const businessCode = record?.code;
+    const message = typeof record?.msg === "string" ? record.msg : typeof record?.message === "string" ? record.message : "";
+    const normalized = `${message}`.toLowerCase();
+    if (status === 401 || normalized.includes("login")) {
+        return {
+            reason: "SESSION_EXPIRED",
+            message: "登录已失效，无法执行 xhs.search"
+        };
+    }
+    if (status === 461 || businessCode === 300011) {
+        return {
+            reason: "ACCOUNT_ABNORMAL",
+            message: "账号异常，平台拒绝当前请求"
+        };
+    }
+    if (businessCode === 300015 || normalized.includes("browser environment abnormal")) {
+        return {
+            reason: "BROWSER_ENV_ABNORMAL",
+            message: "浏览器环境异常，平台拒绝当前请求"
+        };
+    }
+    if (status >= 500 || normalized.includes("create invoker failed")) {
+        return {
+            reason: "GATEWAY_INVOKER_FAILED",
+            message: "网关调用失败，当前上下文不足以完成搜索请求"
+        };
+    }
+    if (status === 429 || normalized.includes("captcha")) {
+        return {
+            reason: "CAPTCHA_REQUIRED",
+            message: "平台要求额外人机验证，无法继续执行"
+        };
+    }
+    return {
+        reason: "TARGET_API_RESPONSE_INVALID",
+        message: "搜索接口返回了未识别的失败响应"
+    };
+};
+const inferRequestException = (error) => {
+    const errorName = typeof error === "object" && error !== null && "name" in error
+        ? String(error.name)
+        : "";
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorName === "AbortError") {
+        return {
+            reason: "REQUEST_TIMEOUT",
+            message: "请求超时，无法完成 xhs.search",
+            detail: errorMessage
+        };
+    }
+    return {
+        reason: "REQUEST_DISPATCH_FAILED",
+        message: "搜索请求发送失败，无法完成 xhs.search",
+        detail: errorMessage
+    };
+};
+const resolveXsCommon = (value) => {
+    if (typeof value === "string" && value.trim().length > 0) {
+        return value.trim();
+    }
+    return "{}";
+};
+const containsCookie = (cookie, key) => cookie
+    .split(";")
+    .map((item) => item.trim())
+    .some((item) => item.startsWith(`${key}=`));
+return { buildEditorInputEvidence, containsCookie, createDiagnosis, createFailure, createObservability, inferFailure, inferRequestException, isTrustedEditorInputValidation, parseCount, resolveSimulatedResult, resolveRiskStateOutput, resolveXsCommon };
+})();
+const __webenvoy_module_xhs_search_gate = (() => {
+const {
+  buildRiskTransitionAudit,
+  resolveIssueScope: resolveSharedIssueScope,
+  resolveRiskState: resolveSharedRiskState
+} = __webenvoy_module_risk_state;
+const { evaluateXhsGate } = __webenvoy_module_shared_xhs_gate;
+const { resolveRiskStateOutput } = __webenvoy_module_xhs_search_telemetry;
+const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value
+    : null;
+const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
+const resolveRiskState = (value) => resolveSharedRiskState(value);
+const resolveIssueScope = (value) => resolveSharedIssueScope(value);
+const isIssue208EditorInputValidation = (options) => options.issue_scope === "issue_208" &&
+    options.action_type === "write" &&
+    options.requested_execution_mode === "live_write" &&
+    options.validation_action === "editor_input";
+const buildGateDecisionId = (context) => context.requestId
+    ? `gate_decision_${context.runId}_${context.requestId}`
+    : `gate_decision_${context.runId}`;
+const buildGateEventId = (decisionId) => `gate_evt_${decisionId}`;
+const resolveActualTargetGateReasons = (options) => {
+    const gateReasons = [];
+    const targetDomain = asNonEmptyString(options.target_domain);
+    const targetTabId = asInteger(options.target_tab_id);
+    const targetPage = asNonEmptyString(options.target_page);
+    const actualTargetDomain = asNonEmptyString(options.actual_target_domain);
+    const actualTargetTabId = asInteger(options.actual_target_tab_id);
+    const actualTargetPage = asNonEmptyString(options.actual_target_page);
+    if (actualTargetDomain && targetDomain && actualTargetDomain !== targetDomain) {
+        gateReasons.push("TARGET_DOMAIN_CONTEXT_MISMATCH");
+    }
+    if (actualTargetTabId !== null && targetTabId !== null && actualTargetTabId !== targetTabId) {
+        gateReasons.push("TARGET_TAB_CONTEXT_MISMATCH");
+    }
+    if (targetPage && !actualTargetPage) {
+        gateReasons.push("TARGET_PAGE_CONTEXT_UNRESOLVED");
+    }
+    if (actualTargetPage && targetPage && actualTargetPage !== targetPage) {
+        gateReasons.push("TARGET_PAGE_CONTEXT_MISMATCH");
+    }
+    return gateReasons;
+};
+const resolveGate = (options, context) => {
+    const providedApprovalRecord = (options.approval_record ?? options.approval);
+    const approvalRecord = asRecord(providedApprovalRecord);
+    const decisionId = buildGateDecisionId(context);
+    const approvalId = asNonEmptyString(approvalRecord?.approval_id) ?? undefined;
+    return evaluateXhsGate({
+        issueScope: options.issue_scope,
+        riskState: options.risk_state,
+        targetDomain: options.target_domain,
+        targetTabId: options.target_tab_id,
+        targetPage: options.target_page,
+        actualTargetDomain: options.actual_target_domain,
+        actualTargetTabId: options.actual_target_tab_id,
+        actualTargetPage: options.actual_target_page,
+        requireActualTargetPage: true,
+        actionType: options.action_type,
+        abilityAction: options.ability_action,
+        requestedExecutionMode: options.requested_execution_mode,
+        approvalRecord: providedApprovalRecord,
+        decisionId,
+        approvalId,
+        issue208EditorInputValidation: isIssue208EditorInputValidation(options),
+        treatMissingEditorValidationAsUnsupported: true
+    });
+};
+const createAuditRecord = (context, gate, env) => {
+    const recordedAt = new Date(env.now()).toISOString();
+    const requestedMode = gate.consumer_gate_result.requested_execution_mode;
+    const liveModeRequested = requestedMode === "live_read_limited" ||
+        requestedMode === "live_read_high_risk" ||
+        requestedMode === "live_write";
+    const riskSignal = gate.consumer_gate_result.gate_decision === "blocked" && liveModeRequested;
+    const recoverySignal = gate.consumer_gate_result.gate_decision === "allowed" &&
+        gate.gate_input.risk_state === "limited" &&
+        liveModeRequested;
+    const auditRecord = {
+        event_id: buildGateEventId(gate.gate_outcome.decision_id),
+        decision_id: gate.gate_outcome.decision_id,
+        approval_id: gate.approval_record.approval_id,
+        run_id: context.runId,
+        session_id: context.sessionId,
+        profile: context.profile,
+        issue_scope: gate.gate_input.issue_scope,
+        risk_state: gate.gate_input.risk_state,
+        target_domain: gate.consumer_gate_result.target_domain,
+        target_tab_id: gate.consumer_gate_result.target_tab_id,
+        target_page: gate.consumer_gate_result.target_page,
+        action_type: gate.consumer_gate_result.action_type,
+        requested_execution_mode: requestedMode,
+        effective_execution_mode: gate.consumer_gate_result.effective_execution_mode,
+        gate_decision: gate.consumer_gate_result.gate_decision,
+        gate_reasons: [...gate.consumer_gate_result.gate_reasons],
+        approver: gate.approval_record.approver,
+        approved_at: gate.approval_record.approved_at,
+        write_interaction_tier: gate.write_action_matrix_decisions?.write_interaction_tier ?? null,
+        write_action_matrix_decisions: gate.write_action_matrix_decisions,
+        risk_signal: riskSignal,
+        recovery_signal: recoverySignal,
+        session_rhythm_state: riskSignal ? "cooldown" : recoverySignal ? "recovery" : "normal",
+        cooldown_until: riskSignal ? new Date(env.now() + 30 * 60_000).toISOString() : null,
+        recovery_started_at: recoverySignal ? recordedAt : null,
+        recorded_at: recordedAt
+    };
+    const transitionAudit = buildRiskTransitionAudit({
+        runId: context.runId,
+        sessionId: context.sessionId,
+        issueScope: gate.gate_input.issue_scope,
+        prevState: gate.gate_input.risk_state,
+        decision: gate.consumer_gate_result.gate_decision,
+        gateReasons: [...gate.consumer_gate_result.gate_reasons],
+        requestedExecutionMode: gate.consumer_gate_result.requested_execution_mode,
+        approvalRecord: gate.approval_record,
+        auditRecords: [auditRecord],
+        now: recordedAt
+    });
+    auditRecord.next_state = transitionAudit.next_state;
+    auditRecord.transition_trigger = transitionAudit.trigger;
+    return auditRecord;
+};
+const createGateOnlySuccess = (input, gate, auditRecord, env) => ({
+    ok: true,
+    payload: {
+        summary: {
+            capability_result: {
+                ability_id: input.abilityId,
+                layer: input.abilityLayer,
+                action: gate.consumer_gate_result.action_type ?? input.abilityAction,
+                outcome: "partial",
+                data_ref: {
+                    query: input.params.query
+                },
+                metrics: {
+                    count: 0
+                }
+            },
+            scope_context: gate.scope_context,
+            gate_input: {
+                run_id: auditRecord.run_id,
+                session_id: auditRecord.session_id,
+                profile: auditRecord.profile,
+                ...gate.gate_input
+            },
+            gate_outcome: gate.gate_outcome,
+            read_execution_policy: gate.read_execution_policy,
+            issue_action_matrix: gate.issue_action_matrix,
+            write_interaction_tier: gate.write_interaction_tier,
+            write_action_matrix_decisions: gate.write_action_matrix_decisions,
+            consumer_gate_result: gate.consumer_gate_result,
+            approval_record: gate.approval_record,
+            risk_state_output: resolveRiskStateOutput(gate, auditRecord),
+            audit_record: auditRecord
+        },
+        observability: {
+            page_state: {
+                page_kind: env.getLocationHref().includes("/login")
+                    ? "login"
+                    : env.getLocationHref().includes("creator.xiaohongshu.com/publish")
+                        ? "compose"
+                        : env.getLocationHref().includes("/search_result")
+                            ? "search"
+                            : env.getLocationHref().includes("/explore/")
+                                ? "detail"
+                                : "unknown",
+                url: env.getLocationHref(),
+                title: env.getDocumentTitle(),
+                ready_state: env.getReadyState()
+            },
+            key_requests: [],
+            failure_site: null
+        }
+    }
+});
+return { createAuditRecord, createGateOnlySuccess, resolveGate };
+})();
+const __webenvoy_module_xhs_search_execution = (() => {
+const { SEARCH_ENDPOINT } = __webenvoy_module_xhs_search_types;
+const {
+  createAuditRecord,
+  createGateOnlySuccess,
+  resolveGate
+} = __webenvoy_module_xhs_search_gate;
+const {
+  buildEditorInputEvidence,
+  containsCookie,
+  createDiagnosis,
+  createFailure,
+  createObservability,
+  inferFailure,
+  inferRequestException,
+  isTrustedEditorInputValidation,
+  parseCount,
+  resolveSimulatedResult,
+  resolveRiskStateOutput,
+  resolveXsCommon
+} = __webenvoy_module_xhs_search_telemetry;
+const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value
+    : null;
+const executeXhsSearch = async (input, env) => {
+    const gate = resolveGate(input.options, input.executionContext);
+    const auditRecord = createAuditRecord(input.executionContext, gate, env);
+    const startedAt = env.now();
+    if (gate.consumer_gate_result.gate_decision === "blocked") {
+        return createFailure("ERR_EXECUTION_FAILED", "执行模式门禁阻断了当前 xhs.search 请求", {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: "EXECUTION_MODE_GATE_BLOCKED"
+        }, createObservability({
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: "EXECUTION_MODE_GATE_BLOCKED",
+            failureSite: {
+                stage: "execution",
+                component: "gate",
+                target: "requested_execution_mode",
+                summary: "执行模式门禁阻断"
+            }
+        }), createDiagnosis({
+            reason: "EXECUTION_MODE_GATE_BLOCKED",
+            summary: "执行模式门禁阻断"
+        }), gate, auditRecord);
+    }
+    if (gate.consumer_gate_result.effective_execution_mode === "dry_run" ||
+        gate.consumer_gate_result.effective_execution_mode === "recon") {
+        return createGateOnlySuccess(input, gate, auditRecord, env);
+    }
+    if (input.options.validation_action === "editor_input" &&
+        input.options.issue_scope === "issue_208" &&
+        input.options.action_type === "write" &&
+        input.options.requested_execution_mode === "live_write") {
+        const validationText = typeof input.options.validation_text === "string" && input.options.validation_text.trim().length > 0
+            ? input.options.validation_text.trim()
+            : "WebEnvoy editor_input validation";
+        const focusAttestation = input.options.editor_focus_attestation ?? null;
+        const validationResult = env.performEditorInputValidation
+            ? await env.performEditorInputValidation({
+                text: validationText,
+                focusAttestation: focusAttestation
+            })
+            : {
+                ok: false,
+                mode: "dom_editor_input_validation",
+                attestation: "dom_self_certified",
+                editor_locator: null,
+                input_text: validationText,
+                before_text: "",
+                visible_text: "",
+                post_blur_text: "",
+                focus_confirmed: false,
+                focus_attestation_source: null,
+                focus_attestation_reason: null,
+                preserved_after_blur: false,
+                success_signals: [],
+                failure_signals: ["missing_focus_attestation", "dom_variant"],
+                minimum_replay: ["enter_editable_mode", "focus_editor", "type_short_text", "blur_or_reobserve"]
+            };
+        if (!isTrustedEditorInputValidation(validationResult)) {
+            return createFailure("ERR_EXECUTION_FAILED", "editor_input 真实验证失败", {
+                ability_id: input.abilityId,
+                stage: "execution",
+                reason: "EDITOR_INPUT_VALIDATION_FAILED",
+                ...buildEditorInputEvidence(validationResult)
+            }, createObservability({
+                href: env.getLocationHref(),
+                title: env.getDocumentTitle(),
+                readyState: env.getReadyState(),
+                requestId: `req-${env.randomId()}`,
+                outcome: "failed",
+                failureReason: "EDITOR_INPUT_VALIDATION_FAILED",
+                failureSite: {
+                    stage: "execution",
+                    component: "page",
+                    target: validationResult.editor_locator ?? "editor_input",
+                    summary: validationResult.failure_signals[0] ?? "editor_input validation failed"
+                }
+            }), createDiagnosis({
+                reason: "EDITOR_INPUT_VALIDATION_FAILED",
+                summary: validationResult.failure_signals[0] ?? "editor_input validation failed",
+                category: "page_changed"
+            }), gate, auditRecord);
+        }
+        return {
+            ok: true,
+            payload: {
+                summary: {
+                    capability_result: {
+                        ability_id: input.abilityId,
+                        layer: input.abilityLayer,
+                        action: gate.consumer_gate_result.action_type ?? input.abilityAction,
+                        outcome: "success",
+                        data_ref: {
+                            validation_action: "editor_input"
+                        },
+                        metrics: {
+                            duration_ms: Math.max(0, env.now() - startedAt)
+                        }
+                    },
+                    scope_context: gate.scope_context,
+                    gate_input: {
+                        run_id: auditRecord.run_id,
+                        session_id: auditRecord.session_id,
+                        profile: auditRecord.profile,
+                        ...gate.gate_input
+                    },
+                    gate_outcome: gate.gate_outcome,
+                    read_execution_policy: gate.read_execution_policy,
+                    issue_action_matrix: gate.issue_action_matrix,
+                    write_interaction_tier: gate.write_interaction_tier,
+                    write_action_matrix_decisions: gate.write_action_matrix_decisions,
+                    consumer_gate_result: gate.consumer_gate_result,
+                    approval_record: gate.approval_record,
+                    risk_state_output: resolveRiskStateOutput(gate, auditRecord),
+                    audit_record: auditRecord,
+                    interaction_result: buildEditorInputEvidence(validationResult)
+                },
+                observability: createObservability({
+                    href: env.getLocationHref(),
+                    title: env.getDocumentTitle(),
+                    readyState: env.getReadyState(),
+                    requestId: `req-${env.randomId()}`,
+                    outcome: "completed"
+                })
+            }
+        };
+    }
+    const simulated = resolveSimulatedResult(input.options.simulate_result, input.params, input.options, env);
+    if (simulated) {
+        if (simulated.ok) {
+            const summary = asRecord(simulated.payload.summary) ?? {};
+            const capability = asRecord(summary.capability_result) ?? {};
+            capability.ability_id = input.abilityId;
+            capability.layer = input.abilityLayer;
+            capability.action = gate.consumer_gate_result.action_type ?? input.abilityAction;
+            return {
+                ok: true,
+                payload: {
+                    ...simulated.payload,
+                    summary: {
+                        capability_result: capability,
+                        scope_context: gate.scope_context,
+                        gate_input: {
+                            run_id: auditRecord.run_id,
+                            session_id: auditRecord.session_id,
+                            profile: auditRecord.profile,
+                            ...gate.gate_input
+                        },
+                        gate_outcome: gate.gate_outcome,
+                        read_execution_policy: gate.read_execution_policy,
+                        issue_action_matrix: gate.issue_action_matrix,
+                        consumer_gate_result: gate.consumer_gate_result,
+                        approval_record: gate.approval_record,
+                        risk_state_output: resolveRiskStateOutput(gate, auditRecord),
+                        audit_record: auditRecord
+                    }
+                }
+            };
+        }
+        return {
+            ...simulated,
+            payload: {
+                ...simulated.payload,
+                details: {
+                    ability_id: input.abilityId,
+                    ...(asRecord(simulated.payload.details) ?? {})
+                },
+                read_execution_policy: gate.read_execution_policy,
+                issue_action_matrix: gate.issue_action_matrix,
+                consumer_gate_result: gate.consumer_gate_result,
+                approval_record: gate.approval_record,
+                audit_record: auditRecord
+            }
+        };
+    }
+    if (!containsCookie(env.getCookie(), "a1")) {
+        return createFailure("ERR_EXECUTION_FAILED", "登录态缺失，无法执行 xhs.search", {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: "SESSION_EXPIRED"
+        }, createObservability({
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: "SESSION_EXPIRED"
+        }), createDiagnosis({
+            reason: "SESSION_EXPIRED",
+            summary: "登录态缺失，无法执行 xhs.search"
+        }), gate, auditRecord);
+    }
+    const payload = {
+        keyword: input.params.query,
+        page: input.params.page ?? 1,
+        page_size: input.params.limit ?? 20,
+        search_id: input.params.search_id ?? env.randomId(),
+        sort: input.params.sort ?? "general",
+        note_type: input.params.note_type ?? 0
+    };
+    let signature;
+    try {
+        signature = await env.callSignature(SEARCH_ENDPOINT, payload);
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return createFailure("ERR_EXECUTION_FAILED", "页面签名入口不可用", {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: "SIGNATURE_ENTRY_MISSING"
+        }, createObservability({
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: message,
+            includeKeyRequest: false,
+            failureSite: {
+                stage: "action",
+                component: "page",
+                target: "window._webmsxyw",
+                summary: "页面签名入口不可用"
+            }
+        }), createDiagnosis({
+            reason: "SIGNATURE_ENTRY_MISSING",
+            summary: "页面签名入口不可用"
+        }), gate, auditRecord);
+    }
+    const headers = {
+        Accept: "application/json, text/plain, */*",
+        "Content-Type": "application/json;charset=utf-8",
+        "X-s": String(signature["X-s"]),
+        "X-t": String(signature["X-t"]),
+        "X-S-Common": resolveXsCommon(input.options.x_s_common),
+        "x-b3-traceid": env.randomId().replace(/-/g, ""),
+        "x-xray-traceid": env.randomId().replace(/-/g, "")
+    };
+    let response;
+    try {
+        response = await env.fetchJson({
+            url: SEARCH_ENDPOINT,
+            method: "POST",
+            headers,
+            body: JSON.stringify(payload),
+            timeoutMs: typeof input.options.timeout_ms === "number" && Number.isFinite(input.options.timeout_ms)
+                ? Math.max(1, Math.floor(input.options.timeout_ms))
+                : 30_000
+        });
+    }
+    catch (error) {
+        const failure = inferRequestException(error);
+        return createFailure("ERR_EXECUTION_FAILED", failure.message, {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: failure.reason
+        }, createObservability({
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: failure.detail
+        }), createDiagnosis({
+            reason: failure.reason,
+            summary: failure.message
+        }), gate, auditRecord);
+    }
+    const responseRecord = asRecord(response.body);
+    const businessCode = responseRecord?.code;
+    if (response.status >= 400 || (typeof businessCode === "number" && businessCode !== 0)) {
+        const failure = inferFailure(response.status, response.body);
+        return createFailure("ERR_EXECUTION_FAILED", failure.message, {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: failure.reason
+        }, createObservability({
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            statusCode: response.status,
+            failureReason: failure.reason
+        }), createDiagnosis({
+            reason: failure.reason,
+            summary: failure.message
+        }), gate, auditRecord);
+    }
+    const count = parseCount(response.body);
+    return {
+        ok: true,
+        payload: {
+            summary: {
+                capability_result: {
+                    ability_id: input.abilityId,
+                    layer: input.abilityLayer,
+                    action: gate.consumer_gate_result.action_type ?? input.abilityAction,
+                    outcome: "success",
+                    data_ref: {
+                        query: input.params.query,
+                        search_id: payload.search_id
+                    },
+                    metrics: {
+                        count,
+                        duration_ms: Math.max(0, env.now() - startedAt)
+                    }
+                },
+                scope_context: gate.scope_context,
+                gate_input: {
+                    run_id: auditRecord.run_id,
+                    session_id: auditRecord.session_id,
+                    profile: auditRecord.profile,
+                    ...gate.gate_input
+                },
+                gate_outcome: gate.gate_outcome,
+                read_execution_policy: gate.read_execution_policy,
+                issue_action_matrix: gate.issue_action_matrix,
+                consumer_gate_result: gate.consumer_gate_result,
+                approval_record: gate.approval_record,
+                risk_state_output: resolveRiskStateOutput(gate, auditRecord),
+                audit_record: auditRecord
+            },
+            observability: createObservability({
+                href: env.getLocationHref(),
+                title: env.getDocumentTitle(),
+                readyState: env.getReadyState(),
+                requestId: `req-${env.randomId()}`,
+                outcome: "completed",
+                statusCode: response.status
+            })
+        }
+    };
+};
+return { executeXhsSearch };
+})();
+const __webenvoy_module_xhs_search = (() => {
+const { executeXhsSearch: executeXhsSearchImpl } = __webenvoy_module_xhs_search_execution;
 function executeXhsSearch(...args) {
     return executeXhsSearchImpl(...args);
 }

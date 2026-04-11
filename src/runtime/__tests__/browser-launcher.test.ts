@@ -1,6 +1,7 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { runInNewContext } from "node:vm";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -216,6 +217,59 @@ const findArgValue = (args: string[], prefix: string): string | null => {
     }
   }
   return null;
+};
+
+const executeBundledDryRunSearch = async (bundlePath: string) => {
+  const bundleSource = await readFile(bundlePath, "utf8");
+  const context: Record<string, unknown> = {};
+  context.globalThis = context;
+  runInNewContext(
+    `${bundleSource}\n;globalThis.__bundle_test_exports = { __webenvoy_module_xhs_search };`,
+    context,
+    { filename: bundlePath }
+  );
+  const bundleExports = context.__bundle_test_exports as {
+    __webenvoy_module_xhs_search?: {
+      executeXhsSearch?: (input: Record<string, unknown>, env: Record<string, unknown>) => Promise<unknown>;
+    };
+  };
+  const executeXhsSearch = bundleExports.__webenvoy_module_xhs_search?.executeXhsSearch;
+  expect(executeXhsSearch).toEqual(expect.any(Function));
+
+  return executeXhsSearch?.(
+    {
+      abilityId: "xhs.note.search.v1",
+      abilityLayer: "L3",
+      abilityAction: "read",
+      params: {
+        query: "露营装备"
+      },
+      options: {
+        issue_scope: "issue_209",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 8,
+        target_page: "search_result_tab",
+        actual_target_domain: "www.xiaohongshu.com",
+        actual_target_tab_id: 8,
+        actual_target_page: "search_result_tab",
+        action_type: "read",
+        risk_state: "limited",
+        requested_execution_mode: "dry_run"
+      },
+      executionContext: {
+        runId: "run-staged-bundled-search-001",
+        sessionId: "nm-session-staged-bundled-search-001",
+        profile: "profile-a"
+      }
+    },
+    {
+      now: () => 1_710_000_000_000,
+      randomId: () => "staged-bundle-req-001",
+      getLocationHref: () => "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
+      getDocumentTitle: () => "Search Result",
+      getReadyState: () => "complete"
+    }
+  );
 };
 
 const matchConstStringValue = (source: string, constantName: string): string | null => {
@@ -555,6 +609,19 @@ describe("browser-launcher", () => {
     );
     expect(bundledContentScriptRaw).toContain("installMainWorldEventChannelSecret(resolvedMainWorldSecret);");
     expect(bundledContentScriptRaw).not.toContain("window.postMessage(");
+    await expect(
+      executeBundledDryRunSearch(join(stagedExtensionPath as string, "build", "content-script.js"))
+    ).resolves.toMatchObject({
+      ok: true,
+      payload: {
+        summary: {
+          capability_result: {
+            ability_id: "xhs.note.search.v1",
+            outcome: "partial"
+          }
+        }
+      }
+    });
     expect(mainWorldBridgeRaw).toContain(
       `const EXPECTED_MAIN_WORLD_REQUEST_EVENT = "${expectedEvents.requestEvent}";`
     );
