@@ -1779,19 +1779,6 @@ process.stdin.on("data", (chunk) => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          },
-          audit_record: {
-            event_id: "gate_evt_issue209_live_limited_001",
-            decision_id: "gate_decision_issue209-live-limited-001",
-            approval_id: "gate_appr_gate_decision_issue209-live-limited-001",
-            issue_scope: "issue_209",
-            target_domain: "www.xiaohongshu.com",
-            target_tab_id: 32,
-            target_page: "search_result_tab",
-            action_type: "read",
-            requested_execution_mode: "live_read_limited",
-            gate_decision: "allowed",
-            recorded_at: "2026-03-23T10:05:00Z"
           }
         }
       })

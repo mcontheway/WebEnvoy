@@ -246,6 +246,32 @@ const resolveGateDecisionId = (input) => {
 };
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
 const asBoolean = (value) => value === true;
+const mergeGateArtifactsIntoCommandParams = (commandParams, gatePayload) => {
+    if (!gatePayload) {
+        return commandParams;
+    }
+    const approvalRecord = asRecord(gatePayload.approval_record);
+    const auditRecord = asRecord(gatePayload.audit_record);
+    if (!approvalRecord && !auditRecord) {
+        return commandParams;
+    }
+    const normalized = { ...commandParams };
+    const normalizedOptions = asRecord(commandParams.options)
+        ? { ...asRecord(commandParams.options) }
+        : {};
+    if (approvalRecord) {
+        normalized.approval_record = approvalRecord;
+        normalized.approval = approvalRecord;
+        normalizedOptions.approval_record = approvalRecord;
+        normalizedOptions.approval = approvalRecord;
+    }
+    if (auditRecord) {
+        normalized.audit_record = auditRecord;
+        normalizedOptions.audit_record = auditRecord;
+    }
+    normalized.options = normalizedOptions;
+    return normalized;
+};
 const emitCliInvalidArgs = (emit, request, error) => {
     emit({
         id: request.id,
@@ -2259,6 +2285,7 @@ class ChromeBackgroundBridge {
             gatePayload,
             suppressHostResponse
         });
+        const mergedCommandParams = mergeGateArtifactsIntoCommandParams(commandParams, gatePayload);
         const forward = {
             kind: "forward",
             id: request.id,
@@ -2271,7 +2298,7 @@ class ChromeBackgroundBridge {
             params: typeof request.params === "object" && request.params !== null
                 ? { ...request.params }
                 : {},
-            commandParams,
+            commandParams: mergedCommandParams,
             fingerprintContext: forwardFingerprintContext
         };
         try {

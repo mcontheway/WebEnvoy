@@ -4,6 +4,7 @@ import { buildLoopbackAuditRecord } from "./loopback-gate-audit.js";
 import { buildLoopbackGatePayload } from "./loopback-gate-payload.js";
 import type { ContentMessage, HostMessage } from "./loopback-messages.js";
 import type { InMemoryPort } from "./loopback-port.js";
+import { resolveIssueScope as resolveSharedIssueScope } from "../../../shared/risk-state.js";
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -13,9 +14,79 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const resolveLoopbackIssueScope = (value: unknown): string => resolveSharedIssueScope(value);
+
 const resolveApprovalRecord = (
   options: Record<string, unknown>
 ): Record<string, unknown> | null => asRecord(options.approval_record) ?? asRecord(options.approval);
+
+const resolveLoopbackApprovalId = (
+  approvalRecord: Record<string, unknown> | null,
+  decisionId: string
+): string | null => {
+  const checks = asRecord(approvalRecord?.checks);
+  const approvalComplete =
+    approvalRecord?.approved === true &&
+    typeof approvalRecord.approver === "string" &&
+    approvalRecord.approver.trim().length > 0 &&
+    typeof approvalRecord.approved_at === "string" &&
+    approvalRecord.approved_at.trim().length > 0 &&
+    checks?.target_domain_confirmed === true &&
+    checks?.target_tab_confirmed === true &&
+    checks?.target_page_confirmed === true &&
+    checks?.risk_state_checked === true &&
+    checks?.action_type_confirmed === true;
+  if (!approvalComplete) {
+    return null;
+  }
+  const approvalDecisionId = asString(approvalRecord?.decision_id);
+  const approvalId = asString(approvalRecord?.approval_id);
+  if (approvalDecisionId && approvalDecisionId !== decisionId) {
+    return null;
+  }
+  if (approvalId && !approvalDecisionId) {
+    return null;
+  }
+  return approvalId ?? `gate_appr_${decisionId}`;
+};
+
+const buildLoopbackGateSeedOptions = (input: {
+  options: Record<string, unknown>;
+  decisionId: string;
+  approvalId: string | null;
+  approvalRecord: Record<string, unknown> | null;
+}): Record<string, unknown> => {
+  const nextOptions = { ...input.options };
+  const approvalDecisionId = asString(input.approvalRecord?.decision_id);
+  const approvalId = asString(input.approvalRecord?.approval_id);
+  const canSeedApprovalRecord =
+    input.approvalRecord &&
+    (!approvalDecisionId || approvalDecisionId === input.decisionId) &&
+    (!approvalId || approvalDecisionId === input.decisionId);
+  if (canSeedApprovalRecord) {
+    const seededApprovalRecord = {
+      ...input.approvalRecord,
+      decision_id: input.decisionId,
+      ...(input.approvalId ? { approval_id: input.approvalId } : {})
+    };
+    nextOptions.approval_record = seededApprovalRecord;
+    nextOptions.approval = seededApprovalRecord;
+  }
+  nextOptions.audit_record = {
+    event_id: `gate_evt_${input.decisionId}`,
+    decision_id: input.decisionId,
+    approval_id: input.approvalId,
+    issue_scope: resolveLoopbackIssueScope(input.options.issue_scope),
+    target_domain: input.options.target_domain ?? null,
+    target_tab_id: input.options.target_tab_id ?? null,
+    target_page: input.options.target_page ?? null,
+    action_type: input.options.action_type ?? null,
+    requested_execution_mode: input.options.requested_execution_mode ?? null,
+    gate_decision: "allowed",
+    recorded_at: "1970-01-01T00:00:00.000Z"
+  };
+  return nextOptions;
+};
 
 const resolveGateDecisionId = (input: {
   runId: string;
@@ -26,6 +97,39 @@ const resolveGateDecisionId = (input: {
   return commandRequestId
     ? `gate_decision_${input.runId}_${commandRequestId}`
     : `gate_decision_${input.runId}_${input.requestId}`;
+};
+
+const mergeGateArtifactsIntoCommandParams = (
+  commandParams: Record<string, unknown>,
+  gatePayload?: Record<string, unknown>
+): Record<string, unknown> => {
+  if (!gatePayload) {
+    return commandParams;
+  }
+  const approvalRecord = asRecord(gatePayload.approval_record);
+  const auditRecord = asRecord(gatePayload.audit_record);
+  if (!approvalRecord && !auditRecord) {
+    return commandParams;
+  }
+
+  const normalized: Record<string, unknown> = { ...commandParams };
+  const normalizedOptions = asRecord(commandParams.options)
+    ? { ...(asRecord(commandParams.options) as Record<string, unknown>) }
+    : {};
+
+  if (approvalRecord) {
+    normalized.approval_record = approvalRecord;
+    normalized.approval = approvalRecord;
+    normalizedOptions.approval_record = approvalRecord;
+    normalizedOptions.approval = approvalRecord;
+  }
+  if (auditRecord) {
+    normalized.audit_record = auditRecord;
+    normalizedOptions.audit_record = auditRecord;
+  }
+
+  normalized.options = normalizedOptions;
+  return normalized;
 };
 
 export class InMemoryBackgroundRelay {
@@ -121,11 +225,21 @@ export class InMemoryBackgroundRelay {
           requestId: request.id,
           commandRequestId: commandParams.request_id
         });
-        const gate = buildLoopbackGate(options, asString(ability.action), {
-          runId,
-          decisionId,
-          approvalId: asString(approvalRecord?.approval_id) ?? undefined
-        });
+        const approvalId = resolveLoopbackApprovalId(approvalRecord, decisionId);
+        const gate = buildLoopbackGate(
+          buildLoopbackGateSeedOptions({
+            options,
+            decisionId,
+            approvalId,
+            approvalRecord
+          }),
+          asString(ability.action),
+          {
+            runId,
+            decisionId,
+            approvalId: approvalId ?? undefined
+          }
+        );
         const auditRecord = buildLoopbackAuditRecord({
           runId,
           sessionId,
@@ -188,7 +302,7 @@ export class InMemoryBackgroundRelay {
         kind: "forward",
         id: request.id,
         command,
-        commandParams,
+        commandParams: mergeGateArtifactsIntoCommandParams(commandParams, gatePayload),
         runId,
         sessionId
       });

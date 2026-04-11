@@ -549,6 +549,39 @@ const asInteger = (value: unknown): number | null =>
 
 const asBoolean = (value: unknown): boolean => value === true;
 
+const mergeGateArtifactsIntoCommandParams = (
+  commandParams: Record<string, unknown>,
+  gatePayload?: Record<string, unknown>
+): Record<string, unknown> => {
+  if (!gatePayload) {
+    return commandParams;
+  }
+  const approvalRecord = asRecord(gatePayload.approval_record);
+  const auditRecord = asRecord(gatePayload.audit_record);
+  if (!approvalRecord && !auditRecord) {
+    return commandParams;
+  }
+
+  const normalized: Record<string, unknown> = { ...commandParams };
+  const normalizedOptions = asRecord(commandParams.options)
+    ? { ...(asRecord(commandParams.options) as Record<string, unknown>) }
+    : {};
+
+  if (approvalRecord) {
+    normalized.approval_record = approvalRecord;
+    normalized.approval = approvalRecord;
+    normalizedOptions.approval_record = approvalRecord;
+    normalizedOptions.approval = approvalRecord;
+  }
+  if (auditRecord) {
+    normalized.audit_record = auditRecord;
+    normalizedOptions.audit_record = auditRecord;
+  }
+
+  normalized.options = normalizedOptions;
+  return normalized;
+};
+
 const emitCliInvalidArgs = (
   emit: (message: BridgeResponse) => void,
   request: BridgeRequest,
@@ -2943,6 +2976,7 @@ class ChromeBackgroundBridge {
       suppressHostResponse
     });
 
+    const mergedCommandParams = mergeGateArtifactsIntoCommandParams(commandParams, gatePayload);
     const forward: BackgroundToContentMessage = {
       kind: "forward",
       id: request.id,
@@ -2956,7 +2990,7 @@ class ChromeBackgroundBridge {
         typeof request.params === "object" && request.params !== null
           ? { ...(request.params as Record<string, unknown>) }
           : {},
-      commandParams,
+      commandParams: mergedCommandParams,
       fingerprintContext: forwardFingerprintContext
     };
 

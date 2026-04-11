@@ -323,7 +323,7 @@ describe("xhs-search gate helpers", () => {
     expect(gate.approval_record.decision_id).toBe("gate_decision_run-extension-004_req-4");
   });
 
-  it("does not require upfront audit_record linkage before allowing live_read_limited", () => {
+  it("blocks live_read_limited when audit_record linkage does not match the approved decision", () => {
     const gate = resolveGate(
       {
         issue_scope: "issue_209",
@@ -374,9 +374,9 @@ describe("xhs-search gate helpers", () => {
       }
     );
 
-    expect(gate.gate_outcome.gate_decision).toBe("allowed");
-    expect(gate.gate_outcome.effective_execution_mode).toBe("live_read_limited");
-    expect(gate.gate_outcome.gate_reasons).toEqual(["LIVE_MODE_APPROVED"]);
+    expect(gate.gate_outcome.gate_decision).toBe("blocked");
+    expect(gate.gate_outcome.effective_execution_mode).toBe("recon");
+    expect(gate.gate_outcome.gate_reasons).toContain("AUDIT_RECORD_MISSING");
   });
 
 });
