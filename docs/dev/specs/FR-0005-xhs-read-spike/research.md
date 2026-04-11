@@ -554,11 +554,146 @@
 - issue `#445` 本轮正式 Go/No-Go 结论继续维持：`No-Go/paused`。
 - 当前唯一允许写入 formal FR 的停点应是：`仍缺某些场景的 API primary 成功/矩阵证据，继续 No-Go/paused`。
 
+### 5.4 2026-04-11 latest head 在 `#445-A` 合入后的再复核（issue #445-B）
+
+2026-04-11 在同一 canonical runtime 根 `/Users/mc/dev/WebEnvoy` 再次执行 fresh rerun。本轮与 5.3 的差异是：执行头已前进到 `tested_head_sha=90e1a3f0ad2ca70ac10ffc91130d9c1dd4585c0a`，即已包含 `#445-A` 对 XHS read classic bundle 的修复；因此本节只用于确认“旧的 bundle 阻断是否已解除”，并据此重做当前 formal 停点判断。
+
+#### 5.4.1 准入预检结果
+
+本轮只使用 `xhs_001`，且只在 `main` 目录执行：
+
+- `run_id=issue445-main-verify-status-restore-002`
+  - `command=runtime.status`
+  - 结果：`profileState=stopped`、`browserState=absent`、`identityBindingState=bound`、`transportState=not_connected`、`bootstrapState=not_started`、`runtimeReadiness=blocked`
+  - 同时 `identityPreflight.failureReason=IDENTITY_PREFLIGHT_PASSED`、`profileRootMatches=true`，说明当前已不再是 worktree/main 路径污染
+- `run_id=issue445-main-start-visible-clean-002`
+  - `command=runtime.start`
+  - `profile=xhs_001`
+  - `browser_channel=chrome`
+  - `execution_surface=real_browser`
+  - `page_url=https://www.xiaohongshu.com/search_result?keyword=AI&type=51`
+  - 结果：`browserState=ready`、`transportState=ready`、`bootstrapState=ready`、`runtimeReadiness=ready`
+- `run_id=issue445-main-ping-clean-002`
+  - `command=runtime.ping`
+  - 结果：`relay_path=host>background>content-script>background>host`
+- `run_id=issue445-main-runtime-tabs-002`
+  - 桥接命令：`runtime.tabs`（当前 latest head 仍属于 internal bridge diagnostics path，不是公开 CLI 命令）
+  - `page_url=https://www.xiaohongshu.com/search_result/?keyword=AI&type=51`
+  - `target_tab_id=1230416738`
+  - `relay_path=host>background`
+  - 结果：成功回读当前 XHS 搜索页 tab
+
+由此可确认：在 `tested_head_sha=90e1a3f0ad2ca70ac10ffc91130d9c1dd4585c0a` 上，`xhs_001` 仍可被认定为可启动的 WebEnvoy-managed official runtime profile；`#445-A` 之后的当前阻断已不再是 runtime identity / bundle 装载失败。
+
+#### 5.4.2 fresh rerun 事实
+
+本轮 fresh rerun 统一执行口径：
+
+- `profile=xhs_001`
+- `browser_channel=chrome`
+- `execution_surface=real_browser`
+- `tested_head_sha=90e1a3f0ad2ca70ac10ffc91130d9c1dd4585c0a`
+- Chrome 页面：`https://www.xiaohongshu.com/search_result/?keyword=AI&type=51`
+
+同时确认到的 latest-head command surface 事实：
+
+- 当前公开 runtime CLI 命令仅有 `runtime.help/install/uninstall/ping/start/login/status/stop/audit`
+- 当前公开 XHS CLI 命令仅有 `xhs.search`
+- `detail` / `user_home` 仍没有对应的公开 CLI 命令入口；`runtime.tabs` 虽可通过 internal bridge diagnostics path 使用，但不能替代正式 `xhs.detail` / `xhs.user_home` command surface
+
+#### 5.4.3 三场景 endpoint 证据更新
+
+`search`
+
+- `run_id=issue445-main-search-dryrun-002`
+- `evidence_collected_at=2026-04-11T04:53:03.766Z`
+- `profile=xhs_001`
+- `browser_channel=chrome`
+- `execution_surface=real_browser`
+- `page_url=https://www.xiaohongshu.com/search_result/?keyword=AI&type=51`
+- `target_tab_id=1230416738`
+- `relay_path=host>background>content-script>background>host`
+- `interaction_locator=search_result_tab + query=AI`
+- 最小 replay：
+  - `runtime.start --profile xhs_001 --run-id issue445-main-start-visible-clean-002 --params {"headless":false,"startUrl":"https://www.xiaohongshu.com/search_result?keyword=AI&type=51"}`
+  - internal bridge `runtime.tabs` 回读当前 XHS tab，确认 `target_tab_id=1230416738`
+  - 以 `target_domain=www.xiaohongshu.com`、`target_page=search_result_tab`、`requested_execution_mode=dry_run` 执行 `xhs.search`
+- 成功信号：
+  - `capability_result.outcome=partial`
+  - `consumer_gate_result.gate_decision=allowed`
+  - `requested_execution_mode=dry_run`
+  - `effective_execution_mode=dry_run`
+  - `observability.page_state.page_kind=search`
+- 失败/限制事实：
+  - `observability.request_evidence=none`
+  - `observability.key_requests=[]`
+  - 本轮没有形成 `route_role=primary + path_kind=api + evidence_status=success` 的 live API 成功样本
+- 成熟度结论：
+  - `#445-A` 已解除此前的 `executeXhsSearchImpl is not defined`
+  - 但 latest head 下这次 success 仍停留在 `dry_run` 成功壳，不构成 `search primary api success`，也不能补齐 required headers 矩阵
+
+- `run_id=issue445-main-search-live-blocked-001`
+- `evidence_collected_at=2026-04-11T04:53:29.106Z`
+- `profile=xhs_001`
+- `browser_channel=chrome`
+- `execution_surface=real_browser`
+- `page_url=https://www.xiaohongshu.com/search_result/?keyword=AI&type=51`
+- `target_tab_id=1230416738`
+- `relay_path=host>background>content-script>background>host`
+- `interaction_locator=search_result_tab + query=AI`
+- 最小 replay：
+  - 复用同一 `runtime.start` / `runtime.tabs` 现场
+  - 以 `requested_execution_mode=live_read_high_risk`、其余 gate 参数保持同口径执行 `xhs.search`
+- 失败信号：
+  - `error.code=ERR_EXECUTION_FAILED`
+  - 失败原文：`risk state paused blocks live read`
+  - `effective_execution_mode=dry_run`
+  - `gate_decision=blocked`
+  - `gate_reasons=["RISK_STATE_PAUSED","ISSUE_ACTION_MATRIX_BLOCKED"]`
+  - `risk_state_output.current_state=paused`
+  - `failure_reason=live_read_blocked_by_risk_state`
+  - `blocker_level=formal_runtime_gate`
+- 成熟度结论：
+  - latest head 已不再被 bundle 阻断，但在当前 formal 风险状态下，`search` 仍无法进入 live primary API 执行
+
+`detail`
+
+- 本轮未获得合法 fresh rerun 样本
+- 直接原因已不再是 bundle 缺陷，而是当前 latest head 公开 command surface 仍未提供 `xhs.detail` 的正式 CLI 入口
+- `runtime.tabs` 等 internal bridge diagnostics path 只能证明 tab/page 诊断可达，不能替代 `detail primary api` 的正式复核路径
+- 当前维持既有结论：`fallback-only + candidate/failed`，未新增 `/api/sns/web/v1/feed` primary success 样本
+
+`user_home`
+
+- 本轮未获得合法 fresh rerun 样本
+- 直接原因同上：当前 latest head 公开 command surface 仍未提供 `xhs.user_home` 的正式 CLI 入口
+- 本轮没有新增 `/api/sns/web/v1/user/otherinfo` 或候选聚合端点的 primary success 样本
+- 当前维持既有结论：`fallback-only + candidate/failed`
+
+#### 5.4.4 required headers / 关键字段矩阵是否提升
+
+- `search`：未提升。`dry_run` 成功壳不包含 API request evidence；而 `live_read_high_risk` 在 background gate 即被 `risk_state=paused` 阻断，因此本轮没有新增 `required_headers_observed/candidate` 的有效提升证据。
+- `detail`：未提升。当前 latest head 仍无 repo 内可复核的公开 CLI 入口，本轮无新增 API primary success 样本。
+- `user_home`：未提升。当前 latest head 仍无 repo 内可复核的公开 CLI 入口，本轮无新增 API primary success 样本。
+
+#### 5.4.5 本轮正式结论
+
+`tested_head_sha=90e1a3f0ad2ca70ac10ffc91130d9c1dd4585c0a` 的 fresh rerun，已经把 issue `#445` 的当前正式停点从“latest head execution bundle 缺陷”更新为“formal runtime gate + command surface 仍不足”，原因如下：
+
+- `#445-A` 已被 latest-head fresh rerun 证明有效：`xhs.search` 不再出现 `executeXhsSearchImpl is not defined`。
+- `xhs_001` 当前可被认定为可启动、可完成 `runtime.start ready`、`runtime.ping`、internal `runtime.tabs` 的 WebEnvoy-managed official runtime profile。
+- 但 `search` 在 current formal state 下只能达到 `dry_run` 成功壳；一旦请求 `live_read_high_risk`，就会被 `risk_state=paused` 与 `ISSUE_ACTION_MATRIX_BLOCKED` 明确阻断，未形成 `primary + api + success` 样本。
+- `detail` 与 `user_home` 在当前 latest head 上仍无公开 CLI 命令入口，因此本轮没有合法的同口径 fresh rerun 路径去产出 primary API success 样本。
+- 因此 `search/detail/user_home` 三类场景依然没有同时达到 `route_role=primary + path_kind=api + evidence_status=success + reproduced_multi_round`。
+- issue `#445` 的本轮正式 Go/No-Go 结论继续维持：`No-Go/paused`。
+- 当前唯一允许写入 formal FR 的停点应是：`仍缺某些场景的 API primary 成功/矩阵证据，继续 No-Go/paused`；其中当前 latest-head 的直接阻断已更新为 `live_read_blocked_by_risk_state + detail/user_home formal command surface missing`。
+
 ## 未决项（进入下一轮复核前保留）
 
 - 保持 `xhs_001` 的 main 目录绑定不再回写到 worktree 路径
-- 修复后续实现中的 XHS read 执行 bundle 缺陷（当前已记录的 fresh rerun 失败原文：`executeXhsSearchImpl is not defined`）
-- 在完成上述执行层修复后，再重新执行 `search/detail/user_home` 的 managed-profile `real_browser` fresh live rerun
+- 在风险状态满足准入、且具备合法 approval / gate 前提后，再重新执行 `search` 的 managed-profile `real_browser` fresh live rerun
+- 为 `detail` / `user_home` 提供 repo 内可复核的正式命令入口，或通过独立 formal review 明确其 latest-head 复核路径
+- 在满足上述前提后，再重新执行 `search/detail/user_home` 的 managed-profile `real_browser` fresh live rerun
 - 在新会话样本中复核 `detail` 的成功路径与最小必要请求上下文
 - 在新会话样本中复核 `user_home` 主端点（含 `otherinfo` 与候选聚合端点）的成功路径
 - 对 `search/detail/user_home` 分别完成“required_headers 最小必要集”实验矩阵
