@@ -145,9 +145,6 @@ const inferReadRequestException = (spec, error) => {
     };
 };
 const containsTargetIdentifier = (value, target, candidateKeys) => {
-    if (typeof value === "string") {
-        return value === target;
-    }
     const record = asRecord(value);
     if (record) {
         for (const key of candidateKeys) {
@@ -155,29 +152,99 @@ const containsTargetIdentifier = (value, target, candidateKeys) => {
                 return true;
             }
         }
-        return Object.values(record).some((child) => containsTargetIdentifier(child, target, candidateKeys));
-    }
-    const array = asArray(value);
-    if (array) {
-        return array.some((entry) => containsTargetIdentifier(entry, target, candidateKeys));
     }
     return false;
 };
-const responseContainsRequestedTarget = (spec, params, body) => {
+const collectCandidateRecords = (value) => {
+    const record = asRecord(value);
+    if (record) {
+        return [record];
+    }
+    const array = asArray(value);
+    if (array) {
+        return array.map((entry) => asRecord(entry)).filter((entry) => entry !== null);
+    }
+    return [];
+};
+const hasDetailDataShape = (record) => [
+    "title",
+    "desc",
+    "user",
+    "interact_info",
+    "image_list",
+    "video_info",
+    "note_card",
+    "note_card_list"
+].some((key) => key in record);
+const hasUserDataShape = (record) => [
+    "nickname",
+    "avatar",
+    "avatar_url",
+    "images",
+    "follows",
+    "fans",
+    "basicInfo",
+    "basic_info",
+    "interactions"
+].some((key) => key in record);
+const getDetailResponseCandidates = (body) => {
     const responseRecord = asRecord(body);
     const data = responseRecord?.data ?? body;
+    const dataRecord = asRecord(data);
+    if (!dataRecord) {
+        return [];
+    }
+    return [
+        ...collectCandidateRecords(dataRecord.note),
+        ...collectCandidateRecords(dataRecord.note_card),
+        ...collectCandidateRecords(dataRecord.current_note),
+        ...collectCandidateRecords(dataRecord.item),
+        ...collectCandidateRecords(dataRecord.items),
+        ...collectCandidateRecords(dataRecord.notes),
+        ...(hasDetailDataShape(dataRecord) ? [dataRecord] : [])
+    ];
+};
+const getUserHomeResponseCandidates = (body) => {
+    const responseRecord = asRecord(body);
+    const data = responseRecord?.data ?? body;
+    const dataRecord = asRecord(data);
+    if (!dataRecord) {
+        return [];
+    }
+    return [
+        ...collectCandidateRecords(dataRecord.user),
+        ...collectCandidateRecords(dataRecord.basic_info),
+        ...collectCandidateRecords(dataRecord.basicInfo),
+        ...collectCandidateRecords(dataRecord.profile),
+        ...(hasUserDataShape(dataRecord) ? [dataRecord] : [])
+    ];
+};
+const responseContainsRequestedTarget = (spec, params, body) => {
     if (spec.command === "xhs.detail") {
-        return containsTargetIdentifier(data, params.note_id, [
+        return getDetailResponseCandidates(body).some((candidate) => containsTargetIdentifier(candidate, params.note_id, [
             "note_id",
             "noteId",
             "id"
-        ]);
+        ]));
     }
-    return containsTargetIdentifier(data, params.user_id, [
+    return getUserHomeResponseCandidates(body).some((candidate) => containsTargetIdentifier(candidate, params.user_id, [
         "user_id",
         "userId",
         "id"
-    ]);
+    ]));
+};
+const createReadDiagnosis = (spec, input) => {
+    const diagnosis = createDiagnosis(input);
+    const failureSite = asRecord(diagnosis.failure_site);
+    const shouldUseEndpointTarget = (typeof failureSite?.component === "string" ? failureSite.component : null) === "network";
+    return {
+        ...diagnosis,
+        failure_site: {
+            ...(failureSite ?? {}),
+            ...(shouldUseEndpointTarget ? { target: spec.endpoint } : {}),
+            summary: input.summary
+        }
+    };
 };
 const hasDetailPageStateFallback = (params, root) => {
     const note = asRecord(root?.note);
@@ -251,7 +318,7 @@ const createPageStateFallbackFailure = (input, spec, gate, auditRecord, env, pay
             target: spec.endpoint,
             summary: requestFailure.message
         }
-    }, createDiagnosis({
+    }, createReadDiagnosis(spec, {
         reason: requestFailure.reason,
         summary: requestFailure.message
     }), gate, auditRecord);
@@ -395,7 +462,7 @@ const resolveSimulatedResult = (input, spec, payload, env) => {
         requestId,
         outcome: "failed",
         failureReason: input.options.simulate_result
-    }), createDiagnosis({
+    }), createReadDiagnosis(spec, {
         reason: mapped.reason,
         summary: mapped.message
     }));
@@ -450,7 +517,7 @@ const executeXhsRead = async (input, spec, env) => {
                 target: "requested_execution_mode",
                 summary: "执行模式门禁阻断"
             }
-        }), createDiagnosis({
+        }), createReadDiagnosis(spec, {
             reason: "EXECUTION_MODE_GATE_BLOCKED",
             summary: "执行模式门禁阻断"
         }), gate, auditRecord);
@@ -516,7 +583,7 @@ const executeXhsRead = async (input, spec, env) => {
             requestId: `req-${env.randomId()}`,
             outcome: "failed",
             failureReason: "SESSION_EXPIRED"
-        }), createDiagnosis({
+        }), createReadDiagnosis(spec, {
             reason: "SESSION_EXPIRED",
             summary: `登录态缺失，无法执行 ${spec.command}`
         }), gate, auditRecord);
@@ -545,7 +612,7 @@ const executeXhsRead = async (input, spec, env) => {
                 target: "window._webmsxyw",
                 summary: "页面签名入口不可用"
             }
-        }), createDiagnosis({
+        }), createReadDiagnosis(spec, {
             reason: "SIGNATURE_ENTRY_MISSING",
             summary: "页面签名入口不可用",
             category: "page_changed"
@@ -585,7 +652,7 @@ const executeXhsRead = async (input, spec, env) => {
             requestId: `req-${env.randomId()}`,
             outcome: "failed",
             failureReason: failure.detail
-        }), createDiagnosis({
+        }), createReadDiagnosis(spec, {
             reason: failure.reason,
             summary: failure.message
         }), gate, auditRecord);
@@ -616,7 +683,7 @@ const executeXhsRead = async (input, spec, env) => {
             outcome: "failed",
             statusCode: response.status,
             failureReason: failure.reason
-        }), createDiagnosis({
+        }), createReadDiagnosis(spec, {
             reason: failure.reason,
             summary: failure.message
         }), gate, auditRecord);
@@ -635,7 +702,7 @@ const executeXhsRead = async (input, spec, env) => {
             outcome: "failed",
             statusCode: response.status,
             failureReason: "TARGET_DATA_NOT_FOUND"
-        }), createDiagnosis({
+        }), createReadDiagnosis(spec, {
             reason: "TARGET_DATA_NOT_FOUND",
             summary: `${spec.command} 接口返回成功但未包含目标数据`
         }), gate, auditRecord);

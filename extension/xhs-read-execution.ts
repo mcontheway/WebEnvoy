@@ -246,10 +246,6 @@ const containsTargetIdentifier = (
   target: string,
   candidateKeys: readonly string[]
 ): boolean => {
-  if (typeof value === "string") {
-    return value === target;
-  }
-
   const record = asRecord(value);
   if (record) {
     for (const key of candidateKeys) {
@@ -257,15 +253,84 @@ const containsTargetIdentifier = (
         return true;
       }
     }
-    return Object.values(record).some((child) => containsTargetIdentifier(child, target, candidateKeys));
+  }
+
+  return false;
+};
+
+const collectCandidateRecords = (value: unknown): JsonRecord[] => {
+  const record = asRecord(value);
+  if (record) {
+    return [record];
   }
 
   const array = asArray(value);
   if (array) {
-    return array.some((entry) => containsTargetIdentifier(entry, target, candidateKeys));
+    return array.map((entry) => asRecord(entry)).filter((entry): entry is JsonRecord => entry !== null);
   }
 
-  return false;
+  return [];
+};
+
+const hasDetailDataShape = (record: JsonRecord): boolean =>
+  [
+    "title",
+    "desc",
+    "user",
+    "interact_info",
+    "image_list",
+    "video_info",
+    "note_card",
+    "note_card_list"
+  ].some((key) => key in record);
+
+const hasUserDataShape = (record: JsonRecord): boolean =>
+  [
+    "nickname",
+    "avatar",
+    "avatar_url",
+    "images",
+    "follows",
+    "fans",
+    "basicInfo",
+    "basic_info",
+    "interactions"
+  ].some((key) => key in record);
+
+const getDetailResponseCandidates = (body: unknown): JsonRecord[] => {
+  const responseRecord = asRecord(body);
+  const data = responseRecord?.data ?? body;
+  const dataRecord = asRecord(data);
+  if (!dataRecord) {
+    return [];
+  }
+
+  return [
+    ...collectCandidateRecords(dataRecord.note),
+    ...collectCandidateRecords(dataRecord.note_card),
+    ...collectCandidateRecords(dataRecord.current_note),
+    ...collectCandidateRecords(dataRecord.item),
+    ...collectCandidateRecords(dataRecord.items),
+    ...collectCandidateRecords(dataRecord.notes),
+    ...(hasDetailDataShape(dataRecord) ? [dataRecord] : [])
+  ];
+};
+
+const getUserHomeResponseCandidates = (body: unknown): JsonRecord[] => {
+  const responseRecord = asRecord(body);
+  const data = responseRecord?.data ?? body;
+  const dataRecord = asRecord(data);
+  if (!dataRecord) {
+    return [];
+  }
+
+  return [
+    ...collectCandidateRecords(dataRecord.user),
+    ...collectCandidateRecords(dataRecord.basic_info),
+    ...collectCandidateRecords(dataRecord.basicInfo),
+    ...collectCandidateRecords(dataRecord.profile),
+    ...(hasUserDataShape(dataRecord) ? [dataRecord] : [])
+  ];
 };
 
 const responseContainsRequestedTarget = (
@@ -273,20 +338,44 @@ const responseContainsRequestedTarget = (
   params: XhsDetailParams | XhsUserHomeParams,
   body: unknown
 ): boolean => {
-  const responseRecord = asRecord(body);
-  const data = responseRecord?.data ?? body;
   if (spec.command === "xhs.detail") {
-    return containsTargetIdentifier(data, (params as XhsDetailParams).note_id, [
-      "note_id",
-      "noteId",
-      "id"
-    ]);
+    return getDetailResponseCandidates(body).some((candidate) =>
+      containsTargetIdentifier(candidate, (params as XhsDetailParams).note_id, [
+        "note_id",
+        "noteId",
+        "id"
+      ])
+    );
   }
-  return containsTargetIdentifier(data, (params as XhsUserHomeParams).user_id, [
-    "user_id",
-    "userId",
-    "id"
-  ]);
+  return getUserHomeResponseCandidates(body).some((candidate) =>
+    containsTargetIdentifier(candidate, (params as XhsUserHomeParams).user_id, [
+      "user_id",
+      "userId",
+      "id"
+    ])
+  );
+};
+
+const createReadDiagnosis = (
+  spec: XhsReadCommandSpec,
+  input: {
+    reason: string;
+    summary: string;
+    category?: "request_failed" | "page_changed";
+  }
+): JsonRecord => {
+  const diagnosis = createDiagnosis(input);
+  const failureSite = asRecord(diagnosis.failure_site);
+  const shouldUseEndpointTarget =
+    (typeof failureSite?.component === "string" ? failureSite.component : null) === "network";
+  return {
+    ...diagnosis,
+    failure_site: {
+      ...(failureSite ?? {}),
+      ...(shouldUseEndpointTarget ? { target: spec.endpoint } : {}),
+      summary: input.summary
+    }
+  };
 };
 
 const hasDetailPageStateFallback = (params: XhsDetailParams, root: JsonRecord | null): boolean => {
@@ -393,7 +482,7 @@ const createPageStateFallbackFailure = (
         summary: requestFailure.message
       }
     },
-    createDiagnosis({
+    createReadDiagnosis(spec, {
       reason: requestFailure.reason,
       summary: requestFailure.message
     }),
@@ -564,7 +653,7 @@ const resolveSimulatedResult = (
       outcome: "failed",
       failureReason: input.options.simulate_result
     }),
-    createDiagnosis({
+    createReadDiagnosis(spec, {
       reason: mapped.reason,
       summary: mapped.message
     })
@@ -637,7 +726,7 @@ const executeXhsRead = async (
           summary: "执行模式门禁阻断"
         }
       }),
-      createDiagnosis({
+      createReadDiagnosis(spec, {
         reason: "EXECUTION_MODE_GATE_BLOCKED",
         summary: "执行模式门禁阻断"
       }),
@@ -717,7 +806,7 @@ const executeXhsRead = async (
         outcome: "failed",
         failureReason: "SESSION_EXPIRED"
       }),
-      createDiagnosis({
+      createReadDiagnosis(spec, {
         reason: "SESSION_EXPIRED",
         summary: `登录态缺失，无法执行 ${spec.command}`
       }),
@@ -754,7 +843,7 @@ const executeXhsRead = async (
           summary: "页面签名入口不可用"
         }
       }),
-      createDiagnosis({
+      createReadDiagnosis(spec, {
         reason: "SIGNATURE_ENTRY_MISSING",
         summary: "页面签名入口不可用",
         category: "page_changed"
@@ -803,7 +892,7 @@ const executeXhsRead = async (
         outcome: "failed",
         failureReason: failure.detail
       }),
-      createDiagnosis({
+      createReadDiagnosis(spec, {
         reason: failure.reason,
         summary: failure.message
       }),
@@ -843,7 +932,7 @@ const executeXhsRead = async (
         statusCode: response.status,
         failureReason: failure.reason
       }),
-      createDiagnosis({
+      createReadDiagnosis(spec, {
         reason: failure.reason,
         summary: failure.message
       }),
@@ -871,7 +960,7 @@ const executeXhsRead = async (
         statusCode: response.status,
         failureReason: "TARGET_DATA_NOT_FOUND"
       }),
-      createDiagnosis({
+      createReadDiagnosis(spec, {
         reason: "TARGET_DATA_NOT_FOUND",
         summary: `${spec.command} 接口返回成功但未包含目标数据`
       }),
