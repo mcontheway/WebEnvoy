@@ -3034,72 +3034,54 @@ const hasUserHomePageStateFallback = (params, root) => {
 const canUsePageStateFallback = (spec, params, root) => spec.command === "xhs.detail"
     ? hasDetailPageStateFallback(params, root)
     : hasUserHomePageStateFallback(params, root);
-const createPageStateFallbackSuccess = (input, spec, gate, auditRecord, env, payload, startedAt, requestFailure) => {
+const createPageStateFallbackFailure = (input, spec, gate, auditRecord, env, payload, startedAt, requestFailure) => {
     const requestId = `req-${env.randomId()}`;
-    return {
-        ok: true,
-        payload: {
-            summary: {
-                capability_result: {
-                    ability_id: input.abilityId,
-                    layer: input.abilityLayer,
-                    action: gate.consumer_gate_result.action_type ?? input.abilityAction,
-                    outcome: "partial",
-                    data_ref: spec.buildDataRef(input.params, payload),
-                    metrics: {
-                        count: 1,
-                        duration_ms: Math.max(0, env.now() - startedAt)
-                    }
-                },
-                scope_context: gate.scope_context,
-                gate_input: {
-                    run_id: auditRecord.run_id,
-                    session_id: auditRecord.session_id,
-                    profile: auditRecord.profile,
-                    ...gate.gate_input
-                },
-                gate_outcome: gate.gate_outcome,
-                read_execution_policy: gate.read_execution_policy,
-                issue_action_matrix: gate.issue_action_matrix,
-                consumer_gate_result: gate.consumer_gate_result,
-                approval_record: gate.approval_record,
-                risk_state_output: resolveRiskStateOutput(gate, auditRecord),
-                audit_record: auditRecord
+    return createFailure("ERR_EXECUTION_FAILED", requestFailure.message, {
+        ability_id: input.abilityId,
+        stage: "execution",
+        reason: requestFailure.reason
+    }, {
+        page_state: {
+            page_kind: classifyPageKind(env.getLocationHref(), spec.pageKind),
+            url: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            ready_state: env.getReadyState(),
+            fallback_used: true
+        },
+        key_requests: [
+            {
+                request_id: requestId,
+                stage: "request",
+                method: spec.method,
+                url: spec.endpoint,
+                outcome: "failed",
+                ...(typeof requestFailure.statusCode === "number"
+                    ? { status_code: requestFailure.statusCode }
+                    : {}),
+                failure_reason: requestFailure.reason,
+                request_class: spec.requestClass
             },
-            observability: {
-                page_state: {
-                    page_kind: classifyPageKind(env.getLocationHref(), spec.pageKind),
-                    url: env.getLocationHref(),
-                    title: env.getDocumentTitle(),
-                    ready_state: env.getReadyState(),
-                    fallback_used: true
-                },
-                key_requests: [
-                    {
-                        request_id: requestId,
-                        stage: "request",
-                        method: spec.method,
-                        url: spec.endpoint,
-                        outcome: "failed",
-                        ...(typeof requestFailure.statusCode === "number"
-                            ? { status_code: requestFailure.statusCode }
-                            : {}),
-                        failure_reason: requestFailure.reason,
-                        request_class: spec.requestClass
-                    },
-                    {
-                        request_id: `${requestId}-page-state`,
-                        stage: "page_state_fallback",
-                        method: "N/A",
-                        url: env.getLocationHref(),
-                        outcome: "completed",
-                        fallback_reason: requestFailure.reason
-                    }
-                ],
-                failure_site: null
+            {
+                request_id: `${requestId}-page-state`,
+                stage: "page_state_fallback",
+                method: "N/A",
+                url: env.getLocationHref(),
+                outcome: "completed",
+                fallback_reason: requestFailure.reason,
+                data_ref: spec.buildDataRef(input.params, payload),
+                duration_ms: Math.max(0, env.now() - startedAt)
             }
+        ],
+        failure_site: {
+            stage: "request",
+            component: "network",
+            target: spec.endpoint,
+            summary: requestFailure.message
         }
-    };
+    }, createDiagnosis({
+        reason: requestFailure.reason,
+        summary: requestFailure.message
+    }), gate, auditRecord);
 };
 const createGateOnlySuccess = (input, spec, gate, auditRecord, env, payload) => ({
     ok: true,
@@ -3412,8 +3394,9 @@ const executeXhsRead = async (input, spec, env) => {
         const failure = inferReadRequestException(spec, error);
         const pageStateRoot = await resolvePageStateRoot();
         if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
-            return createPageStateFallbackSuccess(input, spec, gate, auditRecord, env, payload, startedAt, {
+            return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, payload, startedAt, {
                 reason: failure.reason,
+                message: failure.message,
                 detail: failure.detail
             });
         }
@@ -3440,8 +3423,9 @@ const executeXhsRead = async (input, spec, env) => {
         const failure = inferReadFailure(spec, response.status, response.body);
         const pageStateRoot = await resolvePageStateRoot();
         if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
-            return createPageStateFallbackSuccess(input, spec, gate, auditRecord, env, payload, startedAt, {
+            return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, payload, startedAt, {
                 reason: failure.reason,
+                message: failure.message,
                 detail: failure.message,
                 statusCode: response.status
             });

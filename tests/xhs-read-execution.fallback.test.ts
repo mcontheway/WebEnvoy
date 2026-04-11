@@ -88,25 +88,22 @@ describe("xhs read execution fallback", () => {
       })
     );
 
-    expect(result.ok).toBe(true);
-    if (!result.ok) {
-      throw new Error("expected detail fallback success");
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected detail fallback failure envelope");
     }
-    expect(result.payload.summary).toMatchObject({
-      capability_result: {
-        ability_id: "xhs.note.detail.v1",
-        outcome: "partial",
-        data_ref: {
-          note_id: "note-001"
-        }
-      }
+    expect(result.error).toMatchObject({
+      code: "ERR_EXECUTION_FAILED",
+      message: "账号异常，平台拒绝当前请求"
     });
     expect(result.payload.observability).toMatchObject({
       page_state: {
         page_kind: "detail",
         fallback_used: true
       },
-      failure_site: null
+      failure_site: {
+        target: "/api/sns/web/v1/feed"
+      }
     });
     expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual(
       expect.arrayContaining([
@@ -118,7 +115,10 @@ describe("xhs read execution fallback", () => {
         expect.objectContaining({
           stage: "page_state_fallback",
           outcome: "completed",
-          fallback_reason: "ACCOUNT_ABNORMAL"
+          fallback_reason: "ACCOUNT_ABNORMAL",
+          data_ref: {
+            note_id: "note-001"
+          }
         })
       ])
     );
@@ -163,25 +163,22 @@ describe("xhs read execution fallback", () => {
       })
     );
 
-    expect(result.ok).toBe(true);
-    if (!result.ok) {
-      throw new Error("expected user_home fallback success");
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected user_home fallback failure envelope");
     }
-    expect(result.payload.summary).toMatchObject({
-      capability_result: {
-        ability_id: "xhs.user.home.v1",
-        outcome: "partial",
-        data_ref: {
-          user_id: "user-001"
-        }
-      }
+    expect(result.error).toMatchObject({
+      code: "ERR_EXECUTION_FAILED",
+      message: "浏览器环境异常，平台拒绝当前请求"
     });
     expect(result.payload.observability).toMatchObject({
       page_state: {
         page_kind: "user_home",
         fallback_used: true
       },
-      failure_site: null
+      failure_site: {
+        target: "/api/sns/web/v1/user/otherinfo"
+      }
     });
   });
 
@@ -267,16 +264,13 @@ describe("xhs read execution fallback", () => {
       environment
     );
 
-    expect(result.ok).toBe(true);
-    if (!result.ok) {
-      throw new Error("expected sync fallback success");
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected sync fallback failure envelope");
     }
-    expect(result.payload.summary).toMatchObject({
-      capability_result: {
-        data_ref: {
-          note_id: "note-sync-001"
-        },
-        outcome: "partial"
+    expect(result.payload.observability).toMatchObject({
+      page_state: {
+        fallback_used: true
       }
     });
   });
