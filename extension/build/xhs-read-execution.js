@@ -404,7 +404,9 @@ const executeXhsRead = async (input, spec, env) => {
     const startedAt = env.now();
     const payload = spec.buildPayload(input.params, env);
     const resolvePageStateRoot = async () => {
-        const mainWorldState = await env.readPageStateRoot?.().catch(() => null);
+        const mainWorldState = typeof env.readPageStateRoot === "function"
+            ? await env.readPageStateRoot().catch(() => null)
+            : null;
         const mainWorldRecord = asRecord(mainWorldState);
         if (mainWorldRecord) {
             return mainWorldRecord;

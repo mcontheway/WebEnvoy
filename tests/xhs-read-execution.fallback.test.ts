@@ -225,6 +225,62 @@ describe("xhs read execution fallback", () => {
     });
   });
 
+  it("falls back to sync page-state hook when readPageStateRoot is absent", async () => {
+    const environment = createEnvironment({
+      readPageStateRoot: undefined,
+      getLocationHref: () => "https://www.xiaohongshu.com/explore/note-sync-001",
+      getPageStateRoot: () => ({
+        note: {
+          noteDetailMap: {
+            "note-sync-001": {
+              noteId: "note-sync-001"
+            }
+          }
+        }
+      }),
+      fetchJson: async () => ({
+        status: 500,
+        body: {
+          msg: "create invoker failed"
+        }
+      })
+    });
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-sync-001"
+        },
+        options: createLiveReadOptions({
+          target_page: "explore_detail_tab",
+          actual_target_page: "explore_detail_tab"
+        }),
+        executionContext: {
+          runId: "run-detail-sync-fallback-001",
+          sessionId: "nm-session-001",
+          profile: "xhs_001"
+        }
+      },
+      environment
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("expected sync fallback success");
+    }
+    expect(result.payload.summary).toMatchObject({
+      capability_result: {
+        data_ref: {
+          note_id: "note-sync-001"
+        },
+        outcome: "partial"
+      }
+    });
+  });
+
   it("keeps user_home execution failed when page-state user identity does not match requested user_id", async () => {
     const result = await executeXhsUserHome(
       {
