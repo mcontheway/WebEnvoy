@@ -203,7 +203,7 @@ describe("native messaging legacy loopback runtime", () => {
       cwd: "/tmp",
       command: "xhs.search",
       params: {
-        request_id: "xhs-search-req",
+        request_id: "issue209-live-limited-001",
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -235,9 +235,9 @@ describe("native messaging legacy loopback runtime", () => {
             }
           },
           audit_record: {
-            event_id: "gate_evt_gate_decision_run-loopback-live-limited-001_xhs-search-req",
-            decision_id: "gate_decision_run-loopback-live-limited-001_xhs-search-req",
-            approval_id: "gate_appr_gate_decision_run-loopback-live-limited-001_xhs-search-req",
+            event_id: "gate_evt_gate_decision_issue209-live-limited-001",
+            decision_id: "gate_decision_issue209-live-limited-001",
+            approval_id: "gate_appr_gate_decision_issue209-live-limited-001",
             issue_scope: "issue_209",
             target_domain: "www.xiaohongshu.com",
             target_tab_id: 33,
@@ -256,17 +256,17 @@ describe("native messaging legacy loopback runtime", () => {
       expect.objectContaining({
         summary: expect.objectContaining({
           approval_record: expect.objectContaining({
-            approval_id: "gate_appr_gate_decision_run-loopback-live-limited-001_xhs-search-req",
-            decision_id: "gate_decision_run-loopback-live-limited-001_xhs-search-req"
+            approval_id: "gate_appr_gate_decision_issue209-live-limited-001",
+            decision_id: "gate_decision_issue209-live-limited-001"
           }),
           audit_record: expect.objectContaining({
-            decision_id: "gate_decision_run-loopback-live-limited-001_xhs-search-req",
+            decision_id: "gate_decision_issue209-live-limited-001",
             gate_decision: "allowed",
             requested_execution_mode: "live_read_limited",
             effective_execution_mode: "live_read_limited"
           }),
           gate_outcome: expect.objectContaining({
-            decision_id: "gate_decision_run-loopback-live-limited-001_xhs-search-req",
+            decision_id: "gate_decision_issue209-live-limited-001",
             effective_execution_mode: "live_read_limited",
             gate_decision: "allowed",
             gate_reasons: ["LIVE_MODE_APPROVED"]
@@ -298,7 +298,7 @@ describe("native messaging legacy loopback runtime", () => {
       cwd: "/tmp",
       command: "xhs.search",
       params: {
-        request_id: "xhs-search-req",
+        request_id: "issue209-live-limited-current-001",
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -330,9 +330,9 @@ describe("native messaging legacy loopback runtime", () => {
             }
           },
           audit_record: {
-            event_id: "gate_evt_gate_decision_run-loopback-live-limited-stale-001_previous-req",
-            decision_id: "gate_decision_run-loopback-live-limited-stale-001_previous-req",
-            approval_id: "gate_appr_gate_decision_run-loopback-live-limited-stale-001_previous-req",
+            event_id: "gate_evt_gate_decision_issue209-live-limited-previous-001",
+            decision_id: "gate_decision_issue209-live-limited-previous-001",
+            approval_id: "gate_appr_gate_decision_issue209-live-limited-previous-001",
             issue_scope: "issue_209",
             target_domain: "www.xiaohongshu.com",
             target_tab_id: 34,
@@ -350,13 +350,13 @@ describe("native messaging legacy loopback runtime", () => {
     expect(result.payload).toEqual(
       expect.objectContaining({
         gate_outcome: expect.objectContaining({
-          decision_id: "gate_decision_run-loopback-live-limited-stale-001_xhs-search-req",
+          decision_id: "gate_decision_issue209-live-limited-current-001",
           effective_execution_mode: "recon",
           gate_decision: "blocked",
           gate_reasons: expect.arrayContaining(["AUDIT_RECORD_MISSING"])
         }),
         audit_record: expect.objectContaining({
-          decision_id: "gate_decision_run-loopback-live-limited-stale-001_xhs-search-req",
+          decision_id: "gate_decision_issue209-live-limited-current-001",
           approval_id: null
         })
       })

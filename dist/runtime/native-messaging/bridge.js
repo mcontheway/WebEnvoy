@@ -57,7 +57,6 @@ const runWithTimeout = async (promise, timeoutMs) => {
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
-const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const isNonIdempotentForward = (input) => {
     if (input.command === "runtime.bootstrap" ||
         input.command === "runtime.start" ||
@@ -279,10 +278,9 @@ export class NativeMessagingBridge {
         await this.#recoverIfDisconnected(input.profile, budget);
         await this.#ensureReady(input.profile, budget);
         await this.#pulseHeartbeat(budget);
-        const explicitRequestId = asNonEmptyString(input.params.request_id);
         const forwardTimeoutMs = budget.remainingMs();
         const request = createBridgeForwardRequest({
-            id: explicitRequestId ?? this.#nextId("run"),
+            id: this.#nextId("run"),
             profile: input.profile,
             sessionId: this.#session.sessionIdOrThrow(),
             runId: input.runId,
@@ -313,7 +311,7 @@ export class NativeMessagingBridge {
             await this.#pulseHeartbeat(budget);
             const retryTimeoutMs = budget.remainingMs();
             const retryRequest = createBridgeForwardRequest({
-                id: explicitRequestId ?? this.#nextId("run"),
+                id: this.#nextId("run"),
                 profile: input.profile,
                 sessionId: this.#session.sessionIdOrThrow(),
                 runId: input.runId,

@@ -42,11 +42,23 @@ const resolveApprovalRecord = (
   options: Record<string, unknown>
 ): Record<string, unknown> | null => asRecord(options.approval_record) ?? asRecord(options.approval);
 
+const resolveGateDecisionId = (input: {
+  runId: string;
+  requestId: string;
+  commandRequestId?: unknown;
+}): string => {
+  const commandRequestId = asString(input.commandRequestId);
+  return commandRequestId
+    ? `gate_decision_${commandRequestId}`
+    : `gate_decision_${input.runId}_${input.requestId}`;
+};
+
 const buildLoopbackXhsSearchGateBundle = (input: {
   options: Record<string, unknown>;
   abilityAction: string | null;
   runId: string;
   requestId: string;
+  commandRequestId?: unknown;
   sessionId: string;
   profile: string;
 }): {
@@ -54,7 +66,11 @@ const buildLoopbackXhsSearchGateBundle = (input: {
   payload: Record<string, unknown>;
 } => {
   const approvalRecord = resolveApprovalRecord(input.options);
-  const decisionId = `gate_decision_${input.runId}_${input.requestId}`;
+  const decisionId = resolveGateDecisionId({
+    runId: input.runId,
+    requestId: input.requestId,
+    commandRequestId: input.commandRequestId
+  });
   const gate = buildLoopbackGate(input.options, input.abilityAction, {
     runId: input.runId,
     decisionId,
@@ -302,6 +318,7 @@ class InMemoryContentScriptRuntime {
       abilityAction: asString(ability.action),
       runId: message.runId,
       requestId: message.id,
+      commandRequestId: message.commandParams.request_id,
       sessionId: message.sessionId,
       profile: "loopback_profile"
     });
@@ -689,6 +706,7 @@ class InMemoryBackgroundRelay {
           abilityAction: asString(ability.action),
           runId,
           requestId: request.id,
+          commandRequestId: commandParams.request_id,
           sessionId,
           profile: "loopback_profile"
         });

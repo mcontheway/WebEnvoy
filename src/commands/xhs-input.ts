@@ -20,6 +20,7 @@ export interface AbilityEnvelope {
   ability: AbilityRef;
   input: JsonObject;
   options: JsonObject;
+  requestId: string | null;
 }
 
 export interface XhsSearchInputContract extends JsonObject {
@@ -103,6 +104,15 @@ export const parseAbilityEnvelopeForContract = (params: JsonObject): AbilityEnve
     throw invalidAbilityInput("ABILITY_OPTIONS_INVALID", abilityId);
   }
 
+  const requestId =
+    params.request_id === undefined
+      ? null
+      : typeof params.request_id === "string" && params.request_id.trim().length > 0
+        ? params.request_id.trim()
+        : (() => {
+            throw invalidAbilityInput("REQUEST_ID_INVALID", abilityId);
+          })();
+
   return {
     ability: {
       id: abilityId,
@@ -110,7 +120,8 @@ export const parseAbilityEnvelopeForContract = (params: JsonObject): AbilityEnve
       action: action as AbilityAction
     },
     input,
-    options
+    options,
+    requestId
   };
 };
 

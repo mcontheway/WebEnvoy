@@ -22,12 +22,11 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
   it("returns capability_result for xhs.search fixture success path", () => {
     const result = runCli([
       "xhs.search",
-      "--run-id",
-      "run-20260323-live-read-limited-001",
       "--profile",
       "xhs_account_001",
       "--params",
       JSON.stringify({
+        request_id: "issue209-live-limited-001",
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -1569,12 +1568,11 @@ process.stdin.on("data", (chunk) => {
   it("accepts live_read_limited as approved live mode in limited risk state", () => {
     const result = runCli([
       "xhs.search",
-      "--run-id",
-      "run-20260323-live-read-limited-001",
       "--profile",
       "xhs_account_001",
       "--params",
       JSON.stringify({
+        request_id: "issue209-live-limited-001",
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -1603,9 +1601,8 @@ process.stdin.on("data", (chunk) => {
           },
           audit_record: {
             event_id: "audit-live-read-limited-001",
-            decision_id: "gate_decision_run-20260323-live-read-limited-001_xhs-search-req",
-            approval_id:
-              "gate_appr_gate_decision_run-20260323-live-read-limited-001_xhs-search-req",
+            decision_id: "gate_decision_issue209-live-limited-001",
+            approval_id: "gate_appr_gate_decision_issue209-live-limited-001",
             issue_scope: "issue_209",
             target_domain: "www.xiaohongshu.com",
             target_tab_id: 32,

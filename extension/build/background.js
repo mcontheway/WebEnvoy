@@ -238,6 +238,12 @@ const hasSuccessfulExecutionAttestation = (payload) => {
     return asStringArray(injection.missing_required_patches).length === 0;
 };
 const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const resolveGateDecisionId = (input) => {
+    const commandRequestId = asNonEmptyString(input.commandRequestId);
+    return commandRequestId
+        ? `gate_decision_${commandRequestId}`
+        : `gate_decision_${input.runId}_${input.requestId}`;
+};
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
 const asBoolean = (value) => value === true;
 const emitCliInvalidArgs = (emit, request, error) => {
@@ -587,7 +593,12 @@ const createRelayXhsGatePayload = (input) => {
     const runId = String(input.request.params.run_id ?? input.request.id);
     const sessionId = String(input.request.params.session_id ?? "nm-session-001");
     const profile = typeof input.request.profile === "string" ? input.request.profile : null;
-    const decisionId = `gate_decision_${runId}_${input.request.id}`;
+    const commandParams = asRecord(input.request.params.command_params);
+    const decisionId = resolveGateDecisionId({
+        runId,
+        requestId: input.request.id,
+        commandRequestId: commandParams?.request_id
+    });
     const approvalActive = input.gateDecision === "allowed" &&
         (input.effectiveExecutionMode === "live_read_limited" ||
             input.effectiveExecutionMode === "live_read_high_risk" ||
@@ -681,7 +692,12 @@ const createBackgroundXhsGatePayload = (input) => {
     const sessionId = String(input.request.params.session_id ?? "nm-session-001");
     const profile = typeof input.request.profile === "string" ? input.request.profile : null;
     const recordedAt = new Date().toISOString();
-    const decisionId = `gate_decision_${runId}_${input.request.id}`;
+    const commandParams = asRecord(input.request.params.command_params);
+    const decisionId = resolveGateDecisionId({
+        runId,
+        requestId: input.request.id,
+        commandRequestId: commandParams?.request_id
+    });
     const approvalActive = input.gateDecision === "allowed" &&
         (input.effectiveExecutionMode === "live_read_limited" ||
             input.effectiveExecutionMode === "live_read_high_risk" ||

@@ -110,9 +110,6 @@ const asObject = (value: unknown): Record<string, unknown> | null =>
     ? (value as Record<string, unknown>)
     : null;
 
-const asNonEmptyString = (value: unknown): string | null =>
-  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-
 const isNonIdempotentForward = (input: BridgeCommandInput): boolean => {
   if (
     input.command === "runtime.bootstrap" ||
@@ -445,10 +442,9 @@ export class NativeMessagingBridge {
     await this.#ensureReady(input.profile, budget);
     await this.#pulseHeartbeat(budget);
 
-    const explicitRequestId = asNonEmptyString(input.params.request_id);
     const forwardTimeoutMs = budget.remainingMs();
     const request = createBridgeForwardRequest({
-      id: explicitRequestId ?? this.#nextId("run"),
+      id: this.#nextId("run"),
       profile: input.profile,
       sessionId: this.#session.sessionIdOrThrow(),
       runId: input.runId,
@@ -482,7 +478,7 @@ export class NativeMessagingBridge {
 
       const retryTimeoutMs = budget.remainingMs();
       const retryRequest = createBridgeForwardRequest({
-        id: explicitRequestId ?? this.#nextId("run"),
+        id: this.#nextId("run"),
         profile: input.profile,
         sessionId: this.#session.sessionIdOrThrow(),
         runId: input.runId,

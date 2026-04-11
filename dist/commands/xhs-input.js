@@ -45,6 +45,13 @@ export const parseAbilityEnvelopeForContract = (params) => {
     if (!options) {
         throw invalidAbilityInput("ABILITY_OPTIONS_INVALID", abilityId);
     }
+    const requestId = params.request_id === undefined
+        ? null
+        : typeof params.request_id === "string" && params.request_id.trim().length > 0
+            ? params.request_id.trim()
+            : (() => {
+                throw invalidAbilityInput("REQUEST_ID_INVALID", abilityId);
+            })();
     return {
         ability: {
             id: abilityId,
@@ -52,7 +59,8 @@ export const parseAbilityEnvelopeForContract = (params) => {
             action: action
         },
         input,
-        options
+        options,
+        requestId
     };
 };
 export const parseSearchInputForContract = (input, abilityId, options, abilityAction) => {

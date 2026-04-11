@@ -8,6 +8,12 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const resolveApprovalRecord = (options) => asRecord(options.approval_record) ?? asRecord(options.approval);
+const resolveGateDecisionId = (input) => {
+    const commandRequestId = asString(input.commandRequestId);
+    return commandRequestId
+        ? `gate_decision_${commandRequestId}`
+        : `gate_decision_${input.runId}_${input.requestId}`;
+};
 const XHS_READ_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
 export class InMemoryContentScriptRuntime {
     port;
@@ -151,7 +157,11 @@ export class InMemoryContentScriptRuntime {
                 ? message.commandParams.options
                 : {};
             const approvalRecord = resolveApprovalRecord(options);
-            const decisionId = `gate_decision_${message.runId}_${message.id}`;
+            const decisionId = resolveGateDecisionId({
+                runId: message.runId,
+                requestId: message.id,
+                commandRequestId: message.commandParams.request_id
+            });
             const gate = buildLoopbackGate(options, asString(ability.action), {
                 runId: message.runId,
                 decisionId,

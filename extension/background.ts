@@ -533,6 +533,17 @@ const hasSuccessfulExecutionAttestation = (payload: Record<string, unknown>): bo
 const asNonEmptyString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const resolveGateDecisionId = (input: {
+  runId: string;
+  requestId: string;
+  commandRequestId?: unknown;
+}): string => {
+  const commandRequestId = asNonEmptyString(input.commandRequestId);
+  return commandRequestId
+    ? `gate_decision_${commandRequestId}`
+    : `gate_decision_${input.runId}_${input.requestId}`;
+};
+
 const asInteger = (value: unknown): number | null =>
   typeof value === "number" && Number.isInteger(value) ? value : null;
 
@@ -1007,7 +1018,12 @@ const createRelayXhsGatePayload = (input: {
   const runId = String(input.request.params.run_id ?? input.request.id);
   const sessionId = String(input.request.params.session_id ?? "nm-session-001");
   const profile = typeof input.request.profile === "string" ? input.request.profile : null;
-  const decisionId = `gate_decision_${runId}_${input.request.id}`;
+  const commandParams = asRecord(input.request.params.command_params);
+  const decisionId = resolveGateDecisionId({
+    runId,
+    requestId: input.request.id,
+    commandRequestId: commandParams?.request_id
+  });
   const approvalActive =
     input.gateDecision === "allowed" &&
     (input.effectiveExecutionMode === "live_read_limited" ||
@@ -1127,7 +1143,12 @@ const createBackgroundXhsGatePayload = (input: {
   const sessionId = String(input.request.params.session_id ?? "nm-session-001");
   const profile = typeof input.request.profile === "string" ? input.request.profile : null;
   const recordedAt = new Date().toISOString();
-  const decisionId = `gate_decision_${runId}_${input.request.id}`;
+  const commandParams = asRecord(input.request.params.command_params);
+  const decisionId = resolveGateDecisionId({
+    runId,
+    requestId: input.request.id,
+    commandRequestId: commandParams?.request_id
+  });
   const approvalActive =
     input.gateDecision === "allowed" &&
     (input.effectiveExecutionMode === "live_read_limited" ||
