@@ -113,6 +113,35 @@ describe("runtime-store-recorder", () => {
     );
   });
 
+  it("preserves upstream diagnosis truncation when projecting failure events", async () => {
+    const upsertRun = vi.fn().mockResolvedValue(undefined);
+    const appendRunEvent = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn();
+    const recorder = new RuntimeStoreRecorder(baseContext.cwd, { upsertRun, appendRunEvent, close });
+
+    await recorder.recordFailure(
+      baseContext,
+      new CliError("ERR_EXECUTION_FAILED", "oversized diagnosis", {
+        diagnosis: {
+          failure_site: {
+            stage: "request",
+            component: "network",
+            target: "edith.xiaohongshu.com/api/sns/web/v1/search/notes",
+            summary: "x".repeat(400)
+          }
+        }
+      })
+    );
+
+    expect(appendRunEvent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        diagnosisCategory: "request_failed",
+        summaryTruncated: true
+      })
+    );
+  });
+
   it("marks failure summaries as truncated when projection exceeds store budget", async () => {
     const upsertRun = vi.fn().mockResolvedValue(undefined);
     const appendRunEvent = vi.fn().mockResolvedValue(undefined);

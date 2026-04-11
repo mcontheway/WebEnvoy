@@ -395,6 +395,12 @@ const migrateV10ToV11 = (db: DatabaseSync): void => {
       ADD COLUMN summary_truncated INTEGER NOT NULL DEFAULT 0;
     `);
   }
+  db.exec(`
+    UPDATE runtime_events
+    SET summary_truncated = 1
+    WHERE summary IS NOT NULL
+      AND summary LIKE '%[TRUNCATED]';
+  `);
   db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run(
     String(SCHEMA_VERSION)
   );

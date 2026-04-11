@@ -110,7 +110,13 @@ const buildFailureEventProjection = (
     eventType: "failed",
     diagnosisCategory: diagnosis?.category ?? "unknown",
     failurePoint: failureSite?.target ?? context.command,
-    ...buildSummaryProjection(summaryText)
+    ...(() => {
+      const projection = buildSummaryProjection(summaryText);
+      return {
+        ...projection,
+        summaryTruncated: projection.summaryTruncated || failureSite?.summary_truncated === true
+      };
+    })()
   };
 };
 

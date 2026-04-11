@@ -423,6 +423,7 @@ export class SQLiteRuntimeStore {
       }
 
       const eventSummary = sanitizeRuntimeEventSummary(input.summary);
+      const summaryTruncated = input.summaryTruncated || eventSummary.summaryTruncated;
       const createdAt = new Date().toISOString();
       const result = this.#db
         .prepare(
@@ -441,7 +442,7 @@ export class SQLiteRuntimeStore {
           input.diagnosisCategory,
           input.failurePoint,
           eventSummary.summary,
-          eventSummary.summaryTruncated ? 1 : 0,
+          summaryTruncated ? 1 : 0,
           createdAt
         );
 
