@@ -634,7 +634,8 @@ export class ContentScriptHandler {
           runId: message.runId,
           sessionId: String(message.params.session_id ?? "nm-session-001"),
           profile: message.profile ?? "unknown",
-          requestId: message.id
+          requestId: message.id,
+          commandRequestId: asString(asRecord(message.commandParams)?.request_id) ?? undefined
         }
       };
       let result: SearchExecutionResult;

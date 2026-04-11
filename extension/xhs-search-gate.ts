@@ -51,10 +51,15 @@ const isIssue208EditorInputValidation = (options: XhsSearchOptions): boolean =>
   options.requested_execution_mode === "live_write" &&
   options.validation_action === "editor_input";
 
-const buildGateDecisionId = (context: XhsExecutionContext): string =>
-  context.requestId
+const buildGateDecisionId = (context: XhsExecutionContext): string => {
+  const commandRequestId = asNonEmptyString(context.commandRequestId);
+  if (commandRequestId) {
+    return `gate_decision_${commandRequestId}`;
+  }
+  return context.requestId
     ? `gate_decision_${context.runId}_${context.requestId}`
     : `gate_decision_${context.runId}`;
+};
 
 const buildGateEventId = (decisionId: string): string => `gate_evt_${decisionId}`;
 

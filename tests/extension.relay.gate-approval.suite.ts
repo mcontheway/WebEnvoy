@@ -407,6 +407,93 @@ describe("extension background relay contract / gate and approval", () => {
     });
   });
 
+  it("keeps live_read_limited audit linkage on caller-provided request_id across relay and content gate", async () => {
+    const contentScript = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_000,
+        randomId: () => "relay-live-limited-command-request-id",
+        getLocationHref: () => "https://www.xiaohongshu.com/search_result",
+        getDocumentTitle: () => "Search Result",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=valid;",
+        callSignature: async () => ({
+          "X-s": "signed",
+          "X-t": "1"
+        }),
+        fetchJson: async () => ({
+          status: 200,
+          body: {
+            code: 0,
+            data: {
+              items: []
+            }
+          }
+        })
+      }
+    });
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+    const responsePromise = waitForResponse(relay);
+
+    relay.onNativeRequest({
+      id: "forward-xhs-live-limited-command-request-id-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-limited-command-request-id-001",
+        command: "xhs.search",
+        command_params: {
+          request_id: "issue209-live-limited-command-request-id-001",
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            ...approvedLimitedLiveOptions,
+            approval: {
+              ...approvedLimitedLiveOptions.approval,
+              approval_id: "gate_appr_gate_decision_issue209-live-limited-command-request-id-001",
+              decision_id: "gate_decision_issue209-live-limited-command-request-id-001"
+            },
+            audit_record: {
+              event_id: "gate_evt_issue209-live-limited-command-request-id-001",
+              decision_id: "gate_decision_issue209-live-limited-command-request-id-001",
+              approval_id: "gate_appr_gate_decision_issue209-live-limited-command-request-id-001",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_limited",
+              gate_decision: "allowed",
+              recorded_at: "2026-03-23T08:00:30Z"
+            }
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    const response = await responsePromise;
+    const payload = response.payload as Record<string, unknown>;
+    const summary = payload.summary as Record<string, unknown>;
+    const gateOutcome = summary.gate_outcome as Record<string, unknown>;
+    const approvalRecord = summary.approval_record as Record<string, unknown>;
+    const auditRecord = summary.audit_record as Record<string, unknown>;
+
+    expect(response.status).toBe("success");
+    expect(gateOutcome.decision_id).toBe("gate_decision_issue209-live-limited-command-request-id-001");
+    expect(gateOutcome.effective_execution_mode).toBe("live_read_limited");
+    expect(gateOutcome.gate_decision).toBe("allowed");
+    expect(approvalRecord.decision_id).toBe("gate_decision_issue209-live-limited-command-request-id-001");
+    expect(auditRecord.decision_id).toBe("gate_decision_issue209-live-limited-command-request-id-001");
+  });
+
   it("blocks live_read_high_risk in limited risk state and falls back to recon", async () => {
     let fetchCalled = false;
     const contentScript = new ContentScriptHandler({

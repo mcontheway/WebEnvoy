@@ -2414,9 +2414,15 @@ const isIssue208EditorInputValidation = (options) => options.issue_scope === "is
     options.action_type === "write" &&
     options.requested_execution_mode === "live_write" &&
     options.validation_action === "editor_input";
-const buildGateDecisionId = (context) => context.requestId
-    ? `gate_decision_${context.runId}_${context.requestId}`
-    : `gate_decision_${context.runId}`;
+const buildGateDecisionId = (context) => {
+    const commandRequestId = asNonEmptyString(context.commandRequestId);
+    if (commandRequestId) {
+        return `gate_decision_${commandRequestId}`;
+    }
+    return context.requestId
+        ? `gate_decision_${context.runId}_${context.requestId}`
+        : `gate_decision_${context.runId}`;
+};
 const buildGateEventId = (decisionId) => `gate_evt_${decisionId}`;
 const resolveActualTargetGateReasons = (options) => {
     const gateReasons = [];
@@ -5214,7 +5220,8 @@ class ContentScriptHandler {
                     runId: message.runId,
                     sessionId: String(message.params.session_id ?? "nm-session-001"),
                     profile: message.profile ?? "unknown",
-                    requestId: message.id
+                    requestId: message.id,
+                    commandRequestId: asString(asRecord(message.commandParams)?.request_id) ?? undefined
                 }
             };
             let result;

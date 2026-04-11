@@ -197,6 +197,7 @@ export interface XhsExecutionContext {
   sessionId: string;
   profile: string;
   requestId?: string;
+  commandRequestId?: string;
 }
 
 export interface XhsSearchExecutionInput {

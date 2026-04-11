@@ -192,6 +192,7 @@ export interface XhsExecutionContext {
   sessionId: string;
   profile: string;
   requestId?: string;
+  commandRequestId?: string;
 }
 
 export const SEARCH_ENDPOINT = "/api/sns/web/v1/search/notes";

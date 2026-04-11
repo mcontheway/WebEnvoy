@@ -103,10 +103,18 @@ const createApprovedReadApprovalRecord = () => ({
   }
 });
 
-const createApprovedReadAuditRecord = (linkage: { runId: string; requestId: string }) => ({
-  event_id: `gate_evt_${linkage.requestId}`,
-  decision_id: `gate_decision_${linkage.runId}_${linkage.requestId}`,
-  approval_id: `gate_appr_gate_decision_${linkage.runId}_${linkage.requestId}`,
+const createApprovedReadAuditRecord = (linkage: {
+  runId: string;
+  requestId: string;
+  commandRequestId?: string;
+}) => ({
+  event_id: `gate_evt_${linkage.commandRequestId ?? linkage.requestId}`,
+  decision_id: linkage.commandRequestId
+    ? `gate_decision_${linkage.commandRequestId}`
+    : `gate_decision_${linkage.runId}_${linkage.requestId}`,
+  approval_id: linkage.commandRequestId
+    ? `gate_appr_gate_decision_${linkage.commandRequestId}`
+    : `gate_appr_gate_decision_${linkage.runId}_${linkage.requestId}`,
   issue_scope: "issue_209",
   target_domain: "www.xiaohongshu.com",
   target_tab_id: 1,
@@ -1034,6 +1042,7 @@ describe("content-script handler contract", () => {
             session_id: "nm-session-001"
           },
           commandParams: {
+            request_id: "issue209-sign-forged-001",
             requested_execution_mode: "live_read_limited",
             ability: {
               id: "xhs.search",
@@ -1054,7 +1063,8 @@ describe("content-script handler contract", () => {
               approval_record: createApprovedReadApprovalRecord(),
               audit_record: createApprovedReadAuditRecord({
                 runId: "run-xhs-sign-forged-001",
-                requestId: "run-xhs-sign-forged-001"
+                requestId: "run-xhs-sign-forged-001",
+                commandRequestId: "issue209-sign-forged-001"
               })
             }
           },
@@ -1160,6 +1170,7 @@ describe("content-script handler contract", () => {
             session_id: "nm-session-001"
           },
           commandParams: {
+            request_id: `issue209-simulated-${simulateResult}-001`,
             requested_execution_mode: "live_read_limited",
             ability: {
               id: "xhs.search",
@@ -1181,7 +1192,8 @@ describe("content-script handler contract", () => {
               approval_record: createApprovedReadApprovalRecord(),
               audit_record: createApprovedReadAuditRecord({
                 runId: `run-xhs-simulated-${simulateResult}-001`,
-                requestId: `run-xhs-simulated-${simulateResult}-001`
+                requestId: `run-xhs-simulated-${simulateResult}-001`,
+                commandRequestId: `issue209-simulated-${simulateResult}-001`
               })
             }
           },

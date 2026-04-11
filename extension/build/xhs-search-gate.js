@@ -13,9 +13,15 @@ const isIssue208EditorInputValidation = (options) => options.issue_scope === "is
     options.action_type === "write" &&
     options.requested_execution_mode === "live_write" &&
     options.validation_action === "editor_input";
-const buildGateDecisionId = (context) => context.requestId
-    ? `gate_decision_${context.runId}_${context.requestId}`
-    : `gate_decision_${context.runId}`;
+const buildGateDecisionId = (context) => {
+    const commandRequestId = asNonEmptyString(context.commandRequestId);
+    if (commandRequestId) {
+        return `gate_decision_${commandRequestId}`;
+    }
+    return context.requestId
+        ? `gate_decision_${context.runId}_${context.requestId}`
+        : `gate_decision_${context.runId}`;
+};
 const buildGateEventId = (decisionId) => `gate_evt_${decisionId}`;
 export const resolveActualTargetGateReasons = (options) => {
     const gateReasons = [];
