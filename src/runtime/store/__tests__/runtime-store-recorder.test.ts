@@ -113,6 +113,43 @@ describe("runtime-store-recorder", () => {
     );
   });
 
+  it("falls back to observability failure_site when diagnosis is absent", async () => {
+    const upsertRun = vi.fn().mockResolvedValue(undefined);
+    const appendRunEvent = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn();
+    const recorder = new RuntimeStoreRecorder(baseContext.cwd, { upsertRun, appendRunEvent, close });
+
+    await recorder.recordFailure(
+      baseContext,
+      new CliError("ERR_EXECUTION_FAILED", "blocked by page drift", {
+        observability: {
+          coverage: "partial",
+          request_evidence: "none",
+          key_requests: [],
+          page_state: null,
+          failure_site: {
+            stage: "request",
+            component: "network",
+            target: "/api/sns/web/v1/user/otherinfo",
+            summary: "account_abnormal gate returned 461"
+          }
+        }
+      })
+    );
+
+    expect(appendRunEvent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        stage: "request",
+        component: "network",
+        diagnosisCategory: "request_failed",
+        failurePoint: "/api/sns/web/v1/user/otherinfo",
+        summary: "account_abnormal gate returned 461",
+        summaryTruncated: false
+      })
+    );
+  });
+
   it("preserves upstream diagnosis truncation when projecting failure events", async () => {
     const upsertRun = vi.fn().mockResolvedValue(undefined);
     const appendRunEvent = vi.fn().mockResolvedValue(undefined);

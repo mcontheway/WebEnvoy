@@ -93,7 +93,13 @@ const buildFailureEventProjection = (
   context: RuntimeContext,
   error: CliError
 ): Omit<AppendRunEventInput, "runId" | "eventTime"> => {
-  const diagnosis = error.diagnosis ? buildDiagnosis(error.diagnosis) : null;
+  const diagnosis = error.diagnosis
+    ? buildDiagnosis(error.diagnosis)
+    : error.observability?.failure_site
+      ? buildDiagnosis({
+          failure_site: error.observability.failure_site
+        })
+      : null;
   const failureSite = diagnosis?.failure_site ?? null;
   const evidenceSummary =
     diagnosis?.evidence.find((item) => typeof item === "string" && item.trim().length > 0) ?? null;
