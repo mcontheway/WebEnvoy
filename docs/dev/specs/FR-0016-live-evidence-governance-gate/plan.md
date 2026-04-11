@@ -58,19 +58,22 @@
   - `mixed_spec_and_governance_scope` 对 `spec_contract_targets` 与 `todo_handoff_target` 都必须生效，确保治理落库 PR 不会再夹带 FR-0016 的 `TODO.md` handoff 回写
   - formal spec PR 只要碰任一治理落库目标文件，就必须直接触发 `mixed_spec_and_governance_scope`，不需要等到完整 landing 形态
   - `classification_scope` 对治理落库的判定必须同时消费 `governance_issue_ref=#310`，避免把未来其他治理文件修订误吸进 FR-0016 landing lane
-  - `governance_landing_pr` 必须以完整五文件落库为前提，不能被任一单文件或子集落库 PR 提前占用 lane 与 closing semantics
-  - formal spec review PR、governance landing PR 与所有 `in_scope=true` PR 缺少 `gate_applicability` 时必须直接 blocked，不能靠 reviewer/guardian 事后脑补
+  - `governance_landing_pr` 与 `governance_maintenance_pr` 都必须以完整五文件落库为前提，不能被任一单文件或子集落库 PR 提前占用 lane 与 closing semantics
+  - 未来其他命中五处治理目标文件的维护 PR，必须显式提供 `gate_applicability.governance_context_issue_ref`，并由 reviewer / guardian 机器化归入 `governance_maintenance_pr`
+  - formal spec review PR、governance landing PR、governance maintenance PR 与所有 `in_scope=true` PR 缺少 `gate_applicability` 时必须直接 blocked，不能靠 reviewer/guardian 事后脑补
   - FR-0016 `TODO.md` 只作为 handoff 文件存在，不再作为治理落库 lane 的同行例外；若需要更新停点或恢复说明，必须拆到独立 PR
-  - `governance_landing_pr` 必须是精确五文件落库范围，不能夹带其他实质性改动
-  - 精确命中五个治理落库目标文件却缺少 `#310` 引用时，也必须直接 blocked，不能降格成普通 PR
+  - `governance_landing_pr` 与 `governance_maintenance_pr` 都必须是精确五文件落库范围，不能夹带其他实质性改动
+  - 精确命中五个治理落库目标文件却缺少 `governance_context_issue_ref` 时，必须直接 blocked，不能降格成普通 PR
   - `governance_landing_pr` 即使 `not_applicable`，closing semantics 也只能是 `Refs #310` 或 `Fixes #310`，不得退成 `n_a`
+  - `governance_maintenance_pr` 即使 `not_applicable`，closing semantics 也只能引用其 `governance_context_issue_ref`，不得退成 `n_a`
   - 带 `#310` 上下文但只命中治理目标文件子集、或在五文件之外扩 scope 的 PR，也必须直接 blocked，不能退回普通 PR
+  - docs-only closeout PR 的 latest-head gate evidence 必须以 PR 描述中的 `live_evidence_record` 为准；仓库 formal 文档中的固定样本不得被要求逐提交追写当前 PR head SHA
   - `spec.md`、`contracts/` 与 `risks.md` 对专项门禁触发条件保持同一集合
   - `Fixes` / `Refs` 与 `merge-ready` 的 live evidence 条件保持一致
-  - `review_lane` 足以机器化地区分 `formal_spec_review_pr`、`governance_landing_pr` 与 `general_pr`
+  - `review_lane` 足以机器化地区分 `formal_spec_review_pr`、`governance_landing_pr`、`governance_maintenance_pr` 与 `general_pr`
   - `governance_scope_targets` 足以让 reviewer / guardian 机器化校验治理落库 lane，不被自报 `general_pr` 绕过
   - `mixed_spec_and_governance_scope` 足以让 reviewer / guardian 机器化阻断 spec review PR 与治理落库 PR 的重新混线
-  - PR 描述中的结构化元数据必须对专项门禁 PR、formal spec review PR 与 governance landing PR 承载 `gate_applicability`，且对 in-scope PR 额外承载条件化 `live_evidence_record`
+  - PR 描述中的结构化元数据必须对专项门禁 PR、formal spec review PR、governance landing PR 与 governance maintenance PR 承载 `gate_applicability`，且对 in-scope PR 额外承载条件化 `live_evidence_record`
   - `latest_head_sha`、`run_id`、`evidence_collected_at`、`artifact_identity` 与 `artifact_log_ref` 能共同区分“当前 latest head fresh rerun”与“同一 head 的历史 artifact”
 4. 后续治理落库 PR 的最小验证要求：
   - 根级规范、开发区规范、review 基线与 PR 模板使用同一触发集合
