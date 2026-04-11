@@ -137,6 +137,12 @@ export const normalizeGateOptionsForContract = (options, abilityId) => {
         targetPage !== "creator_publish_tab") {
         throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
     }
+    if (abilityId === "xhs.note.detail.v1" && targetPage !== "explore_detail_tab") {
+        throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
+    }
+    if (abilityId === "xhs.user.home.v1" && targetPage !== "profile_tab") {
+        throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
+    }
     const requestedExecutionMode = typeof options.requested_execution_mode === "string" &&
         XHS_EXECUTION_MODES.has(options.requested_execution_mode)
         ? options.requested_execution_mode
