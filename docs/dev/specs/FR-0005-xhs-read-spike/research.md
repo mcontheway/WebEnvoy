@@ -554,7 +554,7 @@
 - issue `#445` 本轮正式 Go/No-Go 结论继续维持：`No-Go/paused`。
 - 当前唯一允许写入 formal FR 的停点应是：`仍缺某些场景的 API primary 成功/矩阵证据，继续 No-Go/paused`。
 
-### 5.4 2026-04-11 latest head 在 `#445-A` 合入后的再复核（issue #445-B）
+### 5.4 2026-04-11 仓库内已固化 fresh rerun 样本（issue #445-B）
 
 2026-04-11 在同一 canonical runtime 根 `/Users/mc/dev/WebEnvoy` 再次执行 fresh rerun。本轮与 5.3 的差异是：执行头已前进到承载 `#445-B` formal 记录更新的后续 head；当前仓库内固化的这组 fresh rerun 证据对应提交为 `eca28babebe929821aa20fbb113b2f94d6ce4f49`。因此本节只用于确认“旧的 bundle 阻断是否已解除”，并据此重做当前 formal 停点判断。
 
@@ -678,7 +678,7 @@
 
 #### 5.4.5 本轮正式结论
 
-当前仓库内已固化的 fresh rerun 证据（`evidence_head_sha=eca28babebe929821aa20fbb113b2f94d6ce4f49`），已经把 issue `#445` 的当前正式停点从“latest head execution bundle 缺陷”更新为“formal runtime gate + command surface 仍不足”，原因如下：
+当前仓库内已固化的 fresh rerun 证据（`evidence_head_sha=eca28babebe929821aa20fbb113b2f94d6ce4f49`），已经把 issue `#445` 的正式停点从“latest head execution bundle 缺陷”更新为“formal runtime gate + command surface 仍不足”，原因如下：
 
 - `#445-A` 已被 latest-head fresh rerun 证明有效：`xhs.search` 不再出现 `executeXhsSearchImpl is not defined`。
 - `xhs_001` 当前可被认定为可启动、可完成 `runtime.start ready`、`runtime.ping`、internal `runtime.tabs` 的 WebEnvoy-managed official runtime profile。
