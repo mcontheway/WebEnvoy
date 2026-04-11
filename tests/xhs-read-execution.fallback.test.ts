@@ -47,6 +47,98 @@ const createEnvironment = (overrides?: Partial<XhsSearchEnvironment>): XhsSearch
 });
 
 describe("xhs read execution fallback", () => {
+  it("keeps detail execution failed when api success payload does not contain requested note", async () => {
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-missing-001"
+        },
+        options: createLiveReadOptions({
+          target_page: "explore_detail_tab",
+          actual_target_page: "explore_detail_tab"
+        }),
+        executionContext: {
+          runId: "run-detail-target-missing-001",
+          sessionId: "nm-session-001",
+          profile: "xhs_001"
+        }
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-missing-001",
+        fetchJson: async () => ({
+          status: 200,
+          body: {
+            code: 0,
+            data: {
+              items: [
+                {
+                  noteId: "different-note"
+                }
+              ]
+            }
+          }
+        })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected detail target-missing failure");
+    }
+    expect(result.error).toMatchObject({
+      code: "ERR_EXECUTION_FAILED",
+      message: "xhs.detail 接口返回成功但未包含目标数据"
+    });
+  });
+
+  it("keeps user_home execution failed when api success payload does not contain requested user", async () => {
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-missing-001"
+        },
+        options: createLiveReadOptions({
+          target_page: "profile_tab",
+          actual_target_page: "profile_tab"
+        }),
+        executionContext: {
+          runId: "run-user-target-missing-001",
+          sessionId: "nm-session-001",
+          profile: "xhs_001"
+        }
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-missing-001",
+        fetchJson: async () => ({
+          status: 200,
+          body: {
+            code: 0,
+            data: {
+              user: {
+                userId: "different-user"
+              }
+            }
+          }
+        })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected user target-missing failure");
+    }
+    expect(result.error).toMatchObject({
+      code: "ERR_EXECUTION_FAILED",
+      message: "xhs.user_home 接口返回成功但未包含目标数据"
+    });
+  });
+
   it("uses detail page-state fallback when feed api is blocked but note state is still present", async () => {
     const result = await executeXhsDetail(
       {

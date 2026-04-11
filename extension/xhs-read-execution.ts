@@ -98,6 +98,8 @@ const asRecord = (value: unknown): JsonRecord | null =>
     ? (value as JsonRecord)
     : null;
 
+const asArray = (value: unknown): unknown[] | null => (Array.isArray(value) ? value : null);
+
 const classifyPageKind = (href: string, fallback: XhsReadCommandSpec["pageKind"]): string => {
   if (href.includes("/login")) {
     return "login";
@@ -237,6 +239,54 @@ const inferReadRequestException = (
     message: `${spec.command} 请求发送失败，无法完成执行`,
     detail: errorMessage
   };
+};
+
+const containsTargetIdentifier = (
+  value: unknown,
+  target: string,
+  candidateKeys: readonly string[]
+): boolean => {
+  if (typeof value === "string") {
+    return value === target;
+  }
+
+  const record = asRecord(value);
+  if (record) {
+    for (const key of candidateKeys) {
+      if (typeof record[key] === "string" && record[key] === target) {
+        return true;
+      }
+    }
+    return Object.values(record).some((child) => containsTargetIdentifier(child, target, candidateKeys));
+  }
+
+  const array = asArray(value);
+  if (array) {
+    return array.some((entry) => containsTargetIdentifier(entry, target, candidateKeys));
+  }
+
+  return false;
+};
+
+const responseContainsRequestedTarget = (
+  spec: XhsReadCommandSpec,
+  params: XhsDetailParams | XhsUserHomeParams,
+  body: unknown
+): boolean => {
+  const responseRecord = asRecord(body);
+  const data = responseRecord?.data ?? body;
+  if (spec.command === "xhs.detail") {
+    return containsTargetIdentifier(data, (params as XhsDetailParams).note_id, [
+      "note_id",
+      "noteId",
+      "id"
+    ]);
+  }
+  return containsTargetIdentifier(data, (params as XhsUserHomeParams).user_id, [
+    "user_id",
+    "userId",
+    "id"
+  ]);
 };
 
 const hasDetailPageStateFallback = (params: XhsDetailParams, root: JsonRecord | null): boolean => {
@@ -796,6 +846,34 @@ const executeXhsRead = async (
       createDiagnosis({
         reason: failure.reason,
         summary: failure.message
+      }),
+      gate,
+      auditRecord
+    );
+  }
+
+  if (!responseContainsRequestedTarget(spec, input.params, response.body)) {
+    return createFailure(
+      "ERR_EXECUTION_FAILED",
+      `${spec.command} 接口返回成功但未包含目标数据`,
+      {
+        ability_id: input.abilityId,
+        stage: "execution",
+        reason: "TARGET_DATA_NOT_FOUND"
+      },
+      createReadObservability({
+        spec,
+        href: env.getLocationHref(),
+        title: env.getDocumentTitle(),
+        readyState: env.getReadyState(),
+        requestId: `req-${env.randomId()}`,
+        outcome: "failed",
+        statusCode: response.status,
+        failureReason: "TARGET_DATA_NOT_FOUND"
+      }),
+      createDiagnosis({
+        reason: "TARGET_DATA_NOT_FOUND",
+        summary: `${spec.command} 接口返回成功但未包含目标数据`
       }),
       gate,
       auditRecord
