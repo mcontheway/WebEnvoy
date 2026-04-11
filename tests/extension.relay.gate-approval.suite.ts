@@ -455,13 +455,17 @@ describe("extension background relay contract / gate and approval", () => {
             ...approvedLimitedLiveOptions,
             approval: {
               ...approvedLimitedLiveOptions.approval,
-              approval_id: "gate_appr_gate_decision_issue209-live-limited-command-request-id-001",
-              decision_id: "gate_decision_issue209-live-limited-command-request-id-001"
+              approval_id:
+                "gate_appr_gate_decision_run-xhs-live-limited-command-request-id-001_issue209-live-limited-command-request-id-001",
+              decision_id:
+                "gate_decision_run-xhs-live-limited-command-request-id-001_issue209-live-limited-command-request-id-001"
             },
             audit_record: {
               event_id: "gate_evt_issue209-live-limited-command-request-id-001",
-              decision_id: "gate_decision_issue209-live-limited-command-request-id-001",
-              approval_id: "gate_appr_gate_decision_issue209-live-limited-command-request-id-001",
+              decision_id:
+                "gate_decision_run-xhs-live-limited-command-request-id-001_issue209-live-limited-command-request-id-001",
+              approval_id:
+                "gate_appr_gate_decision_run-xhs-live-limited-command-request-id-001_issue209-live-limited-command-request-id-001",
               issue_scope: "issue_209",
               target_domain: "www.xiaohongshu.com",
               target_tab_id: 32,
@@ -487,11 +491,17 @@ describe("extension background relay contract / gate and approval", () => {
     const auditRecord = summary.audit_record as Record<string, unknown>;
 
     expect(response.status).toBe("success");
-    expect(gateOutcome.decision_id).toBe("gate_decision_issue209-live-limited-command-request-id-001");
+    expect(gateOutcome.decision_id).toBe(
+      "gate_decision_run-xhs-live-limited-command-request-id-001_issue209-live-limited-command-request-id-001"
+    );
     expect(gateOutcome.effective_execution_mode).toBe("live_read_limited");
     expect(gateOutcome.gate_decision).toBe("allowed");
-    expect(approvalRecord.decision_id).toBe("gate_decision_issue209-live-limited-command-request-id-001");
-    expect(auditRecord.decision_id).toBe("gate_decision_issue209-live-limited-command-request-id-001");
+    expect(approvalRecord.decision_id).toBe(
+      "gate_decision_run-xhs-live-limited-command-request-id-001_issue209-live-limited-command-request-id-001"
+    );
+    expect(auditRecord.decision_id).toBe(
+      "gate_decision_run-xhs-live-limited-command-request-id-001_issue209-live-limited-command-request-id-001"
+    );
   });
 
   it("blocks live_read_high_risk in limited risk state and falls back to recon", async () => {

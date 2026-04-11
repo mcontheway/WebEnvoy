@@ -16,7 +16,7 @@ const isIssue208EditorInputValidation = (options) => options.issue_scope === "is
 const buildGateDecisionId = (context) => {
     const commandRequestId = asNonEmptyString(context.commandRequestId);
     if (commandRequestId) {
-        return `gate_decision_${commandRequestId}`;
+        return `gate_decision_${context.runId}_${commandRequestId}`;
     }
     return context.requestId
         ? `gate_decision_${context.runId}_${context.requestId}`

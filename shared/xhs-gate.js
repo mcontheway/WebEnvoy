@@ -755,22 +755,6 @@ const collectXhsMatrixGateReasons = (input) => {
         liveRequirements.filter((requirement) => requirement.startsWith("approval_record_")),
         approvalRecord
       );
-      const auditRequirementGaps = liveRequirements.includes("audit_record_present")
-        ? resolveXhsAuditRequirementGaps(
-            auditRecord,
-            {
-              decisionId: input.decisionId ?? null,
-              approvalId: input.expectedApprovalId ?? null,
-              runId: input.runId ?? null
-            },
-            state,
-            {
-            targetDomain: input.targetDomain,
-            targetTabId: input.targetTabId,
-            targetPage: input.targetPage
-            }
-          )
-        : [];
       const rolloutRequirementGaps =
         liveRequirements.includes("limited_read_rollout_ready_true") &&
         state.limitedReadRolloutReadyTrue !== true
@@ -781,9 +765,6 @@ const collectXhsMatrixGateReasons = (input) => {
       }
       if (approvalRequirementGaps.includes("approval_record_checks_all_true")) {
         pushReason(gateReasons, "APPROVAL_CHECKS_INCOMPLETE");
-      }
-      if (auditRequirementGaps.length > 0) {
-        pushReason(gateReasons, "AUDIT_RECORD_MISSING");
       }
       if (rolloutRequirementGaps.length > 0) {
         pushReason(gateReasons, "LIMITED_READ_ROLLOUT_NOT_READY");

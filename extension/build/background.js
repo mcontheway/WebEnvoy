@@ -241,7 +241,7 @@ const asNonEmptyString = (value) => typeof value === "string" && value.trim().le
 const resolveGateDecisionId = (input) => {
     const commandRequestId = asNonEmptyString(input.commandRequestId);
     return commandRequestId
-        ? `gate_decision_${commandRequestId}`
+        ? `gate_decision_${input.runId}_${commandRequestId}`
         : `gate_decision_${input.runId}_${input.requestId}`;
 };
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;

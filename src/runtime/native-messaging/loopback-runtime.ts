@@ -49,7 +49,7 @@ const resolveGateDecisionId = (input: {
 }): string => {
   const commandRequestId = asString(input.commandRequestId);
   return commandRequestId
-    ? `gate_decision_${commandRequestId}`
+    ? `gate_decision_${input.runId}_${commandRequestId}`
     : `gate_decision_${input.runId}_${input.requestId}`;
 };
 

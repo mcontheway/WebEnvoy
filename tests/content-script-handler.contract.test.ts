@@ -110,10 +110,10 @@ const createApprovedReadAuditRecord = (linkage: {
 }) => ({
   event_id: `gate_evt_${linkage.commandRequestId ?? linkage.requestId}`,
   decision_id: linkage.commandRequestId
-    ? `gate_decision_${linkage.commandRequestId}`
+    ? `gate_decision_${linkage.runId}_${linkage.commandRequestId}`
     : `gate_decision_${linkage.runId}_${linkage.requestId}`,
   approval_id: linkage.commandRequestId
-    ? `gate_appr_gate_decision_${linkage.commandRequestId}`
+    ? `gate_appr_gate_decision_${linkage.runId}_${linkage.commandRequestId}`
     : `gate_appr_gate_decision_${linkage.runId}_${linkage.requestId}`,
   issue_scope: "issue_209",
   target_domain: "www.xiaohongshu.com",
