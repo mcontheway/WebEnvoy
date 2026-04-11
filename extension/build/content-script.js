@@ -3336,14 +3336,41 @@ const resolveSimulatedResult = (input, spec, payload, env) => {
             }
         };
     }
-    const mapped = inferReadFailure(spec, input.options.simulate_result === "account_abnormal" ? 461 : 500, {
-        code: input.options.simulate_result === "account_abnormal" ? 300011 : undefined,
-        msg: input.options.simulate_result === "browser_env_abnormal"
-            ? "Browser environment abnormal"
-            : input.options.simulate_result === "gateway_invoker_failed"
-                ? "create invoker failed"
-                : input.options.simulate_result
-    });
+    const simulatedReasonMap = {
+        signature_entry_missing: {
+            reason: "SIGNATURE_ENTRY_MISSING",
+            message: "页面签名入口不可用"
+        },
+        account_abnormal: {
+            reason: "ACCOUNT_ABNORMAL",
+            message: "账号异常，平台拒绝当前请求",
+            statusCode: 461
+        },
+        browser_env_abnormal: {
+            reason: "BROWSER_ENV_ABNORMAL",
+            message: "浏览器环境异常，平台拒绝当前请求",
+            statusCode: 200
+        },
+        captcha_required: {
+            reason: "CAPTCHA_REQUIRED",
+            message: "平台要求额外人机验证，无法继续执行",
+            statusCode: 429
+        },
+        gateway_invoker_failed: {
+            reason: "GATEWAY_INVOKER_FAILED",
+            message: `网关调用失败，当前上下文不足以完成 ${spec.command} 请求`,
+            statusCode: 500
+        }
+    };
+    const mapped = simulatedReasonMap[input.options.simulate_result] ??
+        inferReadFailure(spec, input.options.simulate_result === "account_abnormal" ? 461 : 500, {
+            code: input.options.simulate_result === "account_abnormal" ? 300011 : undefined,
+            msg: input.options.simulate_result === "browser_env_abnormal"
+                ? "Browser environment abnormal"
+                : input.options.simulate_result === "gateway_invoker_failed"
+                    ? "create invoker failed"
+                    : input.options.simulate_result
+        });
     return createFailure("ERR_EXECUTION_FAILED", mapped.message, {
         ability_id: input.abilityId,
         stage: "execution",
@@ -3355,6 +3382,7 @@ const resolveSimulatedResult = (input, spec, payload, env) => {
         readyState: env.getReadyState(),
         requestId,
         outcome: "failed",
+        ...(typeof mapped.statusCode === "number" ? { statusCode: mapped.statusCode } : {}),
         failureReason: input.options.simulate_result
     }), createReadDiagnosis(spec, {
         reason: mapped.reason,

@@ -795,6 +795,50 @@ describe("xhs read execution fallback", () => {
     });
   });
 
+  it("projects simulated signature-entry failures with page-change semantics for xhs.detail", async () => {
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-simulated-signature-001"
+        },
+        options: createLiveReadOptions({
+          target_page: "explore_detail_tab",
+          actual_target_page: "explore_detail_tab",
+          simulate_result: "signature_entry_missing"
+        }),
+        executionContext: {
+          runId: "run-detail-simulated-signature-001",
+          sessionId: "nm-session-001",
+          profile: "xhs_001"
+        }
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-simulated-signature-001"
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected simulated signature-entry failure");
+    }
+    expect(result.error).toMatchObject({
+      code: "ERR_EXECUTION_FAILED",
+      message: "页面签名入口不可用"
+    });
+    expect(result.payload.details).toMatchObject({
+      reason: "SIGNATURE_ENTRY_MISSING"
+    });
+    expect(result.payload.diagnosis).toMatchObject({
+      category: "page_changed",
+      failure_site: {
+        target: "window._webmsxyw"
+      }
+    });
+  });
+
   it("keeps detail execution failed when api fails and no fallback page state exists", async () => {
     const result = await executeXhsDetail(
       {
