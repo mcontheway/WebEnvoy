@@ -250,6 +250,7 @@ const xhsReadCommand = async (
   const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
     requestedExecutionMode: gate.requestedExecutionMode
   });
+  const requestId = `${context.command.replace(/\./g, "-")}-req`;
 
   try {
     await ensureOfficialChromeRuntimeReady(
@@ -262,6 +263,7 @@ const xhsReadCommand = async (
     );
     const commandParams = appendFingerprintContext(
       {
+        request_id: requestId,
         target_domain: gate.targetDomain,
         target_tab_id: gate.targetTabId,
         target_page: gate.targetPage,

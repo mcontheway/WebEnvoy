@@ -184,7 +184,6 @@ export declare const collectXhsMatrixGateReasons: (input: {
   state: ReturnType<typeof buildXhsGatePolicyState>;
   decisionId?: string | null;
   expectedApprovalId?: string | null;
-  runId?: string | null;
   approvalRecord: unknown;
   auditRecord?: unknown;
   targetDomain?: unknown;

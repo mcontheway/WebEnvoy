@@ -2766,7 +2766,6 @@ class ChromeBackgroundBridge {
             state: gateState,
             decisionId: gateDecisionId,
             expectedApprovalId,
-            runId: requestRunId,
             approvalRecord,
             auditRecord,
             targetDomain,

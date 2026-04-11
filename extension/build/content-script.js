@@ -1324,31 +1324,16 @@ const normalizeXhsAuditRecord = (value) => {
 };
 
 const resolveXhsAuditRequirementGaps = (auditRecord, expectedLinkage, state, target) => {
-  const runScopedDecisionPrefix =
-    typeof expectedLinkage.runId === "string" && expectedLinkage.runId.length > 0
-      ? `gate_decision_${expectedLinkage.runId}`
-      : null;
-  const runScopedApprovalPrefix =
-    typeof expectedLinkage.runId === "string" && expectedLinkage.runId.length > 0
-      ? `gate_appr_gate_decision_${expectedLinkage.runId}`
-      : null;
   const matchesExactLinkage =
     !!expectedLinkage.decisionId &&
     !!expectedLinkage.approvalId &&
     auditRecord.decision_id === expectedLinkage.decisionId &&
     auditRecord.approval_id === expectedLinkage.approvalId;
-  const matchesRunScopedLinkage =
-    !!runScopedDecisionPrefix &&
-    !!runScopedApprovalPrefix &&
-    typeof auditRecord.decision_id === "string" &&
-    typeof auditRecord.approval_id === "string" &&
-    auditRecord.decision_id.startsWith(runScopedDecisionPrefix) &&
-    auditRecord.approval_id.startsWith(runScopedApprovalPrefix);
   if (
     !auditRecord.event_id ||
     !auditRecord.decision_id ||
     !auditRecord.approval_id ||
-    (!matchesExactLinkage && !matchesRunScopedLinkage) ||
+    !matchesExactLinkage ||
     !auditRecord.recorded_at ||
     auditRecord.issue_scope !== state.issueScope ||
     auditRecord.target_domain !== target.targetDomain ||
@@ -1964,7 +1949,6 @@ const evaluateXhsGate = (input) => {
     state,
     decisionId,
     expectedApprovalId,
-    runId: input.runId,
     approvalRecord: input.approvalRecord,
     auditRecord: input.auditRecord,
     targetDomain: input.targetDomain,

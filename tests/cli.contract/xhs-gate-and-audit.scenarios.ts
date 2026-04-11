@@ -1784,8 +1784,9 @@ process.stdin.on("data", (chunk) => {
           },
           audit_record: {
             event_id: "gate_evt_issue209_live_limited_001",
-            decision_id: "gate_decision_run-20260323-live-read-limited-001",
-            approval_id: "gate_appr_gate_decision_run-20260323-live-read-limited-001",
+            decision_id: "gate_decision_run-20260323-live-read-limited-001_xhs-search-req",
+            approval_id:
+              "gate_appr_gate_decision_run-20260323-live-read-limited-001_xhs-search-req",
             issue_scope: "issue_209",
             target_domain: "www.xiaohongshu.com",
             target_tab_id: 32,

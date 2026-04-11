@@ -192,7 +192,7 @@ describe("native messaging legacy loopback runtime", () => {
     );
   });
 
-  it("accepts run-scoped audit linkage for live_read_limited in loopback bundles", async () => {
+  it("accepts exact audit linkage for live_read_limited in loopback bundles", async () => {
     const bridge = new NativeMessagingBridge({
       transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
     });
@@ -203,6 +203,7 @@ describe("native messaging legacy loopback runtime", () => {
       cwd: "/tmp",
       command: "xhs.search",
       params: {
+        request_id: "xhs-search-req",
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -234,9 +235,9 @@ describe("native messaging legacy loopback runtime", () => {
             }
           },
           audit_record: {
-            event_id: "gate_evt_gate_decision_run-loopback-live-limited-001_run-previous",
-            decision_id: "gate_decision_run-loopback-live-limited-001_run-previous",
-            approval_id: "gate_appr_gate_decision_run-loopback-live-limited-001_run-previous",
+            event_id: "gate_evt_gate_decision_run-loopback-live-limited-001_xhs-search-req",
+            decision_id: "gate_decision_run-loopback-live-limited-001_xhs-search-req",
+            approval_id: "gate_appr_gate_decision_run-loopback-live-limited-001_xhs-search-req",
             issue_scope: "issue_209",
             target_domain: "www.xiaohongshu.com",
             target_tab_id: 33,
@@ -255,25 +256,17 @@ describe("native messaging legacy loopback runtime", () => {
       expect.objectContaining({
         summary: expect.objectContaining({
           approval_record: expect.objectContaining({
-            approval_id: expect.stringMatching(
-              /^gate_appr_gate_decision_run-loopback-live-limited-001_run-\d{4}$/
-            ),
-            decision_id: expect.stringMatching(
-              /^gate_decision_run-loopback-live-limited-001_run-\d{4}$/
-            )
+            approval_id: "gate_appr_gate_decision_run-loopback-live-limited-001_xhs-search-req",
+            decision_id: "gate_decision_run-loopback-live-limited-001_xhs-search-req"
           }),
           audit_record: expect.objectContaining({
-            decision_id: expect.stringMatching(
-              /^gate_decision_run-loopback-live-limited-001_run-\d{4}$/
-            ),
+            decision_id: "gate_decision_run-loopback-live-limited-001_xhs-search-req",
             gate_decision: "allowed",
             requested_execution_mode: "live_read_limited",
             effective_execution_mode: "live_read_limited"
           }),
           gate_outcome: expect.objectContaining({
-            decision_id: expect.stringMatching(
-              /^gate_decision_run-loopback-live-limited-001_run-\d{4}$/
-            ),
+            decision_id: "gate_decision_run-loopback-live-limited-001_xhs-search-req",
             effective_execution_mode: "live_read_limited",
             gate_decision: "allowed",
             gate_reasons: ["LIVE_MODE_APPROVED"]
@@ -289,6 +282,82 @@ describe("native messaging legacy loopback runtime", () => {
             gate_decision: "allowed",
             gate_reasons: ["LIVE_MODE_APPROVED"]
           })
+        })
+      })
+    );
+  });
+
+  it("blocks stale same-run audit linkage for live_read_limited in loopback bundles", async () => {
+    const bridge = new NativeMessagingBridge({
+      transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
+    });
+
+    const result = await bridge.runCommand({
+      runId: "run-loopback-live-limited-stale-001",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "xhs.search",
+      params: {
+        request_id: "xhs-search-req",
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          simulate_result: "success",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 34,
+          target_page: "search_result_tab",
+          issue_scope: "issue_209",
+          action_type: "read",
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          limited_read_rollout_ready_true: true,
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          },
+          audit_record: {
+            event_id: "gate_evt_gate_decision_run-loopback-live-limited-stale-001_previous-req",
+            decision_id: "gate_decision_run-loopback-live-limited-stale-001_previous-req",
+            approval_id: "gate_appr_gate_decision_run-loopback-live-limited-stale-001_previous-req",
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 34,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_limited",
+            gate_decision: "allowed",
+            recorded_at: "2026-03-23T10:00:30Z"
+          }
+        }
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.payload).toEqual(
+      expect.objectContaining({
+        gate_outcome: expect.objectContaining({
+          decision_id: "gate_decision_run-loopback-live-limited-stale-001_xhs-search-req",
+          effective_execution_mode: "recon",
+          gate_decision: "blocked",
+          gate_reasons: expect.arrayContaining(["AUDIT_RECORD_MISSING"])
+        }),
+        audit_record: expect.objectContaining({
+          decision_id: "gate_decision_run-loopback-live-limited-stale-001_xhs-search-req",
+          approval_id: null
         })
       })
     );

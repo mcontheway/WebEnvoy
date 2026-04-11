@@ -76,7 +76,6 @@ export const buildLoopbackGate = (
     approvalRecord: options.approval_record ?? options.approval,
     auditRecord: options.audit_record,
     limitedReadRolloutReadyTrue: options.limited_read_rollout_ready_true === true,
-    runId: linkage?.runId,
     decisionId: linkage?.decisionId,
     approvalId: linkage?.approvalId,
     issue208EditorInputValidation,
