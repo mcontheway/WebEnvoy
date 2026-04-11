@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 const hasColumn = (db, tableName, columnName) => {
     const rows = db
         .prepare(`PRAGMA table_info(${tableName})`)
@@ -357,6 +357,21 @@ const migrateV9ToV10 = (db) => {
         )
       );
   `);
+    db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run("10");
+};
+const migrateV10ToV11 = (db) => {
+    if (!hasColumn(db, "runtime_events", "summary_truncated")) {
+        db.exec(`
+      ALTER TABLE runtime_events
+      ADD COLUMN summary_truncated INTEGER NOT NULL DEFAULT 0;
+    `);
+    }
+    db.exec(`
+    UPDATE runtime_events
+    SET summary_truncated = 1
+    WHERE summary IS NOT NULL
+      AND summary LIKE '%[TRUNCATED]';
+  `);
     db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION));
 };
 export const initializeRuntimeStoreSchema = ({ db, onSchemaMismatch }) => {
@@ -388,6 +403,7 @@ export const initializeRuntimeStoreSchema = ({ db, onSchemaMismatch }) => {
       diagnosis_category TEXT,
       failure_point TEXT,
       summary TEXT,
+      summary_truncated INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
     );
@@ -491,6 +507,11 @@ export const initializeRuntimeStoreSchema = ({ db, onSchemaMismatch }) => {
         if (currentVersion === 9) {
             migrateV9ToV10(db);
             currentVersion = 10;
+            continue;
+        }
+        if (currentVersion === 10) {
+            migrateV10ToV11(db);
+            currentVersion = 11;
             continue;
         }
         break;

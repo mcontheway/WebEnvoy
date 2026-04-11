@@ -18,7 +18,12 @@ import { browserStateFromProfileState, buildBoundlessRuntimeReadiness, buildNonP
 const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
 const LOCK_ACQUIRE_MAX_RETRIES = 6;
 const STOP_LOCK_DELETE_MAX_RETRIES = 3;
+const LOCK_READ_PARSE_MAX_RETRIES = 3;
+const LOCK_READ_PARSE_RETRY_DELAY_MS = 20;
 const isoNow = () => new Date().toISOString();
+const delay = (ms) => new Promise((resolve) => {
+    setTimeout(resolve, ms);
+});
 const DEFAULT_LOCK_FILE_ADAPTER = {
     readFile: async (path, encoding) => readFile(path, encoding),
     writeFile: async (path, data, options) => {
@@ -850,17 +855,27 @@ export class ProfileRuntimeService {
         return store.initializeMeta(profile, nowIso);
     }
     async #readLock(lockPath) {
-        try {
-            const raw = await this.#lockFileAdapter.readFile(lockPath, "utf8");
-            return JSON.parse(raw);
-        }
-        catch (error) {
-            const nodeError = error;
-            if (nodeError.code === "ENOENT") {
-                return null;
+        let lastError = null;
+        for (let attempt = 0; attempt < LOCK_READ_PARSE_MAX_RETRIES; attempt += 1) {
+            try {
+                const raw = await this.#lockFileAdapter.readFile(lockPath, "utf8");
+                return JSON.parse(raw);
             }
-            throw new CliError("ERR_PROFILE_META_CORRUPT", "profile 锁文件损坏");
+            catch (error) {
+                const nodeError = error;
+                if (nodeError.code === "ENOENT") {
+                    return null;
+                }
+                lastError = error;
+                if (!(error instanceof SyntaxError) || attempt === LOCK_READ_PARSE_MAX_RETRIES - 1) {
+                    break;
+                }
+                await delay(LOCK_READ_PARSE_RETRY_DELAY_MS);
+            }
         }
+        throw new CliError("ERR_PROFILE_META_CORRUPT", "profile 锁文件损坏", {
+            cause: lastError instanceof Error ? lastError : undefined
+        });
     }
     async #writeLock(lockPath, lock) {
         await this.#lockFileAdapter.writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
