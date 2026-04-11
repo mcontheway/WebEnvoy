@@ -192,7 +192,7 @@ describe("native messaging legacy loopback runtime", () => {
     );
   });
 
-  it("injects gate-produced audit linkage for live_read_limited in loopback bundles", async () => {
+  it("keeps live_read_limited approved when caller provides matching audit linkage", async () => {
     const bridge = new NativeMessagingBridge({
       transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
     });
@@ -234,6 +234,20 @@ describe("native messaging legacy loopback runtime", () => {
               action_type_confirmed: true
             }
           },
+          audit_record: {
+            event_id: "audit-live-read-limited-loopback-001",
+            decision_id: "gate_decision_run-loopback-live-limited-001_issue209-live-limited-001",
+            approval_id:
+              "gate_appr_gate_decision_run-loopback-live-limited-001_issue209-live-limited-001",
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 33,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_limited",
+            gate_decision: "allowed",
+            recorded_at: "2026-03-23T10:00:30Z"
+          }
         }
       }
     });

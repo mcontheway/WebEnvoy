@@ -55,6 +55,7 @@ const XHS_READ_EXECUTION_POLICY = {
     live_entry_requirements: [
         "gate_input_risk_state_limited_or_allowed",
         "audit_record_present",
+        "limited_read_rollout_ready_true",
         "risk_state_checked",
         "target_domain_confirmed",
         "target_tab_confirmed",
