@@ -556,7 +556,7 @@
 
 ### 5.4 2026-04-11 仓库内已固化 fresh rerun 样本（issue #445-B）
 
-2026-04-11 在同一 canonical runtime 根 `/Users/mc/dev/WebEnvoy` 再次执行 fresh rerun。本轮与 5.3 的差异是：执行头已前进到承载 `#445-B` formal 记录更新的后续 head；当前仓库内先固化了一组历史 fresh rerun 样本，对应提交为 `eca28babebe929821aa20fbb113b2f94d6ce4f49`。该组样本用于确认“旧的 bundle 阻断是否已解除”，但不再把它直接表述成后续 PR gate 的 current latest-head 证据；当前 PR latest-head 的 gate refresh 见 5.4.6。
+2026-04-11 在同一 canonical runtime 根 `/Users/mc/dev/WebEnvoy` 再次执行 fresh rerun。本轮与 5.3 的差异是：执行头已前进到承载 `#445-B` formal 记录更新的后续 head；当前仓库内先固化了一组历史 fresh rerun 样本，对应提交为 `eca28babebe929821aa20fbb113b2f94d6ce4f49`。该组样本用于确认“旧的 bundle 阻断是否已解除”，但不再把它直接表述成后续 PR gate 的 current latest-head 证据；根据 `#455/#457` 合入后的 FR-0016 治理口径，current latest-head 的有效 gate evidence 以 PR 描述中的 `live_evidence_record` 为准，repo formal docs 只保留 fixed/historical sample 与参考 gate refresh 样本。
 
 #### 5.4.1 准入预检结果
 
@@ -688,14 +688,14 @@
 - issue `#445` 的本轮正式 Go/No-Go 结论继续维持：`No-Go/paused`。
 - 当前唯一允许写入 formal FR 的停点应是：`仍缺某些场景的 API primary 成功/矩阵证据，继续 No-Go/paused`；其中该轮固定样本头的直接阻断已更新为 `live_read_blocked_by_risk_state + detail/user_home formal command surface missing`。
 
-#### 5.4.6 2026-04-11 current PR latest-head gate refresh
+#### 5.4.6 2026-04-11 PR gate refresh 参考样本与 latest-head 维护口径
 
-为满足 FR-0016 latest-head gate 约束，在当前 PR rebased head `2aa5e90cbccb61902365fbf417e431ec10e7edbd` 上再次执行 fresh rerun。该轮 gate refresh 只用于确认：5.4 中已经写入 formal closeout 的结论，在 current latest head 上是否仍保持同一口径。
+为满足 FR-0016 latest-head gate 约束，PR 链路上曾再次执行 gate refresh。这里保留其中一组参考样本，目的仅是说明：5.4 已写入 formal closeout 的结论，在后续 PR gate refresh 中没有出现反向变化；但 current latest-head 的有效证据头不再在 repo formal docs 中逐提交覆写，而是以 PR 描述里的 `live_evidence_record` 为准。
 
 - `profile=xhs_001`
 - `browser_channel=chrome`
 - `execution_surface=real_browser`
-- `evidence_head_sha=2aa5e90cbccb61902365fbf417e431ec10e7edbd`
+- `reference_gate_refresh_head_sha=2aa5e90cbccb61902365fbf417e431ec10e7edbd`
 - `page_url=https://www.xiaohongshu.com/search_result/?keyword=AI&type=51`
 - readiness / relay：
   - `run_id=issue445-head2aa5e90-status-001`
@@ -723,9 +723,10 @@
   - `gate_reasons=["RISK_STATE_PAUSED","ISSUE_ACTION_MATRIX_BLOCKED"]`
   - `effective_execution_mode=dry_run`
   - `risk_state_output.current_state=paused`
-- current latest-head gate refresh 结论：
+- 该组 PR gate refresh 参考样本结论：
   - 与 5.4 历史固定样本保持一致：`#445-A` 已解除 bundle 缺陷，但 `search` 仍只达到 `dry_run` 成功壳，`live_read_high_risk` 仍被 formal runtime gate 阻断。
-  - `detail` / `user_home` 在 current latest head 仍无公开 CLI 命令入口，因此 formal `No-Go/paused` 结论保持不变。
+  - `detail` / `user_home` 在对应 gate refresh 样本下仍无公开 CLI 命令入口，因此 formal `No-Go/paused` 结论保持不变。
+  - 后续 current latest-head 若继续发生 docs-only 推进，只允许在 PR `live_evidence_record` 中更新 latest-head gate evidence；repo formal docs 不再把该 SHA 误写成“当前值”。
 
 ## 未决项（进入下一轮复核前保留）
 

@@ -33,7 +33,7 @@
 - [x] 同一轮 fresh rerun 已确认 `xhs_001` 仍满足 managed-profile / official runtime / `real_browser` 启动前提，且 `runtime.start`、`runtime.ping`、internal `runtime.tabs` 均可达
 - [x] 仓库内已固化样本中的 `search` 已获得合法 fresh rerun 样本，但只达到 `dry_run` 成功壳；请求 `live_read_high_risk` 时会被 `risk_state=paused` + `ISSUE_ACTION_MATRIX_BLOCKED` 阻断，未形成 API primary success
 - [x] 仓库内已固化样本中的 `detail/user_home` 仍无公开 CLI 命令入口；因此本轮没有合法的同口径 fresh rerun 路径去产出 primary API success 样本
-- [x] 当前 PR latest-head `2aa5e90cbccb61902365fbf417e431ec10e7edbd` 已完成 fresh rerun gate refresh，并确认 formal 结论与当前 head 对齐：`search` 仍止于 `dry_run` 成功壳，`detail/user_home` 仍缺公开 CLI 命令入口
+- [x] current latest-head gate refresh 已收口到 FR-0016 新治理口径：PR `live_evidence_record` 维护 latest-head 证据，repo formal docs 只保留 fixed/historical sample；formal 结论继续保持 `No-Go/paused`
 - [x] 当前 formal FR 的文档收口已完成；正式功能停点更新为：`search/detail/user_home` 仍缺 API primary 成功与矩阵证据，正式结论继续 `No-Go/paused`
 
 ## #185 阻断点吸收（本次规约修订）
