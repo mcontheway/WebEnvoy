@@ -163,3 +163,12 @@ export const verifyFingerprintRuntimeViaMainWorld = async () => await mainWorldC
     type: "fingerprint-verify",
     payload: {}
 });
+export const readPageStateViaMainWorld = async () => {
+    const result = await mainWorldCall({
+        type: "page-state-read",
+        payload: {}
+    });
+    return typeof result === "object" && result !== null && !Array.isArray(result)
+        ? result
+        : null;
+};

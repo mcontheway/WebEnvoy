@@ -19,7 +19,9 @@ import {
   buildCapabilityResult,
   normalizeGateOptionsForContract,
   parseAbilityEnvelopeForContract,
+  parseDetailInputForContract,
   parseSearchInputForContract,
+  parseUserHomeInputForContract,
   XhsExecutionMode
 } from "./xhs-input.js";
 
@@ -174,20 +176,60 @@ export const ensureOfficialChromeRuntimeReady = async (
 };
 
 const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResult> => {
+  return xhsReadCommand(context, {
+    fixtureDataRefKey: "query",
+    parseInput: (envelope, gate) =>
+      parseSearchInputForContract(
+        envelope.input,
+        envelope.ability.id,
+        gate.options,
+        envelope.ability.action
+      )
+  });
+};
+
+const xhsDetail = async (context: RuntimeContext): Promise<CommandExecutionResult> => {
+  return xhsReadCommand(context, {
+    fixtureDataRefKey: "note_id",
+    parseInput: (envelope) => parseDetailInputForContract(envelope.input, envelope.ability.id)
+  });
+};
+
+const xhsUserHome = async (context: RuntimeContext): Promise<CommandExecutionResult> => {
+  return xhsReadCommand(context, {
+    fixtureDataRefKey: "user_id",
+    parseInput: (envelope) => parseUserHomeInputForContract(envelope.input, envelope.ability.id)
+  });
+};
+
+const xhsReadCommand = async (
+  context: RuntimeContext,
+  inputConfig: {
+    fixtureDataRefKey: "query" | "note_id" | "user_id";
+    parseInput: (
+      envelope: AbilityEnvelope,
+      gate: ReturnType<typeof normalizeGateOptionsForContract>
+    ) => JsonObject;
+  }
+): Promise<CommandExecutionResult> => {
   const envelope = parseAbilityEnvelopeForContract(context.params);
   const gate = normalizeGateOptionsForContract(envelope.options, envelope.ability.id);
+  const parsedInput = inputConfig.parseInput(envelope, gate);
 
   if (
     process.env.NODE_ENV === "test" &&
     process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS === "1" &&
     gate.options.fixture_success === true
   ) {
-    const query = typeof envelope.input.query === "string" ? envelope.input.query : null;
+    const dataRefValue =
+      typeof parsedInput[inputConfig.fixtureDataRefKey] === "string"
+        ? String(parsedInput[inputConfig.fixtureDataRefKey])
+        : null;
     return {
       summary: mapCapabilitySummaryForContract(
         envelope.ability.id,
         buildCapabilityResult(envelope.ability, {
-          data_ref: query ? { query } : {},
+          data_ref: dataRefValue ? { [inputConfig.fixtureDataRefKey]: dataRefValue } : {},
           metrics: {
             count: 0
           }
@@ -225,12 +267,7 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
         target_page: gate.targetPage,
         requested_execution_mode: gate.requestedExecutionMode,
         ability: envelope.ability,
-        input: parseSearchInputForContract(
-          envelope.input,
-          envelope.ability.id,
-          gate.options,
-          envelope.ability.action
-        ),
+        input: parsedInput,
         options: gate.options
       },
       fingerprintContext
@@ -275,5 +312,17 @@ export const xhsCommands = (): CommandDefinition[] => [
     status: "implemented",
     requiresProfile: true,
     handler: xhsSearch
+  },
+  {
+    name: "xhs.detail",
+    status: "implemented",
+    requiresProfile: true,
+    handler: xhsDetail
+  },
+  {
+    name: "xhs.user_home",
+    status: "implemented",
+    requiresProfile: true,
+    handler: xhsUserHome
   }
 ];

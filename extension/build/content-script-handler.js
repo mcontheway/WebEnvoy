@@ -1,16 +1,33 @@
 import { executeXhsSearch } from "./xhs-search.js";
+import { executeXhsDetail } from "./xhs-detail.js";
+import { executeXhsUserHome } from "./xhs-user-home.js";
 import { performEditorInputValidation } from "./xhs-editor-input.js";
 import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 import { buildFailedFingerprintInjectionContext, hasInstalledFingerprintInjection, installFingerprintRuntimeWithVerification, resolveFingerprintContextForContract, resolveFingerprintContextFromMessage, resolveMissingRequiredFingerprintPatches, summarizeFingerprintRuntimeContext } from "./content-script-fingerprint.js";
-import { encodeMainWorldPayload, installMainWorldEventChannelSecret, installFingerprintRuntimeViaMainWorld, MAIN_WORLD_EVENT_BOOTSTRAP, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret } from "./content-script-main-world.js";
-export { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret };
+import { encodeMainWorldPayload, installMainWorldEventChannelSecret, installFingerprintRuntimeViaMainWorld, MAIN_WORLD_EVENT_BOOTSTRAP, readPageStateViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret } from "./content-script-main-world.js";
+import { ExtensionContractError, validateXhsCommandInputForExtension } from "./xhs-command-contract.js";
+export { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readPageStateViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret };
 export { resolveFingerprintContextForContract };
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
 const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
+const XHS_READ_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
 const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+const toCliInvalidArgsResult = (input) => ({
+    kind: "result",
+    id: input.id,
+    ok: false,
+    error: {
+        code: input.error.code,
+        message: input.error.message
+    },
+    payload: {
+        ...(input.error.details ? { details: input.error.details } : {}),
+        ...(input.fingerprintRuntime ? { fingerprint_runtime: input.fingerprintRuntime } : {})
+    }
+});
 const resolveRequestedExecutionMode = (message) => {
     const topLevelMode = asString(asRecord(message.commandParams)?.requested_execution_mode);
     if (topLevelMode) {
@@ -91,6 +108,8 @@ const createBrowserEnvironment = () => ({
     getDocumentTitle: () => document.title,
     getReadyState: () => document.readyState,
     getCookie: () => document.cookie,
+    getPageStateRoot: () => window.__INITIAL_STATE__,
+    readPageStateRoot: async () => await readPageStateViaMainWorld(),
     callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
     fetchJson: async (input) => {
         const controller = new AbortController();
@@ -124,11 +143,19 @@ const resolveTargetDomainFromHref = (href) => {
         return null;
     }
 };
-const resolveTargetPageFromHref = (href) => {
+const resolveTargetPageFromHref = (href, command) => {
     try {
         const url = new URL(href);
         if (url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/search_result")) {
             return "search_result_tab";
+        }
+        if (command === "xhs.detail" && url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/explore/")) {
+            return "explore_detail_tab";
+        }
+        if (command === "xhs.user_home" &&
+            url.hostname === "www.xiaohongshu.com" &&
+            url.pathname.startsWith("/user/profile/")) {
+            return "profile_tab";
         }
         if (url.hostname === "creator.xiaohongshu.com" && url.pathname.startsWith("/publish")) {
             return "creator_publish_tab";
@@ -168,8 +195,8 @@ export class ContentScriptHandler {
             void this.#handleRuntimeBootstrap(message);
             return true;
         }
-        if (message.command === "xhs.search") {
-            void this.#handleXhsSearch(message);
+        if (XHS_READ_COMMANDS.has(message.command)) {
+            void this.#handleXhsReadCommand(message);
             return true;
         }
         const result = this.#handleForward(message);
@@ -329,7 +356,7 @@ export class ContentScriptHandler {
             return fallback;
         }
     }
-    async #handleXhsSearch(message) {
+    async #handleXhsReadCommand(message) {
         const messageFingerprintContext = resolveFingerprintContextFromMessage(message);
         const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
         const requestedExecutionMode = resolveRequestedExecutionMode(message);
@@ -367,7 +394,7 @@ export class ContentScriptHandler {
         const options = asRecord(message.commandParams.options) ?? {};
         const locationHref = this.#xhsEnv.getLocationHref();
         const actualTargetDomain = resolveTargetDomainFromHref(locationHref);
-        const actualTargetPage = resolveTargetPageFromHref(locationHref);
+        const actualTargetPage = resolveTargetPageFromHref(locationHref, message.command);
         if (!ability || !input) {
             this.#emit({
                 kind: "result",
@@ -375,7 +402,7 @@ export class ContentScriptHandler {
                 ok: false,
                 error: {
                     code: "ERR_EXECUTION_FAILED",
-                    message: "xhs.search payload missing ability or input"
+                    message: `${message.command} payload missing ability or input`
                 },
                 payload: {
                     details: {
@@ -388,20 +415,17 @@ export class ContentScriptHandler {
             return;
         }
         try {
-            const result = await executeXhsSearch({
+            const normalizedInput = validateXhsCommandInputForExtension({
+                command: message.command,
+                abilityId: String(ability.id ?? "unknown"),
+                abilityAction: typeof ability.action === "string" ? ability.action : "read",
+                payload: input,
+                options
+            });
+            const commonInput = {
                 abilityId: String(ability.id ?? "unknown"),
                 abilityLayer: String(ability.layer ?? "L3"),
                 abilityAction: String(ability.action ?? "read"),
-                params: {
-                    query: String(input.query ?? ""),
-                    ...(typeof input.limit === "number" ? { limit: input.limit } : {}),
-                    ...(typeof input.page === "number" ? { page: input.page } : {}),
-                    ...(typeof input.search_id === "string" ? { search_id: input.search_id } : {}),
-                    ...(typeof input.sort === "string" ? { sort: input.sort } : {}),
-                    ...(typeof input.note_type === "string" || typeof input.note_type === "number"
-                        ? { note_type: input.note_type }
-                        : {})
-                },
                 options: {
                     ...(typeof options.timeout_ms === "number" ? { timeout_ms: options.timeout_ms } : {}),
                     ...(typeof options.simulate_result === "string"
@@ -453,10 +477,54 @@ export class ContentScriptHandler {
                     profile: message.profile ?? "unknown",
                     requestId: message.id
                 }
-            }, this.#xhsEnv);
+            };
+            let result;
+            if (message.command === "xhs.search") {
+                const searchInput = normalizedInput;
+                result = await executeXhsSearch({
+                    ...commonInput,
+                    params: {
+                        query: searchInput.query,
+                        ...(typeof searchInput.limit === "number" ? { limit: searchInput.limit } : {}),
+                        ...(typeof searchInput.page === "number" ? { page: searchInput.page } : {}),
+                        ...(typeof searchInput.search_id === "string"
+                            ? { search_id: searchInput.search_id }
+                            : {}),
+                        ...(typeof searchInput.sort === "string" ? { sort: searchInput.sort } : {}),
+                        ...(typeof searchInput.note_type === "string" ||
+                            typeof searchInput.note_type === "number"
+                            ? { note_type: searchInput.note_type }
+                            : {})
+                    }
+                }, this.#xhsEnv);
+            }
+            else if (message.command === "xhs.detail") {
+                result = await executeXhsDetail({
+                    ...commonInput,
+                    params: {
+                        note_id: normalizedInput.note_id
+                    }
+                }, this.#xhsEnv);
+            }
+            else {
+                result = await executeXhsUserHome({
+                    ...commonInput,
+                    params: {
+                        user_id: normalizedInput.user_id
+                    }
+                }, this.#xhsEnv);
+            }
             this.#emit(this.#toContentMessage(message.id, result, fingerprintRuntime));
         }
         catch (error) {
+            if (error instanceof ExtensionContractError && error.code === "ERR_CLI_INVALID_ARGS") {
+                this.#emit(toCliInvalidArgsResult({
+                    id: message.id,
+                    error,
+                    fingerprintRuntime
+                }));
+                return;
+            }
             this.#emit({
                 kind: "result",
                 id: message.id,

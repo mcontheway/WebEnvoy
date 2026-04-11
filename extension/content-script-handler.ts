@@ -1,4 +1,6 @@
 import { executeXhsSearch, type SearchExecutionResult, type XhsSearchEnvironment } from "./xhs-search.js";
+import { executeXhsDetail } from "./xhs-detail.js";
+import { executeXhsUserHome } from "./xhs-user-home.js";
 import { performEditorInputValidation } from "./xhs-editor-input.js";
 import {
   ensureFingerprintRuntimeContext,
@@ -18,15 +20,21 @@ import {
   installMainWorldEventChannelSecret,
   installFingerprintRuntimeViaMainWorld,
   MAIN_WORLD_EVENT_BOOTSTRAP,
+  readPageStateViaMainWorld,
   resetMainWorldEventChannelForContract,
   resolveMainWorldEventNamesForSecret
 } from "./content-script-main-world.js";
+import {
+  ExtensionContractError,
+  validateXhsCommandInputForExtension
+} from "./xhs-command-contract.js";
 
 export {
   encodeMainWorldPayload,
   installFingerprintRuntimeViaMainWorld,
   installMainWorldEventChannelSecret,
   MAIN_WORLD_EVENT_BOOTSTRAP,
+  readPageStateViaMainWorld,
   resetMainWorldEventChannelForContract,
   resolveMainWorldEventNamesForSecret
 };
@@ -74,12 +82,31 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
     : null;
 
 const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
+const XHS_READ_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
 
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
 
 const asStringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
+const toCliInvalidArgsResult = (input: {
+  id: string;
+  error: ExtensionContractError;
+  fingerprintRuntime: Record<string, unknown> | null;
+}): ContentToBackgroundMessage => ({
+  kind: "result",
+  id: input.id,
+  ok: false,
+  error: {
+    code: input.error.code,
+    message: input.error.message
+  },
+  payload: {
+    ...(input.error.details ? { details: input.error.details } : {}),
+    ...(input.fingerprintRuntime ? { fingerprint_runtime: input.fingerprintRuntime } : {})
+  }
+});
 
 const resolveRequestedExecutionMode = (message: BackgroundToContentMessage): string | null => {
   const topLevelMode = asString(asRecord(message.commandParams)?.requested_execution_mode);
@@ -189,6 +216,8 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
   getDocumentTitle: () => document.title,
   getReadyState: () => document.readyState,
   getCookie: () => document.cookie,
+  getPageStateRoot: () => (window as typeof window & { __INITIAL_STATE__?: unknown }).__INITIAL_STATE__,
+  readPageStateRoot: async () => await readPageStateViaMainWorld(),
   callSignature: async (
     uri: Parameters<XhsSearchEnvironment["callSignature"]>[0],
     payload: Parameters<XhsSearchEnvironment["callSignature"]>[1]
@@ -229,11 +258,21 @@ const resolveTargetDomainFromHref = (href: string): string | null => {
   }
 };
 
-const resolveTargetPageFromHref = (href: string): string | null => {
+const resolveTargetPageFromHref = (href: string, command: string): string | null => {
   try {
     const url = new URL(href);
     if (url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/search_result")) {
       return "search_result_tab";
+    }
+    if (command === "xhs.detail" && url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/explore/")) {
+      return "explore_detail_tab";
+    }
+    if (
+      command === "xhs.user_home" &&
+      url.hostname === "www.xiaohongshu.com" &&
+      url.pathname.startsWith("/user/profile/")
+    ) {
+      return "profile_tab";
     }
     if (url.hostname === "creator.xiaohongshu.com" && url.pathname.startsWith("/publish")) {
       return "creator_publish_tab";
@@ -281,8 +320,8 @@ export class ContentScriptHandler {
       return true;
     }
 
-    if (message.command === "xhs.search") {
-      void this.#handleXhsSearch(message);
+    if (XHS_READ_COMMANDS.has(message.command)) {
+      void this.#handleXhsReadCommand(message);
       return true;
     }
 
@@ -462,7 +501,7 @@ export class ContentScriptHandler {
     }
   }
 
-  async #handleXhsSearch(message: BackgroundToContentMessage): Promise<void> {
+  async #handleXhsReadCommand(message: BackgroundToContentMessage): Promise<void> {
     const messageFingerprintContext = resolveFingerprintContextFromMessage(message);
     const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
     const requestedExecutionMode = resolveRequestedExecutionMode(message);
@@ -505,7 +544,7 @@ export class ContentScriptHandler {
     const options = asRecord(message.commandParams.options) ?? {};
     const locationHref = this.#xhsEnv.getLocationHref();
     const actualTargetDomain = resolveTargetDomainFromHref(locationHref);
-    const actualTargetPage = resolveTargetPageFromHref(locationHref);
+    const actualTargetPage = resolveTargetPageFromHref(locationHref, message.command);
 
     if (!ability || !input) {
       this.#emit({
@@ -514,7 +553,7 @@ export class ContentScriptHandler {
         ok: false,
         error: {
           code: "ERR_EXECUTION_FAILED",
-          message: "xhs.search payload missing ability or input"
+          message: `${message.command} payload missing ability or input`
         },
         payload: {
           details: {
@@ -528,78 +567,132 @@ export class ContentScriptHandler {
     }
 
     try {
-      const result = await executeXhsSearch(
-        {
-          abilityId: String(ability.id ?? "unknown"),
-          abilityLayer: String(ability.layer ?? "L3"),
-          abilityAction: String(ability.action ?? "read"),
-          params: {
-            query: String(input.query ?? ""),
-            ...(typeof input.limit === "number" ? { limit: input.limit } : {}),
-            ...(typeof input.page === "number" ? { page: input.page } : {}),
-            ...(typeof input.search_id === "string" ? { search_id: input.search_id } : {}),
-            ...(typeof input.sort === "string" ? { sort: input.sort } : {}),
-            ...(typeof input.note_type === "string" || typeof input.note_type === "number"
-              ? { note_type: input.note_type }
-              : {})
-          },
-          options: {
-            ...(typeof options.timeout_ms === "number" ? { timeout_ms: options.timeout_ms } : {}),
-            ...(typeof options.simulate_result === "string"
-              ? { simulate_result: options.simulate_result }
-              : {}),
-            ...(typeof options.x_s_common === "string" ? { x_s_common: options.x_s_common } : {}),
-            ...(typeof options.target_domain === "string"
-              ? { target_domain: options.target_domain }
-              : {}),
-            ...(typeof options.target_tab_id === "number"
-              ? { target_tab_id: options.target_tab_id }
-              : {}),
-            ...(typeof options.target_page === "string"
-              ? { target_page: options.target_page }
-              : {}),
-            ...(typeof message.tabId === "number" ? { actual_target_tab_id: message.tabId } : {}),
-            ...(actualTargetDomain ? { actual_target_domain: actualTargetDomain } : {}),
-            ...(actualTargetPage ? { actual_target_page: actualTargetPage } : {}),
-            ...(typeof ability.action === "string" ? { ability_action: ability.action } : {}),
-            ...(typeof options.action_type === "string"
-              ? { action_type: options.action_type }
-              : {}),
-            ...(typeof options.issue_scope === "string"
-              ? { issue_scope: options.issue_scope }
-              : {}),
-            ...(requestedExecutionMode !== null
-              ? { requested_execution_mode: requestedExecutionMode }
-              : {}),
-            ...(typeof options.risk_state === "string" ? { risk_state: options.risk_state } : {}),
-            ...(typeof options.validation_action === "string"
-              ? { validation_action: options.validation_action }
-              : {}),
-            ...(typeof options.validation_text === "string"
-              ? { validation_text: options.validation_text }
-              : {}),
-            ...(asRecord(options.editor_focus_attestation)
-              ? {
-                  editor_focus_attestation:
-                    asRecord(options.editor_focus_attestation) ?? {}
-                }
-              : {}),
-            ...(asRecord(options.approval_record)
-              ? { approval_record: asRecord(options.approval_record) ?? {} }
-              : {}),
-            ...(asRecord(options.approval) ? { approval: asRecord(options.approval) ?? {} } : {})
-          },
-          executionContext: {
-            runId: message.runId,
-            sessionId: String(message.params.session_id ?? "nm-session-001"),
-            profile: message.profile ?? "unknown",
-            requestId: message.id
-          }
+      const normalizedInput = validateXhsCommandInputForExtension({
+        command: message.command,
+        abilityId: String(ability.id ?? "unknown"),
+        abilityAction: typeof ability.action === "string" ? (ability.action as "read" | "write" | "download") : "read",
+        payload: input,
+        options
+      });
+      const commonInput = {
+        abilityId: String(ability.id ?? "unknown"),
+        abilityLayer: String(ability.layer ?? "L3"),
+        abilityAction: String(ability.action ?? "read"),
+        options: {
+          ...(typeof options.timeout_ms === "number" ? { timeout_ms: options.timeout_ms } : {}),
+          ...(typeof options.simulate_result === "string"
+            ? { simulate_result: options.simulate_result }
+            : {}),
+          ...(typeof options.x_s_common === "string" ? { x_s_common: options.x_s_common } : {}),
+          ...(typeof options.target_domain === "string"
+            ? { target_domain: options.target_domain }
+            : {}),
+          ...(typeof options.target_tab_id === "number"
+            ? { target_tab_id: options.target_tab_id }
+            : {}),
+          ...(typeof options.target_page === "string"
+            ? { target_page: options.target_page }
+            : {}),
+          ...(typeof message.tabId === "number" ? { actual_target_tab_id: message.tabId } : {}),
+          ...(actualTargetDomain ? { actual_target_domain: actualTargetDomain } : {}),
+          ...(actualTargetPage ? { actual_target_page: actualTargetPage } : {}),
+          ...(typeof ability.action === "string" ? { ability_action: ability.action } : {}),
+          ...(typeof options.action_type === "string"
+            ? { action_type: options.action_type }
+            : {}),
+          ...(typeof options.issue_scope === "string"
+            ? { issue_scope: options.issue_scope }
+            : {}),
+          ...(requestedExecutionMode !== null
+            ? { requested_execution_mode: requestedExecutionMode }
+            : {}),
+          ...(typeof options.risk_state === "string" ? { risk_state: options.risk_state } : {}),
+          ...(typeof options.validation_action === "string"
+            ? { validation_action: options.validation_action }
+            : {}),
+          ...(typeof options.validation_text === "string"
+            ? { validation_text: options.validation_text }
+            : {}),
+          ...(asRecord(options.editor_focus_attestation)
+            ? {
+                editor_focus_attestation:
+                  asRecord(options.editor_focus_attestation) ?? {}
+              }
+            : {}),
+          ...(asRecord(options.approval_record)
+            ? { approval_record: asRecord(options.approval_record) ?? {} }
+            : {}),
+          ...(asRecord(options.approval) ? { approval: asRecord(options.approval) ?? {} } : {})
         },
-        this.#xhsEnv
-      );
+        executionContext: {
+          runId: message.runId,
+          sessionId: String(message.params.session_id ?? "nm-session-001"),
+          profile: message.profile ?? "unknown",
+          requestId: message.id
+        }
+      };
+      let result: SearchExecutionResult;
+      if (message.command === "xhs.search") {
+        const searchInput = normalizedInput as {
+          query: string;
+          limit?: number;
+          page?: number;
+          search_id?: string;
+          sort?: string;
+          note_type?: string | number;
+        };
+        result = await executeXhsSearch(
+          {
+            ...commonInput,
+            params: {
+              query: searchInput.query,
+              ...(typeof searchInput.limit === "number" ? { limit: searchInput.limit } : {}),
+              ...(typeof searchInput.page === "number" ? { page: searchInput.page } : {}),
+              ...(typeof searchInput.search_id === "string"
+                ? { search_id: searchInput.search_id }
+                : {}),
+              ...(typeof searchInput.sort === "string" ? { sort: searchInput.sort } : {}),
+              ...(typeof searchInput.note_type === "string" ||
+              typeof searchInput.note_type === "number"
+                ? { note_type: searchInput.note_type }
+                : {})
+            }
+          },
+          this.#xhsEnv
+        );
+      } else if (message.command === "xhs.detail") {
+        result = await executeXhsDetail(
+          {
+            ...commonInput,
+            params: {
+              note_id: (normalizedInput as { note_id: string }).note_id
+            }
+          },
+          this.#xhsEnv
+        );
+      } else {
+        result = await executeXhsUserHome(
+          {
+            ...commonInput,
+            params: {
+              user_id: (normalizedInput as { user_id: string }).user_id
+            }
+          },
+          this.#xhsEnv
+        );
+      }
       this.#emit(this.#toContentMessage(message.id, result, fingerprintRuntime));
     } catch (error) {
+      if (error instanceof ExtensionContractError && error.code === "ERR_CLI_INVALID_ARGS") {
+        this.#emit(
+          toCliInvalidArgsResult({
+            id: message.id,
+            error,
+            fingerprintRuntime
+          })
+        );
+        return;
+      }
       this.#emit({
         kind: "result",
         id: message.id,

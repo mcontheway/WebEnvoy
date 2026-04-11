@@ -22,6 +22,29 @@ export interface AbilityEnvelope {
   options: JsonObject;
 }
 
+export interface XhsSearchInputContract extends JsonObject {
+  query: string;
+  limit?: number;
+  page?: number;
+  search_id?: string;
+  sort?: string;
+  note_type?: string | number;
+}
+
+export interface XhsDetailInputContract extends JsonObject {
+  note_id: string;
+}
+
+export interface XhsUserHomeInputContract extends JsonObject {
+  user_id: string;
+}
+
+export type XhsCommandInputContract =
+  | XhsSearchInputContract
+  | XhsDetailInputContract
+  | XhsUserHomeInputContract
+  | JsonObject;
+
 const ABILITY_LAYERS = new Set<AbilityLayer>(["L3", "L2", "L1"]);
 const ABILITY_ACTIONS = new Set<AbilityAction>(["read", "write", "download"]);
 const XHS_EXECUTION_MODES = new Set<XhsExecutionMode>([
@@ -96,7 +119,7 @@ export const parseSearchInputForContract = (
   abilityId: string,
   options: JsonObject,
   abilityAction: AbilityAction
-): JsonObject => {
+): XhsSearchInputContract | JsonObject => {
   const issue208EditorInputValidation =
     abilityAction === "write" &&
     options.issue_scope === "issue_208" &&
@@ -113,7 +136,7 @@ export const parseSearchInputForContract = (
     throw invalidAbilityInput("QUERY_MISSING", abilityId);
   }
 
-  const normalized: JsonObject = {
+  const normalized: XhsSearchInputContract = {
     query
   };
 
@@ -137,6 +160,60 @@ export const parseSearchInputForContract = (
   }
 
   return normalized;
+};
+
+export const parseDetailInputForContract = (
+  input: JsonObject,
+  abilityId: string
+): XhsDetailInputContract => {
+  const noteId =
+    typeof input.note_id === "string" && input.note_id.trim().length > 0 ? input.note_id.trim() : null;
+  if (!noteId) {
+    throw invalidAbilityInput("NOTE_ID_MISSING", abilityId);
+  }
+
+  return {
+    note_id: noteId
+  };
+};
+
+export const parseUserHomeInputForContract = (
+  input: JsonObject,
+  abilityId: string
+): XhsUserHomeInputContract => {
+  const userId =
+    typeof input.user_id === "string" && input.user_id.trim().length > 0 ? input.user_id.trim() : null;
+  if (!userId) {
+    throw invalidAbilityInput("USER_ID_MISSING", abilityId);
+  }
+
+  return {
+    user_id: userId
+  };
+};
+
+export const parseXhsCommandInputForContract = (input: {
+  command: string;
+  abilityId: string;
+  abilityAction: AbilityAction;
+  payload: JsonObject;
+  options: JsonObject;
+}): XhsCommandInputContract => {
+  if (input.command === "xhs.search") {
+    return parseSearchInputForContract(
+      input.payload,
+      input.abilityId,
+      input.options,
+      input.abilityAction
+    );
+  }
+  if (input.command === "xhs.detail") {
+    return parseDetailInputForContract(input.payload, input.abilityId);
+  }
+  if (input.command === "xhs.user_home") {
+    return parseUserHomeInputForContract(input.payload, input.abilityId);
+  }
+  throw invalidAbilityInput("ABILITY_COMMAND_UNSUPPORTED", input.abilityId);
 };
 
 export const normalizeGateOptionsForContract = (
@@ -185,6 +262,12 @@ export const normalizeGateOptionsForContract = (
     validationAction === "editor_input" &&
     targetPage !== "creator_publish_tab"
   ) {
+    throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
+  }
+  if (abilityId === "xhs.note.detail.v1" && targetPage !== "explore_detail_tab") {
+    throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
+  }
+  if (abilityId === "xhs.user.home.v1" && targetPage !== "profile_tab") {
     throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
   }
 

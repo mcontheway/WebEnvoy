@@ -1,4 +1,5 @@
 const defaultForwardTimeoutMs = 3_000;
+const XHS_READ_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
 const defaultReadTimeoutMs = (value) => {
     if (typeof value !== "number" || !Number.isFinite(value)) {
         return null;
@@ -96,7 +97,7 @@ export class BackgroundRelay {
             runId: String(request.params.run_id ?? request.id),
             tabId: typeof request.params.tab_id === "number" && Number.isInteger(request.params.tab_id)
                 ? request.params.tab_id
-                : String(request.params.command ?? "") === "xhs.search"
+                : XHS_READ_COMMANDS.has(String(request.params.command ?? ""))
                     ? 32
                     : null,
             profile: typeof request.profile === "string" ? request.profile : null,

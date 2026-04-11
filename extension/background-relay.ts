@@ -32,6 +32,7 @@ interface PendingForward {
 }
 
 const defaultForwardTimeoutMs = 3_000;
+const XHS_READ_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
 
 const defaultReadTimeoutMs = (value: unknown): number | null => {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -150,7 +151,7 @@ export class BackgroundRelay {
       tabId:
         typeof request.params.tab_id === "number" && Number.isInteger(request.params.tab_id)
           ? request.params.tab_id
-          : String(request.params.command ?? "") === "xhs.search"
+          : XHS_READ_COMMANDS.has(String(request.params.command ?? ""))
             ? 32
             : null,
       profile: typeof request.profile === "string" ? request.profile : null,

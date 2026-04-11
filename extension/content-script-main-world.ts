@@ -173,7 +173,7 @@ export const resetMainWorldEventChannelForContract = (): void => {
 };
 
 const mainWorldCall = async <T>(request: {
-  type: "fingerprint-install" | "fingerprint-verify";
+  type: "fingerprint-install" | "fingerprint-verify" | "page-state-read";
   payload: Record<string, unknown>;
 }): Promise<T> => {
   const requestId =
@@ -227,3 +227,13 @@ export const verifyFingerprintRuntimeViaMainWorld = async (): Promise<Record<str
     type: "fingerprint-verify",
     payload: {}
   });
+
+export const readPageStateViaMainWorld = async (): Promise<Record<string, unknown> | null> => {
+  const result = await mainWorldCall<unknown>({
+    type: "page-state-read",
+    payload: {}
+  });
+  return typeof result === "object" && result !== null && !Array.isArray(result)
+    ? (result as Record<string, unknown>)
+    : null;
+};

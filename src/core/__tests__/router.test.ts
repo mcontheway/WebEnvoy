@@ -115,6 +115,94 @@ describe("executeCommand", () => {
     }
   });
 
+  it("returns capability summary for xhs.detail fixture success", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousFixtureFlag = process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS;
+    process.env.NODE_ENV = "test";
+    process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS = "1";
+    try {
+      const execution = await executeCommand(
+        {
+          ...baseContext,
+          command: "xhs.detail",
+          profile: "xhs_account_001",
+          params: {
+            ability: {
+              id: "xhs.note.detail.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              note_id: "note-001"
+            },
+            options: {
+              ...scopedXhsGateOptions,
+              target_page: "explore_detail_tab",
+              fixture_success: true
+            }
+          }
+        },
+        createCommandRegistry()
+      );
+
+      expect(execution.summary).toMatchObject({
+        capability_result: {
+          ability_id: "xhs.note.detail.v1",
+          layer: "L3",
+          action: "read",
+          outcome: "partial"
+        }
+      });
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+      process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS = previousFixtureFlag;
+    }
+  });
+
+  it("returns capability summary for xhs.user_home fixture success", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousFixtureFlag = process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS;
+    process.env.NODE_ENV = "test";
+    process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS = "1";
+    try {
+      const execution = await executeCommand(
+        {
+          ...baseContext,
+          command: "xhs.user_home",
+          profile: "xhs_account_001",
+          params: {
+            ability: {
+              id: "xhs.user.home.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              user_id: "user-001"
+            },
+            options: {
+              ...scopedXhsGateOptions,
+              target_page: "profile_tab",
+              fixture_success: true
+            }
+          }
+        },
+        createCommandRegistry()
+      );
+
+      expect(execution.summary).toMatchObject({
+        capability_result: {
+          ability_id: "xhs.user.home.v1",
+          layer: "L3",
+          action: "read",
+          outcome: "partial"
+        }
+      });
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+      process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS = previousFixtureFlag;
+    }
+  });
+
   it("returns capability summary and observability for xhs.search runtime success", async () => {
     const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
     const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
@@ -391,6 +479,70 @@ describe("executeCommand", () => {
       code: "ERR_CLI_INVALID_ARGS",
       details: {
         reason: "REQUESTED_EXECUTION_MODE_INVALID"
+      }
+    });
+  });
+
+  it("returns invalid args when xhs.detail note_id is missing", async () => {
+    await expect(
+      executeCommand(
+        {
+          ...baseContext,
+          command: "xhs.detail",
+          profile: "xhs_account_001",
+          params: {
+            ability: {
+              id: "xhs.note.detail.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {},
+            options: {
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "explore_detail_tab",
+              requested_execution_mode: "dry_run"
+            }
+          }
+        },
+        createCommandRegistry()
+      )
+    ).rejects.toMatchObject({
+      code: "ERR_CLI_INVALID_ARGS",
+      details: {
+        reason: "NOTE_ID_MISSING"
+      }
+    });
+  });
+
+  it("returns invalid args when xhs.user_home user_id is missing", async () => {
+    await expect(
+      executeCommand(
+        {
+          ...baseContext,
+          command: "xhs.user_home",
+          profile: "xhs_account_001",
+          params: {
+            ability: {
+              id: "xhs.user.home.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {},
+            options: {
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "profile_tab",
+              requested_execution_mode: "dry_run"
+            }
+          }
+        },
+        createCommandRegistry()
+      )
+    ).rejects.toMatchObject({
+      code: "ERR_CLI_INVALID_ARGS",
+      details: {
+        reason: "USER_ID_MISSING"
       }
     });
   });

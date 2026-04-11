@@ -312,7 +312,10 @@ const parseMainWorldRequest = (event) => {
     }
     const id = asString(detail.id);
     const type = detail.type;
-    if (!id || (type !== "fingerprint-install" && type !== "fingerprint-verify")) {
+    if (!id ||
+        (type !== "fingerprint-install" &&
+            type !== "fingerprint-verify" &&
+            type !== "page-state-read")) {
         return null;
     }
     return {
@@ -342,6 +345,14 @@ const handleFingerprintVerifyRequest = async (request) => {
         result: buildMainWorldVerifyResult()
     });
 };
+const handlePageStateReadRequest = async (request) => {
+    const initialState = asRecord(window.__INITIAL_STATE__);
+    await emitMainWorldResult({
+        id: request.id,
+        ok: true,
+        result: initialState ?? null
+    });
+};
 const handleFingerprintInstallRequest = async (request) => {
     const runtime = asRecord(request.payload.fingerprint_runtime ?? null);
     const result = installFingerprintRuntime(runtime);
@@ -354,6 +365,10 @@ const handleFingerprintInstallRequest = async (request) => {
 const handleRequest = async (request) => {
     if (request.type === "fingerprint-verify") {
         await handleFingerprintVerifyRequest(request);
+        return;
+    }
+    if (request.type === "page-state-read") {
+        await handlePageStateReadRequest(request);
         return;
     }
     await handleFingerprintInstallRequest(request);

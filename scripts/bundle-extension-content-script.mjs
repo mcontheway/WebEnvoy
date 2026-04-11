@@ -44,7 +44,11 @@ const buildContentScriptBundle = async () => {
   const xhsSearchGateSource = await readSource(join(buildRoot, "xhs-search-gate.js"));
   const xhsSearchExecutionSource = await readSource(join(buildRoot, "xhs-search-execution.js"));
   const xhsSearchSource = await readSource(join(buildRoot, "xhs-search.js"));
+  const xhsReadExecutionSource = await readSource(join(buildRoot, "xhs-read-execution.js"));
+  const xhsDetailSource = await readSource(join(buildRoot, "xhs-detail.js"));
+  const xhsUserHomeSource = await readSource(join(buildRoot, "xhs-user-home.js"));
   const xhsEditorInputSource = await readSource(join(buildRoot, "xhs-editor-input.js"));
+  const xhsCommandContractSource = await readSource(join(buildRoot, "xhs-command-contract.js"));
   const contentScriptMainWorldSource = await readSource(
     join(buildRoot, "content-script-main-world.js")
   );
@@ -179,10 +183,47 @@ const buildContentScriptBundle = async () => {
     exports: ["executeXhsSearch"]
   });
 
+  const xhsReadExecutionModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_xhs_read_execution",
+    prelude: [
+      "const { createAuditRecord, resolveGate } = __webenvoy_module_xhs_search_gate;",
+      "const {",
+      "  containsCookie,",
+      "  createDiagnosis,",
+      "  createFailure,",
+      "  resolveRiskStateOutput,",
+      "  resolveXsCommon",
+      "} = __webenvoy_module_xhs_search_telemetry;"
+    ].join("\n"),
+    sourceBody: xhsReadExecutionSource,
+    exports: ["executeXhsDetail", "executeXhsUserHome"]
+  });
+
+  const xhsDetailModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_xhs_detail",
+    prelude: "const { executeXhsDetail: executeXhsDetailImpl } = __webenvoy_module_xhs_read_execution;",
+    sourceBody: xhsDetailSource,
+    exports: ["executeXhsDetail"]
+  });
+
+  const xhsUserHomeModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_xhs_user_home",
+    prelude:
+      "const { executeXhsUserHome: executeXhsUserHomeImpl } = __webenvoy_module_xhs_read_execution;",
+    sourceBody: xhsUserHomeSource,
+    exports: ["executeXhsUserHome"]
+  });
+
   const xhsEditorInputModule = renderClassicModule({
     moduleVar: "__webenvoy_module_xhs_editor_input",
     sourceBody: xhsEditorInputSource,
     exports: ["performEditorInputValidation"]
+  });
+
+  const xhsCommandContractModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_xhs_command_contract",
+    sourceBody: xhsCommandContractSource,
+    exports: ["ExtensionContractError", "validateXhsCommandInputForExtension"]
   });
 
   const contentScriptMainWorldModule = renderClassicModule({
@@ -193,6 +234,7 @@ const buildContentScriptBundle = async () => {
       "installFingerprintRuntimeViaMainWorld",
       "installMainWorldEventChannelSecret",
       "MAIN_WORLD_EVENT_BOOTSTRAP",
+      "readPageStateViaMainWorld",
       "resetMainWorldEventChannelForContract",
       "resolveMainWorldEventNamesForSecret",
       "verifyFingerprintRuntimeViaMainWorld"
@@ -224,6 +266,8 @@ const buildContentScriptBundle = async () => {
     moduleVar: "__webenvoy_module_content_script_handler",
     prelude: [
       "const { executeXhsSearch } = __webenvoy_module_xhs_search;",
+      "const { executeXhsDetail } = __webenvoy_module_xhs_detail;",
+      "const { executeXhsUserHome } = __webenvoy_module_xhs_user_home;",
       "const { performEditorInputValidation } = __webenvoy_module_xhs_editor_input;",
       "const { ensureFingerprintRuntimeContext } = __webenvoy_module_fingerprint_profile;",
       "const {",
@@ -236,10 +280,15 @@ const buildContentScriptBundle = async () => {
       "  summarizeFingerprintRuntimeContext",
       "} = __webenvoy_module_content_script_fingerprint;",
       "const {",
+      "  ExtensionContractError,",
+      "  validateXhsCommandInputForExtension",
+      "} = __webenvoy_module_xhs_command_contract;",
+      "const {",
       "  encodeMainWorldPayload,",
       "  installFingerprintRuntimeViaMainWorld,",
       "  installMainWorldEventChannelSecret,",
       "  MAIN_WORLD_EVENT_BOOTSTRAP,",
+      "  readPageStateViaMainWorld,",
       "  resetMainWorldEventChannelForContract,",
       "  resolveMainWorldEventNamesForSecret",
       "} = __webenvoy_module_content_script_main_world;"
@@ -247,10 +296,13 @@ const buildContentScriptBundle = async () => {
     sourceBody: handlerSource,
     exports: [
       "ContentScriptHandler",
+      "ExtensionContractError",
       "encodeMainWorldPayload",
       "installFingerprintRuntimeViaMainWorld",
       "installMainWorldEventChannelSecret",
+      "readPageStateViaMainWorld",
       "resolveFingerprintContextForContract",
+      "validateXhsCommandInputForExtension",
       "resolveMainWorldEventNamesForSecret"
     ]
   });
@@ -280,7 +332,11 @@ const buildContentScriptBundle = async () => {
     xhsSearchGateModule,
     xhsSearchExecutionModule,
     xhsSearchModule,
+    xhsReadExecutionModule,
+    xhsDetailModule,
+    xhsUserHomeModule,
     xhsEditorInputModule,
+    xhsCommandContractModule,
     contentScriptMainWorldModule,
     contentScriptFingerprintModule,
     handlerModule,

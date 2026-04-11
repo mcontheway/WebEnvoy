@@ -1,6 +1,6 @@
 type RecordValue = Record<string, unknown>;
 
-type MainWorldRequestType = "fingerprint-install" | "fingerprint-verify";
+type MainWorldRequestType = "fingerprint-install" | "fingerprint-verify" | "page-state-read";
 
 type MainWorldRequest = {
   id: string;
@@ -425,7 +425,12 @@ const parseMainWorldRequest = (event: Event): MainWorldRequest | null => {
   }
   const id = asString(detail.id);
   const type = detail.type;
-  if (!id || (type !== "fingerprint-install" && type !== "fingerprint-verify")) {
+  if (
+    !id ||
+    (type !== "fingerprint-install" &&
+      type !== "fingerprint-verify" &&
+      type !== "page-state-read")
+  ) {
     return null;
   }
   return {
@@ -462,6 +467,15 @@ const handleFingerprintVerifyRequest = async (request: MainWorldRequest): Promis
   });
 };
 
+const handlePageStateReadRequest = async (request: MainWorldRequest): Promise<void> => {
+  const initialState = asRecord((window as Window & { __INITIAL_STATE__?: unknown }).__INITIAL_STATE__);
+  await emitMainWorldResult({
+    id: request.id,
+    ok: true,
+    result: initialState ?? null
+  });
+};
+
 const handleFingerprintInstallRequest = async (request: MainWorldRequest): Promise<void> => {
   const runtime = asRecord(request.payload.fingerprint_runtime ?? null);
   const result = installFingerprintRuntime(runtime);
@@ -475,6 +489,10 @@ const handleFingerprintInstallRequest = async (request: MainWorldRequest): Promi
 const handleRequest = async (request: MainWorldRequest): Promise<void> => {
   if (request.type === "fingerprint-verify") {
     await handleFingerprintVerifyRequest(request);
+    return;
+  }
+  if (request.type === "page-state-read") {
+    await handlePageStateReadRequest(request);
     return;
   }
   await handleFingerprintInstallRequest(request);

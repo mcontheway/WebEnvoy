@@ -942,4 +942,50 @@ describe("normalizeGateOptionsForContract", () => {
       });
     }
   });
+
+  it("rejects xhs.detail when target_page is not explore_detail_tab", () => {
+    try {
+      normalizeGateOptionsForContract(
+        {
+          issue_scope: "issue_209",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
+          requested_execution_mode: "dry_run"
+        },
+        "xhs.note.detail.v1"
+      );
+      throw new Error("expected normalizeGateOptionsForContract to throw");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "TARGET_PAGE_INVALID"
+        }
+      });
+    }
+  });
+
+  it("rejects xhs.user_home when target_page is not profile_tab", () => {
+    try {
+      normalizeGateOptionsForContract(
+        {
+          issue_scope: "issue_209",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
+          requested_execution_mode: "dry_run"
+        },
+        "xhs.user.home.v1"
+      );
+      throw new Error("expected normalizeGateOptionsForContract to throw");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "TARGET_PAGE_INVALID"
+        }
+      });
+    }
+  });
 });

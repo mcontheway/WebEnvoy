@@ -7,7 +7,7 @@ import { appendFingerprintContext, buildFingerprintContextForMeta } from "../run
 import { ProfileStore } from "../runtime/profile-store.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import { prepareOfficialChromeRuntime } from "../runtime/official-chrome-runtime.js";
-import { buildCapabilityResult, normalizeGateOptionsForContract, parseAbilityEnvelopeForContract, parseSearchInputForContract } from "./xhs-input.js";
+import { buildCapabilityResult, normalizeGateOptionsForContract, parseAbilityEnvelopeForContract, parseDetailInputForContract, parseSearchInputForContract, parseUserHomeInputForContract } from "./xhs-input.js";
 export { buildOfficialChromeRuntimeStatusParams } from "../runtime/official-chrome-runtime.js";
 export { normalizeGateOptionsForContract } from "./xhs-input.js";
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
@@ -124,15 +124,36 @@ export const ensureOfficialChromeRuntimeReady = async (context, ability, request
     });
 };
 const xhsSearch = async (context) => {
+    return xhsReadCommand(context, {
+        fixtureDataRefKey: "query",
+        parseInput: (envelope, gate) => parseSearchInputForContract(envelope.input, envelope.ability.id, gate.options, envelope.ability.action)
+    });
+};
+const xhsDetail = async (context) => {
+    return xhsReadCommand(context, {
+        fixtureDataRefKey: "note_id",
+        parseInput: (envelope) => parseDetailInputForContract(envelope.input, envelope.ability.id)
+    });
+};
+const xhsUserHome = async (context) => {
+    return xhsReadCommand(context, {
+        fixtureDataRefKey: "user_id",
+        parseInput: (envelope) => parseUserHomeInputForContract(envelope.input, envelope.ability.id)
+    });
+};
+const xhsReadCommand = async (context, inputConfig) => {
     const envelope = parseAbilityEnvelopeForContract(context.params);
     const gate = normalizeGateOptionsForContract(envelope.options, envelope.ability.id);
+    const parsedInput = inputConfig.parseInput(envelope, gate);
     if (process.env.NODE_ENV === "test" &&
         process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS === "1" &&
         gate.options.fixture_success === true) {
-        const query = typeof envelope.input.query === "string" ? envelope.input.query : null;
+        const dataRefValue = typeof parsedInput[inputConfig.fixtureDataRefKey] === "string"
+            ? String(parsedInput[inputConfig.fixtureDataRefKey])
+            : null;
         return {
             summary: mapCapabilitySummaryForContract(envelope.ability.id, buildCapabilityResult(envelope.ability, {
-                data_ref: query ? { query } : {},
+                data_ref: dataRefValue ? { [inputConfig.fixtureDataRefKey]: dataRefValue } : {},
                 metrics: {
                     count: 0
                 }
@@ -158,7 +179,7 @@ const xhsSearch = async (context) => {
             target_page: gate.targetPage,
             requested_execution_mode: gate.requestedExecutionMode,
             ability: envelope.ability,
-            input: parseSearchInputForContract(envelope.input, envelope.ability.id, gate.options, envelope.ability.action),
+            input: parsedInput,
             options: gate.options
         }, fingerprintContext);
         const bridgeResult = await bridge.runCommand({
@@ -194,5 +215,17 @@ export const xhsCommands = () => [
         status: "implemented",
         requiresProfile: true,
         handler: xhsSearch
+    },
+    {
+        name: "xhs.detail",
+        status: "implemented",
+        requiresProfile: true,
+        handler: xhsDetail
+    },
+    {
+        name: "xhs.user_home",
+        status: "implemented",
+        requiresProfile: true,
+        handler: xhsUserHome
     }
 ];

@@ -89,6 +89,36 @@ export const parseSearchInputForContract = (input, abilityId, options, abilityAc
     }
     return normalized;
 };
+export const parseDetailInputForContract = (input, abilityId) => {
+    const noteId = typeof input.note_id === "string" && input.note_id.trim().length > 0 ? input.note_id.trim() : null;
+    if (!noteId) {
+        throw invalidAbilityInput("NOTE_ID_MISSING", abilityId);
+    }
+    return {
+        note_id: noteId
+    };
+};
+export const parseUserHomeInputForContract = (input, abilityId) => {
+    const userId = typeof input.user_id === "string" && input.user_id.trim().length > 0 ? input.user_id.trim() : null;
+    if (!userId) {
+        throw invalidAbilityInput("USER_ID_MISSING", abilityId);
+    }
+    return {
+        user_id: userId
+    };
+};
+export const parseXhsCommandInputForContract = (input) => {
+    if (input.command === "xhs.search") {
+        return parseSearchInputForContract(input.payload, input.abilityId, input.options, input.abilityAction);
+    }
+    if (input.command === "xhs.detail") {
+        return parseDetailInputForContract(input.payload, input.abilityId);
+    }
+    if (input.command === "xhs.user_home") {
+        return parseUserHomeInputForContract(input.payload, input.abilityId);
+    }
+    throw invalidAbilityInput("ABILITY_COMMAND_UNSUPPORTED", input.abilityId);
+};
 export const normalizeGateOptionsForContract = (options, abilityId) => {
     const targetDomain = typeof options.target_domain === "string" && options.target_domain.trim().length > 0
         ? options.target_domain.trim()
@@ -117,6 +147,12 @@ export const normalizeGateOptionsForContract = (options, abilityId) => {
     if (issueScope === "issue_208" &&
         validationAction === "editor_input" &&
         targetPage !== "creator_publish_tab") {
+        throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
+    }
+    if (abilityId === "xhs.note.detail.v1" && targetPage !== "explore_detail_tab") {
+        throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
+    }
+    if (abilityId === "xhs.user.home.v1" && targetPage !== "profile_tab") {
         throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
     }
     const requestedExecutionMode = typeof options.requested_execution_mode === "string" &&

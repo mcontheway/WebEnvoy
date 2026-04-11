@@ -224,6 +224,105 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
     ).toEqual(["DEFAULT_MODE_DRY_RUN"]);
   });
 
+  it("keeps note_id in dry_run gate-only summary for xhs.detail", () => {
+    const result = runCli([
+      "xhs.detail",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.detail.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          note_id: "note-001"
+        },
+        options: {
+          ...scopedReadGateOptions,
+          target_page: "explore_detail_tab",
+          action_type: "read",
+          simulate_result: "success"
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.detail",
+      status: "success",
+      summary: {
+        capability_result: {
+          ability_id: "xhs.note.detail.v1",
+          action: "read",
+          outcome: "partial",
+          data_ref: {
+            note_id: "note-001"
+          }
+        },
+        consumer_gate_result: {
+          requested_execution_mode: "dry_run",
+          effective_execution_mode: "dry_run",
+          gate_decision: "allowed"
+        }
+      }
+    });
+  });
+
+  it("keeps user_id in recon gate-only summary for xhs.user_home", () => {
+    const result = runCli([
+      "xhs.user_home",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.user.home.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          user_id: "user-001"
+        },
+        options: {
+          ...scopedReadGateOptions,
+          target_page: "profile_tab",
+          requested_execution_mode: "recon",
+          action_type: "read",
+          simulate_result: "success"
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.user_home",
+      status: "success",
+      summary: {
+        capability_result: {
+          ability_id: "xhs.user.home.v1",
+          action: "read",
+          outcome: "partial",
+          data_ref: {
+            user_id: "user-001"
+          }
+        },
+        consumer_gate_result: {
+          requested_execution_mode: "recon",
+          effective_execution_mode: "recon",
+          gate_decision: "allowed"
+        }
+      }
+    });
+  });
+
   it("blocks xhs.search before execution when official Chrome runtime readiness is not ready", () => {
     const result = runCli([
       "xhs.search",

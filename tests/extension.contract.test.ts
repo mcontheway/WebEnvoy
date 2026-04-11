@@ -26,49 +26,32 @@ const expectedContentScriptMatches = [
   "http://localhost/*"
 ];
 
-const executeBundledDryRunSearch = async (bundlePath: string) => {
+const executeBundledDryRunXhsCommand = async (
+  bundlePath: string,
+  input: {
+    moduleVar: "__webenvoy_module_xhs_search" | "__webenvoy_module_xhs_detail" | "__webenvoy_module_xhs_user_home";
+    exportName: "executeXhsSearch" | "executeXhsDetail" | "executeXhsUserHome";
+    commandInput: Record<string, unknown>;
+  }
+) => {
   const bundleSource = fs.readFileSync(bundlePath, "utf8");
   const context: Record<string, unknown> = {};
   context.globalThis = context;
   runInNewContext(
-    `${bundleSource}\n;globalThis.__bundle_test_exports = { __webenvoy_module_xhs_search };`,
+    `${bundleSource}\n;globalThis.__bundle_test_exports = { ${input.moduleVar} };`,
     context,
     { filename: bundlePath }
   );
   const bundleExports = context.__bundle_test_exports as {
-    __webenvoy_module_xhs_search?: {
-      executeXhsSearch?: (input: Record<string, unknown>, env: Record<string, unknown>) => Promise<unknown>;
+    [key: string]: {
+      [exportName: string]: (input: Record<string, unknown>, env: Record<string, unknown>) => Promise<unknown>;
     };
   };
-  const executeXhsSearch = bundleExports.__webenvoy_module_xhs_search?.executeXhsSearch;
-  expect(executeXhsSearch).toEqual(expect.any(Function));
+  const executeCommand = bundleExports[input.moduleVar]?.[input.exportName];
+  expect(executeCommand).toEqual(expect.any(Function));
 
-  return executeXhsSearch?.(
-    {
-      abilityId: "xhs.note.search.v1",
-      abilityLayer: "L3",
-      abilityAction: "read",
-      params: {
-        query: "露营装备"
-      },
-      options: {
-        issue_scope: "issue_209",
-        target_domain: "www.xiaohongshu.com",
-        target_tab_id: 8,
-        target_page: "search_result_tab",
-        actual_target_domain: "www.xiaohongshu.com",
-        actual_target_tab_id: 8,
-        actual_target_page: "search_result_tab",
-        action_type: "read",
-        risk_state: "limited",
-        requested_execution_mode: "dry_run"
-      },
-      executionContext: {
-        runId: "run-bundled-search-001",
-        sessionId: "nm-session-bundled-search-001",
-        profile: "profile-a"
-      }
-    },
+  return executeCommand?.(
+    input.commandInput,
     {
       now: () => 1_710_000_000_000,
       randomId: () => "bundle-req-001",
@@ -126,6 +109,7 @@ describe("extension build contract", () => {
     expect(contentScriptBuild).toContain("bootstrapContentScript");
     expect(contentScriptBuild).toContain("installMainWorldEventChannelSecret");
     expect(contentScriptBuild).toContain("installFingerprintRuntimeViaMainWorld");
+    expect(contentScriptBuild).toContain("readPageStateViaMainWorld");
     expect(xhsEditorInputBuild).toContain("performEditorInputValidation");
     expect(xhsEditorInputBuild).toContain("新的创作");
     expect(xhsEditorInputBuild).toContain("enter_editable_mode");
@@ -133,12 +117,130 @@ describe("extension build contract", () => {
   });
 
   it("executes bundled xhs.search classic module without unresolved implementation references", async () => {
-    await expect(executeBundledDryRunSearch(contentScriptBuildPath)).resolves.toMatchObject({
+    await expect(
+      executeBundledDryRunXhsCommand(contentScriptBuildPath, {
+        moduleVar: "__webenvoy_module_xhs_search",
+        exportName: "executeXhsSearch",
+        commandInput: {
+          abilityId: "xhs.note.search.v1",
+          abilityLayer: "L3",
+          abilityAction: "read",
+          params: {
+            query: "露营装备"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 8,
+            target_page: "search_result_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 8,
+            actual_target_page: "search_result_tab",
+            action_type: "read",
+            risk_state: "limited",
+            requested_execution_mode: "dry_run"
+          },
+          executionContext: {
+            runId: "run-bundled-search-001",
+            sessionId: "nm-session-bundled-search-001",
+            profile: "profile-a"
+          }
+        }
+      })
+    ).resolves.toMatchObject({
       ok: true,
       payload: {
         summary: {
           capability_result: {
             ability_id: "xhs.note.search.v1",
+            outcome: "partial"
+          }
+        }
+      }
+    });
+  });
+
+  it("executes bundled xhs.detail classic module without unresolved implementation references", async () => {
+    await expect(
+      executeBundledDryRunXhsCommand(contentScriptBuildPath, {
+        moduleVar: "__webenvoy_module_xhs_detail",
+        exportName: "executeXhsDetail",
+        commandInput: {
+          abilityId: "xhs.note.detail.v1",
+          abilityLayer: "L3",
+          abilityAction: "read",
+          params: {
+            note_id: "note-bundled-001"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 8,
+            target_page: "explore_detail_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 8,
+            actual_target_page: "explore_detail_tab",
+            action_type: "read",
+            risk_state: "limited",
+            requested_execution_mode: "dry_run"
+          },
+          executionContext: {
+            runId: "run-bundled-detail-001",
+            sessionId: "nm-session-bundled-detail-001",
+            profile: "profile-a"
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      payload: {
+        summary: {
+          capability_result: {
+            ability_id: "xhs.note.detail.v1",
+            outcome: "partial"
+          }
+        }
+      }
+    });
+  });
+
+  it("executes bundled xhs.user_home classic module without unresolved implementation references", async () => {
+    await expect(
+      executeBundledDryRunXhsCommand(contentScriptBuildPath, {
+        moduleVar: "__webenvoy_module_xhs_user_home",
+        exportName: "executeXhsUserHome",
+        commandInput: {
+          abilityId: "xhs.user.home.v1",
+          abilityLayer: "L3",
+          abilityAction: "read",
+          params: {
+            user_id: "user-bundled-001"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 8,
+            target_page: "profile_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 8,
+            actual_target_page: "profile_tab",
+            action_type: "read",
+            risk_state: "limited",
+            requested_execution_mode: "dry_run"
+          },
+          executionContext: {
+            runId: "run-bundled-user-home-001",
+            sessionId: "nm-session-bundled-user-home-001",
+            profile: "profile-a"
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      payload: {
+        summary: {
+          capability_result: {
+            ability_id: "xhs.user.home.v1",
             outcome: "partial"
           }
         }

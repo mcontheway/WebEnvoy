@@ -325,7 +325,9 @@ const runtimeHelp = async () => ({
     "runtime.status",
     "runtime.stop",
     "runtime.audit",
-    "xhs.search"
+    "xhs.search",
+    "xhs.detail",
+    "xhs.user_home"
   ],
   notes: ["--params 必须是 JSON 对象字符串", "stdout 只输出单个 JSON 对象"]
 });

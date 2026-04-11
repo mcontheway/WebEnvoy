@@ -2854,6 +2854,864 @@ function executeXhsSearch(...args) {
 }
 return { executeXhsSearch };
 })();
+const __webenvoy_module_xhs_read_execution = (() => {
+const { createAuditRecord, resolveGate } = __webenvoy_module_xhs_search_gate;
+const {
+  containsCookie,
+  createDiagnosis,
+  createFailure,
+  resolveRiskStateOutput,
+  resolveXsCommon
+} = __webenvoy_module_xhs_search_telemetry;
+const XHS_DETAIL_SPEC = {
+    command: "xhs.detail",
+    endpoint: "/api/sns/web/v1/feed",
+    method: "POST",
+    pageKind: "detail",
+    requestClass: "xhs.detail",
+    buildPayload: (params) => ({
+        source_note_id: params.note_id
+    }),
+    buildUrl: () => "/api/sns/web/v1/feed",
+    buildSignatureUri: () => "/api/sns/web/v1/feed",
+    buildDataRef: (params) => ({
+        note_id: params.note_id
+    })
+};
+const XHS_USER_HOME_SPEC = {
+    command: "xhs.user_home",
+    endpoint: "/api/sns/web/v1/user/otherinfo",
+    method: "GET",
+    pageKind: "user_home",
+    requestClass: "xhs.user_home",
+    buildPayload: () => ({}),
+    buildUrl: (params) => `/api/sns/web/v1/user/otherinfo?user_id=${encodeURIComponent(params.user_id)}`,
+    buildSignatureUri: (params) => `/api/sns/web/v1/user/otherinfo?user_id=${encodeURIComponent(params.user_id)}`,
+    buildDataRef: (params) => ({
+        user_id: params.user_id
+    })
+};
+const READ_COMMAND_SPECS = {
+    "xhs.detail": XHS_DETAIL_SPEC,
+    "xhs.user_home": XHS_USER_HOME_SPEC
+};
+const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value
+    : null;
+const asArray = (value) => (Array.isArray(value) ? value : null);
+const classifyPageKind = (href, fallback) => {
+    if (href.includes("/login")) {
+        return "login";
+    }
+    if (href.includes("/search_result")) {
+        return "search";
+    }
+    if (href.includes("/explore/")) {
+        return "detail";
+    }
+    if (href.includes("/user/profile/")) {
+        return "user_home";
+    }
+    return fallback;
+};
+const createReadObservability = (input) => ({
+    page_state: {
+        page_kind: classifyPageKind(input.href, input.spec.pageKind),
+        url: input.href,
+        title: input.title,
+        ready_state: input.readyState
+    },
+    key_requests: input.includeKeyRequest === false
+        ? []
+        : [
+            {
+                request_id: input.requestId,
+                stage: "request",
+                method: input.spec.method,
+                url: input.spec.endpoint,
+                outcome: input.outcome,
+                ...(typeof input.statusCode === "number" ? { status_code: input.statusCode } : {}),
+                ...(input.failureReason
+                    ? { failure_reason: input.failureReason, request_class: input.spec.requestClass }
+                    : {})
+            }
+        ],
+    failure_site: input.outcome === "failed"
+        ? (input.failureSite ?? {
+            stage: "request",
+            component: "network",
+            target: input.spec.endpoint,
+            summary: input.failureReason ?? "request failed"
+        })
+        : null
+});
+const inferReadFailure = (spec, status, body) => {
+    const record = asRecord(body);
+    const businessCode = record?.code;
+    const message = typeof record?.msg === "string"
+        ? record.msg
+        : typeof record?.message === "string"
+            ? record.message
+            : "";
+    const normalized = `${message}`.toLowerCase();
+    if (status === 401 || normalized.includes("login")) {
+        return {
+            reason: "SESSION_EXPIRED",
+            message: `登录已失效，无法执行 ${spec.command}`
+        };
+    }
+    if (status === 461 || businessCode === 300011) {
+        return {
+            reason: "ACCOUNT_ABNORMAL",
+            message: "账号异常，平台拒绝当前请求"
+        };
+    }
+    if (businessCode === 300015 || normalized.includes("browser environment abnormal")) {
+        return {
+            reason: "BROWSER_ENV_ABNORMAL",
+            message: "浏览器环境异常，平台拒绝当前请求"
+        };
+    }
+    if (status >= 500 || normalized.includes("create invoker failed")) {
+        return {
+            reason: "GATEWAY_INVOKER_FAILED",
+            message: `网关调用失败，当前上下文不足以完成 ${spec.command} 请求`
+        };
+    }
+    if (status === 429 || normalized.includes("captcha")) {
+        return {
+            reason: "CAPTCHA_REQUIRED",
+            message: "平台要求额外人机验证，无法继续执行"
+        };
+    }
+    return {
+        reason: "TARGET_API_RESPONSE_INVALID",
+        message: `${spec.command} 接口返回了未识别的失败响应`
+    };
+};
+const inferReadRequestException = (spec, error) => {
+    const errorName = typeof error === "object" && error !== null && "name" in error
+        ? String(error.name)
+        : "";
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorName === "AbortError") {
+        return {
+            reason: "REQUEST_TIMEOUT",
+            message: `请求超时，无法完成 ${spec.command}`,
+            detail: errorMessage
+        };
+    }
+    return {
+        reason: "REQUEST_DISPATCH_FAILED",
+        message: `${spec.command} 请求发送失败，无法完成执行`,
+        detail: errorMessage
+    };
+};
+const containsTargetIdentifier = (value, target, candidateKeys) => {
+    const record = asRecord(value);
+    if (record) {
+        for (const key of candidateKeys) {
+            if (typeof record[key] === "string" && record[key] === target) {
+                return true;
+            }
+        }
+    }
+    return false;
+};
+const collectCandidateRecords = (value) => {
+    const record = asRecord(value);
+    if (record) {
+        return [record];
+    }
+    const array = asArray(value);
+    if (array) {
+        return array.map((entry) => asRecord(entry)).filter((entry) => entry !== null);
+    }
+    return [];
+};
+const collectNestedRecordCandidates = (value, nestedKeys, seen = new Set()) => {
+    const directCandidates = collectCandidateRecords(value);
+    const nestedCandidates = [];
+    for (const candidate of directCandidates) {
+        if (seen.has(candidate)) {
+            continue;
+        }
+        seen.add(candidate);
+        nestedCandidates.push(candidate);
+        for (const key of nestedKeys) {
+            nestedCandidates.push(...collectNestedRecordCandidates(candidate[key], nestedKeys, seen));
+        }
+    }
+    return nestedCandidates;
+};
+const hasDetailDataShape = (record) => [
+    "title",
+    "desc",
+    "user",
+    "interact_info",
+    "image_list",
+    "video_info",
+    "note_card",
+    "note_card_list"
+].some((key) => key in record);
+const hasUserDataShape = (record) => [
+    "nickname",
+    "avatar",
+    "avatar_url",
+    "images",
+    "follows",
+    "fans",
+    "basicInfo",
+    "basic_info",
+    "interactions"
+].some((key) => key in record);
+const getDetailResponseCandidates = (body) => {
+    const responseRecord = asRecord(body);
+    const data = responseRecord?.data ?? body;
+    const dataRecord = asRecord(data);
+    if (!dataRecord) {
+        return [];
+    }
+    return [
+        ...collectNestedRecordCandidates(dataRecord.note, ["note", "note_card", "current_note", "item"]),
+        ...collectNestedRecordCandidates(dataRecord.note_card, ["note", "note_card", "current_note", "item"]),
+        ...collectNestedRecordCandidates(dataRecord.note_card_list, [
+            "note",
+            "note_card",
+            "current_note",
+            "item"
+        ]),
+        ...collectNestedRecordCandidates(dataRecord.current_note, ["note", "note_card", "current_note", "item"]),
+        ...collectNestedRecordCandidates(dataRecord.item, ["note", "note_card", "current_note", "item"]),
+        ...collectNestedRecordCandidates(dataRecord.items, ["note", "note_card", "current_note", "item"]),
+        ...collectNestedRecordCandidates(dataRecord.notes, ["note", "note_card", "current_note", "item"]),
+        ...(hasDetailDataShape(dataRecord) ? [dataRecord] : [])
+    ];
+};
+const getUserHomeResponseCandidates = (body) => {
+    const responseRecord = asRecord(body);
+    const data = responseRecord?.data ?? body;
+    const dataRecord = asRecord(data);
+    if (!dataRecord) {
+        return [];
+    }
+    return [
+        ...collectNestedRecordCandidates(dataRecord.user, ["basic_info", "basicInfo", "profile", "user"]),
+        ...collectNestedRecordCandidates(dataRecord.basic_info, [
+            "basic_info",
+            "basicInfo",
+            "profile",
+            "user"
+        ]),
+        ...collectNestedRecordCandidates(dataRecord.basicInfo, [
+            "basic_info",
+            "basicInfo",
+            "profile",
+            "user"
+        ]),
+        ...collectNestedRecordCandidates(dataRecord.profile, ["basic_info", "basicInfo", "profile", "user"]),
+        ...(hasUserDataShape(dataRecord) ? [dataRecord] : [])
+    ];
+};
+const responseContainsRequestedTarget = (spec, params, body) => {
+    if (spec.command === "xhs.detail") {
+        return getDetailResponseCandidates(body).some((candidate) => containsTargetIdentifier(candidate, params.note_id, [
+            "note_id",
+            "noteId",
+            "id"
+        ]));
+    }
+    return getUserHomeResponseCandidates(body).some((candidate) => containsTargetIdentifier(candidate, params.user_id, [
+        "user_id",
+        "userId",
+        "id"
+    ]));
+};
+const createReadDiagnosis = (spec, input) => {
+    const diagnosis = createDiagnosis(input);
+    const failureSite = asRecord(diagnosis.failure_site);
+    const shouldUseEndpointTarget = (typeof failureSite?.component === "string" ? failureSite.component : null) === "network";
+    return {
+        ...diagnosis,
+        failure_site: {
+            ...(failureSite ?? {}),
+            ...(shouldUseEndpointTarget ? { target: spec.endpoint } : {}),
+            summary: input.summary
+        }
+    };
+};
+const hasDetailPageStateFallback = (params, root) => {
+    const note = asRecord(root?.note);
+    const noteDetailMap = asRecord(note?.noteDetailMap);
+    return asRecord(noteDetailMap?.[params.note_id]) !== null;
+};
+const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const hasUserHomePageStateFallback = (params, root) => {
+    const user = asRecord(root?.user);
+    if (!user) {
+        return false;
+    }
+    const candidateUserIds = [
+        asNonEmptyString(user.userId),
+        asNonEmptyString(user.user_id),
+        asNonEmptyString(user.id),
+        asNonEmptyString(asRecord(user.basicInfo)?.userId),
+        asNonEmptyString(asRecord(user.basicInfo)?.user_id),
+        asNonEmptyString(asRecord(user.profile)?.userId),
+        asNonEmptyString(asRecord(user.profile)?.user_id)
+    ].filter((value) => value !== null);
+    if (!candidateUserIds.some((userId) => userId === params.user_id)) {
+        return false;
+    }
+    return asRecord(root?.board) !== null || asRecord(root?.note) !== null || user !== null;
+};
+const canUsePageStateFallback = (spec, params, root) => spec.command === "xhs.detail"
+    ? hasDetailPageStateFallback(params, root)
+    : hasUserHomePageStateFallback(params, root);
+const createPageStateFallbackFailure = (input, spec, gate, auditRecord, env, payload, startedAt, requestFailure) => {
+    const requestId = `req-${env.randomId()}`;
+    return createFailure("ERR_EXECUTION_FAILED", requestFailure.message, {
+        ability_id: input.abilityId,
+        stage: "execution",
+        reason: requestFailure.reason
+    }, {
+        page_state: {
+            page_kind: classifyPageKind(env.getLocationHref(), spec.pageKind),
+            url: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            ready_state: env.getReadyState(),
+            fallback_used: true
+        },
+        key_requests: [
+            {
+                request_id: requestId,
+                stage: "request",
+                method: spec.method,
+                url: spec.endpoint,
+                outcome: "failed",
+                ...(typeof requestFailure.statusCode === "number"
+                    ? { status_code: requestFailure.statusCode }
+                    : {}),
+                failure_reason: requestFailure.reason,
+                request_class: spec.requestClass
+            },
+            {
+                request_id: `${requestId}-page-state`,
+                stage: "page_state_fallback",
+                method: "N/A",
+                url: env.getLocationHref(),
+                outcome: "completed",
+                fallback_reason: requestFailure.reason,
+                data_ref: spec.buildDataRef(input.params, payload),
+                duration_ms: Math.max(0, env.now() - startedAt)
+            }
+        ],
+        failure_site: {
+            stage: "request",
+            component: "network",
+            target: spec.endpoint,
+            summary: requestFailure.message
+        }
+    }, createReadDiagnosis(spec, {
+        reason: requestFailure.reason,
+        summary: requestFailure.message
+    }), gate, auditRecord);
+};
+const createGateOnlySuccess = (input, spec, gate, auditRecord, env, payload) => ({
+    ok: true,
+    payload: {
+        summary: {
+            capability_result: {
+                ability_id: input.abilityId,
+                layer: input.abilityLayer,
+                action: gate.consumer_gate_result.action_type ?? input.abilityAction,
+                outcome: "partial",
+                data_ref: spec.buildDataRef(input.params, payload),
+                metrics: {
+                    count: 0
+                }
+            },
+            scope_context: gate.scope_context,
+            gate_input: {
+                run_id: auditRecord.run_id,
+                session_id: auditRecord.session_id,
+                profile: auditRecord.profile,
+                ...gate.gate_input
+            },
+            gate_outcome: gate.gate_outcome,
+            read_execution_policy: gate.read_execution_policy,
+            issue_action_matrix: gate.issue_action_matrix,
+            write_interaction_tier: gate.write_interaction_tier,
+            write_action_matrix_decisions: gate.write_action_matrix_decisions,
+            consumer_gate_result: gate.consumer_gate_result,
+            approval_record: gate.approval_record,
+            risk_state_output: resolveRiskStateOutput(gate, auditRecord),
+            audit_record: auditRecord
+        },
+        observability: {
+            page_state: {
+                page_kind: classifyPageKind(env.getLocationHref(), spec.pageKind),
+                url: env.getLocationHref(),
+                title: env.getDocumentTitle(),
+                ready_state: env.getReadyState()
+            },
+            key_requests: [],
+            failure_site: null
+        }
+    }
+});
+const resolveSimulatedResult = (input, spec, payload, env) => {
+    if (!input.options.simulate_result) {
+        return null;
+    }
+    const requestId = `req-${env.randomId()}`;
+    const dataRef = spec.buildDataRef(input.params, payload);
+    if (input.options.simulate_result === "success") {
+        return {
+            ok: true,
+            payload: {
+                summary: {
+                    capability_result: {
+                        ability_id: input.abilityId,
+                        layer: input.abilityLayer,
+                        action: input.abilityAction,
+                        outcome: "success",
+                        data_ref: dataRef,
+                        metrics: {
+                            count: 1
+                        }
+                    }
+                },
+                observability: createReadObservability({
+                    spec,
+                    href: env.getLocationHref(),
+                    title: env.getDocumentTitle(),
+                    readyState: env.getReadyState(),
+                    requestId,
+                    outcome: "completed"
+                })
+            }
+        };
+    }
+    if (input.options.simulate_result === "missing_capability_result") {
+        return {
+            ok: true,
+            payload: {
+                summary: {},
+                observability: createReadObservability({
+                    spec,
+                    href: env.getLocationHref(),
+                    title: env.getDocumentTitle(),
+                    readyState: env.getReadyState(),
+                    requestId,
+                    outcome: "completed"
+                })
+            }
+        };
+    }
+    if (input.options.simulate_result === "capability_result_invalid_outcome") {
+        return {
+            ok: true,
+            payload: {
+                summary: {
+                    capability_result: {
+                        ability_id: input.abilityId,
+                        layer: input.abilityLayer,
+                        action: input.abilityAction,
+                        outcome: "blocked",
+                        data_ref: dataRef,
+                        metrics: {
+                            count: 1
+                        }
+                    }
+                },
+                observability: createReadObservability({
+                    spec,
+                    href: env.getLocationHref(),
+                    title: env.getDocumentTitle(),
+                    readyState: env.getReadyState(),
+                    requestId,
+                    outcome: "completed"
+                })
+            }
+        };
+    }
+    const simulatedReasonMap = {
+        signature_entry_missing: {
+            reason: "SIGNATURE_ENTRY_MISSING",
+            message: "页面签名入口不可用"
+        },
+        account_abnormal: {
+            reason: "ACCOUNT_ABNORMAL",
+            message: "账号异常，平台拒绝当前请求",
+            statusCode: 461
+        },
+        browser_env_abnormal: {
+            reason: "BROWSER_ENV_ABNORMAL",
+            message: "浏览器环境异常，平台拒绝当前请求",
+            statusCode: 200
+        },
+        captcha_required: {
+            reason: "CAPTCHA_REQUIRED",
+            message: "平台要求额外人机验证，无法继续执行",
+            statusCode: 429
+        },
+        gateway_invoker_failed: {
+            reason: "GATEWAY_INVOKER_FAILED",
+            message: `网关调用失败，当前上下文不足以完成 ${spec.command} 请求`,
+            statusCode: 500
+        }
+    };
+    const mapped = simulatedReasonMap[input.options.simulate_result] ??
+        inferReadFailure(spec, input.options.simulate_result === "account_abnormal" ? 461 : 500, {
+            code: input.options.simulate_result === "account_abnormal" ? 300011 : undefined,
+            msg: input.options.simulate_result === "browser_env_abnormal"
+                ? "Browser environment abnormal"
+                : input.options.simulate_result === "gateway_invoker_failed"
+                    ? "create invoker failed"
+                    : input.options.simulate_result
+        });
+    return createFailure("ERR_EXECUTION_FAILED", mapped.message, {
+        ability_id: input.abilityId,
+        stage: "execution",
+        reason: mapped.reason
+    }, createReadObservability({
+        spec,
+        href: env.getLocationHref(),
+        title: env.getDocumentTitle(),
+        readyState: env.getReadyState(),
+        requestId,
+        outcome: "failed",
+        ...(typeof mapped.statusCode === "number" ? { statusCode: mapped.statusCode } : {}),
+        failureReason: input.options.simulate_result
+    }), createReadDiagnosis(spec, {
+        reason: mapped.reason,
+        summary: mapped.message
+    }));
+};
+const buildHeaders = (env, options, signature) => ({
+    Accept: "application/json, text/plain, */*",
+    ...(options.target_domain === "www.xiaohongshu.com" || options.target_domain === undefined
+        ? {}
+        : {}),
+    ...(signature
+        ? {
+            "X-s": String(signature["X-s"]),
+            "X-t": String(signature["X-t"]),
+            "X-S-Common": resolveXsCommon(options.x_s_common),
+            "x-b3-traceid": env.randomId().replace(/-/g, ""),
+            "x-xray-traceid": env.randomId().replace(/-/g, "")
+        }
+        : {}),
+    "Content-Type": "application/json;charset=utf-8"
+});
+const executeXhsRead = async (input, spec, env) => {
+    const gate = resolveGate(input.options, input.executionContext);
+    const auditRecord = createAuditRecord(input.executionContext, gate, env);
+    const startedAt = env.now();
+    const payload = spec.buildPayload(input.params, env);
+    const resolvePageStateRoot = async () => {
+        const mainWorldState = typeof env.readPageStateRoot === "function"
+            ? await env.readPageStateRoot().catch(() => null)
+            : null;
+        const mainWorldRecord = asRecord(mainWorldState);
+        if (mainWorldRecord) {
+            return mainWorldRecord;
+        }
+        return asRecord(env.getPageStateRoot?.());
+    };
+    if (gate.consumer_gate_result.gate_decision === "blocked") {
+        return createFailure("ERR_EXECUTION_FAILED", `执行模式门禁阻断了当前 ${spec.command} 请求`, {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: "EXECUTION_MODE_GATE_BLOCKED"
+        }, createReadObservability({
+            spec,
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: "EXECUTION_MODE_GATE_BLOCKED",
+            failureSite: {
+                stage: "execution",
+                component: "gate",
+                target: "requested_execution_mode",
+                summary: "执行模式门禁阻断"
+            }
+        }), createReadDiagnosis(spec, {
+            reason: "EXECUTION_MODE_GATE_BLOCKED",
+            summary: "执行模式门禁阻断"
+        }), gate, auditRecord);
+    }
+    if (gate.consumer_gate_result.effective_execution_mode === "dry_run" ||
+        gate.consumer_gate_result.effective_execution_mode === "recon") {
+        return createGateOnlySuccess(input, spec, gate, auditRecord, env, payload);
+    }
+    const simulated = resolveSimulatedResult(input, spec, payload, env);
+    if (simulated) {
+        if (simulated.ok) {
+            const summary = asRecord(simulated.payload.summary) ?? {};
+            const capability = asRecord(summary.capability_result) ?? {};
+            capability.ability_id = input.abilityId;
+            capability.layer = input.abilityLayer;
+            capability.action = gate.consumer_gate_result.action_type ?? input.abilityAction;
+            return {
+                ok: true,
+                payload: {
+                    ...simulated.payload,
+                    summary: {
+                        capability_result: capability,
+                        scope_context: gate.scope_context,
+                        gate_input: {
+                            run_id: auditRecord.run_id,
+                            session_id: auditRecord.session_id,
+                            profile: auditRecord.profile,
+                            ...gate.gate_input
+                        },
+                        gate_outcome: gate.gate_outcome,
+                        read_execution_policy: gate.read_execution_policy,
+                        issue_action_matrix: gate.issue_action_matrix,
+                        consumer_gate_result: gate.consumer_gate_result,
+                        approval_record: gate.approval_record,
+                        risk_state_output: resolveRiskStateOutput(gate, auditRecord),
+                        audit_record: auditRecord
+                    }
+                }
+            };
+        }
+        return {
+            ...simulated,
+            payload: {
+                ...simulated.payload,
+                read_execution_policy: gate.read_execution_policy,
+                issue_action_matrix: gate.issue_action_matrix,
+                consumer_gate_result: gate.consumer_gate_result,
+                approval_record: gate.approval_record,
+                audit_record: auditRecord
+            }
+        };
+    }
+    if (!containsCookie(env.getCookie(), "a1")) {
+        return createFailure("ERR_EXECUTION_FAILED", `登录态缺失，无法执行 ${spec.command}`, {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: "SESSION_EXPIRED"
+        }, createReadObservability({
+            spec,
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: "SESSION_EXPIRED"
+        }), createReadDiagnosis(spec, {
+            reason: "SESSION_EXPIRED",
+            summary: `登录态缺失，无法执行 ${spec.command}`
+        }), gate, auditRecord);
+    }
+    let signature;
+    try {
+        signature = await env.callSignature(spec.buildSignatureUri(input.params), payload);
+    }
+    catch (error) {
+        const pageStateRoot = await resolvePageStateRoot();
+        if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
+            return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, payload, startedAt, {
+                reason: "SIGNATURE_ENTRY_MISSING",
+                message: "页面签名入口不可用",
+                detail: error instanceof Error ? error.message : String(error)
+            });
+        }
+        return createFailure("ERR_EXECUTION_FAILED", "页面签名入口不可用", {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: "SIGNATURE_ENTRY_MISSING"
+        }, createReadObservability({
+            spec,
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: error instanceof Error ? error.message : String(error),
+            includeKeyRequest: false,
+            failureSite: {
+                stage: "action",
+                component: "page",
+                target: "window._webmsxyw",
+                summary: "页面签名入口不可用"
+            }
+        }), createReadDiagnosis(spec, {
+            reason: "SIGNATURE_ENTRY_MISSING",
+            summary: "页面签名入口不可用",
+            category: "page_changed"
+        }), gate, auditRecord);
+    }
+    let response;
+    try {
+        response = await env.fetchJson({
+            url: spec.buildUrl(input.params),
+            method: spec.method,
+            headers: buildHeaders(env, input.options, signature),
+            ...(spec.method === "POST" ? { body: JSON.stringify(payload) } : {}),
+            timeoutMs: typeof input.options.timeout_ms === "number" && Number.isFinite(input.options.timeout_ms)
+                ? Math.max(1, Math.floor(input.options.timeout_ms))
+                : 30_000
+        });
+    }
+    catch (error) {
+        const failure = inferReadRequestException(spec, error);
+        const pageStateRoot = await resolvePageStateRoot();
+        if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
+            return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, payload, startedAt, {
+                reason: failure.reason,
+                message: failure.message,
+                detail: failure.detail
+            });
+        }
+        return createFailure("ERR_EXECUTION_FAILED", failure.message, {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: failure.reason
+        }, createReadObservability({
+            spec,
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: failure.detail
+        }), createReadDiagnosis(spec, {
+            reason: failure.reason,
+            summary: failure.message
+        }), gate, auditRecord);
+    }
+    const responseRecord = asRecord(response.body);
+    const businessCode = responseRecord?.code;
+    if (response.status >= 400 || (typeof businessCode === "number" && businessCode !== 0)) {
+        const failure = inferReadFailure(spec, response.status, response.body);
+        const pageStateRoot = await resolvePageStateRoot();
+        if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
+            return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, payload, startedAt, {
+                reason: failure.reason,
+                message: failure.message,
+                detail: failure.message,
+                statusCode: response.status
+            });
+        }
+        return createFailure("ERR_EXECUTION_FAILED", failure.message, {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: failure.reason
+        }, createReadObservability({
+            spec,
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            statusCode: response.status,
+            failureReason: failure.reason
+        }), createReadDiagnosis(spec, {
+            reason: failure.reason,
+            summary: failure.message
+        }), gate, auditRecord);
+    }
+    if (!responseContainsRequestedTarget(spec, input.params, response.body)) {
+        const pageStateRoot = await resolvePageStateRoot();
+        if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
+            return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, payload, startedAt, {
+                reason: "TARGET_DATA_NOT_FOUND",
+                message: `${spec.command} 接口返回成功但未包含目标数据`,
+                detail: `${spec.command} response target missing`,
+                statusCode: response.status
+            });
+        }
+        return createFailure("ERR_EXECUTION_FAILED", `${spec.command} 接口返回成功但未包含目标数据`, {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: "TARGET_DATA_NOT_FOUND"
+        }, createReadObservability({
+            spec,
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            statusCode: response.status,
+            failureReason: "TARGET_DATA_NOT_FOUND"
+        }), createReadDiagnosis(spec, {
+            reason: "TARGET_DATA_NOT_FOUND",
+            summary: `${spec.command} 接口返回成功但未包含目标数据`
+        }), gate, auditRecord);
+    }
+    return {
+        ok: true,
+        payload: {
+            summary: {
+                capability_result: {
+                    ability_id: input.abilityId,
+                    layer: input.abilityLayer,
+                    action: gate.consumer_gate_result.action_type ?? input.abilityAction,
+                    outcome: "success",
+                    data_ref: spec.buildDataRef(input.params, payload),
+                    metrics: {
+                        count: 1,
+                        duration_ms: Math.max(0, env.now() - startedAt)
+                    }
+                },
+                scope_context: gate.scope_context,
+                gate_input: {
+                    run_id: auditRecord.run_id,
+                    session_id: auditRecord.session_id,
+                    profile: auditRecord.profile,
+                    ...gate.gate_input
+                },
+                gate_outcome: gate.gate_outcome,
+                read_execution_policy: gate.read_execution_policy,
+                issue_action_matrix: gate.issue_action_matrix,
+                consumer_gate_result: gate.consumer_gate_result,
+                approval_record: gate.approval_record,
+                risk_state_output: resolveRiskStateOutput(gate, auditRecord),
+                audit_record: auditRecord
+            },
+            observability: createReadObservability({
+                spec,
+                href: env.getLocationHref(),
+                title: env.getDocumentTitle(),
+                readyState: env.getReadyState(),
+                requestId: `req-${env.randomId()}`,
+                outcome: "completed",
+                statusCode: response.status
+            })
+        }
+    };
+};
+const executeXhsDetail = async (input, env) => executeXhsRead({
+    command: "xhs.detail",
+    ...input
+}, READ_COMMAND_SPECS["xhs.detail"], env);
+const executeXhsUserHome = async (input, env) => executeXhsRead({
+    command: "xhs.user_home",
+    ...input
+}, READ_COMMAND_SPECS["xhs.user_home"], env);
+return { executeXhsDetail, executeXhsUserHome };
+})();
+const __webenvoy_module_xhs_detail = (() => {
+const { executeXhsDetail: executeXhsDetailImpl } = __webenvoy_module_xhs_read_execution;
+function executeXhsDetail(...args) {
+    return executeXhsDetailImpl(...args);
+}
+return { executeXhsDetail };
+})();
+const __webenvoy_module_xhs_user_home = (() => {
+const { executeXhsUserHome: executeXhsUserHomeImpl } = __webenvoy_module_xhs_read_execution;
+function executeXhsUserHome(...args) {
+    return executeXhsUserHomeImpl(...args);
+}
+return { executeXhsUserHome };
+})();
 const __webenvoy_module_xhs_editor_input = (() => {
 const TARGET_PAGE = "creator.xiaohongshu.com/publish";
 const BASE_MINIMUM_REPLAY = ["focus_editor", "type_short_text", "blur_or_reobserve"];
@@ -3257,6 +4115,79 @@ const performEditorInputValidation = async (input) => {
 };
 return { performEditorInputValidation };
 })();
+const __webenvoy_module_xhs_command_contract = (() => {
+class ExtensionContractError extends Error {
+    code;
+    details;
+    constructor(code, message, details) {
+        super(message);
+        this.name = "ExtensionContractError";
+        this.code = code;
+        this.details = details;
+    }
+}
+const invalidAbilityInput = (reason, abilityId = "unknown") => new ExtensionContractError("ERR_CLI_INVALID_ARGS", "能力输入不合法", {
+    ability_id: abilityId,
+    stage: "input_validation",
+    reason
+});
+const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const parseSearchInput = (payload, abilityId, options, abilityAction) => {
+    const issue208EditorInputValidation = abilityAction === "write" &&
+        options.issue_scope === "issue_208" &&
+        options.action_type === "write" &&
+        options.requested_execution_mode === "live_write" &&
+        options.validation_action === "editor_input";
+    if (issue208EditorInputValidation) {
+        return {};
+    }
+    const query = asNonEmptyString(payload.query);
+    if (!query) {
+        throw invalidAbilityInput("QUERY_MISSING", abilityId);
+    }
+    const normalized = {
+        query
+    };
+    if (typeof payload.limit === "number" && Number.isFinite(payload.limit)) {
+        normalized.limit = Math.max(1, Math.floor(payload.limit));
+    }
+    if (typeof payload.page === "number" && Number.isFinite(payload.page)) {
+        normalized.page = Math.max(1, Math.floor(payload.page));
+    }
+    if (asNonEmptyString(payload.search_id)) {
+        normalized.search_id = asNonEmptyString(payload.search_id);
+    }
+    if (asNonEmptyString(payload.sort)) {
+        normalized.sort = asNonEmptyString(payload.sort);
+    }
+    if ((typeof payload.note_type === "string" && payload.note_type.trim().length > 0) ||
+        typeof payload.note_type === "number") {
+        normalized.note_type = payload.note_type;
+    }
+    return normalized;
+};
+const validateXhsCommandInputForExtension = (input) => {
+    if (input.command === "xhs.search") {
+        return parseSearchInput(input.payload, input.abilityId, input.options, input.abilityAction);
+    }
+    if (input.command === "xhs.detail") {
+        const noteId = asNonEmptyString(input.payload.note_id);
+        if (!noteId) {
+            throw invalidAbilityInput("NOTE_ID_MISSING", input.abilityId);
+        }
+        return { note_id: noteId };
+    }
+    if (input.command === "xhs.user_home") {
+        const userId = asNonEmptyString(input.payload.user_id);
+        if (!userId) {
+            throw invalidAbilityInput("USER_ID_MISSING", input.abilityId);
+        }
+        return { user_id: userId };
+    }
+    throw invalidAbilityInput("ABILITY_COMMAND_UNSUPPORTED", input.abilityId);
+};
+return { ExtensionContractError, validateXhsCommandInputForExtension };
+})();
 const __webenvoy_module_content_script_main_world = (() => {
 const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
@@ -3423,7 +4354,16 @@ const verifyFingerprintRuntimeViaMainWorld = async () => await mainWorldCall({
     type: "fingerprint-verify",
     payload: {}
 });
-return { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret, verifyFingerprintRuntimeViaMainWorld };
+const readPageStateViaMainWorld = async () => {
+    const result = await mainWorldCall({
+        type: "page-state-read",
+        payload: {}
+    });
+    return typeof result === "object" && result !== null && !Array.isArray(result)
+        ? result
+        : null;
+};
+return { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readPageStateViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret, verifyFingerprintRuntimeViaMainWorld };
 })();
 const __webenvoy_module_content_script_fingerprint = (() => {
 const { ensureFingerprintRuntimeContext } = __webenvoy_module_fingerprint_profile;
@@ -3683,6 +4623,8 @@ return { buildFailedFingerprintInjectionContext, hasInstalledFingerprintInjectio
 })();
 const __webenvoy_module_content_script_handler = (() => {
 const { executeXhsSearch } = __webenvoy_module_xhs_search;
+const { executeXhsDetail } = __webenvoy_module_xhs_detail;
+const { executeXhsUserHome } = __webenvoy_module_xhs_user_home;
 const { performEditorInputValidation } = __webenvoy_module_xhs_editor_input;
 const { ensureFingerprintRuntimeContext } = __webenvoy_module_fingerprint_profile;
 const {
@@ -3695,10 +4637,15 @@ const {
   summarizeFingerprintRuntimeContext
 } = __webenvoy_module_content_script_fingerprint;
 const {
+  ExtensionContractError,
+  validateXhsCommandInputForExtension
+} = __webenvoy_module_xhs_command_contract;
+const {
   encodeMainWorldPayload,
   installFingerprintRuntimeViaMainWorld,
   installMainWorldEventChannelSecret,
   MAIN_WORLD_EVENT_BOOTSTRAP,
+  readPageStateViaMainWorld,
   resetMainWorldEventChannelForContract,
   resolveMainWorldEventNamesForSecret
 } = __webenvoy_module_content_script_main_world;
@@ -3706,8 +4653,22 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
+const XHS_READ_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
 const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+const toCliInvalidArgsResult = (input) => ({
+    kind: "result",
+    id: input.id,
+    ok: false,
+    error: {
+        code: input.error.code,
+        message: input.error.message
+    },
+    payload: {
+        ...(input.error.details ? { details: input.error.details } : {}),
+        ...(input.fingerprintRuntime ? { fingerprint_runtime: input.fingerprintRuntime } : {})
+    }
+});
 const resolveRequestedExecutionMode = (message) => {
     const topLevelMode = asString(asRecord(message.commandParams)?.requested_execution_mode);
     if (topLevelMode) {
@@ -3788,6 +4749,8 @@ const createBrowserEnvironment = () => ({
     getDocumentTitle: () => document.title,
     getReadyState: () => document.readyState,
     getCookie: () => document.cookie,
+    getPageStateRoot: () => window.__INITIAL_STATE__,
+    readPageStateRoot: async () => await readPageStateViaMainWorld(),
     callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
     fetchJson: async (input) => {
         const controller = new AbortController();
@@ -3821,11 +4784,19 @@ const resolveTargetDomainFromHref = (href) => {
         return null;
     }
 };
-const resolveTargetPageFromHref = (href) => {
+const resolveTargetPageFromHref = (href, command) => {
     try {
         const url = new URL(href);
         if (url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/search_result")) {
             return "search_result_tab";
+        }
+        if (command === "xhs.detail" && url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/explore/")) {
+            return "explore_detail_tab";
+        }
+        if (command === "xhs.user_home" &&
+            url.hostname === "www.xiaohongshu.com" &&
+            url.pathname.startsWith("/user/profile/")) {
+            return "profile_tab";
         }
         if (url.hostname === "creator.xiaohongshu.com" && url.pathname.startsWith("/publish")) {
             return "creator_publish_tab";
@@ -3865,8 +4836,8 @@ class ContentScriptHandler {
             void this.#handleRuntimeBootstrap(message);
             return true;
         }
-        if (message.command === "xhs.search") {
-            void this.#handleXhsSearch(message);
+        if (XHS_READ_COMMANDS.has(message.command)) {
+            void this.#handleXhsReadCommand(message);
             return true;
         }
         const result = this.#handleForward(message);
@@ -4026,7 +4997,7 @@ class ContentScriptHandler {
             return fallback;
         }
     }
-    async #handleXhsSearch(message) {
+    async #handleXhsReadCommand(message) {
         const messageFingerprintContext = resolveFingerprintContextFromMessage(message);
         const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
         const requestedExecutionMode = resolveRequestedExecutionMode(message);
@@ -4064,7 +5035,7 @@ class ContentScriptHandler {
         const options = asRecord(message.commandParams.options) ?? {};
         const locationHref = this.#xhsEnv.getLocationHref();
         const actualTargetDomain = resolveTargetDomainFromHref(locationHref);
-        const actualTargetPage = resolveTargetPageFromHref(locationHref);
+        const actualTargetPage = resolveTargetPageFromHref(locationHref, message.command);
         if (!ability || !input) {
             this.#emit({
                 kind: "result",
@@ -4072,7 +5043,7 @@ class ContentScriptHandler {
                 ok: false,
                 error: {
                     code: "ERR_EXECUTION_FAILED",
-                    message: "xhs.search payload missing ability or input"
+                    message: `${message.command} payload missing ability or input`
                 },
                 payload: {
                     details: {
@@ -4085,20 +5056,17 @@ class ContentScriptHandler {
             return;
         }
         try {
-            const result = await executeXhsSearch({
+            const normalizedInput = validateXhsCommandInputForExtension({
+                command: message.command,
+                abilityId: String(ability.id ?? "unknown"),
+                abilityAction: typeof ability.action === "string" ? ability.action : "read",
+                payload: input,
+                options
+            });
+            const commonInput = {
                 abilityId: String(ability.id ?? "unknown"),
                 abilityLayer: String(ability.layer ?? "L3"),
                 abilityAction: String(ability.action ?? "read"),
-                params: {
-                    query: String(input.query ?? ""),
-                    ...(typeof input.limit === "number" ? { limit: input.limit } : {}),
-                    ...(typeof input.page === "number" ? { page: input.page } : {}),
-                    ...(typeof input.search_id === "string" ? { search_id: input.search_id } : {}),
-                    ...(typeof input.sort === "string" ? { sort: input.sort } : {}),
-                    ...(typeof input.note_type === "string" || typeof input.note_type === "number"
-                        ? { note_type: input.note_type }
-                        : {})
-                },
                 options: {
                     ...(typeof options.timeout_ms === "number" ? { timeout_ms: options.timeout_ms } : {}),
                     ...(typeof options.simulate_result === "string"
@@ -4150,10 +5118,54 @@ class ContentScriptHandler {
                     profile: message.profile ?? "unknown",
                     requestId: message.id
                 }
-            }, this.#xhsEnv);
+            };
+            let result;
+            if (message.command === "xhs.search") {
+                const searchInput = normalizedInput;
+                result = await executeXhsSearch({
+                    ...commonInput,
+                    params: {
+                        query: searchInput.query,
+                        ...(typeof searchInput.limit === "number" ? { limit: searchInput.limit } : {}),
+                        ...(typeof searchInput.page === "number" ? { page: searchInput.page } : {}),
+                        ...(typeof searchInput.search_id === "string"
+                            ? { search_id: searchInput.search_id }
+                            : {}),
+                        ...(typeof searchInput.sort === "string" ? { sort: searchInput.sort } : {}),
+                        ...(typeof searchInput.note_type === "string" ||
+                            typeof searchInput.note_type === "number"
+                            ? { note_type: searchInput.note_type }
+                            : {})
+                    }
+                }, this.#xhsEnv);
+            }
+            else if (message.command === "xhs.detail") {
+                result = await executeXhsDetail({
+                    ...commonInput,
+                    params: {
+                        note_id: normalizedInput.note_id
+                    }
+                }, this.#xhsEnv);
+            }
+            else {
+                result = await executeXhsUserHome({
+                    ...commonInput,
+                    params: {
+                        user_id: normalizedInput.user_id
+                    }
+                }, this.#xhsEnv);
+            }
             this.#emit(this.#toContentMessage(message.id, result, fingerprintRuntime));
         }
         catch (error) {
+            if (error instanceof ExtensionContractError && error.code === "ERR_CLI_INVALID_ARGS") {
+                this.#emit(toCliInvalidArgsResult({
+                    id: message.id,
+                    error,
+                    fingerprintRuntime
+                }));
+                return;
+            }
             this.#emit({
                 kind: "result",
                 id: message.id,
@@ -4195,7 +5207,7 @@ class ContentScriptHandler {
         }
     }
 }
-return { ContentScriptHandler, encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, resolveFingerprintContextForContract, resolveMainWorldEventNamesForSecret };
+return { ContentScriptHandler, ExtensionContractError, encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, readPageStateViaMainWorld, resolveFingerprintContextForContract, validateXhsCommandInputForExtension, resolveMainWorldEventNamesForSecret };
 })();
 const __webenvoy_module_content_script = (() => {
 const {

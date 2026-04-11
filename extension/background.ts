@@ -40,6 +40,11 @@ import {
   resolveXhsExecutionMode,
   normalizeXhsApprovalRecord
 } from "../shared/xhs-gate.js";
+import {
+  ExtensionContractError,
+  validateXhsCommandInputForExtension,
+  type ExtensionAbilityAction
+} from "./xhs-command-contract.js";
 import type { EditorInputFocusAttestation } from "./xhs-editor-input.js";
 
 type BridgeRequest = {
@@ -284,6 +289,7 @@ const XHS_LIVE_EXECUTION_MODES = new Set<XhsExecutionMode>([
   "live_read_high_risk",
   "live_write"
 ]);
+const XHS_GATE_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
 const XHS_REQUIRED_APPROVAL_CHECKS = APPROVAL_CHECK_KEYS;
 const XHS_WRITE_APPROVAL_REQUIREMENTS = [
   "approval_record_approved_true",
@@ -328,18 +334,122 @@ const XHS_PLUGIN_GATE_OWNERSHIP = {
   cli_role: "request_and_result_shell_only"
 } as const;
 
-const scoreXhsTab = (tab: ExtensionTab): number => {
+const resolvePreferredXhsReadPage = (
+  command: string,
+  targetPage: string | null
+): "search_result_tab" | "explore_detail_tab" | "profile_tab" | null => {
+  if (targetPage === "search_result_tab" || targetPage === "explore_detail_tab" || targetPage === "profile_tab") {
+    return targetPage;
+  }
+  if (command === "xhs.detail") {
+    return "explore_detail_tab";
+  }
+  if (command === "xhs.user_home") {
+    return "profile_tab";
+  }
+  if (command === "xhs.search") {
+    return "search_result_tab";
+  }
+  return null;
+};
+
+const resolveRequestedXhsResourceId = (
+  command: string,
+  commandParams: Record<string, unknown>
+): string | null => {
+  const input = asRecord(commandParams.input);
+  if (command === "xhs.detail") {
+    return asNonEmptyString(input?.note_id);
+  }
+  if (command === "xhs.user_home") {
+    return asNonEmptyString(input?.user_id);
+  }
+  return null;
+};
+
+const isAllowedTargetPageForXhsReadCommand = (command: string, targetPage: string | null): boolean => {
+  if (!targetPage) {
+    return true;
+  }
+  if (command === "xhs.detail") {
+    return targetPage === "explore_detail_tab";
+  }
+  if (command === "xhs.user_home") {
+    return targetPage === "profile_tab";
+  }
+  return true;
+};
+
+const validateXhsCommandInputContract = (
+  command: string,
+  commandParams: Record<string, unknown>
+): void => {
+  const ability = asRecord(commandParams.ability);
+  const input = asRecord(commandParams.input);
+  const options = asRecord(commandParams.options) ?? {};
+  if (!ability || !input) {
+    return;
+  }
+
+  validateXhsCommandInputForExtension({
+    command,
+    abilityId: asNonEmptyString(ability.id) ?? "unknown",
+    abilityAction:
+      ((asNonEmptyString(ability.action) as ExtensionAbilityAction | null) ?? "read"),
+    payload: input,
+    options
+  });
+};
+
+const tabMatchesRequestedXhsResource = (
+  tab: ExtensionTab,
+  preferredPage: ReturnType<typeof resolvePreferredXhsReadPage>,
+  resourceId: string | null
+): boolean => {
+  if (!preferredPage || !resourceId) {
+    return false;
+  }
   const url = typeof tab.url === "string" ? tab.url : "";
-  if (url.includes("/search_result")) {
+  const parsed = parseUrl(url);
+  if (!parsed) {
+    return false;
+  }
+  const currentResourceId = parsed.pathname.split("/").filter((segment) => segment.length > 0).pop() ?? null;
+  if (preferredPage === "explore_detail_tab") {
+    return parsed.pathname.startsWith("/explore/") && currentResourceId === resourceId;
+  }
+  if (preferredPage === "profile_tab") {
+    return parsed.pathname.startsWith("/user/profile/") && currentResourceId === resourceId;
+  }
+  return false;
+};
+
+const scoreXhsTab = (
+  tab: ExtensionTab,
+  preferredPage: ReturnType<typeof resolvePreferredXhsReadPage>
+): number => {
+  const url = typeof tab.url === "string" ? tab.url : "";
+  const page =
+    url.includes("/search_result")
+      ? "search_result_tab"
+      : url.includes("/explore/")
+        ? "explore_detail_tab"
+        : url.includes("/user/profile/")
+          ? "profile_tab"
+          : "other";
+  if (preferredPage && page === preferredPage) {
     return 0;
   }
-  if (url.includes("/explore/")) {
+  if (page === "search_result_tab") {
     return 1;
   }
-  if (url.includes("/user/profile/")) {
+  if (page === "explore_detail_tab") {
     return 2;
   }
-  return 3;
+  if (page === "profile_tab") {
+    return 3;
+  }
+  return 4;
 };
 
 const scoreXhsRuntimeSurfaceTab = (tab: ExtensionTab): number => {
@@ -427,6 +537,25 @@ const asInteger = (value: unknown): number | null =>
 
 const asBoolean = (value: unknown): boolean => value === true;
 
+const emitCliInvalidArgs = (
+  emit: (message: BridgeResponse) => void,
+  request: BridgeRequest,
+  error: ExtensionContractError
+): void => {
+  emit({
+    id: request.id,
+    status: "error",
+    summary: {
+      relay_path: "host>background"
+    },
+    payload: error.details ? { details: error.details } : undefined,
+    error: {
+      code: error.code,
+      message: error.message
+    }
+  });
+};
+
 const parseUrl = (value: string): URL | null => {
   try {
     return new URL(value);
@@ -487,7 +616,7 @@ const xhsGateReasonMessage = (reason: string): string => {
     TARGET_TAB_NOT_EXPLICIT: "target tab is not explicit",
     TARGET_PAGE_NOT_EXPLICIT: "target page is not explicit",
     ACTION_DOMAIN_MISMATCH: "read action cannot target write domain",
-    EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND: "execution mode is unsupported for xhs.search",
+    EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND: "execution mode is unsupported for xhs read commands",
     EDITOR_INPUT_VALIDATION_REQUIRED: "issue_208 live_write requires editor_input validation scope",
     TARGET_PAGE_ARTICLE_REQUIRED: "issue_208 editor_input only supports article publish target",
     WRITE_EXECUTION_GATE_ONLY: "write gate approved but execution remains gate-only",
@@ -718,14 +847,32 @@ const resolveGateOnlyPageState = (
   }
 
   return {
-    page_kind: targetPage === "creator_publish_tab" ? "compose" : targetPage,
+    page_kind:
+      targetPage === "creator_publish_tab"
+        ? "compose"
+        : targetPage === "explore_detail_tab"
+          ? "detail"
+          : targetPage === "profile_tab"
+            ? "user_home"
+            : targetPage,
     url:
       targetPage === "creator_publish_tab"
         ? `https://${targetDomain}/publish/publish`
         : targetPage === "search_result_tab"
           ? `https://${targetDomain}/search_result`
+          : targetPage === "explore_detail_tab"
+            ? `https://${targetDomain}/explore/note-id`
+            : targetPage === "profile_tab"
+              ? `https://${targetDomain}/user/profile/user-id`
           : `https://${targetDomain}/`,
-    title: targetPage === "creator_publish_tab" ? "Creator Publish" : "Search Result",
+    title:
+      targetPage === "creator_publish_tab"
+        ? "Creator Publish"
+        : targetPage === "explore_detail_tab"
+          ? "Detail"
+          : targetPage === "profile_tab"
+            ? "User Home"
+            : "Search Result",
     ready_state: "complete"
   };
 };
@@ -781,14 +928,40 @@ const createBridgeXhsGateOnlyPayload = (
   const ability = asRecord(commandParams.ability) ?? {};
   const input = asRecord(commandParams.input) ?? {};
   const consumerGateResult = asRecord(gatePayload.consumer_gate_result) ?? {};
+  const command = typeof request.params.command === "string" ? request.params.command : null;
+  let normalizedInput: Record<string, unknown> = input;
+  if (command && XHS_GATE_COMMANDS.has(command)) {
+    try {
+      normalizedInput = validateXhsCommandInputForExtension({
+        command,
+        abilityId: asNonEmptyString(ability.id) ?? "unknown",
+        abilityAction:
+          ((asNonEmptyString(ability.action) as ExtensionAbilityAction | null) ?? "read"),
+        payload: input,
+        options: asRecord(commandParams.options) ?? {}
+      }) as Record<string, unknown>;
+    } catch {
+      normalizedInput = input;
+    }
+  }
+  const dataRef =
+    command === "xhs.detail"
+      ? {
+          note_id: String(normalizedInput.note_id ?? "")
+        }
+      : command === "xhs.user_home"
+        ? {
+            user_id: String(normalizedInput.user_id ?? "")
+          }
+        : {
+            query: String(normalizedInput.query ?? "")
+          };
   const capabilityResult = {
     ability_id: String(ability.id ?? "xhs.note.search.v1"),
     layer: String(ability.layer ?? "L3"),
     action: String(consumerGateResult.action_type ?? "read"),
     outcome: "partial",
-    data_ref: {
-      query: String(input.query ?? "")
-    },
+    data_ref: dataRef,
     metrics: {
       count: 0
     }
@@ -2569,10 +2742,20 @@ class ChromeBackgroundBridge {
       typeof request.params.command_params === "object" && request.params.command_params !== null
         ? (request.params.command_params as Record<string, unknown>)
         : {};
-    let commandParams =
-      command === "xhs.search"
-        ? normalizeXhsSearchCommandParams(rawCommandParams)
-        : rawCommandParams;
+    let commandParams = XHS_GATE_COMMANDS.has(command)
+      ? normalizeXhsSearchCommandParams(rawCommandParams)
+      : rawCommandParams;
+    if (XHS_GATE_COMMANDS.has(command)) {
+      try {
+        validateXhsCommandInputContract(command, commandParams);
+      } catch (error) {
+        if (error instanceof ExtensionContractError && error.code === "ERR_CLI_INVALID_ARGS") {
+          emitCliInvalidArgs(this.#emit.bind(this), request, error);
+          return;
+        }
+        throw error;
+      }
+    }
     const optionParams = asRecord(commandParams.options);
     const validationAction = asNonEmptyString(
       Object.prototype.hasOwnProperty.call(commandParams, "validation_action")
@@ -2590,7 +2773,7 @@ class ChromeBackgroundBridge {
         : optionParams?.requested_execution_mode
     );
     const issue208EditorInputValidation =
-      command === "xhs.search" &&
+      XHS_GATE_COMMANDS.has(command) &&
       issueScope === "issue_208" &&
       requestedExecutionMode === "live_write" &&
       validationAction === "editor_input";
@@ -2598,11 +2781,11 @@ class ChromeBackgroundBridge {
       requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
     const requestedFingerprintContext = resolveFingerprintContext(commandParams);
     let forwardFingerprintContext =
-      command === "xhs.search" ? requestedFingerprintContext : requestedFingerprintContext;
+      XHS_GATE_COMMANDS.has(command) ? requestedFingerprintContext : requestedFingerprintContext;
     let tabId: number | null;
     let consumerGateResult: XhsTargetGateResult["consumerGateResult"] | undefined;
     let gatePayload: XhsTargetGateResult["gatePayload"] | undefined;
-    if (command === "xhs.search") {
+    if (XHS_GATE_COMMANDS.has(command)) {
       const gateResult = await this.#evaluateXhsTargetGate({
         ...request,
         params: {
@@ -2634,7 +2817,7 @@ class ChromeBackgroundBridge {
           summary: {
             session_id: String(request.params.session_id ?? "nm-session-001"),
             run_id: String(request.params.run_id ?? request.id),
-            command: "xhs.search",
+            command,
             profile: typeof request.profile === "string" ? request.profile : null,
             cwd: String(request.params.cwd ?? ""),
             tab_id: null,
@@ -3260,6 +3443,7 @@ class ChromeBackgroundBridge {
   }
 
   async #evaluateXhsTargetGate(request: BridgeRequest): Promise<XhsTargetGateResult> {
+    const command = String(request.params.command ?? "");
     const {
       commandParams,
       targetDomain,
@@ -3328,6 +3512,9 @@ class ChromeBackgroundBridge {
       issue208EditorInputValidation,
       treatMissingEditorValidationAsUnsupported: false
     });
+    if (!isAllowedTargetPageForXhsReadCommand(command, targetPage)) {
+      pushReason("TARGET_PAGE_MISMATCH");
+    }
     const matrixResolution = collectXhsMatrixGateReasons({
       gateReasons,
       state: gateState,
@@ -3791,7 +3978,16 @@ class ChromeBackgroundBridge {
       const candidate = ranked[0];
       return typeof candidate?.id === "number" ? candidate.id : null;
     }
-    if (command === "xhs.search") {
+    if (XHS_GATE_COMMANDS.has(command)) {
+      const rawCommandParams =
+        typeof request.params.command_params === "object" && request.params.command_params !== null
+          ? (request.params.command_params as Record<string, unknown>)
+          : {};
+      const requestedResourceId = resolveRequestedXhsResourceId(command, rawCommandParams);
+      const preferredPage = resolvePreferredXhsReadPage(
+        command,
+        resolveXhsGateCommandInput(rawCommandParams).targetPage
+      );
       const xhsUrlPatterns = [
         "*://www.xiaohongshu.com/*",
         "*://edith.xiaohongshu.com/*",
@@ -3807,10 +4003,20 @@ class ChromeBackgroundBridge {
           : await this.chromeApi.tabs.query({
               url: xhsUrlPatterns
             });
+      const resourceBoundTabs =
+        requestedResourceId && preferredPage
+          ? xhsTabs.filter((tab) => tabMatchesRequestedXhsResource(tab, preferredPage, requestedResourceId))
+          : [];
+      if (resourceBoundTabs.length === 1) {
+        return typeof resourceBoundTabs[0]?.id === "number" ? resourceBoundTabs[0].id : null;
+      }
+      if (requestedResourceId && preferredPage) {
+        return null;
+      }
       const ranked = xhsTabs
         .filter((tab) => typeof tab.id === "number")
         .sort((left, right) => {
-          const scoreDiff = scoreXhsTab(left) - scoreXhsTab(right);
+          const scoreDiff = scoreXhsTab(left, preferredPage) - scoreXhsTab(right, preferredPage);
           if (scoreDiff !== 0) {
             return scoreDiff;
           }
