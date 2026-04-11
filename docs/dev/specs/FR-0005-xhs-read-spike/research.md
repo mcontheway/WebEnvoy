@@ -556,34 +556,34 @@
 
 ### 5.4 2026-04-11 latest head 在 `#445-A` 合入后的再复核（issue #445-B）
 
-2026-04-11 在同一 canonical runtime 根 `/Users/mc/dev/WebEnvoy` 再次执行 fresh rerun。本轮与 5.3 的差异是：执行头已前进到 `tested_head_sha=90e1a3f0ad2ca70ac10ffc91130d9c1dd4585c0a`，即已包含 `#445-A` 对 XHS read classic bundle 的修复；因此本节只用于确认“旧的 bundle 阻断是否已解除”，并据此重做当前 formal 停点判断。
+2026-04-11 在同一 canonical runtime 根 `/Users/mc/dev/WebEnvoy` 再次执行 fresh rerun。本轮与 5.3 的差异是：执行头已前进到当前 PR latest head `tested_head_sha=c0e49add432f0d8ae8c7fe93683c552bc35128cd`，即在已包含 `#445-A` 的基础上再加入本 PR 的 formal 记录更新；因此本节只用于确认“旧的 bundle 阻断是否已解除”，并据此重做当前 formal 停点判断。
 
 #### 5.4.1 准入预检结果
 
 本轮只使用 `xhs_001`，且只在 `main` 目录执行：
 
-- `run_id=issue445-main-verify-status-restore-002`
+- `run_id=issue445-branch-verify-status-001`
   - `command=runtime.status`
   - 结果：`profileState=stopped`、`browserState=absent`、`identityBindingState=bound`、`transportState=not_connected`、`bootstrapState=not_started`、`runtimeReadiness=blocked`
   - 同时 `identityPreflight.failureReason=IDENTITY_PREFLIGHT_PASSED`、`profileRootMatches=true`，说明当前已不再是 worktree/main 路径污染
-- `run_id=issue445-main-start-visible-clean-002`
+- `run_id=issue445-branch-start-visible-001`
   - `command=runtime.start`
   - `profile=xhs_001`
   - `browser_channel=chrome`
   - `execution_surface=real_browser`
   - `page_url=https://www.xiaohongshu.com/search_result?keyword=AI&type=51`
   - 结果：`browserState=ready`、`transportState=ready`、`bootstrapState=ready`、`runtimeReadiness=ready`
-- `run_id=issue445-main-ping-clean-002`
+- `run_id=issue445-branch-ping-001`
   - `command=runtime.ping`
   - 结果：`relay_path=host>background>content-script>background>host`
-- `run_id=issue445-main-runtime-tabs-002`
+- `run_id=issue445-branch-runtime-tabs-001`
   - 桥接命令：`runtime.tabs`（当前 latest head 仍属于 internal bridge diagnostics path，不是公开 CLI 命令）
   - `page_url=https://www.xiaohongshu.com/search_result/?keyword=AI&type=51`
-  - `target_tab_id=1230416738`
+  - `target_tab_id=1230416814`
   - `relay_path=host>background`
   - 结果：成功回读当前 XHS 搜索页 tab
 
-由此可确认：在 `tested_head_sha=90e1a3f0ad2ca70ac10ffc91130d9c1dd4585c0a` 上，`xhs_001` 仍可被认定为可启动的 WebEnvoy-managed official runtime profile；`#445-A` 之后的当前阻断已不再是 runtime identity / bundle 装载失败。
+由此可确认：在 `tested_head_sha=c0e49add432f0d8ae8c7fe93683c552bc35128cd` 上，`xhs_001` 仍可被认定为可启动的 WebEnvoy-managed official runtime profile；`#445-A` 之后的当前阻断已不再是 runtime identity / bundle 装载失败。
 
 #### 5.4.2 fresh rerun 事实
 
@@ -592,7 +592,7 @@
 - `profile=xhs_001`
 - `browser_channel=chrome`
 - `execution_surface=real_browser`
-- `tested_head_sha=90e1a3f0ad2ca70ac10ffc91130d9c1dd4585c0a`
+- `tested_head_sha=c0e49add432f0d8ae8c7fe93683c552bc35128cd`
 - Chrome 页面：`https://www.xiaohongshu.com/search_result/?keyword=AI&type=51`
 
 同时确认到的 latest-head command surface 事实：
@@ -605,18 +605,18 @@
 
 `search`
 
-- `run_id=issue445-main-search-dryrun-002`
-- `evidence_collected_at=2026-04-11T04:53:03.766Z`
+- `run_id=issue445-branch-search-dryrun-002`
+- `evidence_collected_at=2026-04-11T05:05:10.068Z`
 - `profile=xhs_001`
 - `browser_channel=chrome`
 - `execution_surface=real_browser`
 - `page_url=https://www.xiaohongshu.com/search_result/?keyword=AI&type=51`
-- `target_tab_id=1230416738`
+- `target_tab_id=1230416814`
 - `relay_path=host>background>content-script>background>host`
 - `interaction_locator=search_result_tab + query=AI`
 - 最小 replay：
-  - `runtime.start --profile xhs_001 --run-id issue445-main-start-visible-clean-002 --params {"headless":false,"startUrl":"https://www.xiaohongshu.com/search_result?keyword=AI&type=51"}`
-  - internal bridge `runtime.tabs` 回读当前 XHS tab，确认 `target_tab_id=1230416738`
+  - `runtime.start --profile xhs_001 --run-id issue445-branch-start-visible-001 --params {"headless":false,"startUrl":"https://www.xiaohongshu.com/search_result?keyword=AI&type=51"}`
+  - internal bridge `runtime.tabs` 回读当前 XHS tab，确认 `target_tab_id=1230416814`
   - 以 `target_domain=www.xiaohongshu.com`、`target_page=search_result_tab`、`requested_execution_mode=dry_run` 执行 `xhs.search`
 - 成功信号：
   - `capability_result.outcome=partial`
@@ -632,13 +632,13 @@
   - `#445-A` 已解除此前的 `executeXhsSearchImpl is not defined`
   - 但 latest head 下这次 success 仍停留在 `dry_run` 成功壳，不构成 `search primary api success`，也不能补齐 required headers 矩阵
 
-- `run_id=issue445-main-search-live-blocked-001`
-- `evidence_collected_at=2026-04-11T04:53:29.106Z`
+- `run_id=issue445-branch-search-dryrun-002`（同一持锁 fresh session 内继续请求 `live_read_high_risk`）
+- `evidence_collected_at=2026-04-11T05:07:13.603Z`
 - `profile=xhs_001`
 - `browser_channel=chrome`
 - `execution_surface=real_browser`
 - `page_url=https://www.xiaohongshu.com/search_result/?keyword=AI&type=51`
-- `target_tab_id=1230416738`
+- `target_tab_id=1230416814`
 - `relay_path=host>background>content-script>background>host`
 - `interaction_locator=search_result_tab + query=AI`
 - 最小 replay：
@@ -678,7 +678,7 @@
 
 #### 5.4.5 本轮正式结论
 
-`tested_head_sha=90e1a3f0ad2ca70ac10ffc91130d9c1dd4585c0a` 的 fresh rerun，已经把 issue `#445` 的当前正式停点从“latest head execution bundle 缺陷”更新为“formal runtime gate + command surface 仍不足”，原因如下：
+`tested_head_sha=c0e49add432f0d8ae8c7fe93683c552bc35128cd` 的 fresh rerun，已经把 issue `#445` 的当前正式停点从“latest head execution bundle 缺陷”更新为“formal runtime gate + command surface 仍不足”，原因如下：
 
 - `#445-A` 已被 latest-head fresh rerun 证明有效：`xhs.search` 不再出现 `executeXhsSearchImpl is not defined`。
 - `xhs_001` 当前可被认定为可启动、可完成 `runtime.start ready`、`runtime.ping`、internal `runtime.tabs` 的 WebEnvoy-managed official runtime profile。
