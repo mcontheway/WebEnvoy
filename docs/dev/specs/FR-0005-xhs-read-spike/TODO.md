@@ -29,7 +29,7 @@
 - [x] 2026-04-06 晚间起，不再把作者本机 `.webenvoy/profiles/**` 的恢复状态直接写成正式结论；正式状态只跟随 FR-0005 已收口的 managed-profile 同口径复核结论变化
 - [x] 2026-04-10/2026-04-11 已确认此前 `IDENTITY_MANIFEST_MISSING` 属于 worktree/main 路径污染后的中间现场，不再作为最终停点
 - [x] 2026-04-11 的 managed-profile official runtime 复核历史事实已在 `research.md` 收口；其中已记录 profile root / identity preflight 不再构成当时的直接阻断
-- [x] `tested_head_sha=c0e49add432f0d8ae8c7fe93683c552bc35128cd` 的 latest-head fresh rerun 已确认：`#445-A` 修复后的 `xhs.search` 不再出现 `executeXhsSearchImpl is not defined`
+- [x] 当前 PR latest head 的 fresh rerun 已确认：`#445-A` 修复后的 `xhs.search` 不再出现 `executeXhsSearchImpl is not defined`
 - [x] 同一轮 fresh rerun 已确认 `xhs_001` 仍满足 managed-profile / official runtime / `real_browser` 启动前提，且 `runtime.start`、`runtime.ping`、internal `runtime.tabs` 均可达
 - [x] 当前 latest-head 的 `search` 已获得合法 fresh rerun 样本，但只达到 `dry_run` 成功壳；请求 `live_read_high_risk` 时会被 `risk_state=paused` + `ISSUE_ACTION_MATRIX_BLOCKED` 阻断，未形成 API primary success
 - [x] 当前 latest-head 的 `detail/user_home` 仍无公开 CLI 命令入口；因此本轮没有合法的同口径 fresh rerun 路径去产出 primary API success 样本

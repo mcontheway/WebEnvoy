@@ -556,7 +556,7 @@
 
 ### 5.4 2026-04-11 latest head 在 `#445-A` 合入后的再复核（issue #445-B）
 
-2026-04-11 在同一 canonical runtime 根 `/Users/mc/dev/WebEnvoy` 再次执行 fresh rerun。本轮与 5.3 的差异是：执行头已前进到当前 PR latest head `tested_head_sha=c0e49add432f0d8ae8c7fe93683c552bc35128cd`，即在已包含 `#445-A` 的基础上再加入本 PR 的 formal 记录更新；因此本节只用于确认“旧的 bundle 阻断是否已解除”，并据此重做当前 formal 停点判断。
+2026-04-11 在同一 canonical runtime 根 `/Users/mc/dev/WebEnvoy` 再次执行 fresh rerun。本轮与 5.3 的差异是：执行头已前进到承载 `#445-B` formal 记录更新的当前 PR latest head，即在已包含 `#445-A` 的基础上继续复核；因此本节只用于确认“旧的 bundle 阻断是否已解除”，并据此重做当前 formal 停点判断。
 
 #### 5.4.1 准入预检结果
 
@@ -583,7 +583,7 @@
   - `relay_path=host>background`
   - 结果：成功回读当前 XHS 搜索页 tab
 
-由此可确认：在 `tested_head_sha=c0e49add432f0d8ae8c7fe93683c552bc35128cd` 上，`xhs_001` 仍可被认定为可启动的 WebEnvoy-managed official runtime profile；`#445-A` 之后的当前阻断已不再是 runtime identity / bundle 装载失败。
+由此可确认：在当前 PR latest head 上，`xhs_001` 仍可被认定为可启动的 WebEnvoy-managed official runtime profile；`#445-A` 之后的当前阻断已不再是 runtime identity / bundle 装载失败。
 
 #### 5.4.2 fresh rerun 事实
 
@@ -592,7 +592,7 @@
 - `profile=xhs_001`
 - `browser_channel=chrome`
 - `execution_surface=real_browser`
-- `tested_head_sha=c0e49add432f0d8ae8c7fe93683c552bc35128cd`
+- `tested_head_sha=<见当前 PR 的 live_evidence_record.latest_head_sha>`
 - Chrome 页面：`https://www.xiaohongshu.com/search_result/?keyword=AI&type=51`
 
 同时确认到的 latest-head command surface 事实：
@@ -678,7 +678,7 @@
 
 #### 5.4.5 本轮正式结论
 
-`tested_head_sha=c0e49add432f0d8ae8c7fe93683c552bc35128cd` 的 fresh rerun，已经把 issue `#445` 的当前正式停点从“latest head execution bundle 缺陷”更新为“formal runtime gate + command surface 仍不足”，原因如下：
+当前 PR latest head 的 fresh rerun，已经把 issue `#445` 的当前正式停点从“latest head execution bundle 缺陷”更新为“formal runtime gate + command surface 仍不足”，原因如下：
 
 - `#445-A` 已被 latest-head fresh rerun 证明有效：`xhs.search` 不再出现 `executeXhsSearchImpl is not defined`。
 - `xhs_001` 当前可被认定为可启动、可完成 `runtime.start ready`、`runtime.ping`、internal `runtime.tabs` 的 WebEnvoy-managed official runtime profile。
