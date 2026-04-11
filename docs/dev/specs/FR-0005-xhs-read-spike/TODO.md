@@ -29,7 +29,12 @@
 - [x] 2026-04-06 晚间起，不再把作者本机 `.webenvoy/profiles/**` 的恢复状态直接写成正式结论；正式状态只跟随 FR-0005 已收口的 managed-profile 同口径复核结论变化
 - [x] 2026-04-10/2026-04-11 已确认此前 `IDENTITY_MANIFEST_MISSING` 属于 worktree/main 路径污染后的中间现场，不再作为最终停点
 - [x] 2026-04-11 的 managed-profile official runtime 复核历史事实已在 `research.md` 收口；其中已记录 profile root / identity preflight 不再构成当时的直接阻断
-- [x] 当前 formal FR 的文档收口已完成；正式功能停点仅为：`search/detail/user_home` 仍缺 API primary 成功与矩阵证据，其中 `detail/user_home` 尚未获得合法 fresh rerun 样本，正式结论继续 `No-Go/paused`
+- [x] 仓库内已固化的历史 fresh rerun 样本头 `eca28babebe929821aa20fbb113b2f94d6ce4f49` 已确认：`#445-A` 修复后的 `xhs.search` 不再出现 `executeXhsSearchImpl is not defined`
+- [x] 同一轮 fresh rerun 已确认 `xhs_001` 仍满足 managed-profile / official runtime / `real_browser` 启动前提，且 `runtime.start`、`runtime.ping`、internal `runtime.tabs` 均可达
+- [x] 仓库内已固化样本中的 `search` 已获得合法 fresh rerun 样本，但只达到 `dry_run` 成功壳；请求 `live_read_high_risk` 时会被 `risk_state=paused` + `ISSUE_ACTION_MATRIX_BLOCKED` 阻断，未形成 API primary success
+- [x] 仓库内已固化样本中的 `detail/user_home` 仍无公开 CLI 命令入口；因此本轮没有合法的同口径 fresh rerun 路径去产出 primary API success 样本
+- [x] current latest-head gate refresh 已收口到 FR-0016 新治理口径：PR `live_evidence_record` 维护 latest-head 证据，repo formal docs 只保留 fixed/historical sample；formal 结论继续保持 `No-Go/paused`
+- [x] 当前 formal FR 的文档收口已完成；正式功能停点更新为：`search/detail/user_home` 仍缺 API primary 成功与矩阵证据，正式结论继续 `No-Go/paused`
 
 ## #185 阻断点吸收（本次规约修订）
 
@@ -54,7 +59,10 @@
 - [x] 上述 `No-Go/paused` 继续保留为带日期的历史 closeout；当前 formal FR 何时解除停点，取决于 WebEnvoy-managed profile 下剩余同口径复核是否补齐
 - [x] 2026-04-10 晚间已按最新 managed-profile / official runtime 现场重做 Go/No-Go 判定，结论继续维持 `No-Go/paused`
 - [x] 2026-04-11 已在 main 目录完成恢复后再复核，并把 “worktree 路径污染不是最终结论” 写回正式记录
-- [ ] 先确认当前实现头是否仍存在 XHS read 执行层失败；若存在则完成修复，再补齐 `search/detail/user_home` 的 API primary 复核，并再次判定当前 Go/No-Go
+- [x] 2026-04-11 已在 latest head 重新确认：此前的 XHS read bundle 阻断已被 `#445-A` 解除，但 FR-0005 的正式停点尚未解除
+- [ ] 在风险状态满足准入、且具备合法 approval / gate 前提后，重新执行 `search` 的 managed-profile `real_browser` live primary API 复核，并补齐 required headers 最小必要集矩阵
+- [ ] 为 `detail/user_home` 提供 repo 内可复核的正式命令入口，或通过独立 formal review 明确其 latest-head 复核路径
+- [ ] 在满足上述前提后，再次判定 `search/detail/user_home` 是否达到 `route_role=primary + path_kind=api + evidence_status=success + reproduced_multi_round`
 - [ ] 完成浏览器内复核后，再决定是否进入后续实现 FR
 - [ ] 若存在 fallback-only 场景：先补 API primary 成功证据，或提交“实现范围修订”并通过独立 spec review
 - [ ] 创建“小红书 L3 读适配实现 FR”并引用 FR-0005 已复核结论
