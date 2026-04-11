@@ -28,6 +28,19 @@ describe("runtime-store-recorder", () => {
     const startInput = upsertRun.mock.calls[0][0] as { startedAt: string };
     const successInput = upsertRun.mock.calls[1][0] as { startedAt: string };
     expect(successInput.startedAt).toBe(startInput.startedAt);
+    expect(appendRunEvent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        summary: "command started",
+        summaryTruncated: false
+      })
+    );
+    expect(appendRunEvent).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        summaryTruncated: false
+      })
+    );
   });
 
   it("keeps startedAt stable from start to failure", async () => {
@@ -44,6 +57,43 @@ describe("runtime-store-recorder", () => {
     const startInput = upsertRun.mock.calls[0][0] as { startedAt: string };
     const failureInput = upsertRun.mock.calls[1][0] as { startedAt: string };
     expect(failureInput.startedAt).toBe(startInput.startedAt);
+    expect(appendRunEvent).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        diagnosisCategory: "unknown",
+        stage: "execution",
+        component: "runtime",
+        failurePoint: "unknown",
+        summary: "boom",
+        summaryTruncated: false
+      })
+    );
+  });
+
+  it("reuses CLI fallback diagnosis for runtime unavailable failures", async () => {
+    const upsertRun = vi.fn().mockResolvedValue(undefined);
+    const appendRunEvent = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn();
+    const recorder = new RuntimeStoreRecorder(baseContext.cwd, { upsertRun, appendRunEvent, close });
+
+    await recorder.recordFailure(
+      baseContext,
+      new CliError("ERR_RUNTIME_UNAVAILABLE", "通信链路不可用: ERR_TRANSPORT_TIMEOUT", {
+        retryable: true
+      })
+    );
+
+    expect(appendRunEvent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        diagnosisCategory: "runtime_unavailable",
+        stage: "runtime",
+        component: "cli",
+        failurePoint: "native-messaging",
+        summary: "通信链路不可用: ERR_TRANSPORT_TIMEOUT",
+        summaryTruncated: false
+      })
+    );
   });
 
   it("does not swallow runtime store write errors", async () => {
@@ -54,6 +104,163 @@ describe("runtime-store-recorder", () => {
     const recorder = new RuntimeStoreRecorder(baseContext.cwd, { upsertRun, appendRunEvent, close });
 
     await expect(recorder.recordSuccess(baseContext, {})).rejects.toBe(writeError);
+  });
+
+  it("projects diagnosis into runtime store failure events", async () => {
+    const upsertRun = vi.fn().mockResolvedValue(undefined);
+    const appendRunEvent = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn();
+    const recorder = new RuntimeStoreRecorder(baseContext.cwd, { upsertRun, appendRunEvent, close });
+
+    await recorder.recordFailure(
+      baseContext,
+      new CliError("ERR_EXECUTION_FAILED", "bridge timed out", {
+        diagnosis: {
+          category: "execution_interrupted",
+          failure_site: {
+            stage: "runtime_link",
+            component: "extension",
+            target: "native_bridge_open",
+            summary: "heartbeat timeout after retry budget"
+          },
+          evidence: ["transport ack missing"]
+        }
+      })
+    );
+
+    expect(appendRunEvent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        stage: "runtime_link",
+        component: "extension",
+        diagnosisCategory: "execution_interrupted",
+        failurePoint: "native_bridge_open",
+        summary: "heartbeat timeout after retry budget",
+        summaryTruncated: false
+      })
+    );
+  });
+
+  it("falls back to observability failure_site when diagnosis is absent", async () => {
+    const upsertRun = vi.fn().mockResolvedValue(undefined);
+    const appendRunEvent = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn();
+    const recorder = new RuntimeStoreRecorder(baseContext.cwd, { upsertRun, appendRunEvent, close });
+
+    await recorder.recordFailure(
+      baseContext,
+      new CliError("ERR_EXECUTION_FAILED", "blocked by page drift", {
+        observability: {
+          coverage: "partial",
+          request_evidence: "none",
+          key_requests: [],
+          page_state: null,
+          failure_site: {
+            stage: "request",
+            component: "network",
+            target: "/api/sns/web/v1/user/otherinfo",
+            summary: "account_abnormal gate returned 461"
+          }
+        }
+      })
+    );
+
+    expect(appendRunEvent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        stage: "request",
+        component: "network",
+        diagnosisCategory: "request_failed",
+        failurePoint: "/api/sns/web/v1/user/otherinfo",
+        summary: "account_abnormal gate returned 461",
+        summaryTruncated: false
+      })
+    );
+  });
+
+  it("preserves upstream diagnosis truncation when projecting failure events", async () => {
+    const upsertRun = vi.fn().mockResolvedValue(undefined);
+    const appendRunEvent = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn();
+    const recorder = new RuntimeStoreRecorder(baseContext.cwd, { upsertRun, appendRunEvent, close });
+
+    await recorder.recordFailure(
+      baseContext,
+      new CliError("ERR_EXECUTION_FAILED", "oversized diagnosis", {
+        diagnosis: {
+          failure_site: {
+            stage: "request",
+            component: "network",
+            target: "edith.xiaohongshu.com/api/sns/web/v1/search/notes",
+            summary: "x".repeat(400)
+          }
+        }
+      })
+    );
+
+    expect(appendRunEvent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        diagnosisCategory: "request_failed",
+        summaryTruncated: true
+      })
+    );
+  });
+
+  it("preserves truncation markers from already-shaped diagnoses", async () => {
+    const upsertRun = vi.fn().mockResolvedValue(undefined);
+    const appendRunEvent = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn();
+    const recorder = new RuntimeStoreRecorder(baseContext.cwd, { upsertRun, appendRunEvent, close });
+
+    await recorder.recordFailure(
+      baseContext,
+      new CliError("ERR_EXECUTION_FAILED", "forwarded runtime failure", {
+        diagnosis: {
+          category: "request_failed",
+          failure_site: {
+            stage: "request",
+            component: "network",
+            target: "/api/feed",
+            summary: "already clipped upstream",
+            summary_truncated: true
+          }
+        }
+      })
+    );
+
+    expect(appendRunEvent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        diagnosisCategory: "request_failed",
+        summary: "already clipped upstream",
+        summaryTruncated: true
+      })
+    );
+  });
+
+  it("redacts oversized failure summaries when synthesizing CLI fallback diagnosis", async () => {
+    const upsertRun = vi.fn().mockResolvedValue(undefined);
+    const appendRunEvent = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn();
+    const recorder = new RuntimeStoreRecorder(baseContext.cwd, { upsertRun, appendRunEvent, close });
+
+    await recorder.recordFailure(
+      baseContext,
+      new CliError("ERR_EXECUTION_FAILED", `authorization=Bearer abc ${"x".repeat(1200)}`)
+    );
+
+    expect(appendRunEvent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        diagnosisCategory: "unknown"
+      })
+    );
+    const eventInput = appendRunEvent.mock.calls[0][0] as { summary: string };
+    expect(eventInput.summary).toContain("[REDACTED]");
+    expect(eventInput.summary).not.toContain("Bearer abc");
+    expect(eventInput.summary).not.toContain("[TRUNCATED]");
+    expect(eventInput.summary.length).toBeLessThanOrEqual(200);
   });
 
   it("preserves approval_id when recording gate artifacts", async () => {

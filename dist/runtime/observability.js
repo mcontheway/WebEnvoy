@@ -143,9 +143,11 @@ export const normalizeFailureSite = (input, options) => {
         stage: nonEmpty(input.stage, "unknown"),
         component: nonEmpty(input.component, "unknown"),
         target: target.value,
-        ...(target.truncated ? { target_truncated: true } : {}),
+        ...((target.truncated || input.target_truncated === true) ? { target_truncated: true } : {}),
         summary: summary.value,
-        ...(summary.truncated ? { summary_truncated: true } : {})
+        ...((summary.truncated || input.summary_truncated === true)
+            ? { summary_truncated: true }
+            : {})
     };
 };
 export const buildObservabilityPayload = (input, options) => {

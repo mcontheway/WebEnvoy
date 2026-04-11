@@ -120,6 +120,21 @@ describe("diagnostics", () => {
     expect(diagnosis.failure_site.component).toBe("network");
   });
 
+  it("preserves explicit failure_site truncation markers from shaped input", () => {
+    const diagnosis = buildDiagnosis({
+      failure_site: {
+        stage: "request",
+        component: "network",
+        target: "/api/feed",
+        summary: "already clipped upstream",
+        summary_truncated: true
+      }
+    });
+
+    expect(diagnosis.failure_site.summary).toBe("already clipped upstream");
+    expect(diagnosis.failure_site.summary_truncated).toBe(true);
+  });
+
   it("prefers execution_interrupted signal over runtime_unavailable when no failure site is available", () => {
     const diagnosis = buildDiagnosis({
       signals: {

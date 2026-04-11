@@ -23,18 +23,27 @@ const SUMMARY_MAX_CHARS = 512;
 const SQLITE_BUSY_MESSAGE = /SQLITE_BUSY|database is locked/i;
 const SQLITE_OPEN_RETRY_LIMIT = 8;
 let databaseSyncCtorCache;
-const sanitizeSummary = (summary) => {
+export const sanitizeRuntimeEventSummary = (summary) => {
     if (summary === null) {
-        return null;
+        return {
+            summary: null,
+            summaryTruncated: false
+        };
     }
     const redacted = summary
         .replace(/(authorization\s*[:=]\s*)[^\s,;]+/gi, "$1[REDACTED]")
         .replace(/(cookie\s*[:=]\s*)[^\s,;]+/gi, "$1[REDACTED]")
         .replace(/(token\s*[:=]\s*)[^\s,;]+/gi, "$1[REDACTED]");
     if (redacted.length <= SUMMARY_MAX_CHARS) {
-        return redacted;
+        return {
+            summary: redacted,
+            summaryTruncated: false
+        };
     }
-    return `${redacted.slice(0, SUMMARY_MAX_CHARS)} [TRUNCATED]`;
+    return {
+        summary: `${redacted.slice(0, SUMMARY_MAX_CHARS)} [TRUNCATED]`,
+        summaryTruncated: true
+    };
 };
 const isIsoLike = (value) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value);
 const isSqliteBusyError = (error) => error instanceof Error && SQLITE_BUSY_MESSAGE.test(error.message);
@@ -180,15 +189,16 @@ export class SQLiteRuntimeStore {
             if (!runExists) {
                 throw new RuntimeStoreError("ERR_RUNTIME_STORE_RUN_NOT_FOUND", "run not found");
             }
-            const eventSummary = sanitizeSummary(input.summary);
+            const eventSummary = sanitizeRuntimeEventSummary(input.summary);
+            const summaryTruncated = input.summaryTruncated || eventSummary.summaryTruncated;
             const createdAt = new Date().toISOString();
             const result = this.#db
                 .prepare(`
         INSERT INTO runtime_events(
-          run_id, event_time, stage, component, event_type, diagnosis_category, failure_point, summary, created_at
-        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+          run_id, event_time, stage, component, event_type, diagnosis_category, failure_point, summary, summary_truncated, created_at
+        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
-                .run(input.runId, input.eventTime, input.stage, input.component, input.eventType, input.diagnosisCategory, input.failurePoint, eventSummary, createdAt);
+                .run(input.runId, input.eventTime, input.stage, input.component, input.eventType, input.diagnosisCategory, input.failurePoint, eventSummary.summary, summaryTruncated ? 1 : 0, createdAt);
             return {
                 run_id: input.runId,
                 event_id: Number(result.lastInsertRowid),
@@ -305,12 +315,20 @@ export class SQLiteRuntimeStore {
             .get(runId);
         const events = this.#db
             .prepare(`
-      SELECT id, run_id, event_time, stage, component, event_type, diagnosis_category, failure_point, summary, created_at
+      SELECT id, run_id, event_time, stage, component, event_type, diagnosis_category, failure_point, summary, summary_truncated, created_at
       FROM runtime_events
       WHERE run_id = ?
       ORDER BY event_time ASC
     `)
-            .all(runId);
+            .all(runId)
+            .map((row) => {
+            const event = row;
+            return {
+                ...event,
+                summary_truncated: event.summary_truncated === true ||
+                    (typeof event.summary_truncated === "number" && event.summary_truncated === 1)
+            };
+        });
         return {
             run: run ?? null,
             events

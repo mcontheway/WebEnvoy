@@ -47,6 +47,7 @@ export interface AppendRunEventInput {
   diagnosisCategory: string | null;
   failurePoint: string | null;
   summary: string | null;
+  summaryTruncated: boolean;
 }
 
 export interface AppendRunEventResult {
@@ -183,6 +184,7 @@ export interface RuntimeEventRecord {
   diagnosis_category: string | null;
   failure_point: string | null;
   summary: string | null;
+  summary_truncated: boolean;
   created_at: string;
 }
 
@@ -214,9 +216,14 @@ const SQLITE_OPEN_RETRY_LIMIT = 8;
 type DatabaseSyncConstructor = new (path: string) => DatabaseSync;
 let databaseSyncCtorCache: DatabaseSyncConstructor | null | undefined;
 
-const sanitizeSummary = (summary: string | null): string | null => {
+export const sanitizeRuntimeEventSummary = (
+  summary: string | null
+): { summary: string | null; summaryTruncated: boolean } => {
   if (summary === null) {
-    return null;
+    return {
+      summary: null,
+      summaryTruncated: false
+    };
   }
 
   const redacted = summary
@@ -225,10 +232,16 @@ const sanitizeSummary = (summary: string | null): string | null => {
     .replace(/(token\s*[:=]\s*)[^\s,;]+/gi, "$1[REDACTED]");
 
   if (redacted.length <= SUMMARY_MAX_CHARS) {
-    return redacted;
+    return {
+      summary: redacted,
+      summaryTruncated: false
+    };
   }
 
-  return `${redacted.slice(0, SUMMARY_MAX_CHARS)} [TRUNCATED]`;
+  return {
+    summary: `${redacted.slice(0, SUMMARY_MAX_CHARS)} [TRUNCATED]`,
+    summaryTruncated: true
+  };
 };
 
 const isIsoLike = (value: string): boolean =>
@@ -409,14 +422,15 @@ export class SQLiteRuntimeStore {
         throw new RuntimeStoreError("ERR_RUNTIME_STORE_RUN_NOT_FOUND", "run not found");
       }
 
-      const eventSummary = sanitizeSummary(input.summary);
+      const eventSummary = sanitizeRuntimeEventSummary(input.summary);
+      const summaryTruncated = input.summaryTruncated || eventSummary.summaryTruncated;
       const createdAt = new Date().toISOString();
       const result = this.#db
         .prepare(
           `
         INSERT INTO runtime_events(
-          run_id, event_time, stage, component, event_type, diagnosis_category, failure_point, summary, created_at
-        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+          run_id, event_time, stage, component, event_type, diagnosis_category, failure_point, summary, summary_truncated, created_at
+        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
         )
         .run(
@@ -427,7 +441,8 @@ export class SQLiteRuntimeStore {
           input.eventType,
           input.diagnosisCategory,
           input.failurePoint,
-          eventSummary,
+          eventSummary.summary,
+          summaryTruncated ? 1 : 0,
           createdAt
         );
 
@@ -596,13 +611,24 @@ export class SQLiteRuntimeStore {
     const events = this.#db
       .prepare(
         `
-      SELECT id, run_id, event_time, stage, component, event_type, diagnosis_category, failure_point, summary, created_at
+      SELECT id, run_id, event_time, stage, component, event_type, diagnosis_category, failure_point, summary, summary_truncated, created_at
       FROM runtime_events
       WHERE run_id = ?
       ORDER BY event_time ASC
     `
       )
-      .all(runId) as unknown as RuntimeEventRecord[];
+      .all(runId)
+      .map((row) => {
+        const event = row as unknown as Omit<RuntimeEventRecord, "summary_truncated"> & {
+          summary_truncated: number | boolean;
+        };
+        return {
+          ...event,
+          summary_truncated:
+            event.summary_truncated === true ||
+            (typeof event.summary_truncated === "number" && event.summary_truncated === 1)
+        };
+      }) as RuntimeEventRecord[];
 
     return {
       run: run ?? null,

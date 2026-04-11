@@ -159,7 +159,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
         eventType: "failed",
         diagnosisCategory: "runtime_unavailable",
         failurePoint: "bridge.open",
-        summary: "connection failed"
+        summary: "connection failed",
+        summaryTruncated: false
       })
     ).rejects.toMatchObject<Partial<RuntimeStoreError>>({
       code: "ERR_RUNTIME_STORE_RUN_NOT_FOUND"
@@ -190,7 +191,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
       eventType: "failed",
       diagnosisCategory: "runtime_unavailable",
       failurePoint: "bridge.open",
-      summary: oversized
+      summary: oversized,
+      summaryTruncated: false
     });
 
     const trace = await store.getRunTrace("run-redact-001");
@@ -202,6 +204,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
     expect(summary).not.toContain("abc123");
     expect(summary).toContain("[REDACTED]");
     expect(summary).toContain("[TRUNCATED]");
+    expect(trace.events[0]?.summary_truncated).toBe(true);
   });
 
   it("returns events ordered by event_time", async () => {
@@ -226,7 +229,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
       eventType: "succeeded",
       diagnosisCategory: null,
       failurePoint: null,
-      summary: "done"
+      summary: "done",
+      summaryTruncated: false
     });
     await store.appendRunEvent({
       runId: "run-order-001",
@@ -236,7 +240,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
       eventType: "started",
       diagnosisCategory: null,
       failurePoint: null,
-      summary: "start"
+      summary: "start",
+      summaryTruncated: false
     });
 
     const trace = await store.getRunTrace("run-order-001");
@@ -246,6 +251,71 @@ describeWithSqlite("sqlite-runtime-store", () => {
       "2026-03-19T10:00:01.000Z",
       "2026-03-19T10:00:03.000Z"
     ]);
+    expect(trace.events.map((event) => event.summary_truncated)).toEqual([false, false]);
+  });
+
+  it("rejects append event when summary_truncated is not boolean", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    await store.upsertRun({
+      runId: "run-invalid-truncation-001",
+      sessionId: null,
+      profileName: "default",
+      command: "runtime.ping",
+      status: "running",
+      startedAt: "2026-03-19T10:00:00.000Z",
+      endedAt: null,
+      errorCode: null
+    });
+
+    await expect(
+      store.appendRunEvent({
+        runId: "run-invalid-truncation-001",
+        eventTime: "2026-03-19T10:00:01.000Z",
+        stage: "command",
+        component: "runtime",
+        eventType: "failed",
+        diagnosisCategory: "unknown",
+        failurePoint: "runtime.ping",
+        summary: "bad flag",
+        summaryTruncated: "false" as unknown as boolean
+      })
+    ).rejects.toMatchObject<Partial<RuntimeStoreError>>({
+      code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+    });
+    store.close();
+  });
+
+  it("preserves caller-provided summary_truncated when store does not need to truncate again", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    await store.upsertRun({
+      runId: "run-caller-truncated-001",
+      sessionId: null,
+      profileName: "default",
+      command: "runtime.ping",
+      status: "running",
+      startedAt: "2026-03-19T10:00:00.000Z",
+      endedAt: null,
+      errorCode: null
+    });
+
+    await store.appendRunEvent({
+      runId: "run-caller-truncated-001",
+      eventTime: "2026-03-19T10:00:01.000Z",
+      stage: "command",
+      component: "runtime",
+      eventType: "failed",
+      diagnosisCategory: "unknown",
+      failurePoint: "runtime.ping",
+      summary: "diagnosis unavailable",
+      summaryTruncated: true
+    });
+
+    const trace = await store.getRunTrace("run-caller-truncated-001");
+    store.close();
+
+    expect(trace.events[0]?.summary_truncated).toBe(true);
   });
 
   it("persists approval_record and audit_record and queries by run_id", async () => {
@@ -1673,6 +1743,87 @@ describeWithSqlite("sqlite-runtime-store", () => {
     db.close();
 
     expect(() => new SQLiteRuntimeStore(dbPath)).toThrowError(RuntimeStoreError);
+  });
+
+  it("backfills summary_truncated for legacy v10 runtime events during v11 migration", async () => {
+    const cwd = await createTempCwd();
+    const dbPath = resolveRuntimeStorePath(cwd);
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    await mkdir(path.dirname(dbPath), { recursive: true });
+    const db = new DatabaseSyncCtor(dbPath);
+
+    db.prepare("PRAGMA journal_mode=WAL").run();
+    db.exec(`
+      CREATE TABLE runtime_store_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO runtime_store_meta(key, value) VALUES('schema_version', '10');
+      CREATE TABLE runtime_runs (
+        run_id TEXT PRIMARY KEY,
+        session_id TEXT,
+        profile_name TEXT NOT NULL,
+        command TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE runtime_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT NOT NULL,
+        event_time TEXT NOT NULL,
+        stage TEXT NOT NULL,
+        component TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        diagnosis_category TEXT,
+        failure_point TEXT,
+        summary TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(run_id) REFERENCES runtime_runs(run_id)
+      );
+    `);
+    db.prepare(`
+      INSERT INTO runtime_runs(
+        run_id, session_id, profile_name, command, status, started_at, ended_at, error_code, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "run-legacy-truncation-001",
+      null,
+      "default",
+      "runtime.ping",
+      "failed",
+      "2026-03-19T10:00:00.000Z",
+      "2026-03-19T10:00:01.000Z",
+      "ERR_EXECUTION_FAILED",
+      "2026-03-19T10:00:00.000Z",
+      "2026-03-19T10:00:01.000Z"
+    );
+    db.prepare(`
+      INSERT INTO runtime_events(
+        run_id, event_time, stage, component, event_type, diagnosis_category, failure_point, summary, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "run-legacy-truncation-001",
+      "2026-03-19T10:00:01.000Z",
+      "command",
+      "runtime",
+      "failed",
+      "unknown",
+      "runtime.ping",
+      "legacy projection [TRUNCATED]",
+      "2026-03-19T10:00:01.000Z"
+    );
+    db.close();
+
+    const storeAfterMigration = new SQLiteRuntimeStore(dbPath);
+    const trace = await storeAfterMigration.getRunTrace("run-legacy-truncation-001");
+    storeAfterMigration.close();
+
+    expect(trace.events[0]?.summary).toBe("legacy projection [TRUNCATED]");
+    expect(trace.events[0]?.summary_truncated).toBe(true);
   });
 
   it("backfills decision_id and approval_id linkages when migrating v6 gate records", async () => {

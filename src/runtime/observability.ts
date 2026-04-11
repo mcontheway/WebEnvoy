@@ -36,7 +36,9 @@ export interface FailureSiteInput {
   stage?: string | null;
   component?: string | null;
   target?: string | null;
+  target_truncated?: boolean;
   summary?: string | null;
+  summary_truncated?: boolean;
 }
 
 export interface ObservabilityInput {
@@ -289,9 +291,11 @@ export const normalizeFailureSite = (
     stage: nonEmpty(input.stage, "unknown"),
     component: nonEmpty(input.component, "unknown"),
     target: target.value,
-    ...(target.truncated ? { target_truncated: true } : {}),
+    ...((target.truncated || input.target_truncated === true) ? { target_truncated: true } : {}),
     summary: summary.value,
-    ...(summary.truncated ? { summary_truncated: true } : {})
+    ...((summary.truncated || input.summary_truncated === true)
+      ? { summary_truncated: true }
+      : {})
   };
 };
 

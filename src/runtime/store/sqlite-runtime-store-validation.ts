@@ -78,6 +78,9 @@ export const assertAppendRunEventInput = (
   if (!helpers.isIsoLike(input.eventTime)) {
     helpers.invalidInput("invalid event_time");
   }
+  if (typeof input.summaryTruncated !== "boolean") {
+    helpers.invalidInput("summary_truncated must be boolean");
+  }
 };
 
 export const assertGateApprovalInput = (
