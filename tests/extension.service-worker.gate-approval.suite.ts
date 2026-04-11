@@ -308,6 +308,117 @@ describe("extension service worker / gate and approval", () => {
     );
   });
 
+  it("blocks xhs.detail auto tab selection when no tab matches the requested note_id", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async (filter: { active?: boolean; url?: string | string[] }) => {
+      if (filter.url) {
+        return [
+          { id: 44, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true },
+          { id: 52, url: "https://www.xiaohongshu.com/explore/other-note", active: false }
+        ];
+      }
+      return [{ id: 11 }];
+    });
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-detail-tab-bind-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-detail-tab-bind-001",
+        command: "xhs.detail",
+        command_params: {
+          ability: { id: "xhs.note.detail.v1", layer: "L3", action: "read" },
+          input: { note_id: "expected-note" },
+          options: createXhsCommandParams({
+            target_tab_id: undefined,
+            target_page: "explore_detail_tab"
+          })
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    const failure = await vi.waitFor(() => {
+      const message = firstPort.postMessage.mock.calls
+        .map((call) => call[0] as Record<string, unknown>)
+        .find((entry) => entry.id === "run-xhs-detail-tab-bind-001");
+      expect(message).toBeDefined();
+      return message;
+    });
+    expect(failure).toMatchObject({
+      status: "error",
+      error: {
+        code: "ERR_TRANSPORT_FORWARD_FAILED"
+      }
+    });
+  });
+
+  it("blocks xhs.user_home when target_page does not belong to the command", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async (filter: { active?: boolean; url?: string | string[] }) => {
+      if (filter.url) {
+        return [{ id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }];
+      }
+      return [{ id: 11 }];
+    });
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-user-home-target-page-invalid-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-user-home-target-page-invalid-001",
+        command: "xhs.user_home",
+        command_params: {
+          ability: { id: "xhs.user.home.v1", layer: "L3", action: "read" },
+          input: { user_id: "user-001" },
+          options: createXhsCommandParams({
+            target_tab_id: undefined,
+            target_page: "search_result_tab"
+          })
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    const failure = await vi.waitFor(() => {
+      const message = firstPort.postMessage.mock.calls
+        .map((call) => call[0] as Record<string, unknown>)
+        .find((entry) => entry.id === "run-xhs-user-home-target-page-invalid-001");
+      expect(message).toBeDefined();
+      return message;
+    });
+    expect(failure).toMatchObject({
+      status: "error",
+      payload: {
+        consumer_gate_result: {
+          gate_decision: "blocked",
+          target_page: "search_result_tab"
+        }
+      },
+      error: {
+        code: "ERR_TRANSPORT_FORWARD_FAILED"
+      }
+    });
+  });
+
   it("accepts real xhs.search payload shape and reads target gate fields from options", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);

@@ -348,6 +348,56 @@ const resolvePreferredXhsReadPage = (
   return null;
 };
 
+const resolveRequestedXhsResourceId = (
+  command: string,
+  commandParams: Record<string, unknown>
+): string | null => {
+  const input = asRecord(commandParams.input);
+  if (command === "xhs.detail") {
+    return asNonEmptyString(input?.note_id);
+  }
+  if (command === "xhs.user_home") {
+    return asNonEmptyString(input?.user_id);
+  }
+  return null;
+};
+
+const isAllowedTargetPageForXhsReadCommand = (command: string, targetPage: string | null): boolean => {
+  if (!targetPage) {
+    return true;
+  }
+  if (command === "xhs.detail") {
+    return targetPage === "explore_detail_tab";
+  }
+  if (command === "xhs.user_home") {
+    return targetPage === "profile_tab";
+  }
+  return true;
+};
+
+const tabMatchesRequestedXhsResource = (
+  tab: ExtensionTab,
+  preferredPage: ReturnType<typeof resolvePreferredXhsReadPage>,
+  resourceId: string | null
+): boolean => {
+  if (!preferredPage || !resourceId) {
+    return false;
+  }
+  const url = typeof tab.url === "string" ? tab.url : "";
+  const parsed = parseUrl(url);
+  if (!parsed) {
+    return false;
+  }
+  const currentResourceId = parsed.pathname.split("/").filter((segment) => segment.length > 0).pop() ?? null;
+  if (preferredPage === "explore_detail_tab") {
+    return parsed.pathname.startsWith("/explore/") && currentResourceId === resourceId;
+  }
+  if (preferredPage === "profile_tab") {
+    return parsed.pathname.startsWith("/user/profile/") && currentResourceId === resourceId;
+  }
+  return false;
+};
+
 const scoreXhsTab = (
   tab: ExtensionTab,
   preferredPage: ReturnType<typeof resolvePreferredXhsReadPage>
@@ -3322,6 +3372,7 @@ class ChromeBackgroundBridge {
   }
 
   async #evaluateXhsTargetGate(request: BridgeRequest): Promise<XhsTargetGateResult> {
+    const command = String(request.params.command ?? "");
     const {
       commandParams,
       targetDomain,
@@ -3390,6 +3441,9 @@ class ChromeBackgroundBridge {
       issue208EditorInputValidation,
       treatMissingEditorValidationAsUnsupported: false
     });
+    if (!isAllowedTargetPageForXhsReadCommand(command, targetPage)) {
+      pushReason("TARGET_PAGE_MISMATCH");
+    }
     const matrixResolution = collectXhsMatrixGateReasons({
       gateReasons,
       state: gateState,
@@ -3858,6 +3912,7 @@ class ChromeBackgroundBridge {
         typeof request.params.command_params === "object" && request.params.command_params !== null
           ? (request.params.command_params as Record<string, unknown>)
           : {};
+      const requestedResourceId = resolveRequestedXhsResourceId(command, rawCommandParams);
       const preferredPage = resolvePreferredXhsReadPage(
         command,
         resolveXhsGateCommandInput(rawCommandParams).targetPage
@@ -3877,6 +3932,16 @@ class ChromeBackgroundBridge {
           : await this.chromeApi.tabs.query({
               url: xhsUrlPatterns
             });
+      const resourceBoundTabs =
+        requestedResourceId && preferredPage
+          ? xhsTabs.filter((tab) => tabMatchesRequestedXhsResource(tab, preferredPage, requestedResourceId))
+          : [];
+      if (resourceBoundTabs.length === 1) {
+        return typeof resourceBoundTabs[0]?.id === "number" ? resourceBoundTabs[0].id : null;
+      }
+      if (requestedResourceId && preferredPage) {
+        return null;
+      }
       const ranked = xhsTabs
         .filter((tab) => typeof tab.id === "number")
         .sort((left, right) => {
