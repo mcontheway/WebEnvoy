@@ -44,29 +44,31 @@
 - 不以 live evidence 作为关闭依据的治理、研究、spec 或实现前置 PR
 - 不以真实 live evidence 作为关闭、完成或 merge 放行依据的 formal spec review PR 或治理前置 PR
 
-当 PR 落入专项门禁，或其职责属于 formal spec review PR / live evidence 治理落库 PR 时，PR 描述必须先显式提供结构化 `gate_applicability`，至少包含：
+当 PR 落入专项门禁，或其职责属于 formal spec review PR / live evidence 治理落库或治理维护 PR 时，PR 描述必须先显式提供结构化 `gate_applicability`，至少包含：
 
 - `review_lane`
+- `governance_context_issue_ref`
 - `governance_scope_targets`
 - `in_scope`
 - `trigger_reasons`
 - `n_a_allowed`
 
-其中，`review_lane=governance_landing_pr` 只有在 reviewer / guardian 同时确认以下条件时才成立，不得只信作者自报 lane：
+其中，治理相关 lane 只有在 reviewer / guardian 同时确认以下条件时才成立，不得只信作者自报 lane：
 
-- PR 元数据显式引用 `#310`
-- PR 实际变更精确等于以下五处冻结治理落库目标文件：
+- PR 实际变更精确等于以下五处冻结治理目标文件：
   - `AGENTS.md`
   - `docs/dev/AGENTS.md`
   - `code_review.md`
   - `docs/dev/review/guardian-review-addendum.md`
   - `.github/PULL_REQUEST_TEMPLATE.md`
+- `gate_applicability.governance_context_issue_ref=#310` 时，归入 `governance_landing_pr`
+- `gate_applicability.governance_context_issue_ref` 非空且不等于 `#310` 时，归入 `governance_maintenance_pr`
 
-若带 `#310` 上下文的 PR 只命中上述目标文件子集，或在五处目标文件之外再夹带其他实质性改动，必须视为 `invalid_governance_landing_scope` 直接阻断，不得降格成 `general_pr`。
+若精确命中上述五处治理目标文件却缺少 `governance_context_issue_ref`，必须视为 `missing_governance_issue_ref` 直接阻断，不得退回普通 PR。
 
-若 PR 实际变更精确命中上述五处治理落库目标文件，但 PR 元数据没有显式引用 `#310`，必须视为 `missing_governance_issue_ref` 直接阻断，不得退回普通 PR。
+若携带治理 issue 引用的 PR 只命中上述目标文件子集，或在五处目标文件之外再夹带其他实质性改动，必须视为 `invalid_governance_landing_scope` 直接阻断，不得降格成 `general_pr`。
 
-若同一 PR 同时命中 FR-0016 正式契约文件，或命中 `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md`，且又命中任一治理落库目标文件，必须视为 `mixed_spec_and_governance_scope` 直接阻断；不需要等到完整五文件 landing 形态才触发。
+若同一 PR 同时命中 FR-0016 正式契约文件，或命中 `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md`，且又命中任一治理目标文件，必须视为 `mixed_spec_and_governance_scope` 直接阻断；不需要等到完整五文件治理形态才触发。
 
 只有 `gate_applicability.in_scope=true` 时，才必须继续提供完整 `live_evidence_record`；若 `in_scope=false && n_a_allowed=true`，该对象才允许整块写 `N/A` 或 `null`。
 
@@ -82,6 +84,7 @@
 - 仅有 `runtime.bootstrap` ack
 - 历史 run、旧日志、旧 artifact，或同一 latest head 下的历史 artifact 被直接复用为当前 evidence
 - stub/fake host 的成功结果被描述为 official Chrome live evidence
+- reviewer / guardian 被要求把仓库 formal 文档中的固定样本逐提交追写到当前 PR head，来替代 PR 描述中的 `live_evidence_record`
 
 ## 必查维度
 
@@ -100,8 +103,8 @@
   - 是否引入提示词注入、命令注入、越权执行、错误自动合并、敏感信息泄露或对不可信输入的错误信任
 - 流程与元数据合规
   - 是否满足提交信息规范、PR 描述规范、`Fixes #...` / `refs #...` 使用时机、目标分支与仓库合并策略
-  - 若 PR 属于 formal spec review PR、治理落库 PR 或落入“真实 Live Evidence 专项门禁”，PR 描述是否完整提供必需的结构化 `gate_applicability`
-  - 若 PR 自报或实质上属于 `governance_landing_pr`，是否同时满足“显式引用 `#310` + 精确五文件治理落库范围”；若不满足，是否已按 blocker 处理，而不是退回普通 PR
+  - 若 PR 属于 formal spec review PR、治理落库/治理维护 PR 或落入“真实 Live Evidence 专项门禁”，PR 描述是否完整提供必需的结构化 `gate_applicability`
+  - 若 PR 自报或实质上属于治理相关 lane，是否同时满足“精确五文件范围 + `governance_context_issue_ref` + 与 lane 一致的 closing 语义”；若不满足，是否已按 blocker 处理，而不是退回普通 PR
   - 若 PR 落入“真实 Live Evidence 专项门禁”，PR 描述是否完整提供 `live_evidence_record`，且字段、来源和 latest head 一致性可复核
 
 自动门禁优先负责低层问题，例如单元测试、集成测试、lint、type check、contract test、基础安全扫描与 CI 健康；代码审查重点判断“这段改动是否值得进入主干”。
@@ -120,8 +123,8 @@
 - 本地门禁可见性
   - 若 PR 声明通过本地创建脚本发起，是否在 PR 描述或评论中提供了可复核的门禁执行证据
 - live evidence 元数据完整性
-  - 对 formal spec review PR、治理落库 PR 与所有落入专项门禁的 PR，是否已显式提供 `gate_applicability`
-  - 对治理落库 PR，是否已显式核对 `#310` 上下文、精确五文件范围、formal spec review 前置是否满足，以及是否存在 FR-0016 spec / `TODO.md` handoff 与治理文件混线
+  - 对 formal spec review PR、治理落库/治理维护 PR 与所有落入专项门禁的 PR，是否已显式提供 `gate_applicability`
+  - 对治理落库/治理维护 PR，是否已显式核对 `governance_context_issue_ref`、精确五文件范围、formal spec review 前置是否满足，以及是否存在 FR-0016 spec / `TODO.md` handoff 与治理文件混线
   - 对落入专项门禁的 PR，是否至少写明 `latest_head_sha`、`profile`、`browser_channel`、`execution_surface`、`page_url`、`target_tab_id`、`run_id`、`evidence_collected_at`、`artifact_identity`、`relay_path`、`interaction_locator` 或等价交互定位、`success_signals`、`minimum_replay`、`artifact_log_ref`、`failure_reason`、`blocker_level`
 
 说明：
@@ -212,8 +215,8 @@
 - 高风险改动缺少关键验证或回滚说明
 - 存在安全、滥用、权限或数据风险
 - 流程与元数据不合规，且会影响合并判断，例如在 `spike/spec-ready` 阶段误用 `Fixes #...`
-- formal spec review PR、治理落库 PR 或落入“真实 Live Evidence 专项门禁”的 PR 缺少必需的 `gate_applicability`
-- 治理落库 PR 未显式引用 `#310`、未精确命中五处冻结治理落库目标文件，或 formal spec review 尚未通过
+- formal spec review PR、治理落库/治理维护 PR 或落入“真实 Live Evidence 专项门禁”的 PR 缺少必需的 `gate_applicability`
+- 治理落库/治理维护 PR 缺少 `governance_context_issue_ref`、未精确命中五处冻结治理目标文件，或 `governance_context_issue_ref` 与 `review_lane`/closing 语义不一致
 - 同一 PR 同时触碰 FR-0016 正式契约文件，或触碰 `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md`，且又触碰任一治理落库目标文件
 - 落入“真实 Live Evidence 专项门禁”的 PR 缺少 latest head 新鲜复验，或把 stub/fake host / `runtime.ping` / `runtime.bootstrap` 误写成真实闭环证据
 - 证据不足，无法支持放行
@@ -258,7 +261,7 @@ Findings 的写法要求：
 - GitHub checks 全绿（不只看 Required Checks）
 - 对普通或高风险 PR，已基于最新 head 成功执行本地 `scripts/pr-guardian.sh review <pr-number>`，且未出现新的阻断项
 - 若 PR head、目标基线或 Required Checks 状态发生变化，必须重新执行受影响的本地审查或验证
-- 若 PR 属于 formal spec review PR、治理落库 PR 或落入“真实 Live Evidence 专项门禁”，PR 描述中的 `gate_applicability` 必须完整且与 PR 实际职责一致
+- 若 PR 属于 formal spec review PR、治理落库/治理维护 PR 或落入“真实 Live Evidence 专项门禁”，PR 描述中的 `gate_applicability` 必须完整且与 PR 实际职责一致
 - 若 PR 属于 `governance_landing_pr`，formal spec review 必须已通过；未通过前必须保留 `spec_review_not_completed` 阻断，不得因为 `live_evidence_record=N/A` 或 `in_scope=false` 提前放行
 - 若 PR 落入“真实 Live Evidence 专项门禁”，PR 描述中的 `live_evidence_record` 必须与 latest head 对齐，且 reviewer / guardian 已确认不存在 evidence 缺失、证据失效、来源错误或闭环信号不足
 - 目标分支允许按仓库策略合入
@@ -299,8 +302,8 @@ Findings 的写法要求：
 - 如果证据不足，不要乐观放行
 - 如果实现与产品边界、架构原则或正式 spec 冲突，应直接指出
 - 如果关键测试、验证证据或合并元数据不足，应视为阻断性问题
-- 对 formal spec review PR、治理落库 PR 与所有落入“真实 Live Evidence 专项门禁”的 PR，必须先核对 `gate_applicability`
-- 对治理落库 PR，必须继续核对 `#310` issue 上下文、精确五文件 landing 范围、formal spec review 是否已通过，以及是否触发 `mixed_spec_and_governance_scope`；任一项不满足都应视为阻断
+- 对 formal spec review PR、治理落库/治理维护 PR 与所有落入“真实 Live Evidence 专项门禁”的 PR，必须先核对 `gate_applicability`
+- 对治理落库/治理维护 PR，必须继续核对 `governance_context_issue_ref`、精确五文件治理范围、formal spec review 是否已通过，以及是否触发 `mixed_spec_and_governance_scope`；任一项不满足都应视为阻断
 - 对落入“真实 Live Evidence 专项门禁”的 PR，必须核对 latest head、新鲜 live evidence、真实浏览器执行面来源，以及 PR 描述中的 `live_evidence_record` 字段完整性；任一项不满足都应视为阻断
 
 高风险改动：

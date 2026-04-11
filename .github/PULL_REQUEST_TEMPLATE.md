@@ -18,18 +18,20 @@
 - 已执行：
 - 未执行：
 
-## gate_applicability（对 formal spec review PR、live evidence 治理落库 PR，以及所有落入真实 live evidence 专项门禁的 PR 必填）
+## gate_applicability（对 formal spec review PR、live evidence 治理落库/治理维护 PR，以及所有落入真实 live evidence 专项门禁的 PR 必填）
 
-- review_lane（`general_pr` / `formal_spec_review_pr` / `governance_landing_pr`）:
-- governance_scope_targets（仅 `review_lane=governance_landing_pr` 时填写冻结目标文件数组；必须精确列出 `AGENTS.md`、`docs/dev/AGENTS.md`、`code_review.md`、`docs/dev/review/guardian-review-addendum.md`、`.github/PULL_REQUEST_TEMPLATE.md`；其他场景写 `[]`）:
+- review_lane（`general_pr` / `formal_spec_review_pr` / `governance_landing_pr` / `governance_maintenance_pr`）:
+- governance_context_issue_ref（仅治理相关 lane 使用；`#310` 仅用于 `governance_landing_pr`；其他治理维护使用独立 issue；非治理场景写 `null`）:
+- governance_scope_targets（仅治理相关 lane 时填写冻结目标文件数组；必须精确列出 `AGENTS.md`、`docs/dev/AGENTS.md`、`code_review.md`、`docs/dev/review/guardian-review-addendum.md`、`.github/PULL_REQUEST_TEMPLATE.md`；其他场景写 `[]`）:
 - in_scope（`true` / `false`）:
 - trigger_reasons（命中触发原因时填写数组；不适用写 `[]`）:
 - n_a_allowed（`true` / `false`）:
 
 补充说明：
 
-- `review_lane=governance_landing_pr` 只有在当前 PR 元数据显式引用 `#310`，且实际变更精确等于上述五个冻结治理落库目标文件时才成立；子集、超集或缺少 `#310` 引用都必须视为阻断，不得通过自报 lane 绕过
-- 若当前 PR 同时触碰 FR-0016 正式契约文件或 `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md`，且又触碰任一治理落库目标文件，必须拆分；不要继续在同一 PR 混合 spec 与治理落库范围
+- 只有在当前 PR 实际变更精确等于上述五个冻结治理目标文件时，治理相关 lane 才成立；子集、超集或缺少 `governance_context_issue_ref` 都必须视为阻断
+- `review_lane=governance_landing_pr` 仅当 `governance_context_issue_ref=#310` 时成立；`review_lane=governance_maintenance_pr` 仅当 `governance_context_issue_ref` 非空且不等于 `#310` 时成立
+- 若当前 PR 同时触碰 FR-0016 正式契约文件或 `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md`，且又触碰任一治理目标文件，必须拆分；不要继续在同一 PR 混合 spec 与治理范围
 - `governance_landing_pr` 在 formal spec review 通过前必须保持 blocked；该 lane 即使 `in_scope=false` 且 `live_evidence_record=N/A`，也不能绕过此前置条件
 
 ## live_evidence_record（仅当 `gate_applicability.in_scope=true` 时必填；若 `in_scope=false && n_a_allowed=true`，整块可写 `N/A` 或 `null`）
@@ -51,6 +53,10 @@
 - failure_reason（成功填 `N/A`）:
 - blocker_level（成功填 `N/A`）:
 
+补充说明：
+
+- latest-head 门禁以 PR 描述中的 `live_evidence_record` 为准；仓库 formal 文档中的固定样本、历史失败事实或已固化 run 记录，只要未被误写成当前 latest-head gate evidence，就不需要逐提交追写当前 PR head SHA
+
 ## 作者执行现场自述（供 review 参考）
 
 - 本次执行现场：
@@ -69,8 +75,8 @@
 - [ ] 已确认标题和提交信息符合中文 Conventional Commits 约束
 - [ ] 已补充与风险相匹配的验证证据
 - [ ] 如有对应 Issue，已在 PR 描述中显式写出正确的关闭语义（`Fixes #...` 或 `Refs #...`）
-- [ ] 若本 PR 属于 formal spec review PR、live evidence 治理落库 PR 或落入真实 live evidence 专项门禁，已补齐 `gate_applicability`
-- [ ] 若本 PR 属于 `governance_landing_pr`，已确认当前 PR 显式引用 `#310`，且实际变更精确等于五个冻结治理落库目标文件，未混入 FR-0016 formal spec / `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md` 范围
+- [ ] 若本 PR 属于 formal spec review PR、live evidence 治理落库/治理维护 PR 或落入真实 live evidence 专项门禁，已补齐 `gate_applicability`
+- [ ] 若本 PR 属于治理相关 lane，已确认 `governance_context_issue_ref`、`review_lane`、精确五文件治理范围与 closing 语义彼此一致，且未混入 FR-0016 formal spec / `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md` 范围
 - [ ] 若本 PR 落入真实 live evidence 专项门禁，已补齐 latest head 的有效 `live_evidence_record`，且未把 stub/fake host、`runtime.ping` 或 `runtime.bootstrap` 误写为真实闭环证据
 - [ ] 如涉及 FR / 架构 / 高风险目录，已补充必要上下文与影响说明
 - [ ] 如涉及正式 spec / 架构规约，已先完成 spec review，且未与实现代码混在同一 PR

@@ -217,26 +217,28 @@ spec review 的执行约束：
 - 不把真实 live evidence 作为关闭依据的治理、研究、spec 或实现前置 PR
 - 不把真实 live evidence 作为关闭、完成或 merge 放行依据的 formal spec review PR 或治理前置 PR
 
-当 PR 落入专项门禁，或其职责属于 formal spec review PR / live evidence 治理落库 PR 时，PR 描述必须显式提供结构化 `gate_applicability` 区块，至少包含：
+当 PR 落入专项门禁，或其职责属于 formal spec review PR / live evidence 治理落库或治理维护 PR 时，PR 描述必须显式提供结构化 `gate_applicability` 区块，至少包含：
 
 - `review_lane`
+- `governance_context_issue_ref`
 - `governance_scope_targets`
 - `in_scope`
 - `trigger_reasons`
 - `n_a_allowed`
 
-其中，`review_lane=governance_landing_pr` 不是作者自报即可成立；reviewer / guardian 必须同时确认：
+其中，`review_lane=governance_landing_pr` / `governance_maintenance_pr` 都不是作者自报即可成立；reviewer / guardian 必须基于 PR 实际文件范围与结构化 issue 引用机判：
 
-- PR 元数据显式引用 `#310`
-- PR 实际变更精确等于以下五处冻结治理落库目标文件：
+- PR 实际变更精确等于以下五处冻结治理目标文件：
   - `AGENTS.md`
   - `docs/dev/AGENTS.md`
   - `code_review.md`
   - `docs/dev/review/guardian-review-addendum.md`
   - `.github/PULL_REQUEST_TEMPLATE.md`
-- 若只命中上述目标文件子集，或在五处目标文件之外再夹带其他实质性改动，必须直接阻断，不得退回普通 PR
+- `gate_applicability.governance_context_issue_ref=#310` 时，才允许进入 `governance_landing_pr`
+- `gate_applicability.governance_context_issue_ref` 非空且不等于 `#310` 时，才允许进入 `governance_maintenance_pr`
+- 若精确命中上述五处治理目标文件却缺少 `governance_context_issue_ref`，或只命中上述目标文件子集，或在五处目标文件之外再夹带其他实质性改动，必须直接阻断，不得退回普通 PR
 
-若 PR 实际变更命中 FR-0016 `spec_contract_targets` 中任一正式契约文件，或命中 `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md`，且又命中任一治理落库目标文件，必须按 `mixed_spec_and_governance_scope` 直接阻断，不得继续占用 `formal_spec_review_pr` 或 `governance_landing_pr` lane。
+若 PR 实际变更命中 FR-0016 `spec_contract_targets` 中任一正式契约文件，或命中 `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md`，且又命中任一治理目标文件，必须按 `mixed_spec_and_governance_scope` 直接阻断，不得继续占用 `formal_spec_review_pr`、`governance_landing_pr` 或 `governance_maintenance_pr` lane。
 
 只有当 `gate_applicability.in_scope=true` 时，才必须进一步提供完整 `live_evidence_record`；若 `in_scope=false && n_a_allowed=true`，`live_evidence_record` 才允许整块写 `N/A` 或 `null`。
 
@@ -276,6 +278,7 @@ spec review 的执行约束：
 
 - `execution_surface=real_browser` 才可能成为有效 live evidence
 - `run_id`、`evidence_collected_at`、`artifact_identity` 与 `artifact_log_ref` 必须能共同指向当前 latest head 的这次 fresh rerun
+- reviewer / guardian 必须以 PR 描述中的 `live_evidence_record` 作为 latest-head 门禁输入；仓库 formal 文档中的固定样本、历史失败事实或已固化 run 记录，只要未被误写成当前 latest-head gate evidence，就不得被要求逐提交追写当前 PR head SHA
 - 成功态必须把 `failure_reason` 与 `blocker_level` 写为 `N/A`
 - 失败或阻断态必须显式填写失败原因与阻断层级，不得用 `N/A` 规避披露
 
@@ -308,7 +311,7 @@ spec review 的执行约束：
   - 完整实现闭环使用 `Fixes #<issue-number>`
   - Spike、规约、研究或部分完成场景使用 `Refs #<issue-number>`
 - 若 PR 落入“真实 Live Evidence 专项门禁”，缺少 latest head fresh rerun、证据来自 stub/fake host、只给出 `runtime.ping` / `runtime.bootstrap` 等控制面信号，或缺少必需的 `gate_applicability` / `live_evidence_record` 元数据时，reviewer 必须直接阻断，不按“建议补充”处理
-- 若 PR 自报 `governance_landing_pr`，但未显式引用 `#310`、未精确命中五处冻结治理落库目标文件，或 formal spec review 尚未通过，reviewer 必须直接阻断，不得按普通 PR 放行
+- 若 PR 精确命中五处冻结治理目标文件，却缺少 `governance_context_issue_ref`、未精确命中该五文件集合，或 `review_lane` / closing 语义与 `governance_context_issue_ref` 不一致，reviewer 必须直接阻断，不得按普通 PR 放行
 - 若同一 PR 同时触碰 FR-0016 正式契约文件，或触碰 `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md`，且又触碰任一治理落库目标文件，reviewer 必须按 `mixed_spec_and_governance_scope` 直接阻断
 - `docs/dev/specs/` 是正式契约区，不应把 backlog 草稿、未确认需求或本地进度真相源写入其中。
 
