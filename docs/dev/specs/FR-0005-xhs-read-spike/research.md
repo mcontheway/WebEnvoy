@@ -556,7 +556,7 @@
 
 ### 5.4 2026-04-11 仓库内已固化 fresh rerun 样本（issue #445-B）
 
-2026-04-11 在同一 canonical runtime 根 `/Users/mc/dev/WebEnvoy` 再次执行 fresh rerun。本轮与 5.3 的差异是：执行头已前进到承载 `#445-B` formal 记录更新的后续 head；当前仓库内固化的这组 fresh rerun 证据对应提交为 `eca28babebe929821aa20fbb113b2f94d6ce4f49`。因此本节只用于确认“旧的 bundle 阻断是否已解除”，并据此重做当前 formal 停点判断。
+2026-04-11 在同一 canonical runtime 根 `/Users/mc/dev/WebEnvoy` 再次执行 fresh rerun。本轮与 5.3 的差异是：执行头已前进到承载 `#445-B` formal 记录更新的后续 head；当前仓库内先固化了一组历史 fresh rerun 样本，对应提交为 `eca28babebe929821aa20fbb113b2f94d6ce4f49`。该组样本用于确认“旧的 bundle 阻断是否已解除”，但不再把它直接表述成后续 PR gate 的 current latest-head 证据；当前 PR latest-head 的 gate refresh 见 5.4.6。
 
 #### 5.4.1 准入预检结果
 
@@ -583,7 +583,7 @@
   - `relay_path=host>background`
   - 结果：成功回读当前 XHS 搜索页 tab
 
-由此可确认：在当前 PR latest head 上，`xhs_001` 仍可被认定为可启动的 WebEnvoy-managed official runtime profile；`#445-A` 之后的当前阻断已不再是 runtime identity / bundle 装载失败。
+由此可确认：在该轮固定样本头 `eca28babebe929821aa20fbb113b2f94d6ce4f49` 上，`xhs_001` 可被认定为可启动的 WebEnvoy-managed official runtime profile；`#445-A` 之后的当时直接阻断已不再是 runtime identity / bundle 装载失败。
 
 #### 5.4.2 fresh rerun 事实
 
@@ -595,7 +595,7 @@
 - `evidence_head_sha=eca28babebe929821aa20fbb113b2f94d6ce4f49`
 - Chrome 页面：`https://www.xiaohongshu.com/search_result/?keyword=AI&type=51`
 
-同时确认到的 latest-head command surface 事实：
+同时确认到的该轮样本头 command surface 事实：
 
 - 当前公开 runtime CLI 命令仅有 `runtime.help/install/uninstall/ping/start/login/status/stop/audit`
 - 当前公开 XHS CLI 命令仅有 `xhs.search`
@@ -630,7 +630,7 @@
   - 本轮没有形成 `route_role=primary + path_kind=api + evidence_status=success` 的 live API 成功样本
 - 成熟度结论：
   - `#445-A` 已解除此前的 `executeXhsSearchImpl is not defined`
-  - 但 latest head 下这次 success 仍停留在 `dry_run` 成功壳，不构成 `search primary api success`，也不能补齐 required headers 矩阵
+  - 但该轮固定样本头下这次 success 仍停留在 `dry_run` 成功壳，不构成 `search primary api success`，也不能补齐 required headers 矩阵
 
 - `run_id=issue445-branch-search-dryrun-002`（同一持锁 fresh session 内继续请求 `live_read_high_risk`）
 - `evidence_collected_at=2026-04-11T05:07:13.603Z`
@@ -654,39 +654,78 @@
   - `failure_reason=live_read_blocked_by_risk_state`
   - `blocker_level=formal_runtime_gate`
 - 成熟度结论：
-  - latest head 已不再被 bundle 阻断，但在当前 formal 风险状态下，`search` 仍无法进入 live primary API 执行
+  - 该轮固定样本头已不再被 bundle 阻断，但在当前 formal 风险状态下，`search` 仍无法进入 live primary API 执行
 
 `detail`
 
 - 本轮未获得合法 fresh rerun 样本
-- 直接原因已不再是 bundle 缺陷，而是当前 latest head 公开 command surface 仍未提供 `xhs.detail` 的正式 CLI 入口
+- 直接原因已不再是 bundle 缺陷，而是该轮固定样本头的公开 command surface 仍未提供 `xhs.detail` 的正式 CLI 入口
 - `runtime.tabs` 等 internal bridge diagnostics path 只能证明 tab/page 诊断可达，不能替代 `detail primary api` 的正式复核路径
 - 当前维持既有结论：`fallback-only + candidate/failed`，未新增 `/api/sns/web/v1/feed` primary success 样本
 
 `user_home`
 
 - 本轮未获得合法 fresh rerun 样本
-- 直接原因同上：当前 latest head 公开 command surface 仍未提供 `xhs.user_home` 的正式 CLI 入口
+- 直接原因同上：该轮固定样本头的公开 command surface 仍未提供 `xhs.user_home` 的正式 CLI 入口
 - 本轮没有新增 `/api/sns/web/v1/user/otherinfo` 或候选聚合端点的 primary success 样本
 - 当前维持既有结论：`fallback-only + candidate/failed`
 
 #### 5.4.4 required headers / 关键字段矩阵是否提升
 
 - `search`：未提升。`dry_run` 成功壳不包含 API request evidence；而 `live_read_high_risk` 在 background gate 即被 `risk_state=paused` 阻断，因此本轮没有新增 `required_headers_observed/candidate` 的有效提升证据。
-- `detail`：未提升。当前 latest head 仍无 repo 内可复核的公开 CLI 入口，本轮无新增 API primary success 样本。
-- `user_home`：未提升。当前 latest head 仍无 repo 内可复核的公开 CLI 入口，本轮无新增 API primary success 样本。
+- `detail`：未提升。该轮固定样本头仍无 repo 内可复核的公开 CLI 入口，本轮无新增 API primary success 样本。
+- `user_home`：未提升。该轮固定样本头仍无 repo 内可复核的公开 CLI 入口，本轮无新增 API primary success 样本。
 
 #### 5.4.5 本轮正式结论
 
-当前仓库内已固化的 fresh rerun 证据（`evidence_head_sha=eca28babebe929821aa20fbb113b2f94d6ce4f49`），已经把 issue `#445` 的正式停点从“latest head execution bundle 缺陷”更新为“formal runtime gate + command surface 仍不足”，原因如下：
+当前仓库内已固化的历史 fresh rerun 证据（`evidence_head_sha=eca28babebe929821aa20fbb113b2f94d6ce4f49`），已经把 issue `#445` 的正式停点从“execution bundle 缺陷”更新为“formal runtime gate + command surface 仍不足”，原因如下：
 
-- `#445-A` 已被 latest-head fresh rerun 证明有效：`xhs.search` 不再出现 `executeXhsSearchImpl is not defined`。
+- `#445-A` 已被该轮固定样本 fresh rerun 证明有效：`xhs.search` 不再出现 `executeXhsSearchImpl is not defined`。
 - `xhs_001` 当前可被认定为可启动、可完成 `runtime.start ready`、`runtime.ping`、internal `runtime.tabs` 的 WebEnvoy-managed official runtime profile。
 - 但 `search` 在 current formal state 下只能达到 `dry_run` 成功壳；一旦请求 `live_read_high_risk`，就会被 `risk_state=paused` 与 `ISSUE_ACTION_MATRIX_BLOCKED` 明确阻断，未形成 `primary + api + success` 样本。
-- `detail` 与 `user_home` 在当前 latest head 上仍无公开 CLI 命令入口，因此本轮没有合法的同口径 fresh rerun 路径去产出 primary API success 样本。
+- `detail` 与 `user_home` 在该轮固定样本头上仍无公开 CLI 命令入口，因此本轮没有合法的同口径 fresh rerun 路径去产出 primary API success 样本。
 - 因此 `search/detail/user_home` 三类场景依然没有同时达到 `route_role=primary + path_kind=api + evidence_status=success + reproduced_multi_round`。
 - issue `#445` 的本轮正式 Go/No-Go 结论继续维持：`No-Go/paused`。
-- 当前唯一允许写入 formal FR 的停点应是：`仍缺某些场景的 API primary 成功/矩阵证据，继续 No-Go/paused`；其中当前 latest-head 的直接阻断已更新为 `live_read_blocked_by_risk_state + detail/user_home formal command surface missing`。
+- 当前唯一允许写入 formal FR 的停点应是：`仍缺某些场景的 API primary 成功/矩阵证据，继续 No-Go/paused`；其中该轮固定样本头的直接阻断已更新为 `live_read_blocked_by_risk_state + detail/user_home formal command surface missing`。
+
+#### 5.4.6 2026-04-11 current PR latest-head gate refresh
+
+为满足 FR-0016 latest-head gate 约束，在当前 PR rebased head `2aa5e90cbccb61902365fbf417e431ec10e7edbd` 上再次执行 fresh rerun。该轮 gate refresh 只用于确认：5.4 中已经写入 formal closeout 的结论，在 current latest head 上是否仍保持同一口径。
+
+- `profile=xhs_001`
+- `browser_channel=chrome`
+- `execution_surface=real_browser`
+- `evidence_head_sha=2aa5e90cbccb61902365fbf417e431ec10e7edbd`
+- `page_url=https://www.xiaohongshu.com/search_result/?keyword=AI&type=51`
+- readiness / relay：
+  - `run_id=issue445-head2aa5e90-status-001`
+  - `run_id=issue445-head2aa5e90-start-001`
+  - `run_id=issue445-head2aa5e90-ping-001`
+  - `run_id=issue445-head2aa5e90-tabs-001`
+  - `target_tab_id=1230417138`
+  - `relay_path=host>background>content-script>background>host`
+- `search` dry-run：
+  - `run_id=issue445-head2aa5e90-search-dryrun-001`
+  - `evidence_collected_at=2026-04-11T07:30:34.691Z`
+  - `capability_result.outcome=partial`
+  - `consumer_gate_result.gate_decision=allowed`
+  - `requested_execution_mode=dry_run`
+  - `effective_execution_mode=dry_run`
+  - `observability.page_state.page_kind=search`
+  - `observability.request_evidence=none`
+  - `observability.key_requests=[]`
+- `search` live request：
+  - `run_id=issue445-head2aa5e90-search-live-001`
+  - `evidence_collected_at=2026-04-11T07:30:35.018Z`
+  - `error.code=ERR_EXECUTION_FAILED`
+  - 原文：`risk state paused blocks live read`
+  - `gate_decision=blocked`
+  - `gate_reasons=["RISK_STATE_PAUSED","ISSUE_ACTION_MATRIX_BLOCKED"]`
+  - `effective_execution_mode=dry_run`
+  - `risk_state_output.current_state=paused`
+- current latest-head gate refresh 结论：
+  - 与 5.4 历史固定样本保持一致：`#445-A` 已解除 bundle 缺陷，但 `search` 仍只达到 `dry_run` 成功壳，`live_read_high_risk` 仍被 formal runtime gate 阻断。
+  - `detail` / `user_home` 在 current latest head 仍无公开 CLI 命令入口，因此 formal `No-Go/paused` 结论保持不变。
 
 ## 未决项（进入下一轮复核前保留）
 
