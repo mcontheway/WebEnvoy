@@ -61,8 +61,36 @@ describe("runtime-store-recorder", () => {
       2,
       expect.objectContaining({
         diagnosisCategory: "unknown",
-        failurePoint: "runtime.ping",
-        summary: "ERR_EXECUTION_FAILED: boom",
+        stage: "execution",
+        component: "runtime",
+        failurePoint: "unknown",
+        summary: "boom",
+        summaryTruncated: false
+      })
+    );
+  });
+
+  it("reuses CLI fallback diagnosis for runtime unavailable failures", async () => {
+    const upsertRun = vi.fn().mockResolvedValue(undefined);
+    const appendRunEvent = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn();
+    const recorder = new RuntimeStoreRecorder(baseContext.cwd, { upsertRun, appendRunEvent, close });
+
+    await recorder.recordFailure(
+      baseContext,
+      new CliError("ERR_RUNTIME_UNAVAILABLE", "通信链路不可用: ERR_TRANSPORT_TIMEOUT", {
+        retryable: true
+      })
+    );
+
+    expect(appendRunEvent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        diagnosisCategory: "runtime_unavailable",
+        stage: "runtime",
+        component: "cli",
+        failurePoint: "native-messaging",
+        summary: "通信链路不可用: ERR_TRANSPORT_TIMEOUT",
         summaryTruncated: false
       })
     );
@@ -211,7 +239,7 @@ describe("runtime-store-recorder", () => {
     );
   });
 
-  it("marks failure summaries as truncated when projection exceeds store budget", async () => {
+  it("redacts oversized failure summaries when synthesizing CLI fallback diagnosis", async () => {
     const upsertRun = vi.fn().mockResolvedValue(undefined);
     const appendRunEvent = vi.fn().mockResolvedValue(undefined);
     const close = vi.fn();
@@ -225,13 +253,14 @@ describe("runtime-store-recorder", () => {
     expect(appendRunEvent).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        diagnosisCategory: "unknown",
-        summaryTruncated: true
+        diagnosisCategory: "unknown"
       })
     );
     const eventInput = appendRunEvent.mock.calls[0][0] as { summary: string };
     expect(eventInput.summary).toContain("[REDACTED]");
-    expect(eventInput.summary).toContain("[TRUNCATED]");
+    expect(eventInput.summary).not.toContain("Bearer abc");
+    expect(eventInput.summary).not.toContain("[TRUNCATED]");
+    expect(eventInput.summary.length).toBeLessThanOrEqual(200);
   });
 
   it("preserves approval_id when recording gate artifacts", async () => {

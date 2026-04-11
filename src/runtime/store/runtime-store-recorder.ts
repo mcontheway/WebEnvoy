@@ -1,5 +1,6 @@
 import type { CliError } from "../../core/errors.js";
 import type { JsonObject, RuntimeContext } from "../../core/types.js";
+import { diagnosisFromCliError } from "../cli-diagnosis.js";
 import { buildDiagnosis } from "../diagnostics.js";
 import {
   APPROVAL_CHECK_KEYS,
@@ -99,7 +100,7 @@ const buildFailureEventProjection = (
       ? buildDiagnosis({
           failure_site: error.observability.failure_site
         })
-      : null;
+      : buildDiagnosis(diagnosisFromCliError(error));
   const failureSite = diagnosis?.failure_site ?? null;
   const evidenceSummary =
     diagnosis?.evidence.find((item) => typeof item === "string" && item.trim().length > 0) ?? null;
