@@ -367,33 +367,6 @@ const createFlakyDeleteLockAdapter = (failuresBeforeSuccess: number) => {
   };
 };
 
-const createTransientCorruptLockReadAdapter = (lockPath: string, invalidReadsBeforeSuccess: number) => {
-  let invalidReadsRemaining = invalidReadsBeforeSuccess;
-  return {
-    readFile: async (path: string, encoding: "utf8") => {
-      if (path === lockPath && invalidReadsRemaining > 0) {
-        invalidReadsRemaining -= 1;
-        return "{\"ownerRunId\":";
-      }
-      return readFile(path, encoding);
-    },
-    writeFile: async (
-      path: string,
-      data: string,
-      options?: { encoding?: "utf8"; flag?: string } | "utf8"
-    ) => {
-      if (typeof options === "string") {
-        await writeFile(path, data, options);
-        return;
-      }
-      await writeFile(path, data, options);
-    },
-    unlink: async (path: string) => {
-      await rm(path, { force: true });
-    }
-  };
-};
-
 describe("profile-runtime start rollback", () => {
   it("rolls back lock file when meta write fails", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-"));
@@ -417,68 +390,6 @@ describe("profile-runtime start rollback", () => {
     const lockPath = join(profileRootDir, "rollback_profile", "__webenvoy_lock.json");
     await expect(readFile(lockPath, "utf8")).rejects.toMatchObject({
       code: "ENOENT"
-    });
-  });
-});
-
-describe("profile-runtime lock read recovery", () => {
-  it("retries transient partial lock reads before returning locked during start contention", async () => {
-    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-lock-read-retry-"));
-    tempDirs.push(baseDir);
-    const profileDir = join(baseDir, ".webenvoy", "profiles", "lock_retry_profile");
-    await mkdir(profileDir, { recursive: true });
-    const lockPath = join(profileDir, "__webenvoy_lock.json");
-    await writeFile(
-      lockPath,
-      `${JSON.stringify(
-        {
-          profileName: "lock_retry_profile",
-          lockPath,
-          ownerPid: 54321,
-          ownerRunId: "run-runtime-test-locked-owner",
-          acquiredAt: "2026-04-11T00:00:00.000Z",
-          lastHeartbeatAt: "2026-04-11T00:00:00.000Z"
-        },
-        null,
-        2
-      )}\n`,
-      "utf8"
-    );
-    const service = createTestService({
-      lockFileAdapter: createTransientCorruptLockReadAdapter(lockPath, 1),
-      isProcessAlive: (pid: number) => pid === 54321
-    });
-
-    await expect(
-      service.start({
-        cwd: baseDir,
-        profile: "lock_retry_profile",
-        runId: "run-runtime-test-locked-contender",
-        params: {}
-      })
-    ).rejects.toMatchObject({
-      code: "ERR_PROFILE_LOCKED"
-    });
-  });
-
-  it("keeps malformed lock files as profile_meta_corrupt after retry budget", async () => {
-    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-lock-read-corrupt-"));
-    tempDirs.push(baseDir);
-    const profileDir = join(baseDir, ".webenvoy", "profiles", "lock_corrupt_profile");
-    await mkdir(profileDir, { recursive: true });
-    const lockPath = join(profileDir, "__webenvoy_lock.json");
-    await writeFile(lockPath, "{\"ownerRunId\":\n", "utf8");
-    const service = createTestService();
-
-    await expect(
-      service.start({
-        cwd: baseDir,
-        profile: "lock_corrupt_profile",
-        runId: "run-runtime-test-lock-corrupt",
-        params: {}
-      })
-    ).rejects.toMatchObject({
-      code: "ERR_PROFILE_META_CORRUPT"
     });
   });
 });

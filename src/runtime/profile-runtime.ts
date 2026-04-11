@@ -78,8 +78,6 @@ import {
 const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
 const LOCK_ACQUIRE_MAX_RETRIES = 6;
 const STOP_LOCK_DELETE_MAX_RETRIES = 3;
-const LOCK_READ_PARSE_MAX_RETRIES = 3;
-const LOCK_READ_PARSE_RETRY_DELAY_MS = 20;
 
 interface RuntimeActionInput {
   cwd: string;
@@ -139,11 +137,6 @@ interface RuntimeBridgeLike {
   }): Promise<BridgeCommandResult>;
 }
 const isoNow = (): string => new Date().toISOString();
-const delay = (ms: number): Promise<void> =>
-  new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-
 const DEFAULT_LOCK_FILE_ADAPTER: LockFileAdapter = {
   readFile: async (path, encoding) => readFile(path, encoding),
   writeFile: async (path, data, options) => {
@@ -1166,26 +1159,16 @@ export class ProfileRuntimeService {
   }
 
   async #readLock(lockPath: string): Promise<ProfileLock | null> {
-    let lastError: unknown = null;
-    for (let attempt = 0; attempt < LOCK_READ_PARSE_MAX_RETRIES; attempt += 1) {
-      try {
-        const raw = await this.#lockFileAdapter.readFile(lockPath, "utf8");
-        return JSON.parse(raw) as ProfileLock;
-      } catch (error) {
-        const nodeError = error as NodeJS.ErrnoException;
-        if (nodeError.code === "ENOENT") {
-          return null;
-        }
-        lastError = error;
-        if (!(error instanceof SyntaxError) || attempt === LOCK_READ_PARSE_MAX_RETRIES - 1) {
-          break;
-        }
-        await delay(LOCK_READ_PARSE_RETRY_DELAY_MS);
+    try {
+      const raw = await this.#lockFileAdapter.readFile(lockPath, "utf8");
+      return JSON.parse(raw) as ProfileLock;
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException;
+      if (nodeError.code === "ENOENT") {
+        return null;
       }
+      throw new CliError("ERR_PROFILE_META_CORRUPT", "profile 锁文件损坏");
     }
-    throw new CliError("ERR_PROFILE_META_CORRUPT", "profile 锁文件损坏", {
-      cause: lastError instanceof Error ? lastError : undefined
-    });
   }
 
   async #writeLock(lockPath: string, lock: ProfileLock): Promise<void> {
