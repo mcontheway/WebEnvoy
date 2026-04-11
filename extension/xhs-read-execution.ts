@@ -239,6 +239,105 @@ const inferReadRequestException = (
   };
 };
 
+const hasDetailPageStateFallback = (params: XhsDetailParams, root: JsonRecord | null): boolean => {
+  const note = asRecord(root?.note);
+  const noteDetailMap = asRecord(note?.noteDetailMap);
+  return asRecord(noteDetailMap?.[params.note_id]) !== null;
+};
+
+const hasUserHomePageStateFallback = (root: JsonRecord | null): boolean =>
+  asRecord(root?.user) !== null || asRecord(root?.board) !== null || asRecord(root?.note) !== null;
+
+const canUsePageStateFallback = (
+  spec: XhsReadCommandSpec,
+  params: XhsDetailParams | XhsUserHomeParams,
+  root: JsonRecord | null
+): boolean =>
+  spec.command === "xhs.detail"
+    ? hasDetailPageStateFallback(params as XhsDetailParams, root)
+    : hasUserHomePageStateFallback(root);
+
+const createPageStateFallbackSuccess = (
+  input: XhsReadExecutionInput,
+  spec: XhsReadCommandSpec,
+  gate: ReturnType<typeof resolveGate>,
+  auditRecord: ReturnType<typeof createAuditRecord>,
+  env: XhsSearchEnvironment,
+  payload: JsonRecord,
+  startedAt: number,
+  requestFailure: {
+    reason: string;
+    detail: string;
+    statusCode?: number;
+  }
+): SearchExecutionResult => {
+  const requestId = `req-${env.randomId()}`;
+  return {
+    ok: true,
+    payload: {
+      summary: {
+        capability_result: {
+          ability_id: input.abilityId,
+          layer: input.abilityLayer,
+          action: gate.consumer_gate_result.action_type ?? input.abilityAction,
+          outcome: "partial",
+          data_ref: spec.buildDataRef(input.params, payload),
+          metrics: {
+            count: 1,
+            duration_ms: Math.max(0, env.now() - startedAt)
+          }
+        },
+        scope_context: gate.scope_context,
+        gate_input: {
+          run_id: auditRecord.run_id,
+          session_id: auditRecord.session_id,
+          profile: auditRecord.profile,
+          ...gate.gate_input
+        },
+        gate_outcome: gate.gate_outcome,
+        read_execution_policy: gate.read_execution_policy,
+        issue_action_matrix: gate.issue_action_matrix,
+        consumer_gate_result: gate.consumer_gate_result,
+        approval_record: gate.approval_record,
+        risk_state_output: resolveRiskStateOutput(gate, auditRecord),
+        audit_record: auditRecord
+      },
+      observability: {
+        page_state: {
+          page_kind: classifyPageKind(env.getLocationHref(), spec.pageKind),
+          url: env.getLocationHref(),
+          title: env.getDocumentTitle(),
+          ready_state: env.getReadyState(),
+          fallback_used: true
+        },
+        key_requests: [
+          {
+            request_id: requestId,
+            stage: "request",
+            method: spec.method,
+            url: spec.endpoint,
+            outcome: "failed",
+            ...(typeof requestFailure.statusCode === "number"
+              ? { status_code: requestFailure.statusCode }
+              : {}),
+            failure_reason: requestFailure.reason,
+            request_class: spec.requestClass
+          },
+          {
+            request_id: `${requestId}-page-state`,
+            stage: "page_state_fallback",
+            method: "N/A",
+            url: env.getLocationHref(),
+            outcome: "completed",
+            fallback_reason: requestFailure.reason
+          }
+        ],
+        failure_site: null
+      }
+    }
+  };
+};
+
 const createGateOnlySuccess = (
   input: XhsReadExecutionInput,
   spec: XhsReadCommandSpec,
@@ -604,6 +703,13 @@ const executeXhsRead = async (
     });
   } catch (error) {
     const failure = inferReadRequestException(spec, error);
+    const pageStateRoot = asRecord(env.getPageStateRoot?.());
+    if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
+      return createPageStateFallbackSuccess(input, spec, gate, auditRecord, env, payload, startedAt, {
+        reason: failure.reason,
+        detail: failure.detail
+      });
+    }
     return createFailure(
       "ERR_EXECUTION_FAILED",
       failure.message,
@@ -634,6 +740,14 @@ const executeXhsRead = async (
   const businessCode = responseRecord?.code;
   if (response.status >= 400 || (typeof businessCode === "number" && businessCode !== 0)) {
     const failure = inferReadFailure(spec, response.status, response.body);
+    const pageStateRoot = asRecord(env.getPageStateRoot?.());
+    if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
+      return createPageStateFallbackSuccess(input, spec, gate, auditRecord, env, payload, startedAt, {
+        reason: failure.reason,
+        detail: failure.message,
+        statusCode: response.status
+      });
+    }
     return createFailure(
       "ERR_EXECUTION_FAILED",
       failure.message,

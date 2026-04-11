@@ -94,6 +94,7 @@ const createBrowserEnvironment = () => ({
     getDocumentTitle: () => document.title,
     getReadyState: () => document.readyState,
     getCookie: () => document.cookie,
+    getPageStateRoot: () => window.__INITIAL_STATE__,
     callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
     fetchJson: async (input) => {
         const controller = new AbortController();

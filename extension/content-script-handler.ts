@@ -192,6 +192,7 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
   getDocumentTitle: () => document.title,
   getReadyState: () => document.readyState,
   getCookie: () => document.cookie,
+  getPageStateRoot: () => (window as typeof window & { __INITIAL_STATE__?: unknown }).__INITIAL_STATE__,
   callSignature: async (
     uri: Parameters<XhsSearchEnvironment["callSignature"]>[0],
     payload: Parameters<XhsSearchEnvironment["callSignature"]>[1]
