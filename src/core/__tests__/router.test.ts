@@ -189,6 +189,148 @@ describe("executeCommand", () => {
     }
   });
 
+  it("returns output mapping failure when xhs.search runtime success omits capability_result", async () => {
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+    const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    process.env.WEBENVOY_NATIVE_TRANSPORT = "loopback";
+    process.env.WEBENVOY_BROWSER_PATH = join(process.cwd(), "tests", "fixtures", "mock-browser.sh");
+    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Chromium 146.0.0.0";
+    try {
+      await expect(
+        executeCommand(
+          {
+            ...baseContext,
+            command: "xhs.search",
+            profile: "xhs_account_001",
+            params: {
+              ability: {
+                id: "xhs.note.search.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                query: "露营装备"
+              },
+              options: {
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "search_result_tab",
+                action_type: "read",
+                simulate_result: "missing_capability_result",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed",
+                approval_record: {
+                  approved: true,
+                  approver: "qa-reviewer",
+                  approved_at: "2026-03-23T10:00:00Z",
+                  checks: {
+                    target_domain_confirmed: true,
+                    target_tab_confirmed: true,
+                    target_page_confirmed: true,
+                    risk_state_checked: true,
+                    action_type_confirmed: true
+                  }
+                }
+              }
+            }
+          },
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          ability_id: "xhs.note.search.v1",
+          stage: "output_mapping",
+          reason: "CAPABILITY_RESULT_MISSING"
+        }
+      });
+    } finally {
+      process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
+      if (previousBrowserPath === undefined) {
+        delete process.env.WEBENVOY_BROWSER_PATH;
+      } else {
+        process.env.WEBENVOY_BROWSER_PATH = previousBrowserPath;
+      }
+      if (previousBrowserMockVersion === undefined) {
+        delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+      } else {
+        process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
+      }
+    }
+  });
+
+  it("returns output mapping failure when xhs.search runtime success carries invalid capability_result", async () => {
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+    const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    process.env.WEBENVOY_NATIVE_TRANSPORT = "loopback";
+    process.env.WEBENVOY_BROWSER_PATH = join(process.cwd(), "tests", "fixtures", "mock-browser.sh");
+    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Chromium 146.0.0.0";
+    try {
+      await expect(
+        executeCommand(
+          {
+            ...baseContext,
+            command: "xhs.search",
+            profile: "xhs_account_001",
+            params: {
+              ability: {
+                id: "xhs.note.search.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                query: "露营装备"
+              },
+              options: {
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "search_result_tab",
+                action_type: "read",
+                simulate_result: "capability_result_invalid_outcome",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed",
+                approval_record: {
+                  approved: true,
+                  approver: "qa-reviewer",
+                  approved_at: "2026-03-23T10:00:00Z",
+                  checks: {
+                    target_domain_confirmed: true,
+                    target_tab_confirmed: true,
+                    target_page_confirmed: true,
+                    risk_state_checked: true,
+                    action_type_confirmed: true
+                  }
+                }
+              }
+            }
+          },
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          ability_id: "xhs.note.search.v1",
+          stage: "output_mapping",
+          reason: "CAPABILITY_RESULT_OUTCOME_INVALID"
+        }
+      });
+    } finally {
+      process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
+      if (previousBrowserPath === undefined) {
+        delete process.env.WEBENVOY_BROWSER_PATH;
+      } else {
+        process.env.WEBENVOY_BROWSER_PATH = previousBrowserPath;
+      }
+      if (previousBrowserMockVersion === undefined) {
+        delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+      } else {
+        process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
+      }
+    }
+  });
+
   it("returns invalid args when xhs.search misses target gate fields", async () => {
     await expect(
       executeCommand(

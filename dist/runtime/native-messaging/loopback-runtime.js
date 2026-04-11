@@ -223,6 +223,36 @@ class InMemoryContentScriptRuntime {
             profile: "loopback_profile"
         });
         const consumerGateResult = gateBundle.consumerGateResult;
+        const successObservability = {
+            page_state: {
+                page_kind: "search",
+                url: "https://www.xiaohongshu.com/search_result",
+                title: "Search Result",
+                ready_state: "complete",
+                observation_status: "complete"
+            },
+            key_requests: [],
+            failure_site: null
+        };
+        const buildSuccessfulResult = (capabilityResult, overrides) => ({
+            kind: "result",
+            id: message.id,
+            ok: true,
+            payload: {
+                summary: capabilityResult === undefined
+                    ? {
+                        ...gateBundle.payload
+                    }
+                    : {
+                        capability_result: capabilityResult,
+                        ...gateBundle.payload
+                    },
+                observability: {
+                    ...successObservability,
+                    ...(overrides?.key_requests ? { key_requests: overrides.key_requests } : {})
+                }
+            }
+        });
         if (consumerGateResult.gate_decision === "blocked") {
             return {
                 kind: "result",
@@ -244,39 +274,18 @@ class InMemoryContentScriptRuntime {
         }
         if (consumerGateResult.effective_execution_mode === "dry_run" ||
             consumerGateResult.effective_execution_mode === "recon") {
-            return {
-                kind: "result",
-                id: message.id,
-                ok: true,
-                payload: {
-                    summary: {
-                        capability_result: {
-                            ability_id: String(ability.id ?? "xhs.note.search.v1"),
-                            layer: String(ability.layer ?? "L3"),
-                            action: String(consumerGateResult.action_type ?? ability.action ?? "read"),
-                            outcome: "partial",
-                            data_ref: {
-                                query: String(input.query ?? "")
-                            },
-                            metrics: {
-                                count: 0
-                            }
-                        },
-                        ...gateBundle.payload
-                    },
-                    observability: {
-                        page_state: {
-                            page_kind: "search",
-                            url: "https://www.xiaohongshu.com/search_result",
-                            title: "Search Result",
-                            ready_state: "complete",
-                            observation_status: "complete"
-                        },
-                        key_requests: [],
-                        failure_site: null
-                    }
+            return buildSuccessfulResult({
+                ability_id: String(ability.id ?? "xhs.note.search.v1"),
+                layer: String(ability.layer ?? "L3"),
+                action: String(consumerGateResult.action_type ?? ability.action ?? "read"),
+                outcome: "partial",
+                data_ref: {
+                    query: String(input.query ?? "")
+                },
+                metrics: {
+                    count: 0
                 }
-            };
+            });
         }
         if (consumerGateResult.effective_execution_mode === "live_write" &&
             options.validation_action === "editor_input") {
@@ -334,51 +343,53 @@ class InMemoryContentScriptRuntime {
                 }
             };
         }
+        if (simulated === "missing_capability_result") {
+            return buildSuccessfulResult(undefined);
+        }
+        if (simulated === "capability_result_not_object") {
+            return buildSuccessfulResult("invalid");
+        }
+        if (simulated === "capability_result_missing_layer") {
+            return buildSuccessfulResult({
+                ability_id: String(ability.id ?? "xhs.note.search.v1"),
+                action: String(consumerGateResult.action_type ?? ability.action ?? "read"),
+                outcome: "success"
+            });
+        }
+        if (simulated === "capability_result_invalid_outcome") {
+            return buildSuccessfulResult({
+                ability_id: String(ability.id ?? "xhs.note.search.v1"),
+                layer: String(ability.layer ?? "L3"),
+                action: String(consumerGateResult.action_type ?? ability.action ?? "read"),
+                outcome: "blocked"
+            });
+        }
         if (simulated === "success") {
-            return {
-                kind: "result",
-                id: message.id,
-                ok: true,
-                payload: {
-                    summary: {
-                        capability_result: {
-                            ability_id: String(ability.id ?? "xhs.note.search.v1"),
-                            layer: String(ability.layer ?? "L3"),
-                            action: String(consumerGateResult.action_type ?? ability.action ?? "read"),
-                            outcome: "success",
-                            data_ref: {
-                                query: String(input.query ?? ""),
-                                search_id: "loopback-search-id"
-                            },
-                            metrics: {
-                                count: 2,
-                                duration_ms: 12
-                            }
-                        },
-                        ...gateBundle.payload
-                    },
-                    observability: {
-                        page_state: {
-                            page_kind: "search",
-                            url: "https://www.xiaohongshu.com/search_result",
-                            title: "Search Result",
-                            ready_state: "complete",
-                            observation_status: "complete"
-                        },
-                        key_requests: [
-                            {
-                                request_id: "req-loopback-001",
-                                stage: "request",
-                                method: "POST",
-                                url: "/api/sns/web/v1/search/notes",
-                                outcome: "completed",
-                                status_code: 200
-                            }
-                        ],
-                        failure_site: null
-                    }
+            return buildSuccessfulResult({
+                ability_id: String(ability.id ?? "xhs.note.search.v1"),
+                layer: String(ability.layer ?? "L3"),
+                action: String(consumerGateResult.action_type ?? ability.action ?? "read"),
+                outcome: "success",
+                data_ref: {
+                    query: String(input.query ?? ""),
+                    search_id: "loopback-search-id"
+                },
+                metrics: {
+                    count: 2,
+                    duration_ms: 12
                 }
-            };
+            }, {
+                key_requests: [
+                    {
+                        request_id: "req-loopback-001",
+                        stage: "request",
+                        method: "POST",
+                        url: "/api/sns/web/v1/search/notes",
+                        outcome: "completed",
+                        status_code: 200
+                    }
+                ]
+            });
         }
         return {
             kind: "result",

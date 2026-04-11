@@ -2416,4 +2416,114 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  it("returns output mapping failure when runtime success payload omits capability_result", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          ...scopedReadGateOptions,
+          simulate_result: "missing_capability_result",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback",
+      WEBENVOY_BROWSER_PATH: path.join(repoRoot, "tests", "fixtures", "mock-browser.sh"),
+      WEBENVOY_BROWSER_MOCK_VERSION: "Chromium 146.0.0.0"
+    });
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          ability_id: "xhs.note.search.v1",
+          stage: "output_mapping",
+          reason: "CAPABILITY_RESULT_MISSING"
+        }
+      }
+    });
+  });
+
+  it("returns output mapping failure when runtime success payload carries invalid capability_result", () => {
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          ...scopedReadGateOptions,
+          simulate_result: "capability_result_invalid_outcome",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback",
+      WEBENVOY_BROWSER_PATH: path.join(repoRoot, "tests", "fixtures", "mock-browser.sh"),
+      WEBENVOY_BROWSER_MOCK_VERSION: "Chromium 146.0.0.0"
+    });
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "xhs.search",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          ability_id: "xhs.note.search.v1",
+          stage: "output_mapping",
+          reason: "CAPABILITY_RESULT_OUTCOME_INVALID"
+        }
+      }
+    });
+  });
+
 });

@@ -1,4 +1,5 @@
 import { CliError } from "../core/errors.js";
+import { mapCapabilitySummaryForContract } from "../core/capability-output.js";
 import { NativeMessagingBridge, NativeMessagingTransportError } from "../runtime/native-messaging/bridge.js";
 import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
@@ -130,22 +131,18 @@ const xhsSearch = async (context) => {
         gate.options.fixture_success === true) {
         const query = typeof envelope.input.query === "string" ? envelope.input.query : null;
         return {
-            summary: buildCapabilityResult(envelope.ability, {
+            summary: mapCapabilitySummaryForContract(envelope.ability.id, buildCapabilityResult(envelope.ability, {
                 data_ref: query ? { query } : {},
                 metrics: {
                     count: 0
                 }
-            })
+            }))
         };
     }
     if (envelope.input.force_bad_output === true) {
-        throw new CliError("ERR_EXECUTION_FAILED", "能力输出映射失败", {
-            details: {
-                ability_id: envelope.ability.id,
-                stage: "output_mapping",
-                reason: "CAPABILITY_RESULT_MISSING"
-            }
-        });
+        return {
+            summary: mapCapabilitySummaryForContract(envelope.ability.id, {})
+        };
     }
     const bridge = resolveRuntimeBridge();
     const profileStore = new ProfileStore(resolveRuntimeProfileRoot(context.cwd));
@@ -174,23 +171,13 @@ const xhsSearch = async (context) => {
         if (!bridgeResult.ok) {
             throw toCliExecutionError(envelope.ability, bridgeResult.payload, bridgeResult.error.message);
         }
-        const summary = asObject(bridgeResult.payload.summary);
-        if (!summary) {
-            throw new CliError("ERR_EXECUTION_FAILED", "能力输出映射失败", {
-                details: {
-                    ability_id: envelope.ability.id,
-                    stage: "output_mapping",
-                    reason: "CAPABILITY_RESULT_MISSING"
-                }
-            });
-        }
+        const consumerGateResult = asObject(bridgeResult.payload.consumer_gate_result);
+        const summary = mapCapabilitySummaryForContract(envelope.ability.id, {
+            ...(asObject(bridgeResult.payload.summary) ?? {}),
+            ...(consumerGateResult ? { consumer_gate_result: consumerGateResult } : {})
+        });
         return {
-            summary: {
-                ...summary,
-                ...(asObject(bridgeResult.payload.consumer_gate_result)
-                    ? { consumer_gate_result: asObject(bridgeResult.payload.consumer_gate_result) }
-                    : {})
-            },
+            summary,
             observability: asObservabilityInput(bridgeResult.payload.observability)
         };
     }

@@ -1,5 +1,6 @@
 import type { CommandDefinition, CommandExecutionResult, JsonObject, RuntimeContext } from "../core/types.js";
 import { CliError } from "../core/errors.js";
+import { mapCapabilitySummaryForContract } from "../core/capability-output.js";
 import {
   NativeMessagingBridge,
   NativeMessagingTransportError
@@ -183,23 +184,22 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
   ) {
     const query = typeof envelope.input.query === "string" ? envelope.input.query : null;
     return {
-      summary: buildCapabilityResult(envelope.ability, {
-        data_ref: query ? { query } : {},
-        metrics: {
-          count: 0
-        }
-      })
+      summary: mapCapabilitySummaryForContract(
+        envelope.ability.id,
+        buildCapabilityResult(envelope.ability, {
+          data_ref: query ? { query } : {},
+          metrics: {
+            count: 0
+          }
+        })
+      )
     };
   }
 
   if (envelope.input.force_bad_output === true) {
-    throw new CliError("ERR_EXECUTION_FAILED", "能力输出映射失败", {
-      details: {
-        ability_id: envelope.ability.id,
-        stage: "output_mapping",
-        reason: "CAPABILITY_RESULT_MISSING"
-      }
-    });
+    return {
+      summary: mapCapabilitySummaryForContract(envelope.ability.id, {})
+    };
   }
 
   const bridge = resolveRuntimeBridge();
@@ -251,24 +251,14 @@ const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResul
       );
     }
 
-    const summary = asObject(bridgeResult.payload.summary);
-    if (!summary) {
-      throw new CliError("ERR_EXECUTION_FAILED", "能力输出映射失败", {
-        details: {
-          ability_id: envelope.ability.id,
-          stage: "output_mapping",
-          reason: "CAPABILITY_RESULT_MISSING"
-        }
-      });
-    }
+    const consumerGateResult = asObject(bridgeResult.payload.consumer_gate_result);
+    const summary = mapCapabilitySummaryForContract(envelope.ability.id, {
+      ...(asObject(bridgeResult.payload.summary) ?? {}),
+      ...(consumerGateResult ? { consumer_gate_result: consumerGateResult } : {})
+    });
 
     return {
-      summary: {
-        ...summary,
-        ...(asObject(bridgeResult.payload.consumer_gate_result)
-          ? { consumer_gate_result: asObject(bridgeResult.payload.consumer_gate_result) }
-          : {})
-      },
+      summary,
       observability: asObservabilityInput(bridgeResult.payload.observability)
     };
   } catch (error) {
