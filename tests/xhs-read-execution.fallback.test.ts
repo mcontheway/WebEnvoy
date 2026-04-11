@@ -221,4 +221,52 @@ describe("xhs read execution fallback", () => {
       message: "网关调用失败，当前上下文不足以完成 xhs.detail 请求"
     });
   });
+
+  it("keeps user_home execution failed when page-state user identity does not match requested user_id", async () => {
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-001"
+        },
+        options: createLiveReadOptions({
+          target_page: "profile_tab",
+          actual_target_page: "profile_tab"
+        }),
+        executionContext: {
+          runId: "run-user-mismatch-001",
+          sessionId: "nm-session-001",
+          profile: "xhs_001"
+        }
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-001",
+        getPageStateRoot: () => ({
+          user: {
+            userId: "user-999"
+          },
+          board: {},
+          note: {}
+        }),
+        fetchJson: async () => ({
+          status: 200,
+          body: {
+            code: 300015,
+            msg: "browser environment abnormal"
+          }
+        })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected user_home execution failure");
+    }
+    expect(result.error).toMatchObject({
+      code: "ERR_EXECUTION_FAILED",
+      message: "浏览器环境异常，平台拒绝当前请求"
+    });
+  });
 });

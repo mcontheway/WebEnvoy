@@ -245,8 +245,31 @@ const hasDetailPageStateFallback = (params: XhsDetailParams, root: JsonRecord | 
   return asRecord(noteDetailMap?.[params.note_id]) !== null;
 };
 
-const hasUserHomePageStateFallback = (root: JsonRecord | null): boolean =>
-  asRecord(root?.user) !== null || asRecord(root?.board) !== null || asRecord(root?.note) !== null;
+const asNonEmptyString = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+
+const hasUserHomePageStateFallback = (params: XhsUserHomeParams, root: JsonRecord | null): boolean => {
+  const user = asRecord(root?.user);
+  if (!user) {
+    return false;
+  }
+
+  const candidateUserIds = [
+    asNonEmptyString(user.userId),
+    asNonEmptyString(user.user_id),
+    asNonEmptyString(user.id),
+    asNonEmptyString(asRecord(user.basicInfo)?.userId),
+    asNonEmptyString(asRecord(user.basicInfo)?.user_id),
+    asNonEmptyString(asRecord(user.profile)?.userId),
+    asNonEmptyString(asRecord(user.profile)?.user_id)
+  ].filter((value): value is string => value !== null);
+
+  if (!candidateUserIds.some((userId) => userId === params.user_id)) {
+    return false;
+  }
+
+  return asRecord(root?.board) !== null || asRecord(root?.note) !== null || user !== null;
+};
 
 const canUsePageStateFallback = (
   spec: XhsReadCommandSpec,
@@ -255,7 +278,7 @@ const canUsePageStateFallback = (
 ): boolean =>
   spec.command === "xhs.detail"
     ? hasDetailPageStateFallback(params as XhsDetailParams, root)
-    : hasUserHomePageStateFallback(root);
+    : hasUserHomePageStateFallback(params as XhsUserHomeParams, root);
 
 const createPageStateFallbackSuccess = (
   input: XhsReadExecutionInput,
