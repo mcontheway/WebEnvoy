@@ -59,12 +59,14 @@
   - formal spec PR 只要碰任一治理落库目标文件，就必须直接触发 `mixed_spec_and_governance_scope`，不需要等到完整 landing 形态
   - `classification_scope` 对治理落库的判定必须同时消费 `governance_issue_ref=#310`，避免把未来其他治理文件修订误吸进 FR-0016 landing lane
   - `governance_landing_pr` 必须以完整五文件落库为前提，不能被任一单文件或子集落库 PR 提前占用 lane 与 closing semantics
+  - 未来其他命中五处治理目标文件、但不承接 `#310` 一次性落库闭环的维护 PR，不得仅因路径命中被自动吸入 `governance_landing_pr`
   - formal spec review PR、governance landing PR 与所有 `in_scope=true` PR 缺少 `gate_applicability` 时必须直接 blocked，不能靠 reviewer/guardian 事后脑补
   - FR-0016 `TODO.md` 只作为 handoff 文件存在，不再作为治理落库 lane 的同行例外；若需要更新停点或恢复说明，必须拆到独立 PR
   - `governance_landing_pr` 必须是精确五文件落库范围，不能夹带其他实质性改动
-  - 精确命中五个治理落库目标文件却缺少 `#310` 引用时，也必须直接 blocked，不能降格成普通 PR
+  - 自报 `governance_landing_pr` 却缺少 `#310` 引用时，必须直接 blocked，不能降格成普通 PR
   - `governance_landing_pr` 即使 `not_applicable`，closing semantics 也只能是 `Refs #310` 或 `Fixes #310`，不得退成 `n_a`
   - 带 `#310` 上下文但只命中治理目标文件子集、或在五文件之外扩 scope 的 PR，也必须直接 blocked，不能退回普通 PR
+  - docs-only closeout PR 的 latest-head gate evidence 必须以 PR 描述中的 `live_evidence_record` 为准；仓库 formal 文档中的固定样本不得被要求逐提交追写当前 PR head SHA
   - `spec.md`、`contracts/` 与 `risks.md` 对专项门禁触发条件保持同一集合
   - `Fixes` / `Refs` 与 `merge-ready` 的 live evidence 条件保持一致
   - `review_lane` 足以机器化地区分 `formal_spec_review_pr`、`governance_landing_pr` 与 `general_pr`

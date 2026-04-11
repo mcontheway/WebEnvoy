@@ -54,8 +54,8 @@ FR-0016 的机器判定输入至少包含以下对象：
 4. `todo_handoff_target` 不属于 `governance_landing_pr` 的允许范围；若治理落库尝试携带该文件，必须拆分为独立 PR，而不是在 landing lane 内再区分“进度回写”或“语义回写”。
 5. `governance_issue_ref` 固定为 `#310`，用于限定 FR-0016 治理落库链路的 issue 上下文，避免把未来其他治理文案修订误判为本 FR 的 landing PR。
 6. 若 PR 实际变更命中 `governance_scope_targets` 中任一目标文件，且 PR 元数据显式引用 `governance_issue_ref`，但其文件范围不是“精确等于五个治理目标文件集合”，reviewer / guardian 必须产出 `invalid_governance_landing_scope`，并阻断合并。
-7. 若 PR 实际变更精确等于 `governance_scope_targets` 冻结的五个目标文件集合，但 PR 元数据没有显式引用 `governance_issue_ref`，reviewer / guardian 必须产出 `missing_governance_issue_ref`，并阻断合并。
-8. reviewer / guardian 只有在 PR 同时满足“实际变更精确等于 `governance_scope_targets` 冻结的五个目标文件集合”与“PR 元数据显式引用 `governance_issue_ref`”时，才能先视为治理落库相关链路。
+7. 若 PR 自报 `review_lane=governance_landing_pr`，但 PR 元数据没有显式引用 `governance_issue_ref`，reviewer / guardian 必须产出 `missing_governance_issue_ref`，并阻断合并。
+8. reviewer / guardian 只有在 PR 同时满足“实际变更精确等于 `governance_scope_targets` 冻结的五个目标文件集合”与“PR 元数据显式引用 `governance_issue_ref`”时，才能先视为治理落库相关链路；未来其他命中同一文件集合、但不承接 `#310` 落库闭环的维护 PR，不得仅因路径命中被自动拉入该 lane。
 9. 若同一 PR 同时命中 `spec_contract_targets` 中任一正式契约文件，或命中 `todo_handoff_target`，且又命中 `governance_scope_targets` 中任一治理落库目标文件，无论是否已经满足完整 landing 形态，都必须产出 `mixed_spec_and_governance_scope`，并阻断合并。
 
 当 PR 落入专项门禁，或其 `review_lane` 属于 `formal_spec_review_pr` / `governance_landing_pr` 时，门禁共享输出还至少包含以下对象：
@@ -67,6 +67,7 @@ FR-0016 的机器判定输入至少包含以下对象：
 
 - 当 `gate_applicability.in_scope=true` 或 `gate_applicability.n_a_allowed=false` 时，必须提供完整 `live_evidence_record`
 - 当 `gate_applicability.in_scope=false` 且 `gate_applicability.n_a_allowed=true` 时，允许省略 `live_evidence_record` 或将其置为 `null`，以对应 PR 模板整块填写 `N/A` 的路径
+- `live_evidence_record` 是 PR 级 latest-head fresh rerun 门禁对象；仓库内 formal 文档、研究记录或 TODO 中保留的固定样本，不是该对象的替代物
 
 ## gate_applicability
 
@@ -130,14 +131,15 @@ FR-0016 的机器判定输入至少包含以下对象：
 2. `review_lane=governance_landing_pr` 时，`governance_scope_targets` 必须非空，且只能由上述五个冻结目标文件组成；其他 lane 必须填写空数组。
 3. 若 formal spec review PR、governance landing PR 或任何 `in_scope=true` 的 PR 缺少必需的结构化 `gate_applicability` 元数据，reviewer / guardian 必须阻断，不得改用路径、标题或 issue 引用代填 PR 模板义务。
 4. 若 PR 实际变更命中 `classification_scope.governance_scope_targets` 中任一目标文件，且 PR 元数据显式引用 `classification_scope.governance_issue_ref`，但其文件范围不是“精确等于五个治理目标文件集合”，reviewer / guardian 必须阻断，不得把它降格为 `general_pr`。
-5. 若 PR 实际变更精确等于 `classification_scope.governance_scope_targets` 冻结的五个目标文件集合，但 PR 元数据没有显式引用 `classification_scope.governance_issue_ref`，reviewer / guardian 必须阻断，不得把它降格为 `general_pr`。
+5. 若 PR 自报 `review_lane=governance_landing_pr` 但 PR 元数据没有显式引用 `classification_scope.governance_issue_ref`，reviewer / guardian 必须阻断，不得把它降格为 `general_pr`。
 6. 若 PR 同时满足“实际变更精确等于 `classification_scope.governance_scope_targets` 冻结的五个目标文件集合”与“PR 元数据显式引用 `classification_scope.governance_issue_ref`”，reviewer / guardian 必须按 `governance_landing_pr` 处理，不得被作者自报的其他 lane 覆盖。
-7. 若 PR 实际变更命中 `classification_scope.spec_contract_targets` 中任一正式契约文件，reviewer / guardian 必须按 `formal_spec_review_pr` 处理，除非同时命中 FR-0016 治理落库目标文件而触发混线阻断。
-8. `in_scope=true` 时，`trigger_reasons` 必须非空。
-9. `in_scope=true` 时，`n_a_allowed` 必须为 `false`。
-10. `in_scope=false` 时，`trigger_reasons` 必须为空数组。
-11. `in_scope=false` 时，`n_a_allowed` 必须为 `true`，以便 formal spec / 治理前置 / 纯文档 / 纯研究 PR 可以稳定填写 `N/A`，避免被默认值误挡。
-12. 只有在 PR 明确不以真实 live evidence 作为 issue 关闭、完成判定或 merge 放行依据时，才允许 `in_scope=false`；即使 PR 是纯文档、纯研究 / spike 或 formal spec / design input，只要命中任一触发原因，也必须设为 `in_scope=true`。
+7. 若 PR 仅因后续治理维护而命中 `classification_scope.governance_scope_targets`，但并未承接 `classification_scope.governance_issue_ref` 指向的 `#310` 一次性落库闭环，reviewer / guardian 不得仅因路径命中把它强制判成 `governance_landing_pr`。
+8. 若 PR 实际变更命中 `classification_scope.spec_contract_targets` 中任一正式契约文件，reviewer / guardian 必须按 `formal_spec_review_pr` 处理，除非同时命中 FR-0016 治理落库目标文件而触发混线阻断。
+9. `in_scope=true` 时，`trigger_reasons` 必须非空。
+10. `in_scope=true` 时，`n_a_allowed` 必须为 `false`。
+11. `in_scope=false` 时，`trigger_reasons` 必须为空数组。
+12. `in_scope=false` 时，`n_a_allowed` 必须为 `true`，以便 formal spec / 治理前置 / 纯文档 / 纯研究 PR 可以稳定填写 `N/A`，避免被默认值误挡。
+13. 只有在 PR 明确不以真实 live evidence 作为 issue 关闭、完成判定或 merge 放行依据时，才允许 `in_scope=false`；即使 PR 是纯文档、纯研究 / spike 或 formal spec / design input，只要命中任一触发原因，也必须设为 `in_scope=true`。
 
 ## live_evidence_record
 
@@ -197,6 +199,8 @@ FR-0016 的机器判定输入至少包含以下对象：
 9. `interaction_locator` 必须提供与当前 live evidence 相匹配的最小交互或观测定位；不得强制要求 write-flow 专用字段去适配 runtime-only 或 read-only 场景。
 10. `success_signals` 必须描述真实页面交互或真实闭环结果，不能只写控制面存活信号。
 11. 仅当 `gate_applicability.in_scope=true` 或 `gate_applicability.n_a_allowed=false` 时，以上字段约束才对 `live_evidence_record` 生效；`in_scope=false && n_a_allowed=true` 的非适用 PR 可以不提供该对象。
+12. reviewer / guardian 必须以 PR 描述中的 `live_evidence_record` 作为 latest-head 门禁的唯一判定输入；仓库内 formal 文档、研究记录或 TODO 中保留的固定样本，不得被要求逐提交追写当前 PR head SHA 来替代这份 PR 级元数据。
+13. docs-only formal closeout PR 若在仓库文档中保留固定样本、历史失败事实或已固化 run 记录，只要这些内容没有被误写成“当前 latest head gate evidence”，就不得因为其 SHA 不等于当前 PR latest head 而被判定为 stale gate evidence。
 
 ## gate_verdict
 
@@ -251,7 +255,7 @@ FR-0016 的机器判定输入至少包含以下对象：
 6. 只有当 `gate_applicability.review_lane=governance_landing_pr` 且 formal spec review 未通过时，才必须在 `blocking_reasons` 中包含 `spec_review_not_completed`，并产出 `status=blocked`。
 7. formal spec review PR、governance landing PR 或任何 `in_scope=true` 的 PR 若缺少必需的结构化 `gate_applicability` 元数据，必须在 `blocking_reasons` 中包含 `missing_gate_applicability_metadata`，并产出 `status=blocked`。
 8. 若 PR 实际变更命中 `classification_scope.governance_scope_targets` 中任一目标文件，且 PR 元数据显式引用 `classification_scope.governance_issue_ref`，但其文件范围不是“精确命中五个治理目标文件集合”，必须在 `blocking_reasons` 中包含 `invalid_governance_landing_scope`，并产出 `status=blocked`。
-9. 若 PR 实际变更精确命中 `classification_scope.governance_scope_targets`，但 PR 元数据没有显式引用 `classification_scope.governance_issue_ref`，必须在 `blocking_reasons` 中包含 `missing_governance_issue_ref`，并产出 `status=blocked`。
+9. 若 PR 自报 `gate_applicability.review_lane=governance_landing_pr`，但 PR 元数据没有显式引用 `classification_scope.governance_issue_ref`，必须在 `blocking_reasons` 中包含 `missing_governance_issue_ref`，并产出 `status=blocked`。
 10. 若同一 PR 同时改动 `classification_scope.spec_contract_targets` 中任一正式契约文件，或命中 `classification_scope.todo_handoff_target`，且又命中 `classification_scope.governance_scope_targets` 中任一治理落库目标文件，无论是否已经满足完整 landing 形态，都必须在 `blocking_reasons` 中包含 `mixed_spec_and_governance_scope`，并产出 `status=blocked`。
 
 ## 兼容性约束

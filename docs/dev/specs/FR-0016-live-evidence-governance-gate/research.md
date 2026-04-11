@@ -18,8 +18,12 @@
 
 - Issue `#310`
   - 目标是冻结 live evidence 专项门禁，不承接 runtime 实现。
+- Issue `#455`
+  - 目标是修复 FR-0016 在 docs-only governance maintenance / live-evidence closeout 场景下的自指阻断。
 - PR `#311`
   - 已回写四处治理文档，但尚未同步 `docs/dev/review/guardian-review-addendum.md`，且最新 review 仍阻断。
+- PR `#454`
+  - 作为 FR-0005 docs-only live-evidence closeout 现场，已稳定暴露“仓库 formal 文档被错误要求逐提交追写当前 PR head SHA”的治理阻断。
 - review 轨迹
   - 第一轮指出触发条件不一致
   - 第二轮指出最低字段缺少 `latest_head_sha` 与 `execution_surface`
@@ -41,6 +45,7 @@
   - #322 最新 guardian 继续指出：formal spec PR 只要触碰任一治理落库目标文件，也必须立刻 mixed-scope blocked，不能等到完整 landing 形态才阻断
   - #322 最新 guardian 继续指出：formal spec lane 即使 `status=ready` 也必须保持 `Refs`；FR-0016 `TODO.md` 若继续作为治理落库同行例外，会回到不可机判的启发式争议
   - 最新一轮明确指出：高风险治理基线变更缺 formal spec review
+  - `#454` 最新 guardian 继续要求 formal 文档把 latest-head 证据 SHA 与当前 PR head 对齐，形成“每补一次 SHA，PR head 又前移”的自指阻断
 
 ## 证据梳理
 
@@ -96,6 +101,18 @@
 - 结论：
   - O2 是当前唯一与仓库流程一致的路径。
 
+### E5：docs-only closeout PR 的 latest-head 门禁与仓库固定样本缺少职责分层
+
+- 来源：
+  - PR `#454`
+  - PR comment `https://github.com/MC-and-his-Agents/WebEnvoy/pull/454#issuecomment-4228338350`
+- 观察：
+  - PR 描述已经提供 current latest-head 的 `live_evidence_record`，但 guardian 仍持续要求把同一 SHA 追写进仓库 formal 文档。
+  - 只要为追 head 再提交一次文档修正，PR head 就会继续前移，导致同一要求再次出现，无法在普通提交流程中稳定收敛。
+  - 当前 formal contract 虽然冻结了 PR 级 `live_evidence_record`，但没有明确声明“latest-head gate evidence 只以 PR 元数据为准，仓库固定样本不需要逐提交追 head”。
+- 结论：
+  - FR-0016 需要补上 PR 级 gate evidence 与仓库固定样本的职责分层；否则 docs-only closeout PR 会继续落入自指阻断。
+
 ## 证据矩阵
 
 | ID | Claim/Unknown | Evidence Artifact | Method | Maturity | Confidence | Notes |
@@ -114,10 +131,11 @@
 | U12 | `mixed_spec_and_governance_scope` 不能直接覆盖整个 spec 套件目录；FR-0016 `TODO.md` 必须作为独立 handoff 文件建模，而不是隐式治理例外 | `#322` guardian review | review blocker 对照 | M3 | 90% | 若把整个 spec 目录都算进 mixed-scope blocker，或继续让 `TODO.md` 以启发式方式同行，后续治理落库 PR 仍会在误伤与绕过之间摇摆 |
 | U13 | `formal_spec_review_pr` 也必须只由 `spec_contract_targets` 触发，且 `governance_landing_pr` 必须要求完整五文件集合并排除 FR-0016 `TODO.md` | `#322` guardian review | review blocker 对照 | M3 | 95% | 若 formal spec lane 仍吃进纯 `TODO.md`，或治理落库 lane 继续容忍 `TODO.md` / 部分文件子集同行，后续合规 PR 仍会被误判或提前关闭 `#310` |
 | U14 | 缺失必需 `gate_applicability` 元数据必须显式 blocked，且治理落库线必须是精确五文件范围 | `#322` guardian review | review blocker 对照 | M3 | 95% | 若缺少结构化 blocker 与精确范围约束，reviewer/guardian 仍可靠启发式放行缺失元数据或夹带改动的 PR |
-| U15 | 精确命中五个治理落库目标文件但缺少 `#310` 引用时，必须有结构化 blocker，不能退回普通 PR | `#322` guardian review | review blocker 对照 | M3 | 95% | 若缺少这一 blocker，formal spec review 通过前的落库 PR 仍可能绕开 `spec_review_not_completed` 与 metadata 门禁 |
+| U15 | 自报 `governance_landing_pr` 却缺少 `#310` 引用时，必须有结构化 blocker，不能退回普通 PR | `#322` guardian review | review blocker 对照 | M3 | 95% | 若缺少这一 blocker，伪装成治理落库的 PR 仍可能绕开 `spec_review_not_completed` 与 metadata 门禁 |
 | U16 | `governance_landing_pr` 即使 `not_applicable`，closing semantics 也必须保留 `Refs/Fixes #310`，不得使用 `n_a` | `#322` guardian review | review blocker 对照 | M3 | 95% | 若允许 `n_a`，治理落库 PR 仍可绕开仓库要求的 issue closing metadata |
 | U17 | 带 `#310` 上下文的治理落库尝试若只命中目标文件子集，或在五文件之外扩 scope，也必须显式 blocked | `#322` guardian review | review blocker 对照 | M3 | 95% | 若只对“精确五文件”建模，子集/超集治理改动仍可绕开 `spec_review_not_completed` 与 metadata 门禁 |
 | U18 | formal spec PR 只要触碰任一治理落库目标文件，就必须立即触发 `mixed_spec_and_governance_scope` | `#322` guardian review | review blocker 对照 | M3 | 95% | 若 mixed-scope 只在完整 landing 形态才触发，spec PR 仍可顺手塞入单个治理文件改动而绕开 split 规则 |
+| U19 | docs-only closeout PR 的 latest-head gate evidence 必须以 PR 描述中的 `live_evidence_record` 为准，仓库 formal 文档中的固定样本不得被要求逐提交追写当前 PR head | `#454` guardian review + `#454` 阻断说明 comment | blocked 现场对照 | M3 | 95% | 若不冻结这一分层，formal closeout PR 会因追 head 形成自指死锁 |
 
 ## Gate Status
 

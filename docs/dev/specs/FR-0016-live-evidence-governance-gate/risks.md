@@ -11,17 +11,19 @@
   - formal spec review PR 与治理落库目标文件重新混线，但 contract 没有结构化 blocker
   - lane 判定仍要先相信作者自报 `review_lane`，没有独立的 classification 输入
   - `governance_landing_pr` 若只靠五个治理目标文件路径命中，会把未来无关治理修订误吸进 FR-0016 专项门禁
+  - 未来治理维护 PR 若精确命中五个治理目标文件、却未承接 `#310` 落库闭环，仍被自动判成 `governance_landing_pr`
   - `mixed_spec_and_governance_scope` 若没有把 FR-0016 `TODO.md` handoff 文件纳入阻断，治理落库 PR 仍可夹带 handoff 改动重新混线
   - `formal_spec_review_pr` 若继续按整棵 spec 目录命中，会把非契约 handoff 回写也误判成 formal spec 语义变更
   - `governance_landing_pr` 若允许部分五文件子集触发，仍会给不完整落库 PR 留下提前关闭 `#310` 的空间
   - 必需的 `gate_applicability` 元数据若缺失却不显式 blocked，reviewer/guardian 仍可回到启发式放行
   - 治理落库 lane 若继续为 `TODO.md` 开同行例外，机器判定仍会回到“进度回写还是语义回写”的启发式争议
   - 治理落库 PR 若允许在五文件之外夹带其他实质性改动，split 规则仍不可机器执行
-  - 精确命中五个治理落库目标文件却缺少 `#310` 引用时，若不显式 blocked，仍可绕开治理落库前置门禁
+  - 自报 `governance_landing_pr` 却缺少 `#310` 引用时，若不显式 blocked，仍可绕开治理落库前置门禁
   - `governance_landing_pr` 若允许 `n_a` closing semantics，仍可绕开仓库要求的 `Refs/Fixes #310` metadata
   - 带 `#310` 上下文的治理落库尝试若只命中目标文件子集，或在五文件之外扩 scope，仍可能绕开治理前置门禁
   - formal spec PR 若触碰任一治理落库目标文件却不立即 mixed-scope blocked，仍可能把高风险治理文案重新塞回 spec 线
   - formal spec PR 若在 `status=ready` 时仍可使用 `Fixes`，仍可能提前关闭本应由治理落库 PR 承接的 `#310`
+  - docs-only closeout PR 若在仓库 formal 文档中保留固定样本，reviewer / guardian 仍错误要求其逐提交追写当前 PR head SHA
 - 影响：
   - 作者、reviewer 与 guardian 会基于不同前提做判断
   - live evidence 门禁再次出现可绕过空间
@@ -34,6 +36,7 @@
   - formal contract 中显式冻结 `mixed_spec_and_governance_scope` 与 formal spec lane 的 `Fixes` 禁止规则
   - formal contract 中显式冻结 `classification_scope`，并要求先消费该输入再判 lane
   - formal contract 中显式冻结 `governance_issue_ref=#310`，要求治理落库 lane 只能在“目标文件命中 + issue 上下文命中”时成立
+  - formal contract 中显式区分 `#310` 的一次性 `governance_landing_pr` 与后续治理维护 PR，禁止单靠路径命中触发 landing lane
   - formal contract 中显式冻结 `spec_contract_targets`，把正式契约文件与 FR-0016 `TODO.md` handoff 文件分开建模
   - formal contract 中显式要求 formal spec lane 只由 `spec_contract_targets` 触发，治理落库 lane 只在完整五文件集合落库时成立
   - formal contract 中显式冻结 `missing_gate_applicability_metadata` blocker，禁止 reviewer/guardian 以启发式替代必需元数据
@@ -44,6 +47,7 @@
   - formal contract 中显式冻结 `invalid_governance_landing_scope` blocker，禁止带 `#310` 上下文的子集/超集治理改动退回普通 PR
   - formal contract 中显式要求 formal spec PR 只要触碰任一治理落库目标文件就立即触发 `mixed_spec_and_governance_scope`
   - formal contract 中显式要求 formal spec lane 无论 `ready` 还是 `not_applicable` 都保持 `refs_only`
+  - formal contract 中显式声明 `live_evidence_record` 是 PR 级 latest-head 门禁对象，禁止把仓库 formal 文档中的固定样本误判成必须追写当前 PR head 的 gate 证据
   - 后续治理落库 PR 必须逐项对照同一集合，并同步更新 `docs/dev/review/guardian-review-addendum.md`
 - 回滚：
   - 阻断治理落库 PR，回到 formal spec 层修正 shared contract
