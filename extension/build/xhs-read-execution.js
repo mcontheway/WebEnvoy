@@ -9,7 +9,7 @@ const XHS_DETAIL_SPEC = {
     buildPayload: (params) => ({
         source_note_id: params.note_id
     }),
-    buildUrl: () => "/api/sns/web/v1/feed",
+    buildUrl: () => "https://edith.xiaohongshu.com/api/sns/web/v1/feed",
     buildSignatureUri: () => "/api/sns/web/v1/feed",
     buildDataRef: (params) => ({
         note_id: params.note_id
@@ -22,7 +22,7 @@ const XHS_USER_HOME_SPEC = {
     pageKind: "user_home",
     requestClass: "xhs.user_home",
     buildPayload: () => ({}),
-    buildUrl: (params) => `/api/sns/web/v1/user/otherinfo?user_id=${encodeURIComponent(params.user_id)}`,
+    buildUrl: (params) => `https://edith.xiaohongshu.com/api/sns/web/v1/user/otherinfo?user_id=${encodeURIComponent(params.user_id)}`,
     buildSignatureUri: (params) => `/api/sns/web/v1/user/otherinfo?user_id=${encodeURIComponent(params.user_id)}`,
     buildDataRef: (params) => ({
         user_id: params.user_id

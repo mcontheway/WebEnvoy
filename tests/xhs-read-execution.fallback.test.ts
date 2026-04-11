@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { executeXhsDetail } from "../extension/xhs-detail.js";
 import { executeXhsUserHome } from "../extension/xhs-user-home.js";
@@ -48,6 +48,22 @@ const createEnvironment = (overrides?: Partial<XhsSearchEnvironment>): XhsSearch
 
 describe("xhs read execution fallback", () => {
   it("returns detail success only when the api payload contains the requested note object", async () => {
+    const callSignature = vi.fn(async () => ({
+      "X-s": "sig",
+      "X-t": "1710000000"
+    }));
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          note: {
+            noteId: "note-success-001",
+            title: "target note"
+          }
+        }
+      }
+    }));
     const result = await executeXhsDetail(
       {
         abilityId: "xhs.note.detail.v1",
@@ -68,18 +84,8 @@ describe("xhs read execution fallback", () => {
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-success-001",
-        fetchJson: async () => ({
-          status: 200,
-          body: {
-            code: 0,
-            data: {
-              note: {
-                noteId: "note-success-001",
-                title: "target note"
-              }
-            }
-          }
-        })
+        callSignature,
+        fetchJson
       })
     );
 
@@ -100,9 +106,33 @@ describe("xhs read execution fallback", () => {
       failure_site: null
     });
     expect(result.payload).not.toHaveProperty("diagnosis");
+    expect(callSignature).toHaveBeenCalledWith("/api/sns/web/v1/feed", {
+      source_note_id: "note-success-001"
+    });
+    expect(fetchJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://edith.xiaohongshu.com/api/sns/web/v1/feed"
+      })
+    );
   });
 
   it("returns user_home success only when the api payload contains the requested user object", async () => {
+    const callSignature = vi.fn(async () => ({
+      "X-s": "sig",
+      "X-t": "1710000000"
+    }));
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          user: {
+            userId: "user-success-001",
+            nickname: "target user"
+          }
+        }
+      }
+    }));
     const result = await executeXhsUserHome(
       {
         abilityId: "xhs.user.home.v1",
@@ -123,18 +153,8 @@ describe("xhs read execution fallback", () => {
       },
       createEnvironment({
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-success-001",
-        fetchJson: async () => ({
-          status: 200,
-          body: {
-            code: 0,
-            data: {
-              user: {
-                userId: "user-success-001",
-                nickname: "target user"
-              }
-            }
-          }
-        })
+        callSignature,
+        fetchJson
       })
     );
 
@@ -155,6 +175,15 @@ describe("xhs read execution fallback", () => {
       failure_site: null
     });
     expect(result.payload).not.toHaveProperty("diagnosis");
+    expect(callSignature).toHaveBeenCalledWith(
+      "/api/sns/web/v1/user/otherinfo?user_id=user-success-001",
+      {}
+    );
+    expect(fetchJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://edith.xiaohongshu.com/api/sns/web/v1/user/otherinfo?user_id=user-success-001"
+      })
+    );
   });
 
   it("keeps detail execution failed when api success payload does not contain requested note", async () => {
