@@ -22,7 +22,7 @@
 
 - [x] FR-0011 spec review 已通过并形成明确结论；独立已合并依据见 `PR #229`、`PR #242`、`PR #257`，以及 `#217` 的 closeout comment：`https://github.com/mcontheway/WebEnvoy/issues/217#issuecomment-4150153539`。
 - [ ] `#208` 与 `#209` 的后续事项继续以 FR-0011 作为统一前置消费者，不回退到未冻结的口头边界。
-- [ ] `#209` 的 live read admission evidence 与 post-gate persisted audit trail 必须分别落在已冻结的 pre-gate audit payload 与 `FR-0010.audit_record` 上；后续实现与 review 不得再把两者混写成同一时序对象。
+- [ ] `#209` 的 live read admission evidence 与 post-gate persisted trail 必须分别落在已冻结的 pre-gate `approval_admission_evidence` / `audit_admission_evidence` 与 `FR-0010.approval_record` / `FR-0010.audit_record` 上；后续实现与 review 不得再把两者混写成同一时序对象。
 - [ ] 涉及 `#208` 的后续文案若再次引用“验证前置已冻结”，必须同时区分该表述属于 2026-03-30 的 contract freeze 语境，而不是用它代替后续实现链路里的真实验证或关闭结论。
 - [ ] `#216` 提供的 Sprint 治理基线已对齐，后续 Sprint 3 实现事项可按当前 Sprint 2 / Sprint 3 / Sprint 4 语义消费 roadmap 与 milestone。
 - [ ] 涉及 issue thread / anchor 的同步与切换通过 dedicated GitHub / formal writeback 链路单独完成；本文件不并行重定义 GitHub 元数据。

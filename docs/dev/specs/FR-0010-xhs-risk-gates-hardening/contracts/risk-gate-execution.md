@@ -95,14 +95,13 @@
 约束：
 
 1. `decision_id` 必须稳定、唯一、可公开消费，作为本次门禁结论的正式标识。
-2. 若下游 FR 需要在 gate evaluation 前消费 `decision_id` 作为 admission evidence linkage，则该标识必须能由公开请求作用域稳定预导出，并在 gate 结果中原样复用；不得依赖内部 bridge 私有 id 临时拼接。
-3. 默认 `effective_execution_mode` 必须是 `dry_run` 或 `recon`。
-4. `requested_execution_mode` 为 `live_*` 时，如任一前置缺失必须 `gate_decision=blocked`。
-5. `gate_reasons` 不得为空，必须可用于审计复盘。
-6. `gate_decision` 在整个 FR-0010 套件中固定为标量枚举，不可作为对象层名称复用。
-7. `gate_decision=blocked` 时，`effective_execution_mode` 只允许表示真实未继续 live 的降级模式，不得返回未实际执行的 `live_*`。
-8. `effective_execution_mode=live_read_limited` 只允许表示读动作的真实继续执行路径，不得用于写动作或不可逆写动作。
-9. 若请求或生效模式命中 `live_read_limited`，在 `FR-0011` 未完成 formal 收口前必须阻断。
+2. 默认 `effective_execution_mode` 必须是 `dry_run` 或 `recon`。
+3. `requested_execution_mode` 为 `live_*` 时，如任一前置缺失必须 `gate_decision=blocked`。
+4. `gate_reasons` 不得为空，必须可用于审计复盘。
+5. `gate_decision` 在整个 FR-0010 套件中固定为标量枚举，不可作为对象层名称复用。
+6. `gate_decision=blocked` 时，`effective_execution_mode` 只允许表示真实未继续 live 的降级模式，不得返回未实际执行的 `live_*`。
+7. `effective_execution_mode=live_read_limited` 只允许表示读动作的真实继续执行路径，不得用于写动作或不可逆写动作。
+8. 若请求或生效模式命中 `live_read_limited`，在 `FR-0011` 未完成 formal 收口前必须阻断。
 
 ## approval_record
 
@@ -133,7 +132,6 @@
 4. `requested_execution_mode|effective_execution_mode` 命中 `live_read_limited` 且 `gate_decision=allowed` 时，除审批证据外还必须满足 `FR-0011` 已正式冻结其 live-entry 语义；在此之前不得放行。
 5. `approval_id` 是 `FR-0009.approval_record_ref` 的等价承载，必须稳定、可检索、不可歧义。
 6. `decision_id` 必须指向同一次 `gate_outcome` 决策，保证审批记录可回链到唯一门禁结论。
-7. 若下游 FR 需要在 gate evaluation 前消费 `approval_id` 作为 admission evidence linkage，则该标识必须能够与 `decision_id` 一起按公开 contract 稳定预导出，并在 gate 判定后被 `approval_record` 原样复用。
 
 ## audit_record
 
