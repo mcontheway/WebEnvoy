@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { CliError } from "../core/errors.js";
+import { resolveIssueScope as resolveSharedIssueScope } from "../../shared/risk-state.js";
 import { normalizeXhsApprovalRecord, resolveXhsGateApprovalId, resolveXhsGateDecisionId } from "../../shared/xhs-gate.js";
 const ABILITY_LAYERS = new Set(["L3", "L2", "L1"]);
 const ABILITY_ACTIONS = new Set(["read", "write", "download"]);
@@ -14,6 +16,7 @@ const XHS_LIVE_READ_EXECUTION_MODES = new Set([
     "live_read_high_risk"
 ]);
 const DEFAULT_GATE_SESSION_ID = "nm-session-001";
+const ISSUE209_LIVE_REQUEST_ID_PREFIX = "issue209-live";
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
@@ -199,9 +202,19 @@ const cloneAdmissionContextForContract = (value) => {
     }
     return cloneJsonObject(object);
 };
-const isIssue209LiveReadRequest = (options) => options.issue_scope === "issue_209" &&
+const isIssue209LiveReadRequest = (options) => resolveSharedIssueScope(options.issue_scope) === "issue_209" &&
     typeof options.requested_execution_mode === "string" &&
     XHS_LIVE_READ_EXECUTION_MODES.has(options.requested_execution_mode);
+export const resolveIssue209CommandRequestIdForContract = (input) => {
+    const requestId = asString(input.requestId);
+    if (requestId) {
+        return requestId;
+    }
+    if (!isIssue209LiveReadRequest(input.options)) {
+        return null;
+    }
+    return `${ISSUE209_LIVE_REQUEST_ID_PREFIX}-${randomUUID()}`;
+};
 export const ensureIssue209AdmissionContextForContract = (input) => {
     const nextOptions = cloneJsonObject(input.options);
     const admissionContext = cloneAdmissionContextForContract(nextOptions.admission_context);
@@ -212,14 +225,18 @@ export const ensureIssue209AdmissionContextForContract = (input) => {
     if (!isIssue209LiveReadRequest(nextOptions)) {
         return nextOptions;
     }
+    const canonicalRequestId = resolveIssue209CommandRequestIdForContract({
+        options: nextOptions,
+        requestId: input.requestId
+    });
     const approvalRecord = normalizeXhsApprovalRecord(nextOptions.approval_record ?? nextOptions.approval);
     const decisionId = resolveXhsGateDecisionId({
         runId: input.runId,
-        commandRequestId: input.requestId
+        commandRequestId: canonicalRequestId
     });
     const approvalId = resolveXhsGateApprovalId({
         runId: input.runId,
-        commandRequestId: input.requestId,
+        commandRequestId: canonicalRequestId,
         approvalRecord: nextOptions.approval_record ?? nextOptions.approval
     });
     const approvalComplete = approvalRecord.approved &&

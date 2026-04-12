@@ -3293,6 +3293,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: "run-xhs-live-blocked-by-fingerprint-001",
+          requestId: "run-xhs-live-blocked-by-fingerprint-001",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -3355,6 +3356,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: "run-xhs-live-blocked-by-fingerprint-002",
+          requestId: "run-xhs-live-blocked-by-fingerprint-002",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           approval_record: createApprovedReadApprovalRecord(),
@@ -3408,6 +3410,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: "run-xhs-live-blocked-by-fingerprint-003",
+          requestId: "run-xhs-live-blocked-by-fingerprint-003",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord()
@@ -3457,6 +3460,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: "run-xhs-live-blocked-by-fingerprint-untrusted-001",
+          requestId: "run-xhs-live-blocked-by-fingerprint-untrusted-001",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -3515,6 +3519,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: "run-xhs-live-untrusted-startup-tab-001",
+          requestId: "run-xhs-live-untrusted-startup-tab-001",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -3598,6 +3603,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: liveRunId,
+          requestId: liveRequestId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -3676,6 +3682,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: liveRunId,
+          requestId: liveRequestId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord()
@@ -3751,6 +3758,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: liveRunId,
+          requestId: liveRunId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord()
@@ -3846,6 +3854,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: liveRunId,
+          requestId: liveRunId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -3926,6 +3935,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command_params: createRequestBoundXhsCommandParams({
           runId: "run-xhs-live-recovery-untrusted-001",
           sessionId: "nm-session-002",
+          requestId: "run-xhs-live-recovery-untrusted-001",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -4003,6 +4013,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: liveRunId,
+          requestId: firstAttemptId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -4050,6 +4061,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: liveRunId,
+          requestId: liveRunId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -4130,6 +4142,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: liveRunId,
+          requestId: liveRunId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -4231,6 +4244,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: liveRunId,
+          requestId: liveRequestId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -4310,6 +4324,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: runId,
+          requestId: runId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -4374,6 +4389,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: runId,
+          requestId: `${runId}-drifted`,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -4404,6 +4420,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: runId,
+          requestId: `${runId}-after-invalidation`,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -4457,6 +4474,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: "run-xhs-live-top-level-patch-missing-001",
+          requestId: "run-xhs-live-top-level-patch-missing-001",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           approval_record: createApprovedReadApprovalRecord(),
@@ -5205,6 +5223,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: "run-xhs-live-limited-approved-001",
+          requestId: "run-xhs-live-limited-approved-001",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           fingerprint_context: createFingerprintRuntimeContext(),
@@ -5321,6 +5340,7 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: "run-xhs-live-mode-approved-001",
+          requestId: "run-xhs-live-mode-approved-001",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           fingerprint_context: createFingerprintRuntimeContext(),

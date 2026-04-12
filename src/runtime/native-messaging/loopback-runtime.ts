@@ -39,6 +39,67 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const XHS_READ_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
+const XHS_READ_COMMAND_DEFAULT_ABILITY_IDS: Record<string, string> = {
+  "xhs.search": "xhs.note.search.v1",
+  "xhs.detail": "xhs.note.detail.v1",
+  "xhs.user_home": "xhs.user.home.v1"
+};
+type XhsReadCommand = keyof typeof XHS_READ_COMMAND_DEFAULT_ABILITY_IDS;
+const XHS_READ_COMMAND_SPECS: Record<
+  XhsReadCommand,
+  {
+    abilityId: string;
+    pageKind: "search" | "detail" | "profile";
+    pageUrl: string;
+    pageTitle: string;
+    requestUrl: string;
+    dataRefKey: "query" | "note_id" | "user_id";
+    successDataRef: (input: Record<string, unknown>) => Record<string, unknown>;
+    failureSummary: string;
+  }
+> = {
+  "xhs.search": {
+    abilityId: "xhs.note.search.v1",
+    pageKind: "search",
+    pageUrl: "https://www.xiaohongshu.com/search_result",
+    pageTitle: "Search Result",
+    requestUrl: "/api/sns/web/v1/search/notes",
+    dataRefKey: "query",
+    successDataRef: (input) => ({
+      query: String(input.query ?? ""),
+      search_id: "loopback-search-id"
+    }),
+    failureSummary: "网关调用失败，当前上下文不足以完成搜索请求"
+  },
+  "xhs.detail": {
+    abilityId: "xhs.note.detail.v1",
+    pageKind: "detail",
+    pageUrl: "https://www.xiaohongshu.com/explore/loopback-note",
+    pageTitle: "Note Detail",
+    requestUrl: "/api/sns/web/v1/feed",
+    dataRefKey: "note_id",
+    successDataRef: (input) => ({
+      note_id: String(input.note_id ?? ""),
+      note_title: "loopback-note-title"
+    }),
+    failureSummary: "网关调用失败，当前上下文不足以完成详情读取请求"
+  },
+  "xhs.user_home": {
+    abilityId: "xhs.user.home.v1",
+    pageKind: "profile",
+    pageUrl: "https://www.xiaohongshu.com/user/profile/loopback-user",
+    pageTitle: "User Home",
+    requestUrl: "/api/sns/web/v1/user/otherinfo",
+    dataRefKey: "user_id",
+    successDataRef: (input) => ({
+      user_id: String(input.user_id ?? ""),
+      profile_id: "loopback-profile-id"
+    }),
+    failureSummary: "网关调用失败，当前上下文不足以完成主页读取请求"
+  }
+};
+
 const resolveApprovalRecord = (
   options: Record<string, unknown>
 ): Record<string, unknown> | null => asRecord(options.approval_record) ?? asRecord(options.approval);
@@ -137,7 +198,7 @@ const mergeGateArtifactsIntoCommandParams = (
   return normalized;
 };
 
-const buildLoopbackXhsSearchGateBundle = (input: {
+const buildLoopbackXhsReadGateBundle = (input: {
   options: Record<string, unknown>;
   abilityAction: string | null;
   runId: string;
@@ -375,8 +436,8 @@ class InMemoryContentScriptRuntime {
       };
     }
 
-    if (message.command === "xhs.search") {
-      return this.handleXhsSearch(message);
+    if (XHS_READ_COMMANDS.has(message.command)) {
+      return this.handleXhsRead(message);
     }
 
     return {
@@ -389,7 +450,9 @@ class InMemoryContentScriptRuntime {
     };
   }
 
-  private handleXhsSearch(message: Extract<ContentMessage, { kind: "forward" }>): ContentMessage {
+  private handleXhsRead(message: Extract<ContentMessage, { kind: "forward" }>): ContentMessage {
+    const command = message.command as XhsReadCommand;
+    const spec = XHS_READ_COMMAND_SPECS[command];
     const simulated =
       typeof message.commandParams.options === "object" &&
       message.commandParams.options !== null &&
@@ -408,7 +471,7 @@ class InMemoryContentScriptRuntime {
       typeof message.commandParams.options === "object" && message.commandParams.options !== null
         ? (message.commandParams.options as Record<string, unknown>)
         : {};
-    const gateBundle = buildLoopbackXhsSearchGateBundle({
+    const gateBundle = buildLoopbackXhsReadGateBundle({
       options,
       abilityAction: asString(ability.action),
       runId: message.runId,
@@ -420,9 +483,9 @@ class InMemoryContentScriptRuntime {
     const consumerGateResult = gateBundle.consumerGateResult;
     const successObservability = {
       page_state: {
-        page_kind: "search",
-        url: "https://www.xiaohongshu.com/search_result",
-        title: "Search Result",
+        page_kind: spec.pageKind,
+        url: spec.pageUrl,
+        title: spec.pageTitle,
         ready_state: "complete",
         observation_status: "complete"
       },
@@ -461,11 +524,11 @@ class InMemoryContentScriptRuntime {
         ok: false,
         error: {
           code: "ERR_EXECUTION_FAILED",
-          message: "执行模式门禁阻断了当前 xhs.search 请求"
+          message: `执行模式门禁阻断了当前 ${command} 请求`
         },
         payload: {
           details: {
-            ability_id: String(ability.id ?? "xhs.note.search.v1"),
+            ability_id: String(ability.id ?? spec.abilityId),
             stage: "execution",
             reason: "EXECUTION_MODE_GATE_BLOCKED"
           },
@@ -478,12 +541,12 @@ class InMemoryContentScriptRuntime {
       consumerGateResult.effective_execution_mode === "recon"
     ) {
       return buildSuccessfulResult({
-        ability_id: String(ability.id ?? "xhs.note.search.v1"),
+        ability_id: String(ability.id ?? spec.abilityId),
         layer: String(ability.layer ?? "L3"),
         action: String(consumerGateResult.action_type ?? ability.action ?? "read"),
         outcome: "partial",
         data_ref: {
-          query: String(input.query ?? "")
+          [spec.dataRefKey]: String(input[spec.dataRefKey] ?? "")
         },
         metrics: {
           count: 0
@@ -561,7 +624,7 @@ class InMemoryContentScriptRuntime {
 
     if (simulated === "capability_result_missing_layer") {
       return buildSuccessfulResult({
-        ability_id: String(ability.id ?? "xhs.note.search.v1"),
+        ability_id: String(ability.id ?? spec.abilityId),
         action: String(consumerGateResult.action_type ?? ability.action ?? "read"),
         outcome: "success"
       });
@@ -569,7 +632,7 @@ class InMemoryContentScriptRuntime {
 
     if (simulated === "capability_result_invalid_outcome") {
       return buildSuccessfulResult({
-        ability_id: String(ability.id ?? "xhs.note.search.v1"),
+        ability_id: String(ability.id ?? spec.abilityId),
         layer: String(ability.layer ?? "L3"),
         action: String(consumerGateResult.action_type ?? ability.action ?? "read"),
         outcome: "blocked"
@@ -579,14 +642,11 @@ class InMemoryContentScriptRuntime {
     if (simulated === "success") {
       return buildSuccessfulResult(
         {
-          ability_id: String(ability.id ?? "xhs.note.search.v1"),
+          ability_id: String(ability.id ?? spec.abilityId),
           layer: String(ability.layer ?? "L3"),
           action: String(consumerGateResult.action_type ?? ability.action ?? "read"),
           outcome: "success",
-          data_ref: {
-            query: String(input.query ?? ""),
-            search_id: "loopback-search-id"
-          },
+          data_ref: spec.successDataRef(input),
           metrics: {
             count: 2,
             duration_ms: 12
@@ -598,7 +658,7 @@ class InMemoryContentScriptRuntime {
               request_id: "req-loopback-001",
               stage: "request",
               method: "POST",
-              url: "/api/sns/web/v1/search/notes",
+              url: spec.requestUrl,
               outcome: "completed",
               status_code: 200
             }
@@ -615,20 +675,20 @@ class InMemoryContentScriptRuntime {
         code: "ERR_EXECUTION_FAILED",
         message:
           simulated === "login_required"
-            ? "登录态缺失，无法执行 xhs.search"
+            ? `登录态缺失，无法执行 ${command}`
             : simulated === "account_abnormal"
               ? "账号异常，平台拒绝当前请求"
               : simulated === "browser_env_abnormal"
                 ? "浏览器环境异常，平台拒绝当前请求"
-                : simulated === "captcha_required"
+              : simulated === "captcha_required"
                   ? "平台要求额外人机验证，无法继续执行"
                   : simulated === "signature_entry_missing"
                     ? "页面签名入口不可用"
-                    : "网关调用失败，当前上下文不足以完成搜索请求"
+                    : spec.failureSummary
       },
       payload: {
         details: {
-          ability_id: String(ability.id ?? "xhs.note.search.v1"),
+          ability_id: String(ability.id ?? spec.abilityId),
           stage: "execution",
           reason:
             simulated === "login_required"
@@ -646,12 +706,12 @@ class InMemoryContentScriptRuntime {
         ...gateBundle.payload,
         observability: {
           page_state: {
-            page_kind: simulated === "login_required" ? "login" : "search",
+            page_kind: simulated === "login_required" ? "login" : spec.pageKind,
             url:
               simulated === "login_required"
                 ? "https://www.xiaohongshu.com/login"
-                : "https://www.xiaohongshu.com/search_result",
-            title: "Search Result",
+                : spec.pageUrl,
+            title: spec.pageTitle,
             ready_state: "complete",
             observation_status: "complete"
           },
@@ -663,7 +723,7 @@ class InMemoryContentScriptRuntime {
                     request_id: "req-loopback-001",
                     stage: "request",
                     method: "POST",
-                    url: "/api/sns/web/v1/search/notes",
+                    url: spec.requestUrl,
                     outcome: "failed",
                     status_code:
                       simulated === "account_abnormal"
@@ -684,7 +744,7 @@ class InMemoryContentScriptRuntime {
             target:
               simulated === "signature_entry_missing"
                 ? "window._webmsxyw"
-                : "/api/sns/web/v1/search/notes",
+                : spec.requestUrl,
             summary: simulated
           }
         },
@@ -698,7 +758,7 @@ class InMemoryContentScriptRuntime {
             target:
               simulated === "signature_entry_missing"
                 ? "window._webmsxyw"
-                : "/api/sns/web/v1/search/notes",
+                : spec.requestUrl,
             summary: simulated
           },
           evidence: [simulated]
@@ -787,7 +847,7 @@ class InMemoryBackgroundRelay {
       const sessionId = String(request.params.session_id ?? this.#sessionId);
       let gatePayload: Record<string, unknown> | undefined;
 
-      if (command === "xhs.search") {
+      if (XHS_READ_COMMANDS.has(command)) {
         const ability =
           typeof commandParams.ability === "object" && commandParams.ability !== null
             ? (commandParams.ability as Record<string, unknown>)
@@ -796,7 +856,7 @@ class InMemoryBackgroundRelay {
           typeof commandParams.options === "object" && commandParams.options !== null
             ? (commandParams.options as Record<string, unknown>)
             : {};
-        const gateBundle = buildLoopbackXhsSearchGateBundle({
+        const gateBundle = buildLoopbackXhsReadGateBundle({
           options,
           abilityAction: asString(ability.action),
           runId,
@@ -817,7 +877,11 @@ class InMemoryBackgroundRelay {
               },
               payload: {
                 details: {
-                  ability_id: String(ability.id ?? "xhs.note.search.v1"),
+                  ability_id: String(
+                    ability.id ??
+                      XHS_READ_COMMAND_DEFAULT_ABILITY_IDS[command] ??
+                      "xhs.note.search.v1"
+                  ),
                   stage: "execution",
                   reason: "EXECUTION_MODE_GATE_BLOCKED"
                 },

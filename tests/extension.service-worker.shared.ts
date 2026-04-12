@@ -309,11 +309,10 @@ export const createRequestBoundXhsCommandParams = (
   } & Record<string, unknown>
 ) => {
   const { runId, sessionId, requestId, ...overrides } = input;
-  const effectiveRequestId = requestId ?? runId;
   return createXhsCommandParams({
     ...overrides,
     run_id: runId,
-    request_id: effectiveRequestId,
+    ...(requestId ? { request_id: requestId } : {}),
     session_id: sessionId ?? "nm-session-001"
   });
 };

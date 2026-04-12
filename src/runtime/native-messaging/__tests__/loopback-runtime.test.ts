@@ -7,6 +7,7 @@ const createApprovedReadAdmissionContext = (input: {
   runId: string;
   requestId: string;
   targetTabId: number;
+  targetPage?: string;
   requestedExecutionMode: "live_read_limited" | "live_read_high_risk";
   riskState: "limited" | "allowed";
 }) => ({
@@ -19,7 +20,7 @@ const createApprovedReadAdmissionContext = (input: {
     issue_scope: "issue_209",
     target_domain: "www.xiaohongshu.com",
     target_tab_id: input.targetTabId,
-    target_page: "search_result_tab",
+    target_page: input.targetPage ?? "search_result_tab",
     action_type: "read",
     requested_execution_mode: input.requestedExecutionMode,
     approved: true,
@@ -43,7 +44,7 @@ const createApprovedReadAdmissionContext = (input: {
     issue_scope: "issue_209",
     target_domain: "www.xiaohongshu.com",
     target_tab_id: input.targetTabId,
-    target_page: "search_result_tab",
+    target_page: input.targetPage ?? "search_result_tab",
     action_type: "read",
     requested_execution_mode: input.requestedExecutionMode,
     risk_state: input.riskState,
@@ -347,6 +348,114 @@ describe("native messaging legacy loopback runtime", () => {
       })
     );
   });
+
+  it.each([
+    {
+      command: "xhs.detail",
+      abilityId: "xhs.note.detail.v1",
+      input: { note_id: "note-loopback-001" },
+      targetPage: "explore_detail_tab"
+    },
+    {
+      command: "xhs.user_home",
+      abilityId: "xhs.user.home.v1",
+      input: { user_id: "user-loopback-001" },
+      targetPage: "profile_tab"
+    }
+  ])(
+    "applies the same live_read_limited gate bundle to $command",
+    async ({ command, abilityId, input, targetPage }) => {
+      const runId = `run-${command.replace(".", "-")}-live-limited-001`;
+      const requestId = `${command.replace(".", "-")}-live-limited-001`;
+      const targetTabId = 36;
+      const bridge = new NativeMessagingBridge({
+        transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
+      });
+
+      const result = await bridge.runCommand({
+        runId,
+        profile: "profile-a",
+        cwd: "/tmp",
+        command,
+        params: {
+          request_id: requestId,
+          ability: {
+            id: abilityId,
+            layer: "L3",
+            action: "read"
+          },
+          input,
+          options: {
+            simulate_result: "success",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: targetTabId,
+            target_page: targetPage,
+            issue_scope: "issue_209",
+            action_type: "read",
+            requested_execution_mode: "live_read_limited",
+            risk_state: "limited",
+            limited_read_rollout_ready_true: true,
+            approval_record: {
+              approved: true,
+              approver: "qa-reviewer",
+              approved_at: "2026-03-23T10:00:00Z",
+              checks: {
+                target_domain_confirmed: true,
+                target_tab_confirmed: true,
+                target_page_confirmed: true,
+                risk_state_checked: true,
+                action_type_confirmed: true
+              }
+            },
+            admission_context: createApprovedReadAdmissionContext({
+              runId,
+              requestId,
+              targetTabId,
+              targetPage,
+              requestedExecutionMode: "live_read_limited",
+              riskState: "limited"
+            }),
+            audit_record: {
+              event_id: `audit-${requestId}`,
+              decision_id: `gate_decision_${runId}_${requestId}`,
+              approval_id: `gate_appr_gate_decision_${runId}_${requestId}`,
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: targetTabId,
+              target_page: targetPage,
+              action_type: "read",
+              requested_execution_mode: "live_read_limited",
+              gate_decision: "allowed",
+              recorded_at: "2026-03-23T10:00:30Z"
+            }
+          }
+        }
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.payload).toEqual(
+        expect.objectContaining({
+          summary: expect.objectContaining({
+            gate_input: expect.objectContaining({
+              target_page: targetPage,
+              requested_execution_mode: "live_read_limited"
+            }),
+            gate_outcome: expect.objectContaining({
+              decision_id: `gate_decision_${runId}_${requestId}`,
+              effective_execution_mode: "live_read_limited",
+              gate_decision: "allowed",
+              gate_reasons: ["LIVE_MODE_APPROVED"]
+            }),
+            audit_record: expect.objectContaining({
+              decision_id: `gate_decision_${runId}_${requestId}`,
+              requested_execution_mode: "live_read_limited",
+              effective_execution_mode: "live_read_limited"
+            })
+          })
+        })
+      );
+    }
+  );
 
   it("blocks stale caller audit linkage in loopback bundles", async () => {
     const runId = "run-loopback-live-limited-stale-001";

@@ -31,6 +31,7 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: "run-xhs-live-top-level-patch-missing-001",
+          requestId: "run-xhs-live-top-level-patch-missing-001",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           approval_record: createApprovedReadApprovalRecord(),
@@ -779,6 +780,7 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: "run-xhs-live-limited-approved-001",
+          requestId: "run-xhs-live-limited-approved-001",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           fingerprint_context: createFingerprintRuntimeContext(),
@@ -895,6 +897,7 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         command: "xhs.search",
         command_params: createRequestBoundXhsCommandParams({
           runId: "run-xhs-live-mode-approved-001",
+          requestId: "run-xhs-live-mode-approved-001",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           fingerprint_context: createFingerprintRuntimeContext(),

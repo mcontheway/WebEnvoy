@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { CliError } from "../core/errors.js";
 import type { JsonObject } from "../core/types.js";
+import { resolveIssueScope as resolveSharedIssueScope } from "../../shared/risk-state.js";
 import {
   normalizeXhsApprovalRecord,
   resolveXhsGateApprovalId,
@@ -65,6 +67,7 @@ const XHS_LIVE_READ_EXECUTION_MODES = new Set<XhsExecutionMode>([
   "live_read_high_risk"
 ]);
 const DEFAULT_GATE_SESSION_ID = "nm-session-001";
+const ISSUE209_LIVE_REQUEST_ID_PREFIX = "issue209-live";
 
 const asObject = (value: unknown): JsonObject | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -331,9 +334,25 @@ const isIssue209LiveReadRequest = (options: JsonObject): options is JsonObject &
   issue_scope: "issue_209";
   requested_execution_mode: XhsExecutionMode;
 } =>
-  options.issue_scope === "issue_209" &&
+  resolveSharedIssueScope(options.issue_scope) === "issue_209" &&
   typeof options.requested_execution_mode === "string" &&
   XHS_LIVE_READ_EXECUTION_MODES.has(options.requested_execution_mode as XhsExecutionMode);
+
+export const resolveIssue209CommandRequestIdForContract = (input: {
+  options: JsonObject;
+  requestId: string | null;
+}): string | null => {
+  const requestId = asString(input.requestId);
+  if (requestId) {
+    return requestId;
+  }
+
+  if (!isIssue209LiveReadRequest(input.options)) {
+    return null;
+  }
+
+  return `${ISSUE209_LIVE_REQUEST_ID_PREFIX}-${randomUUID()}`;
+};
 
 export const ensureIssue209AdmissionContextForContract = (input: {
   options: JsonObject;
@@ -352,14 +371,18 @@ export const ensureIssue209AdmissionContextForContract = (input: {
     return nextOptions;
   }
 
+  const canonicalRequestId = resolveIssue209CommandRequestIdForContract({
+    options: nextOptions,
+    requestId: input.requestId
+  });
   const approvalRecord = normalizeXhsApprovalRecord(nextOptions.approval_record ?? nextOptions.approval);
   const decisionId = resolveXhsGateDecisionId({
     runId: input.runId,
-    commandRequestId: input.requestId
+    commandRequestId: canonicalRequestId
   });
   const approvalId = resolveXhsGateApprovalId({
     runId: input.runId,
-    commandRequestId: input.requestId,
+    commandRequestId: canonicalRequestId,
     approvalRecord: nextOptions.approval_record ?? nextOptions.approval
   });
   const approvalComplete =

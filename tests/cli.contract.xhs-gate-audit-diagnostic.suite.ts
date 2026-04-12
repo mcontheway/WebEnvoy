@@ -1904,6 +1904,81 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  it("synthesizes request linkage for live_read_limited when caller omits request_id", () => {
+    const runId = "run-issue209-live-limited-generated-request-001";
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--run-id",
+      runId,
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          ...scopedReadGateOptions,
+          simulate_result: "success",
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          limited_read_rollout_ready_true: true,
+          fingerprint_context: createLoopbackFingerprintContext(),
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    const decisionId = String(body.summary.gate_outcome.decision_id);
+    const approvalAdmissionEvidence = body.summary.gate_input.admission_context.approval_admission_evidence;
+    const auditAdmissionEvidence = body.summary.gate_input.admission_context.audit_admission_evidence;
+    expect(decisionId).toMatch(new RegExp(`^gate_decision_${runId}_issue209-live-`));
+    expect(approvalAdmissionEvidence).toMatchObject({
+      decision_id: decisionId,
+      approval_id: `gate_appr_${decisionId}`
+    });
+    expect(auditAdmissionEvidence).toMatchObject({
+      decision_id: decisionId,
+      approval_id: `gate_appr_${decisionId}`,
+      risk_state: "limited"
+    });
+    expect(body.summary.gate_outcome).toMatchObject({
+      effective_execution_mode: "live_read_limited",
+      gate_decision: "allowed",
+      gate_reasons: ["LIVE_MODE_APPROVED"]
+    });
+    expect(body.summary.approval_record).toMatchObject({
+      decision_id: decisionId,
+      approval_id: `gate_appr_${decisionId}`
+    });
+    expect(body.summary.audit_record).toMatchObject({
+      decision_id: decisionId,
+      approval_id: `gate_appr_${decisionId}`,
+      requested_execution_mode: "live_read_limited",
+      effective_execution_mode: "live_read_limited"
+    });
+  });
+
   itWithSqlite("queries persisted gate audit trail by run_id after live approval", async () => {
     const cwd = await createRuntimeCwd();
     const runId = "run-audit-query-allowed-001";

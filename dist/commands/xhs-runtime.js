@@ -7,7 +7,7 @@ import { appendFingerprintContext, buildFingerprintContextForMeta } from "../run
 import { ProfileStore } from "../runtime/profile-store.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import { prepareOfficialChromeRuntime } from "../runtime/official-chrome-runtime.js";
-import { buildCapabilityResult, ensureIssue209AdmissionContextForContract, normalizeGateOptionsForContract, parseAbilityEnvelopeForContract, parseDetailInputForContract, parseSearchInputForContract, parseUserHomeInputForContract } from "./xhs-input.js";
+import { buildCapabilityResult, ensureIssue209AdmissionContextForContract, normalizeGateOptionsForContract, parseAbilityEnvelopeForContract, parseDetailInputForContract, parseSearchInputForContract, parseUserHomeInputForContract, resolveIssue209CommandRequestIdForContract } from "./xhs-input.js";
 export { buildOfficialChromeRuntimeStatusParams } from "../runtime/official-chrome-runtime.js";
 export { normalizeGateOptionsForContract } from "./xhs-input.js";
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
@@ -172,15 +172,19 @@ const xhsReadCommand = async (context, inputConfig) => {
         requestedExecutionMode: gate.requestedExecutionMode
     });
     try {
+        const commandRequestId = resolveIssue209CommandRequestIdForContract({
+            options: gate.options,
+            requestId: envelope.requestId
+        });
         const normalizedOptions = ensureIssue209AdmissionContextForContract({
             options: gate.options,
             runId: context.run_id,
-            requestId: envelope.requestId,
+            requestId: commandRequestId,
             sessionId: "nm-session-001"
         });
         await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, gate);
         const commandParams = appendFingerprintContext({
-            ...(envelope.requestId ? { request_id: envelope.requestId } : {}),
+            ...(commandRequestId ? { request_id: commandRequestId } : {}),
             target_domain: gate.targetDomain,
             target_tab_id: gate.targetTabId,
             target_page: gate.targetPage,

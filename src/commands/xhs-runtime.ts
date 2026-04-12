@@ -23,6 +23,7 @@ import {
   parseDetailInputForContract,
   parseSearchInputForContract,
   parseUserHomeInputForContract,
+  resolveIssue209CommandRequestIdForContract,
   XhsExecutionMode
 } from "./xhs-input.js";
 
@@ -253,10 +254,14 @@ const xhsReadCommand = async (
   });
 
   try {
+    const commandRequestId = resolveIssue209CommandRequestIdForContract({
+      options: gate.options,
+      requestId: envelope.requestId
+    });
     const normalizedOptions = ensureIssue209AdmissionContextForContract({
       options: gate.options,
       runId: context.run_id,
-      requestId: envelope.requestId,
+      requestId: commandRequestId,
       sessionId: "nm-session-001"
     });
     await ensureOfficialChromeRuntimeReady(
@@ -269,7 +274,7 @@ const xhsReadCommand = async (
     );
     const commandParams = appendFingerprintContext(
       {
-        ...(envelope.requestId ? { request_id: envelope.requestId } : {}),
+        ...(commandRequestId ? { request_id: commandRequestId } : {}),
         target_domain: gate.targetDomain,
         target_tab_id: gate.targetTabId,
         target_page: gate.targetPage,
