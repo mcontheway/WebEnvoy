@@ -29,7 +29,6 @@
 - `live_read_limited` 作为 `allowed_modes` 成员时，表示正式公开的受控 live 模式，不得仅作为内部 fallback 枚举存在。
 - `blocked_actions` 为空时视为无效对象。
 - `live_entry_requirements` 必须显式覆盖 `FR-0010.GateInput.risk_state` 的 live 准入边界、`target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`action_type_confirmed`、以及完整的 request-side admission evidence；其中 audit admission 必须至少包含 `audit_admission_evidence_present` 与 `audit_admission_checks_all_true` 两类条件名；gate 后审批/审计留痕不得弱于 `FR-0010.ApprovalRecord` / `FR-0010.AuditRecord` 的正式边界。
-- `live_entry_requirements` 允许保留 `FR-0010` 既有的 `approval_record_*` 共享条件名，以保证 `issue_208` 的 `conditional_actions.requires` 与冻结词汇表兼容；这不改变 `issue_209` live read 继续以 request-side admission evidence 作为 pre-gate 前置的要求。
 - `FR-0009.resume_requirements.limited_read_rollout_ready` 的正式条件载体不在本实体的共享 `live_entry_requirements` 中统一展开；它只允许在 `IssueActionMatrix.conditional_actions.requires` 中以 `limited_read_rollout_ready_true` 的条件名被 `live_read_limited` 显式消费。
 
 ## 实体 3：ApprovalAdmissionEvidence
@@ -128,7 +127,8 @@
 - `issue_208` 与 `issue_209` 必须覆盖相同的 `state` 枚举集合。
 - `paused` 的 `allowed_actions` 只能包含 `dry_run` 或 `recon` 类动作。
 - `conditional_actions` 的每个元素必须至少包含 `action` 与 `requires` 两个字段。
-- `conditional_actions.requires` 只允许引用已在 `ReadExecutionPolicy.live_entry_requirements` 中冻结的机器条件名。
+- `conditional_actions.requires` 若对应 `issue_209` live read，只允许引用已在 `ReadExecutionPolicy.live_entry_requirements` 中冻结的机器条件名。
+- `issue_208` 的 `conditional_actions.requires` 允许继续直接引用 `FR-0010` 冻结的 `approval_record_approved_true`、`approval_record_approver_present`、`approval_record_approved_at_present`、`approval_record_checks_all_true`，以保持其写验证路径与既有审批字段口径一致。
 - `conditional_actions.requires` 允许额外引用 `limited_read_rollout_ready_true`；该条件名是 `FR-0009.resume_requirements.limited_read_rollout_ready` 的正式载体，且只允许与 `action=live_read_limited` 绑定。
 - 所有 `IssueActionMatrix` entry 都必须显式包含 `conditional_actions`；当不存在附加前置动作时，取空数组。
 - `paused` 的 `blocked_actions` 必须显式覆盖所有 live 动作，不得依赖实现推断补全。

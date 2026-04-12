@@ -74,10 +74,6 @@
       "target_tab_confirmed",
       "target_page_confirmed",
       "action_type_confirmed",
-      "approval_record_approved_true",
-      "approval_record_approver_present",
-      "approval_record_approved_at_present",
-      "approval_record_checks_all_true",
       "approval_admission_evidence_approved_true",
       "approval_admission_evidence_approver_present",
       "approval_admission_evidence_approved_at_present",
@@ -95,7 +91,6 @@
 - `gate_input_risk_state_limited_or_allowed` 表示 `FR-0010.gate_input.risk_state` 只能为 `limited` 或 `allowed`；若为 `paused`，不得进入 live 判定。
 - `audit_admission_evidence_present` 表示 live read 请求侧必须携带字段完整、且与本次请求 scope/target/mode 精确匹配的 `audit_admission_evidence` 准入证据；不得只凭同 scope/target 的历史记录近似满足。
 - `audit_admission_checks_all_true` 表示 `audit_admission_evidence.audited_checks.target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`risk_state_checked`、`action_type_confirmed` 全为 `true`。
-- `approval_record_approved_true` / `approval_record_approver_present` / `approval_record_approved_at_present` / `approval_record_checks_all_true` 继续保留在共享冻结词汇中，供 `issue_208` 的 `conditional_actions.requires` 与 `FR-0010` 既有审批字段保持兼容；`issue_209` 的 live read 前置不直接以这些条件名作为 request-side admission input 的唯一承载。
 - `approval_admission_evidence_approved_true` 表示 `approval_admission_evidence.approved=true`；`approval_admission_evidence_approver_present` / `approval_admission_evidence_approved_at_present` 表示 `approver` 与 `approved_at` 已填写。
 - `approval_admission_evidence_checks_all_true` 表示 `approval_admission_evidence.checks.target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`risk_state_checked`、`action_type_confirmed` 全为 `true`。
 - `manual_confirmation_recorded` 不再作为独立机器条件名存在；人工确认的正式机器承载统一落在 pre-gate `approval_admission_evidence` 的 `approved=true`、`approver`、`approved_at` 与完整 `checks` 上。
