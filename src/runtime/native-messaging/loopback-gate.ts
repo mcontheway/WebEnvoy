@@ -3,7 +3,6 @@ import {
   ISSUE_SCOPES,
   getIssueActionMatrixEntry,
   resolveIssueScope as resolveSharedIssueScope,
-  resolveRiskState as resolveSharedRiskState,
   type IssueActionMatrixEntry,
   type IssueScope,
   type RiskState,
@@ -20,7 +19,6 @@ export const LOOPBACK_PLUGIN_GATE_OWNERSHIP = {
   cli_role: "request_and_result_shell_only"
 } as const;
 
-type LoopbackRiskState = RiskState;
 type LoopbackIssueScope = IssueScope;
 type LoopbackIssueActionMatrixEntry = IssueActionMatrixEntry;
 
@@ -32,8 +30,6 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
-const resolveLoopbackRiskState = (value: unknown): LoopbackRiskState => resolveSharedRiskState(value);
-
 const resolveLoopbackIssueScope = (value: unknown): LoopbackIssueScope =>
   ISSUE_SCOPES.includes(value as LoopbackIssueScope)
     ? (value as LoopbackIssueScope)
@@ -41,62 +37,34 @@ const resolveLoopbackIssueScope = (value: unknown): LoopbackIssueScope =>
 
 const resolveLoopbackIssueActionMatrixEntry = (
   issueScope: LoopbackIssueScope,
-  riskState: LoopbackRiskState
+  riskState: RiskState
 ): LoopbackIssueActionMatrixEntry => getIssueActionMatrixEntry(issueScope, riskState);
 
-const bindAdmissionContextToRequest = (input: {
-  admissionContext: Record<string, unknown> | null;
-  runId: string | null;
-  sessionId: string | null;
-  issueScope: string | null;
-  targetDomain: string | null;
-  targetTabId: number | null;
-  targetPage: string | null;
-  actionType: string | null;
-  requestedExecutionMode: string | null;
-  riskState: string | null;
-}): Record<string, unknown> | null => {
-  const admissionContext = asRecord(input.admissionContext);
-  if (!admissionContext) {
+const cloneAdmissionContext = (
+  admissionContext: Record<string, unknown> | null
+): Record<string, unknown> | null => {
+  const normalizedAdmissionContext = asRecord(admissionContext);
+  if (!normalizedAdmissionContext) {
     return null;
   }
 
-  const approvalEvidence = asRecord(admissionContext.approval_admission_evidence);
-  const auditEvidence = asRecord(admissionContext.audit_admission_evidence);
+  const approvalEvidence = asRecord(normalizedAdmissionContext.approval_admission_evidence);
+  const auditEvidence = asRecord(normalizedAdmissionContext.audit_admission_evidence);
 
   return {
-    ...(approvalEvidence
-      ? {
-          approval_admission_evidence: {
-            ...approvalEvidence,
-            run_id: input.runId,
-            session_id: input.sessionId,
-            issue_scope: input.issueScope,
-            target_domain: input.targetDomain,
-            target_tab_id: input.targetTabId,
-            target_page: input.targetPage,
-            action_type: input.actionType,
-            requested_execution_mode: input.requestedExecutionMode
-          }
-        }
-      : {}),
-    ...(auditEvidence
-      ? {
-          audit_admission_evidence: {
-            ...auditEvidence,
-            run_id: input.runId,
-            session_id: input.sessionId,
-            issue_scope: input.issueScope,
-            target_domain: input.targetDomain,
-            target_tab_id: input.targetTabId,
-            target_page: input.targetPage,
-            action_type: input.actionType,
-            requested_execution_mode: input.requestedExecutionMode,
-            risk_state: input.riskState
-          }
-        }
-      : {})
+    ...(approvalEvidence ? { approval_admission_evidence: { ...approvalEvidence } } : {}),
+    ...(auditEvidence ? { audit_admission_evidence: { ...auditEvidence } } : {})
   };
+};
+
+const bindAdmissionContextToRequest = (input: {
+  admissionContext: Record<string, unknown> | null;
+}): Record<string, unknown> | null => {
+  const admissionContext = cloneAdmissionContext(input.admissionContext);
+  if (!admissionContext) {
+    return null;
+  }
+  return admissionContext;
 };
 
 export const buildLoopbackGate = (
@@ -121,19 +89,8 @@ export const buildLoopbackGate = (
   approvalRecord: Record<string, unknown>;
 } => {
   const clone = <T>(value: T): T => structuredClone(value);
-  const resolvedIssueScope = resolveLoopbackIssueScope(options.issue_scope);
-  const resolvedRiskState = resolveLoopbackRiskState(options.risk_state);
   const boundAdmissionContext = bindAdmissionContextToRequest({
-    admissionContext: asRecord(options.admission_context),
-    runId: linkage?.runId ?? asString(options.run_id),
-    sessionId: linkage?.sessionId ?? asString(options.session_id),
-    issueScope: resolvedIssueScope,
-    targetDomain: asString(options.target_domain),
-    targetTabId: typeof options.target_tab_id === "number" ? options.target_tab_id : null,
-    targetPage: asString(options.target_page),
-    actionType: asString(options.action_type),
-    requestedExecutionMode: asString(options.requested_execution_mode),
-    riskState: resolvedRiskState
+    admissionContext: asRecord(options.admission_context)
   });
   const issue208EditorInputValidation =
     options.issue_scope === "issue_208" &&

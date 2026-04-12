@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createMockPort, createEditorInputProbeResult, createChromeApi, respondHandshake, waitForBridgeTurn, waitForPostedMessage, primeTrustedFingerprintContext, promoteBootstrapReadinessThroughPing, createXhsCommandParams, createXhsEditorInputCommandParams, createApprovedReadApprovalRecord, createApprovedReadAuditRecordForRequest, createFingerprintRuntimeContext, asRecord, resolveWriteInteractionTier, startChromeBackgroundBridge } from "./extension.service-worker.shared.js";
+import { createMockPort, createEditorInputProbeResult, createChromeApi, respondHandshake, waitForBridgeTurn, waitForPostedMessage, primeTrustedFingerprintContext, promoteBootstrapReadinessThroughPing, createXhsCommandParams, createRequestBoundXhsCommandParams, createXhsEditorInputCommandParams, createApprovedReadApprovalRecord, createApprovedReadAuditRecordForRequest, createFingerprintRuntimeContext, asRecord, resolveWriteInteractionTier, startChromeBackgroundBridge } from "./extension.service-worker.shared.js";
 
 describe("extension service worker / recovery and relay prerequisites", () => {
   it("forwards top-level requested_execution_mode live path and relays required-patch missing block", async () => {
@@ -29,7 +29,8 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-top-level-patch-missing-001",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-top-level-patch-missing-001",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           approval_record: createApprovedReadApprovalRecord(),
@@ -776,7 +777,8 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-limited-approved-001",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-limited-approved-001",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           fingerprint_context: createFingerprintRuntimeContext(),
@@ -891,7 +893,8 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-mode-approved-001",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-mode-approved-001",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           fingerprint_context: createFingerprintRuntimeContext(),

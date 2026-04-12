@@ -448,4 +448,97 @@ describe("native messaging legacy loopback runtime", () => {
       })
     );
   });
+
+  it("blocks stale admission evidence in loopback bundles even when caller records match current decision", async () => {
+    const runId = "run-loopback-live-admission-stale-001";
+    const requestId = "issue209-live-admission-current-001";
+    const decisionId = `gate_decision_${runId}_${requestId}`;
+    const approvalId = `gate_appr_${decisionId}`;
+    const bridge = new NativeMessagingBridge({
+      transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
+    });
+
+    const result = await bridge.runCommand({
+      runId,
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "xhs.search",
+      params: {
+        request_id: requestId,
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          simulate_result: "success",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 35,
+          target_page: "search_result_tab",
+          issue_scope: "issue_209",
+          action_type: "read",
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          limited_read_rollout_ready_true: true,
+          approval_record: {
+            approval_id: approvalId,
+            decision_id: decisionId,
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          },
+          admission_context: createApprovedReadAdmissionContext({
+            runId: "run-loopback-live-admission-stale-legacy-001",
+            requestId,
+            targetTabId: 35,
+            requestedExecutionMode: "live_read_limited",
+            riskState: "limited"
+          }),
+          audit_record: {
+            event_id: "audit-live-read-limited-loopback-stale-admission-001",
+            decision_id: decisionId,
+            approval_id: approvalId,
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 35,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_limited",
+            gate_decision: "allowed",
+            recorded_at: "2026-03-23T10:00:30Z"
+          }
+        }
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.payload).toEqual(
+      expect.objectContaining({
+        gate_outcome: expect.objectContaining({
+          decision_id: decisionId,
+          gate_decision: "blocked",
+          effective_execution_mode: "recon",
+          gate_reasons: expect.arrayContaining(["MANUAL_CONFIRMATION_MISSING", "AUDIT_RECORD_MISSING"])
+        }),
+        approval_record: expect.objectContaining({
+          approval_id: null,
+          decision_id: decisionId
+        }),
+        audit_record: expect.objectContaining({
+          approval_id: null,
+          decision_id: decisionId
+        })
+      })
+    );
+  });
 });

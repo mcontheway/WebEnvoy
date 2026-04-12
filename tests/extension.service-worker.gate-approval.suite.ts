@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createMockPort, createEditorInputProbeResult, createChromeApi, respondHandshake, waitForBridgeTurn, waitForPostedMessage, primeTrustedFingerprintContext, promoteBootstrapReadinessThroughPing, createXhsCommandParams, createXhsEditorInputCommandParams, createApprovedReadApprovalRecord, createApprovedReadAuditRecordForRequest, createFingerprintRuntimeContext, asRecord, resolveWriteInteractionTier, startChromeBackgroundBridge } from "./extension.service-worker.shared.js";
+import { createMockPort, createEditorInputProbeResult, createChromeApi, respondHandshake, waitForBridgeTurn, waitForPostedMessage, primeTrustedFingerprintContext, promoteBootstrapReadinessThroughPing, createXhsCommandParams, createRequestBoundXhsCommandParams, createXhsEditorInputCommandParams, createApprovedReadApprovalRecord, createApprovedReadAuditRecordForRequest, createFingerprintRuntimeContext, asRecord, resolveWriteInteractionTier, startChromeBackgroundBridge } from "./extension.service-worker.shared.js";
 
 describe("extension service worker / gate and approval", () => {
   it("forwards fingerprint_context into background bridge", async () => {
@@ -1663,7 +1663,8 @@ describe("extension service worker / gate and approval", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-blocked-by-fingerprint-001",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-blocked-by-fingerprint-001",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -1724,7 +1725,8 @@ describe("extension service worker / gate and approval", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-blocked-by-fingerprint-002",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-blocked-by-fingerprint-002",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           approval_record: createApprovedReadApprovalRecord(),
@@ -1776,7 +1778,8 @@ describe("extension service worker / gate and approval", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-blocked-by-fingerprint-003",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-blocked-by-fingerprint-003",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord()
@@ -1824,7 +1827,8 @@ describe("extension service worker / gate and approval", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-blocked-by-fingerprint-untrusted-001",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-blocked-by-fingerprint-untrusted-001",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -1881,7 +1885,8 @@ describe("extension service worker / gate and approval", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-untrusted-startup-tab-001",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-untrusted-startup-tab-001",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -1963,7 +1968,8 @@ describe("extension service worker / gate and approval", () => {
         session_id: "nm-session-001",
         run_id: liveRunId,
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: liveRunId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -2054,7 +2060,8 @@ describe("extension service worker / gate and approval", () => {
         session_id: "nm-session-001",
         run_id: liveRunId,
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: liveRunId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -2132,7 +2139,9 @@ describe("extension service worker / gate and approval", () => {
         session_id: "nm-session-002",
         run_id: "run-xhs-live-recovery-untrusted-001",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-recovery-untrusted-001",
+          sessionId: "nm-session-002",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -2208,7 +2217,8 @@ describe("extension service worker / gate and approval", () => {
         session_id: "nm-session-001",
         run_id: liveRunId,
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: liveRunId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -2254,7 +2264,8 @@ describe("extension service worker / gate and approval", () => {
         session_id: "nm-session-001",
         run_id: liveRunId,
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: liveRunId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -2333,7 +2344,8 @@ describe("extension service worker / gate and approval", () => {
         session_id: "nm-session-001",
         run_id: liveRunId,
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: liveRunId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -2423,16 +2435,18 @@ describe("extension service worker / gate and approval", () => {
     );
     expect(stopDispatch).toBeDefined();
 
-    const liveRequestId = `${runId}-live-after-stop`;
+    const liveRunId = `${runId}-after-stop`;
+    const liveRequestId = `${liveRunId}-live-after-stop`;
     firstPort.onMessageListeners[0]?.({
       id: liveRequestId,
       method: "bridge.forward",
       profile,
       params: {
         session_id: "nm-session-001",
-        run_id: runId,
+        run_id: liveRunId,
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: liveRunId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -2510,7 +2524,8 @@ describe("extension service worker / gate and approval", () => {
         session_id: "nm-session-001",
         run_id: runId,
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: runId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -2573,7 +2588,8 @@ describe("extension service worker / gate and approval", () => {
         session_id: "nm-session-001",
         run_id: runId,
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: runId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -2602,7 +2618,8 @@ describe("extension service worker / gate and approval", () => {
         session_id: "nm-session-001",
         run_id: runId,
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: runId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),

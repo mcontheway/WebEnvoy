@@ -54,6 +54,41 @@ const createAdmissionContext = (input?: {
   }
 });
 
+const createApprovalRecord = (decisionId: string, approvalId: string) => ({
+  approval_id: approvalId,
+  decision_id: decisionId,
+  approved: true,
+  approver: "qa-reviewer",
+  approved_at: "2026-03-23T10:00:00.000Z",
+  checks: {
+    target_domain_confirmed: true,
+    target_tab_confirmed: true,
+    target_page_confirmed: true,
+    risk_state_checked: true,
+    action_type_confirmed: true
+  }
+});
+
+const createAuditRecord = (input: {
+  decisionId: string;
+  approvalId: string;
+  targetTabId: number;
+  targetPage: string;
+  requestedExecutionMode: "live_read_high_risk" | "live_read_limited";
+}) => ({
+  event_id: `audit-${input.decisionId}`,
+  decision_id: input.decisionId,
+  approval_id: input.approvalId,
+  issue_scope: "issue_209",
+  target_domain: "www.xiaohongshu.com",
+  target_tab_id: input.targetTabId,
+  target_page: input.targetPage,
+  action_type: "read",
+  requested_execution_mode: input.requestedExecutionMode,
+  gate_decision: "allowed",
+  recorded_at: "2026-03-23T10:00:30.000Z"
+});
+
 describe("xhs-search gate helpers", () => {
   it("flags mismatched actual target context", () => {
     expect(
@@ -487,6 +522,120 @@ describe("xhs-search gate helpers", () => {
     expect(gate.gate_outcome.gate_decision).toBe("blocked");
     expect(gate.gate_outcome.effective_execution_mode).toBe("recon");
     expect(gate.gate_outcome.gate_reasons).toContain("AUDIT_RECORD_MISSING");
+  });
+
+  it.each([
+    {
+      label: "run_id",
+      runId: "run-extension-admission-mismatch-001",
+      requestId: "req-admission-run",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      requestedExecutionMode: "live_read_high_risk" as const,
+      riskState: "allowed" as const,
+      admissionContext: createAdmissionContext({ run_id: "run-extension-admission-stale-001" }),
+      expectedFallback: "dry_run",
+      expectedReasons: ["MANUAL_CONFIRMATION_MISSING", "AUDIT_RECORD_MISSING"]
+    },
+    {
+      label: "target_tab_id",
+      runId: "run-extension-admission-mismatch-002",
+      requestId: "req-admission-tab",
+      targetTabId: 24,
+      targetPage: "search_result_tab",
+      requestedExecutionMode: "live_read_high_risk" as const,
+      riskState: "allowed" as const,
+      admissionContext: createAdmissionContext({ run_id: "run-extension-admission-mismatch-002", target_tab_id: 25 }),
+      expectedFallback: "dry_run",
+      expectedReasons: ["MANUAL_CONFIRMATION_MISSING", "AUDIT_RECORD_MISSING"]
+    },
+    {
+      label: "target_page",
+      runId: "run-extension-admission-mismatch-003",
+      requestId: "req-admission-page",
+      targetTabId: 36,
+      targetPage: "search_result_tab",
+      requestedExecutionMode: "live_read_high_risk" as const,
+      riskState: "allowed" as const,
+      admissionContext: createAdmissionContext({
+        run_id: "run-extension-admission-mismatch-003",
+        target_tab_id: 36,
+        target_page: "explore_detail_tab"
+      }),
+      expectedFallback: "dry_run",
+      expectedReasons: ["MANUAL_CONFIRMATION_MISSING", "AUDIT_RECORD_MISSING"]
+    },
+    {
+      label: "requested_execution_mode",
+      runId: "run-extension-admission-mismatch-004",
+      requestId: "req-admission-mode",
+      targetTabId: 48,
+      targetPage: "search_result_tab",
+      requestedExecutionMode: "live_read_high_risk" as const,
+      riskState: "allowed" as const,
+      admissionContext: createAdmissionContext({
+        run_id: "run-extension-admission-mismatch-004",
+        target_tab_id: 48,
+        requested_execution_mode: "live_read_limited"
+      }),
+      expectedFallback: "dry_run",
+      expectedReasons: ["MANUAL_CONFIRMATION_MISSING", "AUDIT_RECORD_MISSING"]
+    },
+    {
+      label: "risk_state",
+      runId: "run-extension-admission-mismatch-005",
+      requestId: "req-admission-risk",
+      targetTabId: 60,
+      targetPage: "search_result_tab",
+      requestedExecutionMode: "live_read_limited" as const,
+      riskState: "limited" as const,
+      admissionContext: createAdmissionContext({
+        run_id: "run-extension-admission-mismatch-005",
+        target_tab_id: 60,
+        requested_execution_mode: "live_read_limited",
+        risk_state: "allowed"
+      }),
+      expectedFallback: "recon",
+      expectedReasons: ["AUDIT_RECORD_MISSING"]
+    }
+  ])("blocks live gate when admission evidence %s mismatches current request", (scenario) => {
+    const decisionId = `gate_decision_${scenario.runId}_${scenario.requestId}`;
+    const approvalId = `gate_appr_${decisionId}`;
+    const gate = resolveGate(
+      {
+        issue_scope: "issue_209",
+        risk_state: scenario.riskState,
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: scenario.targetTabId,
+        target_page: scenario.targetPage,
+        actual_target_domain: "www.xiaohongshu.com",
+        actual_target_tab_id: scenario.targetTabId,
+        actual_target_page: scenario.targetPage,
+        action_type: "read",
+        ability_action: "read",
+        requested_execution_mode: scenario.requestedExecutionMode,
+        admission_context: scenario.admissionContext,
+        approval_record: createApprovalRecord(decisionId, approvalId),
+        audit_record: createAuditRecord({
+          decisionId,
+          approvalId,
+          targetTabId: scenario.targetTabId,
+          targetPage: scenario.targetPage,
+          requestedExecutionMode: scenario.requestedExecutionMode
+        }),
+        limited_read_rollout_ready_true: scenario.requestedExecutionMode === "live_read_limited"
+      },
+      {
+        runId: scenario.runId,
+        requestId: scenario.requestId,
+        sessionId: "session-extension-001",
+        profile: "profile-a"
+      }
+    );
+
+    expect(gate.gate_outcome.gate_decision).toBe("blocked");
+    expect(gate.gate_outcome.effective_execution_mode).toBe(scenario.expectedFallback);
+    expect(gate.gate_outcome.gate_reasons).toEqual(expect.arrayContaining(scenario.expectedReasons));
   });
 
   it("returns gate core state without throwing when admission_context is provided", () => {

@@ -279,46 +279,24 @@ const mergeGateArtifactsIntoCommandParams = (commandParams, gatePayload) => {
     normalized.options = normalizedOptions;
     return normalized;
 };
+const cloneAdmissionContext = (admissionContext) => {
+    const normalizedAdmissionContext = asRecord(admissionContext);
+    if (!normalizedAdmissionContext) {
+        return null;
+    }
+    const approvalEvidence = asRecord(normalizedAdmissionContext.approval_admission_evidence);
+    const auditEvidence = asRecord(normalizedAdmissionContext.audit_admission_evidence);
+    return {
+        ...(approvalEvidence ? { approval_admission_evidence: { ...approvalEvidence } } : {}),
+        ...(auditEvidence ? { audit_admission_evidence: { ...auditEvidence } } : {})
+    };
+};
 const bindAdmissionContextToRequest = (input) => {
-    const admissionContext = asRecord(input.admissionContext);
+    const admissionContext = cloneAdmissionContext(input.admissionContext);
     if (!admissionContext) {
         return null;
     }
-    const approvalEvidence = asRecord(admissionContext.approval_admission_evidence);
-    const auditEvidence = asRecord(admissionContext.audit_admission_evidence);
-    return {
-        ...(approvalEvidence
-            ? {
-                approval_admission_evidence: {
-                    ...approvalEvidence,
-                    run_id: input.runId,
-                    session_id: input.sessionId,
-                    issue_scope: input.issueScope,
-                    target_domain: input.targetDomain,
-                    target_tab_id: input.targetTabId,
-                    target_page: input.targetPage,
-                    action_type: input.actionType,
-                    requested_execution_mode: input.requestedExecutionMode
-                }
-            }
-            : {}),
-        ...(auditEvidence
-            ? {
-                audit_admission_evidence: {
-                    ...auditEvidence,
-                    run_id: input.runId,
-                    session_id: input.sessionId,
-                    issue_scope: input.issueScope,
-                    target_domain: input.targetDomain,
-                    target_tab_id: input.targetTabId,
-                    target_page: input.targetPage,
-                    action_type: input.actionType,
-                    requested_execution_mode: input.requestedExecutionMode,
-                    risk_state: input.riskState
-                }
-            }
-            : {})
-    };
+    return admissionContext;
 };
 const emitCliInvalidArgs = (emit, request, error) => {
     emit({
@@ -2840,16 +2818,7 @@ class ChromeBackgroundBridge {
         }
         const requestSessionId = String(request.params.session_id ?? this.#sessionId);
         const boundAdmissionContext = bindAdmissionContextToRequest({
-            admissionContext,
-            runId: requestRunId,
-            sessionId: requestSessionId,
-            issueScope,
-            targetDomain,
-            targetTabId,
-            targetPage,
-            actionType,
-            requestedExecutionMode,
-            riskState
+            admissionContext
         });
         const gateState = buildXhsGatePolicyState({
             issueScope,

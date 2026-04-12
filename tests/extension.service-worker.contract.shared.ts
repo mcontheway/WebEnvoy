@@ -261,6 +261,12 @@ const promoteBootstrapReadinessThroughPing = async (input: {
 };
 
 const createXhsCommandParams = (overrides?: Record<string, unknown>) => {
+  const requestRunId =
+    typeof overrides?.run_id === "string" && overrides.run_id.length > 0 ? overrides.run_id : "run-sw-001";
+  const requestSessionId =
+    typeof overrides?.session_id === "string" && overrides.session_id.length > 0
+      ? overrides.session_id
+      : "nm-session-001";
   const merged = {
     issue_scope: "issue_209",
     target_domain: "www.xiaohongshu.com",
@@ -276,6 +282,10 @@ const createXhsCommandParams = (overrides?: Record<string, unknown>) => {
 
   if (merged.admission_context === undefined) {
     merged.admission_context = createApprovedReadAdmissionContext({
+      run_id: requestRunId,
+      session_id: requestSessionId,
+      target_tab_id: typeof merged.target_tab_id === "number" ? merged.target_tab_id : undefined,
+      target_page: typeof merged.target_page === "string" ? merged.target_page : undefined,
       requested_execution_mode:
         merged.requested_execution_mode === "live_read_high_risk"
           ? "live_read_high_risk"
@@ -288,6 +298,20 @@ const createXhsCommandParams = (overrides?: Record<string, unknown>) => {
   }
 
   return merged;
+};
+
+const createRequestBoundXhsCommandParams = (
+  input: {
+    runId: string;
+    sessionId?: string;
+  } & Record<string, unknown>
+) => {
+  const { runId, sessionId, ...overrides } = input;
+  return createXhsCommandParams({
+    ...overrides,
+    run_id: runId,
+    session_id: sessionId ?? "nm-session-001"
+  });
 };
 
 const createXhsEditorInputCommandParams = (overrides?: Record<string, unknown>) => ({
@@ -507,6 +531,7 @@ Object.assign(globalThis as Record<string, unknown>, {
     primeTrustedFingerprintContext,
     promoteBootstrapReadinessThroughPing,
     createXhsCommandParams,
+    createRequestBoundXhsCommandParams,
     createXhsEditorInputCommandParams,
     createApprovedReadApprovalRecord,
     createApprovedReadAuditRecord,
