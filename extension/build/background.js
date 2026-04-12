@@ -1392,9 +1392,6 @@ class ChromeBackgroundBridge {
         return trusted;
     }
     #resolveValidatedTrustedFingerprintContext(request, requestedFingerprintContext) {
-        if (requestedFingerprintContext === null) {
-            return null;
-        }
         const trustedEntry = this.#resolveTrustedFingerprintContext(request);
         if (!trustedEntry) {
             return null;

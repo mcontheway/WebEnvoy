@@ -3613,6 +3613,82 @@ describe("extension service worker / bootstrap and trust", () => {
     );
   });
 
+  it("allows live xhs.search to reuse trusted fingerprint context when command fingerprint_context is omitted", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const startupRunId = "run-xhs-live-trusted-omit-fingerprint-startup-001";
+    const liveRunId = "run-xhs-live-trusted-omit-fingerprint-live-002";
+    const profile = "profile-a";
+    const fingerprintContext = createFingerprintRuntimeContext({
+      live_allowed: true,
+      live_decision: "allowed",
+      allowed_execution_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+      reason_codes: []
+    });
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: `startup-fingerprint-trust:${startupRunId}`,
+        ok: true,
+        payload: {
+          startup_fingerprint_trust: {
+            run_id: startupRunId,
+            profile,
+            session_id: "nm-session-001",
+            fingerprint_runtime: fingerprintContext,
+            trust_source: "extension_bootstrap_context",
+            bootstrap_attested: true,
+            main_world_result_used_for_trust: false
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+    chromeApi.tabs.sendMessage.mockClear();
+
+    const liveRequestId = `${liveRunId}-live`;
+    firstPort.onMessageListeners[0]?.({
+      id: liveRequestId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: liveRunId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord()
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: liveRequestId,
+        command: "xhs.search"
+      })
+    );
+  });
+
   it("does not establish trusted fingerprint context from runtime.ping", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);

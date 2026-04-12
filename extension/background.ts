@@ -2008,9 +2008,6 @@ class ChromeBackgroundBridge {
     request: BridgeRequest,
     requestedFingerprintContext: FingerprintRuntimeContext | null
   ): FingerprintRuntimeContext | null {
-    if (requestedFingerprintContext === null) {
-      return null;
-    }
     const trustedEntry = this.#resolveTrustedFingerprintContext(request);
     if (!trustedEntry) {
       return null;
