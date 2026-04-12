@@ -1435,12 +1435,8 @@ const resolveXhsApprovalAdmissionRequirementGaps = (
   }
 
   if (
-    !approvalAdmissionEvidence.approval_admission_ref ||
     !approvalAdmissionEvidence.recorded_at ||
-    approvalAdmissionEvidence.decision_id !== expected.decisionId ||
-    approvalAdmissionEvidence.approval_id !== expected.approvalId ||
     approvalAdmissionEvidence.run_id !== expected.runId ||
-    approvalAdmissionEvidence.session_id !== expected.sessionId ||
     approvalAdmissionEvidence.issue_scope !== expected.issueScope ||
     approvalAdmissionEvidence.target_domain !== expected.targetDomain ||
     approvalAdmissionEvidence.target_tab_id !== expected.targetTabId ||
@@ -1479,12 +1475,8 @@ const resolveXhsAuditAdmissionRequirementGaps = (
   const gaps = [];
   if (
     requirements.includes("audit_admission_evidence_present") &&
-    (!auditAdmissionEvidence.audit_admission_ref ||
-      !auditAdmissionEvidence.recorded_at ||
+    (!auditAdmissionEvidence.recorded_at ||
       auditAdmissionEvidence.run_id !== expected.runId ||
-      auditAdmissionEvidence.decision_id !== expected.decisionId ||
-      auditAdmissionEvidence.approval_id !== expected.approvalId ||
-      auditAdmissionEvidence.session_id !== expected.sessionId ||
       auditAdmissionEvidence.issue_scope !== expected.issueScope ||
       auditAdmissionEvidence.target_domain !== expected.targetDomain ||
       auditAdmissionEvidence.target_tab_id !== expected.targetTabId ||
