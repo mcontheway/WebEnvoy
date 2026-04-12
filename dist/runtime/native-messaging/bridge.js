@@ -168,6 +168,17 @@ export class NativeMessagingBridge {
     async close() {
         await this.#transport.close?.();
     }
+    currentSessionId() {
+        return this.#session.snapshot().sessionId;
+    }
+    async ensureSession(input) {
+        const timeoutMs = readTimeoutMs(input.timeoutMs) ?? DEFAULT_TRANSPORT_TIMEOUT_MS;
+        const budget = createTimeoutBudget(timeoutMs, this.#now);
+        await this.#recoverIfDisconnected(input.profile, budget);
+        await this.#ensureReady(input.profile, budget);
+        await this.#pulseHeartbeat(budget);
+        return this.#session.sessionIdOrThrow();
+    }
     async runtimePing(input) {
         const timeoutMs = readTimeoutMs(input.params.timeout_ms) ?? DEFAULT_TRANSPORT_TIMEOUT_MS;
         const budget = createTimeoutBudget(timeoutMs, this.#now);

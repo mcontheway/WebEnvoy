@@ -330,6 +330,38 @@ const cloneAdmissionContextForContract = (value: unknown): JsonObject | null => 
   return cloneJsonObject(object);
 };
 
+const resolveIssue209RequestIdFromAdmissionContext = (
+  options: JsonObject,
+  runId?: string | null
+): string | null => {
+  const admissionContext = asObject(options.admission_context);
+  if (!admissionContext) {
+    return null;
+  }
+
+  const approvalAdmissionEvidence = asObject(admissionContext.approval_admission_evidence);
+  const auditAdmissionEvidence = asObject(admissionContext.audit_admission_evidence);
+  const approvalDecisionId = asString(approvalAdmissionEvidence?.decision_id);
+  const auditDecisionId = asString(auditAdmissionEvidence?.decision_id);
+
+  if (approvalDecisionId && auditDecisionId && approvalDecisionId !== auditDecisionId) {
+    return null;
+  }
+
+  const decisionId = approvalDecisionId ?? auditDecisionId;
+  const resolvedRunId = asString(runId);
+  if (!decisionId || !resolvedRunId) {
+    return null;
+  }
+
+  const prefix = `gate_decision_${resolvedRunId}_`;
+  if (!decisionId.startsWith(prefix) || decisionId.length <= prefix.length) {
+    return null;
+  }
+
+  return decisionId.slice(prefix.length);
+};
+
 const isIssue209LiveReadRequest = (options: JsonObject): options is JsonObject & {
   issue_scope: "issue_209";
   requested_execution_mode: XhsExecutionMode;
@@ -341,6 +373,7 @@ const isIssue209LiveReadRequest = (options: JsonObject): options is JsonObject &
 export const resolveIssue209CommandRequestIdForContract = (input: {
   options: JsonObject;
   requestId: string | null;
+  runId?: string | null;
 }): string | null => {
   const requestId = asString(input.requestId);
   if (requestId) {
@@ -348,6 +381,18 @@ export const resolveIssue209CommandRequestIdForContract = (input: {
   }
 
   if (!isIssue209LiveReadRequest(input.options)) {
+    return null;
+  }
+
+  const requestIdFromAdmissionContext = resolveIssue209RequestIdFromAdmissionContext(
+    input.options,
+    input.runId
+  );
+  if (requestIdFromAdmissionContext) {
+    return requestIdFromAdmissionContext;
+  }
+
+  if (asObject(input.options.admission_context)) {
     return null;
   }
 
@@ -373,7 +418,8 @@ export const ensureIssue209AdmissionContextForContract = (input: {
 
   const canonicalRequestId = resolveIssue209CommandRequestIdForContract({
     options: nextOptions,
-    requestId: input.requestId
+    requestId: input.requestId,
+    runId: input.runId
   });
   const approvalRecord = normalizeXhsApprovalRecord(nextOptions.approval_record ?? nextOptions.approval);
   const decisionId = resolveXhsGateDecisionId({

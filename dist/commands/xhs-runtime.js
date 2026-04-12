@@ -174,15 +174,19 @@ const xhsReadCommand = async (context, inputConfig) => {
     try {
         const commandRequestId = resolveIssue209CommandRequestIdForContract({
             options: gate.options,
-            requestId: envelope.requestId
+            requestId: envelope.requestId,
+            runId: context.run_id
+        });
+        await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, gate);
+        const bridgeSessionId = await bridge.ensureSession({
+            profile: context.profile
         });
         const normalizedOptions = ensureIssue209AdmissionContextForContract({
             options: gate.options,
             runId: context.run_id,
             requestId: commandRequestId,
-            sessionId: "nm-session-001"
+            sessionId: bridgeSessionId
         });
-        await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, gate);
         const commandParams = appendFingerprintContext({
             ...(commandRequestId ? { request_id: commandRequestId } : {}),
             target_domain: gate.targetDomain,

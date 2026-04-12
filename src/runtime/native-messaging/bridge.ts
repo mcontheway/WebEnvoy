@@ -268,6 +268,11 @@ interface BridgeOptions {
   heartbeatTimeoutMs?: number;
 }
 
+export interface BridgeSessionInput {
+  profile: string | null;
+  timeoutMs?: number;
+}
+
 const defaultRecoveryPollIntervalMs = 100;
 const defaultHeartbeatTimeoutMs = 3_000;
 
@@ -308,6 +313,19 @@ export class NativeMessagingBridge {
 
   async close(): Promise<void> {
     await this.#transport.close?.();
+  }
+
+  currentSessionId(): string | null {
+    return this.#session.snapshot().sessionId;
+  }
+
+  async ensureSession(input: BridgeSessionInput): Promise<string> {
+    const timeoutMs = readTimeoutMs(input.timeoutMs) ?? DEFAULT_TRANSPORT_TIMEOUT_MS;
+    const budget = createTimeoutBudget(timeoutMs, this.#now);
+    await this.#recoverIfDisconnected(input.profile, budget);
+    await this.#ensureReady(input.profile, budget);
+    await this.#pulseHeartbeat(budget);
+    return this.#session.sessionIdOrThrow();
   }
 
   async runtimePing(input: RuntimePingInput): Promise<RuntimePingResult> {

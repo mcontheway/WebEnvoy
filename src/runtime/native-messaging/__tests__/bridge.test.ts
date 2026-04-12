@@ -29,6 +29,58 @@ describe("native messaging bridge", () => {
     });
   });
 
+  it("exposes the real bridge session id after handshake", async () => {
+    const bridge = new NativeMessagingBridge({
+      transport: {
+        async open(request) {
+          return {
+            id: request.id,
+            status: "success",
+            summary: {
+              protocol: "webenvoy.native-bridge.v1",
+              session_id: "nm-session-real-209",
+              state: "ready"
+            },
+            error: null
+          };
+        },
+        async heartbeat(request) {
+          return {
+            id: request.id,
+            status: "success",
+            summary: {
+              session_id: "nm-session-real-209"
+            },
+            error: null
+          };
+        },
+        async forward(request) {
+          return {
+            id: request.id,
+            status: "success",
+            summary: {
+              session_id: "nm-session-real-209",
+              run_id: String(request.params.run_id ?? request.id),
+              command: String(request.params.command ?? "runtime.ping")
+            },
+            payload: {
+              message: "pong"
+            },
+            error: null
+          };
+        }
+      }
+    });
+
+    expect(bridge.currentSessionId()).toBeNull();
+    await expect(
+      bridge.ensureSession({
+        profile: "profile-a"
+      })
+    ).resolves.toBe("nm-session-real-209");
+    expect(bridge.currentSessionId()).toBe("nm-session-real-209");
+  });
+
   it("maps timeout to transport timeout error", async () => {
     const bridge = new NativeMessagingBridge({
       transport: createFakeNativeBridgeTransport({

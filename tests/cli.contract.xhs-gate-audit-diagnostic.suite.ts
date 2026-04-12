@@ -1979,6 +1979,70 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  it("preserves caller admission linkage when request_id is omitted", () => {
+    const runId = "run-issue209-live-limited-existing-admission-001";
+    const requestId = "issue209-live-existing-admission-001";
+    const admissionContext = createApprovedReadAdmissionContext({
+      runId,
+      requestId,
+      requestedExecutionMode: "live_read_limited",
+      riskState: "limited"
+    });
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--run-id",
+      runId,
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          ...scopedReadGateOptions,
+          simulate_result: "success",
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          limited_read_rollout_ready_true: true,
+          fingerprint_context: createLoopbackFingerprintContext(),
+          approval_record: {
+            decision_id: `gate_decision_${runId}_${requestId}`,
+            approval_id: `gate_appr_gate_decision_${runId}_${requestId}`,
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          },
+          admission_context: admissionContext
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body.summary.gate_outcome).toMatchObject({
+      decision_id: `gate_decision_${runId}_${requestId}`,
+      effective_execution_mode: "live_read_limited",
+      gate_decision: "allowed",
+      gate_reasons: ["LIVE_MODE_APPROVED"]
+    });
+    expect(body.summary.gate_input.admission_context).toMatchObject(admissionContext);
+  });
+
   itWithSqlite("queries persisted gate audit trail by run_id after live approval", async () => {
     const cwd = await createRuntimeCwd();
     const runId = "run-audit-query-allowed-001";

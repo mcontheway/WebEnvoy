@@ -256,13 +256,8 @@ const xhsReadCommand = async (
   try {
     const commandRequestId = resolveIssue209CommandRequestIdForContract({
       options: gate.options,
-      requestId: envelope.requestId
-    });
-    const normalizedOptions = ensureIssue209AdmissionContextForContract({
-      options: gate.options,
-      runId: context.run_id,
-      requestId: commandRequestId,
-      sessionId: "nm-session-001"
+      requestId: envelope.requestId,
+      runId: context.run_id
     });
     await ensureOfficialChromeRuntimeReady(
       context,
@@ -272,6 +267,15 @@ const xhsReadCommand = async (
       fingerprintContext,
       gate
     );
+    const bridgeSessionId = await bridge.ensureSession({
+      profile: context.profile
+    });
+    const normalizedOptions = ensureIssue209AdmissionContextForContract({
+      options: gate.options,
+      runId: context.run_id,
+      requestId: commandRequestId,
+      sessionId: bridgeSessionId
+    });
     const commandParams = appendFingerprintContext(
       {
         ...(commandRequestId ? { request_id: commandRequestId } : {}),
