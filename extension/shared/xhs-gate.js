@@ -973,8 +973,17 @@ const collectXhsMatrixGateReasons = (input) => {
         state.limitedReadRolloutReadyTrue !== true
           ? ["limited_read_rollout_ready_true"]
           : [];
-      if (approvalAdmissionRequirementGaps.length > 0) {
+      if (
+        approvalRecordHasConflictingLinkage ||
+        !approvalRecord.approved ||
+        !approvalRecord.approver ||
+        !approvalRecord.approved_at ||
+        approvalAdmissionRequirementGaps.length > 0
+      ) {
         pushReason(gateReasons, "MANUAL_CONFIRMATION_MISSING");
+      }
+      if (XHS_REQUIRED_APPROVAL_CHECKS.some((key) => approvalRecord.checks[key] !== true)) {
+        pushReason(gateReasons, "APPROVAL_CHECKS_INCOMPLETE");
       }
       if (
         approvalAdmissionRequirementGaps.includes("approval_admission_evidence_checks_all_true")

@@ -341,6 +341,23 @@ describe("xhs-search gate helpers", () => {
         action_type: "read",
         ability_action: "read",
         requested_execution_mode: "live_read_high_risk",
+        admission_context: createAdmissionContext({
+          run_id: "run-extension-003",
+          session_id: "session-extension-003"
+        }),
+        audit_record: {
+          event_id: "gate_evt_run-extension-003_req-3",
+          decision_id: "gate_decision_run-extension-003_req-3",
+          approval_id: "gate_appr_gate_decision_run-extension-003_req-3",
+          issue_scope: "issue_209",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 24,
+          target_page: "search_result_tab",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          gate_decision: "allowed",
+          recorded_at: "2026-03-23T10:00:30.000Z"
+        },
         approval_record: {
           approval_id: "gate_appr_previous_req",
           decision_id: "gate_decision_previous_req",
