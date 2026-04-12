@@ -2,6 +2,7 @@ import { BRIDGE_PROTOCOL, ensureBridgeRequestEnvelope } from "./protocol.js";
 import { buildLoopbackGate } from "./loopback-gate.js";
 import { buildLoopbackAuditRecord } from "./loopback-gate-audit.js";
 import { buildLoopbackGatePayload } from "./loopback-gate-payload.js";
+import { resolveXhsGateDecisionId } from "../../../shared/xhs-gate.js";
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
@@ -50,13 +51,6 @@ const buildLoopbackGateSeedOptions = (input) => {
     }
     return nextOptions;
 };
-const resolveGateDecisionId = (input) => {
-    const commandRequestId = asString(input.commandRequestId);
-    if (commandRequestId) {
-        return `gate_decision_${input.runId}_${commandRequestId}`;
-    }
-    return `gate_decision_${input.runId}_${input.requestId}`;
-};
 const mergeGateArtifactsIntoCommandParams = (commandParams, gatePayload) => {
     if (!gatePayload) {
         return commandParams;
@@ -91,7 +85,7 @@ const mergeGateArtifactsIntoCommandParams = (commandParams, gatePayload) => {
 };
 const buildLoopbackXhsSearchGateBundle = (input) => {
     const approvalRecord = resolveApprovalRecord(input.options);
-    const decisionId = resolveGateDecisionId({
+    const decisionId = resolveXhsGateDecisionId({
         runId: input.runId,
         requestId: input.requestId,
         commandRequestId: input.commandRequestId

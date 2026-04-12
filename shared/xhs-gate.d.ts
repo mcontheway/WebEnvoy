@@ -34,6 +34,8 @@ export interface XhsAuditRecord {
 
 export interface XhsApprovalAdmissionEvidence {
   approval_admission_ref: string | null;
+  decision_id: string | null;
+  approval_id: string | null;
   run_id: string | null;
   session_id: string | null;
   issue_scope: string | null;
@@ -51,6 +53,8 @@ export interface XhsApprovalAdmissionEvidence {
 
 export interface XhsAuditAdmissionEvidence {
   audit_admission_ref: string | null;
+  decision_id: string | null;
+  approval_id: string | null;
   run_id: string | null;
   session_id: string | null;
   issue_scope: string | null;
@@ -156,6 +160,26 @@ export declare const normalizeXhsAuditAdmissionEvidence: (
   value: unknown
 ) => XhsAuditAdmissionEvidence;
 export declare const normalizeXhsAdmissionContext: (value: unknown) => XhsAdmissionContext;
+export declare const resolveXhsGateDecisionId: (input: {
+  decisionId?: unknown;
+  runId?: unknown;
+  requestId?: unknown;
+  commandRequestId?: unknown;
+  issueScope?: unknown;
+  targetPage?: unknown;
+  targetTabId?: unknown;
+}) => string;
+export declare const resolveXhsGateApprovalId: (input: {
+  decisionId?: unknown;
+  runId?: unknown;
+  requestId?: unknown;
+  commandRequestId?: unknown;
+  issueScope?: unknown;
+  targetPage?: unknown;
+  targetTabId?: unknown;
+  approvalRecord?: unknown;
+  approvalId?: unknown;
+}) => string | null;
 export declare const resolveXhsIssueActionMatrixEntry: (
   issueScope: IssueScope,
   state: RiskState

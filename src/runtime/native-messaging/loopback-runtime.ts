@@ -8,6 +8,7 @@ import type { NativeBridgeTransport } from "./transport.js";
 import { buildLoopbackGate } from "./loopback-gate.js";
 import { buildLoopbackAuditRecord } from "./loopback-gate-audit.js";
 import { buildLoopbackGatePayload } from "./loopback-gate-payload.js";
+import { resolveXhsGateDecisionId } from "../../../shared/xhs-gate.js";
 
 type HostMessage =
   | { kind: "request"; envelope: BridgeRequestEnvelope }
@@ -97,18 +98,6 @@ const buildLoopbackGateSeedOptions = (input: {
   return nextOptions;
 };
 
-const resolveGateDecisionId = (input: {
-  runId: string;
-  requestId: string;
-  commandRequestId?: unknown;
-}): string => {
-  const commandRequestId = asString(input.commandRequestId);
-  if (commandRequestId) {
-    return `gate_decision_${input.runId}_${commandRequestId}`;
-  }
-  return `gate_decision_${input.runId}_${input.requestId}`;
-};
-
 const mergeGateArtifactsIntoCommandParams = (
   commandParams: Record<string, unknown>,
   gatePayload?: Record<string, unknown>
@@ -161,7 +150,7 @@ const buildLoopbackXhsSearchGateBundle = (input: {
   payload: Record<string, unknown>;
 } => {
   const approvalRecord = resolveApprovalRecord(input.options);
-  const decisionId = resolveGateDecisionId({
+  const decisionId = resolveXhsGateDecisionId({
     runId: input.runId,
     requestId: input.requestId,
     commandRequestId: input.commandRequestId

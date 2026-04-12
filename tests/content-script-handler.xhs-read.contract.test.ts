@@ -5,6 +5,7 @@ import { ContentScriptHandler, type BackgroundToContentMessage } from "../extens
 const approvedLiveOptions = {
   target_domain: "www.xiaohongshu.com",
   target_tab_id: 32,
+  target_page: "explore_detail_tab",
   action_type: "read",
   requested_execution_mode: "live_read_high_risk",
   risk_state: "allowed",
@@ -23,6 +24,8 @@ const approvedLiveOptions = {
   admission_context: {
     approval_admission_evidence: {
       approval_admission_ref: "gate_appr_content_read_001",
+      decision_id: "gate_decision_run-contract-001",
+      approval_id: "gate_appr_gate_decision_run-contract-001",
       run_id: "run-contract-001",
       session_id: "nm-session-001",
       issue_scope: "issue_209",
@@ -45,6 +48,8 @@ const approvedLiveOptions = {
     },
     audit_admission_evidence: {
       audit_admission_ref: "gate_evt_content_read_001",
+      decision_id: "gate_decision_run-contract-001",
+      approval_id: "gate_appr_gate_decision_run-contract-001",
       run_id: "run-contract-001",
       session_id: "nm-session-001",
       issue_scope: "issue_209",
@@ -66,6 +71,8 @@ const approvedLiveOptions = {
   },
   audit_record: {
     event_id: "audit-content-read-001",
+    decision_id: "gate_decision_run-contract-001",
+    approval_id: "gate_appr_gate_decision_run-contract-001",
     issue_scope: "issue_209",
     target_domain: "www.xiaohongshu.com",
     target_tab_id: 32,
@@ -145,6 +152,10 @@ const createMessage = (input: {
         options: {
           ...approvedLiveOptions,
           target_page: input.targetPage,
+          audit_record: {
+            ...(approvedLiveOptions.audit_record),
+            target_page: input.targetPage
+          },
           admission_context: {
             approval_admission_evidence: {
               ...(approvedLiveOptions.admission_context.approval_admission_evidence),

@@ -9,7 +9,12 @@ import {
   resolveIssueScope as resolveSharedIssueScope,
   resolveRiskState as resolveSharedRiskState
 } from "../shared/risk-state.js";
-import { evaluateXhsGate, XHS_READ_DOMAIN, XHS_WRITE_DOMAIN } from "../shared/xhs-gate.js";
+import {
+  evaluateXhsGate,
+  resolveXhsGateDecisionId,
+  XHS_READ_DOMAIN,
+  XHS_WRITE_DOMAIN
+} from "../shared/xhs-gate.js";
 import {
   type XhsExecutionAuditRecord,
   type XhsExecutionContext,
@@ -51,15 +56,12 @@ const isIssue208EditorInputValidation = (options: XhsSearchOptions): boolean =>
   options.requested_execution_mode === "live_write" &&
   options.validation_action === "editor_input";
 
-const buildGateDecisionId = (context: XhsExecutionContext): string => {
-  const commandRequestId = asNonEmptyString(context.commandRequestId);
-  if (commandRequestId) {
-    return `gate_decision_${context.runId}_${commandRequestId}`;
-  }
-  return context.requestId
-    ? `gate_decision_${context.runId}_${context.requestId}`
-    : `gate_decision_${context.runId}`;
-};
+const buildGateDecisionId = (context: XhsExecutionContext): string =>
+  resolveXhsGateDecisionId({
+    runId: context.runId,
+    requestId: context.requestId,
+    commandRequestId: context.commandRequestId
+  });
 
 const buildGateEventId = (decisionId: string): string => `gate_evt_${decisionId}`;
 

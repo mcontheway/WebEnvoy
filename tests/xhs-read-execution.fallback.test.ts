@@ -31,13 +31,20 @@ const createAuditRecord = () => ({
 
 const createApprovedReadAdmissionContext = (input: {
   runId: string;
+  requestId?: string;
   targetTabId?: number;
   targetPage: string;
   requestedExecutionMode?: "live_read_high_risk" | "live_read_limited";
   riskState?: "allowed" | "limited";
-}) => ({
+}) => {
+  const requestId = input.requestId;
+  const decisionId = requestId ? `gate_decision_${input.runId}_${requestId}` : `gate_decision_${input.runId}`;
+  const approvalId = `gate_appr_${decisionId}`;
+  return ({
   approval_admission_evidence: {
-    approval_admission_ref: `gate_appr_${input.runId}`,
+    approval_admission_ref: approvalId,
+    decision_id: decisionId,
+    approval_id: approvalId,
     run_id: input.runId,
     session_id: "nm-session-001",
     issue_scope: "issue_209",
@@ -59,7 +66,9 @@ const createApprovedReadAdmissionContext = (input: {
     recorded_at: "2026-03-23T10:00:00Z"
   },
   audit_admission_evidence: {
-    audit_admission_ref: `gate_evt_${input.runId}`,
+    audit_admission_ref: `gate_evt_${decisionId}`,
+    decision_id: decisionId,
+    approval_id: approvalId,
     run_id: input.runId,
     session_id: "nm-session-001",
     issue_scope: "issue_209",
@@ -79,6 +88,7 @@ const createApprovedReadAdmissionContext = (input: {
     recorded_at: "2026-03-23T10:00:30Z"
   }
 });
+};
 
 const createLiveReadOptions = (overrides?: Partial<XhsSearchOptions>): XhsSearchOptions => ({
   issue_scope: "issue_209",

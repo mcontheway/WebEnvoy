@@ -3,6 +3,7 @@ import { buildLoopbackAuditRecord } from "./loopback-gate-audit.js";
 import { buildLoopbackGatePayload } from "./loopback-gate-payload.js";
 import { CliError } from "../../core/errors.js";
 import { parseXhsCommandInputForContract } from "../../commands/xhs-input.js";
+import { resolveXhsGateDecisionId } from "../../../shared/xhs-gate.js";
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
@@ -50,13 +51,6 @@ const buildLoopbackGateSeedOptions = (input) => {
         nextOptions.approval = seededApprovalRecord;
     }
     return nextOptions;
-};
-const resolveGateDecisionId = (input) => {
-    const commandRequestId = asString(input.commandRequestId);
-    if (commandRequestId) {
-        return `gate_decision_${input.runId}_${commandRequestId}`;
-    }
-    return `gate_decision_${input.runId}_${input.requestId}`;
 };
 const XHS_READ_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
 export class InMemoryContentScriptRuntime {
@@ -201,7 +195,7 @@ export class InMemoryContentScriptRuntime {
                 ? message.commandParams.options
                 : {};
             const approvalRecord = resolveApprovalRecord(options);
-            const decisionId = resolveGateDecisionId({
+            const decisionId = resolveXhsGateDecisionId({
                 runId: message.runId,
                 requestId: message.id,
                 commandRequestId: message.commandParams.request_id

@@ -17,6 +17,7 @@ import {
   AbilityAction,
   AbilityEnvelope,
   buildCapabilityResult,
+  ensureIssue209AdmissionContextForContract,
   normalizeGateOptionsForContract,
   parseAbilityEnvelopeForContract,
   parseDetailInputForContract,
@@ -252,6 +253,12 @@ const xhsReadCommand = async (
   });
 
   try {
+    const normalizedOptions = ensureIssue209AdmissionContextForContract({
+      options: gate.options,
+      runId: context.run_id,
+      requestId: envelope.requestId,
+      sessionId: "nm-session-001"
+    });
     await ensureOfficialChromeRuntimeReady(
       context,
       envelope.ability,
@@ -269,7 +276,7 @@ const xhsReadCommand = async (
         requested_execution_mode: gate.requestedExecutionMode,
         ability: envelope.ability,
         input: parsedInput,
-        options: gate.options
+        options: normalizedOptions
       },
       fingerprintContext
     );

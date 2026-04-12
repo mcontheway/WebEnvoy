@@ -1174,21 +1174,34 @@ const asString = (value) => (typeof value === "string" && value.trim().length > 
 
 const asInteger = (value) => (typeof value === "number" && Number.isInteger(value) ? value : null);
 
-const deriveGateDecisionId = (input) => {
-  const explicitDecisionId = asString(input.decisionId);
+const resolveXhsGateDecisionId = (input) => {
+  const explicitDecisionId = asString(input?.decisionId);
   if (explicitDecisionId) {
     return explicitDecisionId;
   }
 
-  const runId = asString(input.runId);
+  const runId = asString(input?.runId);
+  const commandRequestId = asString(input?.commandRequestId);
+  if (runId && commandRequestId) {
+    return `gate_decision_${runId}_${commandRequestId}`;
+  }
   if (runId) {
     return `gate_decision_${runId}`;
   }
 
-  const issueScope = asString(input.issueScope) ?? "unknown_scope";
-  const targetPage = asString(input.targetPage) ?? "unknown_page";
-  const targetTabId = asInteger(input.targetTabId);
+  const requestId = asString(input?.requestId);
+  if (requestId) {
+    return `gate_decision_${requestId}`;
+  }
+
+  const issueScope = asString(input?.issueScope) ?? "unknown_scope";
+  const targetPage = asString(input?.targetPage) ?? "unknown_page";
+  const targetTabId = asInteger(input?.targetTabId);
   return `gate_decision_${issueScope}_${targetPage}_${targetTabId ?? "unknown_tab"}`;
+};
+
+const deriveGateDecisionId = (input) => {
+  return resolveXhsGateDecisionId(input);
 };
 
 const deriveApprovalId = (input, decisionId) => {
@@ -1222,6 +1235,11 @@ const deriveApprovalId = (input, decisionId) => {
   }
 
   return `gate_appr_${decisionId}`;
+};
+
+const resolveXhsGateApprovalId = (input) => {
+  const decisionId = resolveXhsGateDecisionId(input);
+  return deriveApprovalId(input, decisionId);
 };
 
 const pushReason = (target, reason) => {
@@ -1260,6 +1278,8 @@ const normalizeXhsApprovalAdmissionEvidence = (value) => {
   const checksRecord = asRecord(record?.checks);
   return {
     approval_admission_ref: asString(record?.approval_admission_ref),
+    decision_id: asString(record?.decision_id),
+    approval_id: asString(record?.approval_id),
     run_id: asString(record?.run_id),
     session_id: asString(record?.session_id),
     issue_scope: asString(record?.issue_scope),
@@ -1283,6 +1303,8 @@ const normalizeXhsAuditAdmissionEvidence = (value) => {
   const checksRecord = asRecord(record?.audited_checks);
   return {
     audit_admission_ref: asString(record?.audit_admission_ref),
+    decision_id: asString(record?.decision_id),
+    approval_id: asString(record?.approval_id),
     run_id: asString(record?.run_id),
     session_id: asString(record?.session_id),
     issue_scope: asString(record?.issue_scope),
@@ -1413,6 +1435,8 @@ const resolveXhsApprovalAdmissionRequirementGaps = (
   if (
     !approvalAdmissionEvidence.approval_admission_ref ||
     !approvalAdmissionEvidence.recorded_at ||
+    approvalAdmissionEvidence.decision_id !== expected.decisionId ||
+    approvalAdmissionEvidence.approval_id !== expected.approvalId ||
     approvalAdmissionEvidence.run_id !== expected.runId ||
     approvalAdmissionEvidence.session_id !== expected.sessionId ||
     approvalAdmissionEvidence.issue_scope !== expected.issueScope ||
@@ -1456,6 +1480,8 @@ const resolveXhsAuditAdmissionRequirementGaps = (
     (!auditAdmissionEvidence.audit_admission_ref ||
       !auditAdmissionEvidence.recorded_at ||
       auditAdmissionEvidence.run_id !== expected.runId ||
+      auditAdmissionEvidence.decision_id !== expected.decisionId ||
+      auditAdmissionEvidence.approval_id !== expected.approvalId ||
       auditAdmissionEvidence.session_id !== expected.sessionId ||
       auditAdmissionEvidence.issue_scope !== expected.issueScope ||
       auditAdmissionEvidence.target_domain !== expected.targetDomain ||
@@ -2042,6 +2068,8 @@ const collectXhsMatrixGateReasons = (input) => {
         ),
         admissionContext.approval_admission_evidence,
         {
+          decisionId: input.decisionId ?? null,
+          approvalId: input.expectedApprovalId ?? null,
           runId: input.runId ?? null,
           sessionId: input.sessionId ?? null,
           issueScope: state.issueScope,
@@ -2055,6 +2083,8 @@ const collectXhsMatrixGateReasons = (input) => {
       const auditAdmissionRequirementGaps = resolveXhsAuditAdmissionRequirementGaps(
         admissionContext.audit_admission_evidence,
         {
+          decisionId: input.decisionId ?? null,
+          approvalId: input.expectedApprovalId ?? null,
           runId: input.runId ?? null,
           sessionId: input.sessionId ?? null,
           issueScope: state.issueScope,
@@ -2243,7 +2273,7 @@ const evaluateXhsGate = (input) => {
     approval_record: approvalRecord
   };
 };
-return { XHS_ALLOWED_DOMAINS, evaluateXhsGate };
+return { XHS_ALLOWED_DOMAINS, XHS_READ_DOMAIN, XHS_WRITE_DOMAIN, evaluateXhsGate, resolveXhsGateDecisionId };
 })();
 const __webenvoy_module_xhs_search_types = (() => {
 const SEARCH_ENDPOINT = "/api/sns/web/v1/search/notes";
@@ -2619,7 +2649,12 @@ const {
   resolveIssueScope: resolveSharedIssueScope,
   resolveRiskState: resolveSharedRiskState
 } = __webenvoy_module_risk_state;
-const { evaluateXhsGate } = __webenvoy_module_shared_xhs_gate;
+const {
+  evaluateXhsGate,
+  resolveXhsGateDecisionId,
+  XHS_READ_DOMAIN,
+  XHS_WRITE_DOMAIN
+} = __webenvoy_module_shared_xhs_gate;
 const { resolveRiskStateOutput } = __webenvoy_module_xhs_search_telemetry;
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
@@ -2632,15 +2667,11 @@ const isIssue208EditorInputValidation = (options) => options.issue_scope === "is
     options.action_type === "write" &&
     options.requested_execution_mode === "live_write" &&
     options.validation_action === "editor_input";
-const buildGateDecisionId = (context) => {
-    const commandRequestId = asNonEmptyString(context.commandRequestId);
-    if (commandRequestId) {
-        return `gate_decision_${context.runId}_${commandRequestId}`;
-    }
-    return context.requestId
-        ? `gate_decision_${context.runId}_${context.requestId}`
-        : `gate_decision_${context.runId}`;
-};
+const buildGateDecisionId = (context) => resolveXhsGateDecisionId({
+    runId: context.runId,
+    requestId: context.requestId,
+    commandRequestId: context.commandRequestId
+});
 const buildGateEventId = (decisionId) => `gate_evt_${decisionId}`;
 const resolveActualTargetGateReasons = (options) => {
     const gateReasons = [];

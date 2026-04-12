@@ -110,7 +110,7 @@ const createApprovedReadAuditRecord = (linkage: {
 }) => {
   const decisionId = linkage.commandRequestId
     ? `gate_decision_${linkage.runId}_${linkage.commandRequestId}`
-    : `gate_decision_${linkage.runId}_${linkage.requestId}`;
+    : `gate_decision_${linkage.runId}`;
   return {
   event_id: `gate_evt_${decisionId}`,
   decision_id: decisionId,
@@ -130,11 +130,16 @@ const createApprovedReadAdmissionContext = (linkage: {
   runId: string;
   requestId: string;
   commandRequestId?: string;
-}) => ({
+}) => {
+  const decisionId = linkage.commandRequestId
+    ? `gate_decision_${linkage.runId}_${linkage.commandRequestId}`
+    : `gate_decision_${linkage.runId}`;
+  const approvalId = `gate_appr_${decisionId}`;
+  return ({
   approval_admission_evidence: {
-    approval_admission_ref: linkage.commandRequestId
-      ? `gate_appr_gate_decision_${linkage.runId}_${linkage.commandRequestId}`
-      : `gate_appr_gate_decision_${linkage.runId}_${linkage.requestId}`,
+    approval_admission_ref: approvalId,
+    decision_id: decisionId,
+    approval_id: approvalId,
     run_id: linkage.runId,
     session_id: "nm-session-001",
     issue_scope: "issue_209",
@@ -156,7 +161,9 @@ const createApprovedReadAdmissionContext = (linkage: {
     recorded_at: "2026-03-23T10:00:00Z"
   },
   audit_admission_evidence: {
-    audit_admission_ref: `gate_evt_${linkage.runId}`,
+    audit_admission_ref: `gate_evt_${decisionId}`,
+    decision_id: decisionId,
+    approval_id: approvalId,
     run_id: linkage.runId,
     session_id: "nm-session-001",
     issue_scope: "issue_209",
@@ -176,6 +183,7 @@ const createApprovedReadAdmissionContext = (linkage: {
     recorded_at: "2026-03-23T10:00:30Z"
   }
 });
+};
 
 const MAIN_WORLD_CHANNEL_SECRET = "contract-main-world-secret-001";
 

@@ -82,11 +82,18 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
 
   const createApprovedReadAdmissionContext = (input: {
     runId: string;
+    requestId?: string;
     requestedExecutionMode: "live_read_limited" | "live_read_high_risk";
     riskState: "limited" | "allowed";
-  }): Record<string, unknown> => ({
+  }): Record<string, unknown> => {
+    const requestId = input.requestId;
+    const decisionId = requestId ? `gate_decision_${input.runId}_${requestId}` : `gate_decision_${input.runId}`;
+    const approvalId = `gate_appr_${decisionId}`;
+    return ({
     approval_admission_evidence: {
-      approval_admission_ref: `gate_appr_${input.runId}`,
+      approval_admission_ref: approvalId,
+      decision_id: decisionId,
+      approval_id: approvalId,
       run_id: input.runId,
       session_id: "nm-session-001",
       issue_scope: "issue_209",
@@ -108,7 +115,9 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       recorded_at: "2026-03-23T10:00:00Z"
     },
     audit_admission_evidence: {
-      audit_admission_ref: `gate_evt_${input.runId}`,
+      audit_admission_ref: `gate_evt_${decisionId}`,
+      decision_id: decisionId,
+      approval_id: approvalId,
       run_id: input.runId,
       session_id: "nm-session-001",
       issue_scope: "issue_209",
@@ -128,6 +137,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       recorded_at: "2026-03-23T10:00:30Z"
     }
   });
+  };
 
   it("returns structured input validation error for xhs.search without ability envelope", () => {
     const result = runCli(["xhs.search", "--profile", "xhs_account_001"]);
@@ -1787,6 +1797,7 @@ process.stdin.on("data", (chunk) => {
           },
           admission_context: createApprovedReadAdmissionContext({
             runId,
+            requestId: "issue209-live-limited-001",
             requestedExecutionMode: "live_read_limited",
             riskState: "limited"
           })

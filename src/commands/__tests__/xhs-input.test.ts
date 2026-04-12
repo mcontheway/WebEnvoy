@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ensureIssue209AdmissionContextForContract,
   normalizeGateOptionsForContract,
   parseAbilityEnvelopeForContract,
   parseXhsCommandInputForContract,
@@ -106,6 +107,75 @@ describe("xhs-input", () => {
       })
     ).toEqual({
       note_id: "note-001"
+    });
+  });
+
+  it("builds issue_209 live admission_context from the current approval record", () => {
+    const options = ensureIssue209AdmissionContextForContract({
+      options: {
+        issue_scope: "issue_209",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 32,
+        target_page: "search_result_tab",
+        action_type: "read",
+        requested_execution_mode: "live_read_limited",
+        risk_state: "limited",
+        approval_record: {
+          approved: true,
+          approver: "qa-reviewer",
+          approved_at: "2026-03-23T10:00:00Z",
+          checks: {
+            target_domain_confirmed: true,
+            target_tab_confirmed: true,
+            target_page_confirmed: true,
+            risk_state_checked: true,
+            action_type_confirmed: true
+          }
+        }
+      },
+      runId: "run-cli-issue209-live-001",
+      requestId: "issue209-live-limited-001"
+    });
+
+    expect(options.admission_context).toMatchObject({
+      approval_admission_evidence: {
+        decision_id: "gate_decision_run-cli-issue209-live-001_issue209-live-limited-001",
+        approval_id: "gate_appr_gate_decision_run-cli-issue209-live-001_issue209-live-limited-001"
+      },
+      audit_admission_evidence: {
+        decision_id: "gate_decision_run-cli-issue209-live-001_issue209-live-limited-001",
+        approval_id: "gate_appr_gate_decision_run-cli-issue209-live-001_issue209-live-limited-001",
+        risk_state: "limited"
+      }
+    });
+  });
+
+  it("keeps caller-provided admission_context unchanged", () => {
+    const options = ensureIssue209AdmissionContextForContract({
+      options: {
+        issue_scope: "issue_209",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 32,
+        target_page: "search_result_tab",
+        action_type: "read",
+        requested_execution_mode: "live_read_limited",
+        risk_state: "limited",
+        admission_context: {
+          approval_admission_evidence: {
+            decision_id: "gate_decision_external",
+            approval_id: "gate_appr_external"
+          }
+        }
+      },
+      runId: "run-cli-issue209-live-002",
+      requestId: "issue209-live-limited-002"
+    });
+
+    expect(options.admission_context).toEqual({
+      approval_admission_evidence: {
+        decision_id: "gate_decision_external",
+        approval_id: "gate_appr_external"
+      }
     });
   });
 });

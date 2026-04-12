@@ -98,7 +98,13 @@ const buildContentScriptBundle = async () => {
       "} = __webenvoy_module_risk_state;"
     ].join("\n"),
     sourceBody: sharedXhsGateSource,
-    exports: ["XHS_ALLOWED_DOMAINS", "evaluateXhsGate"]
+    exports: [
+      "XHS_ALLOWED_DOMAINS",
+      "XHS_READ_DOMAIN",
+      "XHS_WRITE_DOMAIN",
+      "evaluateXhsGate",
+      "resolveXhsGateDecisionId"
+    ]
   });
 
   const xhsSearchTypesModule = renderClassicModule({
@@ -141,7 +147,12 @@ const buildContentScriptBundle = async () => {
       "  resolveIssueScope: resolveSharedIssueScope,",
       "  resolveRiskState: resolveSharedRiskState",
       "} = __webenvoy_module_risk_state;",
-      "const { evaluateXhsGate } = __webenvoy_module_shared_xhs_gate;",
+      "const {",
+      "  evaluateXhsGate,",
+      "  resolveXhsGateDecisionId,",
+      "  XHS_READ_DOMAIN,",
+      "  XHS_WRITE_DOMAIN",
+      "} = __webenvoy_module_shared_xhs_gate;",
       "const { resolveRiskStateOutput } = __webenvoy_module_xhs_search_telemetry;"
     ].join("\n"),
     sourceBody: xhsSearchGateSource,

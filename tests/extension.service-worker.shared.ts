@@ -283,6 +283,7 @@ export const createXhsCommandParams = (overrides?: Record<string, unknown>) => {
   if (merged.admission_context === undefined) {
     merged.admission_context = createApprovedReadAdmissionContext({
       run_id: requestRunId,
+      ...(typeof merged.request_id === "string" ? { request_id: merged.request_id } : {}),
       session_id: requestSessionId,
       target_tab_id: typeof merged.target_tab_id === "number" ? merged.target_tab_id : undefined,
       target_page: typeof merged.target_page === "string" ? merged.target_page : undefined,
@@ -304,12 +305,15 @@ export const createRequestBoundXhsCommandParams = (
   input: {
     runId: string;
     sessionId?: string;
+    requestId?: string;
   } & Record<string, unknown>
 ) => {
-  const { runId, sessionId, ...overrides } = input;
+  const { runId, sessionId, requestId, ...overrides } = input;
+  const effectiveRequestId = requestId ?? runId;
   return createXhsCommandParams({
     ...overrides,
     run_id: runId,
+    request_id: effectiveRequestId,
     session_id: sessionId ?? "nm-session-001"
   });
 };
@@ -375,15 +379,26 @@ export const createApprovedReadAuditRecord = (overrides?: Record<string, unknown
 
 export const createApprovedReadAdmissionContext = (overrides?: {
   run_id?: string;
+  request_id?: string;
   session_id?: string;
+  decision_id?: string;
+  approval_id?: string;
   target_tab_id?: number;
   target_page?: string;
   requested_execution_mode?: "live_read_limited" | "live_read_high_risk";
   risk_state?: "limited" | "allowed" | "paused";
-}) => ({
+}) => {
+  const runId = overrides?.run_id ?? "run-sw-001";
+  const requestId = overrides?.request_id;
+  const decisionId = overrides?.decision_id ?? (requestId ? `gate_decision_${runId}_${requestId}` : `gate_decision_${runId}`);
+  const approvalId = overrides?.approval_id ?? `gate_appr_${decisionId}`;
+
+  return {
   approval_admission_evidence: {
-    approval_admission_ref: "gate_appr_issue209_sw_001",
-    run_id: overrides?.run_id ?? "run-sw-001",
+    approval_admission_ref: approvalId,
+    decision_id: decisionId,
+    approval_id: approvalId,
+    run_id: runId,
     session_id: overrides?.session_id ?? "nm-session-001",
     issue_scope: "issue_209",
     target_domain: "www.xiaohongshu.com",
@@ -404,8 +419,10 @@ export const createApprovedReadAdmissionContext = (overrides?: {
     recorded_at: "2026-03-23T10:00:00Z"
   },
   audit_admission_evidence: {
-    audit_admission_ref: "gate_evt_issue209_sw_001",
-    run_id: overrides?.run_id ?? "run-sw-001",
+    audit_admission_ref: `gate_evt_${decisionId}`,
+    decision_id: decisionId,
+    approval_id: approvalId,
+    run_id: runId,
     session_id: overrides?.session_id ?? "nm-session-001",
     issue_scope: "issue_209",
     target_domain: "www.xiaohongshu.com",
@@ -423,19 +440,24 @@ export const createApprovedReadAdmissionContext = (overrides?: {
     },
     recorded_at: "2026-03-23T10:05:00Z"
   }
-});
+  };
+};
 
 export const createApprovedReadAuditRecordForRequest = (input: {
   runId: string;
   requestId?: string;
   overrides?: Record<string, unknown>;
-}) =>
-  createApprovedReadAuditRecord({
-    event_id: `gate_evt_${input.requestId ?? input.runId}`,
-    decision_id: `gate_decision_${input.runId}_${input.requestId ?? input.runId}`,
-    approval_id: `gate_appr_gate_decision_${input.runId}_${input.requestId ?? input.runId}`,
+}) => {
+  const decisionId = input.requestId
+    ? `gate_decision_${input.runId}_${input.requestId}`
+    : `gate_decision_${input.runId}`;
+  return createApprovedReadAuditRecord({
+    event_id: `gate_evt_${decisionId}`,
+    decision_id: decisionId,
+    approval_id: `gate_appr_${decisionId}`,
     ...(input.overrides ?? {})
   });
+};
 
 export const createFingerprintRuntimeContext = (executionOverrides?: Record<string, unknown>) => ({
   profile: "profile-a",

@@ -30,10 +30,8 @@ describe("extension background relay contract / gate and approval", () => {
     }),
     audit_record: {
       event_id: "gate_evt_forward-xhs-live-limited-allowed-001",
-      decision_id:
-        "gate_decision_run-xhs-live-limited-allowed-001_forward-xhs-live-limited-allowed-001",
-      approval_id:
-        "gate_appr_gate_decision_run-xhs-live-limited-allowed-001_forward-xhs-live-limited-allowed-001",
+      decision_id: "gate_decision_run-xhs-live-limited-allowed-001",
+      approval_id: "gate_appr_gate_decision_run-xhs-live-limited-allowed-001",
       issue_scope: "issue_209",
       target_domain: "www.xiaohongshu.com",
       target_tab_id: 32,

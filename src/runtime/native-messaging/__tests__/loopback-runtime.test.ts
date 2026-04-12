@@ -12,6 +12,8 @@ const createApprovedReadAdmissionContext = (input: {
 }) => ({
   approval_admission_evidence: {
     approval_admission_ref: `gate_appr_gate_decision_${input.runId}_${input.requestId}`,
+    decision_id: `gate_decision_${input.runId}_${input.requestId}`,
+    approval_id: `gate_appr_gate_decision_${input.runId}_${input.requestId}`,
     run_id: input.runId,
     session_id: "nm-session-001",
     issue_scope: "issue_209",
@@ -33,7 +35,9 @@ const createApprovedReadAdmissionContext = (input: {
     recorded_at: "2026-03-23T10:00:00Z"
   },
   audit_admission_evidence: {
-    audit_admission_ref: `gate_evt_${input.runId}`,
+    audit_admission_ref: `gate_evt_gate_decision_${input.runId}_${input.requestId}`,
+    decision_id: `gate_decision_${input.runId}_${input.requestId}`,
+    approval_id: `gate_appr_gate_decision_${input.runId}_${input.requestId}`,
     run_id: input.runId,
     session_id: "nm-session-001",
     issue_scope: "issue_209",
@@ -158,24 +162,18 @@ describe("native messaging legacy loopback runtime", () => {
     expect(result.payload).toEqual(
       expect.objectContaining({
         gate_outcome: expect.objectContaining({
-          decision_id: expect.stringMatching(
-            /^gate_decision_run-loopback-custom-approval-001_run-\d{4}$/
-          ),
+          decision_id: "gate_decision_run-loopback-custom-approval-001",
           effective_execution_mode: "dry_run",
           gate_decision: "blocked",
           gate_reasons: expect.arrayContaining(["MANUAL_CONFIRMATION_MISSING"])
         }),
         approval_record: expect.objectContaining({
           approval_id: null,
-          decision_id: expect.stringMatching(
-            /^gate_decision_run-loopback-custom-approval-001_run-\d{4}$/
-          )
+          decision_id: "gate_decision_run-loopback-custom-approval-001"
         }),
         audit_record: expect.objectContaining({
           approval_id: null,
-          decision_id: expect.stringMatching(
-            /^gate_decision_run-loopback-custom-approval-001_run-\d{4}$/
-          )
+          decision_id: "gate_decision_run-loopback-custom-approval-001"
         })
       })
     );
@@ -225,19 +223,13 @@ describe("native messaging legacy loopback runtime", () => {
     expect(result.payload).toEqual(
       expect.objectContaining({
         gate_outcome: expect.objectContaining({
-          decision_id: expect.stringMatching(
-            /^gate_decision_run-loopback-no-approval-001_run-\d{4}$/
-          )
+          decision_id: "gate_decision_run-loopback-no-approval-001"
         }),
         approval_record: expect.objectContaining({
-          decision_id: expect.stringMatching(
-            /^gate_decision_run-loopback-no-approval-001_run-\d{4}$/
-          )
+          decision_id: "gate_decision_run-loopback-no-approval-001"
         }),
         audit_record: expect.objectContaining({
-          decision_id: expect.stringMatching(
-            /^gate_decision_run-loopback-no-approval-001_run-\d{4}$/
-          )
+          decision_id: "gate_decision_run-loopback-no-approval-001"
         })
       })
     );

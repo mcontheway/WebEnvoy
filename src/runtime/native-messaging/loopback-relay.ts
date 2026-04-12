@@ -4,6 +4,7 @@ import { buildLoopbackAuditRecord } from "./loopback-gate-audit.js";
 import { buildLoopbackGatePayload } from "./loopback-gate-payload.js";
 import type { ContentMessage, HostMessage } from "./loopback-messages.js";
 import type { InMemoryPort } from "./loopback-port.js";
+import { resolveXhsGateDecisionId } from "../../../shared/xhs-gate.js";
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -70,18 +71,6 @@ const buildLoopbackGateSeedOptions = (input: {
     nextOptions.approval = seededApprovalRecord;
   }
   return nextOptions;
-};
-
-const resolveGateDecisionId = (input: {
-  runId: string;
-  requestId: string;
-  commandRequestId?: unknown;
-}): string => {
-  const commandRequestId = asString(input.commandRequestId);
-  if (commandRequestId) {
-    return `gate_decision_${input.runId}_${commandRequestId}`;
-  }
-  return `gate_decision_${input.runId}_${input.requestId}`;
 };
 
 const mergeGateArtifactsIntoCommandParams = (
@@ -211,7 +200,7 @@ export class InMemoryBackgroundRelay {
             ? (commandParams.options as Record<string, unknown>)
             : {};
         const approvalRecord = resolveApprovalRecord(options);
-        const decisionId = resolveGateDecisionId({
+        const decisionId = resolveXhsGateDecisionId({
           runId,
           requestId: request.id,
           commandRequestId: commandParams.request_id

@@ -36,6 +36,8 @@ import {
   collectXhsCommandGateReasons,
   collectXhsMatrixGateReasons,
   finalizeXhsGateOutcome,
+  resolveXhsGateApprovalId,
+  resolveXhsGateDecisionId,
   resolveXhsActionType,
   resolveXhsExecutionMode,
   normalizeXhsApprovalRecord
@@ -534,18 +536,6 @@ const hasSuccessfulExecutionAttestation = (payload: Record<string, unknown>): bo
 const asNonEmptyString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
-const resolveGateDecisionId = (input: {
-  runId: string;
-  requestId: string;
-  commandRequestId?: unknown;
-}): string => {
-  const commandRequestId = asNonEmptyString(input.commandRequestId);
-  if (commandRequestId) {
-    return `gate_decision_${input.runId}_${commandRequestId}`;
-  }
-  return `gate_decision_${input.runId}_${input.requestId}`;
-};
-
 const asInteger = (value: unknown): number | null =>
   typeof value === "number" && Number.isInteger(value) ? value : null;
 
@@ -1004,10 +994,21 @@ const resolveGatePayloadApprovalId = (input: {
 
   const approvalDecisionId = asNonEmptyString(input.approvalRecord.decision_id);
   if (approvalDecisionId && approvalDecisionId !== input.decisionId) {
-    return `gate_appr_${input.decisionId}`;
+    return resolveXhsGateApprovalId({
+      decisionId: input.decisionId,
+      approvalRecord: {
+        ...input.approvalRecord,
+        decision_id: input.decisionId,
+        approval_id: null
+      }
+    });
   }
 
-  return asNonEmptyString(input.approvalRecord.approval_id) ?? `gate_appr_${input.decisionId}`;
+  return resolveXhsGateApprovalId({
+    decisionId: input.decisionId,
+    approvalRecord: input.approvalRecord,
+    approvalId: input.approvalRecord.approval_id
+  });
 };
 
 const createBridgeXhsGateOnlyPayload = (
@@ -1090,7 +1091,7 @@ const createRelayXhsGatePayload = (input: {
   const sessionId = String(input.request.params.session_id ?? "nm-session-001");
   const profile = typeof input.request.profile === "string" ? input.request.profile : null;
   const commandParams = asRecord(input.request.params.command_params);
-  const decisionId = resolveGateDecisionId({
+  const decisionId = resolveXhsGateDecisionId({
     runId,
     requestId: input.request.id,
     commandRequestId: commandParams?.request_id
@@ -1217,7 +1218,7 @@ const createBackgroundXhsGatePayload = (input: {
   const profile = typeof input.request.profile === "string" ? input.request.profile : null;
   const recordedAt = new Date().toISOString();
   const commandParams = asRecord(input.request.params.command_params);
-  const decisionId = resolveGateDecisionId({
+  const decisionId = resolveXhsGateDecisionId({
     runId,
     requestId: input.request.id,
     commandRequestId: commandParams?.request_id
@@ -3586,7 +3587,7 @@ class ChromeBackgroundBridge {
     let writeGateOnlyApprovalDecision: Record<string, unknown> | null = null;
     let writeGateOnlyEligible = false;
     const requestRunId = String(request.params.run_id ?? request.id);
-    const gateDecisionId = resolveGateDecisionId({
+    const gateDecisionId = resolveXhsGateDecisionId({
       runId: requestRunId,
       requestId: request.id,
       commandRequestId: commandParams.request_id

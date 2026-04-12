@@ -1,5 +1,5 @@
 import { buildRiskTransitionAudit, resolveIssueScope as resolveSharedIssueScope, resolveRiskState as resolveSharedRiskState } from "../shared/risk-state.js";
-import { evaluateXhsGate } from "../shared/xhs-gate.js";
+import { evaluateXhsGate, resolveXhsGateDecisionId } from "../shared/xhs-gate.js";
 import { resolveRiskStateOutput } from "./xhs-search-telemetry.js";
 export { resolveRiskStateOutput } from "./xhs-search-telemetry.js";
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
@@ -13,15 +13,11 @@ const isIssue208EditorInputValidation = (options) => options.issue_scope === "is
     options.action_type === "write" &&
     options.requested_execution_mode === "live_write" &&
     options.validation_action === "editor_input";
-const buildGateDecisionId = (context) => {
-    const commandRequestId = asNonEmptyString(context.commandRequestId);
-    if (commandRequestId) {
-        return `gate_decision_${context.runId}_${commandRequestId}`;
-    }
-    return context.requestId
-        ? `gate_decision_${context.runId}_${context.requestId}`
-        : `gate_decision_${context.runId}`;
-};
+const buildGateDecisionId = (context) => resolveXhsGateDecisionId({
+    runId: context.runId,
+    requestId: context.requestId,
+    commandRequestId: context.commandRequestId
+});
 const buildGateEventId = (decisionId) => `gate_evt_${decisionId}`;
 export const resolveActualTargetGateReasons = (options) => {
     const gateReasons = [];

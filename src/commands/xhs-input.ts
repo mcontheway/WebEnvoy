@@ -1,5 +1,10 @@
 import { CliError } from "../core/errors.js";
 import type { JsonObject } from "../core/types.js";
+import {
+  normalizeXhsApprovalRecord,
+  resolveXhsGateApprovalId,
+  resolveXhsGateDecisionId
+} from "../../shared/xhs-gate.js";
 
 export type AbilityLayer = "L3" | "L2" | "L1";
 export type AbilityAction = "read" | "write" | "download";
@@ -55,11 +60,19 @@ const XHS_EXECUTION_MODES = new Set<XhsExecutionMode>([
   "live_read_high_risk",
   "live_write"
 ]);
+const XHS_LIVE_READ_EXECUTION_MODES = new Set<XhsExecutionMode>([
+  "live_read_limited",
+  "live_read_high_risk"
+]);
+const DEFAULT_GATE_SESSION_ID = "nm-session-001";
 
 const asObject = (value: unknown): JsonObject | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as JsonObject)
     : null;
+const asString = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const cloneJsonObject = (value: JsonObject): JsonObject => JSON.parse(JSON.stringify(value)) as JsonObject;
 
 const invalidAbilityInput = (reason: string, abilityId = "unknown"): CliError =>
   new CliError("ERR_CLI_INVALID_ARGS", "能力输入不合法", {
@@ -304,6 +317,108 @@ export const normalizeGateOptionsForContract = (
       requested_execution_mode: requestedExecutionMode
     }
   };
+};
+
+const cloneAdmissionContextForContract = (value: unknown): JsonObject | null => {
+  const object = asObject(value);
+  if (!object) {
+    return null;
+  }
+  return cloneJsonObject(object);
+};
+
+const isIssue209LiveReadRequest = (options: JsonObject): options is JsonObject & {
+  issue_scope: "issue_209";
+  requested_execution_mode: XhsExecutionMode;
+} =>
+  options.issue_scope === "issue_209" &&
+  typeof options.requested_execution_mode === "string" &&
+  XHS_LIVE_READ_EXECUTION_MODES.has(options.requested_execution_mode as XhsExecutionMode);
+
+export const ensureIssue209AdmissionContextForContract = (input: {
+  options: JsonObject;
+  runId: string;
+  requestId: string | null;
+  sessionId?: string | null;
+}): JsonObject => {
+  const nextOptions = cloneJsonObject(input.options);
+  const admissionContext = cloneAdmissionContextForContract(nextOptions.admission_context);
+  if (admissionContext) {
+    nextOptions.admission_context = admissionContext;
+    return nextOptions;
+  }
+
+  if (!isIssue209LiveReadRequest(nextOptions)) {
+    return nextOptions;
+  }
+
+  const approvalRecord = normalizeXhsApprovalRecord(nextOptions.approval_record ?? nextOptions.approval);
+  const decisionId = resolveXhsGateDecisionId({
+    runId: input.runId,
+    commandRequestId: input.requestId
+  });
+  const approvalId = resolveXhsGateApprovalId({
+    runId: input.runId,
+    commandRequestId: input.requestId,
+    approvalRecord: nextOptions.approval_record ?? nextOptions.approval
+  });
+  const approvalComplete =
+    approvalRecord.approved &&
+    !!approvalRecord.approver &&
+    !!approvalRecord.approved_at &&
+    approvalId !== null;
+  if (!approvalComplete) {
+    return nextOptions;
+  }
+
+  const targetDomain = asString(nextOptions.target_domain);
+  const targetTabId =
+    typeof nextOptions.target_tab_id === "number" && Number.isInteger(nextOptions.target_tab_id)
+      ? nextOptions.target_tab_id
+      : null;
+  const targetPage = asString(nextOptions.target_page);
+  const actionType = asString(nextOptions.action_type);
+  const riskState = asString(nextOptions.risk_state);
+  const sessionId = asString(input.sessionId) ?? DEFAULT_GATE_SESSION_ID;
+
+  nextOptions.admission_context = {
+    approval_admission_evidence: {
+      approval_admission_ref: `gate_appr_${decisionId}`,
+      decision_id: decisionId,
+      approval_id: approvalId,
+      run_id: input.runId,
+      session_id: sessionId,
+      issue_scope: "issue_209",
+      target_domain: targetDomain,
+      target_tab_id: targetTabId,
+      target_page: targetPage,
+      action_type: actionType,
+      requested_execution_mode: nextOptions.requested_execution_mode,
+      approved: true,
+      approver: approvalRecord.approver,
+      approved_at: approvalRecord.approved_at,
+      checks: cloneJsonObject(approvalRecord.checks as JsonObject),
+      recorded_at: approvalRecord.approved_at
+    },
+    audit_admission_evidence: {
+      audit_admission_ref: `gate_evt_${decisionId}`,
+      decision_id: decisionId,
+      approval_id: approvalId,
+      run_id: input.runId,
+      session_id: sessionId,
+      issue_scope: "issue_209",
+      target_domain: targetDomain,
+      target_tab_id: targetTabId,
+      target_page: targetPage,
+      action_type: actionType,
+      requested_execution_mode: nextOptions.requested_execution_mode,
+      risk_state: riskState,
+      audited_checks: cloneJsonObject(approvalRecord.checks as JsonObject),
+      recorded_at: approvalRecord.approved_at
+    }
+  };
+
+  return nextOptions;
 };
 
 export const buildCapabilityResult = (

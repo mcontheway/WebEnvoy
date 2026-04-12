@@ -64,15 +64,25 @@ export const completeIssue208ApprovalRecord = {
 
 export const createApprovedReadAdmissionContext = (input?: {
   run_id?: string;
+  request_id?: string;
   session_id?: string;
+  decision_id?: string;
+  approval_id?: string;
   target_tab_id?: number;
   target_page?: string;
   requested_execution_mode?: "live_read_limited" | "live_read_high_risk";
   risk_state?: "limited" | "allowed";
-}) => ({
+}) => {
+  const runId = input?.run_id ?? "run-relay-001";
+  const requestId = input?.request_id;
+  const decisionId = input?.decision_id ?? (requestId ? `gate_decision_${runId}_${requestId}` : `gate_decision_${runId}`);
+  const approvalId = input?.approval_id ?? `gate_appr_${decisionId}`;
+  return ({
   approval_admission_evidence: {
-    approval_admission_ref: "gate_appr_issue209_read_001",
-    run_id: input?.run_id ?? "run-relay-001",
+    approval_admission_ref: approvalId,
+    decision_id: decisionId,
+    approval_id: approvalId,
+    run_id: runId,
     session_id: input?.session_id ?? "nm-session-001",
     issue_scope: "issue_209",
     target_domain: "www.xiaohongshu.com",
@@ -93,8 +103,10 @@ export const createApprovedReadAdmissionContext = (input?: {
     recorded_at: "2026-03-23T08:00:00Z"
   },
   audit_admission_evidence: {
-    audit_admission_ref: "gate_evt_issue209_read_001",
-    run_id: input?.run_id ?? "run-relay-001",
+    audit_admission_ref: `gate_evt_${decisionId}`,
+    decision_id: decisionId,
+    approval_id: approvalId,
+    run_id: runId,
     session_id: input?.session_id ?? "nm-session-001",
     issue_scope: "issue_209",
     target_domain: "www.xiaohongshu.com",
@@ -113,6 +125,7 @@ export const createApprovedReadAdmissionContext = (input?: {
     recorded_at: "2026-03-23T08:00:30Z"
   }
 } as const);
+};
 
 export const approvedLiveOptions = {
   target_domain: "www.xiaohongshu.com",
