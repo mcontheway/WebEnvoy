@@ -246,10 +246,10 @@
           {
             "action": "reversible_interaction_with_approval",
             "requires": [
-              "approval_admission_evidence_approved_true",
-              "approval_admission_evidence_approver_present",
-              "approval_admission_evidence_approved_at_present",
-              "approval_admission_evidence_checks_all_true"
+              "approval_record_approved_true",
+              "approval_record_approver_present",
+              "approval_record_approved_at_present",
+              "approval_record_checks_all_true"
             ]
           }
         ],
