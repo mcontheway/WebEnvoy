@@ -1004,7 +1004,11 @@ describe("extension service worker / gate and approval", () => {
           requested_execution_mode: "live_read_high_risk",
           effective_execution_mode: "dry_run",
           gate_decision: "blocked",
-          gate_reasons: ["MANUAL_CONFIRMATION_MISSING", "APPROVAL_CHECKS_INCOMPLETE"]
+          gate_reasons: [
+            "MANUAL_CONFIRMATION_MISSING",
+            "APPROVAL_CHECKS_INCOMPLETE",
+            "AUDIT_RECORD_MISSING"
+          ]
         },
         read_execution_policy: {
           default_mode: "dry_run",
@@ -1019,12 +1023,13 @@ describe("extension service worker / gate and approval", () => {
             {
               action: "live_read_limited",
               requires: expect.arrayContaining([
-                "audit_record_present",
+                "audit_admission_evidence_present",
+                "audit_admission_checks_all_true",
                 "limited_read_rollout_ready_true",
-                "approval_record_approved_true",
-                "approval_record_approver_present",
-                "approval_record_approved_at_present",
-                "approval_record_checks_all_true"
+                "approval_admission_evidence_approved_true",
+                "approval_admission_evidence_approver_present",
+                "approval_admission_evidence_approved_at_present",
+                "approval_admission_evidence_checks_all_true"
               ])
             }
           ]

@@ -303,16 +303,17 @@ const XHS_READ_EXECUTION_POLICY = {
   blocked_actions: ["expand_new_live_surface_without_gate"],
   live_entry_requirements: [
     "gate_input_risk_state_limited_or_allowed",
-    "audit_record_present",
+    "audit_admission_evidence_present",
+    "audit_admission_checks_all_true",
     "risk_state_checked",
     "target_domain_confirmed",
     "target_tab_confirmed",
     "target_page_confirmed",
     "action_type_confirmed",
-    "approval_record_approved_true",
-    "approval_record_approver_present",
-    "approval_record_approved_at_present",
-    "approval_record_checks_all_true"
+    "approval_admission_evidence_approved_true",
+    "approval_admission_evidence_approver_present",
+    "approval_admission_evidence_approved_at_present",
+    "approval_admission_evidence_checks_all_true"
   ]
 } as const;
 const XHS_SCOPE_CONTEXT = {
@@ -559,7 +560,8 @@ const mergeGateArtifactsIntoCommandParams = (
   }
   const approvalRecord = asRecord(gatePayload.approval_record);
   const auditRecord = asRecord(gatePayload.audit_record);
-  if (!approvalRecord && !auditRecord) {
+  const admissionContext = asRecord(asRecord(gatePayload.gate_input)?.admission_context);
+  if (!approvalRecord && !auditRecord && !admissionContext) {
     return commandParams;
   }
 
@@ -577,6 +579,10 @@ const mergeGateArtifactsIntoCommandParams = (
   if (auditRecord) {
     normalized.audit_record = auditRecord;
     normalizedOptions.audit_record = auditRecord;
+  }
+  if (admissionContext) {
+    normalized.admission_context = admissionContext;
+    normalizedOptions.admission_context = admissionContext;
   }
 
   normalized.options = normalizedOptions;
@@ -670,7 +676,7 @@ const xhsGateReasonMessage = (reason: string): string => {
     RISK_STATE_LIMITED: "risk state limited blocks high-risk live read",
     MANUAL_CONFIRMATION_MISSING: "manual confirmation is required for live mode",
     APPROVAL_CHECKS_INCOMPLETE: "approval checks are incomplete",
-    AUDIT_RECORD_MISSING: "audit record is required for live mode",
+    AUDIT_RECORD_MISSING: "audit admission evidence is required for live mode",
     LIMITED_READ_ROLLOUT_NOT_READY: "limited read rollout readiness is not satisfied",
     FINGERPRINT_CONTEXT_MISSING: "fingerprint context is required for live execution",
     FINGERPRINT_CONTEXT_UNTRUSTED:
@@ -799,6 +805,7 @@ const XHS_FORWARD_OPTION_KEYS = [
   "editor_focus_attestation",
   "approval_record",
   "audit_record",
+  "admission_context",
   "approval",
   "limited_read_rollout_ready_true",
   "timeout_ms",
@@ -849,6 +856,7 @@ type ResolvedXhsGateCommandInput = {
   requestedExecutionMode: XhsExecutionMode | null;
   approvalRecord: XhsApprovalRecord;
   auditRecord: Record<string, unknown> | null;
+  admissionContext: Record<string, unknown> | null;
   limitedReadRolloutReadyTrue: boolean;
   validationAction: string | null;
   requestedFingerprintContext: FingerprintRuntimeContext | null;
@@ -881,6 +889,7 @@ const resolveXhsGateCommandInput = (
       readGateParam("approval_record") ?? readGateParam("approval")
     ) as XhsApprovalRecord,
     auditRecord: asRecord(readGateParam("audit_record")),
+    admissionContext: asRecord(readGateParam("admission_context")),
     limitedReadRolloutReadyTrue: readGateParam("limited_read_rollout_ready_true") === true,
     validationAction: asNonEmptyString(readGateParam("validation_action")),
     requestedFingerprintContext: resolveFingerprintContext(commandParams)
@@ -1044,6 +1053,7 @@ const createRelayXhsGatePayload = (input: {
   gateReasons: string[];
   requiresManualConfirmation: boolean;
   approvalRecord: XhsApprovalRecord;
+  admissionContext?: Record<string, unknown> | null;
   consumerGateResult: Record<string, unknown>;
   writeActionMatrixDecisions: XhsWriteActionMatrixDecisionsOutput | null;
   writeGateOnlyDecision?: Record<string, unknown>;
@@ -1089,6 +1099,7 @@ const createRelayXhsGatePayload = (input: {
       action_type: input.actionType,
       requested_execution_mode: input.requestedExecutionMode,
       risk_state: input.riskState,
+      admission_context: input.admissionContext ?? null,
       fingerprint_gate_decision: "allowed"
     },
     gate_outcome: {
@@ -1168,6 +1179,7 @@ const createBackgroundXhsGatePayload = (input: {
   fingerprintExecution: FingerprintRuntimeContext["execution"] | null;
   consumerGateResult: Record<string, unknown>;
   approvalRecord: XhsApprovalRecord;
+  admissionContext?: Record<string, unknown> | null;
   writeActionMatrixDecisions: XhsWriteActionMatrixDecisionsOutput | null;
   writeMatrixDecision: WriteActionMatrixDecision | null;
   writeGateOnlyDecision: Record<string, unknown> | null;
@@ -1239,6 +1251,7 @@ const createBackgroundXhsGatePayload = (input: {
       action_type: input.actionType,
       requested_execution_mode: input.requestedExecutionMode,
       risk_state: input.riskState,
+      admission_context: input.admissionContext ?? null,
       fingerprint_gate_decision: input.fingerprintGateDecision
     },
     gate_outcome: {
@@ -3521,6 +3534,7 @@ class ChromeBackgroundBridge {
       requestedExecutionMode,
       approvalRecord,
       auditRecord,
+      admissionContext,
       limitedReadRolloutReadyTrue,
       validationAction,
       requestedFingerprintContext
@@ -3598,8 +3612,11 @@ class ChromeBackgroundBridge {
       state: gateState,
       decisionId: gateDecisionId,
       expectedApprovalId,
+      runId: requestRunId,
+      sessionId: String(request.params.session_id ?? this.#sessionId),
       approvalRecord,
       auditRecord,
+      admissionContext,
       targetDomain,
       targetTabId,
       targetPage,
@@ -3660,6 +3677,7 @@ class ChromeBackgroundBridge {
       if (fingerprintExecution === null) {
         fingerprintContextMissing = requestedFingerprintContext === null;
         fingerprintContextUntrusted = requestedFingerprintContext !== null;
+        fingerprintExecution = null;
         if (fingerprintContextMissing) {
           pushReason("FINGERPRINT_CONTEXT_MISSING");
           resolvedFingerprintReasonCodes = ["FINGERPRINT_CONTEXT_MISSING"];
@@ -3776,6 +3794,7 @@ class ChromeBackgroundBridge {
       fingerprintExecution,
       consumerGateResult,
       approvalRecord,
+      admissionContext,
       writeActionMatrixDecisions: gateState.writeActionMatrixDecisions,
       writeMatrixDecision: gateState.writeMatrixDecision,
       writeGateOnlyDecision: writeGateOnlyApprovalDecision,

@@ -608,10 +608,10 @@ describe("extension service worker recovery contract / xhs gate and live forward
             {
               action: "live_read_limited",
               requires: [
-                "approval_record_approved_true",
-                "approval_record_approver_present",
-                "approval_record_approved_at_present",
-                "approval_record_checks_all_true"
+                "approval_admission_evidence_approved_true",
+                "approval_admission_evidence_approver_present",
+                "approval_admission_evidence_approved_at_present",
+                "approval_admission_evidence_checks_all_true"
               ]
             }
           ]
@@ -637,7 +637,7 @@ describe("extension service worker recovery contract / xhs gate and live forward
           recovery_requirements: [
             "stability_window_passed_and_manual_approve",
             "risk_state_checked",
-            "audit_record_present"
+            "audit_admission_evidence_present"
           ]
         }
       }

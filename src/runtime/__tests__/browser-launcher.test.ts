@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
   BROWSER_CONTROL_FILENAME,
@@ -18,6 +18,10 @@ import {
   resolveBrowserVersionOutputForFingerprint,
   shutdownBrowserSession
 } from "../browser-launcher.js";
+import {
+  acquireBrowserEnvTestLock,
+  releaseBrowserEnvTestLock
+} from "./browser-env-test-lock.js";
 
 const tempDirs: string[] = [];
 let browserPathBeforeTest: string | undefined;
@@ -45,7 +49,9 @@ const restoreEnv = (
   process.env[key] = value;
 };
 
-const createMockBrowserExecutable = async (): Promise<{ scriptPath: string; logPath: string }> => {
+const createMockBrowserExecutable = async (
+  versionOutput: string = "Chromium 146.0.0.0"
+): Promise<{ scriptPath: string; logPath: string }> => {
   const dir = await mkdtemp(join(tmpdir(), "webenvoy-browser-launcher-"));
   tempDirs.push(dir);
   const scriptPath = join(dir, "mock-browser.mjs");
@@ -55,9 +61,8 @@ const createMockBrowserExecutable = async (): Promise<{ scriptPath: string; logP
     `#!/usr/bin/env node
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 const logPath = process.env.WEBENVOY_BROWSER_MOCK_LOG;
-const versionOutput = process.env.WEBENVOY_BROWSER_MOCK_VERSION ?? "Chromium 146.0.0.0";
 if (process.argv.includes("--version")) {
-  console.log(versionOutput);
+  console.log(${JSON.stringify(versionOutput)});
   process.exit(0);
 }
 let profileDir = "";
@@ -319,6 +324,10 @@ const waitForExit = async (pid: number): Promise<void> => {
   throw new Error(`process ${pid} did not exit in time`);
 };
 
+beforeAll(async () => {
+  await acquireBrowserEnvTestLock();
+}, 180_000);
+
 beforeEach(() => {
   browserPathBeforeTest = process.env.WEBENVOY_BROWSER_PATH;
   browserMockLogBeforeTest = process.env.WEBENVOY_BROWSER_MOCK_LOG;
@@ -350,6 +359,10 @@ afterEach(async () => {
     }
   }
 });
+
+afterAll(async () => {
+  await releaseBrowserEnvTestLock();
+}, 180_000);
 
 describe("browser-launcher", () => {
   it("prefers official Chrome over CFT and Chromium on darwin when no explicit browser path is set", () => {
@@ -837,9 +850,8 @@ describe("browser-launcher", () => {
   });
 
   it("fails fast for branded Google Chrome 137+ when only WEBENVOY_BROWSER_PATH is provided", async () => {
-    const { scriptPath } = await createMockBrowserExecutable();
-    process.env.WEBENVOY_BROWSER_PATH = scriptPath;
-    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Google Chrome 146.0.7680.154";
+    process.env.WEBENVOY_BROWSER_PATH =
+      await createFixedVersionBrowserExecutable("Google Chrome 146.0.7680.154");
 
     await expect(
       launchBrowser({

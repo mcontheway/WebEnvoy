@@ -36,6 +36,7 @@ const KNOWN_BROWSER_CANDIDATES = {
     sunos: [],
     cygwin: []
 };
+const BROWSER_VERSION_PROBE_TIMEOUT_MS = 5_000;
 const hasPathSegment = (value) => /[\\/]/.test(value);
 export const resolvePreferredBrowserCandidates = (platform, explicitFromEnv) => [explicitFromEnv, ...(KNOWN_BROWSER_CANDIDATES[platform] ?? [])].filter((item) => item !== null);
 const pathExists = async (path) => {
@@ -125,7 +126,7 @@ const readBrowserVersionOutput = async (executablePath) => {
                 // ignore kill failures
             }
             finish(null);
-        }, 2_000);
+        }, BROWSER_VERSION_PROBE_TIMEOUT_MS);
         child.stdout?.on("data", (chunk) => {
             stdout += chunk.toString();
         });

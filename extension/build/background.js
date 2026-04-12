@@ -54,16 +54,17 @@ const XHS_READ_EXECUTION_POLICY = {
     blocked_actions: ["expand_new_live_surface_without_gate"],
     live_entry_requirements: [
         "gate_input_risk_state_limited_or_allowed",
-        "audit_record_present",
+        "audit_admission_evidence_present",
+        "audit_admission_checks_all_true",
         "risk_state_checked",
         "target_domain_confirmed",
         "target_tab_confirmed",
         "target_page_confirmed",
         "action_type_confirmed",
-        "approval_record_approved_true",
-        "approval_record_approver_present",
-        "approval_record_approved_at_present",
-        "approval_record_checks_all_true"
+        "approval_admission_evidence_approved_true",
+        "approval_admission_evidence_approver_present",
+        "approval_admission_evidence_approved_at_present",
+        "approval_admission_evidence_checks_all_true"
     ]
 };
 const XHS_SCOPE_CONTEXT = {
@@ -253,7 +254,8 @@ const mergeGateArtifactsIntoCommandParams = (commandParams, gatePayload) => {
     }
     const approvalRecord = asRecord(gatePayload.approval_record);
     const auditRecord = asRecord(gatePayload.audit_record);
-    if (!approvalRecord && !auditRecord) {
+    const admissionContext = asRecord(asRecord(gatePayload.gate_input)?.admission_context);
+    if (!approvalRecord && !auditRecord && !admissionContext) {
         return commandParams;
     }
     const normalized = { ...commandParams };
@@ -269,6 +271,10 @@ const mergeGateArtifactsIntoCommandParams = (commandParams, gatePayload) => {
     if (auditRecord) {
         normalized.audit_record = auditRecord;
         normalizedOptions.audit_record = auditRecord;
+    }
+    if (admissionContext) {
+        normalized.admission_context = admissionContext;
+        normalizedOptions.admission_context = admissionContext;
     }
     normalized.options = normalizedOptions;
     return normalized;
@@ -350,7 +356,7 @@ const xhsGateReasonMessage = (reason) => {
         RISK_STATE_LIMITED: "risk state limited blocks high-risk live read",
         MANUAL_CONFIRMATION_MISSING: "manual confirmation is required for live mode",
         APPROVAL_CHECKS_INCOMPLETE: "approval checks are incomplete",
-        AUDIT_RECORD_MISSING: "audit record is required for live mode",
+        AUDIT_RECORD_MISSING: "audit admission evidence is required for live mode",
         LIMITED_READ_ROLLOUT_NOT_READY: "limited read rollout readiness is not satisfied",
         FINGERPRINT_CONTEXT_MISSING: "fingerprint context is required for live execution",
         FINGERPRINT_CONTEXT_UNTRUSTED: "fingerprint context is not trusted for current run/profile",
@@ -446,6 +452,7 @@ const XHS_FORWARD_OPTION_KEYS = [
     "editor_focus_attestation",
     "approval_record",
     "audit_record",
+    "admission_context",
     "approval",
     "limited_read_rollout_ready_true",
     "timeout_ms",
@@ -495,6 +502,7 @@ const resolveXhsGateCommandInput = (input) => {
         requestedExecutionMode: resolveXhsExecutionMode(readGateParam("requested_execution_mode")),
         approvalRecord: normalizeXhsApprovalRecord(readGateParam("approval_record") ?? readGateParam("approval")),
         auditRecord: asRecord(readGateParam("audit_record")),
+        admissionContext: asRecord(readGateParam("admission_context")),
         limitedReadRolloutReadyTrue: readGateParam("limited_read_rollout_ready_true") === true,
         validationAction: asNonEmptyString(readGateParam("validation_action")),
         requestedFingerprintContext: resolveFingerprintContext(commandParams)
@@ -655,6 +663,7 @@ const createRelayXhsGatePayload = (input) => {
             action_type: input.actionType,
             requested_execution_mode: input.requestedExecutionMode,
             risk_state: input.riskState,
+            admission_context: input.admissionContext ?? null,
             fingerprint_gate_decision: "allowed"
         },
         gate_outcome: {
@@ -779,6 +788,7 @@ const createBackgroundXhsGatePayload = (input) => {
             action_type: input.actionType,
             requested_execution_mode: input.requestedExecutionMode,
             risk_state: input.riskState,
+            admission_context: input.admissionContext ?? null,
             fingerprint_gate_decision: input.fingerprintGateDecision
         },
         gate_outcome: {
@@ -2746,7 +2756,7 @@ class ChromeBackgroundBridge {
     }
     async #evaluateXhsTargetGate(request) {
         const command = String(request.params.command ?? "");
-        const { commandParams, targetDomain, targetTabId: initialTargetTabId, targetPage, issueScope, riskState, actionType, abilityActionType, requestedExecutionMode, approvalRecord, auditRecord, limitedReadRolloutReadyTrue, validationAction, requestedFingerprintContext } = resolveXhsGateCommandInput(asRecord(request.params.command_params) ?? {});
+        const { commandParams, targetDomain, targetTabId: initialTargetTabId, targetPage, issueScope, riskState, actionType, abilityActionType, requestedExecutionMode, approvalRecord, auditRecord, admissionContext, limitedReadRolloutReadyTrue, validationAction, requestedFingerprintContext } = resolveXhsGateCommandInput(asRecord(request.params.command_params) ?? {});
         let fingerprintExecution = requestedFingerprintContext?.execution ?? null;
         let fingerprintReasonCodes = (Array.isArray(fingerprintExecution?.reason_codes) ? fingerprintExecution.reason_codes : []).filter((code) => typeof code === "string");
         let targetTabId = initialTargetTabId;
@@ -2814,8 +2824,11 @@ class ChromeBackgroundBridge {
             state: gateState,
             decisionId: gateDecisionId,
             expectedApprovalId,
+            runId: requestRunId,
+            sessionId: String(request.params.session_id ?? this.#sessionId),
             approvalRecord,
             auditRecord,
+            admissionContext,
             targetDomain,
             targetTabId,
             targetPage,
@@ -2869,6 +2882,7 @@ class ChromeBackgroundBridge {
             if (fingerprintExecution === null) {
                 fingerprintContextMissing = requestedFingerprintContext === null;
                 fingerprintContextUntrusted = requestedFingerprintContext !== null;
+                fingerprintExecution = null;
                 if (fingerprintContextMissing) {
                     pushReason("FINGERPRINT_CONTEXT_MISSING");
                     resolvedFingerprintReasonCodes = ["FINGERPRINT_CONTEXT_MISSING"];
@@ -2983,6 +2997,7 @@ class ChromeBackgroundBridge {
             fingerprintExecution,
             consumerGateResult,
             approvalRecord,
+            admissionContext,
             writeActionMatrixDecisions: gateState.writeActionMatrixDecisions,
             writeMatrixDecision: gateState.writeMatrixDecision,
             writeGateOnlyDecision: writeGateOnlyApprovalDecision,

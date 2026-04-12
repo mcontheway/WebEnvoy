@@ -18,6 +18,10 @@ import { browserStateFromProfileState, buildBoundlessRuntimeReadiness, buildNonP
 const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
 const LOCK_ACQUIRE_MAX_RETRIES = 6;
 const STOP_LOCK_DELETE_MAX_RETRIES = 3;
+const hasRequestedPersistentExtensionIdentity = (params) => {
+    const candidate = params.persistent_extension_identity ?? params.persistentExtensionIdentity;
+    return typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
+};
 const isoNow = () => new Date().toISOString();
 const DEFAULT_LOCK_FILE_ADAPTER = {
     readFile: async (path, encoding) => readFile(path, encoding),
@@ -292,7 +296,10 @@ export class ProfileRuntimeService {
                         profileDir,
                         nowIso
                     })
-                    : await store.initializeMeta(input.profile, nowIso);
+                    : await store.initializeMeta(input.profile, nowIso, {
+                        allowUnsupportedExtensionBrowser: usesPersistentIdentityMode ||
+                            hasRequestedPersistentExtensionIdentity(input.params)
+                    });
             }
             let recoveredMeta = shouldRecoverAsDisconnected(lockAcquireResult.acquisition, existingMeta.profileState)
                 ? this.#patchMeta(existingMeta, {
@@ -435,7 +442,10 @@ export class ProfileRuntimeService {
                         profileDir,
                         nowIso
                     })
-                    : await store.initializeMeta(input.profile, nowIso);
+                    : await store.initializeMeta(input.profile, nowIso, {
+                        allowUnsupportedExtensionBrowser: usesPersistentIdentityMode ||
+                            hasRequestedPersistentExtensionIdentity(input.params)
+                    });
             }
             let recoveredMeta = shouldRecoverAsDisconnected(lockAcquireResult.acquisition, existingMeta.profileState)
                 ? this.#patchMeta(existingMeta, {

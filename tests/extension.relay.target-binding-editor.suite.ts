@@ -59,6 +59,17 @@ describe("extension background relay contract / target binding and editor input"
                 risk_state_checked: true,
                 action_type_confirmed: true
               }
+            },
+            audit_record: {
+              event_id: "gate_evt_target_binding_live_allowed_001",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              gate_decision: "allowed",
+              recorded_at: "2026-03-23T10:00:30Z"
             }
           }
         },
@@ -135,6 +146,17 @@ describe("extension background relay contract / target binding and editor input"
                 risk_state_checked: true,
                 action_type_confirmed: true
               }
+            },
+            audit_record: {
+              event_id: "gate_evt_target_binding_live_allowed_001",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              gate_decision: "allowed",
+              recorded_at: "2026-03-23T10:00:30Z"
             }
           }
         },
@@ -929,6 +951,17 @@ describe("extension background relay contract / target binding and editor input"
                 risk_state_checked: true,
                 action_type_confirmed: true
               }
+            },
+            audit_record: {
+              event_id: "gate_evt_target_binding_live_allowed_001",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              gate_decision: "allowed",
+              recorded_at: "2026-03-23T10:00:30Z"
             }
           }
         },
@@ -1336,6 +1369,17 @@ describe("extension background relay contract / target binding and editor input"
                 risk_state_checked: true,
                 action_type_confirmed: true
               }
+            },
+            audit_record: {
+              event_id: "gate_evt_target_binding_live_allowed_001",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              gate_decision: "allowed",
+              recorded_at: "2026-03-23T10:00:30Z"
             }
           }
         },

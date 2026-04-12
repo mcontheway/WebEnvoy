@@ -2,6 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
 
 describe("extension background relay contract / forward and timeout", () => {
+  const highRiskAuditRecord = {
+    event_id: "gate_evt_forward-xhs-live-high-risk-allowed-001",
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: 32,
+    target_page: "search_result_tab",
+    action_type: "read",
+    requested_execution_mode: "live_read_high_risk",
+    gate_decision: "allowed",
+    recorded_at: "2026-03-23T08:00:30Z"
+  } as const;
   const approvedLiveOptions = {
     target_domain: "www.xiaohongshu.com",
     target_tab_id: 32,
@@ -20,7 +31,8 @@ describe("extension background relay contract / forward and timeout", () => {
         risk_state_checked: true,
         action_type_confirmed: true
       }
-    }
+    },
+    audit_record: highRiskAuditRecord
   };
   const approvedLimitedLiveOptions = {
     ...approvedLiveOptions,
@@ -502,14 +514,22 @@ describe("extension background relay contract / forward and timeout", () => {
       gate_outcome: {
         effective_execution_mode: "dry_run",
         gate_decision: "blocked",
-        gate_reasons: ["MANUAL_CONFIRMATION_MISSING", "APPROVAL_CHECKS_INCOMPLETE"],
+        gate_reasons: [
+          "MANUAL_CONFIRMATION_MISSING",
+          "APPROVAL_CHECKS_INCOMPLETE",
+          "AUDIT_RECORD_MISSING"
+        ],
         requires_manual_confirmation: true
       },
       consumer_gate_result: {
         requested_execution_mode: "live_read_high_risk",
         effective_execution_mode: "dry_run",
         gate_decision: "blocked",
-        gate_reasons: ["MANUAL_CONFIRMATION_MISSING", "APPROVAL_CHECKS_INCOMPLETE"]
+        gate_reasons: [
+          "MANUAL_CONFIRMATION_MISSING",
+          "APPROVAL_CHECKS_INCOMPLETE",
+          "AUDIT_RECORD_MISSING"
+        ]
       }
     });
   });
@@ -884,6 +904,17 @@ describe("extension background relay contract / forward and timeout", () => {
                 risk_state_checked: true,
                 action_type_confirmed: true
               }
+            },
+            audit_record: {
+              event_id: "gate_evt_forward_xhs_live_allowed_001",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              gate_decision: "allowed",
+              recorded_at: "2026-03-23T10:00:30Z"
             }
           }
         },
@@ -993,6 +1024,17 @@ describe("extension background relay contract / forward and timeout", () => {
                 risk_state_checked: true,
                 action_type_confirmed: true
               }
+            },
+            audit_record: {
+              event_id: "gate_evt_forward_xhs_live_allowed_001",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              gate_decision: "allowed",
+              recorded_at: "2026-03-23T10:00:30Z"
             }
           }
         },
@@ -1069,6 +1111,17 @@ describe("extension background relay contract / forward and timeout", () => {
                 risk_state_checked: true,
                 action_type_confirmed: true
               }
+            },
+            audit_record: {
+              event_id: "gate_evt_forward_xhs_live_allowed_001",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              gate_decision: "allowed",
+              recorded_at: "2026-03-23T10:00:30Z"
             }
           }
         },
@@ -1143,6 +1196,17 @@ describe("extension background relay contract / forward and timeout", () => {
                 risk_state_checked: true,
                 action_type_confirmed: true
               }
+            },
+            audit_record: {
+              event_id: "gate_evt_forward_xhs_live_allowed_001",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              gate_decision: "allowed",
+              recorded_at: "2026-03-23T10:00:30Z"
             }
           }
         },
@@ -2121,6 +2185,17 @@ describe("extension background relay contract / forward and timeout", () => {
                 risk_state_checked: true,
                 action_type_confirmed: true
               }
+            },
+            audit_record: {
+              event_id: "gate_evt_forward_xhs_live_allowed_001",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              gate_decision: "allowed",
+              recorded_at: "2026-03-23T10:00:30Z"
             }
           }
         },
@@ -2528,6 +2603,17 @@ describe("extension background relay contract / forward and timeout", () => {
                 risk_state_checked: true,
                 action_type_confirmed: true
               }
+            },
+            audit_record: {
+              event_id: "gate_evt_forward_xhs_live_allowed_001",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              gate_decision: "allowed",
+              recorded_at: "2026-03-23T10:00:30Z"
             }
           }
         },

@@ -28,6 +28,21 @@ const {
 } = ctx;
 
 describe("webenvoy cli contract / xhs gate and audit", () => {
+  const createAllowedHighRiskAuditRecord = (
+    overrides: Record<string, unknown> = {}
+  ): Record<string, unknown> => ({
+    event_id: "audit-live-read-high-risk-001",
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: 32,
+    target_page: "search_result_tab",
+    action_type: "read",
+    requested_execution_mode: "live_read_high_risk",
+    gate_decision: "allowed",
+    recorded_at: "2026-03-23T10:00:30Z",
+    ...overrides
+  });
+
   it("returns success json for runtime.ping", () => {
     const result = runCli(["runtime.ping", "--run-id", "run-contract-001"], {
       WEBENVOY_NATIVE_TRANSPORT: "loopback"
@@ -697,7 +712,8 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], cwd, {
@@ -762,7 +778,8 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], repoRoot, {
@@ -810,7 +827,8 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], repoRoot, {
@@ -857,7 +875,8 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], repoRoot, {
@@ -924,7 +943,8 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], repoRoot, {
@@ -1754,7 +1774,8 @@ process.stdin.on("data", (chunk) => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], runtimeCwd, {
@@ -1858,12 +1879,19 @@ process.stdin.on("data", (chunk) => {
             {
               action: "live_read_limited",
               requires: [
-                "audit_record_present",
-                "limited_read_rollout_ready_true",
-                "approval_record_approved_true",
-                "approval_record_approver_present",
-                "approval_record_approved_at_present",
-                "approval_record_checks_all_true"
+                "gate_input_risk_state_limited_or_allowed",
+                "audit_admission_evidence_present",
+                "audit_admission_checks_all_true",
+                "risk_state_checked",
+                "target_domain_confirmed",
+                "target_tab_confirmed",
+                "target_page_confirmed",
+                "action_type_confirmed",
+                "approval_admission_evidence_approved_true",
+                "approval_admission_evidence_approver_present",
+                "approval_admission_evidence_approved_at_present",
+                "approval_admission_evidence_checks_all_true",
+                "limited_read_rollout_ready_true"
               ]
             }
           ]
@@ -2003,7 +2031,8 @@ process.stdin.on("data", (chunk) => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], cwd, {
@@ -2695,7 +2724,8 @@ process.stdin.on("data", (chunk) => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ]);
@@ -2746,7 +2776,8 @@ process.stdin.on("data", (chunk) => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], repoRoot, {
@@ -2801,7 +2832,8 @@ process.stdin.on("data", (chunk) => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], repoRoot, {

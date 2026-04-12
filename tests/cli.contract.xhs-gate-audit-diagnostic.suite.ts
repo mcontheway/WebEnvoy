@@ -2,6 +2,21 @@ import { describe, expect, it } from "vitest";
 import { repoRoot, binPath, mockBrowserPath, nativeHostMockPath, repoOwnedNativeHostEntryPath, browserStateFilename, tempDirs, resolveDatabaseSync, DatabaseSync, itWithSqlite, createRuntimeCwd, createNativeHostManifest, seedInstalledPersistentExtension, defaultRuntimeEnv, runCli, expectBundledNativeHostStarts, createNativeHostCommand, createShellWrappedNativeHostCommand, PROFILE_MODE_ROOT_PREFERRED, quoteLauncherExportValue, resolveCanonicalExpectedProfileDir, expectProfileRootOnlyLauncherContract, expectDualEnvRootPreferredLauncherContract, runGit, createGitWorktreePair, runCliAsync, parseSingleJsonLine, encodeNativeBridgeEnvelope, readSingleNativeBridgeEnvelope, asRecord, resolveCliGateEnvelope, resolveWriteInteractionTier, scopedXhsGateOptions, assertLockMissing, detectSystemChromePath, wait, runHeadlessDomProbe, realBrowserContractsEnabled, BROWSER_STATE_FILENAME, BROWSER_CONTROL_FILENAME, isPidAlive, scopedReadGateOptions, path, readFile, writeFile, mkdir, mkdtemp, realpath, rm, stat, chmod, symlink, spawn, spawnSync, createServer, createRequire, tmpdir, resolveRuntimeStorePath, type DatabaseSyncCtor } from "./cli.contract.shared.js";
 
 describe("webenvoy cli contract / xhs gate and audit", () => {
+  const createAllowedHighRiskAuditRecord = (
+    overrides: Record<string, unknown> = {}
+  ): Record<string, unknown> => ({
+    event_id: "audit-live-read-high-risk-001",
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: 32,
+    target_page: "search_result_tab",
+    action_type: "read",
+    requested_execution_mode: "live_read_high_risk",
+    gate_decision: "allowed",
+    recorded_at: "2026-03-23T10:00:30Z",
+    ...overrides
+  });
+
   it("returns structured input validation error for xhs.search without ability envelope", () => {
     const result = runCli(["xhs.search", "--profile", "xhs_account_001"]);
     expect(result.status).toBe(2);
@@ -516,7 +531,8 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], cwd, {
@@ -581,7 +597,8 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], repoRoot, {
@@ -629,7 +646,8 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], repoRoot, {
@@ -676,7 +694,8 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], repoRoot, {
@@ -743,7 +762,8 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], repoRoot, {
@@ -1190,7 +1210,8 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], repoRoot, {
@@ -1573,7 +1594,8 @@ process.stdin.on("data", (chunk) => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], runtimeCwd, {
@@ -1677,12 +1699,19 @@ process.stdin.on("data", (chunk) => {
             {
               action: "live_read_limited",
               requires: [
-                "audit_record_present",
-                "limited_read_rollout_ready_true",
-                "approval_record_approved_true",
-                "approval_record_approver_present",
-                "approval_record_approved_at_present",
-                "approval_record_checks_all_true"
+                "gate_input_risk_state_limited_or_allowed",
+                "audit_admission_evidence_present",
+                "audit_admission_checks_all_true",
+                "risk_state_checked",
+                "target_domain_confirmed",
+                "target_tab_confirmed",
+                "target_page_confirmed",
+                "action_type_confirmed",
+                "approval_admission_evidence_approved_true",
+                "approval_admission_evidence_approver_present",
+                "approval_admission_evidence_approved_at_present",
+                "approval_admission_evidence_checks_all_true",
+                "limited_read_rollout_ready_true"
               ]
             }
           ]
@@ -1751,7 +1780,8 @@ process.stdin.on("data", (chunk) => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], cwd, {
@@ -2356,11 +2386,11 @@ process.stdin.on("data", (chunk) => {
           input: {
             query: "露营装备"
           },
-          options: {
-            ...scopedReadGateOptions,
-            simulate_result: simulateResult,
-            requested_execution_mode: "live_read_high_risk",
-            risk_state: "allowed",
+        options: {
+          ...scopedReadGateOptions,
+          simulate_result: simulateResult,
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
             approval_record: {
               approved: true,
               approver: "qa-reviewer",
@@ -2368,13 +2398,14 @@ process.stdin.on("data", (chunk) => {
               checks: {
                 target_domain_confirmed: true,
                 target_tab_confirmed: true,
-                target_page_confirmed: true,
-                risk_state_checked: true,
-                action_type_confirmed: true
-              }
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
             }
-          }
-        })
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
+        }
+      })
       ], repoRoot, {
         WEBENVOY_NATIVE_TRANSPORT: "loopback"
       });
@@ -2443,7 +2474,8 @@ process.stdin.on("data", (chunk) => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ]);
@@ -2494,7 +2526,8 @@ process.stdin.on("data", (chunk) => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], repoRoot, {
@@ -2549,7 +2582,8 @@ process.stdin.on("data", (chunk) => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createAllowedHighRiskAuditRecord()
         }
       })
     ], repoRoot, {

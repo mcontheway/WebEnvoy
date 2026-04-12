@@ -243,14 +243,22 @@ describe("extension background relay contract / gate and approval", () => {
       gate_outcome: {
         effective_execution_mode: "dry_run",
         gate_decision: "blocked",
-        gate_reasons: ["MANUAL_CONFIRMATION_MISSING", "APPROVAL_CHECKS_INCOMPLETE"],
+        gate_reasons: [
+          "MANUAL_CONFIRMATION_MISSING",
+          "APPROVAL_CHECKS_INCOMPLETE",
+          "AUDIT_RECORD_MISSING"
+        ],
         requires_manual_confirmation: true
       },
       consumer_gate_result: {
         requested_execution_mode: "live_read_high_risk",
         effective_execution_mode: "dry_run",
         gate_decision: "blocked",
-        gate_reasons: ["MANUAL_CONFIRMATION_MISSING", "APPROVAL_CHECKS_INCOMPLETE"]
+        gate_reasons: [
+          "MANUAL_CONFIRMATION_MISSING",
+          "APPROVAL_CHECKS_INCOMPLETE",
+          "AUDIT_RECORD_MISSING"
+        ]
       }
     });
   });

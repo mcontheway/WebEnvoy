@@ -14,6 +14,7 @@ const XHS_ALLOWED_DOMAINS = new Set([XHS_READ_DOMAIN, XHS_WRITE_DOMAIN]);
 const XHS_ACTION_TYPES = new Set(["read", "write", "irreversible_write"]);
 const XHS_EXECUTION_MODE_SET = new Set(EXECUTION_MODES);
 const XHS_REQUIRED_APPROVAL_CHECKS = APPROVAL_CHECK_KEYS;
+const XHS_REQUIRED_AUDIT_ADMISSION_CHECKS = APPROVAL_CHECK_KEYS;
 const XHS_WRITE_APPROVAL_REQUIREMENTS = [
   "approval_record_approved_true",
   "approval_record_approver_present",
@@ -32,16 +33,17 @@ const XHS_READ_EXECUTION_POLICY = {
   blocked_actions: ["expand_new_live_surface_without_gate"],
   live_entry_requirements: [
     "gate_input_risk_state_limited_or_allowed",
-    "audit_record_present",
+    "audit_admission_evidence_present",
+    "audit_admission_checks_all_true",
     "risk_state_checked",
     "target_domain_confirmed",
     "target_tab_confirmed",
     "target_page_confirmed",
     "action_type_confirmed",
-    "approval_record_approved_true",
-    "approval_record_approver_present",
-    "approval_record_approved_at_present",
-    "approval_record_checks_all_true"
+    "approval_admission_evidence_approved_true",
+    "approval_admission_evidence_approver_present",
+    "approval_admission_evidence_approved_at_present",
+    "approval_admission_evidence_checks_all_true"
   ]
 };
 
@@ -135,6 +137,97 @@ const normalizeXhsApprovalRecord = (value) => {
   };
 };
 
+const normalizeXhsApprovalAdmissionEvidence = (value) => {
+  const record = asRecord(value);
+  const checksRecord = asRecord(record?.checks);
+  return {
+    approval_admission_ref: asString(record?.approval_admission_ref),
+    run_id: asString(record?.run_id),
+    session_id: asString(record?.session_id),
+    issue_scope: asString(record?.issue_scope),
+    target_domain: asString(record?.target_domain),
+    target_tab_id: asInteger(record?.target_tab_id),
+    target_page: asString(record?.target_page),
+    action_type: asString(record?.action_type),
+    requested_execution_mode: asString(record?.requested_execution_mode),
+    approved: asBoolean(record?.approved),
+    approver: asString(record?.approver),
+    approved_at: asString(record?.approved_at),
+    checks: Object.fromEntries(
+      XHS_REQUIRED_APPROVAL_CHECKS.map((key) => [key, asBoolean(checksRecord?.[key])])
+    ),
+    recorded_at: asString(record?.recorded_at)
+  };
+};
+
+const normalizeXhsAuditAdmissionEvidence = (value) => {
+  const record = asRecord(value);
+  const checksRecord = asRecord(record?.audited_checks);
+  return {
+    audit_admission_ref: asString(record?.audit_admission_ref),
+    run_id: asString(record?.run_id),
+    session_id: asString(record?.session_id),
+    issue_scope: asString(record?.issue_scope),
+    target_domain: asString(record?.target_domain),
+    target_tab_id: asInteger(record?.target_tab_id),
+    target_page: asString(record?.target_page),
+    action_type: asString(record?.action_type),
+    requested_execution_mode: asString(record?.requested_execution_mode),
+    risk_state: asString(record?.risk_state),
+    audited_checks: Object.fromEntries(
+      XHS_REQUIRED_AUDIT_ADMISSION_CHECKS.map((key) => [key, asBoolean(checksRecord?.[key])])
+    ),
+    recorded_at: asString(record?.recorded_at)
+  };
+};
+
+const normalizeXhsAdmissionContext = (value) => {
+  const record = asRecord(value);
+  return {
+    approval_admission_evidence: normalizeXhsApprovalAdmissionEvidence(
+      record?.approval_admission_evidence
+    ),
+    audit_admission_evidence: normalizeXhsAuditAdmissionEvidence(record?.audit_admission_evidence)
+  };
+};
+
+const buildLegacyAdmissionContext = (input) => {
+  const approvalRecord = normalizeXhsApprovalRecord(input.approvalRecord);
+  const auditRecord = normalizeXhsAuditRecord(input.auditRecord);
+  return {
+    approval_admission_evidence: {
+      approval_admission_ref: asString(input.expectedApprovalId) ?? null,
+      run_id: asString(input.runId),
+      session_id: asString(input.sessionId),
+      issue_scope: asString(input.issueScope),
+      target_domain: asString(input.targetDomain),
+      target_tab_id: asInteger(input.targetTabId),
+      target_page: asString(input.targetPage),
+      action_type: asString(input.actionType),
+      requested_execution_mode: asString(input.requestedExecutionMode),
+      approved: approvalRecord.approved,
+      approver: approvalRecord.approver,
+      approved_at: approvalRecord.approved_at,
+      checks: { ...approvalRecord.checks },
+      recorded_at: auditRecord.recorded_at
+    },
+    audit_admission_evidence: {
+      audit_admission_ref: auditRecord.event_id,
+      run_id: asString(input.runId),
+      session_id: asString(input.sessionId),
+      issue_scope: asString(input.issueScope),
+      target_domain: asString(input.targetDomain),
+      target_tab_id: asInteger(input.targetTabId),
+      target_page: asString(input.targetPage),
+      action_type: asString(input.actionType),
+      requested_execution_mode: asString(input.requestedExecutionMode),
+      risk_state: asString(input.riskState),
+      audited_checks: { ...approvalRecord.checks },
+      recorded_at: auditRecord.recorded_at
+    }
+  };
+};
+
 const resolveXhsIssueActionMatrixEntry = (issueScope, state) => {
   return getIssueActionMatrixEntry(issueScope, state);
 };
@@ -187,6 +280,73 @@ const resolveXhsApprovalRequirementGaps = (requirements, approvalRecord) => {
   return gaps;
 };
 
+const resolveXhsApprovalAdmissionRequirementGaps = (
+  requirements,
+  approvalAdmissionEvidence,
+  expected
+) => {
+  const gaps = [];
+  for (const requirement of requirements) {
+    if (requirement === "approval_admission_evidence_approved_true") {
+      if (!approvalAdmissionEvidence.approved) {
+        gaps.push(requirement);
+      }
+      continue;
+    }
+    if (requirement === "approval_admission_evidence_approver_present") {
+      if (!approvalAdmissionEvidence.approver) {
+        gaps.push(requirement);
+      }
+      continue;
+    }
+    if (requirement === "approval_admission_evidence_approved_at_present") {
+      if (!approvalAdmissionEvidence.approved_at) {
+        gaps.push(requirement);
+      }
+      continue;
+    }
+    if (requirement === "approval_admission_evidence_checks_all_true") {
+      const allChecksComplete = XHS_REQUIRED_APPROVAL_CHECKS.every(
+        (key) => approvalAdmissionEvidence.checks[key] === true
+      );
+      if (!allChecksComplete) {
+        gaps.push(requirement);
+      }
+      continue;
+    }
+    if (
+      requirement === "risk_state_checked" ||
+      requirement === "target_domain_confirmed" ||
+      requirement === "target_tab_confirmed" ||
+      requirement === "target_page_confirmed" ||
+      requirement === "action_type_confirmed"
+    ) {
+      if (approvalAdmissionEvidence.checks[requirement] !== true) {
+        gaps.push(requirement);
+      }
+      continue;
+    }
+    gaps.push(requirement);
+  }
+
+  if (
+    !approvalAdmissionEvidence.approval_admission_ref ||
+    !approvalAdmissionEvidence.recorded_at ||
+    approvalAdmissionEvidence.run_id !== expected.runId ||
+    approvalAdmissionEvidence.session_id !== expected.sessionId ||
+    approvalAdmissionEvidence.issue_scope !== expected.issueScope ||
+    approvalAdmissionEvidence.target_domain !== expected.targetDomain ||
+    approvalAdmissionEvidence.target_tab_id !== expected.targetTabId ||
+    approvalAdmissionEvidence.target_page !== expected.targetPage ||
+    approvalAdmissionEvidence.action_type !== expected.actionType ||
+    approvalAdmissionEvidence.requested_execution_mode !== expected.requestedExecutionMode
+  ) {
+    gaps.push("approval_admission_evidence_present");
+  }
+
+  return gaps;
+};
+
 const normalizeXhsAuditRecord = (value) => {
   const record = asRecord(value);
   return {
@@ -202,6 +362,40 @@ const normalizeXhsAuditRecord = (value) => {
     gate_decision: asString(record?.gate_decision),
     recorded_at: asString(record?.recorded_at)
   };
+};
+
+const resolveXhsAuditAdmissionRequirementGaps = (
+  auditAdmissionEvidence,
+  expected,
+  requirements
+) => {
+  const gaps = [];
+  if (
+    requirements.includes("audit_admission_evidence_present") &&
+    (!auditAdmissionEvidence.audit_admission_ref ||
+      !auditAdmissionEvidence.recorded_at ||
+      auditAdmissionEvidence.run_id !== expected.runId ||
+      auditAdmissionEvidence.session_id !== expected.sessionId ||
+      auditAdmissionEvidence.issue_scope !== expected.issueScope ||
+      auditAdmissionEvidence.target_domain !== expected.targetDomain ||
+      auditAdmissionEvidence.target_tab_id !== expected.targetTabId ||
+      auditAdmissionEvidence.target_page !== expected.targetPage ||
+      auditAdmissionEvidence.action_type !== expected.actionType ||
+      auditAdmissionEvidence.requested_execution_mode !== expected.requestedExecutionMode ||
+      auditAdmissionEvidence.risk_state !== expected.riskState)) {
+    gaps.push("audit_admission_evidence_present");
+  }
+
+  if (requirements.includes("audit_admission_checks_all_true")) {
+    const allChecksComplete = XHS_REQUIRED_AUDIT_ADMISSION_CHECKS.every(
+      (key) => auditAdmissionEvidence.audited_checks[key] === true
+    );
+    if (!allChecksComplete) {
+      gaps.push("audit_admission_checks_all_true");
+    }
+  }
+
+  return gaps;
 };
 
 const resolveXhsAuditRequirementGaps = (auditRecord, expectedLinkage, state, target) => {
@@ -426,6 +620,7 @@ const evaluateXhsGateCore = (input) => {
     issueScope,
     riskState,
     approvalRecord,
+    admissionContext,
     issueActionMatrix,
     writeActionMatrixDecisions,
     writeMatrixDecision,
@@ -654,6 +849,25 @@ const collectXhsMatrixGateReasons = (input) => {
   const state = input.state;
   const approvalRecord = normalizeXhsApprovalRecord(input.approvalRecord);
   const auditRecord = normalizeXhsAuditRecord(input.auditRecord);
+  const explicitAdmissionContext = normalizeXhsAdmissionContext(input.admissionContext);
+  const admissionContext =
+    explicitAdmissionContext.approval_admission_evidence.approval_admission_ref ||
+    explicitAdmissionContext.audit_admission_evidence.audit_admission_ref
+      ? explicitAdmissionContext
+      : buildLegacyAdmissionContext({
+          approvalRecord: input.approvalRecord,
+          auditRecord: input.auditRecord,
+          expectedApprovalId: input.expectedApprovalId,
+          runId: input.runId,
+          sessionId: input.sessionId,
+          issueScope: state.issueScope,
+          targetDomain: input.targetDomain,
+          targetTabId: input.targetTabId,
+          targetPage: input.targetPage,
+          actionType: state.actionType,
+          requestedExecutionMode: state.requestedExecutionMode,
+          riskState: state.riskState
+        });
   const approvalRecordHasConflictingLinkage = hasApprovalRecordConflictingLinkage(
     approvalRecord,
     input.decisionId
@@ -749,38 +963,83 @@ const collectXhsMatrixGateReasons = (input) => {
               (entry) => entry.action === state.requestedExecutionMode
             ) ?? null;
       const liveRequirements = conditionalRequirement?.requires ?? [];
-      const approvalRequirementGaps = resolveXhsApprovalRequirementGaps(
-        liveRequirements.filter((requirement) => requirement.startsWith("approval_record_")),
-        approvalRecord
+      const approvalAdmissionRequirementGaps = resolveXhsApprovalAdmissionRequirementGaps(
+        liveRequirements.filter(
+          (requirement) =>
+            requirement === "approval_admission_evidence_approved_true" ||
+            requirement === "approval_admission_evidence_approver_present" ||
+            requirement === "approval_admission_evidence_approved_at_present" ||
+            requirement === "approval_admission_evidence_checks_all_true" ||
+            requirement === "risk_state_checked" ||
+            requirement === "target_domain_confirmed" ||
+            requirement === "target_tab_confirmed" ||
+            requirement === "target_page_confirmed" ||
+            requirement === "action_type_confirmed"
+        ),
+        admissionContext.approval_admission_evidence,
+        {
+          runId: input.runId ?? null,
+          sessionId: input.sessionId ?? null,
+          issueScope: state.issueScope,
+          targetDomain: input.targetDomain,
+          targetTabId: input.targetTabId,
+          targetPage: input.targetPage,
+          actionType: state.actionType,
+          requestedExecutionMode: state.requestedExecutionMode
+        }
       );
-      const auditRequirementGaps = liveRequirements.includes("audit_record_present")
-        ? resolveXhsAuditRequirementGaps(
-            auditRecord,
-            {
-              decisionId: input.decisionId ?? null,
-              approvalId: input.expectedApprovalId ?? null,
-              runId: input.runId ?? null
-            },
-            state,
-            {
-              targetDomain: input.targetDomain,
-              targetTabId: input.targetTabId,
-              targetPage: input.targetPage
-            }
-          )
-        : [];
+      const auditAdmissionRequirementGaps = resolveXhsAuditAdmissionRequirementGaps(
+        admissionContext.audit_admission_evidence,
+        {
+          runId: input.runId ?? null,
+          sessionId: input.sessionId ?? null,
+          issueScope: state.issueScope,
+          targetDomain: input.targetDomain,
+          targetTabId: input.targetTabId,
+          targetPage: input.targetPage,
+          actionType: state.actionType,
+          requestedExecutionMode: state.requestedExecutionMode,
+          riskState: state.riskState
+        },
+        liveRequirements
+      );
+      const legacyAuditRequirementGaps =
+        input.auditRecord &&
+        liveRequirements.includes("audit_admission_evidence_present") &&
+        (auditRecord.decision_id !== null || auditRecord.approval_id !== null)
+          ? resolveXhsAuditRequirementGaps(
+              auditRecord,
+              {
+                decisionId: input.decisionId ?? null,
+                approvalId: input.expectedApprovalId ?? null,
+                runId: input.runId ?? null
+              },
+              state,
+              {
+                targetDomain: input.targetDomain,
+                targetTabId: input.targetTabId,
+                targetPage: input.targetPage
+              }
+            )
+          : [];
       const rolloutRequirementGaps =
         liveRequirements.includes("limited_read_rollout_ready_true") &&
         state.limitedReadRolloutReadyTrue !== true
           ? ["limited_read_rollout_ready_true"]
           : [];
-      if (approvalRecordHasConflictingLinkage || approvalRequirementGaps.length > 0) {
+      if (approvalAdmissionRequirementGaps.length > 0) {
         pushReason(gateReasons, "MANUAL_CONFIRMATION_MISSING");
       }
-      if (approvalRequirementGaps.includes("approval_record_checks_all_true")) {
+      if (
+        approvalAdmissionRequirementGaps.includes("approval_admission_evidence_checks_all_true")
+      ) {
         pushReason(gateReasons, "APPROVAL_CHECKS_INCOMPLETE");
       }
-      if (auditRequirementGaps.length > 0) {
+      if (
+        auditAdmissionRequirementGaps.includes("audit_admission_evidence_present") ||
+        auditAdmissionRequirementGaps.includes("audit_admission_checks_all_true") ||
+        legacyAuditRequirementGaps.length > 0
+      ) {
         pushReason(gateReasons, "AUDIT_RECORD_MISSING");
       }
       if (rolloutRequirementGaps.length > 0) {
@@ -793,6 +1052,7 @@ const collectXhsMatrixGateReasons = (input) => {
     gateReasons,
     approvalRecord,
     auditRecord,
+    admissionContext,
     writeGateOnlyEligible,
     writeGateOnlyDecision,
     writeGateOnlyApprovalDecision: writeGateOnlyDecision
@@ -825,13 +1085,16 @@ const evaluateXhsGate = (input) => {
     includeWriteInteractionTierReason: input.includeWriteInteractionTierReason === true,
     writeTierReason: state.writeTierReason
   });
-  const { approvalRecord, writeGateOnlyEligible } = collectXhsMatrixGateReasons({
+  const { approvalRecord, admissionContext, writeGateOnlyEligible } = collectXhsMatrixGateReasons({
     gateReasons,
     state,
     decisionId,
     expectedApprovalId,
+    runId: asString(input.runId),
+    sessionId: asString(input.sessionId),
     approvalRecord: input.approvalRecord,
     auditRecord: input.auditRecord,
+    admissionContext: input.admissionContext,
     targetDomain: input.targetDomain,
     targetTabId: input.targetTabId,
     targetPage: input.targetPage,
@@ -879,7 +1142,8 @@ const evaluateXhsGate = (input) => {
       target_page: asString(input.targetPage),
       action_type: state.actionType,
       requested_execution_mode: state.requestedExecutionMode,
-      risk_state: state.riskState
+      risk_state: state.riskState,
+      admission_context: admissionContext
     },
     gate_outcome: {
       decision_id: decisionId,
@@ -921,9 +1185,14 @@ export {
   resolveXhsRiskState,
   resolveXhsIssueScope,
   normalizeXhsApprovalRecord,
+  normalizeXhsApprovalAdmissionEvidence,
+  normalizeXhsAuditAdmissionEvidence,
+  normalizeXhsAdmissionContext,
   resolveXhsIssueActionMatrixEntry,
   resolveXhsWriteMatrixDecision,
   resolveXhsApprovalRequirementGaps,
+  resolveXhsApprovalAdmissionRequirementGaps,
+  resolveXhsAuditAdmissionRequirementGaps,
   resolveXhsFallbackMode,
   evaluateXhsGateCore,
   buildXhsGatePolicyState,

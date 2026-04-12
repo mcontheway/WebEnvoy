@@ -33,6 +33,7 @@ export interface XhsSearchOptions {
   approval?: Record<string, unknown>;
   approval_record?: Record<string, unknown>;
   audit_record?: Record<string, unknown>;
+  admission_context?: Record<string, unknown>;
   limited_read_rollout_ready_true?: boolean;
   validation_action?: string;
   validation_text?: string;
@@ -109,6 +110,7 @@ export interface GateInputRecord {
   action_type: ActionType | null;
   requested_execution_mode: RequestedExecutionMode | null;
   risk_state: RiskState;
+  admission_context?: unknown;
 }
 
 export interface GateOutcomeRecord {

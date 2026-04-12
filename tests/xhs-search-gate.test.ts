@@ -35,6 +35,19 @@ describe("xhs-search gate helpers", () => {
         action_type: "read",
         ability_action: "read",
         requested_execution_mode: "live_read_high_risk",
+        audit_record: {
+          event_id: "audit-extension-req-1",
+          decision_id: "gate_decision_run-extension-001_req-1",
+          approval_id: "gate_appr_custom_extension_req-1",
+          issue_scope: "issue_209",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 12,
+          target_page: "search_result_tab",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          gate_decision: "allowed",
+          recorded_at: "2026-03-23T10:00:30.000Z"
+        },
         approval_record: {
           approval_id: "gate_appr_custom_extension_req-1",
           decision_id: "gate_decision_run-extension-001_req-1",
@@ -77,6 +90,21 @@ describe("xhs-search gate helpers", () => {
         action_type: "read",
         ability_action: "read",
         requested_execution_mode: "live_read_high_risk",
+        audit_record: {
+          event_id: "audit-extension-command-req-1",
+          decision_id:
+            "gate_decision_run-extension-command-request-001_issue209-live-req-1",
+          approval_id:
+            "gate_appr_gate_decision_run-extension-command-request-001_issue209-live-req-1",
+          issue_scope: "issue_209",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 12,
+          target_page: "search_result_tab",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          gate_decision: "allowed",
+          recorded_at: "2026-03-23T10:00:30.000Z"
+        },
         approval_record: {
           approval_id:
             "gate_appr_gate_decision_run-extension-command-request-001_issue209-live-req-1",

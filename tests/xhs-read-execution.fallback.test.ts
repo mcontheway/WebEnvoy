@@ -17,6 +17,18 @@ const createApprovalRecord = () => ({
   }
 });
 
+const createAuditRecord = () => ({
+  event_id: "audit-live-read-fallback-001",
+  issue_scope: "issue_209",
+  target_domain: "www.xiaohongshu.com",
+  target_tab_id: 32,
+  target_page: "search_result_tab",
+  action_type: "read",
+  requested_execution_mode: "live_read_high_risk",
+  gate_decision: "allowed",
+  recorded_at: "2026-03-23T10:00:30Z"
+});
+
 const createLiveReadOptions = (overrides?: Partial<XhsSearchOptions>): XhsSearchOptions => ({
   issue_scope: "issue_209",
   target_domain: "www.xiaohongshu.com",
@@ -29,6 +41,7 @@ const createLiveReadOptions = (overrides?: Partial<XhsSearchOptions>): XhsSearch
   requested_execution_mode: "live_read_high_risk",
   risk_state: "allowed",
   approval_record: createApprovalRecord(),
+  audit_record: createAuditRecord(),
   ...overrides
 });
 

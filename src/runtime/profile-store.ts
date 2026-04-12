@@ -133,6 +133,16 @@ const resolveRequiredBrowserVersionFromResolvedExecutable = async (): Promise<st
   return browserVersion.browserVersion;
 };
 
+const resolveRequiredBrowserVersionForInitializeMeta = async (input?: {
+  allowUnsupportedExtensionBrowser?: boolean;
+}): Promise<string> => {
+  const browserVersion = await resolveBrowserVersionTruthSource({}, input);
+  if (typeof browserVersion.browserVersion !== "string" || browserVersion.browserVersion.length === 0) {
+    throw new Error("Browser version truth-source unavailable");
+  }
+  return browserVersion.browserVersion;
+};
+
 const withBrowserVersion = <T extends object>(input: T, browserVersion: string | null): T =>
   ({ ...(input as Record<string, unknown>), browserVersion } as T);
 
@@ -388,9 +398,13 @@ export class ProfileStore {
     await this.fs.rename(tempPath, metaPath);
   }
 
-  async initializeMeta(profileName: string, nowIso: string): Promise<ProfileMeta> {
+  async initializeMeta(
+    profileName: string,
+    nowIso: string,
+    options?: { allowUnsupportedExtensionBrowser?: boolean }
+  ): Promise<ProfileMeta> {
     const profileDir = await this.ensureProfileDir(profileName);
-    const browserVersion = await resolveRequiredBrowserVersionFromResolvedExecutable();
+    const browserVersion = await resolveRequiredBrowserVersionForInitializeMeta(options);
     const timezone = resolveCurrentTimezone();
 
     const meta: ProfileMeta = {
