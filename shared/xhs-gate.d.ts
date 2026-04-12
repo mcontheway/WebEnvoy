@@ -11,7 +11,7 @@ import type {
 
 export interface XhsApprovalRecord {
   approval_id: string | null;
-  decision_id: string;
+  decision_id: string | null;
   approved: boolean;
   approver: string | null;
   approved_at: string | null;
@@ -126,7 +126,7 @@ export declare const resolveXhsFallbackMode: (
   riskState: RiskState
 ) => ExecutionMode;
 export declare const evaluateXhsGateCore: (
-  input: Omit<XhsGateCoreInput, "auditRecord" | "limitedReadRolloutReadyTrue">
+  input: XhsGateCoreInput
 ) => XhsGateCoreResult;
 export declare const buildXhsGatePolicyState: (input: {
   issueScope: unknown;
