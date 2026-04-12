@@ -279,6 +279,47 @@ const mergeGateArtifactsIntoCommandParams = (commandParams, gatePayload) => {
     normalized.options = normalizedOptions;
     return normalized;
 };
+const bindAdmissionContextToRequest = (input) => {
+    const admissionContext = asRecord(input.admissionContext);
+    if (!admissionContext) {
+        return null;
+    }
+    const approvalEvidence = asRecord(admissionContext.approval_admission_evidence);
+    const auditEvidence = asRecord(admissionContext.audit_admission_evidence);
+    return {
+        ...(approvalEvidence
+            ? {
+                approval_admission_evidence: {
+                    ...approvalEvidence,
+                    run_id: input.runId,
+                    session_id: input.sessionId,
+                    issue_scope: input.issueScope,
+                    target_domain: input.targetDomain,
+                    target_tab_id: input.targetTabId,
+                    target_page: input.targetPage,
+                    action_type: input.actionType,
+                    requested_execution_mode: input.requestedExecutionMode
+                }
+            }
+            : {}),
+        ...(auditEvidence
+            ? {
+                audit_admission_evidence: {
+                    ...auditEvidence,
+                    run_id: input.runId,
+                    session_id: input.sessionId,
+                    issue_scope: input.issueScope,
+                    target_domain: input.targetDomain,
+                    target_tab_id: input.targetTabId,
+                    target_page: input.targetPage,
+                    action_type: input.actionType,
+                    requested_execution_mode: input.requestedExecutionMode,
+                    risk_state: input.riskState
+                }
+            }
+            : {})
+    };
+};
 const emitCliInvalidArgs = (emit, request, error) => {
     emit({
         id: request.id,
@@ -1351,6 +1392,9 @@ class ChromeBackgroundBridge {
         return trusted;
     }
     #resolveValidatedTrustedFingerprintContext(request, requestedFingerprintContext) {
+        if (requestedFingerprintContext === null) {
+            return null;
+        }
         const trustedEntry = this.#resolveTrustedFingerprintContext(request);
         if (!trustedEntry) {
             return null;
@@ -2797,6 +2841,19 @@ class ChromeBackgroundBridge {
                 }
             });
         }
+        const requestSessionId = String(request.params.session_id ?? this.#sessionId);
+        const boundAdmissionContext = bindAdmissionContextToRequest({
+            admissionContext,
+            runId: requestRunId,
+            sessionId: requestSessionId,
+            issueScope,
+            targetDomain,
+            targetTabId,
+            targetPage,
+            actionType,
+            requestedExecutionMode,
+            riskState
+        });
         const gateState = buildXhsGatePolicyState({
             issueScope,
             riskState,
@@ -2825,10 +2882,10 @@ class ChromeBackgroundBridge {
             decisionId: gateDecisionId,
             expectedApprovalId,
             runId: requestRunId,
-            sessionId: String(request.params.session_id ?? this.#sessionId),
+            sessionId: requestSessionId,
             approvalRecord,
             auditRecord,
-            admissionContext,
+            admissionContext: boundAdmissionContext,
             targetDomain,
             targetTabId,
             targetPage,
@@ -2837,12 +2894,16 @@ class ChromeBackgroundBridge {
         writeGateOnlyEligible = matrixResolution.writeGateOnlyEligible;
         writeGateOnlyApprovalDecision = matrixResolution.writeGateOnlyApprovalDecision;
         if (gateReasons.length === 0 && targetDomain && targetTabId !== null && targetPage) {
+            const trustedEntry = this.#resolveTrustedFingerprintContext(request);
+            const trustedTargetBound = trustedEntry?.sourceTabId === targetTabId && trustedEntry?.sourceDomain === targetDomain;
             const domainTabs = await this.chromeApi.tabs.query({
                 url: `*://${targetDomain}/*`
             });
             const targetTab = domainTabs.find((tab) => tab.id === targetTabId);
             if (!targetTab) {
-                pushReason("TARGET_TAB_NOT_FOUND");
+                if (!trustedTargetBound) {
+                    pushReason("TARGET_TAB_NOT_FOUND");
+                }
             }
             else {
                 const tabUrl = typeof targetTab.url === "string" ? targetTab.url : "";
@@ -2942,7 +3003,7 @@ class ChromeBackgroundBridge {
             write_interaction_tier: gateState.writeActionMatrixDecisions?.write_interaction_tier ?? null
         };
         const runId = requestRunId;
-        const sessionId = String(request.params.session_id ?? this.#sessionId);
+        const sessionId = requestSessionId;
         const profile = typeof request.profile === "string" ? request.profile : null;
         const recordedAt = new Date().toISOString();
         const gateAuditSeed = {
@@ -2997,7 +3058,7 @@ class ChromeBackgroundBridge {
             fingerprintExecution,
             consumerGateResult,
             approvalRecord,
-            admissionContext,
+            admissionContext: boundAdmissionContext,
             writeActionMatrixDecisions: gateState.writeActionMatrixDecisions,
             writeMatrixDecision: gateState.writeMatrixDecision,
             writeGateOnlyDecision: writeGateOnlyApprovalDecision,

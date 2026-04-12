@@ -3,6 +3,57 @@ import { describe, expect, it } from "vitest";
 import { NativeMessagingBridge } from "../bridge.js";
 import { createInMemoryLoopbackTransport } from "../loopback-runtime.js";
 
+const createApprovedReadAdmissionContext = (input: {
+  runId: string;
+  requestId: string;
+  targetTabId: number;
+  requestedExecutionMode: "live_read_limited" | "live_read_high_risk";
+  riskState: "limited" | "allowed";
+}) => ({
+  approval_admission_evidence: {
+    approval_admission_ref: `gate_appr_gate_decision_${input.runId}_${input.requestId}`,
+    run_id: input.runId,
+    session_id: "nm-session-001",
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: input.targetTabId,
+    target_page: "search_result_tab",
+    action_type: "read",
+    requested_execution_mode: input.requestedExecutionMode,
+    approved: true,
+    approver: "qa-reviewer",
+    approved_at: "2026-03-23T10:00:00Z",
+    checks: {
+      target_domain_confirmed: true,
+      target_tab_confirmed: true,
+      target_page_confirmed: true,
+      risk_state_checked: true,
+      action_type_confirmed: true
+    },
+    recorded_at: "2026-03-23T10:00:00Z"
+  },
+  audit_admission_evidence: {
+    audit_admission_ref: `gate_evt_${input.runId}`,
+    run_id: input.runId,
+    session_id: "nm-session-001",
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: input.targetTabId,
+    target_page: "search_result_tab",
+    action_type: "read",
+    requested_execution_mode: input.requestedExecutionMode,
+    risk_state: input.riskState,
+    audited_checks: {
+      target_domain_confirmed: true,
+      target_tab_confirmed: true,
+      target_page_confirmed: true,
+      risk_state_checked: true,
+      action_type_confirmed: true
+    },
+    recorded_at: "2026-03-23T10:00:30Z"
+  }
+});
+
 describe("native messaging legacy loopback runtime", () => {
   it("keeps xhs.search observability page_state aligned with the shared contract", async () => {
     const bridge = new NativeMessagingBridge({
@@ -193,17 +244,19 @@ describe("native messaging legacy loopback runtime", () => {
   });
 
   it("keeps live_read_limited approved when caller provides matching audit linkage", async () => {
+    const runId = "run-loopback-live-limited-001";
+    const requestId = "issue209-live-limited-001";
     const bridge = new NativeMessagingBridge({
       transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
     });
 
     const result = await bridge.runCommand({
-      runId: "run-loopback-live-limited-001",
+      runId,
       profile: "profile-a",
       cwd: "/tmp",
       command: "xhs.search",
       params: {
-        request_id: "issue209-live-limited-001",
+        request_id: requestId,
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -228,12 +281,19 @@ describe("native messaging legacy loopback runtime", () => {
             approved_at: "2026-03-23T10:00:00Z",
             checks: {
               target_domain_confirmed: true,
-              target_tab_confirmed: true,
-              target_page_confirmed: true,
-              risk_state_checked: true,
-              action_type_confirmed: true
+            target_tab_confirmed: true,
+            target_page_confirmed: true,
+            risk_state_checked: true,
+            action_type_confirmed: true
             }
           },
+          admission_context: createApprovedReadAdmissionContext({
+            runId,
+            requestId,
+            targetTabId: 33,
+            requestedExecutionMode: "live_read_limited",
+            riskState: "limited"
+          }),
           audit_record: {
             event_id: "audit-live-read-limited-loopback-001",
             decision_id: "gate_decision_run-loopback-live-limited-001_issue209-live-limited-001",
@@ -297,17 +357,19 @@ describe("native messaging legacy loopback runtime", () => {
   });
 
   it("blocks stale caller audit linkage in loopback bundles", async () => {
+    const runId = "run-loopback-live-limited-stale-001";
+    const requestId = "issue209-live-limited-current-001";
     const bridge = new NativeMessagingBridge({
       transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
     });
 
     const result = await bridge.runCommand({
-      runId: "run-loopback-live-limited-stale-001",
+      runId,
       profile: "profile-a",
       cwd: "/tmp",
       command: "xhs.search",
       params: {
-        request_id: "issue209-live-limited-current-001",
+        request_id: requestId,
         ability: {
           id: "xhs.note.search.v1",
           layer: "L3",
@@ -332,12 +394,19 @@ describe("native messaging legacy loopback runtime", () => {
             approved_at: "2026-03-23T10:00:00Z",
             checks: {
               target_domain_confirmed: true,
-              target_tab_confirmed: true,
-              target_page_confirmed: true,
-              risk_state_checked: true,
-              action_type_confirmed: true
+            target_tab_confirmed: true,
+            target_page_confirmed: true,
+            risk_state_checked: true,
+            action_type_confirmed: true
             }
           },
+          admission_context: createApprovedReadAdmissionContext({
+            runId,
+            requestId,
+            targetTabId: 34,
+            requestedExecutionMode: "live_read_limited",
+            riskState: "limited"
+          }),
           audit_record: {
             event_id: "gate_evt_gate_decision_issue209-live-limited-previous-001",
             decision_id: "gate_decision_issue209-live-limited-previous-001",

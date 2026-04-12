@@ -1,7 +1,44 @@
 import { describe, expect, it, vi } from "vitest";
-import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
+import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, createApprovedReadAdmissionContext, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
 
 describe("extension background relay contract / forward and timeout", () => {
+  const createApprovedLiveOptions = (input: {
+    runId: string;
+    sessionId?: string;
+    requested_execution_mode?: "live_read_limited" | "live_read_high_risk";
+    risk_state?: "limited" | "allowed";
+    limited_read_rollout_ready_true?: boolean;
+  }) => ({
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: 32,
+    target_page: "search_result_tab",
+    action_type: "read",
+    requested_execution_mode: input.requested_execution_mode ?? "live_read_high_risk",
+    risk_state: input.risk_state ?? "allowed",
+    approval: {
+      approved: true,
+      approver: "qa-reviewer",
+      approved_at: "2026-03-23T10:00:00Z",
+      checks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      }
+    },
+    admission_context: createApprovedReadAdmissionContext({
+      run_id: input.runId,
+      session_id: input.sessionId ?? "nm-session-001",
+      requested_execution_mode: input.requested_execution_mode,
+      risk_state: input.risk_state
+    }),
+    ...(input.limited_read_rollout_ready_true === true
+      ? { limited_read_rollout_ready_true: true }
+      : {}),
+    audit_record: highRiskAuditRecord
+  });
+
   const highRiskAuditRecord = {
     event_id: "gate_evt_forward-xhs-live-high-risk-allowed-001",
     issue_scope: "issue_209",
@@ -13,36 +50,17 @@ describe("extension background relay contract / forward and timeout", () => {
     gate_decision: "allowed",
     recorded_at: "2026-03-23T08:00:30Z"
   } as const;
-  const approvedLiveOptions = {
-    target_domain: "www.xiaohongshu.com",
-    target_tab_id: 32,
-    target_page: "search_result_tab",
-    action_type: "read",
-    requested_execution_mode: "live_read_high_risk",
-    risk_state: "allowed",
-    approval: {
-      approved: true,
-      approver: "reviewer-a",
-      approved_at: "2026-03-23T08:00:00Z",
-      checks: {
-        target_domain_confirmed: true,
-        target_tab_confirmed: true,
-        target_page_confirmed: true,
-        risk_state_checked: true,
-        action_type_confirmed: true
-      }
-    },
-    audit_record: highRiskAuditRecord
-  };
-  const approvedLimitedLiveOptions = {
-    ...approvedLiveOptions,
+  const approvedLiveOptions = createApprovedLiveOptions({ runId: "run-relay-001" });
+  const approvedLimitedLiveOptions = createApprovedLiveOptions({
+    runId: "run-relay-limited-001",
     requested_execution_mode: "live_read_limited",
+    risk_state: "limited",
+    limited_read_rollout_ready_true: true
+  });
+  const approvedHighRiskLimitedOptions = createApprovedLiveOptions({
+    runId: "run-relay-high-risk-limited-001",
     risk_state: "limited"
-  };
-  const approvedHighRiskLimitedOptions = {
-    ...approvedLiveOptions,
-    risk_state: "limited"
-  };
+  });
 
   it("keeps run/profile/cwd context on successful forward", async () => {
     const contentScript = new ContentScriptHandler();
@@ -149,7 +167,12 @@ describe("extension background relay contract / forward and timeout", () => {
     });
     const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
     const approvedLimitedLiveOptions = {
-      ...approvedLiveOptions,
+      ...createApprovedLiveOptions({
+        runId: "run-xhs-live-limited-allowed-001",
+        requested_execution_mode: "live_read_limited",
+        risk_state: "limited",
+        limited_read_rollout_ready_true: true
+      }),
       requested_execution_mode: "live_read_limited",
       risk_state: "limited",
       limited_read_rollout_ready_true: true,
@@ -187,7 +210,7 @@ describe("extension background relay contract / forward and timeout", () => {
           input: {
             query: "露营装备"
           },
-          options: approvedLiveOptions
+          options: createApprovedLiveOptions({ runId: "run-xhs-error-001" })
         },
         cwd: "/workspace/WebEnvoy"
       },
@@ -311,7 +334,7 @@ describe("extension background relay contract / forward and timeout", () => {
               query: "露营装备"
             },
             options: {
-              ...approvedLiveOptions,
+              ...createApprovedLiveOptions({ runId: `run-xhs-${simulateResult}-001` }),
               simulate_result: simulateResult
             }
           },
@@ -638,7 +661,12 @@ describe("extension background relay contract / forward and timeout", () => {
     });
     const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
     const approvedLimitedLiveOptions = {
-      ...approvedLiveOptions,
+      ...createApprovedLiveOptions({
+        runId: "run-xhs-live-limited-allowed-001",
+        requested_execution_mode: "live_read_limited",
+        risk_state: "limited",
+        limited_read_rollout_ready_true: true
+      }),
       requested_execution_mode: "live_read_limited",
       risk_state: "limited",
       limited_read_rollout_ready_true: true,
@@ -676,7 +704,12 @@ describe("extension background relay contract / forward and timeout", () => {
           input: {
             query: "露营装备"
           },
-          options: approvedLimitedLiveOptions
+          options: createApprovedLiveOptions({
+            runId: "run-xhs-live-limited-allowed-001",
+            requested_execution_mode: "live_read_limited",
+            risk_state: "limited",
+            limited_read_rollout_ready_true: true
+          })
         },
         cwd: "/workspace/WebEnvoy"
       },
@@ -905,6 +938,12 @@ describe("extension background relay contract / forward and timeout", () => {
                 action_type_confirmed: true
               }
             },
+            admission_context: createApprovedReadAdmissionContext({
+              run_id: "run-xhs-live-allowed-001",
+              session_id: "nm-session-001",
+              requested_execution_mode: "live_read_high_risk",
+              risk_state: "allowed"
+            }),
             audit_record: {
               event_id: "gate_evt_forward_xhs_live_allowed_001",
               issue_scope: "issue_209",
@@ -1025,6 +1064,12 @@ describe("extension background relay contract / forward and timeout", () => {
                 action_type_confirmed: true
               }
             },
+            admission_context: createApprovedReadAdmissionContext({
+              run_id: "run-xhs-live-allowed-001",
+              session_id: "nm-session-001",
+              requested_execution_mode: "live_read_high_risk",
+              risk_state: "allowed"
+            }),
             audit_record: {
               event_id: "gate_evt_forward_xhs_live_allowed_001",
               issue_scope: "issue_209",
@@ -1094,35 +1139,8 @@ describe("extension background relay contract / forward and timeout", () => {
             query: "露营装备"
           },
           options: {
-            target_domain: "www.xiaohongshu.com",
-            target_tab_id: 32,
-            target_page: "search_result_tab",
-            action_type: "read",
-            requested_execution_mode: "live_read_high_risk",
-            risk_state: "allowed",
-            approval_record: {
-              approved: true,
-              approver: "qa-reviewer",
-              approved_at: "2026-03-23T10:00:00Z",
-              checks: {
-                target_domain_confirmed: true,
-                target_tab_confirmed: true,
-                target_page_confirmed: true,
-                risk_state_checked: true,
-                action_type_confirmed: true
-              }
-            },
-            audit_record: {
-              event_id: "gate_evt_forward_xhs_live_allowed_001",
-              issue_scope: "issue_209",
-              target_domain: "www.xiaohongshu.com",
-              target_tab_id: 32,
-              target_page: "search_result_tab",
-              action_type: "read",
-              requested_execution_mode: "live_read_high_risk",
-              gate_decision: "allowed",
-              recorded_at: "2026-03-23T10:00:30Z"
-            }
+            ...createApprovedLiveOptions({ runId: "run-xhs-live-allowed-001" }),
+            simulate_result: "success"
           }
         },
         cwd: "/workspace/WebEnvoy"
@@ -2168,35 +2186,8 @@ describe("extension background relay contract / forward and timeout", () => {
             query: "露营装备"
           },
           options: {
-            target_domain: "www.xiaohongshu.com",
-            target_tab_id: 32,
-            target_page: "search_result_tab",
-            action_type: "read",
-            requested_execution_mode: "live_read_high_risk",
-            risk_state: "allowed",
-            approval_record: {
-              approved: true,
-              approver: "qa-reviewer",
-              approved_at: "2026-03-23T10:00:00Z",
-              checks: {
-                target_domain_confirmed: true,
-                target_tab_confirmed: true,
-                target_page_confirmed: true,
-                risk_state_checked: true,
-                action_type_confirmed: true
-              }
-            },
-            audit_record: {
-              event_id: "gate_evt_forward_xhs_live_allowed_001",
-              issue_scope: "issue_209",
-              target_domain: "www.xiaohongshu.com",
-              target_tab_id: 32,
-              target_page: "search_result_tab",
-              action_type: "read",
-              requested_execution_mode: "live_read_high_risk",
-              gate_decision: "allowed",
-              recorded_at: "2026-03-23T10:00:30Z"
-            }
+            ...createApprovedLiveOptions({ runId: "run-xhs-live-allowed-001" }),
+            simulate_result: "success"
           }
         },
         cwd: "/workspace/WebEnvoy"
@@ -2252,7 +2243,7 @@ describe("extension background relay contract / forward and timeout", () => {
           input: {
             query: "露营装备"
           },
-          options: approvedLiveOptions
+          options: createApprovedLiveOptions({ runId: "run-xhs-timeout-001" })
         },
         cwd: "/workspace/WebEnvoy"
       },
@@ -2586,35 +2577,8 @@ describe("extension background relay contract / forward and timeout", () => {
             query: "露营装备"
           },
           options: {
-            target_domain: "www.xiaohongshu.com",
-            target_tab_id: 32,
-            target_page: "search_result_tab",
-            action_type: "read",
-            requested_execution_mode: "live_read_high_risk",
-            risk_state: "allowed",
-            approval_record: {
-              approved: true,
-              approver: "qa-reviewer",
-              approved_at: "2026-03-23T10:00:00Z",
-              checks: {
-                target_domain_confirmed: true,
-                target_tab_confirmed: true,
-                target_page_confirmed: true,
-                risk_state_checked: true,
-                action_type_confirmed: true
-              }
-            },
-            audit_record: {
-              event_id: "gate_evt_forward_xhs_live_allowed_001",
-              issue_scope: "issue_209",
-              target_domain: "www.xiaohongshu.com",
-              target_tab_id: 32,
-              target_page: "search_result_tab",
-              action_type: "read",
-              requested_execution_mode: "live_read_high_risk",
-              gate_decision: "allowed",
-              recorded_at: "2026-03-23T10:00:30Z"
-            }
+            ...createApprovedLiveOptions({ runId: "run-xhs-live-allowed-001" }),
+            simulate_result: "success"
           }
         },
         cwd: "/workspace/WebEnvoy"

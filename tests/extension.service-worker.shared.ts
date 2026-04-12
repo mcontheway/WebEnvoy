@@ -260,18 +260,35 @@ export const promoteBootstrapReadinessThroughPing = async (input: {
   await Promise.resolve();
 };
 
-export const createXhsCommandParams = (overrides?: Record<string, unknown>) => ({
-  issue_scope: "issue_209",
-  target_domain: "www.xiaohongshu.com",
-  target_tab_id: 32,
-  target_page: "search_result_tab",
-  action_type: "read",
-  risk_state: "paused",
-  requested_execution_mode: "dry_run",
-  limited_read_rollout_ready_true: true,
-  audit_record: createApprovedReadAuditRecord(),
-  ...overrides
-});
+export const createXhsCommandParams = (overrides?: Record<string, unknown>) => {
+  const merged = {
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: 32,
+    target_page: "search_result_tab",
+    action_type: "read",
+    risk_state: "paused",
+    requested_execution_mode: "dry_run",
+    limited_read_rollout_ready_true: true,
+    audit_record: createApprovedReadAuditRecord(),
+    ...overrides
+  };
+
+  if (merged.admission_context === undefined) {
+    merged.admission_context = createApprovedReadAdmissionContext({
+      requested_execution_mode:
+        merged.requested_execution_mode === "live_read_high_risk"
+          ? "live_read_high_risk"
+          : "live_read_limited",
+      risk_state:
+        merged.risk_state === "allowed" || merged.risk_state === "limited"
+          ? merged.risk_state
+          : "paused"
+    });
+  }
+
+  return merged;
+};
 
 export const createXhsEditorInputCommandParams = (overrides?: Record<string, unknown>) => ({
   issue_scope: "issue_208",
@@ -282,6 +299,17 @@ export const createXhsEditorInputCommandParams = (overrides?: Record<string, unk
   requested_execution_mode: "live_write",
   risk_state: "allowed",
   approval_record: createApprovedReadApprovalRecord(),
+  fingerprint_context: createFingerprintRuntimeContext({
+    live_allowed: true,
+    live_decision: "allowed",
+    allowed_execution_modes: [
+      "dry_run",
+      "recon",
+      "live_read_limited",
+      "live_read_high_risk",
+      "live_write"
+    ]
+  }),
   validation_action: "editor_input",
   validation_text: "测试发布文案",
   ability: {
@@ -319,6 +347,58 @@ export const createApprovedReadAuditRecord = (overrides?: Record<string, unknown
   gate_decision: "allowed",
   recorded_at: "2026-03-23T10:05:00Z",
   ...overrides
+});
+
+export const createApprovedReadAdmissionContext = (overrides?: {
+  run_id?: string;
+  session_id?: string;
+  target_tab_id?: number;
+  target_page?: string;
+  requested_execution_mode?: "live_read_limited" | "live_read_high_risk";
+  risk_state?: "limited" | "allowed" | "paused";
+}) => ({
+  approval_admission_evidence: {
+    approval_admission_ref: "gate_appr_issue209_sw_001",
+    run_id: overrides?.run_id ?? "run-sw-001",
+    session_id: overrides?.session_id ?? "nm-session-001",
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: overrides?.target_tab_id ?? 32,
+    target_page: overrides?.target_page ?? "search_result_tab",
+    action_type: "read",
+    requested_execution_mode: overrides?.requested_execution_mode ?? "live_read_limited",
+    approved: true,
+    approver: "qa-reviewer",
+    approved_at: "2026-03-23T10:00:00Z",
+    checks: {
+      target_domain_confirmed: true,
+      target_tab_confirmed: true,
+      target_page_confirmed: true,
+      risk_state_checked: true,
+      action_type_confirmed: true
+    },
+    recorded_at: "2026-03-23T10:00:00Z"
+  },
+  audit_admission_evidence: {
+    audit_admission_ref: "gate_evt_issue209_sw_001",
+    run_id: overrides?.run_id ?? "run-sw-001",
+    session_id: overrides?.session_id ?? "nm-session-001",
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: overrides?.target_tab_id ?? 32,
+    target_page: overrides?.target_page ?? "search_result_tab",
+    action_type: "read",
+    requested_execution_mode: overrides?.requested_execution_mode ?? "live_read_limited",
+    risk_state: overrides?.risk_state ?? "paused",
+    audited_checks: {
+      target_domain_confirmed: true,
+      target_tab_confirmed: true,
+      target_page_confirmed: true,
+      risk_state_checked: true,
+      action_type_confirmed: true
+    },
+    recorded_at: "2026-03-23T10:05:00Z"
+  }
 });
 
 export const createApprovedReadAuditRecordForRequest = (input: {

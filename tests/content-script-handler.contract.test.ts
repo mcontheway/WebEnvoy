@@ -126,6 +126,57 @@ const createApprovedReadAuditRecord = (linkage: {
   };
 };
 
+const createApprovedReadAdmissionContext = (linkage: {
+  runId: string;
+  requestId: string;
+  commandRequestId?: string;
+}) => ({
+  approval_admission_evidence: {
+    approval_admission_ref: linkage.commandRequestId
+      ? `gate_appr_gate_decision_${linkage.runId}_${linkage.commandRequestId}`
+      : `gate_appr_gate_decision_${linkage.runId}_${linkage.requestId}`,
+    run_id: linkage.runId,
+    session_id: "nm-session-001",
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: 1,
+    target_page: "search_result_tab",
+    action_type: "read",
+    requested_execution_mode: "live_read_limited",
+    approved: true,
+    approver: "qa-reviewer",
+    approved_at: "2026-03-23T10:00:00Z",
+    checks: {
+      target_domain_confirmed: true,
+      target_tab_confirmed: true,
+      target_page_confirmed: true,
+      risk_state_checked: true,
+      action_type_confirmed: true
+    },
+    recorded_at: "2026-03-23T10:00:00Z"
+  },
+  audit_admission_evidence: {
+    audit_admission_ref: `gate_evt_${linkage.runId}`,
+    run_id: linkage.runId,
+    session_id: "nm-session-001",
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: 1,
+    target_page: "search_result_tab",
+    action_type: "read",
+    requested_execution_mode: "live_read_limited",
+    risk_state: "limited",
+    audited_checks: {
+      target_domain_confirmed: true,
+      target_tab_confirmed: true,
+      target_page_confirmed: true,
+      risk_state_checked: true,
+      action_type_confirmed: true
+    },
+    recorded_at: "2026-03-23T10:00:30Z"
+  }
+});
+
 const MAIN_WORLD_CHANNEL_SECRET = "contract-main-world-secret-001";
 
 const withMockMainWorld = async (
@@ -1066,6 +1117,11 @@ describe("content-script handler contract", () => {
                 runId: "run-xhs-sign-forged-001",
                 requestId: "run-xhs-sign-forged-001",
                 commandRequestId: "issue209-sign-forged-001"
+              }),
+              admission_context: createApprovedReadAdmissionContext({
+                runId: "run-xhs-sign-forged-001",
+                requestId: "run-xhs-sign-forged-001",
+                commandRequestId: "issue209-sign-forged-001"
               })
             }
           },
@@ -1192,6 +1248,11 @@ describe("content-script handler contract", () => {
               limited_read_rollout_ready_true: true,
               approval_record: createApprovedReadApprovalRecord(),
               audit_record: createApprovedReadAuditRecord({
+                runId: `run-xhs-simulated-${simulateResult}-001`,
+                requestId: `run-xhs-simulated-${simulateResult}-001`,
+                commandRequestId: `issue209-simulated-${simulateResult}-001`
+              }),
+              admission_context: createApprovedReadAdmissionContext({
                 runId: `run-xhs-simulated-${simulateResult}-001`,
                 requestId: `run-xhs-simulated-${simulateResult}-001`,
                 commandRequestId: `issue209-simulated-${simulateResult}-001`

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, approvedHighRiskLimitedOptions, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
+import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, createApprovedReadAdmissionContext, approvedHighRiskLimitedOptions, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
 
 describe("extension background relay contract / gate and approval", () => {
   const approvedLimitedLiveOptions = {
@@ -22,6 +22,12 @@ describe("extension background relay contract / gate and approval", () => {
       }
     },
     limited_read_rollout_ready_true: true,
+    admission_context: createApprovedReadAdmissionContext({
+      run_id: "run-xhs-live-limited-allowed-001",
+      session_id: "nm-session-001",
+      requested_execution_mode: "live_read_limited",
+      risk_state: "limited"
+    }),
     audit_record: {
       event_id: "gate_evt_forward-xhs-live-limited-allowed-001",
       decision_id:

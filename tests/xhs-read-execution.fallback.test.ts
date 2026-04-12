@@ -29,6 +29,57 @@ const createAuditRecord = () => ({
   recorded_at: "2026-03-23T10:00:30Z"
 });
 
+const createApprovedReadAdmissionContext = (input: {
+  runId: string;
+  targetTabId?: number;
+  targetPage: string;
+  requestedExecutionMode?: "live_read_high_risk" | "live_read_limited";
+  riskState?: "allowed" | "limited";
+}) => ({
+  approval_admission_evidence: {
+    approval_admission_ref: `gate_appr_${input.runId}`,
+    run_id: input.runId,
+    session_id: "nm-session-001",
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: input.targetTabId ?? 32,
+    target_page: input.targetPage,
+    action_type: "read",
+    requested_execution_mode: input.requestedExecutionMode ?? "live_read_high_risk",
+    approved: true,
+    approver: "qa-reviewer",
+    approved_at: "2026-03-23T10:00:00Z",
+    checks: {
+      target_domain_confirmed: true,
+      target_tab_confirmed: true,
+      target_page_confirmed: true,
+      risk_state_checked: true,
+      action_type_confirmed: true
+    },
+    recorded_at: "2026-03-23T10:00:00Z"
+  },
+  audit_admission_evidence: {
+    audit_admission_ref: `gate_evt_${input.runId}`,
+    run_id: input.runId,
+    session_id: "nm-session-001",
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: input.targetTabId ?? 32,
+    target_page: input.targetPage,
+    action_type: "read",
+    requested_execution_mode: input.requestedExecutionMode ?? "live_read_high_risk",
+    risk_state: input.riskState ?? "allowed",
+    audited_checks: {
+      target_domain_confirmed: true,
+      target_tab_confirmed: true,
+      target_page_confirmed: true,
+      risk_state_checked: true,
+      action_type_confirmed: true
+    },
+    recorded_at: "2026-03-23T10:00:30Z"
+  }
+});
+
 const createLiveReadOptions = (overrides?: Partial<XhsSearchOptions>): XhsSearchOptions => ({
   issue_scope: "issue_209",
   target_domain: "www.xiaohongshu.com",
@@ -44,6 +95,26 @@ const createLiveReadOptions = (overrides?: Partial<XhsSearchOptions>): XhsSearch
   audit_record: createAuditRecord(),
   ...overrides
 });
+
+const createAdmittedLiveReadOptions = (input: {
+  runId: string;
+  targetPage: "explore_detail_tab" | "profile_tab";
+  overrides?: Partial<XhsSearchOptions>;
+}): XhsSearchOptions =>
+  createLiveReadOptions({
+    target_page: input.targetPage,
+    actual_target_page: input.targetPage,
+    admission_context: createApprovedReadAdmissionContext({
+      runId: input.runId,
+      targetPage: input.targetPage,
+      requestedExecutionMode:
+        input.overrides?.requested_execution_mode === "live_read_limited"
+          ? "live_read_limited"
+          : "live_read_high_risk",
+      riskState: input.overrides?.risk_state === "limited" ? "limited" : "allowed"
+    }),
+    ...(input.overrides ?? {})
+  });
 
 const createEnvironment = (overrides?: Partial<XhsSearchEnvironment>): XhsSearchEnvironment => ({
   now: () => 1_000,
@@ -85,9 +156,9 @@ describe("xhs read execution fallback", () => {
         params: {
           note_id: "note-success-001"
         },
-        options: createLiveReadOptions({
-          target_page: "explore_detail_tab",
-          actual_target_page: "explore_detail_tab"
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-success-001",
+          targetPage: "explore_detail_tab"
         }),
         executionContext: {
           runId: "run-detail-success-001",
@@ -154,9 +225,9 @@ describe("xhs read execution fallback", () => {
         params: {
           user_id: "user-success-001"
         },
-        options: createLiveReadOptions({
-          target_page: "profile_tab",
-          actual_target_page: "profile_tab"
+        options: createAdmittedLiveReadOptions({
+          runId: "run-user-success-001",
+          targetPage: "profile_tab"
         }),
         executionContext: {
           runId: "run-user-success-001",
@@ -208,9 +279,9 @@ describe("xhs read execution fallback", () => {
         params: {
           note_id: "note-wrapped-001"
         },
-        options: createLiveReadOptions({
-          target_page: "explore_detail_tab",
-          actual_target_page: "explore_detail_tab"
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-wrapped-001",
+          targetPage: "explore_detail_tab"
         }),
         executionContext: {
           runId: "run-detail-wrapped-001",
@@ -262,9 +333,9 @@ describe("xhs read execution fallback", () => {
         params: {
           user_id: "user-nested-001"
         },
-        options: createLiveReadOptions({
-          target_page: "profile_tab",
-          actual_target_page: "profile_tab"
+        options: createAdmittedLiveReadOptions({
+          runId: "run-user-nested-001",
+          targetPage: "profile_tab"
         }),
         executionContext: {
           runId: "run-user-nested-001",
@@ -314,9 +385,9 @@ describe("xhs read execution fallback", () => {
         params: {
           note_id: "note-missing-001"
         },
-        options: createLiveReadOptions({
-          target_page: "explore_detail_tab",
-          actual_target_page: "explore_detail_tab"
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-target-missing-001",
+          targetPage: "explore_detail_tab"
         }),
         executionContext: {
           runId: "run-detail-target-missing-001",
@@ -366,9 +437,9 @@ describe("xhs read execution fallback", () => {
         params: {
           user_id: "user-missing-001"
         },
-        options: createLiveReadOptions({
-          target_page: "profile_tab",
-          actual_target_page: "profile_tab"
+        options: createAdmittedLiveReadOptions({
+          runId: "run-user-target-missing-001",
+          targetPage: "profile_tab"
         }),
         executionContext: {
           runId: "run-user-target-missing-001",
@@ -416,9 +487,9 @@ describe("xhs read execution fallback", () => {
         params: {
           note_id: "note-metadata-only-001"
         },
-        options: createLiveReadOptions({
-          target_page: "explore_detail_tab",
-          actual_target_page: "explore_detail_tab"
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-metadata-only-001",
+          targetPage: "explore_detail_tab"
         }),
         executionContext: {
           runId: "run-detail-metadata-only-001",
@@ -464,9 +535,9 @@ describe("xhs read execution fallback", () => {
         params: {
           note_id: "note-fallback-target-missing-001"
         },
-        options: createLiveReadOptions({
-          target_page: "explore_detail_tab",
-          actual_target_page: "explore_detail_tab"
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-fallback-target-missing-001",
+          targetPage: "explore_detail_tab"
         }),
         executionContext: {
           runId: "run-detail-fallback-target-missing-001",
@@ -526,9 +597,9 @@ describe("xhs read execution fallback", () => {
         params: {
           user_id: "user-metadata-only-001"
         },
-        options: createLiveReadOptions({
-          target_page: "profile_tab",
-          actual_target_page: "profile_tab"
+        options: createAdmittedLiveReadOptions({
+          runId: "run-user-metadata-only-001",
+          targetPage: "profile_tab"
         }),
         executionContext: {
           runId: "run-user-metadata-only-001",
@@ -572,9 +643,9 @@ describe("xhs read execution fallback", () => {
         params: {
           user_id: "user-fallback-target-missing-001"
         },
-        options: createLiveReadOptions({
-          target_page: "profile_tab",
-          actual_target_page: "profile_tab"
+        options: createAdmittedLiveReadOptions({
+          runId: "run-user-fallback-target-missing-001",
+          targetPage: "profile_tab"
         }),
         executionContext: {
           runId: "run-user-fallback-target-missing-001",
@@ -628,9 +699,9 @@ describe("xhs read execution fallback", () => {
         params: {
           note_id: "note-001"
         },
-        options: createLiveReadOptions({
-          target_page: "explore_detail_tab",
-          actual_target_page: "explore_detail_tab"
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-fallback-001",
+          targetPage: "explore_detail_tab"
         }),
         executionContext: {
           runId: "run-detail-fallback-001",
@@ -705,9 +776,9 @@ describe("xhs read execution fallback", () => {
         params: {
           user_id: "user-001"
         },
-        options: createLiveReadOptions({
-          target_page: "profile_tab",
-          actual_target_page: "profile_tab"
+        options: createAdmittedLiveReadOptions({
+          runId: "run-user-fallback-001",
+          targetPage: "profile_tab"
         }),
         executionContext: {
           runId: "run-user-fallback-001",
@@ -763,9 +834,9 @@ describe("xhs read execution fallback", () => {
         params: {
           note_id: "note-signature-fallback-001"
         },
-        options: createLiveReadOptions({
-          target_page: "explore_detail_tab",
-          actual_target_page: "explore_detail_tab"
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-signature-fallback-001",
+          targetPage: "explore_detail_tab"
         }),
         executionContext: {
           runId: "run-detail-signature-fallback-001",
@@ -817,10 +888,12 @@ describe("xhs read execution fallback", () => {
         params: {
           note_id: "note-simulated-signature-001"
         },
-        options: createLiveReadOptions({
-          target_page: "explore_detail_tab",
-          actual_target_page: "explore_detail_tab",
-          simulate_result: "signature_entry_missing"
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-simulated-signature-001",
+          targetPage: "explore_detail_tab",
+          overrides: {
+            simulate_result: "signature_entry_missing"
+          }
         }),
         executionContext: {
           runId: "run-detail-simulated-signature-001",
@@ -861,9 +934,9 @@ describe("xhs read execution fallback", () => {
         params: {
           note_id: "note-404"
         },
-        options: createLiveReadOptions({
-          target_page: "explore_detail_tab",
-          actual_target_page: "explore_detail_tab"
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-no-fallback-001",
+          targetPage: "explore_detail_tab"
         }),
         executionContext: {
           runId: "run-detail-no-fallback-001",
@@ -921,9 +994,9 @@ describe("xhs read execution fallback", () => {
         params: {
           note_id: "note-sync-001"
         },
-        options: createLiveReadOptions({
-          target_page: "explore_detail_tab",
-          actual_target_page: "explore_detail_tab"
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-sync-fallback-001",
+          targetPage: "explore_detail_tab"
         }),
         executionContext: {
           runId: "run-detail-sync-fallback-001",
@@ -954,9 +1027,9 @@ describe("xhs read execution fallback", () => {
         params: {
           user_id: "user-001"
         },
-        options: createLiveReadOptions({
-          target_page: "profile_tab",
-          actual_target_page: "profile_tab"
+        options: createAdmittedLiveReadOptions({
+          runId: "run-user-mismatch-001",
+          targetPage: "profile_tab"
         }),
         executionContext: {
           runId: "run-user-mismatch-001",

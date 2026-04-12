@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, approvedLiveOptions, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
+import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, createApprovedReadAdmissionContext, approvedLiveOptions, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
 
 describe("extension background relay contract / target binding and editor input", () => {
   it("blocks issue_208 write action in paused state and returns reversible write tier", async () => {
@@ -60,6 +60,12 @@ describe("extension background relay contract / target binding and editor input"
                 action_type_confirmed: true
               }
             },
+            admission_context: createApprovedReadAdmissionContext({
+              run_id: "run-xhs-live-allowed-001",
+              session_id: "nm-session-001",
+              requested_execution_mode: "live_read_high_risk",
+              risk_state: "allowed"
+            }),
             audit_record: {
               event_id: "gate_evt_target_binding_live_allowed_001",
               issue_scope: "issue_209",
@@ -1018,7 +1024,15 @@ describe("extension background relay contract / target binding and editor input"
           input: {
             query: "露营装备"
           },
-          options: approvedLiveOptions
+          options: {
+            ...approvedLiveOptions,
+            admission_context: createApprovedReadAdmissionContext({
+              run_id: "run-xhs-timeout-001",
+              session_id: "nm-session-001",
+              requested_execution_mode: "live_read_high_risk",
+              risk_state: "allowed"
+            })
+          }
         },
         cwd: "/workspace/WebEnvoy"
       },
@@ -1370,6 +1384,12 @@ describe("extension background relay contract / target binding and editor input"
                 action_type_confirmed: true
               }
             },
+            admission_context: createApprovedReadAdmissionContext({
+              run_id: "run-xhs-live-allowed-001",
+              session_id: "nm-session-001",
+              requested_execution_mode: "live_read_high_risk",
+              risk_state: "allowed"
+            }),
             audit_record: {
               event_id: "gate_evt_target_binding_live_allowed_001",
               issue_scope: "issue_209",

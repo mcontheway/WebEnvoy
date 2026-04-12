@@ -191,43 +191,6 @@ const normalizeXhsAdmissionContext = (value) => {
   };
 };
 
-const buildLegacyAdmissionContext = (input) => {
-  const approvalRecord = normalizeXhsApprovalRecord(input.approvalRecord);
-  const auditRecord = normalizeXhsAuditRecord(input.auditRecord);
-  return {
-    approval_admission_evidence: {
-      approval_admission_ref: asString(input.expectedApprovalId) ?? null,
-      run_id: asString(input.runId),
-      session_id: asString(input.sessionId),
-      issue_scope: asString(input.issueScope),
-      target_domain: asString(input.targetDomain),
-      target_tab_id: asInteger(input.targetTabId),
-      target_page: asString(input.targetPage),
-      action_type: asString(input.actionType),
-      requested_execution_mode: asString(input.requestedExecutionMode),
-      approved: approvalRecord.approved,
-      approver: approvalRecord.approver,
-      approved_at: approvalRecord.approved_at,
-      checks: { ...approvalRecord.checks },
-      recorded_at: auditRecord.recorded_at
-    },
-    audit_admission_evidence: {
-      audit_admission_ref: auditRecord.event_id,
-      run_id: asString(input.runId),
-      session_id: asString(input.sessionId),
-      issue_scope: asString(input.issueScope),
-      target_domain: asString(input.targetDomain),
-      target_tab_id: asInteger(input.targetTabId),
-      target_page: asString(input.targetPage),
-      action_type: asString(input.actionType),
-      requested_execution_mode: asString(input.requestedExecutionMode),
-      risk_state: asString(input.riskState),
-      audited_checks: { ...approvalRecord.checks },
-      recorded_at: auditRecord.recorded_at
-    }
-  };
-};
-
 const resolveXhsIssueActionMatrixEntry = (issueScope, state) => {
   return getIssueActionMatrixEntry(issueScope, state);
 };
@@ -849,25 +812,7 @@ const collectXhsMatrixGateReasons = (input) => {
   const state = input.state;
   const approvalRecord = normalizeXhsApprovalRecord(input.approvalRecord);
   const auditRecord = normalizeXhsAuditRecord(input.auditRecord);
-  const explicitAdmissionContext = normalizeXhsAdmissionContext(input.admissionContext);
-  const admissionContext =
-    explicitAdmissionContext.approval_admission_evidence.approval_admission_ref ||
-    explicitAdmissionContext.audit_admission_evidence.audit_admission_ref
-      ? explicitAdmissionContext
-      : buildLegacyAdmissionContext({
-          approvalRecord: input.approvalRecord,
-          auditRecord: input.auditRecord,
-          expectedApprovalId: input.expectedApprovalId,
-          runId: input.runId,
-          sessionId: input.sessionId,
-          issueScope: state.issueScope,
-          targetDomain: input.targetDomain,
-          targetTabId: input.targetTabId,
-          targetPage: input.targetPage,
-          actionType: state.actionType,
-          requestedExecutionMode: state.requestedExecutionMode,
-          riskState: state.riskState
-        });
+  const admissionContext = normalizeXhsAdmissionContext(input.admissionContext);
   const approvalRecordHasConflictingLinkage = hasApprovalRecordConflictingLinkage(
     approvalRecord,
     input.decisionId

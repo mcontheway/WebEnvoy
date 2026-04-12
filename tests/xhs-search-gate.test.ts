@@ -1,6 +1,58 @@
 import { describe, expect, it } from "vitest";
 import { resolveActualTargetGateReasons, resolveGate } from "../extension/xhs-search-gate.js";
 
+const createAdmissionContext = (input?: {
+  run_id?: string;
+  session_id?: string;
+  target_tab_id?: number;
+  target_page?: string;
+  requested_execution_mode?: "live_read_high_risk" | "live_read_limited";
+  risk_state?: "allowed" | "limited";
+}) => ({
+  approval_admission_evidence: {
+    approval_admission_ref: "gate_appr_issue209_extension_001",
+    run_id: input?.run_id ?? "run-extension-001",
+    session_id: input?.session_id ?? "session-extension-001",
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: input?.target_tab_id ?? 12,
+    target_page: input?.target_page ?? "search_result_tab",
+    action_type: "read",
+    requested_execution_mode: input?.requested_execution_mode ?? "live_read_high_risk",
+    approved: true,
+    approver: "qa-reviewer",
+    approved_at: "2026-03-23T10:00:00.000Z",
+    checks: {
+      target_domain_confirmed: true,
+      target_tab_confirmed: true,
+      target_page_confirmed: true,
+      risk_state_checked: true,
+      action_type_confirmed: true
+    },
+    recorded_at: "2026-03-23T10:00:00.000Z"
+  },
+  audit_admission_evidence: {
+    audit_admission_ref: "gate_evt_issue209_extension_001",
+    run_id: input?.run_id ?? "run-extension-001",
+    session_id: input?.session_id ?? "session-extension-001",
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: input?.target_tab_id ?? 12,
+    target_page: input?.target_page ?? "search_result_tab",
+    action_type: "read",
+    requested_execution_mode: input?.requested_execution_mode ?? "live_read_high_risk",
+    risk_state: input?.risk_state ?? "allowed",
+    audited_checks: {
+      target_domain_confirmed: true,
+      target_tab_confirmed: true,
+      target_page_confirmed: true,
+      risk_state_checked: true,
+      action_type_confirmed: true
+    },
+    recorded_at: "2026-03-23T10:00:30.000Z"
+  }
+});
+
 describe("xhs-search gate helpers", () => {
   it("flags mismatched actual target context", () => {
     expect(
@@ -35,6 +87,7 @@ describe("xhs-search gate helpers", () => {
         action_type: "read",
         ability_action: "read",
         requested_execution_mode: "live_read_high_risk",
+        admission_context: createAdmissionContext(),
         audit_record: {
           event_id: "audit-extension-req-1",
           decision_id: "gate_decision_run-extension-001_req-1",
@@ -90,6 +143,10 @@ describe("xhs-search gate helpers", () => {
         action_type: "read",
         ability_action: "read",
         requested_execution_mode: "live_read_high_risk",
+        admission_context: createAdmissionContext({
+          run_id: "run-extension-command-request-001",
+          session_id: "session-extension-command-request-001"
+        }),
         audit_record: {
           event_id: "audit-extension-command-req-1",
           decision_id:
@@ -156,6 +213,7 @@ describe("xhs-search gate helpers", () => {
         action_type: "read",
         ability_action: "read",
         requested_execution_mode: "live_read_high_risk",
+        admission_context: createAdmissionContext(),
         approval_record: {
           approval_id:
             "gate_appr_gate_decision_run-extension-command-request-001_issue209-live-req-reused",

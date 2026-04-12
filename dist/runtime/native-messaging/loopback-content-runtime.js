@@ -36,10 +36,10 @@ const resolveLoopbackApprovalId = (approvalRecord, decisionId) => {
 const buildLoopbackGateSeedOptions = (input) => {
     const nextOptions = { ...input.options };
     const approvalDecisionId = asString(input.approvalRecord?.decision_id);
-    const approvalId = asString(input.approvalRecord?.approval_id);
+    const existingApprovalId = asString(input.approvalRecord?.approval_id);
     const canSeedApprovalRecord = input.approvalRecord &&
         (!approvalDecisionId || approvalDecisionId === input.decisionId) &&
-        (!approvalId || approvalDecisionId === input.decisionId);
+        (!existingApprovalId || approvalDecisionId === input.decisionId);
     if (canSeedApprovalRecord) {
         const seededApprovalRecord = {
             ...input.approvalRecord,
@@ -214,6 +214,7 @@ export class InMemoryContentScriptRuntime {
                 approvalRecord
             }), asString(ability.action), {
                 runId: message.runId,
+                sessionId: message.sessionId,
                 decisionId,
                 approvalId: approvalId ?? undefined
             });

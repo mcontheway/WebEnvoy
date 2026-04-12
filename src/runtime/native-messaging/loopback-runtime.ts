@@ -80,11 +80,11 @@ const buildLoopbackGateSeedOptions = (input: {
 }): Record<string, unknown> => {
   const nextOptions = { ...input.options };
   const approvalDecisionId = asString(input.approvalRecord?.decision_id);
-  const approvalId = asString(input.approvalRecord?.approval_id);
+  const existingApprovalId = asString(input.approvalRecord?.approval_id);
   const canSeedApprovalRecord =
     input.approvalRecord &&
     (!approvalDecisionId || approvalDecisionId === input.decisionId) &&
-    (!approvalId || approvalDecisionId === input.decisionId);
+    (!existingApprovalId || approvalDecisionId === input.decisionId);
   if (canSeedApprovalRecord) {
     const seededApprovalRecord = {
       ...input.approvalRecord,
@@ -118,7 +118,9 @@ const mergeGateArtifactsIntoCommandParams = (
   }
   const approvalRecord = asRecord(gatePayload.approval_record);
   const auditRecord = asRecord(gatePayload.audit_record);
-  if (!approvalRecord && !auditRecord) {
+  const gateInput = asRecord(gatePayload.gate_input);
+  const admissionContext = asRecord(gateInput?.admission_context) ?? asRecord(gatePayload.admission_context);
+  if (!approvalRecord && !auditRecord && !admissionContext) {
     return commandParams;
   }
 
@@ -136,6 +138,10 @@ const mergeGateArtifactsIntoCommandParams = (
   if (auditRecord) {
     normalized.audit_record = auditRecord;
     normalizedOptions.audit_record = auditRecord;
+  }
+  if (admissionContext) {
+    normalized.admission_context = admissionContext;
+    normalizedOptions.admission_context = admissionContext;
   }
 
   normalized.options = normalizedOptions;
@@ -170,8 +176,9 @@ const buildLoopbackXhsSearchGateBundle = (input: {
     }),
     input.abilityAction,
     {
-    runId: input.runId,
-    decisionId,
+      runId: input.runId,
+      sessionId: input.sessionId,
+      decisionId,
       approvalId: approvalId ?? undefined
     }
   );

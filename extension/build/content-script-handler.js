@@ -475,6 +475,9 @@ export class ContentScriptHandler {
                     ...(asRecord(options.audit_record)
                         ? { audit_record: asRecord(options.audit_record) ?? {} }
                         : {}),
+                    ...(asRecord(options.admission_context)
+                        ? { admission_context: asRecord(options.admission_context) ?? {} }
+                        : {}),
                     ...(asRecord(options.approval) ? { approval: asRecord(options.approval) ?? {} } : {})
                 },
                 executionContext: {

@@ -2597,7 +2597,7 @@ describe("extension service worker / bootstrap and trust", () => {
     expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("blocks live_read_high_risk in background gate when approval is missing", async () => {
+  it("blocks live_read_high_risk in background gate when admission evidence is missing", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -2618,7 +2618,8 @@ describe("extension service worker / bootstrap and trust", () => {
         command_params: createXhsCommandParams({
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
-          fingerprint_context: createFingerprintRuntimeContext()
+          fingerprint_context: createFingerprintRuntimeContext(),
+          admission_context: null
         }),
         cwd: "/workspace/WebEnvoy"
       },
@@ -2740,7 +2741,7 @@ describe("extension service worker / bootstrap and trust", () => {
     });
   });
 
-  it("blocks live_read_limited in background gate when approval is missing", async () => {
+  it("blocks live_read_limited in background gate when admission evidence is missing", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -2761,7 +2762,8 @@ describe("extension service worker / bootstrap and trust", () => {
         command_params: createXhsCommandParams({
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
-          fingerprint_context: createFingerprintRuntimeContext()
+          fingerprint_context: createFingerprintRuntimeContext(),
+          admission_context: null
         }),
         cwd: "/workspace/WebEnvoy"
       },

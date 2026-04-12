@@ -17,6 +17,118 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
     ...overrides
   });
 
+  const createLoopbackFingerprintContext = (
+    executionOverrides: Record<string, unknown> = {}
+  ): Record<string, unknown> => ({
+    profile: "loopback_profile",
+    source: "profile_meta",
+    fingerprint_profile_bundle: {
+      ua: "Mozilla/5.0",
+      hardwareConcurrency: 8,
+      deviceMemory: 8,
+      screen: {
+        width: 1440,
+        height: 900,
+        colorDepth: 24,
+        pixelDepth: 24
+      },
+      battery: {
+        level: 0.73,
+        charging: false
+      },
+      timezone: "Asia/Shanghai",
+      audioNoiseSeed: 0.000047231,
+      canvasNoiseSeed: 0.000083154,
+      environment: {
+        os_family: "macos",
+        os_version: "14.6",
+        arch: "arm64"
+      }
+    },
+    fingerprint_patch_manifest: {
+      profile: "loopback_profile",
+      manifest_version: "1",
+      required_patches: ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"],
+      optional_patches: [],
+      field_dependencies: {
+        audio_context: ["audioNoiseSeed"],
+        battery: ["battery.level", "battery.charging"]
+      },
+      unsupported_reason_codes: []
+    },
+    fingerprint_consistency_check: {
+      profile: "loopback_profile",
+      expected_environment: {
+        os_family: "macos",
+        os_version: "14.6",
+        arch: "arm64"
+      },
+      actual_environment: {
+        os_family: "macos",
+        os_version: "14.6",
+        arch: "arm64"
+      },
+      decision: "match",
+      reason_codes: []
+    },
+    execution: {
+      live_allowed: true,
+      live_decision: "allowed",
+      allowed_execution_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+      reason_codes: [],
+      ...executionOverrides
+    }
+  });
+
+  const createApprovedReadAdmissionContext = (input: {
+    runId: string;
+    requestedExecutionMode: "live_read_limited" | "live_read_high_risk";
+    riskState: "limited" | "allowed";
+  }): Record<string, unknown> => ({
+    approval_admission_evidence: {
+      approval_admission_ref: `gate_appr_${input.runId}`,
+      run_id: input.runId,
+      session_id: "nm-session-001",
+      issue_scope: "issue_209",
+      target_domain: "www.xiaohongshu.com",
+      target_tab_id: 32,
+      target_page: "search_result_tab",
+      action_type: "read",
+      requested_execution_mode: input.requestedExecutionMode,
+      approved: true,
+      approver: "qa-reviewer",
+      approved_at: "2026-03-23T10:00:00Z",
+      checks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      },
+      recorded_at: "2026-03-23T10:00:00Z"
+    },
+    audit_admission_evidence: {
+      audit_admission_ref: `gate_evt_${input.runId}`,
+      run_id: input.runId,
+      session_id: "nm-session-001",
+      issue_scope: "issue_209",
+      target_domain: "www.xiaohongshu.com",
+      target_tab_id: 32,
+      target_page: "search_result_tab",
+      action_type: "read",
+      requested_execution_mode: input.requestedExecutionMode,
+      risk_state: input.riskState,
+      audited_checks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      },
+      recorded_at: "2026-03-23T10:00:30Z"
+    }
+  });
+
   it("returns structured input validation error for xhs.search without ability envelope", () => {
     const result = runCli(["xhs.search", "--profile", "xhs_account_001"]);
     expect(result.status).toBe(2);
@@ -1180,10 +1292,13 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
   });
 
   it("allows live_read_high_risk with explicit approval and emits consumer_gate_result", () => {
+    const runId = "run-cli-live-high-risk-approved-001";
     const result = runCli([
       "xhs.search",
       "--profile",
       "xhs_account_001",
+      "--run-id",
+      runId,
       "--params",
       JSON.stringify({
         ability: {
@@ -1199,6 +1314,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
           simulate_result: "success",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
+          fingerprint_context: createLoopbackFingerprintContext(),
           approval_record: {
             approved: true,
             approver: "qa-reviewer",
@@ -1211,7 +1327,12 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
               action_type_confirmed: true
             }
           },
-          audit_record: createAllowedHighRiskAuditRecord()
+          audit_record: createAllowedHighRiskAuditRecord(),
+          admission_context: createApprovedReadAdmissionContext({
+            runId,
+            requestedExecutionMode: "live_read_high_risk",
+            riskState: "allowed"
+          })
         }
       })
     ], repoRoot, {
@@ -1638,6 +1759,7 @@ process.stdin.on("data", (chunk) => {
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           limited_read_rollout_ready_true: true,
+          fingerprint_context: createLoopbackFingerprintContext(),
           approval_record: {
             approved: true,
             approver: "qa-reviewer",
@@ -1662,7 +1784,12 @@ process.stdin.on("data", (chunk) => {
             requested_execution_mode: "live_read_limited",
             gate_decision: "allowed",
             recorded_at: "2026-03-23T10:00:30Z"
-          }
+          },
+          admission_context: createApprovedReadAdmissionContext({
+            runId,
+            requestedExecutionMode: "live_read_limited",
+            riskState: "limited"
+          })
         }
       })
     ], repoRoot, {
@@ -1769,6 +1896,7 @@ process.stdin.on("data", (chunk) => {
           simulate_result: "success",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
+          fingerprint_context: createLoopbackFingerprintContext(),
           approval_record: {
             approved: true,
             approver: "qa-reviewer",
@@ -1781,7 +1909,12 @@ process.stdin.on("data", (chunk) => {
               action_type_confirmed: true
             }
           },
-          audit_record: createAllowedHighRiskAuditRecord()
+          audit_record: createAllowedHighRiskAuditRecord(),
+          admission_context: createApprovedReadAdmissionContext({
+            runId,
+            requestedExecutionMode: "live_read_high_risk",
+            riskState: "allowed"
+          })
         }
       })
     ], cwd, {
@@ -2372,10 +2505,13 @@ process.stdin.on("data", (chunk) => {
       failureStage,
       keyRequestCount
     }) => {
+      const runId = `run-sim-${simulateResult}`;
       const result = runCli([
         "xhs.search",
         "--profile",
         "xhs_account_001",
+        "--run-id",
+        runId,
         "--params",
         JSON.stringify({
           ability: {
@@ -2391,6 +2527,7 @@ process.stdin.on("data", (chunk) => {
           simulate_result: simulateResult,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
+            fingerprint_context: createLoopbackFingerprintContext(),
             approval_record: {
               approved: true,
               approver: "qa-reviewer",
@@ -2403,7 +2540,12 @@ process.stdin.on("data", (chunk) => {
               action_type_confirmed: true
             }
           },
-          audit_record: createAllowedHighRiskAuditRecord()
+          audit_record: createAllowedHighRiskAuditRecord(),
+          admission_context: createApprovedReadAdmissionContext({
+            runId,
+            requestedExecutionMode: "live_read_high_risk",
+            riskState: "allowed"
+          })
         }
       })
       ], repoRoot, {
@@ -2496,10 +2638,13 @@ process.stdin.on("data", (chunk) => {
   });
 
   it("returns output mapping failure when runtime success payload omits capability_result", () => {
+    const runId = "run-output-missing-capability-001";
     const result = runCli([
       "xhs.search",
       "--profile",
       "xhs_account_001",
+      "--run-id",
+      runId,
       "--params",
       JSON.stringify({
         ability: {
@@ -2515,6 +2660,7 @@ process.stdin.on("data", (chunk) => {
           simulate_result: "missing_capability_result",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
+          fingerprint_context: createLoopbackFingerprintContext(),
           approval_record: {
             approved: true,
             approver: "qa-reviewer",
@@ -2527,7 +2673,12 @@ process.stdin.on("data", (chunk) => {
               action_type_confirmed: true
             }
           },
-          audit_record: createAllowedHighRiskAuditRecord()
+          audit_record: createAllowedHighRiskAuditRecord(),
+          admission_context: createApprovedReadAdmissionContext({
+            runId,
+            requestedExecutionMode: "live_read_high_risk",
+            riskState: "allowed"
+          })
         }
       })
     ], repoRoot, {
@@ -2552,10 +2703,13 @@ process.stdin.on("data", (chunk) => {
   });
 
   it("returns output mapping failure when runtime success payload carries invalid capability_result", () => {
+    const runId = "run-output-invalid-capability-001";
     const result = runCli([
       "xhs.search",
       "--profile",
       "xhs_account_001",
+      "--run-id",
+      runId,
       "--params",
       JSON.stringify({
         ability: {
@@ -2571,6 +2725,7 @@ process.stdin.on("data", (chunk) => {
           simulate_result: "capability_result_invalid_outcome",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
+          fingerprint_context: createLoopbackFingerprintContext(),
           approval_record: {
             approved: true,
             approver: "qa-reviewer",
@@ -2583,7 +2738,12 @@ process.stdin.on("data", (chunk) => {
               action_type_confirmed: true
             }
           },
-          audit_record: createAllowedHighRiskAuditRecord()
+          audit_record: createAllowedHighRiskAuditRecord(),
+          admission_context: createApprovedReadAdmissionContext({
+            runId,
+            requestedExecutionMode: "live_read_high_risk",
+            riskState: "allowed"
+          })
         }
       })
     ], repoRoot, {
