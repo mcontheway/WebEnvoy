@@ -144,6 +144,14 @@
     "target_page": "search_result_tab",
     "action_type": "read",
     "requested_execution_mode": "live_read_limited",
+    "risk_state": "limited",
+    "audited_checks": {
+      "target_domain_confirmed": true,
+      "target_tab_confirmed": true,
+      "target_page_confirmed": true,
+      "risk_state_checked": true,
+      "action_type_confirmed": true
+    },
     "recorded_at": "2026-03-22T08:00:00Z"
   }
 }
@@ -153,7 +161,9 @@
 - `audit_admission_evidence` 是 `issue_209` live read 在进入 gate 前必须提供的正式审计证据对象，且必须挂载在 `FR-0010.gate_input.admission_context` 中。
 - `audit_admission_ref` 必须稳定、可检索、不可歧义，并只指向本次 pre-gate audit admission evidence 自身；不得复用 `FR-0010.audit_record` 或 `FR-0009.audit_record_ref` 一类 gate 后记录引用。
 - `issue_scope`、`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode` 必须与本次请求一致；不允许只凭同域或同页面的历史证据近似满足。
-- `audit_admission_evidence` 只承载 pre-gate admission evidence；不得要求它包含 `effective_execution_mode`、`gate_reasons`、`risk_state`、`run_id`、`session_id` 等 gate 完成后才产生的字段。
+- `risk_state` 必须记录本次 admission audit 实际审到的请求入口风险状态，并与 `FR-0010.gate_input.risk_state` 保持一致。
+- `audited_checks.target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`risk_state_checked`、`action_type_confirmed` 必须全部显式给出；缺任一项即不得满足 `audit_admission_evidence_present`。
+- `audit_admission_evidence` 只承载 pre-gate admission evidence；不得要求它包含 `effective_execution_mode`、`gate_reasons`、`run_id`、`session_id` 等 gate 完成后才产生的字段。
 - gate 完成后，运行时仍必须按 `FR-0010.audit_record` 输出 persisted audit trail，不得用 admission evidence 替代 post-gate 留痕。
 
 ## write_interaction_tier

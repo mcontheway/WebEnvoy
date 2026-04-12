@@ -66,13 +66,21 @@
 - `target_page` TEXT NOT NULL
 - `action_type` ENUM NOT NULL（当前固定为 `read`）
 - `requested_execution_mode` ENUM NOT NULL（`live_read_limited` | `live_read_high_risk`）
+- `risk_state` ENUM NOT NULL（`limited` | `allowed`）
+- `audited_checks.target_domain_confirmed` BOOLEAN NOT NULL
+- `audited_checks.target_tab_confirmed` BOOLEAN NOT NULL
+- `audited_checks.target_page_confirmed` BOOLEAN NOT NULL
+- `audited_checks.risk_state_checked` BOOLEAN NOT NULL
+- `audited_checks.action_type_confirmed` BOOLEAN NOT NULL
 - `recorded_at` TEXT NOT NULL
 
 约束：
 - 本实体是 `FR-0010.GateInput.admission_context` 下的 request-side admission input，不是 gate 输出对象。
 - `issue_scope` 当前只允许 `issue_209`，不得外溢到 `#208` 写验证路径。
 - `audit_admission_ref` 只能指向 pre-gate admission evidence 自身，不得复用 `FR-0010.AuditRecord` 或其他 gate 后持久化记录 id。
-- 本实体不得包含 `effective_execution_mode`、`gate_reasons`、`risk_state`、`run_id`、`session_id` 等 gate 完成后才产生的字段。
+- `risk_state` 必须与 `FR-0010.GateInput.risk_state` 一致。
+- `audited_checks` 五项必须全部显式给出，且缺任一项即不得满足 live 准入。
+- 本实体不得包含 `effective_execution_mode`、`gate_reasons`、`run_id`、`session_id` 等 gate 完成后才产生的字段。
 
 ## 实体 5：WriteInteractionTier
 
