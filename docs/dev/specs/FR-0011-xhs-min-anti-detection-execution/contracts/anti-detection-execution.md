@@ -134,7 +134,7 @@
 - `run_id` 与 `session_id` 必须分别与当前 `FR-0010.gate_input.run_id`、`session_id` 精确匹配；不得用历史 approval blob 复用到新的 gate request。
 - `issue_scope`、`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode` 必须与本次请求一致；不允许只凭同域或同页面的历史审批近似满足。
 - `approved=true` 时，`approver` 与 `approved_at` 必填；`checks` 五项必须全部显式给出。
-- `approval_admission_evidence` 只承载 pre-gate admission evidence；不得要求它包含 `decision_id`、`effective_execution_mode`、`gate_reasons`、`run_id`、`session_id` 等 gate 完成后才产生的字段。
+- `approval_admission_evidence` 只承载 pre-gate admission evidence；不得要求它包含 `decision_id`、`effective_execution_mode`、`gate_reasons` 等 gate 完成后才产生的字段。
 - gate 完成后，运行时仍必须按 `FR-0010.approval_record` 输出 persisted approval trail，不得用 admission evidence 替代 post-gate 留痕。
 
 ## audit_admission_evidence
@@ -171,7 +171,7 @@
 - `issue_scope`、`target_domain`、`target_tab_id`、`target_page`、`action_type`、`requested_execution_mode` 必须与本次请求一致；不允许只凭同域或同页面的历史证据近似满足。
 - `risk_state` 必须记录本次 admission audit 实际审到的请求入口风险状态，并与 `FR-0010.gate_input.risk_state` 保持一致。
 - `audited_checks.target_domain_confirmed`、`target_tab_confirmed`、`target_page_confirmed`、`risk_state_checked`、`action_type_confirmed` 必须全部显式给出；缺任一项即不得满足 `audit_admission_evidence_present`。
-- `audit_admission_evidence` 只承载 pre-gate admission evidence；不得要求它包含 `effective_execution_mode`、`gate_reasons`、`run_id`、`session_id` 等 gate 完成后才产生的字段。
+- `audit_admission_evidence` 只承载 pre-gate admission evidence；不得要求它包含 `effective_execution_mode`、`gate_reasons` 等 gate 完成后才产生的字段。
 - gate 完成后，运行时仍必须按 `FR-0010.audit_record` 输出 persisted audit trail，不得用 admission evidence 替代 post-gate 留痕。
 
 ## write_interaction_tier
