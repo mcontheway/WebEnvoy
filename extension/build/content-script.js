@@ -110,7 +110,6 @@ const ISSUE_ACTION_MATRIX = [
       {
         action: "live_read_limited",
         requires: [
-          "audit_record_present",
           "limited_read_rollout_ready_true",
           "approval_record_approved_true",
           "approval_record_approver_present",
@@ -134,7 +133,6 @@ const ISSUE_ACTION_MATRIX = [
       {
         action: "live_read_limited",
         requires: [
-          "audit_record_present",
           "limited_read_rollout_ready_true",
           "approval_record_approved_true",
           "approval_record_approver_present",
@@ -1149,7 +1147,6 @@ const XHS_READ_EXECUTION_POLICY = {
   blocked_actions: ["expand_new_live_surface_without_gate"],
   live_entry_requirements: [
     "gate_input_risk_state_limited_or_allowed",
-    "audit_record_present",
     "limited_read_rollout_ready_true",
     "risk_state_checked",
     "target_domain_confirmed",
@@ -1322,31 +1319,6 @@ const normalizeXhsAuditRecord = (value) => {
     gate_decision: asString(record?.gate_decision),
     recorded_at: asString(record?.recorded_at)
   };
-};
-
-const resolveXhsAuditRequirementGaps = (auditRecord, expectedLinkage, state, target) => {
-  const matchesExactLinkage =
-    !!expectedLinkage.decisionId &&
-    !!expectedLinkage.approvalId &&
-    auditRecord.decision_id === expectedLinkage.decisionId &&
-    auditRecord.approval_id === expectedLinkage.approvalId;
-  if (
-    !auditRecord.event_id ||
-    !auditRecord.decision_id ||
-    !auditRecord.approval_id ||
-    !matchesExactLinkage ||
-    !auditRecord.recorded_at ||
-    auditRecord.issue_scope !== state.issueScope ||
-    auditRecord.target_domain !== target.targetDomain ||
-    auditRecord.target_tab_id !== target.targetTabId ||
-    auditRecord.target_page !== target.targetPage ||
-    auditRecord.action_type !== state.actionType ||
-    auditRecord.requested_execution_mode !== state.requestedExecutionMode ||
-    auditRecord.gate_decision !== "allowed"
-  ) {
-    return ["audit_record_present"];
-  }
-  return [];
 };
 
 const hasApprovalRecordConflictingLinkage = (approvalRecord, decisionId) => {
@@ -1873,22 +1845,6 @@ const collectXhsMatrixGateReasons = (input) => {
         liveRequirements.filter((requirement) => requirement.startsWith("approval_record_")),
         approvalRecord
       );
-      const auditRequirementGaps = liveRequirements.includes("audit_record_present")
-        ? resolveXhsAuditRequirementGaps(
-            auditRecord,
-            {
-              decisionId: input.decisionId ?? null,
-              approvalId: input.expectedApprovalId ?? null,
-              runId: input.runId ?? null
-            },
-            state,
-            {
-              targetDomain: input.targetDomain,
-              targetTabId: input.targetTabId,
-              targetPage: input.targetPage
-            }
-          )
-        : [];
       const rolloutRequirementGaps =
         liveRequirements.includes("limited_read_rollout_ready_true") &&
         state.limitedReadRolloutReadyTrue !== true
@@ -1899,9 +1855,6 @@ const collectXhsMatrixGateReasons = (input) => {
       }
       if (approvalRequirementGaps.includes("approval_record_checks_all_true")) {
         pushReason(gateReasons, "APPROVAL_CHECKS_INCOMPLETE");
-      }
-      if (auditRequirementGaps.length > 0) {
-        pushReason(gateReasons, "AUDIT_RECORD_MISSING");
       }
       if (rolloutRequirementGaps.length > 0) {
         pushReason(gateReasons, "LIMITED_READ_ROLLOUT_NOT_READY");

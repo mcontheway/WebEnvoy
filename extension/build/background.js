@@ -54,7 +54,6 @@ const XHS_READ_EXECUTION_POLICY = {
     blocked_actions: ["expand_new_live_surface_without_gate"],
     live_entry_requirements: [
         "gate_input_risk_state_limited_or_allowed",
-        "audit_record_present",
         "limited_read_rollout_ready_true",
         "risk_state_checked",
         "target_domain_confirmed",

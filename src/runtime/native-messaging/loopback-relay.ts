@@ -4,7 +4,6 @@ import { buildLoopbackAuditRecord } from "./loopback-gate-audit.js";
 import { buildLoopbackGatePayload } from "./loopback-gate-payload.js";
 import type { ContentMessage, HostMessage } from "./loopback-messages.js";
 import type { InMemoryPort } from "./loopback-port.js";
-import { resolveIssueScope as resolveSharedIssueScope } from "../../../shared/risk-state.js";
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -14,14 +13,9 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
-const resolveLoopbackIssueScope = (value: unknown): string => resolveSharedIssueScope(value);
-
 const resolveApprovalRecord = (
   options: Record<string, unknown>
 ): Record<string, unknown> | null => asRecord(options.approval_record) ?? asRecord(options.approval);
-
-const resolveAuditRecord = (options: Record<string, unknown>): Record<string, unknown> | null =>
-  asRecord(options.audit_record);
 
 const resolveLoopbackApprovalId = (
   approvalRecord: Record<string, unknown> | null,
@@ -74,26 +68,6 @@ const buildLoopbackGateSeedOptions = (input: {
     };
     nextOptions.approval_record = seededApprovalRecord;
     nextOptions.approval = seededApprovalRecord;
-  }
-  const auditRecord = resolveAuditRecord(input.options);
-  if (auditRecord) {
-    nextOptions.audit_record = {
-      ...auditRecord,
-      decision_id: input.decisionId,
-      approval_id: input.approvalId,
-      issue_scope: resolveLoopbackIssueScope(
-        auditRecord.issue_scope ?? input.options.issue_scope
-      ),
-      target_domain: auditRecord.target_domain ?? input.options.target_domain ?? null,
-      target_tab_id: auditRecord.target_tab_id ?? input.options.target_tab_id ?? null,
-      target_page: auditRecord.target_page ?? input.options.target_page ?? null,
-      action_type: auditRecord.action_type ?? input.options.action_type ?? null,
-      requested_execution_mode:
-        auditRecord.requested_execution_mode ?? input.options.requested_execution_mode ?? null,
-      gate_decision: "allowed",
-      recorded_at:
-        asString(auditRecord.recorded_at) ?? "1970-01-01T00:00:00.000Z"
-    };
   }
   return nextOptions;
 };

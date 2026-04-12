@@ -2697,7 +2697,6 @@ describe("extension service worker / bootstrap and trust", () => {
             {
               action: "live_read_limited",
               requires: expect.arrayContaining([
-                "audit_record_present",
                 "limited_read_rollout_ready_true",
                 "approval_record_approved_true",
                 "approval_record_approver_present",
