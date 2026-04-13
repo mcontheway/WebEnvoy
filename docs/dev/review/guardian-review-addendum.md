@@ -9,6 +9,7 @@
 - 如果存在高概率行为回归、安全风险、关键验证缺失、错误关闭语义或合并元数据不合规，默认给出阻断性结论。
 - 对应 GitHub Issue 已存在时，完整实现闭环使用 `Fixes #...`；Spike、规约、研究或部分完成场景使用 `Refs #...`。
 - findings 必须聚焦可操作的阻断性问题，并附带尽量精确的 diff 内代码位置。
+- 若事项触及跨仓共享契约、跨仓依赖或联合验收，先核对 PR 描述中的 `integration_check`；缺失时不得默认视为本地单仓事项。
 - 真实 Live Evidence 专项门禁只适用于声称完成真实 runtime / 真实页面交互 / 真实 live read-write 闭环，或把 live evidence 作为关闭 issue、判定“已完成”或请求 merge 放行核心依据的 PR。
 - 对 formal spec review PR、live evidence 治理落库/治理维护 PR 与所有落入专项门禁的 PR，先核对 PR 描述中的结构化 `gate_applicability`；缺失时直接阻断，不得回退到标题、路径或 issue 引用 heuristics。
 - 治理相关 lane 只有在 PR 实际变更精确等于 `AGENTS.md`、`docs/dev/AGENTS.md`、`code_review.md`、`docs/dev/review/guardian-review-addendum.md`、`.github/PULL_REQUEST_TEMPLATE.md` 这五处冻结治理目标文件时才成立；五者缺一不可。
@@ -18,3 +19,4 @@
 - 落入专项门禁的 PR 还必须提供完整 `live_evidence_record`；其中 `latest_head_sha`、`run_id`、`evidence_collected_at`、`artifact_identity` 与 `artifact_log_ref` 必须共同指向当前 latest head 的 fresh rerun。
 - latest-head 门禁只以 PR 描述中的 `live_evidence_record` 为准；仓库 formal 文档中的固定样本、历史失败事实或已固化 run 记录，只要未被误写成当前 latest-head gate evidence，就不得被要求逐提交追写当前 PR head SHA。
 - 只有来自 `real_browser` 执行面的最新 live evidence，且能证明真实页面交互或真实闭环结果时，才可作为放行依据；`runtime.ping`、`runtime.bootstrap`、stub/fake host、旧 head/旧 artifact 或 same-head 历史 artifact 默认无效。
+- 若 `integration_check.shared_contract_changed=yes`、`integration_check.external_dependency!=none` 或事项本身要求 `merge_gate=integration_check_required`，reviewer / guardian 还必须确认提 PR 前与合并前都核对过 `integration_ref` 对应状态。

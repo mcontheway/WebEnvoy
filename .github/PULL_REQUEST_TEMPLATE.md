@@ -18,6 +18,23 @@
 - 已执行：
 - 未执行：
 
+## integration_check
+
+- integration_applicable（`yes` / `no`）:
+- integration_ref:
+- shared_contract_changed（`yes` / `no`）:
+- external_dependency（`none` / `syvert` / `webenvoy` / `both`）:
+- contract_surface（`none` / `execution_provider` / `ids_trace` / `errors` / `raw_normalized` / `diagnostics_observability` / `runtime_modes`）:
+- joint_acceptance_needed（`yes` / `no`）:
+- integration_status_checked_before_pr（`yes` / `no`）:
+- integration_status_checked_before_merge（`yes` / `no`）:
+
+补充说明：
+
+- `integration_applicable=yes` 时，`integration_ref` 不得为空。
+- `shared_contract_changed=yes` 或 `external_dependency != none` 时，当前事项 / PR 的 `merge_gate` 必须按 `integration_check_required` 收口。
+- merge 前必须再次核对 `integration_ref` 对应 integration issue / project item 的状态、依赖与联合验收约束。
+
 ## gate_applicability（对 formal spec review PR、live evidence 治理落库/治理维护 PR，以及所有落入真实 live evidence 专项门禁的 PR 必填）
 
 - review_lane（`general_pr` / `formal_spec_review_pr` / `governance_landing_pr` / `governance_maintenance_pr`）:
@@ -78,6 +95,7 @@
 - [ ] 若本 PR 属于 formal spec review PR、live evidence 治理落库/治理维护 PR 或落入真实 live evidence 专项门禁，已补齐 `gate_applicability`
 - [ ] 若本 PR 属于治理相关 lane，已确认 `governance_context_issue_ref`、`review_lane`、精确五文件治理范围与 closing 语义彼此一致，且未混入 FR-0016 formal spec / `docs/dev/specs/FR-0016-live-evidence-governance-gate/TODO.md` 范围
 - [ ] 若本 PR 落入真实 live evidence 专项门禁，已补齐 latest head 的有效 `live_evidence_record`，且未把 stub/fake host、`runtime.ping` 或 `runtime.bootstrap` 误写为真实闭环证据
+- [ ] 若事项触及跨仓共享契约、跨仓依赖或联合验收，PR 描述已补齐 `integration_check`，且提 PR 前与合并前都核对过 `integration_ref`
 - [ ] 如涉及 FR / 架构 / 高风险目录，已补充必要上下文与影响说明
 - [ ] 如涉及正式 spec / 架构规约，已先完成 spec review，且未与实现代码混在同一 PR
 - [ ] 如本 PR 是正式套件起草 / 修订，已补齐 GWT、异常场景、测试策略与 TDD 范围
