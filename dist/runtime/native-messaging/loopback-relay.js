@@ -13,50 +13,6 @@ const XHS_READ_COMMAND_DEFAULT_ABILITY_IDS = {
     "xhs.detail": "xhs.note.detail.v1",
     "xhs.user_home": "xhs.user.home.v1"
 };
-const resolveApprovalRecord = (options) => asRecord(options.approval_record) ?? asRecord(options.approval);
-const resolveLoopbackApprovalId = (approvalRecord, decisionId) => {
-    const checks = asRecord(approvalRecord?.checks);
-    const approvalComplete = approvalRecord?.approved === true &&
-        typeof approvalRecord.approver === "string" &&
-        approvalRecord.approver.trim().length > 0 &&
-        typeof approvalRecord.approved_at === "string" &&
-        approvalRecord.approved_at.trim().length > 0 &&
-        checks?.target_domain_confirmed === true &&
-        checks?.target_tab_confirmed === true &&
-        checks?.target_page_confirmed === true &&
-        checks?.risk_state_checked === true &&
-        checks?.action_type_confirmed === true;
-    if (!approvalComplete) {
-        return null;
-    }
-    const approvalDecisionId = asString(approvalRecord?.decision_id);
-    const approvalId = asString(approvalRecord?.approval_id);
-    if (approvalDecisionId && approvalDecisionId !== decisionId) {
-        return null;
-    }
-    if (approvalId && !approvalDecisionId) {
-        return null;
-    }
-    return approvalId ?? `gate_appr_${decisionId}`;
-};
-const buildLoopbackGateSeedOptions = (input) => {
-    const nextOptions = { ...input.options };
-    const approvalDecisionId = asString(input.approvalRecord?.decision_id);
-    const existingApprovalId = asString(input.approvalRecord?.approval_id);
-    const canSeedApprovalRecord = input.approvalRecord &&
-        (!approvalDecisionId || approvalDecisionId === input.decisionId) &&
-        (!existingApprovalId || approvalDecisionId === input.decisionId);
-    if (canSeedApprovalRecord) {
-        const seededApprovalRecord = {
-            ...input.approvalRecord,
-            decision_id: input.decisionId,
-            ...(input.approvalId ? { approval_id: input.approvalId } : {})
-        };
-        nextOptions.approval_record = seededApprovalRecord;
-        nextOptions.approval = seededApprovalRecord;
-    }
-    return nextOptions;
-};
 const mergeGateArtifactsIntoCommandParams = (commandParams, gatePayload) => {
     if (!gatePayload) {
         return commandParams;
@@ -159,7 +115,6 @@ export class InMemoryBackgroundRelay {
                 const options = typeof commandParams.options === "object" && commandParams.options !== null
                     ? commandParams.options
                     : {};
-                const approvalRecord = resolveApprovalRecord(options);
                 const decisionId = resolveXhsGateDecisionId({
                     runId,
                     requestId: request.id,
@@ -168,18 +123,11 @@ export class InMemoryBackgroundRelay {
                     issueScope: options.issue_scope,
                     requestedExecutionMode: options.requested_execution_mode
                 });
-                const approvalId = resolveLoopbackApprovalId(approvalRecord, decisionId);
-                const gate = buildLoopbackGate(buildLoopbackGateSeedOptions({
-                    options,
-                    decisionId,
-                    approvalId,
-                    approvalRecord
-                }), asString(ability.action), {
+                const gate = buildLoopbackGate(options, asString(ability.action), {
                     runId,
                     sessionId,
                     gateInvocationId: asString(commandParams.gate_invocation_id) ?? undefined,
-                    decisionId,
-                    approvalId: approvalId ?? undefined
+                    decisionId
                 });
                 const auditRecord = buildLoopbackAuditRecord({
                     runId,

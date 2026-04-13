@@ -3831,6 +3831,8 @@ class ChromeBackgroundBridge {
     });
     writeGateOnlyEligible = matrixResolution.writeGateOnlyEligible;
     writeGateOnlyApprovalDecision = matrixResolution.writeGateOnlyApprovalDecision;
+    const canonicalApprovalRecord = matrixResolution.approvalRecord;
+    const canonicalAdmissionContext = matrixResolution.admissionContext;
 
     if (gateReasons.length === 0 && targetDomain && targetTabId !== null && targetPage) {
       const trustedEntry = this.#resolveTrustedFingerprintContext(request);
@@ -3967,8 +3969,8 @@ class ChromeBackgroundBridge {
       effective_execution_mode: resolvedEffectiveExecutionMode,
       gate_decision: gateDecision,
       gate_reasons: finalizedGate.gateReasons,
-      approver: approvalRecord.approver,
-      approved_at: approvalRecord.approved_at,
+      approver: canonicalApprovalRecord.approver,
+      approved_at: canonicalApprovalRecord.approved_at,
       write_interaction_tier: gateState.writeActionMatrixDecisions?.write_interaction_tier ?? null,
       write_matrix_decision: gateState.writeMatrixDecision?.decision ?? null,
       recorded_at: recordedAt
@@ -3981,7 +3983,7 @@ class ChromeBackgroundBridge {
       decision: gateDecision,
       gateReasons: finalizedGate.gateReasons,
       requestedExecutionMode,
-      approvalRecord,
+      approvalRecord: canonicalApprovalRecord,
       auditRecords: [gateAuditSeed],
       now: gateAuditSeed.recorded_at
     });
@@ -4003,8 +4005,8 @@ class ChromeBackgroundBridge {
       fingerprintGateDecision,
       fingerprintExecution,
       consumerGateResult,
-      approvalRecord,
-      admissionContext: boundAdmissionContext,
+      approvalRecord: canonicalApprovalRecord,
+      admissionContext: canonicalAdmissionContext as unknown as Record<string, unknown> | null,
       writeActionMatrixDecisions: gateState.writeActionMatrixDecisions,
       writeMatrixDecision: gateState.writeMatrixDecision,
       writeGateOnlyDecision: writeGateOnlyApprovalDecision,

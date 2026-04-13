@@ -1476,8 +1476,8 @@ describe("extension background relay contract / target binding and editor input"
         },
         approval_record: {
           approved: true,
-          approver: "reviewer-a",
-          approved_at: "2026-03-23T08:00:00Z"
+          approver: "qa-reviewer",
+          approved_at: "2026-03-23T10:00:00Z"
         },
         audit_record: {
           run_id: "run-xhs-live-allowed-001",
@@ -1492,8 +1492,8 @@ describe("extension background relay contract / target binding and editor input"
           effective_execution_mode: "live_read_high_risk",
           gate_decision: "allowed",
           gate_reasons: ["LIVE_MODE_APPROVED"],
-          approver: "reviewer-a",
-          approved_at: "2026-03-23T08:00:00Z",
+          approver: "qa-reviewer",
+          approved_at: "2026-03-23T10:00:00Z",
           risk_signal: false,
           recovery_signal: false,
           session_rhythm_state: "normal",

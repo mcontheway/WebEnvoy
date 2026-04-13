@@ -11,6 +11,7 @@ const copies = [
   ["shared/xhs-gate.js", "extension/shared/xhs-gate.js"],
   ["shared/issue209-live-read/identity.js", "extension/shared/issue209-live-read/identity.js"],
   ["shared/issue209-live-read/admission.js", "extension/shared/issue209-live-read/admission.js"],
+  ["shared/issue209-live-read/source.js", "extension/shared/issue209-live-read/source.js"],
   ["shared/issue209-live-read/gate.js", "extension/shared/issue209-live-read/gate.js"],
   [
     "shared/issue209-live-read/postgate-audit.js",

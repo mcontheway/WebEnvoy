@@ -41,6 +41,7 @@ const buildContentScriptBundle = async () => {
   const issue209AdmissionSource = await readSource(
     join(sharedRoot, "issue209-live-read", "admission.js")
   );
+  const issue209SourceSource = await readSource(join(sharedRoot, "issue209-live-read", "source.js"));
   const issue209IdentitySource = await readSource(
     join(sharedRoot, "issue209-live-read", "identity.js")
   );
@@ -117,19 +118,47 @@ const buildContentScriptBundle = async () => {
     ]
   });
 
+  const issue209SourceModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_issue209_source",
+    prelude: [
+      "const { APPROVAL_CHECK_KEYS } = __webenvoy_module_risk_state;",
+      "const {",
+      "  resolveIssue209LiveReadApprovalId,",
+      "  resolveIssue209LiveReadDecisionId",
+      "} = __webenvoy_module_issue209_identity;"
+    ].join("\n"),
+    sourceBody: issue209SourceSource,
+    exports: [
+      "APPROVAL_CHECK_KEYS",
+      "cloneIssue209AdmissionContext",
+      "normalizeApprovalAdmissionEvidence",
+      "normalizeAuditAdmissionEvidence",
+      "normalizeProvidedApprovalSource",
+      "normalizeProvidedAuditSource",
+      "prepareIssue209LiveReadSource"
+    ]
+  });
+
   const issue209GateModule = renderClassicModule({
     moduleVar: "__webenvoy_module_issue209_gate",
     prelude: [
       "const { APPROVAL_CHECK_KEYS } = __webenvoy_module_risk_state;",
-      "const { cloneIssue209AdmissionContext } = __webenvoy_module_issue209_admission;"
+      "const { cloneIssue209AdmissionContext } = __webenvoy_module_issue209_admission;",
+      "const { normalizeProvidedApprovalSource } = __webenvoy_module_issue209_source;"
     ].join("\n"),
     sourceBody: issue209GateSource,
-    exports: ["buildIssue209ApprovalRecord", "collectIssue209LiveReadMatrixGateReasons"]
+    exports: [
+      "validateIssue209ApprovalSourceAgainstCurrentLinkage",
+      "collectIssue209LiveReadMatrixGateReasons"
+    ]
   });
 
   const issue209PostGateAuditModule = renderClassicModule({
     moduleVar: "__webenvoy_module_issue209_postgate_audit",
-    prelude: "const { buildRiskTransitionAudit } = __webenvoy_module_risk_state;",
+    prelude: [
+      "const { buildRiskTransitionAudit } = __webenvoy_module_risk_state;",
+      "const { resolveIssue209LiveReadApprovalId } = __webenvoy_module_issue209_identity;"
+    ].join("\n"),
     sourceBody: issue209PostGateAuditSource,
     exports: ["buildIssue209PostGateArtifacts"]
   });
@@ -396,6 +425,7 @@ const buildContentScriptBundle = async () => {
     fingerprintModule,
     issue209AdmissionModule,
     issue209IdentityModule,
+    issue209SourceModule,
     issue209GateModule,
     issue209PostGateAuditModule,
     sharedXhsGateModule,

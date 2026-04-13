@@ -878,6 +878,8 @@ const collectXhsMatrixGateReasons = (input) => {
       expectedApprovalId: input.expectedApprovalId ?? null,
       runId: input.runId ?? null,
       sessionId: input.sessionId ?? null,
+      approvalRecord: input.approvalRecord,
+      auditRecord: input.auditRecord,
       admissionContext: input.admissionContext,
       targetDomain: input.targetDomain,
       targetTabId: input.targetTabId,

@@ -79,13 +79,15 @@ export const createAuditRecord = (context, gate, env) => {
     if (gate.gate_input.issue_scope === "issue_209" &&
         (gate.consumer_gate_result.requested_execution_mode === "live_read_limited" ||
             gate.consumer_gate_result.requested_execution_mode === "live_read_high_risk")) {
-        return buildIssue209PostGateArtifacts({
+        const artifacts = buildIssue209PostGateArtifacts({
             runId: context.runId,
             sessionId: context.sessionId,
             profile: context.profile,
             gate: gate,
             now: () => env.now()
-        }).audit_record;
+        });
+        gate.approval_record = artifacts.approval_record;
+        return artifacts.audit_record;
     }
     const recordedAt = new Date(env.now()).toISOString();
     const requestedMode = gate.consumer_gate_result.requested_execution_mode;

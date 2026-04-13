@@ -3,7 +3,7 @@ export const buildLoopbackAuditRecord = (input) => {
     if (input.gate.gateInput.issue_scope === "issue_209" &&
         (input.gate.consumerGateResult.requested_execution_mode === "live_read_limited" ||
             input.gate.consumerGateResult.requested_execution_mode === "live_read_high_risk")) {
-        return buildIssue209PostGateArtifacts({
+        const artifacts = buildIssue209PostGateArtifacts({
             runId: input.runId,
             sessionId: input.sessionId,
             profile: input.profile,
@@ -15,7 +15,9 @@ export const buildLoopbackAuditRecord = (input) => {
                 write_action_matrix_decisions: input.gate.writeActionMatrixDecisions
             },
             now: () => new Date("2026-03-23T10:00:00.000Z").getTime()
-        }).audit_record;
+        });
+        input.gate.approvalRecord = structuredClone(artifacts.approval_record);
+        return artifacts.audit_record;
     }
     const clone = (value) => structuredClone(value);
     const decisionId = String(input.gate.gateOutcome.decision_id ?? `gate_decision_${input.runId}`);

@@ -1,4 +1,5 @@
 import { buildRiskTransitionAudit } from "../risk-state.js";
+import { resolveIssue209LiveReadApprovalId } from "./identity.js";
 
 const clone = (value) => structuredClone(value);
 
@@ -10,10 +11,12 @@ const buildIssue209PostGateArtifacts = (input) => {
   const recordedAt = new Date(nowValue).toISOString();
   const gate = input.gate;
   const requestedMode = gate.consumer_gate_result.requested_execution_mode;
+  const effectiveMode = gate.consumer_gate_result.effective_execution_mode;
   const liveModeRequested =
-    requestedMode === "live_read_limited" ||
-    requestedMode === "live_read_high_risk" ||
-    requestedMode === "live_write";
+    requestedMode === "live_read_limited" || requestedMode === "live_read_high_risk";
+  const approvalIssued =
+    gate.consumer_gate_result.gate_decision === "allowed" &&
+    (effectiveMode === "live_read_limited" || effectiveMode === "live_read_high_risk");
   const riskSignal = gate.consumer_gate_result.gate_decision === "blocked" && liveModeRequested;
   const recoverySignal =
     gate.consumer_gate_result.gate_decision === "allowed" &&
@@ -21,13 +24,19 @@ const buildIssue209PostGateArtifacts = (input) => {
     liveModeRequested;
 
   const approvalRecord = clone(gate.approval_record);
-  approvalRecord.decision_id = gate.gate_outcome.decision_id;
-  approvalRecord.approval_id = gate.approval_record.approval_id ?? null;
+  const decisionId = gate.gate_outcome.decision_id;
+  const approvalId = approvalIssued
+    ? asString(gate.gate_outcome.approval_id) ??
+      asString(gate.approval_record.approval_id) ??
+      resolveIssue209LiveReadApprovalId({ decisionId })
+    : null;
+  approvalRecord.decision_id = decisionId;
+  approvalRecord.approval_id = approvalId;
 
   const auditRecord = {
-    event_id: `gate_evt_${gate.gate_outcome.decision_id}`,
-    decision_id: gate.gate_outcome.decision_id,
-    approval_id: approvalRecord.approval_id,
+    event_id: `gate_evt_${decisionId}`,
+    decision_id: decisionId,
+    approval_id: approvalId,
     run_id: input.runId,
     session_id: input.sessionId,
     profile: input.profile,

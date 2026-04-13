@@ -17,7 +17,7 @@ export const buildLoopbackAuditRecord = (input: {
     (input.gate.consumerGateResult.requested_execution_mode === "live_read_limited" ||
       input.gate.consumerGateResult.requested_execution_mode === "live_read_high_risk")
   ) {
-    return buildIssue209PostGateArtifacts({
+    const artifacts = buildIssue209PostGateArtifacts({
       runId: input.runId,
       sessionId: input.sessionId,
       profile: input.profile,
@@ -29,7 +29,11 @@ export const buildLoopbackAuditRecord = (input: {
         write_action_matrix_decisions: input.gate.writeActionMatrixDecisions
       } as unknown as Parameters<typeof buildIssue209PostGateArtifacts>[0]["gate"],
       now: () => new Date("2026-03-23T10:00:00.000Z").getTime()
-    }).audit_record;
+    });
+    input.gate.approvalRecord = structuredClone(
+      artifacts.approval_record
+    ) as unknown as Record<string, unknown>;
+    return artifacts.audit_record;
   }
 
   const clone = <T>(value: T): T => structuredClone(value);
