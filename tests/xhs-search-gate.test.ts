@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { evaluateXhsGateCore } from "../shared/xhs-gate.js";
 import { resolveActualTargetGateReasons, resolveGate } from "../extension/xhs-search-gate.js";
+import {
+  validateIssue209AuditSourceAgainstCurrentLinkage
+} from "../shared/issue209-live-read/source-validation.js";
 
 const createAdmissionContext = (input?: {
   run_id?: string;
@@ -85,13 +88,25 @@ const createApprovalRecord = (decisionId: string, approvalId: string) => ({
   }
 });
 
-const createAuditRecord = (input: {
+type AuditRecordOptions = {
   decisionId: string;
   approvalId: string;
   targetTabId: number;
   targetPage: string;
   requestedExecutionMode: "live_read_high_risk" | "live_read_limited";
-}) => ({
+  auditedChecks?: Record<string, boolean>;
+  overrides?: Record<string, unknown>;
+};
+
+const defaultAuditChecks = {
+  target_domain_confirmed: true,
+  target_tab_confirmed: true,
+  target_page_confirmed: true,
+  risk_state_checked: true,
+  action_type_confirmed: true
+};
+
+const createAuditRecord = (input: AuditRecordOptions) => ({
   event_id: `audit-${input.decisionId}`,
   decision_id: input.decisionId,
   approval_id: input.approvalId,
@@ -102,7 +117,9 @@ const createAuditRecord = (input: {
   action_type: "read",
   requested_execution_mode: input.requestedExecutionMode,
   gate_decision: "allowed",
-  recorded_at: "2026-03-23T10:00:30.000Z"
+  audited_checks: input.auditedChecks ?? defaultAuditChecks,
+  recorded_at: "2026-03-23T10:00:30.000Z",
+  ...input.overrides
 });
 
 const createIssue209InvocationLinkage = (runId: string, suffix: string) => {
@@ -110,6 +127,26 @@ const createIssue209InvocationLinkage = (runId: string, suffix: string) => {
   const decisionId = `gate_decision_${gateInvocationId}`;
   const approvalId = `gate_appr_${decisionId}`;
   return { gateInvocationId, decisionId, approvalId };
+};
+
+const buildAuditValidationContext = () => {
+  const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+    "run-extension-audit-validation-001",
+    "audit-validation-001"
+  );
+  return {
+    commandRequestId: "issue209-live-req-1",
+    gateInvocationId,
+    decisionId,
+    approvalId,
+    issueScope: "issue_209",
+    targetDomain: "www.xiaohongshu.com",
+    targetTabId: 12,
+    targetPage: "search_result_tab",
+    actionType: "read",
+    requestedExecutionMode: "live_read_high_risk",
+    riskState: "allowed"
+  };
 };
 
 describe("xhs-search gate helpers", () => {
@@ -393,6 +430,7 @@ describe("xhs-search gate helpers", () => {
       expect.arrayContaining(["MANUAL_CONFIRMATION_MISSING", "AUDIT_RECORD_MISSING"])
     );
   });
+
 
   it("keeps gate decision IDs unique per run even when caller reuses request_id", () => {
     const firstGate = resolveGate(
@@ -1046,6 +1084,63 @@ describe("xhs-search gate helpers", () => {
         }
       })
     ).not.toThrow();
+  });
+
+  describe("issue_209 audit source validation", () => {
+    it("rejects audit sources with mismatched linkage", () => {
+      const current = buildAuditValidationContext();
+      const { auditRequirementGaps, isValid } = validateIssue209AuditSourceAgainstCurrentLinkage({
+        current,
+        auditSource: {
+          event_id: "audit-linkage-validation",
+          decision_id: "gate_decision_stale",
+          approval_id: "gate_appr_stale",
+          issue_scope: current.issueScope,
+          target_domain: current.targetDomain,
+          target_tab_id: current.targetTabId,
+          target_page: current.targetPage,
+          action_type: current.actionType,
+          requested_execution_mode: current.requestedExecutionMode,
+          risk_state: current.riskState,
+          gate_decision: "allowed",
+          audited_checks: defaultAuditChecks,
+          recorded_at: "2026-03-23T10:00:30.000Z",
+          request_id: current.commandRequestId
+        },
+        requestIdWasExplicit: true
+      });
+
+      expect(isValid).toBe(false);
+      expect(auditRequirementGaps).toEqual(
+        expect.arrayContaining(["audit_record_linkage_invalid"])
+      );
+    });
+
+    it("rejects audit sources missing audited checks", () => {
+      const current = buildAuditValidationContext();
+      const { auditRequirementGaps, isValid } = validateIssue209AuditSourceAgainstCurrentLinkage({
+        current,
+        auditSource: {
+          event_id: "audit-missing-checks-validation",
+          decision_id: current.decisionId,
+          approval_id: current.approvalId,
+          issue_scope: current.issueScope,
+          target_domain: current.targetDomain,
+          target_tab_id: current.targetTabId,
+          target_page: current.targetPage,
+          action_type: current.actionType,
+          requested_execution_mode: current.requestedExecutionMode,
+          risk_state: current.riskState,
+          gate_decision: "allowed",
+          recorded_at: "2026-03-23T10:00:30.000Z",
+          request_id: current.commandRequestId
+        },
+        requestIdWasExplicit: true
+      });
+
+      expect(isValid).toBe(false);
+      expect(auditRequirementGaps).toEqual(expect.arrayContaining(["audit_record_checks_all_true"]));
+    });
   });
 
 });

@@ -370,6 +370,105 @@ describe("native messaging legacy loopback runtime", () => {
     );
   });
 
+  it("blocks loopback live read when audit_record linkage mismatches", async () => {
+    const runId = "run-loopback-audit-linkage-mismatch-001";
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      runId,
+      "audit-linkage-mismatch-001"
+    );
+    const bridge = new NativeMessagingBridge({
+      transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
+    });
+
+    const result = await bridge.runCommand({
+      runId,
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "xhs.search",
+      params: {
+        request_id: "issue209-live-audit-linkage-mismatch-001",
+        gate_invocation_id: gateInvocationId,
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          simulate_result: "success",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 33,
+          target_page: "search_result_tab",
+          issue_scope: "issue_209",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: {
+            approval_id: approvalId,
+            decision_id: decisionId,
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          },
+          audit_record: {
+            event_id: `audit-${decisionId}`,
+            decision_id: "gate_decision_mismatch",
+            approval_id: "gate_appr_mismatch",
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 33,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_high_risk",
+            gate_decision: "allowed",
+            recorded_at: "2026-03-23T10:00:30Z",
+            audited_checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          },
+          admission_context: createApprovedReadAdmissionContext({
+            runId,
+            requestId: "issue209-live-audit-linkage-mismatch-001",
+            requestedExecutionMode: "live_read_high_risk",
+            riskState: "allowed"
+          })
+        }
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.payload).toEqual(
+      expect.objectContaining({
+        gate_outcome: expect.objectContaining({
+          decision_id: decisionId,
+          gate_decision: "blocked",
+          gate_reasons: expect.arrayContaining(["AUDIT_RECORD_MISSING"])
+        }),
+        approval_record: expect.objectContaining({
+          approval_id: null,
+          decision_id: decisionId
+        }),
+        audit_record: expect.objectContaining({
+          approval_id: null,
+          decision_id: decisionId
+        })
+      })
+    );
+  });
+
   it("preserves provided invocation linkage when caller retries without request_id", async () => {
     const runId = "run-loopback-live-limited-retry-001";
     const requestId = "issue209-live-limited-retry-001";

@@ -49,6 +49,9 @@ const buildContentScriptBundle = async () => {
   const issue209PostGateAuditSource = await readSource(
     join(sharedRoot, "issue209-live-read", "postgate-audit.js")
   );
+  const issue209SourceValidationSource = await readSource(
+    join(sharedRoot, "issue209-live-read", "source-validation.js")
+  );
   const sharedXhsGateSource = await readSource(join(sharedRoot, "xhs-gate.js"));
   const xhsSearchTypesSource = await readSource(join(buildRoot, "xhs-search-types.js"));
   const xhsSearchTelemetrySource = await readSource(join(buildRoot, "xhs-search-telemetry.js"));
@@ -144,12 +147,32 @@ const buildContentScriptBundle = async () => {
     prelude: [
       "const { APPROVAL_CHECK_KEYS } = __webenvoy_module_risk_state;",
       "const { cloneIssue209AdmissionContext } = __webenvoy_module_issue209_admission;",
-      "const { normalizeProvidedApprovalSource } = __webenvoy_module_issue209_source;"
+      "const { normalizeProvidedApprovalSource } = __webenvoy_module_issue209_source;",
+      "const {",
+      "  validateIssue209ApprovalSourceAgainstCurrentLinkage,",
+      "  validateIssue209AuditSourceAgainstCurrentLinkage",
+      "} = __webenvoy_module_issue209_source_validation;"
     ].join("\n"),
     sourceBody: issue209GateSource,
     exports: [
       "validateIssue209ApprovalSourceAgainstCurrentLinkage",
       "collectIssue209LiveReadMatrixGateReasons"
+    ]
+  });
+
+  const issue209SourceValidationModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_issue209_source_validation",
+    prelude: [
+      "const { APPROVAL_CHECK_KEYS } = __webenvoy_module_risk_state;",
+      "const {",
+      "  normalizeProvidedApprovalSource,",
+      "  normalizeProvidedAuditSource",
+      "} = __webenvoy_module_issue209_source;"
+    ].join("\n"),
+    sourceBody: issue209SourceValidationSource,
+    exports: [
+      "validateIssue209ApprovalSourceAgainstCurrentLinkage",
+      "validateIssue209AuditSourceAgainstCurrentLinkage"
     ]
   });
 
@@ -426,6 +449,7 @@ const buildContentScriptBundle = async () => {
     issue209AdmissionModule,
     issue209IdentityModule,
     issue209SourceModule,
+    issue209SourceValidationModule,
     issue209GateModule,
     issue209PostGateAuditModule,
     sharedXhsGateModule,

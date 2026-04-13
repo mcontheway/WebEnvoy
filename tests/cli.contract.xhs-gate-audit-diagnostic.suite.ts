@@ -2098,6 +2098,77 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  it("blocks live_read_high_risk when caller audit_record lacks audited_checks", () => {
+    const runId = "run-issue209-live-high-risk-audit-checks-missing-001";
+    const requestId = "issue209-live-high-risk-audit-checks-missing-001";
+    const gateInvocationId = `issue209-gate-${runId}-001`;
+    const auditRecord = createAllowedHighRiskAuditRecord({
+      decision_id: "gate_decision_mismatch",
+      approval_id: "gate_appr_mismatch",
+      request_id: requestId
+    });
+
+    const result = runCli(
+      [
+        "xhs.search",
+        "--profile",
+        "xhs_account_001",
+        "--run-id",
+        runId,
+        "--params",
+        JSON.stringify({
+          request_id: requestId,
+          gate_invocation_id: gateInvocationId,
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            ...scopedReadGateOptions,
+            issue_scope: "issue_209",
+            action_type: "read",
+            requested_execution_mode: "live_read_high_risk",
+            risk_state: "allowed",
+            simulate_result: "success",
+            approval_record: {
+              approved: true,
+              approver: "qa-reviewer",
+              approved_at: "2026-03-23T10:00:00Z",
+              checks: {
+                target_domain_confirmed: true,
+                target_tab_confirmed: true,
+                target_page_confirmed: true,
+                risk_state_checked: true,
+                action_type_confirmed: true
+              }
+            },
+            audit_record: auditRecord
+          }
+        })
+      ],
+      repoRoot,
+      {
+        WEBENVOY_NATIVE_TRANSPORT: "loopback"
+      }
+    );
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    const errorDetails = body.error.details as Record<string, unknown>;
+    const gateOutcome = errorDetails.gate_outcome as Record<string, unknown>;
+    expect(gateOutcome).toMatchObject({
+      gate_decision: "blocked",
+      effective_execution_mode: "dry_run"
+    });
+    expect(gateOutcome.gate_reasons as string[]).toEqual(
+      expect.arrayContaining(["AUDIT_RECORD_MISSING"])
+    );
+  });
+
   it("allows formal admission_context without internal linkage and derives current linkage from gate_invocation_id", () => {
     const runId = "run-issue209-live-limited-existing-admission-001";
     const requestId = "issue209-live-existing-admission-001";
