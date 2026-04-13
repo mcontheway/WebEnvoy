@@ -48,11 +48,14 @@ docs/dev/
 
 - 默认执行真相源仍是当前仓库 project；只有当事项触及跨仓共享契约、跨仓依赖或联合验收时，才查看 owner 级 integration project。
 - 每个进入执行回合的事项在 GitHub 侧都必须补齐：
+  - `integration_applicable`
   - `integration_touchpoint`
   - `integration_ref`
   - `external_dependency`
   - `merge_gate`
   - `contract_surface`
+  - `joint_acceptance_needed`
+- `integration_applicable=no` 时，`integration_ref` 必须写 `none`；`integration_applicable=yes` 时，`integration_ref` 必须指向具体 integration issue / project item。
 - `integration_ref` 必须指向可核查的具体 integration issue / project item；只写 owner 级 project 根链接不算合法绑定。
 - 满足以下任一条件时，`integration_touchpoint` 不得为 `none`，并且进入实现前必须先查看 `integration_ref` 对应状态：
   - 改共享输入输出

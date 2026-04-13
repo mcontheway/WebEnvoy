@@ -274,7 +274,7 @@ Findings 的写法要求：
 - 对普通或高风险 PR，已基于最新 head 成功执行本地 `scripts/pr-guardian.sh review <pr-number>`，且未出现新的阻断项
 - 若 PR head、目标基线或 Required Checks 状态发生变化，必须重新执行受影响的本地审查或验证
 - 若 PR 属于 formal spec review PR、治理落库/治理维护 PR 或落入“真实 Live Evidence 专项门禁”，PR 描述中的 `gate_applicability` 必须完整且与 PR 实际职责一致
-- 若事项触及跨仓共享契约、跨仓依赖或联合验收，PR 描述中的 `integration_check` 必须完整且与事项实际职责一致
+- 若事项触及跨仓共享契约、跨仓依赖、联合验收，或当前 PR 只改 integration gate / review 语义，PR 描述中的 `integration_check` 必须完整且与事项实际职责一致
 - 若 PR 属于 `governance_landing_pr`，formal spec review 必须已通过；未通过前必须保留 `spec_review_not_completed` 阻断，不得因为 `live_evidence_record=N/A` 或 `in_scope=false` 提前放行
 - 若 PR 落入“真实 Live Evidence 专项门禁”，PR 描述中的 `live_evidence_record` 必须与 latest head 对齐，且 reviewer / guardian 已确认不存在 evidence 缺失、证据失效、来源错误或闭环信号不足
 - 若事项要求 `merge_gate=integration_check_required`，或 `joint_acceptance_needed=yes`，reviewer / guardian 还必须确认提 PR 前与合并前都核对过 `integration_ref` 对应状态
