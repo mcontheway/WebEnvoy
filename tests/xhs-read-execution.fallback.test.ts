@@ -38,13 +38,11 @@ const createApprovedReadAdmissionContext = (input: {
   riskState?: "allowed" | "limited";
 }) => {
   const requestId = input.requestId;
-  const decisionId = requestId ? `gate_decision_${input.runId}_${requestId}` : `gate_decision_${input.runId}`;
-  const approvalId = `gate_appr_${decisionId}`;
+  const refSuffix = requestId ? `${input.runId}_${requestId}` : input.runId;
   return ({
   approval_admission_evidence: {
-    approval_admission_ref: approvalId,
-    decision_id: decisionId,
-    approval_id: approvalId,
+    approval_admission_ref: `approval_admission_${refSuffix}`,
+    ...(requestId ? { request_id: requestId } : {}),
     run_id: input.runId,
     session_id: "nm-session-001",
     issue_scope: "issue_209",
@@ -66,9 +64,8 @@ const createApprovedReadAdmissionContext = (input: {
     recorded_at: "2026-03-23T10:00:00Z"
   },
   audit_admission_evidence: {
-    audit_admission_ref: `gate_evt_${decisionId}`,
-    decision_id: decisionId,
-    approval_id: approvalId,
+    audit_admission_ref: `audit_admission_${refSuffix}`,
+    ...(requestId ? { request_id: requestId } : {}),
     run_id: input.runId,
     session_id: "nm-session-001",
     issue_scope: "issue_209",

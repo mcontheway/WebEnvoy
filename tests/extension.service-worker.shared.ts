@@ -389,14 +389,15 @@ export const createApprovedReadAdmissionContext = (overrides?: {
 }) => {
   const runId = overrides?.run_id ?? "run-sw-001";
   const requestId = overrides?.request_id;
-  const decisionId = overrides?.decision_id ?? (requestId ? `gate_decision_${runId}_${requestId}` : `gate_decision_${runId}`);
-  const approvalId = overrides?.approval_id ?? `gate_appr_${decisionId}`;
+  const decisionId = overrides?.decision_id;
+  const approvalId = overrides?.approval_id;
+  const refSuffix = requestId ? `${runId}_${requestId}` : runId;
 
   return {
   approval_admission_evidence: {
-    approval_admission_ref: approvalId,
-    decision_id: decisionId,
-    approval_id: approvalId,
+    approval_admission_ref: `approval_admission_${refSuffix}`,
+    ...(decisionId ? { decision_id: decisionId } : {}),
+    ...(approvalId ? { approval_id: approvalId } : {}),
     ...(requestId ? { request_id: requestId } : {}),
     run_id: runId,
     session_id: overrides?.session_id ?? "nm-session-001",
@@ -419,9 +420,9 @@ export const createApprovedReadAdmissionContext = (overrides?: {
     recorded_at: "2026-03-23T10:00:00Z"
   },
   audit_admission_evidence: {
-    audit_admission_ref: `gate_evt_${decisionId}`,
-    decision_id: decisionId,
-    approval_id: approvalId,
+    audit_admission_ref: `audit_admission_${refSuffix}`,
+    ...(decisionId ? { decision_id: decisionId } : {}),
+    ...(approvalId ? { approval_id: approvalId } : {}),
     ...(requestId ? { request_id: requestId } : {}),
     run_id: runId,
     session_id: overrides?.session_id ?? "nm-session-001",

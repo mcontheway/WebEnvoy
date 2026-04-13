@@ -2004,18 +2004,99 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  it("ignores stale caller audit_record when admission_context already matches the current request", () => {
+    const runId = "run-issue209-live-limited-stale-audit-001";
+    const requestId = "issue209-live-stale-audit-001";
+    const decisionId = `gate_decision_${runId}_${requestId}`;
+    const approvalId = `gate_appr_${decisionId}`;
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "xhs_account_001",
+      "--run-id",
+      runId,
+      "--params",
+      JSON.stringify({
+        request_id: requestId,
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          ...scopedReadGateOptions,
+          simulate_result: "success",
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          limited_read_rollout_ready_true: true,
+          fingerprint_context: createLoopbackFingerprintContext(),
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          },
+          admission_context: createApprovedReadAdmissionContext({
+            runId,
+            requestId,
+            requestedExecutionMode: "live_read_limited",
+            riskState: "limited"
+          }),
+          audit_record: {
+            event_id: "gate_evt_issue209-live-limited-previous-001",
+            decision_id: "gate_decision_issue209-live-limited-previous-001",
+            approval_id: "gate_appr_gate_decision_issue209-live-limited-previous-001",
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_limited",
+            gate_decision: "allowed",
+            recorded_at: "2026-03-23T10:00:30Z"
+          }
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(String(body.summary.gate_outcome.decision_id)).toBe(decisionId);
+    expect(body.summary.gate_outcome).toMatchObject({
+      effective_execution_mode: "live_read_limited",
+      gate_decision: "allowed",
+      gate_reasons: ["LIVE_MODE_APPROVED"]
+    });
+    expect(body.summary.approval_record).toMatchObject({
+      decision_id: decisionId,
+      approval_id: approvalId
+    });
+    expect(body.summary.audit_record).toMatchObject({
+      decision_id: decisionId,
+      approval_id: approvalId,
+      gate_decision: "allowed"
+    });
+  });
+
   it("relinks live gate linkage by recovered request_id when admission_context omits invocation identity", () => {
     const runId = "run-issue209-live-limited-existing-admission-001";
     const requestId = "issue209-live-existing-admission-001";
-    const staleDecisionId = "gate_decision_issue209-gate-run-issue209-live-limited-existing-admission-001-001";
-    const staleApprovalId = `gate_appr_${staleDecisionId}`;
     const decisionId = `gate_decision_${runId}_${requestId}`;
     const approvalId = `gate_appr_${decisionId}`;
     const admissionContext = createApprovedReadAdmissionContext({
       runId,
       requestId,
-      decisionId: staleDecisionId,
-      approvalId: staleApprovalId,
       requestedExecutionMode: "live_read_limited",
       riskState: "limited"
     });
@@ -2079,10 +2160,12 @@ process.stdin.on("data", (chunk) => {
     });
     expect(body.summary.gate_input.admission_context).toMatchObject({
       approval_admission_evidence: {
-        decision_id: staleDecisionId
+        decision_id: null,
+        approval_id: null
       },
       audit_admission_evidence: {
-        decision_id: staleDecisionId
+        decision_id: null,
+        approval_id: null
       }
     });
   });

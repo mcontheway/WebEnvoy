@@ -131,15 +131,12 @@ const createApprovedReadAdmissionContext = (linkage: {
   requestId: string;
   commandRequestId?: string;
 }) => {
-  const decisionId = linkage.commandRequestId
-    ? `gate_decision_${linkage.runId}_${linkage.commandRequestId}`
-    : `gate_decision_${linkage.runId}`;
-  const approvalId = `gate_appr_${decisionId}`;
+  const requestId = linkage.commandRequestId ?? linkage.requestId;
+  const refSuffix = requestId ? `${linkage.runId}_${requestId}` : linkage.runId;
   return ({
   approval_admission_evidence: {
-    approval_admission_ref: approvalId,
-    decision_id: decisionId,
-    approval_id: approvalId,
+    approval_admission_ref: `approval_admission_${refSuffix}`,
+    ...(requestId ? { request_id: requestId } : {}),
     run_id: linkage.runId,
     session_id: "nm-session-001",
     issue_scope: "issue_209",
@@ -161,9 +158,8 @@ const createApprovedReadAdmissionContext = (linkage: {
     recorded_at: "2026-03-23T10:00:00Z"
   },
   audit_admission_evidence: {
-    audit_admission_ref: `gate_evt_${decisionId}`,
-    decision_id: decisionId,
-    approval_id: approvalId,
+    audit_admission_ref: `audit_admission_${refSuffix}`,
+    ...(requestId ? { request_id: requestId } : {}),
     run_id: linkage.runId,
     session_id: "nm-session-001",
     issue_scope: "issue_209",

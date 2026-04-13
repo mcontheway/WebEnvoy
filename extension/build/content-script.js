@@ -1255,6 +1255,8 @@ const pushReason = (target, reason) => {
   }
 };
 
+const hasOwnNonNullValue = (record, key) => Object.prototype.hasOwnProperty.call(record, key) && record[key] !== null;
+
 const resolveXhsActionType = (value) =>
   typeof value === "string" && XHS_ACTION_TYPES.has(value) ? value : null;
 
@@ -1396,6 +1398,8 @@ const resolveXhsApprovalAdmissionRequirementGaps = (
   expected
 ) => {
   const gaps = [];
+  const carriesDecisionId = hasOwnNonNullValue(approvalAdmissionEvidence, "decision_id");
+  const carriesApprovalId = hasOwnNonNullValue(approvalAdmissionEvidence, "approval_id");
   for (const requirement of requirements) {
     if (requirement === "approval_admission_evidence_approved_true") {
       if (!approvalAdmissionEvidence.approved) {
@@ -1454,6 +1458,17 @@ const resolveXhsApprovalAdmissionRequirementGaps = (
     gaps.push("approval_admission_evidence_present");
   }
 
+  const linkagePresent = carriesDecisionId || carriesApprovalId;
+  const linkageValid =
+    linkagePresent &&
+    carriesDecisionId &&
+    carriesApprovalId &&
+    approvalAdmissionEvidence.decision_id === expected.decisionId &&
+    approvalAdmissionEvidence.approval_id === expected.approvalId;
+  if (linkagePresent && !linkageValid) {
+    gaps.push("approval_admission_evidence_present");
+  }
+
   return gaps;
 };
 
@@ -1480,6 +1495,8 @@ const resolveXhsAuditAdmissionRequirementGaps = (
   requirements
 ) => {
   const gaps = [];
+  const carriesDecisionId = hasOwnNonNullValue(auditAdmissionEvidence, "decision_id");
+  const carriesApprovalId = hasOwnNonNullValue(auditAdmissionEvidence, "approval_id");
   if (
     requirements.includes("audit_admission_evidence_present") &&
     (!auditAdmissionEvidence.audit_admission_ref ||
@@ -1496,6 +1513,17 @@ const resolveXhsAuditAdmissionRequirementGaps = (
     gaps.push("audit_admission_evidence_present");
   }
 
+  const linkagePresent = carriesDecisionId || carriesApprovalId;
+  const linkageValid =
+    linkagePresent &&
+    carriesDecisionId &&
+    carriesApprovalId &&
+    auditAdmissionEvidence.decision_id === expected.decisionId &&
+    auditAdmissionEvidence.approval_id === expected.approvalId;
+  if (requirements.includes("audit_admission_evidence_present") && linkagePresent && !linkageValid) {
+    gaps.push("audit_admission_evidence_present");
+  }
+
   if (requirements.includes("audit_admission_checks_all_true")) {
     const allChecksComplete = XHS_REQUIRED_AUDIT_ADMISSION_CHECKS.every(
       (key) => auditAdmissionEvidence.audited_checks[key] === true
@@ -1507,32 +1535,6 @@ const resolveXhsAuditAdmissionRequirementGaps = (
 
   return gaps;
 };
-
-const resolveXhsAuditRequirementGaps = (auditRecord, expectedLinkage, state, target) => {
-  const matchesExactLinkage =
-    !!expectedLinkage.decisionId &&
-    !!expectedLinkage.approvalId &&
-    auditRecord.decision_id === expectedLinkage.decisionId &&
-    auditRecord.approval_id === expectedLinkage.approvalId;
-  if (
-    !auditRecord.event_id ||
-    !auditRecord.decision_id ||
-    !auditRecord.approval_id ||
-    !matchesExactLinkage ||
-    !auditRecord.recorded_at ||
-    auditRecord.issue_scope !== state.issueScope ||
-    auditRecord.target_domain !== target.targetDomain ||
-    auditRecord.target_tab_id !== target.targetTabId ||
-    auditRecord.target_page !== target.targetPage ||
-    auditRecord.action_type !== state.actionType ||
-    auditRecord.requested_execution_mode !== state.requestedExecutionMode ||
-    auditRecord.gate_decision !== "allowed"
-  ) {
-    return ["audit_record_present"];
-  }
-  return [];
-};
-
 const hasApprovalRecordConflictingLinkage = (approvalRecord, decisionId) => {
   if (typeof decisionId !== "string" || decisionId.length === 0) {
     return true;
@@ -2100,25 +2102,6 @@ const collectXhsMatrixGateReasons = (input) => {
         },
         liveRequirements
       );
-      const legacyAuditRequirementGaps =
-        input.auditRecord &&
-        liveRequirements.includes("audit_admission_evidence_present") &&
-        (auditRecord.decision_id !== null || auditRecord.approval_id !== null)
-          ? resolveXhsAuditRequirementGaps(
-              auditRecord,
-              {
-                decisionId: input.decisionId ?? null,
-                approvalId: input.expectedApprovalId ?? null,
-                runId: input.runId ?? null
-              },
-              state,
-              {
-                targetDomain: input.targetDomain,
-                targetTabId: input.targetTabId,
-                targetPage: input.targetPage
-              }
-            )
-          : [];
       const rolloutRequirementGaps =
         liveRequirements.includes("limited_read_rollout_ready_true") &&
         state.limitedReadRolloutReadyTrue !== true
@@ -2143,8 +2126,7 @@ const collectXhsMatrixGateReasons = (input) => {
       }
       if (
         auditAdmissionRequirementGaps.includes("audit_admission_evidence_present") ||
-        auditAdmissionRequirementGaps.includes("audit_admission_checks_all_true") ||
-        legacyAuditRequirementGaps.length > 0
+        auditAdmissionRequirementGaps.includes("audit_admission_checks_all_true")
       ) {
         pushReason(gateReasons, "AUDIT_RECORD_MISSING");
       }

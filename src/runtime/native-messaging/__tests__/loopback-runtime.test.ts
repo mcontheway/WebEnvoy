@@ -569,7 +569,7 @@ describe("native messaging legacy loopback runtime", () => {
     }
   );
 
-  it("blocks stale caller audit linkage in loopback bundles", async () => {
+  it("ignores stale caller audit linkage in loopback bundles when admission evidence matches", async () => {
     const runId = "run-loopback-live-limited-stale-001";
     const requestId = "issue209-live-limited-current-001";
     const bridge = new NativeMessagingBridge({
@@ -637,26 +637,30 @@ describe("native messaging legacy loopback runtime", () => {
       }
     });
 
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
     expect(result.payload).toEqual(
       expect.objectContaining({
-        gate_outcome: expect.objectContaining({
-          decision_id: expect.stringMatching(
-            /^gate_decision_run-loopback-live-limited-stale-001_issue209-live-limited-current-001$/
-          ),
-          effective_execution_mode: "recon",
-          gate_decision: "blocked",
-          gate_reasons: ["AUDIT_RECORD_MISSING"]
-        }),
-        audit_record: expect.objectContaining({
-          decision_id: expect.stringMatching(
-            /^gate_decision_run-loopback-live-limited-stale-001_issue209-live-limited-current-001$/
-          ),
-          gate_decision: "blocked",
-          issue_scope: "issue_209"
-        }),
-        approval_record: expect.objectContaining({
-          approval_id: null
+        summary: expect.objectContaining({
+          gate_outcome: expect.objectContaining({
+            decision_id: expect.stringMatching(
+              /^gate_decision_run-loopback-live-limited-stale-001_issue209-live-limited-current-001$/
+            ),
+            effective_execution_mode: "live_read_limited",
+            gate_decision: "allowed",
+            gate_reasons: ["LIVE_MODE_APPROVED"]
+          }),
+          audit_record: expect.objectContaining({
+            decision_id: expect.stringMatching(
+              /^gate_decision_run-loopback-live-limited-stale-001_issue209-live-limited-current-001$/
+            ),
+            gate_decision: "allowed",
+            issue_scope: "issue_209"
+          }),
+          approval_record: expect.objectContaining({
+            approval_id: expect.stringMatching(
+              /^gate_appr_gate_decision_run-loopback-live-limited-stale-001_issue209-live-limited-current-001$/
+            )
+          })
         })
       })
     );

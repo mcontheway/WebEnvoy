@@ -75,13 +75,15 @@ export const createApprovedReadAdmissionContext = (input?: {
 }) => {
   const runId = input?.run_id ?? "run-relay-001";
   const requestId = input?.request_id;
-  const decisionId = input?.decision_id ?? (requestId ? `gate_decision_${runId}_${requestId}` : `gate_decision_${runId}`);
-  const approvalId = input?.approval_id ?? `gate_appr_${decisionId}`;
+  const decisionId = input?.decision_id;
+  const approvalId = input?.approval_id;
+  const refSuffix = requestId ? `${runId}_${requestId}` : runId;
   return ({
   approval_admission_evidence: {
-    approval_admission_ref: approvalId,
-    decision_id: decisionId,
-    approval_id: approvalId,
+    approval_admission_ref: `approval_admission_${refSuffix}`,
+    ...(decisionId ? { decision_id: decisionId } : {}),
+    ...(approvalId ? { approval_id: approvalId } : {}),
+    ...(requestId ? { request_id: requestId } : {}),
     run_id: runId,
     session_id: input?.session_id ?? "nm-session-001",
     issue_scope: "issue_209",
@@ -103,9 +105,10 @@ export const createApprovedReadAdmissionContext = (input?: {
     recorded_at: "2026-03-23T08:00:00Z"
   },
   audit_admission_evidence: {
-    audit_admission_ref: `gate_evt_${decisionId}`,
-    decision_id: decisionId,
-    approval_id: approvalId,
+    audit_admission_ref: `audit_admission_${refSuffix}`,
+    ...(decisionId ? { decision_id: decisionId } : {}),
+    ...(approvalId ? { approval_id: approvalId } : {}),
+    ...(requestId ? { request_id: requestId } : {}),
     run_id: runId,
     session_id: input?.session_id ?? "nm-session-001",
     issue_scope: "issue_209",
