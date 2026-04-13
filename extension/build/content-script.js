@@ -1149,7 +1149,7 @@ const normalizeIssue209AdmissionDraft = (value) => {
     return { kind };
   }
 
-  if (kind !== "explicit_context" && kind !== "derived_draft") {
+  if (kind !== "draft" && kind !== "explicit_context" && kind !== "derived_draft") {
     return null;
   }
 
@@ -1159,7 +1159,7 @@ const normalizeIssue209AdmissionDraft = (value) => {
   }
 
   return {
-    kind,
+    kind: "draft",
     admission_context: admissionContext
   };
 };
@@ -1168,7 +1168,7 @@ const createIssue209AdmissionDraft = (input) => {
   const explicitContext = cloneIssue209AdmissionContext(input?.admissionContext);
   if (explicitContext) {
     return {
-      kind: "explicit_context",
+      kind: "draft",
       admission_context: explicitContext
     };
   }
@@ -1192,10 +1192,6 @@ const bindIssue209AdmissionToSession = (input) => {
   const draft = createIssue209AdmissionDraft(input);
   if (draft.kind === "missing") {
     return null;
-  }
-
-  if (draft.kind === "explicit_context") {
-    return cloneIssue209AdmissionContext(draft.admission_context);
   }
 
   const admissionContext = cloneIssue209AdmissionContext(draft.admission_context);

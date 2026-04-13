@@ -758,12 +758,12 @@ describe("native messaging bridge", () => {
     expect(forwardCall).toBe(2);
   });
 
-  it("does not synthesize issue_209 admission_context after session recovery", async () => {
+  it("rebinds synthesized issue_209 admission_context after session recovery", async () => {
     let openCall = 0;
     let forwardCall = 0;
     const forwardedSessions: Array<{
       requestSessionId: string;
-      admissionContextPresent: boolean;
+      admissionContextSessionId: string | null;
     }> = [];
     const currentSessionId = (): string => (openCall >= 2 ? "nm-session-002" : "nm-session-001");
 
@@ -795,9 +795,14 @@ describe("native messaging bridge", () => {
         forwardCall += 1;
         const commandParams = request.params.command_params as Record<string, unknown>;
         const options = commandParams.options as Record<string, unknown>;
+        const admissionContext = options.admission_context as Record<string, unknown> | undefined;
+        const approvalEvidence = admissionContext?.approval_admission_evidence as
+          | Record<string, unknown>
+          | undefined;
         forwardedSessions.push({
           requestSessionId: String(request.params.session_id ?? ""),
-          admissionContextPresent: Object.hasOwn(options, "admission_context")
+          admissionContextSessionId:
+            typeof approvalEvidence?.session_id === "string" ? approvalEvidence.session_id : null
         });
 
         if (forwardCall === 1) {
@@ -858,6 +863,18 @@ describe("native messaging bridge", () => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
+          },
+          audit_record: {
+            event_id: "gate_evt_issue209_live_recovery_001",
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 12,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_limited",
+            risk_state: "limited",
+            gate_decision: "allowed",
+            recorded_at: "2026-03-23T10:05:00Z"
           }
         }
       }
@@ -869,11 +886,187 @@ describe("native messaging bridge", () => {
     expect(forwardedSessions).toEqual([
       {
         requestSessionId: "nm-session-001",
-        admissionContextPresent: false
+        admissionContextSessionId: "nm-session-001"
       },
       {
         requestSessionId: "nm-session-002",
-        admissionContextPresent: false
+        admissionContextSessionId: "nm-session-002"
+      }
+    ]);
+  });
+
+  it("rebinds explicit issue_209 admission_context after session recovery", async () => {
+    let openCall = 0;
+    let forwardCall = 0;
+    const forwardedSessions: Array<{
+      requestSessionId: string;
+      approvalSessionId: string | null;
+      auditSessionId: string | null;
+    }> = [];
+    const currentSessionId = (): string => (openCall >= 2 ? "nm-session-002" : "nm-session-001");
+
+    const transport = {
+      async open(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        openCall += 1;
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            protocol: "webenvoy.native-bridge.v1",
+            session_id: currentSessionId(),
+            state: "ready"
+          },
+          error: null
+        };
+      },
+      async heartbeat(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            session_id: currentSessionId()
+          },
+          error: null
+        };
+      },
+      async forward(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        forwardCall += 1;
+        const commandParams = request.params.command_params as Record<string, unknown>;
+        const options = commandParams.options as Record<string, unknown>;
+        const admissionContext = options.admission_context as Record<string, unknown> | undefined;
+        const approvalEvidence = admissionContext?.approval_admission_evidence as
+          | Record<string, unknown>
+          | undefined;
+        const auditEvidence = admissionContext?.audit_admission_evidence as
+          | Record<string, unknown>
+          | undefined;
+        forwardedSessions.push({
+          requestSessionId: String(request.params.session_id ?? ""),
+          approvalSessionId:
+            typeof approvalEvidence?.session_id === "string" ? approvalEvidence.session_id : null,
+          auditSessionId: typeof auditEvidence?.session_id === "string" ? auditEvidence.session_id : null
+        });
+
+        if (forwardCall === 1) {
+          throw new NativeMessagingTransportError(
+            "ERR_TRANSPORT_DISCONNECTED",
+            "forward disconnected"
+          );
+        }
+
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            relay_path: "host>background>content-script>background>host"
+          },
+          payload: {
+            summary: {
+              capability_result: {
+                outcome: "success"
+              }
+            }
+          },
+          error: null
+        };
+      }
+    };
+
+    const bridge = new NativeMessagingBridge({
+      transport,
+      recoveryPollIntervalMs: 1
+    });
+
+    const result = await bridge.runCommand({
+      runId: "run-recovery-admission-explicit-001",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "xhs.search",
+      params: {
+        request_id: "issue209-live-recovery-explicit-001",
+        requested_execution_mode: "live_read_limited",
+        gate_invocation_id: "issue209-gate-run-recovery-admission-explicit-001-001",
+        options: {
+          issue_scope: "issue_209",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 12,
+          target_page: "search_result_tab",
+          action_type: "read",
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          },
+          admission_context: {
+            approval_admission_evidence: {
+              approval_admission_ref: "approval_admission_explicit_001",
+              run_id: "run-recovery-admission-explicit-001",
+              session_id: "nm-session-stale-001",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 12,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_limited",
+              approved: true,
+              approver: "qa-reviewer",
+              approved_at: "2026-03-23T10:00:00Z",
+              checks: {
+                target_domain_confirmed: true,
+                target_tab_confirmed: true,
+                target_page_confirmed: true,
+                risk_state_checked: true,
+                action_type_confirmed: true
+              },
+              recorded_at: "2026-03-23T10:00:00Z"
+            },
+            audit_admission_evidence: {
+              audit_admission_ref: "audit_admission_explicit_001",
+              run_id: "run-recovery-admission-explicit-001",
+              session_id: "nm-session-stale-001",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 12,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_limited",
+              risk_state: "limited",
+              audited_checks: {
+                target_domain_confirmed: true,
+                target_tab_confirmed: true,
+                target_page_confirmed: true,
+                risk_state_checked: true,
+                action_type_confirmed: true
+              },
+              recorded_at: "2026-03-23T10:05:00Z"
+            }
+          }
+        }
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: true
+    });
+    expect(forwardedSessions).toEqual([
+      {
+        requestSessionId: "nm-session-001",
+        approvalSessionId: "nm-session-001",
+        auditSessionId: "nm-session-001"
+      },
+      {
+        requestSessionId: "nm-session-002",
+        approvalSessionId: "nm-session-002",
+        auditSessionId: "nm-session-002"
       }
     ]);
   });

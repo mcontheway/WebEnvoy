@@ -227,6 +227,7 @@ export class InMemoryBackgroundRelay {
           {
             runId,
             sessionId,
+            gateInvocationId: asString(commandParams.gate_invocation_id) ?? undefined,
             decisionId,
             approvalId: approvalId ?? undefined
           }

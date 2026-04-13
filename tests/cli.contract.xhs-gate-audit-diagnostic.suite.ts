@@ -2171,12 +2171,12 @@ process.stdin.on("data", (chunk) => {
     });
     expect(body.summary.gate_input.admission_context).toMatchObject({
       approval_admission_evidence: {
-        decision_id: null,
-        approval_id: null
+        decision_id: decisionId,
+        approval_id: approvalId
       },
       audit_admission_evidence: {
-        decision_id: null,
-        approval_id: null
+        decision_id: decisionId,
+        approval_id: approvalId
       }
     });
   });
