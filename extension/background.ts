@@ -33,6 +33,7 @@ import {
 } from "../shared/fingerprint-profile.js";
 import {
   buildXhsGatePolicyState,
+  buildIssue209PostGateArtifacts,
   collectXhsCommandGateReasons,
   collectXhsMatrixGateReasons,
   finalizeXhsGateOutcome,
@@ -1049,6 +1050,93 @@ const resolveGatePayloadApprovalId = (input: {
   });
 };
 
+const isIssue209LiveReadPayload = (input: {
+  issueScope?: XhsIssueScope | null;
+  requestedExecutionMode?: XhsExecutionMode | null;
+}): boolean =>
+  input.issueScope === "issue_209" &&
+  (input.requestedExecutionMode === "live_read_limited" ||
+    input.requestedExecutionMode === "live_read_high_risk");
+
+const buildIssue209GatePayloadArtifacts = (input: {
+  runId: string;
+  sessionId: string;
+  profile: string | null;
+  decisionId: string;
+  issueScope: XhsIssueScope | null;
+  riskState: XhsRiskState;
+  targetDomain: string | null;
+  targetTabId: number | null;
+  targetPage: string | null;
+  actionType: XhsActionType | null;
+  requestedExecutionMode: XhsExecutionMode | null;
+  effectiveExecutionMode: XhsExecutionMode;
+  gateDecision: "allowed" | "blocked";
+  gateReasons: string[];
+  requiresManualConfirmation: boolean;
+  approvalRecord: XhsApprovalRecord;
+  consumerGateResult: Record<string, unknown>;
+  writeActionMatrixDecisions: XhsWriteActionMatrixDecisionsOutput | null;
+}): {
+  approvalRecord: XhsApprovalRecord;
+  auditRecord: Record<string, unknown>;
+} | null => {
+  if (!isIssue209LiveReadPayload(input)) {
+    return null;
+  }
+
+  const issue209Gate = {
+    gate_input: {
+      issue_scope: "issue_209" as const,
+      target_domain: input.targetDomain,
+      target_tab_id: input.targetTabId,
+      target_page: input.targetPage,
+      action_type: input.actionType,
+      requested_execution_mode: input.requestedExecutionMode,
+      risk_state: input.riskState,
+      admission_context: null
+    },
+    gate_outcome: {
+      decision_id: input.decisionId,
+      effective_execution_mode: input.effectiveExecutionMode,
+      gate_decision: input.gateDecision,
+      gate_reasons: input.gateReasons,
+      requires_manual_confirmation: input.requiresManualConfirmation
+    },
+    consumer_gate_result: {
+      issue_scope: "issue_209" as const,
+      target_domain: input.targetDomain,
+      target_tab_id: input.targetTabId,
+      target_page: input.targetPage,
+      action_type: input.actionType,
+      requested_execution_mode: input.requestedExecutionMode,
+      effective_execution_mode: input.effectiveExecutionMode,
+      gate_decision: input.gateDecision,
+      gate_reasons: input.gateReasons,
+      write_interaction_tier: input.writeActionMatrixDecisions?.write_interaction_tier ?? null
+    },
+    approval_record: {
+      ...input.approvalRecord,
+      approval_id: input.approvalRecord.approval_id ?? null,
+      decision_id: input.approvalRecord.decision_id ?? null
+    },
+    write_action_matrix_decisions: input.writeActionMatrixDecisions
+  } as unknown as Parameters<typeof buildIssue209PostGateArtifacts>[0]["gate"];
+
+  const artifacts = buildIssue209PostGateArtifacts({
+    runId: input.runId,
+    sessionId: input.sessionId,
+    profile: input.profile,
+    gate: issue209Gate,
+    now: () => Date.now()
+  });
+
+  return {
+    approvalRecord: artifacts.approval_record as XhsApprovalRecord,
+    auditRecord: artifacts.audit_record as Record<string, unknown>
+  };
+};
+
 const createBridgeXhsGateOnlyPayload = (
   request: BridgeRequest,
   gatePayload: Record<string, unknown>
@@ -1142,11 +1230,59 @@ const createRelayXhsGatePayload = (input: {
     requestedExecutionMode: input.requestedExecutionMode,
     gateInvocationId: asNonEmptyString(asRecord(input.request.params.command_params)?.gate_invocation_id)
   });
-  const approvalRecord = {
-    ...input.approvalRecord,
-    approval_id: approvalId,
-    decision_id: decisionId
-  };
+  const issue209Artifacts = buildIssue209GatePayloadArtifacts({
+    runId,
+    sessionId,
+    profile,
+    decisionId,
+    issueScope: input.issueScope,
+    riskState: input.riskState,
+    targetDomain: input.targetDomain,
+    targetTabId: input.targetTabId,
+    targetPage: input.targetPage,
+    actionType: input.actionType,
+    requestedExecutionMode: input.requestedExecutionMode,
+    effectiveExecutionMode: input.effectiveExecutionMode,
+    gateDecision: input.gateDecision,
+    gateReasons: input.gateReasons,
+    requiresManualConfirmation: input.requiresManualConfirmation,
+    approvalRecord: input.approvalRecord,
+    consumerGateResult: input.consumerGateResult,
+    writeActionMatrixDecisions: input.writeActionMatrixDecisions
+  });
+  const approvalRecord =
+    issue209Artifacts?.approvalRecord ?? {
+      ...input.approvalRecord,
+      approval_id: approvalId,
+      decision_id: decisionId
+    };
+  const auditRecord =
+    issue209Artifacts?.auditRecord ?? {
+      event_id: `relay_gate_${input.request.id}`,
+      decision_id: decisionId,
+      approval_id: approvalId,
+      run_id: runId,
+      session_id: sessionId,
+      profile,
+      issue_scope: input.issueScope,
+      risk_state: input.riskState,
+      target_domain: input.targetDomain,
+      target_tab_id: input.targetTabId,
+      target_page: input.targetPage,
+      action_type: input.actionType,
+      requested_execution_mode: input.requestedExecutionMode,
+      effective_execution_mode: input.effectiveExecutionMode,
+      gate_decision: input.gateDecision,
+      gate_reasons: input.gateReasons,
+      approver: approvalRecord.approver,
+      approved_at: approvalRecord.approved_at,
+      recorded_at: recordedAt,
+      risk_signal: input.riskState !== "allowed",
+      recovery_signal: false,
+      session_rhythm_state: "normal",
+      cooldown_until: null,
+      recovery_started_at: null
+    };
 
   return {
     plugin_gate_ownership: XHS_PLUGIN_GATE_OWNERSHIP,
@@ -1196,32 +1332,7 @@ const createRelayXhsGatePayload = (input: {
       },
       scope_context: XHS_SCOPE_CONTEXT
     }),
-    audit_record: {
-      event_id: `relay_gate_${input.request.id}`,
-      decision_id: decisionId,
-      approval_id: approvalId,
-      run_id: runId,
-      session_id: sessionId,
-      profile,
-      issue_scope: input.issueScope,
-      risk_state: input.riskState,
-      target_domain: input.targetDomain,
-      target_tab_id: input.targetTabId,
-      target_page: input.targetPage,
-      action_type: input.actionType,
-      requested_execution_mode: input.requestedExecutionMode,
-      effective_execution_mode: input.effectiveExecutionMode,
-      gate_decision: input.gateDecision,
-      gate_reasons: input.gateReasons,
-      approver: approvalRecord.approver,
-      approved_at: approvalRecord.approved_at,
-      recorded_at: recordedAt,
-      risk_signal: input.riskState !== "allowed",
-      recovery_signal: false,
-      session_rhythm_state: "normal",
-      cooldown_until: null,
-      recovery_started_at: null
-    }
+    audit_record: auditRecord
   };
 };
 
@@ -1267,36 +1378,58 @@ const createBackgroundXhsGatePayload = (input: {
     requestedExecutionMode: input.requestedExecutionMode,
     gateInvocationId: asNonEmptyString(asRecord(input.request.params.command_params)?.gate_invocation_id)
   });
-  const approvalRecord = {
-    ...input.approvalRecord,
-    approval_id: approvalId,
-    decision_id: decisionId
-  };
-  const auditRecord = {
-    event_id: `bg_gate_${input.request.id}`,
-    decision_id: decisionId,
-    approval_id: approvalId,
-    run_id: runId,
-    session_id: sessionId,
+  const issue209Artifacts = buildIssue209GatePayloadArtifacts({
+    runId,
+    sessionId,
     profile,
-    issue_scope: input.issueScope,
-    risk_state: input.riskState,
-    target_domain: input.targetDomain,
-    target_tab_id: input.targetTabId,
-    target_page: input.targetPage,
-    action_type: input.actionType,
-    requested_execution_mode: input.requestedExecutionMode,
-    effective_execution_mode: input.effectiveExecutionMode,
-    gate_decision: input.gateDecision,
-    gate_reasons: input.gateReasons,
-    approver: approvalRecord.approver,
-    approved_at: approvalRecord.approved_at,
-    write_interaction_tier: input.writeActionMatrixDecisions?.write_interaction_tier ?? null,
-    write_matrix_decision: input.writeMatrixDecision?.decision ?? null,
-    recorded_at: recordedAt,
-    next_state: input.riskTransitionAudit.next_state,
-    transition_trigger: input.riskTransitionAudit.trigger
-  };
+    decisionId,
+    issueScope: input.issueScope,
+    riskState: input.riskState,
+    targetDomain: input.targetDomain,
+    targetTabId: input.targetTabId,
+    targetPage: input.targetPage,
+    actionType: input.actionType,
+    requestedExecutionMode: input.requestedExecutionMode,
+    effectiveExecutionMode: input.effectiveExecutionMode,
+    gateDecision: input.gateDecision,
+    gateReasons: input.gateReasons,
+    requiresManualConfirmation: input.requiresManualConfirmation,
+    approvalRecord: input.approvalRecord,
+    consumerGateResult: input.consumerGateResult,
+    writeActionMatrixDecisions: input.writeActionMatrixDecisions
+  });
+  const approvalRecord =
+    issue209Artifacts?.approvalRecord ?? {
+      ...input.approvalRecord,
+      approval_id: approvalId,
+      decision_id: decisionId
+    };
+  const auditRecord =
+    issue209Artifacts?.auditRecord ?? {
+      event_id: `bg_gate_${input.request.id}`,
+      decision_id: decisionId,
+      approval_id: approvalId,
+      run_id: runId,
+      session_id: sessionId,
+      profile,
+      issue_scope: input.issueScope,
+      risk_state: input.riskState,
+      target_domain: input.targetDomain,
+      target_tab_id: input.targetTabId,
+      target_page: input.targetPage,
+      action_type: input.actionType,
+      requested_execution_mode: input.requestedExecutionMode,
+      effective_execution_mode: input.effectiveExecutionMode,
+      gate_decision: input.gateDecision,
+      gate_reasons: input.gateReasons,
+      approver: approvalRecord.approver,
+      approved_at: approvalRecord.approved_at,
+      write_interaction_tier: input.writeActionMatrixDecisions?.write_interaction_tier ?? null,
+      write_matrix_decision: input.writeMatrixDecision?.decision ?? null,
+      recorded_at: recordedAt,
+      next_state: input.riskTransitionAudit.next_state,
+      transition_trigger: input.riskTransitionAudit.trigger
+    };
 
   return {
     plugin_gate_ownership: XHS_PLUGIN_GATE_OWNERSHIP,
@@ -1336,7 +1469,7 @@ const createBackgroundXhsGatePayload = (input: {
     ...(input.writeGateOnlyDecision ? { write_gate_only_decision: input.writeGateOnlyDecision } : {}),
     risk_state_output: buildUnifiedRiskStateOutput(input.resolvedRiskState, {
       auditRecords: [auditRecord],
-      now: auditRecord.recorded_at
+      now: asNonEmptyString(auditRecord.recorded_at) ?? recordedAt
     }),
     audit_record: auditRecord,
     risk_transition_audit: input.riskTransitionAudit

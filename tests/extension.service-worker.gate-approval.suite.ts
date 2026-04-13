@@ -1197,10 +1197,12 @@ describe("extension service worker / gate and approval", () => {
             "gate_decision_issue209-gate-run-xhs-live-limited-invocation-linkage-001-001"
         },
         approval_record: {
+          approval_id: null,
           decision_id:
             "gate_decision_issue209-gate-run-xhs-live-limited-invocation-linkage-001-001"
         },
         audit_record: {
+          approval_id: null,
           decision_id:
             "gate_decision_issue209-gate-run-xhs-live-limited-invocation-linkage-001-001"
         }
@@ -1826,6 +1828,8 @@ describe("extension service worker / gate and approval", () => {
     const payload = asRecord(blocked?.payload) ?? {};
     const gateOutcome = asRecord(payload.gate_outcome);
     const consumerGateResult = asRecord(payload.consumer_gate_result);
+    const approvalRecord = asRecord(payload.approval_record);
+    const auditRecord = asRecord(payload.audit_record);
     expect(gateOutcome?.effective_execution_mode).toBe("recon");
     expect(consumerGateResult?.gate_decision).toBe("blocked");
     expect(consumerGateResult?.fingerprint_gate_decision).toBe("blocked");
@@ -1833,6 +1837,8 @@ describe("extension service worker / gate and approval", () => {
     expect(consumerGateResult?.gate_reasons).toEqual(
       expect.arrayContaining(["FINGERPRINT_EXECUTION_BLOCKED"])
     );
+    expect(approvalRecord?.approval_id).toBeNull();
+    expect(auditRecord?.approval_id).toBeNull();
   });
 
   it("blocks live mode when fingerprint_context is missing", async () => {
@@ -1875,6 +1881,8 @@ describe("extension service worker / gate and approval", () => {
     const payload = asRecord(blocked?.payload) ?? {};
     const gateOutcome = asRecord(payload.gate_outcome);
     const consumerGateResult = asRecord(payload.consumer_gate_result);
+    const approvalRecord = asRecord(payload.approval_record);
+    const auditRecord = asRecord(payload.audit_record);
     expect(gateOutcome?.effective_execution_mode).toBe("dry_run");
     expect(payload.fingerprint_execution).toBeNull();
     expect(consumerGateResult?.gate_decision).toBe("blocked");
@@ -1883,6 +1891,8 @@ describe("extension service worker / gate and approval", () => {
     expect(consumerGateResult?.gate_reasons).toEqual(
       expect.arrayContaining(["FINGERPRINT_CONTEXT_MISSING", "FINGERPRINT_EXECUTION_BLOCKED"])
     );
+    expect(approvalRecord?.approval_id).toBeNull();
+    expect(auditRecord?.approval_id).toBeNull();
   });
 
   it("blocks live mode when fingerprint_context exists but is not trusted for run/profile", async () => {
