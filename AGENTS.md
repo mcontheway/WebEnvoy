@@ -171,6 +171,7 @@ spec review 的执行约束：
   - `external_dependency`
   - `merge_gate`
   - `contract_surface`
+- `integration_ref` 必须指向可核查的具体 integration issue / project item；只写 owner 级 project 根链接不算合法绑定。
 - 满足以下任一条件时，`integration_touchpoint` 不得为 `none`，并且在进入实现前必须先查看 `integration_ref` 对应的 integration issue / item：
   - 改共享输入输出
   - 改错误码或错误语义

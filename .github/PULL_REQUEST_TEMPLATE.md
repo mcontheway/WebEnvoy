@@ -33,9 +33,9 @@
 
 补充说明：
 
-- `integration_applicable=yes` 时，`integration_ref` 不得为空。
+- `integration_applicable=yes` 时，`integration_ref` 不得为空，且必须指向可核查的具体 integration issue / project item，而不是只写 project 根链接。
 - `integration_applicable=yes` 时，`integration_touchpoint`、`merge_gate` 与 `contract_surface` 不得留空。
-- `shared_contract_changed=yes`、`external_dependency != none` 或 `joint_acceptance_needed=yes` 时，当前事项 / PR 的 `merge_gate` 必须按 `integration_check_required` 收口。
+- `integration_touchpoint != none`、`shared_contract_changed=yes`、`external_dependency != none`、`joint_acceptance_needed=yes`，或当前 PR 改 integration gate / review 语义时，当前事项 / PR 的 `merge_gate` 必须按 `integration_check_required` 收口。
 - merge 前必须再次核对 `integration_ref` 对应 integration issue / project item 的状态、依赖与联合验收约束。
 
 ## gate_applicability（对 formal spec review PR、live evidence 治理落库/治理维护 PR，以及所有落入真实 live evidence 专项门禁的 PR 必填）
