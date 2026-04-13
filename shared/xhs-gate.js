@@ -62,6 +62,11 @@ const resolveXhsGateDecisionId = (input) => {
     return explicitDecisionId;
   }
 
+  const gateInvocationId = asString(input?.gateInvocationId);
+  if (gateInvocationId) {
+    return `gate_decision_${gateInvocationId}`;
+  }
+
   const runId = asString(input?.runId);
   const commandRequestId = asString(input?.commandRequestId);
   if (runId && commandRequestId) {
@@ -319,6 +324,7 @@ const resolveXhsApprovalAdmissionRequirementGaps = (
   if (
     !approvalAdmissionEvidence.recorded_at ||
     approvalAdmissionEvidence.run_id !== expected.runId ||
+    approvalAdmissionEvidence.session_id !== expected.sessionId ||
     approvalAdmissionEvidence.issue_scope !== expected.issueScope ||
     approvalAdmissionEvidence.target_domain !== expected.targetDomain ||
     approvalAdmissionEvidence.target_tab_id !== expected.targetTabId ||
@@ -359,6 +365,7 @@ const resolveXhsAuditAdmissionRequirementGaps = (
     requirements.includes("audit_admission_evidence_present") &&
     (!auditAdmissionEvidence.recorded_at ||
       auditAdmissionEvidence.run_id !== expected.runId ||
+      auditAdmissionEvidence.session_id !== expected.sessionId ||
       auditAdmissionEvidence.issue_scope !== expected.issueScope ||
       auditAdmissionEvidence.target_domain !== expected.targetDomain ||
       auditAdmissionEvidence.target_tab_id !== expected.targetTabId ||

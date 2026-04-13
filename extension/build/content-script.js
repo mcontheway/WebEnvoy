@@ -1180,6 +1180,11 @@ const resolveXhsGateDecisionId = (input) => {
     return explicitDecisionId;
   }
 
+  const gateInvocationId = asString(input?.gateInvocationId);
+  if (gateInvocationId) {
+    return `gate_decision_${gateInvocationId}`;
+  }
+
   const runId = asString(input?.runId);
   const commandRequestId = asString(input?.commandRequestId);
   if (runId && commandRequestId) {
@@ -1437,6 +1442,7 @@ const resolveXhsApprovalAdmissionRequirementGaps = (
   if (
     !approvalAdmissionEvidence.recorded_at ||
     approvalAdmissionEvidence.run_id !== expected.runId ||
+    approvalAdmissionEvidence.session_id !== expected.sessionId ||
     approvalAdmissionEvidence.issue_scope !== expected.issueScope ||
     approvalAdmissionEvidence.target_domain !== expected.targetDomain ||
     approvalAdmissionEvidence.target_tab_id !== expected.targetTabId ||
@@ -1477,6 +1483,7 @@ const resolveXhsAuditAdmissionRequirementGaps = (
     requirements.includes("audit_admission_evidence_present") &&
     (!auditAdmissionEvidence.recorded_at ||
       auditAdmissionEvidence.run_id !== expected.runId ||
+      auditAdmissionEvidence.session_id !== expected.sessionId ||
       auditAdmissionEvidence.issue_scope !== expected.issueScope ||
       auditAdmissionEvidence.target_domain !== expected.targetDomain ||
       auditAdmissionEvidence.target_tab_id !== expected.targetTabId ||
@@ -2664,7 +2671,8 @@ const isIssue208EditorInputValidation = (options) => options.issue_scope === "is
 const buildGateDecisionId = (context) => resolveXhsGateDecisionId({
     runId: context.runId,
     requestId: context.requestId,
-    commandRequestId: context.commandRequestId
+    commandRequestId: context.commandRequestId,
+    gateInvocationId: context.gateInvocationId
 });
 const buildGateEventId = (decisionId) => `gate_evt_${decisionId}`;
 const resolveActualTargetGateReasons = (options) => {
@@ -2709,6 +2717,7 @@ const resolveGate = (options, context) => {
         requestedExecutionMode: options.requested_execution_mode,
         runId: context.runId,
         sessionId: context.sessionId,
+        gateInvocationId: context.gateInvocationId,
         approvalRecord: providedApprovalRecord,
         auditRecord: options.audit_record,
         admissionContext: options.admission_context,
@@ -5470,7 +5479,8 @@ class ContentScriptHandler {
                     sessionId: String(message.params.session_id ?? "nm-session-001"),
                     profile: message.profile ?? "unknown",
                     requestId: message.id,
-                    commandRequestId: asString(asRecord(message.commandParams)?.request_id) ?? undefined
+                    commandRequestId: asString(asRecord(message.commandParams)?.request_id) ?? undefined,
+                    gateInvocationId: asString(asRecord(message.commandParams)?.gate_invocation_id) ?? undefined
                 }
             };
             let result;

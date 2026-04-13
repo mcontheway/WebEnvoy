@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { CliError } from "../core/errors.js";
 import { mapCapabilitySummaryForContract } from "../core/capability-output.js";
 import { NativeMessagingBridge, NativeMessagingTransportError } from "../runtime/native-messaging/bridge.js";
@@ -7,7 +8,7 @@ import { appendFingerprintContext, buildFingerprintContextForMeta } from "../run
 import { ProfileStore } from "../runtime/profile-store.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import { prepareOfficialChromeRuntime } from "../runtime/official-chrome-runtime.js";
-import { buildCapabilityResult, ensureIssue209AdmissionContextForContract, normalizeGateOptionsForContract, parseAbilityEnvelopeForContract, parseDetailInputForContract, parseSearchInputForContract, parseUserHomeInputForContract, resolveIssue209CommandRequestIdForContract } from "./xhs-input.js";
+import { buildCapabilityResult, ensureIssue209AdmissionContextForContract, normalizeGateOptionsForContract, parseAbilityEnvelopeForContract, parseDetailInputForContract, parseSearchInputForContract, parseUserHomeInputForContract, resolveIssue209CommandRequestIdForContract, resolveIssue209GateInvocationIdForContract } from "./xhs-input.js";
 export { buildOfficialChromeRuntimeStatusParams } from "../runtime/official-chrome-runtime.js";
 export { normalizeGateOptionsForContract } from "./xhs-input.js";
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
@@ -177,6 +178,10 @@ const xhsReadCommand = async (context, inputConfig) => {
             requestId: envelope.requestId,
             runId: context.run_id
         });
+        const gateInvocationId = resolveIssue209GateInvocationIdForContract({
+            options: gate.options,
+            runId: context.run_id
+        }) ?? `xhs-gate-${context.run_id}-${randomUUID()}`;
         await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, gate);
         const bridgeSessionId = await bridge.ensureSession({
             profile: context.profile
@@ -185,10 +190,12 @@ const xhsReadCommand = async (context, inputConfig) => {
             options: gate.options,
             runId: context.run_id,
             requestId: commandRequestId,
-            sessionId: bridgeSessionId
+            sessionId: bridgeSessionId,
+            gateInvocationId
         });
         const commandParams = appendFingerprintContext({
             ...(commandRequestId ? { request_id: commandRequestId } : {}),
+            gate_invocation_id: gateInvocationId,
             target_domain: gate.targetDomain,
             target_tab_id: gate.targetTabId,
             target_page: gate.targetPage,

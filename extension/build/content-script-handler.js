@@ -485,7 +485,8 @@ export class ContentScriptHandler {
                     sessionId: String(message.params.session_id ?? "nm-session-001"),
                     profile: message.profile ?? "unknown",
                     requestId: message.id,
-                    commandRequestId: asString(asRecord(message.commandParams)?.request_id) ?? undefined
+                    commandRequestId: asString(asRecord(message.commandParams)?.request_id) ?? undefined,
+                    gateInvocationId: asString(asRecord(message.commandParams)?.gate_invocation_id) ?? undefined
                 }
             };
             let result;

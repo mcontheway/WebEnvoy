@@ -101,6 +101,7 @@ export interface XhsGateCoreInput {
   riskState: unknown;
   runId?: unknown;
   sessionId?: unknown;
+  gateInvocationId?: unknown;
   abilityAction?: unknown;
   approvalRecord: unknown;
   auditRecord?: unknown;
@@ -165,6 +166,7 @@ export declare const resolveXhsGateDecisionId: (input: {
   runId?: unknown;
   requestId?: unknown;
   commandRequestId?: unknown;
+  gateInvocationId?: unknown;
   issueScope?: unknown;
   targetPage?: unknown;
   targetTabId?: unknown;
@@ -174,6 +176,7 @@ export declare const resolveXhsGateApprovalId: (input: {
   runId?: unknown;
   requestId?: unknown;
   commandRequestId?: unknown;
+  gateInvocationId?: unknown;
   issueScope?: unknown;
   targetPage?: unknown;
   targetTabId?: unknown;

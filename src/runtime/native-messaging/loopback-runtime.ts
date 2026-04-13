@@ -204,6 +204,7 @@ const buildLoopbackXhsReadGateBundle = (input: {
   runId: string;
   requestId: string;
   commandRequestId?: unknown;
+  gateInvocationId?: unknown;
   sessionId: string;
   profile: string;
 }): {
@@ -214,7 +215,8 @@ const buildLoopbackXhsReadGateBundle = (input: {
   const decisionId = resolveXhsGateDecisionId({
     runId: input.runId,
     requestId: input.requestId,
-    commandRequestId: input.commandRequestId
+    commandRequestId: input.commandRequestId,
+    gateInvocationId: asString(input.gateInvocationId)
   });
   const approvalId = resolveLoopbackApprovalId(approvalRecord, decisionId);
   const gate = buildLoopbackGate(
@@ -477,6 +479,7 @@ class InMemoryContentScriptRuntime {
       runId: message.runId,
       requestId: message.id,
       commandRequestId: message.commandParams.request_id,
+      gateInvocationId: message.commandParams.gate_invocation_id,
       sessionId: message.sessionId,
       profile: "loopback_profile"
     });
@@ -862,6 +865,7 @@ class InMemoryBackgroundRelay {
           runId,
           requestId: request.id,
           commandRequestId: commandParams.request_id,
+          gateInvocationId: commandParams.gate_invocation_id,
           sessionId,
           profile: "loopback_profile"
         });

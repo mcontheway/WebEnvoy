@@ -135,17 +135,19 @@ describe("xhs-input", () => {
         }
       },
       runId: "run-cli-issue209-live-001",
-      requestId: "issue209-live-limited-001"
+      requestId: "issue209-live-limited-001",
+      gateInvocationId: "issue209-gate-run-cli-issue209-live-001-001",
+      sessionId: "nm-session-001"
     });
 
     expect(options.admission_context).toMatchObject({
       approval_admission_evidence: {
-        decision_id: "gate_decision_run-cli-issue209-live-001_issue209-live-limited-001",
-        approval_id: "gate_appr_gate_decision_run-cli-issue209-live-001_issue209-live-limited-001"
+        decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-001-001",
+        approval_id: "gate_appr_gate_decision_issue209-gate-run-cli-issue209-live-001-001"
       },
       audit_admission_evidence: {
-        decision_id: "gate_decision_run-cli-issue209-live-001_issue209-live-limited-001",
-        approval_id: "gate_appr_gate_decision_run-cli-issue209-live-001_issue209-live-limited-001",
+        decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-001-001",
+        approval_id: "gate_appr_gate_decision_issue209-gate-run-cli-issue209-live-001-001",
         risk_state: "limited"
       }
     });
@@ -176,7 +178,8 @@ describe("xhs-input", () => {
       },
       runId: "run-cli-issue209-live-session-001",
       requestId: "issue209-live-session-001",
-      sessionId: "nm-session-real-209"
+      sessionId: "nm-session-real-209",
+      gateInvocationId: "issue209-gate-run-cli-issue209-live-session-001-001"
     });
 
     expect(options.admission_context).toMatchObject({
@@ -222,18 +225,20 @@ describe("xhs-input", () => {
         }
       },
       runId: "run-cli-issue209-live-003",
-      requestId
+      requestId,
+      gateInvocationId: "issue209-gate-run-cli-issue209-live-003-001",
+      sessionId: "nm-session-001"
     });
 
     expect(options.admission_context).toMatchObject({
       approval_admission_evidence: {
-        decision_id: `gate_decision_run-cli-issue209-live-003_${requestId}`,
-        approval_id: `gate_appr_gate_decision_run-cli-issue209-live-003_${requestId}`,
+        decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-003-001",
+        approval_id: "gate_appr_gate_decision_issue209-gate-run-cli-issue209-live-003-001",
         target_page: "profile_tab"
       },
       audit_admission_evidence: {
-        decision_id: `gate_decision_run-cli-issue209-live-003_${requestId}`,
-        approval_id: `gate_appr_gate_decision_run-cli-issue209-live-003_${requestId}`,
+        decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-003-001",
+        approval_id: "gate_appr_gate_decision_issue209-gate-run-cli-issue209-live-003-001",
         target_page: "profile_tab",
         risk_state: "limited"
       }
@@ -271,19 +276,21 @@ describe("xhs-input", () => {
         }
       },
       runId: "run-cli-issue209-live-004",
-      requestId
+      requestId,
+      gateInvocationId: "issue209-gate-run-cli-issue209-live-004-001",
+      sessionId: "nm-session-001"
     });
 
     expect(options.admission_context).toMatchObject({
       approval_admission_evidence: {
         issue_scope: "issue_209",
-        decision_id: `gate_decision_run-cli-issue209-live-004_${requestId}`,
-        approval_id: `gate_appr_gate_decision_run-cli-issue209-live-004_${requestId}`
+        decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-004-001",
+        approval_id: "gate_appr_gate_decision_issue209-gate-run-cli-issue209-live-004-001"
       },
       audit_admission_evidence: {
         issue_scope: "issue_209",
-        decision_id: `gate_decision_run-cli-issue209-live-004_${requestId}`,
-        approval_id: `gate_appr_gate_decision_run-cli-issue209-live-004_${requestId}`,
+        decision_id: "gate_decision_issue209-gate-run-cli-issue209-live-004-001",
+        approval_id: "gate_appr_gate_decision_issue209-gate-run-cli-issue209-live-004-001",
         risk_state: "limited"
       }
     });

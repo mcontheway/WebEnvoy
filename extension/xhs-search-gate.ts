@@ -60,7 +60,8 @@ const buildGateDecisionId = (context: XhsExecutionContext): string =>
   resolveXhsGateDecisionId({
     runId: context.runId,
     requestId: context.requestId,
-    commandRequestId: context.commandRequestId
+    commandRequestId: context.commandRequestId,
+    gateInvocationId: context.gateInvocationId
   });
 
 const buildGateEventId = (decisionId: string): string => `gate_evt_${decisionId}`;
@@ -114,6 +115,7 @@ export const resolveGate = (
     requestedExecutionMode: options.requested_execution_mode,
     runId: context.runId,
     sessionId: context.sessionId,
+    gateInvocationId: context.gateInvocationId,
     approvalRecord: providedApprovalRecord,
     auditRecord: options.audit_record,
     admissionContext: options.admission_context,

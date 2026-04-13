@@ -195,6 +195,7 @@ export interface XhsExecutionContext {
   profile: string;
   requestId?: string;
   commandRequestId?: string;
+  gateInvocationId?: string;
 }
 
 export const SEARCH_ENDPOINT = "/api/sns/web/v1/search/notes";

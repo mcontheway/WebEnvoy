@@ -210,7 +210,8 @@ export class InMemoryBackgroundRelay {
         const decisionId = resolveXhsGateDecisionId({
           runId,
           requestId: request.id,
-          commandRequestId: commandParams.request_id
+          commandRequestId: commandParams.request_id,
+          gateInvocationId: asString(commandParams.gate_invocation_id)
         });
         const approvalId = resolveLoopbackApprovalId(approvalRecord, decisionId);
         const gate = buildLoopbackGate(

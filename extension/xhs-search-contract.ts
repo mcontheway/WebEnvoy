@@ -198,6 +198,7 @@ export interface XhsExecutionContext {
   profile: string;
   requestId?: string;
   commandRequestId?: string;
+  gateInvocationId?: string;
 }
 
 export interface XhsSearchExecutionInput {

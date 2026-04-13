@@ -15,11 +15,8 @@ const baseContext: RuntimeContext = {
 
 describe("executeCommand", () => {
   const createHighRiskAuditRecord = (requestId: string) => {
-    const decisionId = `gate_decision_${baseContext.run_id}_${requestId}`;
     return {
-      event_id: `gate_evt_${decisionId}`,
-      decision_id: decisionId,
-      approval_id: `gate_appr_${decisionId}`,
+      event_id: `gate_evt_router_${requestId}`,
       issue_scope: "issue_209",
       target_domain: "www.xiaohongshu.com",
       target_tab_id: 32,
@@ -33,9 +30,6 @@ describe("executeCommand", () => {
 
   const createApprovedReadAdmissionContext = (requestId: string) => ({
     approval_admission_evidence: {
-      approval_admission_ref: `gate_appr_gate_decision_${baseContext.run_id}_${requestId}`,
-      decision_id: `gate_decision_${baseContext.run_id}_${requestId}`,
-      approval_id: `gate_appr_gate_decision_${baseContext.run_id}_${requestId}`,
       run_id: baseContext.run_id,
       session_id: "nm-session-001",
       issue_scope: "issue_209",
@@ -57,9 +51,6 @@ describe("executeCommand", () => {
       recorded_at: "2026-03-23T10:00:00Z"
     },
     audit_admission_evidence: {
-      audit_admission_ref: `gate_evt_gate_decision_${baseContext.run_id}_${requestId}`,
-      decision_id: `gate_decision_${baseContext.run_id}_${requestId}`,
-      approval_id: `gate_appr_gate_decision_${baseContext.run_id}_${requestId}`,
       run_id: baseContext.run_id,
       session_id: "nm-session-001",
       issue_scope: "issue_209",

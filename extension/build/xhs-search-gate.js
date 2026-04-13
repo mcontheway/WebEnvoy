@@ -16,7 +16,8 @@ const isIssue208EditorInputValidation = (options) => options.issue_scope === "is
 const buildGateDecisionId = (context) => resolveXhsGateDecisionId({
     runId: context.runId,
     requestId: context.requestId,
-    commandRequestId: context.commandRequestId
+    commandRequestId: context.commandRequestId,
+    gateInvocationId: context.gateInvocationId
 });
 const buildGateEventId = (decisionId) => `gate_evt_${decisionId}`;
 export const resolveActualTargetGateReasons = (options) => {
@@ -61,6 +62,7 @@ export const resolveGate = (options, context) => {
         requestedExecutionMode: options.requested_execution_mode,
         runId: context.runId,
         sessionId: context.sessionId,
+        gateInvocationId: context.gateInvocationId,
         approvalRecord: providedApprovalRecord,
         auditRecord: options.audit_record,
         admissionContext: options.admission_context,

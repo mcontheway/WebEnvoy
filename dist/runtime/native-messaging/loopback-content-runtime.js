@@ -198,7 +198,8 @@ export class InMemoryContentScriptRuntime {
             const decisionId = resolveXhsGateDecisionId({
                 runId: message.runId,
                 requestId: message.id,
-                commandRequestId: message.commandParams.request_id
+                commandRequestId: message.commandParams.request_id,
+                gateInvocationId: asString(message.commandParams.gate_invocation_id)
             });
             const approvalId = resolveLoopbackApprovalId(approvalRecord, decisionId);
             const gate = buildLoopbackGate(buildLoopbackGateSeedOptions({

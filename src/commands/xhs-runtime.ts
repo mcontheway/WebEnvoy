@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { CommandDefinition, CommandExecutionResult, JsonObject, RuntimeContext } from "../core/types.js";
 import { CliError } from "../core/errors.js";
 import { mapCapabilitySummaryForContract } from "../core/capability-output.js";
@@ -24,6 +25,7 @@ import {
   parseSearchInputForContract,
   parseUserHomeInputForContract,
   resolveIssue209CommandRequestIdForContract,
+  resolveIssue209GateInvocationIdForContract,
   XhsExecutionMode
 } from "./xhs-input.js";
 
@@ -259,6 +261,11 @@ const xhsReadCommand = async (
       requestId: envelope.requestId,
       runId: context.run_id
     });
+    const gateInvocationId =
+      resolveIssue209GateInvocationIdForContract({
+        options: gate.options,
+        runId: context.run_id
+      }) ?? `xhs-gate-${context.run_id}-${randomUUID()}`;
     await ensureOfficialChromeRuntimeReady(
       context,
       envelope.ability,
@@ -274,11 +281,13 @@ const xhsReadCommand = async (
       options: gate.options,
       runId: context.run_id,
       requestId: commandRequestId,
-      sessionId: bridgeSessionId
+      sessionId: bridgeSessionId,
+      gateInvocationId
     });
     const commandParams = appendFingerprintContext(
       {
         ...(commandRequestId ? { request_id: commandRequestId } : {}),
+        gate_invocation_id: gateInvocationId,
         target_domain: gate.targetDomain,
         target_tab_id: gate.targetTabId,
         target_page: gate.targetPage,

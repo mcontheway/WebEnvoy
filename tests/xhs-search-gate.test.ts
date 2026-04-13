@@ -265,7 +265,7 @@ describe("xhs-search gate helpers", () => {
         admission_context: {
           approval_admission_evidence: {
             run_id: "run-extension-plain-admission-001",
-            session_id: "stale-session-001",
+            session_id: "session-extension-plain-001",
             issue_scope: "issue_209",
             target_domain: "www.xiaohongshu.com",
             target_tab_id: 12,
@@ -286,7 +286,7 @@ describe("xhs-search gate helpers", () => {
           },
           audit_admission_evidence: {
             run_id: "run-extension-plain-admission-001",
-            session_id: "stale-session-001",
+            session_id: "session-extension-plain-001",
             issue_scope: "issue_209",
             target_domain: "www.xiaohongshu.com",
             target_tab_id: 12,
@@ -346,6 +346,54 @@ describe("xhs-search gate helpers", () => {
     });
   });
 
+  it("blocks admission evidence from an older native-messaging session", () => {
+    const gate = resolveGate(
+      {
+        issue_scope: "issue_209",
+        risk_state: "allowed",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 12,
+        target_page: "search_result_tab",
+        actual_target_domain: "www.xiaohongshu.com",
+        actual_target_tab_id: 12,
+        actual_target_page: "search_result_tab",
+        action_type: "read",
+        ability_action: "read",
+        requested_execution_mode: "live_read_high_risk",
+        admission_context: createAdmissionContext({
+          run_id: "run-extension-session-rebind-001",
+          session_id: "stale-session-001"
+        }),
+        approval_record: {
+          approved: true,
+          approver: "qa-reviewer",
+          approved_at: "2026-03-23T10:00:00.000Z",
+          checks: {
+            target_domain_confirmed: true,
+            target_tab_confirmed: true,
+            target_page_confirmed: true,
+            risk_state_checked: true,
+            action_type_confirmed: true
+          }
+        }
+      },
+      {
+        runId: "run-extension-session-rebind-001",
+        requestId: "req-session-rebind-1",
+        sessionId: "session-extension-current-001",
+        profile: "profile-a"
+      }
+    );
+
+    expect(gate.gate_outcome).toMatchObject({
+      gate_decision: "blocked",
+      effective_execution_mode: "dry_run"
+    });
+    expect(gate.gate_outcome.gate_reasons).toEqual(
+      expect.arrayContaining(["MANUAL_CONFIRMATION_MISSING", "AUDIT_RECORD_MISSING"])
+    );
+  });
+
   it("keeps gate decision IDs unique per run even when caller reuses request_id", () => {
     const firstGate = resolveGate(
       {
@@ -382,6 +430,7 @@ describe("xhs-search gate helpers", () => {
         runId: "run-extension-command-request-001",
         requestId: "transport-req-1",
         commandRequestId: "issue209-live-req-reused",
+        gateInvocationId: "issue209-gate-run-extension-command-request-001-a",
         sessionId: "session-extension-command-request-001",
         profile: "profile-a"
       }
@@ -417,19 +466,20 @@ describe("xhs-search gate helpers", () => {
         }
       },
       {
-        runId: "run-extension-command-request-002",
+        runId: "run-extension-command-request-001",
         requestId: "transport-req-2",
         commandRequestId: "issue209-live-req-reused",
-        sessionId: "session-extension-command-request-002",
+        gateInvocationId: "issue209-gate-run-extension-command-request-001-b",
+        sessionId: "session-extension-command-request-001",
         profile: "profile-a"
       }
     );
 
     expect(firstGate.gate_outcome.decision_id).toBe(
-      "gate_decision_run-extension-command-request-001_issue209-live-req-reused"
+      "gate_decision_issue209-gate-run-extension-command-request-001-a"
     );
     expect(secondGate.gate_outcome.decision_id).toBe(
-      "gate_decision_run-extension-command-request-002_issue209-live-req-reused"
+      "gate_decision_issue209-gate-run-extension-command-request-001-b"
     );
     expect(firstGate.gate_outcome.decision_id).not.toBe(secondGate.gate_outcome.decision_id);
   });

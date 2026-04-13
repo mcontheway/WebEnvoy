@@ -5,15 +5,6 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
   const createAllowedHighRiskAuditRecord = (
     overrides: Record<string, unknown> & { runId?: string; requestId?: string } = {}
   ): Record<string, unknown> => {
-    const runId =
-      typeof overrides.runId === "string" && overrides.runId.length > 0 ? overrides.runId : null;
-    const requestId =
-      typeof overrides.requestId === "string" && overrides.requestId.length > 0
-        ? overrides.requestId
-        : null;
-    const decisionId = runId && requestId ? `gate_decision_${runId}_${requestId}` : null;
-    const approvalId = decisionId ? `gate_appr_${decisionId}` : null;
-
     return {
       event_id: "audit-live-read-high-risk-001",
       issue_scope: "issue_209",
@@ -24,8 +15,6 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       requested_execution_mode: "live_read_high_risk",
       gate_decision: "allowed",
       recorded_at: "2026-03-23T10:00:30Z",
-      ...(decisionId ? { decision_id: decisionId } : {}),
-      ...(approvalId ? { approval_id: approvalId } : {}),
       ...overrides
     };
   };
@@ -98,17 +87,20 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
     requestId?: string;
     requestedExecutionMode: "live_read_limited" | "live_read_high_risk";
     riskState: "limited" | "allowed";
+    decisionId?: string;
+    approvalId?: string;
+    sessionId?: string;
   }): Record<string, unknown> => {
-    const requestId = input.requestId;
-    const decisionId = requestId ? `gate_decision_${input.runId}_${requestId}` : `gate_decision_${input.runId}`;
-    const approvalId = `gate_appr_${decisionId}`;
+    const decisionId = input.decisionId;
+    const approvalId = input.approvalId;
+    const sessionId = input.sessionId ?? "nm-session-001";
     return ({
     approval_admission_evidence: {
-      approval_admission_ref: approvalId,
-      decision_id: decisionId,
-      approval_id: approvalId,
+      ...(approvalId ? { approval_admission_ref: approvalId } : {}),
+      ...(decisionId ? { decision_id: decisionId } : {}),
+      ...(approvalId ? { approval_id: approvalId } : {}),
       run_id: input.runId,
-      session_id: "nm-session-001",
+      session_id: sessionId,
       issue_scope: "issue_209",
       target_domain: "www.xiaohongshu.com",
       target_tab_id: 32,
@@ -128,11 +120,11 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       recorded_at: "2026-03-23T10:00:00Z"
     },
     audit_admission_evidence: {
-      audit_admission_ref: `gate_evt_${decisionId}`,
-      decision_id: decisionId,
-      approval_id: approvalId,
+      ...(decisionId ? { audit_admission_ref: `gate_evt_${decisionId}` } : {}),
+      ...(decisionId ? { decision_id: decisionId } : {}),
+      ...(approvalId ? { approval_id: approvalId } : {}),
       run_id: input.runId,
-      session_id: "nm-session-001",
+      session_id: sessionId,
       issue_scope: "issue_209",
       target_domain: "www.xiaohongshu.com",
       target_tab_id: 32,
@@ -1806,8 +1798,6 @@ process.stdin.on("data", (chunk) => {
           },
           audit_record: {
             event_id: "audit-live-read-limited-001",
-            decision_id: `${"gate_decision_"}${runId}_issue209-live-limited-001`,
-            approval_id: `${"gate_appr_gate_decision_"}${runId}_issue209-live-limited-001`,
             issue_scope: "issue_209",
             target_domain: "www.xiaohongshu.com",
             target_tab_id: 32,
@@ -1952,7 +1942,7 @@ process.stdin.on("data", (chunk) => {
     const decisionId = String(body.summary.gate_outcome.decision_id);
     const approvalAdmissionEvidence = body.summary.gate_input.admission_context.approval_admission_evidence;
     const auditAdmissionEvidence = body.summary.gate_input.admission_context.audit_admission_evidence;
-    expect(decisionId).toMatch(new RegExp(`^gate_decision_${runId}_issue209-live-`));
+    expect(decisionId).toMatch(new RegExp(`^gate_decision_issue209-gate-${runId}-`));
     expect(approvalAdmissionEvidence).toMatchObject({
       decision_id: decisionId,
       approval_id: `gate_appr_${decisionId}`
@@ -1985,6 +1975,8 @@ process.stdin.on("data", (chunk) => {
     const admissionContext = createApprovedReadAdmissionContext({
       runId,
       requestId,
+      decisionId: `gate_decision_${runId}_${requestId}`,
+      approvalId: `gate_appr_gate_decision_${runId}_${requestId}`,
       requestedExecutionMode: "live_read_limited",
       riskState: "limited"
     });
@@ -2012,8 +2004,6 @@ process.stdin.on("data", (chunk) => {
           limited_read_rollout_ready_true: true,
           fingerprint_context: createLoopbackFingerprintContext(),
           approval_record: {
-            decision_id: `gate_decision_${runId}_${requestId}`,
-            approval_id: `gate_appr_gate_decision_${runId}_${requestId}`,
             approved: true,
             approver: "qa-reviewer",
             approved_at: "2026-03-23T10:00:00Z",
@@ -2034,8 +2024,10 @@ process.stdin.on("data", (chunk) => {
 
     expect(result.status).toBe(0);
     const body = parseSingleJsonLine(result.stdout);
+    expect(String(body.summary.gate_outcome.decision_id)).toMatch(
+      new RegExp(`^gate_decision_issue209-gate-${runId}-`)
+    );
     expect(body.summary.gate_outcome).toMatchObject({
-      decision_id: `gate_decision_${runId}_${requestId}`,
       effective_execution_mode: "live_read_limited",
       gate_decision: "allowed",
       gate_reasons: ["LIVE_MODE_APPROVED"]
