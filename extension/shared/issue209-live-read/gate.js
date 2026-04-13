@@ -3,8 +3,8 @@ import {
   cloneIssue209AdmissionContext
 } from "./admission.js";
 import {
-  normalizeProvidedApprovalSource
-} from "./source.js";
+  validateIssue209ApprovalSourceAgainstCurrentLinkage
+} from "./source-validation.js";
 
 const asRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
@@ -24,9 +24,6 @@ const pushReason = (target, reason) => {
     target.push(reason);
   }
 };
-
-const cloneApprovalChecks = (checks) =>
-  Object.fromEntries(APPROVAL_CHECK_KEYS.map((key) => [key, checks?.[key] === true]));
 
 const normalizeApprovalAdmissionEvidence = (value) => {
   const record = asRecord(value);
@@ -206,57 +203,16 @@ const resolveIssue209AuditAdmissionRequirementGaps = (
   return gaps;
 };
 
-const validateIssue209ApprovalSourceAgainstCurrentLinkage = (input) => {
-  const approvalSource = normalizeProvidedApprovalSource(input?.approvalRecord);
-  const gaps = [];
-  const carriesDecisionId = hasOwnNonNullValue(approvalSource, "decision_id");
-  const carriesApprovalId = hasOwnNonNullValue(approvalSource, "approval_id");
-
-  if (approvalSource.approved !== true) {
-    gaps.push("approval_record_approved_true");
-  }
-  if (!approvalSource.approver) {
-    gaps.push("approval_record_approver_present");
-  }
-  if (!approvalSource.approved_at) {
-    gaps.push("approval_record_approved_at_present");
-  }
-  if (!APPROVAL_CHECK_KEYS.every((key) => approvalSource.checks[key] === true)) {
-    gaps.push("approval_record_checks_all_true");
-  }
-
-  if (carriesDecisionId !== carriesApprovalId) {
-    gaps.push("approval_record_linkage_invalid");
-  } else if (
-    carriesDecisionId &&
-    carriesApprovalId &&
-    (approvalSource.decision_id !== input?.decisionId ||
-      approvalSource.approval_id !== input?.expectedApprovalId)
-  ) {
-    gaps.push("approval_record_linkage_invalid");
-  }
-
-  return {
-    approvalRecord: {
-      approval_id: input?.expectedApprovalId ?? null,
-      decision_id: input?.decisionId ?? null,
-      approved: approvalSource.approved,
-      approver: approvalSource.approver,
-      approved_at: approvalSource.approved_at,
-      checks: cloneApprovalChecks(approvalSource.checks)
-    },
-    approvalRequirementGaps: gaps
-  };
-};
-
 const collectIssue209LiveReadMatrixGateReasons = (input) => {
   const gateReasons = Array.isArray(input.gateReasons) ? input.gateReasons : [];
   const admissionContext = cloneIssue209AdmissionContext(input.admissionContext);
   const { approvalRecord, approvalRequirementGaps } =
     validateIssue209ApprovalSourceAgainstCurrentLinkage({
       approvalRecord: input.approvalRecord,
-      decisionId: input.decisionId ?? null,
-      expectedApprovalId: input.expectedApprovalId ?? null
+      current: {
+        decisionId: input.decisionId ?? null,
+        approvalId: input.expectedApprovalId ?? null
+      }
     });
 
   if (gateReasons.length === 0 && input.state.isBlockedByStateMatrix) {

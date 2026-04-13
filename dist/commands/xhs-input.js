@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { CliError } from "../core/errors.js";
 import { prepareIssue209LiveReadSource } from "../../shared/issue209-live-read/source.js";
+import { validateIssue209ApprovalSourceAgainstCurrentLinkage, validateIssue209AuditSourceAgainstCurrentLinkage } from "../../shared/issue209-live-read/source-validation.js";
 const ABILITY_LAYERS = new Set(["L3", "L2", "L1"]);
 const ABILITY_ACTIONS = new Set(["read", "write", "download"]);
 const XHS_EXECUTION_MODES = new Set([
@@ -380,40 +381,29 @@ const resolveIssue209AdmissionDraftForContract = (input) => {
     }
     const approvalSource = source.approvalSource;
     const auditSource = source.auditSource;
-    const formalApprovalValid = approvalSource.approved === true &&
-        approvalSource.approver &&
-        approvalSource.approved_at &&
-        hasAllTrueChecks(approvalSource.checks);
-    const formalAuditValid = auditSource.event_id &&
-        auditSource.recorded_at &&
-        auditSource.gate_decision === "allowed" &&
-        (auditSource.issue_scope === null || auditSource.issue_scope === current.issueScope) &&
-        (auditSource.target_domain === null || auditSource.target_domain === current.targetDomain) &&
-        (auditSource.target_tab_id === null || auditSource.target_tab_id === current.targetTabId) &&
-        (auditSource.target_page === null || auditSource.target_page === current.targetPage) &&
-        (auditSource.action_type === null || auditSource.action_type === current.actionType) &&
-        (auditSource.requested_execution_mode === null ||
-            auditSource.requested_execution_mode === current.requestedExecutionMode) &&
-        (auditSource.risk_state === null || auditSource.risk_state === current.riskState) &&
-        (!input.requestIdWasExplicit ||
-            current.commandRequestId === null ||
-            auditSource.request_id === null ||
-            auditSource.request_id === current.commandRequestId);
+    const validatedApprovalSource = validateIssue209ApprovalSourceAgainstCurrentLinkage({
+        current,
+        approvalSource
+    });
+    const validatedAuditSource = validateIssue209AuditSourceAgainstCurrentLinkage({
+        current,
+        auditSource,
+        requestIdWasExplicit: input.requestIdWasExplicit
+    });
+    const formalApprovalValid = validatedApprovalSource.isValid;
+    const formalAuditValid = validatedAuditSource.isValid;
     const completeFormalSource = formalApprovalValid && formalAuditValid;
     if (source.explicitAdmissionContext !== null && completeFormalSource && !explicitSourceValid) {
         return { kind: "missing" };
     }
     if (completeFormalSource) {
-        const auditChecks = Object.values(auditSource.audited_checks).some((value) => value === true)
-            ? auditSource.audited_checks
-            : approvalSource.checks;
         return {
             kind: "draft",
             admission_context: {
                 approval_admission_evidence: {
                     approval_admission_ref: `approval_admission_${current.gateInvocationId}`,
-                    decision_id: current.decisionId,
-                    approval_id: current.approvalId,
+                    decision_id: validatedApprovalSource.approvalRecord.decision_id,
+                    approval_id: validatedApprovalSource.approvalRecord.approval_id,
                     ...(current.commandRequestId ? { request_id: current.commandRequestId } : {}),
                     run_id: current.runId,
                     session_id: null,
@@ -423,16 +413,16 @@ const resolveIssue209AdmissionDraftForContract = (input) => {
                     target_page: current.targetPage,
                     action_type: current.actionType,
                     requested_execution_mode: current.requestedExecutionMode,
-                    approved: true,
-                    approver: approvalSource.approver,
-                    approved_at: approvalSource.approved_at,
-                    checks: approvalSource.checks,
-                    recorded_at: approvalSource.approved_at
+                    approved: validatedApprovalSource.approvalRecord.approved,
+                    approver: validatedApprovalSource.approvalRecord.approver,
+                    approved_at: validatedApprovalSource.approvalRecord.approved_at,
+                    checks: validatedApprovalSource.approvalRecord.checks,
+                    recorded_at: validatedApprovalSource.approvalRecord.approved_at
                 },
                 audit_admission_evidence: {
                     audit_admission_ref: `audit_admission_${current.gateInvocationId}`,
-                    decision_id: current.decisionId,
-                    approval_id: current.approvalId,
+                    decision_id: validatedAuditSource.auditRecord.decision_id,
+                    approval_id: validatedAuditSource.auditRecord.approval_id,
                     ...(current.commandRequestId ? { request_id: current.commandRequestId } : {}),
                     run_id: current.runId,
                     session_id: null,
@@ -443,8 +433,8 @@ const resolveIssue209AdmissionDraftForContract = (input) => {
                     action_type: current.actionType,
                     requested_execution_mode: current.requestedExecutionMode,
                     risk_state: current.riskState,
-                    audited_checks: auditChecks,
-                    recorded_at: auditSource.recorded_at
+                    audited_checks: validatedAuditSource.auditRecord.audited_checks,
+                    recorded_at: validatedAuditSource.auditRecord.recorded_at
                 }
             }
         };

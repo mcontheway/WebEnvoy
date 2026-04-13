@@ -759,6 +759,8 @@ describe("native messaging bridge", () => {
   });
 
   it("rebinds synthesized issue_209 admission_context after session recovery", async () => {
+    const decisionId = "gate_decision_issue209-gate-run-recovery-admission-session-001-001";
+    const approvalId = "gate_appr_gate_decision_issue209-gate-run-recovery-admission-session-001-001";
     let openCall = 0;
     let forwardCall = 0;
     const forwardedSessions: Array<{
@@ -866,6 +868,8 @@ describe("native messaging bridge", () => {
           },
           audit_record: {
             event_id: "gate_evt_issue209_live_recovery_001",
+            decision_id: decisionId,
+            approval_id: approvalId,
             issue_scope: "issue_209",
             target_domain: "www.xiaohongshu.com",
             target_tab_id: 12,
@@ -874,6 +878,13 @@ describe("native messaging bridge", () => {
             requested_execution_mode: "live_read_limited",
             risk_state: "limited",
             gate_decision: "allowed",
+            audited_checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            },
             recorded_at: "2026-03-23T10:05:00Z"
           }
         }
