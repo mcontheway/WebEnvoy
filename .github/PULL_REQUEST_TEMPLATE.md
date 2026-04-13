@@ -21,9 +21,11 @@
 ## integration_check
 
 - integration_applicable（`yes` / `no`）:
+- integration_touchpoint（`none` / `check_required` / `active` / `blocked` / `resolved`）:
 - integration_ref:
 - shared_contract_changed（`yes` / `no`）:
 - external_dependency（`none` / `syvert` / `webenvoy` / `both`）:
+- merge_gate（`local_only` / `integration_check_required`）:
 - contract_surface（`none` / `execution_provider` / `ids_trace` / `errors` / `raw_normalized` / `diagnostics_observability` / `runtime_modes`）:
 - joint_acceptance_needed（`yes` / `no`）:
 - integration_status_checked_before_pr（`yes` / `no`）:
@@ -32,7 +34,8 @@
 补充说明：
 
 - `integration_applicable=yes` 时，`integration_ref` 不得为空。
-- `shared_contract_changed=yes` 或 `external_dependency != none` 时，当前事项 / PR 的 `merge_gate` 必须按 `integration_check_required` 收口。
+- `integration_applicable=yes` 时，`integration_touchpoint`、`merge_gate` 与 `contract_surface` 不得留空。
+- `shared_contract_changed=yes`、`external_dependency != none` 或 `joint_acceptance_needed=yes` 时，当前事项 / PR 的 `merge_gate` 必须按 `integration_check_required` 收口。
 - merge 前必须再次核对 `integration_ref` 对应 integration issue / project item 的状态、依赖与联合验收约束。
 
 ## gate_applicability（对 formal spec review PR、live evidence 治理落库/治理维护 PR，以及所有落入真实 live evidence 专项门禁的 PR 必填）

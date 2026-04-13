@@ -62,6 +62,7 @@ docs/dev/
   - 依赖另一仓库先做、同步做或共同验收
   - 影响联合 PoC、联合回归或共享桥接能力
 - `merge_gate=integration_check_required` 时，提 PR 前和合并前都必须再次核对 `integration_ref` 对应的依赖和联合验收状态。
+- 只要事项需要联合验收，即使不改共享字段，仍必须按 integration-gated 事项处理；不得把 `joint_acceptance_needed=yes` 的 PR 申报为 `local_only`。
 - `contract_surface` 固定枚举：
   - `none`
   - `execution_provider`

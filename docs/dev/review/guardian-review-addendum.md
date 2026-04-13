@@ -19,4 +19,4 @@
 - 落入专项门禁的 PR 还必须提供完整 `live_evidence_record`；其中 `latest_head_sha`、`run_id`、`evidence_collected_at`、`artifact_identity` 与 `artifact_log_ref` 必须共同指向当前 latest head 的 fresh rerun。
 - latest-head 门禁只以 PR 描述中的 `live_evidence_record` 为准；仓库 formal 文档中的固定样本、历史失败事实或已固化 run 记录，只要未被误写成当前 latest-head gate evidence，就不得被要求逐提交追写当前 PR head SHA。
 - 只有来自 `real_browser` 执行面的最新 live evidence，且能证明真实页面交互或真实闭环结果时，才可作为放行依据；`runtime.ping`、`runtime.bootstrap`、stub/fake host、旧 head/旧 artifact 或 same-head 历史 artifact 默认无效。
-- 若 `integration_check.shared_contract_changed=yes`、`integration_check.external_dependency!=none` 或事项本身要求 `merge_gate=integration_check_required`，reviewer / guardian 还必须确认提 PR 前与合并前都核对过 `integration_ref` 对应状态。
+- 若 `integration_check.shared_contract_changed=yes`、`integration_check.external_dependency!=none`、`integration_check.joint_acceptance_needed=yes` 或事项本身要求 `merge_gate=integration_check_required`，reviewer / guardian 还必须确认提 PR 前与合并前都核对过 `integration_ref` 对应状态。

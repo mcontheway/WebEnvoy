@@ -103,7 +103,7 @@
   - 是否引入提示词注入、命令注入、越权执行、错误自动合并、敏感信息泄露或对不可信输入的错误信任
 - integration 联动一致性
   - 若事项触及跨仓共享契约、跨仓依赖或联合验收，是否已补齐 `integration_touchpoint`、`integration_ref`、`external_dependency`、`merge_gate` 与 `contract_surface`
-  - `merge_gate=integration_check_required` 时，是否已在提 PR 前与合并前核对 integration 状态
+  - `joint_acceptance_needed=yes` 或 `merge_gate=integration_check_required` 时，是否已在提 PR 前与合并前核对 integration 状态
 - 流程与元数据合规
   - 是否满足提交信息规范、PR 描述规范、`Fixes #...` / `refs #...` 使用时机、目标分支与仓库合并策略
   - 若 PR 属于 formal spec review PR、治理落库/治理维护 PR 或落入“真实 Live Evidence 专项门禁”，PR 描述是否完整提供必需的结构化 `gate_applicability`
@@ -132,7 +132,7 @@
   - 对落入专项门禁的 PR，是否至少写明 `latest_head_sha`、`profile`、`browser_channel`、`execution_surface`、`page_url`、`target_tab_id`、`run_id`、`evidence_collected_at`、`artifact_identity`、`relay_path`、`interaction_locator` 或等价交互定位、`success_signals`、`minimum_replay`、`artifact_log_ref`、`failure_reason`、`blocker_level`
 - integration 元数据完整性
   - 对触及跨仓共享契约、跨仓依赖或联合验收的 PR，是否已显式提供 `integration_check`
-  - 若 `shared_contract_changed=yes`、`external_dependency!=none` 或事项自身要求 `merge_gate=integration_check_required`，是否已明确记录提 PR 前与合并前的 integration 状态核对结果
+  - 若 `shared_contract_changed=yes`、`external_dependency!=none`、`joint_acceptance_needed=yes` 或事项自身要求 `merge_gate=integration_check_required`，是否已明确记录提 PR 前与合并前的 integration 状态核对结果
 
 说明：
 
@@ -272,7 +272,7 @@ Findings 的写法要求：
 - 若事项触及跨仓共享契约、跨仓依赖或联合验收，PR 描述中的 `integration_check` 必须完整且与事项实际职责一致
 - 若 PR 属于 `governance_landing_pr`，formal spec review 必须已通过；未通过前必须保留 `spec_review_not_completed` 阻断，不得因为 `live_evidence_record=N/A` 或 `in_scope=false` 提前放行
 - 若 PR 落入“真实 Live Evidence 专项门禁”，PR 描述中的 `live_evidence_record` 必须与 latest head 对齐，且 reviewer / guardian 已确认不存在 evidence 缺失、证据失效、来源错误或闭环信号不足
-- 若事项要求 `merge_gate=integration_check_required`，reviewer / guardian 还必须确认提 PR 前与合并前都核对过 `integration_ref` 对应状态
+- 若事项要求 `merge_gate=integration_check_required`，或 `joint_acceptance_needed=yes`，reviewer / guardian 还必须确认提 PR 前与合并前都核对过 `integration_ref` 对应状态
 - 目标分支允许按仓库策略合入
 
 ## FR 审查补充

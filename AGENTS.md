@@ -193,6 +193,7 @@ spec review 的执行约束：
 - `merge_gate` 取值约定：
   - `local_only`：只受本仓库门禁约束
   - `integration_check_required`：除本仓库门禁外，还必须检查 integration 状态
+- 只要事项需要联合验收，即使不改共享字段，仍必须按 integration-gated 事项处理；不得把 `joint_acceptance_needed=yes` 的 PR 申报为 `local_only`。
 - `contract_surface` 固定枚举：
   - `none`
   - `execution_provider`
