@@ -47,7 +47,7 @@ docs/dev/
 ## integration project 联动规则
 
 - 默认执行真相源仍是当前仓库内的 Issue / Project / PR 分层；只有当事项触及跨仓共享契约、跨仓依赖或联合验收时，才查看 owner 级 integration project。
-- 每个进入执行回合的事项在 GitHub 侧都必须补齐：
+- 每个进入执行回合的 PR 都必须在 PR 描述的 `integration_check` 中补齐：
   - `integration_applicable`
   - `integration_touchpoint`
   - `integration_ref`

@@ -36,7 +36,7 @@
 - `integration_applicable=no` 时，`integration_ref` 填 `none`；只有 `integration_applicable=yes` 时，`integration_ref` 才必须指向可核查的具体 integration issue / project item，而不是只写 project 根链接。
 - `integration_applicable=yes` 时，`integration_touchpoint`、`merge_gate` 与 `contract_surface` 不得留空。
 - `integration_touchpoint` 为 `check_required` / `active` / `blocked`、`shared_contract_changed=yes`、`external_dependency != none`、`joint_acceptance_needed=yes`，或当前 PR 改 integration gate / review 语义时，当前事项 / PR 的 `merge_gate` 必须按 `integration_check_required` 收口。
-- `integration_touchpoint=resolved` 且 `external_dependency=none`、`joint_acceptance_needed=no` 时，可继续使用 `merge_gate=local_only`；若仍有依赖或联合验收约束，则保持 `integration_check_required`。
+- 只有 `integration_touchpoint=resolved` 且 `shared_contract_changed=no`、`external_dependency=none`、`joint_acceptance_needed=no`，并且当前 PR 未改 integration gate / review 语义时，才可继续使用 `merge_gate=local_only`；其余场景保持 `integration_check_required`。
 - 若当前 PR 改 integration gate / review 语义、联合验收口径或其他共享协作契约，`contract_surface` 不得写 `none`；治理型 gate / review 语义变更统一写 `integration_governance`，其他场景填写最接近的共享表面。
 - merge 前必须再次核对 `integration_ref` 对应 integration issue / project item 的状态、依赖与联合验收约束。
 
