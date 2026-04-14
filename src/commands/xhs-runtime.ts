@@ -155,19 +155,6 @@ const toTransportCliError = (error: NativeMessagingTransportError, ability: Abil
     }
   });
 
-const resolveEffectiveRuntimeProfileForCommand = (
-  context: RuntimeContext,
-  envelope: AbilityEnvelope
-): string | null => {
-  if (context.profile) {
-    return context.profile;
-  }
-  if (envelope.upstreamAuthorization?.resource_binding.resource_kind === "profile_session") {
-    return envelope.upstreamAuthorization.resource_binding.profile_ref ?? null;
-  }
-  return null;
-};
-
 export const ensureOfficialChromeRuntimeReady = async (
   context: RuntimeContext,
   ability: AbilityRef,
@@ -228,22 +215,13 @@ const xhsReadCommand = async (
   }
   ): Promise<CommandExecutionResult> => {
   const envelope = parseAbilityEnvelopeForContract(context.params);
-  const effectiveProfile = resolveEffectiveRuntimeProfileForCommand(context, envelope);
   const gate = normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
     command: context.command,
     abilityAction: envelope.ability.action,
-    runtimeProfile: effectiveProfile,
+    runtimeProfile: context.profile ?? null,
     upstreamAuthorization: envelope.upstreamAuthorization
   });
   const parsedInput = inputConfig.parseInput(envelope, gate);
-  const runtimeContext: RuntimeContext = {
-    ...context,
-    profile: effectiveProfile
-  };
-
-  if (!effectiveProfile) {
-    throw new CliError("ERR_CLI_INVALID_ARGS", `命令 ${context.command} 需要 --profile`);
-  }
 
   if (
     process.env.NODE_ENV === "test" &&
@@ -275,8 +253,8 @@ const xhsReadCommand = async (
 
   const bridge = resolveRuntimeBridge();
   const profileStore = new ProfileStore(resolveRuntimeProfileRoot(context.cwd));
-  const profileMeta = await profileStore.readMeta(effectiveProfile);
-  const fingerprintContext = buildFingerprintContextForMeta(effectiveProfile, profileMeta, {
+  const profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
+  const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
     requestedExecutionMode: gate.requestedExecutionMode
   });
 
@@ -287,7 +265,7 @@ const xhsReadCommand = async (
       runId: context.run_id
     });
     await ensureOfficialChromeRuntimeReady(
-      runtimeContext,
+      context,
       envelope.ability,
       gate.requestedExecutionMode,
       bridge,
@@ -295,7 +273,7 @@ const xhsReadCommand = async (
       gate
     );
     const bridgeSessionId = await bridge.ensureSession({
-      profile: effectiveProfile
+      profile: context.profile
     });
     const commandParams = appendFingerprintContext(
       {
@@ -323,7 +301,7 @@ const xhsReadCommand = async (
     );
     const bridgeResult = await bridge.runCommand({
       runId: context.run_id,
-      profile: effectiveProfile,
+      profile: context.profile,
       cwd: context.cwd,
       command: context.command,
       params: commandParams
@@ -359,19 +337,19 @@ export const xhsCommands = (): CommandDefinition[] => [
   {
     name: "xhs.search",
     status: "implemented",
-    requiresProfile: false,
+    requiresProfile: true,
     handler: xhsSearch
   },
   {
     name: "xhs.detail",
     status: "implemented",
-    requiresProfile: false,
+    requiresProfile: true,
     handler: xhsDetail
   },
   {
     name: "xhs.user_home",
     status: "implemented",
-    requiresProfile: false,
+    requiresProfile: true,
     handler: xhsUserHome
   }
 ];
