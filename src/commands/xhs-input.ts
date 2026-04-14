@@ -192,17 +192,9 @@ const resolveIssue209ScopeFromAdmissionSource = (options: JsonObject): "issue_20
   return null;
 };
 
-const resolveCanonicalIssueScopeForContract = (
+const resolveInferredIssueScopeForContract = (
   options: JsonObject
 ): "issue_208" | "issue_209" | null => {
-  const explicitIssueScope = asString(options.issue_scope);
-  if (explicitIssueScope === "issue_208") {
-    return "issue_208";
-  }
-  if (explicitIssueScope === "issue_209") {
-    return "issue_209";
-  }
-
   if (
     asString(options.validation_action) === "editor_input" &&
     asString(options.action_type) === "write" &&
@@ -877,28 +869,52 @@ export const normalizeGateOptionsForContract = (
     throw invalidAbilityInput("REQUESTED_EXECUTION_MODE_INVALID", abilityId);
   }
 
-  const legacyActionType = asString(options.action_type);
+  const legacyActionType = hasOwn(options, "action_type") ? asString(options.action_type) : null;
+  if (upstreamAuthorization && hasOwn(options, "action_type") && !legacyActionType) {
+    throw invalidAbilityInput("ACTION_TYPE_INVALID", abilityId);
+  }
+  const legacyTargetDomain = hasOwn(options, "target_domain") ? asString(options.target_domain) : null;
+  if (upstreamAuthorization && hasOwn(options, "target_domain") && !legacyTargetDomain) {
+    throw invalidAbilityInput("TARGET_DOMAIN_INVALID", abilityId);
+  }
+  const legacyTargetTabId = hasOwn(options, "target_tab_id") ? asInteger(options.target_tab_id) : null;
+  if (upstreamAuthorization && hasOwn(options, "target_tab_id") && legacyTargetTabId === null) {
+    throw invalidAbilityInput("TARGET_TAB_ID_INVALID", abilityId);
+  }
+  const legacyTargetPage = hasOwn(options, "target_page") ? asString(options.target_page) : null;
+  if (upstreamAuthorization && hasOwn(options, "target_page") && !legacyTargetPage) {
+    throw invalidAbilityInput("TARGET_PAGE_INVALID", abilityId);
+  }
+  const explicitIssueScope = hasOwn(options, "issue_scope") ? asString(options.issue_scope) : null;
+  if (
+    upstreamAuthorization &&
+    hasOwn(options, "issue_scope") &&
+    explicitIssueScope !== "issue_208" &&
+    explicitIssueScope !== "issue_209"
+  ) {
+    throw invalidAbilityInput("ISSUE_SCOPE_INVALID", abilityId);
+  }
   if (upstreamAuthorization && legacyActionType && legacyActionType !== legacyProjectedActionType) {
     throw invalidAbilityInput("ACTION_TYPE_CONFLICT", abilityId);
   }
   if (
     upstreamAuthorization &&
-    asString(options.target_domain) &&
-    asString(options.target_domain) !== targetDomain
+    legacyTargetDomain &&
+    legacyTargetDomain !== targetDomain
   ) {
     throw invalidAbilityInput("TARGET_DOMAIN_CONFLICT", abilityId);
   }
   if (
     upstreamAuthorization &&
-    asInteger(options.target_tab_id) !== null &&
-    asInteger(options.target_tab_id) !== targetTabId
+    legacyTargetTabId !== null &&
+    legacyTargetTabId !== targetTabId
   ) {
     throw invalidAbilityInput("TARGET_TAB_ID_CONFLICT", abilityId);
   }
   if (
     upstreamAuthorization &&
-    asString(options.target_page) &&
-    asString(options.target_page) !== targetPage
+    legacyTargetPage &&
+    legacyTargetPage !== targetPage
   ) {
     throw invalidAbilityInput("TARGET_PAGE_CONFLICT", abilityId);
   }
@@ -971,7 +987,7 @@ export const normalizeGateOptionsForContract = (
     }
   }
 
-  const canonicalIssueScope = resolveCanonicalIssueScopeForContract({
+  const inferredIssueScope = resolveInferredIssueScopeForContract({
     ...options,
     ...(legacyProjectedActionType ? { action_type: legacyProjectedActionType } : {}),
     target_domain: targetDomain,
@@ -979,6 +995,14 @@ export const normalizeGateOptionsForContract = (
     target_page: targetPage,
     requested_execution_mode: requestedExecutionMode
   });
+  if (
+    upstreamAuthorization &&
+    hasOwn(options, "issue_scope") &&
+    explicitIssueScope !== inferredIssueScope
+  ) {
+    throw invalidAbilityInput("ISSUE_SCOPE_CONFLICT", abilityId);
+  }
+  const canonicalIssueScope = explicitIssueScope ?? inferredIssueScope;
 
   return {
     targetDomain,

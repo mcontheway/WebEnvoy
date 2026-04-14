@@ -919,6 +919,93 @@ describe("xhs-input", () => {
     );
   });
 
+  it("rejects stale legacy issue_scope values that conflict with FR-0023 normalization", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {
+        issue_scope: "issue_209",
+        requested_execution_mode: "dry_run"
+      },
+      ...buildUpstreamAuthorizationRequest()
+    });
+
+    expect(() =>
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        upstreamAuthorization: envelope.upstreamAuthorization
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "ISSUE_SCOPE_CONFLICT"
+        })
+      })
+    );
+  });
+
+  it("rejects malformed duplicated legacy action_type fields", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {
+        action_type: 1,
+        requested_execution_mode: "dry_run"
+      },
+      ...buildUpstreamAuthorizationRequest()
+    });
+
+    expect(() =>
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        upstreamAuthorization: envelope.upstreamAuthorization
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "ACTION_TYPE_INVALID"
+        })
+      })
+    );
+  });
+
+  it("rejects malformed duplicated legacy target_tab_id fields", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {
+        target_tab_id: "924",
+        requested_execution_mode: "dry_run"
+      },
+      ...buildUpstreamAuthorizationRequest()
+    });
+
+    expect(() =>
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        upstreamAuthorization: envelope.upstreamAuthorization
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "TARGET_TAB_ID_INVALID"
+        })
+      })
+    );
+  });
+
   it("does not synthesize issue_209 live admission_context from an incomplete approval-only source", () => {
     const options = ensureIssue209AdmissionContextForContract({
       options: {
