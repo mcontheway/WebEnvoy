@@ -177,10 +177,7 @@ const projectLegacyActionTypeForContract = (
 };
 
 const isAnonymousRuntimeProfileForContract = (profile: string | null | undefined): boolean => {
-  if (!profile) {
-    return true;
-  }
-  return /^anonymous(?:[._-][A-Za-z0-9._-]+)?$/u.test(profile);
+  return typeof profile === "string" && /^anonymous(?:[._-][A-Za-z0-9._-]+)?$/u.test(profile);
 };
 
 const resolveIssue209ScopeFromAdmissionSource = (options: JsonObject): "issue_209" | null => {
@@ -896,6 +893,7 @@ export const normalizeGateOptionsForContract = (
   }
 
   if (upstreamAuthorization) {
+    const runtimeProfile = input?.runtimeProfile;
     const expectedAbilityAction: AbilityAction =
       normalizedActionType === "read" ? "read" : "write";
     if (input?.abilityAction && input.abilityAction !== expectedAbilityAction) {
@@ -951,7 +949,13 @@ export const normalizeGateOptionsForContract = (
     }
     if (
       upstreamAuthorization.resource_binding.resource_kind === "anonymous_context" &&
-      !isAnonymousRuntimeProfileForContract(input?.runtimeProfile)
+      !runtimeProfile
+    ) {
+      throw invalidAbilityInput("ANONYMOUS_CONTEXT_PROFILE_REQUIRED", abilityId);
+    }
+    if (
+      upstreamAuthorization.resource_binding.resource_kind === "anonymous_context" &&
+      !isAnonymousRuntimeProfileForContract(runtimeProfile)
     ) {
       throw invalidAbilityInput("ANONYMOUS_CONTEXT_PROFILE_CONFLICT", abilityId);
     }

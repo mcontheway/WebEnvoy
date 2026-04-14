@@ -989,3 +989,161 @@ describe("normalizeGateOptionsForContract", () => {
     }
   });
 });
+
+describe("xhs command boundary", () => {
+  const buildFr0023SearchParams = (overrides?: Record<string, unknown>) => ({
+    ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+    input: {
+      query: "露营"
+    },
+    options: {
+      requested_execution_mode: "dry_run",
+      fixture_success: true
+    },
+    action_request: {
+      request_ref: "upstream_req_001",
+      action_name: "xhs.read_search_results",
+      action_category: "read"
+    },
+    resource_binding: {
+      binding_ref: "binding_001",
+      resource_kind: "profile_session",
+      profile_ref: "xhs_account_001"
+    },
+    authorization_grant: {
+      grant_ref: "grant_001",
+      allowed_actions: ["xhs.read_search_results"],
+      binding_scope: {
+        allowed_resource_kinds: ["profile_session"],
+        allowed_profile_refs: ["xhs_account_001"]
+      },
+      target_scope: {
+        allowed_domains: ["www.xiaohongshu.com"],
+        allowed_pages: ["search_result_tab"]
+      }
+    },
+    runtime_target: {
+      target_ref: "target_001",
+      domain: "www.xiaohongshu.com",
+      page: "search_result_tab",
+      tab_id: 924
+    },
+    ...(overrides ?? {})
+  });
+
+  it("accepts profile_session bindings without the legacy --profile path", async () => {
+    process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS = "1";
+    try {
+      const registry = createCommandRegistry();
+      await expect(
+        executeCommand(
+          {
+            cwd: join(process.cwd(), ".tmp-xhs-profile-session"),
+            command: "xhs.search",
+            profile: null,
+            run_id: "run-xhs-profile-binding-001",
+            params: buildFr0023SearchParams()
+          } as RuntimeContext,
+          registry
+        )
+      ).resolves.toMatchObject({
+        summary: expect.any(Object)
+      });
+    } finally {
+      delete process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS;
+    }
+  });
+
+  it("rejects anonymous_context bindings that do not provide an internal anonymous profile", async () => {
+    process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS = "1";
+    try {
+      const registry = createCommandRegistry();
+      await expect(
+        executeCommand(
+          {
+            cwd: join(process.cwd(), ".tmp-xhs-anonymous-missing"),
+            command: "xhs.search",
+            profile: null,
+            run_id: "run-xhs-anonymous-missing-001",
+            params: buildFr0023SearchParams({
+              resource_binding: {
+                binding_ref: "binding_anon_001",
+                resource_kind: "anonymous_context",
+                profile_ref: null,
+                binding_constraints: {
+                  anonymous_required: true,
+                  reuse_logged_in_context_forbidden: true
+                }
+              },
+              authorization_grant: {
+                grant_ref: "grant_anon_001",
+                allowed_actions: ["xhs.read_search_results"],
+                binding_scope: {
+                  allowed_resource_kinds: ["anonymous_context"],
+                  allowed_profile_refs: []
+                },
+                target_scope: {
+                  allowed_domains: ["www.xiaohongshu.com"],
+                  allowed_pages: ["search_result_tab"]
+                }
+              }
+            })
+          } as RuntimeContext,
+          registry
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "ANONYMOUS_CONTEXT_PROFILE_REQUIRED"
+        })
+      });
+    } finally {
+      delete process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS;
+    }
+  });
+
+  it("accepts anonymous_context bindings on an internal anonymous profile", async () => {
+    process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS = "1";
+    try {
+      const registry = createCommandRegistry();
+      await expect(
+        executeCommand(
+          {
+            cwd: join(process.cwd(), ".tmp-xhs-anonymous-profile"),
+            command: "xhs.search",
+            profile: "anonymous.xhs",
+            run_id: "run-xhs-anonymous-profile-001",
+            params: buildFr0023SearchParams({
+              resource_binding: {
+                binding_ref: "binding_anon_002",
+                resource_kind: "anonymous_context",
+                profile_ref: null,
+                binding_constraints: {
+                  anonymous_required: true,
+                  reuse_logged_in_context_forbidden: true
+                }
+              },
+              authorization_grant: {
+                grant_ref: "grant_anon_002",
+                allowed_actions: ["xhs.read_search_results"],
+                binding_scope: {
+                  allowed_resource_kinds: ["anonymous_context"],
+                  allowed_profile_refs: []
+                },
+                target_scope: {
+                  allowed_domains: ["www.xiaohongshu.com"],
+                  allowed_pages: ["search_result_tab"]
+                }
+              }
+            })
+          } as RuntimeContext,
+          registry
+        )
+      ).resolves.toMatchObject({
+        summary: expect.any(Object)
+      });
+    } finally {
+      delete process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS;
+    }
+  });
+});
