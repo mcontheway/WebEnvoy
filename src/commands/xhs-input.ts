@@ -445,6 +445,9 @@ const parseAuthorizationGrantForContract = (
     "GRANT_TARGET_SCOPE_INVALID",
     abilityId
   );
+  if (hasOwn(targetScope, "tab_id")) {
+    throw invalidAbilityInput("GRANT_TARGET_SCOPE_INVALID", abilityId);
+  }
   if (!hasOwn(targetScope, "allowed_domains") || !hasOwn(targetScope, "allowed_pages")) {
     throw invalidAbilityInput("GRANT_TARGET_SCOPE_INVALID", abilityId);
   }

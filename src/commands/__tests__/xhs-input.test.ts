@@ -627,6 +627,42 @@ describe("xhs-input", () => {
     );
   });
 
+  it("rejects authorization_grant target_scope tab_id fields", () => {
+    expect(() =>
+      parseAbilityEnvelopeForContract({
+        ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+        input: {
+          query: "露营"
+        },
+        options: {
+          requested_execution_mode: "dry_run"
+        },
+        ...buildUpstreamAuthorizationRequest({
+          authorization_grant: {
+            grant_ref: "grant_001",
+            allowed_actions: ["xhs.read_search_results"],
+            binding_scope: {
+              allowed_resource_kinds: ["profile_session"],
+              allowed_profile_refs: ["xhs_account_001"]
+            },
+            target_scope: {
+              allowed_domains: ["www.xiaohongshu.com"],
+              allowed_pages: ["search_result_tab"],
+              tab_id: 924
+            }
+          }
+        })
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: expect.objectContaining({
+          reason: "GRANT_TARGET_SCOPE_INVALID"
+        })
+      })
+    );
+  });
+
   it("rejects legacy action_type values that conflict with FR-0023 normalization", () => {
     const envelope = parseAbilityEnvelopeForContract({
       ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
