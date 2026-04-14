@@ -26,27 +26,43 @@ const expectedContentScriptMatches = [
   "http://localhost/*"
 ];
 
-const executeBundledDryRunXhsCommand = async (
-  bundlePath: string,
-  input: {
-    moduleVar: "__webenvoy_module_xhs_search" | "__webenvoy_module_xhs_detail" | "__webenvoy_module_xhs_user_home";
-    exportName: "executeXhsSearch" | "executeXhsDetail" | "executeXhsUserHome";
-    commandInput: Record<string, unknown>;
-  }
-) => {
+type BundledXhsModuleVar =
+  | "__webenvoy_module_xhs_search"
+  | "__webenvoy_module_xhs_detail"
+  | "__webenvoy_module_xhs_user_home";
+
+type BundledXhsExportName =
+  | "executeXhsSearch"
+  | "executeXhsDetail"
+  | "executeXhsUserHome";
+
+const loadBundleExports = (bundlePath: string, moduleVar: BundledXhsModuleVar) => {
   const bundleSource = fs.readFileSync(bundlePath, "utf8");
   const context: Record<string, unknown> = {};
   context.globalThis = context;
+  context.structuredClone = structuredClone;
   runInNewContext(
-    `${bundleSource}\n;globalThis.__bundle_test_exports = { ${input.moduleVar} };`,
+    `${bundleSource}\n;globalThis.__bundle_test_exports = { ${moduleVar}, __webenvoy_module_xhs_search_gate };`,
     context,
     { filename: bundlePath }
   );
-  const bundleExports = context.__bundle_test_exports as {
+  return context.__bundle_test_exports as {
     [key: string]: {
       [exportName: string]: (input: Record<string, unknown>, env: Record<string, unknown>) => Promise<unknown>;
     };
   };
+};
+
+const executeBundledXhsCommand = async (
+  bundlePath: string,
+  input: {
+    moduleVar: BundledXhsModuleVar;
+    exportName: BundledXhsExportName;
+    commandInput: Record<string, unknown>;
+    envOverrides?: Record<string, unknown>;
+  }
+) => {
+  const bundleExports = loadBundleExports(bundlePath, input.moduleVar);
   const executeCommand = bundleExports[input.moduleVar]?.[input.exportName];
   expect(executeCommand).toEqual(expect.any(Function));
 
@@ -57,9 +73,69 @@ const executeBundledDryRunXhsCommand = async (
       randomId: () => "bundle-req-001",
       getLocationHref: () => "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
       getDocumentTitle: () => "Search Result",
-      getReadyState: () => "complete"
+      getReadyState: () => "complete",
+      ...input.envOverrides
     }
   );
+};
+
+const buildLiveReadAdmissionContext = (input: {
+  runId: string;
+  sessionId: string;
+  gateInvocationId: string;
+  targetTabId: number;
+  targetPage: "explore_detail_tab" | "profile_tab";
+}) => {
+  const decisionId = `gate_decision_${input.gateInvocationId}`;
+  const approvalId = `gate_appr_${decisionId}`;
+  return {
+    approval_admission_evidence: {
+      approval_admission_ref: `approval_admission_${input.gateInvocationId}`,
+      decision_id: decisionId,
+      approval_id: approvalId,
+      run_id: input.runId,
+      session_id: input.sessionId,
+      issue_scope: "issue_209",
+      target_domain: "www.xiaohongshu.com",
+      target_tab_id: input.targetTabId,
+      target_page: input.targetPage,
+      action_type: "read",
+      requested_execution_mode: "live_read_high_risk",
+      approved: true,
+      approver: "qa-reviewer",
+      approved_at: "2026-03-23T10:00:00.000Z",
+      checks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      },
+      recorded_at: "2026-03-23T10:00:00.000Z"
+    },
+    audit_admission_evidence: {
+      audit_admission_ref: `audit_admission_${input.gateInvocationId}`,
+      decision_id: decisionId,
+      approval_id: approvalId,
+      run_id: input.runId,
+      session_id: input.sessionId,
+      issue_scope: "issue_209",
+      target_domain: "www.xiaohongshu.com",
+      target_tab_id: input.targetTabId,
+      target_page: input.targetPage,
+      action_type: "read",
+      requested_execution_mode: "live_read_high_risk",
+      risk_state: "allowed",
+      audited_checks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      },
+      recorded_at: "2026-03-23T10:00:30.000Z"
+    }
+  };
 };
 
 describe("extension build contract", () => {
@@ -114,11 +190,14 @@ describe("extension build contract", () => {
     expect(xhsEditorInputBuild).toContain("新的创作");
     expect(xhsEditorInputBuild).toContain("enter_editable_mode");
     expect(contentScriptBuild).not.toMatch(/^\s*import\s+/m);
+    expect(contentScriptBuild).toMatch(
+      /const \{\s*evaluateXhsGate,\s*resolveXhsGateDecisionId,\s*XHS_READ_DOMAIN,\s*XHS_WRITE_DOMAIN,\s*buildIssue209PostGateArtifacts\s*\} = __webenvoy_module_shared_xhs_gate;/s
+    );
   });
 
   it("executes bundled xhs.search classic module without unresolved implementation references", async () => {
     await expect(
-      executeBundledDryRunXhsCommand(contentScriptBuildPath, {
+      executeBundledXhsCommand(contentScriptBuildPath, {
         moduleVar: "__webenvoy_module_xhs_search",
         exportName: "executeXhsSearch",
         commandInput: {
@@ -162,7 +241,7 @@ describe("extension build contract", () => {
 
   it("executes bundled xhs.detail classic module without unresolved implementation references", async () => {
     await expect(
-      executeBundledDryRunXhsCommand(contentScriptBuildPath, {
+      executeBundledXhsCommand(contentScriptBuildPath, {
         moduleVar: "__webenvoy_module_xhs_detail",
         exportName: "executeXhsDetail",
         commandInput: {
@@ -206,7 +285,7 @@ describe("extension build contract", () => {
 
   it("executes bundled xhs.user_home classic module without unresolved implementation references", async () => {
     await expect(
-      executeBundledDryRunXhsCommand(contentScriptBuildPath, {
+      executeBundledXhsCommand(contentScriptBuildPath, {
         moduleVar: "__webenvoy_module_xhs_user_home",
         exportName: "executeXhsUserHome",
         commandInput: {
@@ -242,6 +321,136 @@ describe("extension build contract", () => {
           capability_result: {
             ability_id: "xhs.user.home.v1",
             outcome: "partial"
+          }
+        }
+      }
+    });
+  });
+
+  it("executes bundled xhs.detail live-read path without missing issue209 post-gate artifacts helper", async () => {
+    await expect(
+      executeBundledXhsCommand(contentScriptBuildPath, {
+        moduleVar: "__webenvoy_module_xhs_detail",
+        exportName: "executeXhsDetail",
+        commandInput: {
+          abilityId: "xhs.note.detail.v1",
+          abilityLayer: "L3",
+          abilityAction: "read",
+          params: {
+            note_id: "note-live-bundled-001"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 18,
+            target_page: "explore_detail_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 18,
+            actual_target_page: "explore_detail_tab",
+            action_type: "read",
+            risk_state: "allowed",
+            requested_execution_mode: "live_read_high_risk",
+            admission_context: buildLiveReadAdmissionContext({
+              runId: "run-bundled-detail-live-001",
+              sessionId: "nm-session-bundled-detail-live-001",
+              gateInvocationId: "issue209-gate-run-bundled-detail-live-001",
+              targetTabId: 18,
+              targetPage: "explore_detail_tab"
+            }),
+            simulate_result: "success"
+          },
+          executionContext: {
+            runId: "run-bundled-detail-live-001",
+            sessionId: "nm-session-bundled-detail-live-001",
+            profile: "profile-a",
+            gateInvocationId: "issue209-gate-run-bundled-detail-live-001"
+          }
+        },
+        envOverrides: {
+          getLocationHref: () => "https://www.xiaohongshu.com/explore/note-live-bundled-001",
+          getDocumentTitle: () => "Detail Page"
+        }
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      payload: {
+        summary: {
+          capability_result: {
+            ability_id: "xhs.note.detail.v1",
+            outcome: "success"
+          },
+          consumer_gate_result: {
+            requested_execution_mode: "live_read_high_risk",
+            gate_decision: "allowed"
+          },
+          audit_record: {
+            requested_execution_mode: "live_read_high_risk",
+            gate_decision: "allowed"
+          }
+        }
+      }
+    });
+  });
+
+  it("executes bundled xhs.user_home live-read path without missing issue209 post-gate artifacts helper", async () => {
+    await expect(
+      executeBundledXhsCommand(contentScriptBuildPath, {
+        moduleVar: "__webenvoy_module_xhs_user_home",
+        exportName: "executeXhsUserHome",
+        commandInput: {
+          abilityId: "xhs.user.home.v1",
+          abilityLayer: "L3",
+          abilityAction: "read",
+          params: {
+            user_id: "user-live-bundled-001"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 19,
+            target_page: "profile_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 19,
+            actual_target_page: "profile_tab",
+            action_type: "read",
+            risk_state: "allowed",
+            requested_execution_mode: "live_read_high_risk",
+            admission_context: buildLiveReadAdmissionContext({
+              runId: "run-bundled-user-home-live-001",
+              sessionId: "nm-session-bundled-user-home-live-001",
+              gateInvocationId: "issue209-gate-run-bundled-user-home-live-001",
+              targetTabId: 19,
+              targetPage: "profile_tab"
+            }),
+            simulate_result: "success"
+          },
+          executionContext: {
+            runId: "run-bundled-user-home-live-001",
+            sessionId: "nm-session-bundled-user-home-live-001",
+            profile: "profile-a",
+            gateInvocationId: "issue209-gate-run-bundled-user-home-live-001"
+          }
+        },
+        envOverrides: {
+          getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-live-bundled-001",
+          getDocumentTitle: () => "User Home"
+        }
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      payload: {
+        summary: {
+          capability_result: {
+            ability_id: "xhs.user.home.v1",
+            outcome: "success"
+          },
+          consumer_gate_result: {
+            requested_execution_mode: "live_read_high_risk",
+            gate_decision: "allowed"
+          },
+          audit_record: {
+            requested_execution_mode: "live_read_high_risk",
+            gate_decision: "allowed"
           }
         }
       }

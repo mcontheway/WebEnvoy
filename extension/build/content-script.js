@@ -1929,7 +1929,7 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
 return { validateIssue209ApprovalSourceAgainstCurrentLinkage, collectIssue209LiveReadMatrixGateReasons };
 })();
 const __webenvoy_module_issue209_postgate_audit = (() => {
-const { buildRiskTransitionAudit } = __webenvoy_module_risk_state;
+const { APPROVAL_CHECK_KEYS, buildRiskTransitionAudit } = __webenvoy_module_risk_state;
 const { resolveIssue209LiveReadApprovalId } = __webenvoy_module_issue209_identity;
 const clone = (value) => structuredClone(value);
 const asRecord = (value) =>
@@ -3584,7 +3584,8 @@ const {
   evaluateXhsGate,
   resolveXhsGateDecisionId,
   XHS_READ_DOMAIN,
-  XHS_WRITE_DOMAIN
+  XHS_WRITE_DOMAIN,
+  buildIssue209PostGateArtifacts
 } = __webenvoy_module_shared_xhs_gate;
 const { resolveRiskStateOutput } = __webenvoy_module_xhs_search_telemetry;
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)

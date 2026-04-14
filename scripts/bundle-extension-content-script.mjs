@@ -179,7 +179,7 @@ const buildContentScriptBundle = async () => {
   const issue209PostGateAuditModule = renderClassicModule({
     moduleVar: "__webenvoy_module_issue209_postgate_audit",
     prelude: [
-      "const { buildRiskTransitionAudit } = __webenvoy_module_risk_state;",
+      "const { APPROVAL_CHECK_KEYS, buildRiskTransitionAudit } = __webenvoy_module_risk_state;",
       "const { resolveIssue209LiveReadApprovalId } = __webenvoy_module_issue209_identity;"
     ].join("\n"),
     sourceBody: issue209PostGateAuditSource,
@@ -260,7 +260,8 @@ const buildContentScriptBundle = async () => {
       "  evaluateXhsGate,",
       "  resolveXhsGateDecisionId,",
       "  XHS_READ_DOMAIN,",
-      "  XHS_WRITE_DOMAIN",
+      "  XHS_WRITE_DOMAIN,",
+      "  buildIssue209PostGateArtifacts",
       "} = __webenvoy_module_shared_xhs_gate;",
       "const { resolveRiskStateOutput } = __webenvoy_module_xhs_search_telemetry;"
     ].join("\n"),
