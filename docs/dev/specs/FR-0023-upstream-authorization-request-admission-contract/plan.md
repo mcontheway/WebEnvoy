@@ -40,12 +40,13 @@
   - 对照 `#470` 决策纪要，确认 4 个外部对象与资源边界一致
   - 对照 `FR-0010/0011/0014`，确认内部 gate / admission evidence / session rhythm 仍保持既有 ownership
   - 对照 `vision.md` 与架构文档，确认本 FR 未越界成账号运营产品
+  - 对照 integration 锚点 `#464`，确认本 FR 作为 `runtime_modes` 共享契约事项的 integration-gated 口径仍成立
 - 门禁校验：
   - `bash scripts/docs-guard.sh`
   - `bash scripts/spec-guard.sh`
   - `bash scripts/check-pr-purity.sh docs/472-upstream-authorization-contract-spec main`
 - PR 校验：
-  - `integration_check` 使用 `integration_applicable=no`、`integration_ref=none`
+  - `integration_check` 使用 integration-gated 口径，并绑定本地 integration issue `#464`
   - `gate_applicability.review_lane=formal_spec_review_pr`
   - `live_evidence_record=N/A`
 
@@ -65,6 +66,7 @@
   - 其他不触碰 `FR-0023` 套件的 formal / implementation 事项
 - 串行 / 依赖：
   - `#472` 的后续实现必须等待本 FR spec review 通过
+  - 本 FR 合并前必须再次核对 integration issue `#464` 的状态与联动语义
   - `#445` rerun 只能在实现修复与授权输入 mapping 同时具备后重开
   - 若 reviewer 发现与 `FR-0010/0011/0014` 的 ownership 冲突，必须先收口本 FR 再继续实现
 

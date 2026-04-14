@@ -68,7 +68,7 @@
 2. `reason_codes` 不得为空，必须独立解释为什么允许、阻断或降级。
 3. `normalized_action_type` 必须与 `FR-0010.gate_input.action_type` 兼容。
 4. `normalized_resource_kind` 必须与 `resource_binding.resource_kind` 一致。
-5. `runtime_target_match=false` 时，必须阻断或降级，不得静默继续执行。
+5. `runtime_target_match=false` 时，必须返回 `admission_decision=blocked`，不得降级，也不得静默继续执行。
 6. `anonymous_isolation_ok=false` 时，必须阻断匿名请求。
 7. `effective_runtime_mode` 只作为 WebEnvoy 内部 mode 的请求级结果投影，不是上游正式审批字段。
 8. `request_admission_result` 只能返回请求级事实，不得把 `active / cool_down / paused` 等上游资源状态写成 WebEnvoy 长期真相源。

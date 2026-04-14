@@ -8,7 +8,8 @@
 - [ ] reviewer 确认 `request_admission_result` 与 `execution_audit` 只返回请求级事实，不篡夺上游资源长期状态权威
 - [ ] reviewer 确认 `dry_run / recon / live_*`、request-time admission、session rhythm 仍归 WebEnvoy 内部运行时
 - [ ] reviewer 确认 `FR-0010/0011/0014` 的兼容迁移表无阻断歧义
-- [ ] reviewer 确认 `integration_check`、`gate_applicability`、`live_evidence_record=N/A` 与当前 PR 范围一致
+- [ ] reviewer 确认 `integration_check` 已按 integration-gated 事项绑定 `#464`，且 `contract_surface=runtime_modes`
+- [ ] reviewer 确认 `gate_applicability`、`live_evidence_record=N/A` 与当前 PR 范围一致
 - [ ] reviewer 确认 `bash scripts/check-pr-purity.sh docs/472-upstream-authorization-contract-spec main` 结果与单 worktree 单 issue/PR 约束一致
 - [ ] spec review 通过并形成实现前冻结结论
 

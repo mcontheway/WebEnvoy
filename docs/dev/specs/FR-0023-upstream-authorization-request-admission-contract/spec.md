@@ -82,6 +82,8 @@ Canonical Issue: #472
 - `authorization_grant` 只表达上游授予的动作范围与约束。
 - 第一版正式范围至少覆盖：
   - 允许动作范围
+  - 资源适用范围
+  - 目标适用范围
   - 资源使用约束
   - 人工确认 / 授权结果引用
   - 时间窗口、频率限制、恢复条件等上游约束
@@ -156,6 +158,10 @@ Canonical Issue: #472
 - 在 spec review 通过前，不得据此进入实现承诺。
 - `#468` 是实现侧并行 blocker，但不属于本 FR 范围。
 - `#445` fresh rerun 只能在实现修复与授权输入 mapping 都完成后，在新的 latest head 上重开；本 FR 不承担 rerun closeout。
+- 本 FR 当前属于 integration-gated formal suite：
+  - 本地 integration 锚点：`#464`
+  - 对应 Syvert 治理事项：`MC-and-his-Agents/Syvert#105`
+  - 原因：本 FR 冻结的是上游授权输入与 runtime mode / gate 口径之间的共享契约边界，后续实现前与合并前都必须继续核对 integration 状态。
 
 ## GWT 验收场景
 

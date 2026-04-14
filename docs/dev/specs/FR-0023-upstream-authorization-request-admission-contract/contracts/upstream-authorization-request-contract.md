@@ -94,6 +94,15 @@
   "authorization_grant": {
     "grant_ref": "grant_001",
     "allowed_actions": ["xhs.read_search_results"],
+    "binding_scope": {
+      "allowed_resource_kinds": ["anonymous_context"],
+      "allowed_profile_refs": []
+    },
+    "target_scope": {
+      "allowed_domains": ["www.xiaohongshu.com"],
+      "allowed_pages": ["search_result_tab"],
+      "allowed_tab_ids": [924]
+    },
     "resource_state_snapshot": "paused",
     "grant_constraints": {
       "manual_approval_required": true,
@@ -111,14 +120,22 @@
 
 1. `authorization_grant` 只表达上游授予的动作范围与约束。
 2. `allowed_actions` 必须显式列出上游允许的业务动作；缺失目标动作时必须阻断。
-3. `resource_state_snapshot` 只允许作为上游输入事实，当前至少兼容：
+3. `binding_scope` 必须显式表达 grant 适用的资源范围，至少包括：
+  - `allowed_resource_kinds`
+  - `allowed_profile_refs`
+4. `target_scope` 必须显式表达 grant 适用的现场范围，至少包括：
+  - `allowed_domains`
+  - `allowed_pages`
+  - `allowed_tab_ids`
+5. `resource_state_snapshot` 只允许作为上游输入事实，当前至少兼容：
   - `active`
   - `cool_down`
   - `paused`
-4. WebEnvoy 不得把 `resource_state_snapshot` 当成自己拥有权威的长期资源状态机。
-5. `approval_refs` / `audit_refs` 可以映射到 `FR-0011.approval_admission_evidence` / `audit_admission_evidence` 的第一版兼容承载。
-6. `grant_constraints` 只表达上游限制，不直接表达 WebEnvoy 内部 execution mode。
-7. 若上游只传入 `account_ref` 而未同时给出合法 `resource_binding.resource_kind`，grant 不得生效。
+6. WebEnvoy 不得把 `resource_state_snapshot` 当成自己拥有权威的长期资源状态机。
+7. `approval_refs` / `audit_refs` 可以映射到 `FR-0011.approval_admission_evidence` / `audit_admission_evidence` 的第一版兼容承载。
+8. `grant_constraints` 只表达上游限制，不直接表达 WebEnvoy 内部 execution mode。
+9. 若上游只传入 `account_ref` 而未同时给出合法 `resource_binding.resource_kind`，grant 不得生效。
+10. 当 `resource_binding` 或 `runtime_target` 超出 grant 的 `binding_scope` / `target_scope` 时，请求必须阻断，不得降级为“近似匹配”。
 
 ## runtime_target
 
