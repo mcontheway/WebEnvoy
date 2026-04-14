@@ -143,7 +143,12 @@ const xhsUserHome = async (context) => {
 };
 const xhsReadCommand = async (context, inputConfig) => {
     const envelope = parseAbilityEnvelopeForContract(context.params);
-    const gate = normalizeGateOptionsForContract(envelope.options, envelope.ability.id);
+    const gate = normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: context.command,
+        abilityAction: envelope.ability.action,
+        runtimeProfile: context.profile ?? null,
+        upstreamAuthorization: envelope.upstreamAuthorization
+    });
     const parsedInput = inputConfig.parseInput(envelope, gate);
     if (process.env.NODE_ENV === "test" &&
         process.env.WEBENVOY_ALLOW_FIXTURE_SUCCESS === "1" &&
