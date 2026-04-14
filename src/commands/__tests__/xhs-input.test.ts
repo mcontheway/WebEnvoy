@@ -758,7 +758,8 @@ describe("xhs-input", () => {
       action_type: "write",
       target_domain: "creator.xiaohongshu.com",
       target_tab_id: 11,
-      target_page: "creator_publish_tab"
+      target_page: "creator_publish_tab",
+      issue_scope: "issue_208"
     });
   });
 
@@ -815,6 +816,7 @@ describe("xhs-input", () => {
       target_domain: "creator.xiaohongshu.com",
       target_tab_id: 11,
       target_page: "creator_publish_tab",
+      issue_scope: "issue_208",
       upstream_authorization_request: {
         action_request: {
           action_category: "irreversible_write"

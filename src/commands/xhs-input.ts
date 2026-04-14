@@ -192,10 +192,25 @@ const resolveIssue209ScopeFromAdmissionSource = (options: JsonObject): "issue_20
   return null;
 };
 
-const resolveCanonicalIssueScopeForContract = (options: JsonObject): "issue_209" | null => {
+const resolveCanonicalIssueScopeForContract = (
+  options: JsonObject
+): "issue_208" | "issue_209" | null => {
   const explicitIssueScope = asString(options.issue_scope);
+  if (explicitIssueScope === "issue_208") {
+    return "issue_208";
+  }
   if (explicitIssueScope === "issue_209") {
     return "issue_209";
+  }
+
+  if (
+    asString(options.validation_action) === "editor_input" &&
+    asString(options.action_type) === "write" &&
+    asString(options.target_domain) === "creator.xiaohongshu.com" &&
+    asString(options.target_page) === "creator_publish_tab" &&
+    options.requested_execution_mode === "live_write"
+  ) {
+    return "issue_208";
   }
 
   if (
