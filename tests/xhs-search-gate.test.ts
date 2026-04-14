@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildIssue209PostGateArtifacts, evaluateXhsGateCore } from "../shared/xhs-gate.js";
+import {
+  buildIssue209PostGateArtifacts,
+  evaluateXhsGateCore,
+  resolveXhsGateDecisionId
+} from "../shared/xhs-gate.js";
 import { resolveActualTargetGateReasons, resolveGate } from "../extension/xhs-search-gate.js";
 import {
   validateIssue209AuditSourceAgainstCurrentLinkage
@@ -226,6 +230,31 @@ describe("xhs-search gate helpers", () => {
         }
       )
     ).toThrow("issue_209 live-read requires gate_invocation_id");
+  });
+
+  it("keeps non-issue209 gate linkage tied to dispatch identity instead of caller request_id", () => {
+    const firstDecisionId = resolveXhsGateDecisionId({
+      runId: "run-extension-generic-identity-001",
+      requestId: "dispatch-req-1",
+      commandRequestId: "caller-req-reused",
+      issueScope: "issue_208",
+      requestedExecutionMode: "dry_run",
+      targetPage: "search_result_tab",
+      targetTabId: 12
+    });
+    const secondDecisionId = resolveXhsGateDecisionId({
+      runId: "run-extension-generic-identity-001",
+      requestId: "dispatch-req-2",
+      commandRequestId: "caller-req-reused",
+      issueScope: "issue_208",
+      requestedExecutionMode: "dry_run",
+      targetPage: "search_result_tab",
+      targetTabId: 12
+    });
+
+    expect(firstDecisionId).toBe("gate_decision_run-extension-generic-identity-001_dispatch-req-1");
+    expect(secondDecisionId).toBe("gate_decision_run-extension-generic-identity-001_dispatch-req-2");
+    expect(firstDecisionId).not.toBe(secondDecisionId);
   });
 
   it("prefers gate_invocation_id over caller request ids for live gate linkage", () => {

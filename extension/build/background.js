@@ -241,37 +241,6 @@ const hasSuccessfulExecutionAttestation = (payload) => {
 const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
 const asBoolean = (value) => value === true;
-const mergeGateArtifactsIntoCommandParams = (commandParams, gatePayload) => {
-    if (!gatePayload) {
-        return commandParams;
-    }
-    const approvalRecord = asRecord(gatePayload.approval_record);
-    const auditRecord = asRecord(gatePayload.audit_record);
-    const admissionContext = asRecord(asRecord(gatePayload.gate_input)?.admission_context);
-    if (!approvalRecord && !auditRecord && !admissionContext) {
-        return commandParams;
-    }
-    const normalized = { ...commandParams };
-    const normalizedOptions = asRecord(commandParams.options)
-        ? { ...asRecord(commandParams.options) }
-        : {};
-    if (approvalRecord) {
-        normalized.approval_record = approvalRecord;
-        normalized.approval = approvalRecord;
-        normalizedOptions.approval_record = approvalRecord;
-        normalizedOptions.approval = approvalRecord;
-    }
-    if (auditRecord) {
-        normalized.audit_record = auditRecord;
-        normalizedOptions.audit_record = auditRecord;
-    }
-    if (admissionContext) {
-        normalized.admission_context = admissionContext;
-        normalizedOptions.admission_context = admissionContext;
-    }
-    normalized.options = normalizedOptions;
-    return normalized;
-};
 const cloneAdmissionContext = (admissionContext) => {
     const normalizedAdmissionContext = asRecord(admissionContext);
     if (!normalizedAdmissionContext) {
@@ -2521,7 +2490,6 @@ class ChromeBackgroundBridge {
             gatePayload,
             suppressHostResponse
         });
-        const mergedCommandParams = mergeGateArtifactsIntoCommandParams(commandParams, gatePayload);
         const forward = {
             kind: "forward",
             id: dispatchRequest.id,
@@ -2534,7 +2502,7 @@ class ChromeBackgroundBridge {
             params: typeof dispatchRequest.params === "object" && dispatchRequest.params !== null
                 ? { ...dispatchRequest.params }
                 : {},
-            commandParams: mergedCommandParams,
+            commandParams,
             fingerprintContext: forwardFingerprintContext
         };
         try {

@@ -24,8 +24,6 @@ const approvedLiveOptions = {
   admission_context: {
     approval_admission_evidence: {
       approval_admission_ref: "gate_appr_content_read_001",
-      decision_id: "gate_decision_run-contract-001_req-contract-001",
-      approval_id: "gate_appr_gate_decision_run-contract-001_req-contract-001",
       run_id: "run-contract-001",
       session_id: "nm-session-001",
       issue_scope: "issue_209",
@@ -48,8 +46,6 @@ const approvedLiveOptions = {
     },
     audit_admission_evidence: {
       audit_admission_ref: "gate_evt_content_read_001",
-      decision_id: "gate_decision_run-contract-001_req-contract-001",
-      approval_id: "gate_appr_gate_decision_run-contract-001_req-contract-001",
       run_id: "run-contract-001",
       session_id: "nm-session-001",
       issue_scope: "issue_209",
@@ -71,8 +67,6 @@ const approvedLiveOptions = {
   },
   audit_record: {
     event_id: "audit-content-read-001",
-    decision_id: "gate_decision_run-contract-001_req-contract-001",
-    approval_id: "gate_appr_gate_decision_run-contract-001_req-contract-001",
     issue_scope: "issue_209",
     target_domain: "www.xiaohongshu.com",
     target_tab_id: 32,
@@ -144,6 +138,7 @@ const createMessage = (input: {
       },
       commandParams: {
         request_id: "req-contract-001",
+        gate_invocation_id: `issue209-gate-${input.command}-001`,
         ability: {
           id: input.abilityId,
           layer: "L3",

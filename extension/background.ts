@@ -542,44 +542,6 @@ const asInteger = (value: unknown): number | null =>
 
 const asBoolean = (value: unknown): boolean => value === true;
 
-const mergeGateArtifactsIntoCommandParams = (
-  commandParams: Record<string, unknown>,
-  gatePayload?: Record<string, unknown>
-): Record<string, unknown> => {
-  if (!gatePayload) {
-    return commandParams;
-  }
-  const approvalRecord = asRecord(gatePayload.approval_record);
-  const auditRecord = asRecord(gatePayload.audit_record);
-  const admissionContext = asRecord(asRecord(gatePayload.gate_input)?.admission_context);
-  if (!approvalRecord && !auditRecord && !admissionContext) {
-    return commandParams;
-  }
-
-  const normalized: Record<string, unknown> = { ...commandParams };
-  const normalizedOptions = asRecord(commandParams.options)
-    ? { ...(asRecord(commandParams.options) as Record<string, unknown>) }
-    : {};
-
-  if (approvalRecord) {
-    normalized.approval_record = approvalRecord;
-    normalized.approval = approvalRecord;
-    normalizedOptions.approval_record = approvalRecord;
-    normalizedOptions.approval = approvalRecord;
-  }
-  if (auditRecord) {
-    normalized.audit_record = auditRecord;
-    normalizedOptions.audit_record = auditRecord;
-  }
-  if (admissionContext) {
-    normalized.admission_context = admissionContext;
-    normalizedOptions.admission_context = admissionContext;
-  }
-
-  normalized.options = normalizedOptions;
-  return normalized;
-};
-
 const cloneAdmissionContext = (
   admissionContext: Record<string, unknown> | null
 ): Record<string, unknown> | null => {
@@ -3275,7 +3237,6 @@ class ChromeBackgroundBridge {
       suppressHostResponse
     });
 
-    const mergedCommandParams = mergeGateArtifactsIntoCommandParams(commandParams, gatePayload);
     const forward: BackgroundToContentMessage = {
       kind: "forward",
       id: dispatchRequest.id,
@@ -3289,7 +3250,7 @@ class ChromeBackgroundBridge {
         typeof dispatchRequest.params === "object" && dispatchRequest.params !== null
           ? { ...(dispatchRequest.params as Record<string, unknown>) }
           : {},
-      commandParams: mergedCommandParams,
+      commandParams,
       fingerprintContext: forwardFingerprintContext
     };
 

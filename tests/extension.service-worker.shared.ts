@@ -263,10 +263,6 @@ export const promoteBootstrapReadinessThroughPing = async (input: {
 export const createXhsCommandParams = (overrides?: Record<string, unknown>) => {
   const requestRunId =
     typeof overrides?.run_id === "string" && overrides.run_id.length > 0 ? overrides.run_id : "run-sw-001";
-  const requestSessionId =
-    typeof overrides?.session_id === "string" && overrides.session_id.length > 0
-      ? overrides.session_id
-      : "nm-session-001";
   const merged = {
     issue_scope: "issue_209",
     target_domain: "www.xiaohongshu.com",
@@ -276,9 +272,9 @@ export const createXhsCommandParams = (overrides?: Record<string, unknown>) => {
     risk_state: "paused",
     requested_execution_mode: "dry_run",
     limited_read_rollout_ready_true: true,
-    audit_record: createApprovedReadAuditRecord(),
     ...overrides
   };
+
   const issue209LiveReadRequested =
     merged.issue_scope === "issue_209" &&
     (merged.requested_execution_mode === "live_read_limited" ||
@@ -289,24 +285,6 @@ export const createXhsCommandParams = (overrides?: Record<string, unknown>) => {
   ) {
     issue209GateInvocationCounter += 1;
     merged.gate_invocation_id = `issue209-gate-${requestRunId}-sw-${issue209GateInvocationCounter}`;
-  }
-
-  if (merged.admission_context === undefined) {
-    merged.admission_context = createApprovedReadAdmissionContext({
-      run_id: requestRunId,
-      ...(typeof merged.request_id === "string" ? { request_id: merged.request_id } : {}),
-      session_id: requestSessionId,
-      target_tab_id: typeof merged.target_tab_id === "number" ? merged.target_tab_id : undefined,
-      target_page: typeof merged.target_page === "string" ? merged.target_page : undefined,
-      requested_execution_mode:
-        merged.requested_execution_mode === "live_read_high_risk"
-          ? "live_read_high_risk"
-          : "live_read_limited",
-      risk_state:
-        merged.risk_state === "allowed" || merged.risk_state === "limited"
-          ? merged.risk_state
-          : "paused"
-    });
   }
 
   return merged;
@@ -322,12 +300,43 @@ export const createRequestBoundXhsCommandParams = (
   } & Record<string, unknown>
 ) => {
   const { runId, sessionId, requestId, ...overrides } = input;
-  return createXhsCommandParams({
+  const params = createXhsCommandParams({
     ...overrides,
     run_id: runId,
     ...(requestId ? { request_id: requestId } : {}),
     session_id: sessionId ?? "nm-session-001"
   });
+  const requestedExecutionMode = params.requested_execution_mode;
+  const issue209LiveReadRequested =
+    params.issue_scope === "issue_209" &&
+    (requestedExecutionMode === "live_read_limited" ||
+      requestedExecutionMode === "live_read_high_risk");
+  const approvalSource = asRecord(params.approval_record) ?? asRecord(params.approval);
+  const auditSource = asRecord(params.audit_record);
+  if (
+    issue209LiveReadRequested &&
+    params.admission_context === undefined &&
+    approvalSource &&
+    (requestedExecutionMode === "live_read_high_risk" || auditSource)
+  ) {
+    params.admission_context = createApprovedReadAdmissionContext({
+      run_id: runId,
+      ...(requestId ? { request_id: requestId } : {}),
+      session_id: sessionId ?? "nm-session-001",
+      target_tab_id: typeof params.target_tab_id === "number" ? params.target_tab_id : undefined,
+      target_page: typeof params.target_page === "string" ? params.target_page : undefined,
+      requested_execution_mode:
+        requestedExecutionMode === "live_read_high_risk"
+          ? "live_read_high_risk"
+          : "live_read_limited",
+      risk_state:
+        params.risk_state === "allowed" || params.risk_state === "limited"
+          ? params.risk_state
+          : "paused"
+    });
+  }
+
+  return params;
 };
 
 export const createXhsEditorInputCommandParams = (overrides?: Record<string, unknown>) => ({
@@ -338,7 +347,6 @@ export const createXhsEditorInputCommandParams = (overrides?: Record<string, unk
   action_type: "write",
   requested_execution_mode: "live_write",
   risk_state: "allowed",
-  approval_record: createApprovedReadApprovalRecord(),
   fingerprint_context: createFingerprintRuntimeContext({
     live_allowed: true,
     live_decision: "allowed",
@@ -352,6 +360,7 @@ export const createXhsEditorInputCommandParams = (overrides?: Record<string, unk
   }),
   validation_action: "editor_input",
   validation_text: "测试发布文案",
+  approval_record: createApprovedReadApprovalRecord(),
   ability: {
     id: "xhs.note.search.v1",
     layer: "L3",

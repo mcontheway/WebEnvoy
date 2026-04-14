@@ -104,100 +104,6 @@ const resolveApprovalRecord = (
   options: Record<string, unknown>
 ): Record<string, unknown> | null => asRecord(options.approval_record) ?? asRecord(options.approval);
 
-const resolveLoopbackApprovalId = (
-  approvalRecord: Record<string, unknown> | null,
-  decisionId: string
-): string | null => {
-  const checks = asRecord(approvalRecord?.checks);
-  const approvalComplete =
-    approvalRecord?.approved === true &&
-    typeof approvalRecord.approver === "string" &&
-    approvalRecord.approver.trim().length > 0 &&
-    typeof approvalRecord.approved_at === "string" &&
-    approvalRecord.approved_at.trim().length > 0 &&
-    checks?.target_domain_confirmed === true &&
-    checks?.target_tab_confirmed === true &&
-    checks?.target_page_confirmed === true &&
-    checks?.risk_state_checked === true &&
-    checks?.action_type_confirmed === true;
-  if (!approvalComplete) {
-    return null;
-  }
-  const approvalDecisionId = asString(approvalRecord?.decision_id);
-  const approvalId = asString(approvalRecord?.approval_id);
-  if (approvalDecisionId && approvalDecisionId !== decisionId) {
-    return null;
-  }
-  if (approvalId && !approvalDecisionId) {
-    return null;
-  }
-  return approvalId ?? `gate_appr_${decisionId}`;
-};
-
-const buildLoopbackGateSeedOptions = (input: {
-  options: Record<string, unknown>;
-  decisionId: string;
-  approvalId: string | null;
-  approvalRecord: Record<string, unknown> | null;
-}): Record<string, unknown> => {
-  const nextOptions = { ...input.options };
-  const approvalDecisionId = asString(input.approvalRecord?.decision_id);
-  const existingApprovalId = asString(input.approvalRecord?.approval_id);
-  const canSeedApprovalRecord =
-    input.approvalRecord &&
-    (!approvalDecisionId || approvalDecisionId === input.decisionId) &&
-    (!existingApprovalId || approvalDecisionId === input.decisionId);
-  if (canSeedApprovalRecord) {
-    const seededApprovalRecord = {
-      ...input.approvalRecord,
-      decision_id: input.decisionId,
-      ...(input.approvalId ? { approval_id: input.approvalId } : {})
-    };
-    nextOptions.approval_record = seededApprovalRecord;
-    nextOptions.approval = seededApprovalRecord;
-  }
-  return nextOptions;
-};
-
-const mergeGateArtifactsIntoCommandParams = (
-  commandParams: Record<string, unknown>,
-  gatePayload?: Record<string, unknown>
-): Record<string, unknown> => {
-  if (!gatePayload) {
-    return commandParams;
-  }
-  const approvalRecord = asRecord(gatePayload.approval_record);
-  const auditRecord = asRecord(gatePayload.audit_record);
-  const gateInput = asRecord(gatePayload.gate_input);
-  const admissionContext = asRecord(gateInput?.admission_context) ?? asRecord(gatePayload.admission_context);
-  if (!approvalRecord && !auditRecord && !admissionContext) {
-    return commandParams;
-  }
-
-  const normalized: Record<string, unknown> = { ...commandParams };
-  const normalizedOptions = asRecord(commandParams.options)
-    ? { ...(asRecord(commandParams.options) as Record<string, unknown>) }
-    : {};
-
-  if (approvalRecord) {
-    normalized.approval_record = approvalRecord;
-    normalized.approval = approvalRecord;
-    normalizedOptions.approval_record = approvalRecord;
-    normalizedOptions.approval = approvalRecord;
-  }
-  if (auditRecord) {
-    normalized.audit_record = auditRecord;
-    normalizedOptions.audit_record = auditRecord;
-  }
-  if (admissionContext) {
-    normalized.admission_context = admissionContext;
-    normalizedOptions.admission_context = admissionContext;
-  }
-
-  normalized.options = normalizedOptions;
-  return normalized;
-};
-
 const buildLoopbackXhsReadGateBundle = (input: {
   options: Record<string, unknown>;
   abilityAction: string | null;
@@ -211,7 +117,6 @@ const buildLoopbackXhsReadGateBundle = (input: {
   consumerGateResult: Record<string, unknown>;
   payload: Record<string, unknown>;
 } => {
-  const approvalRecord = resolveApprovalRecord(input.options);
   const decisionId = resolveXhsGateDecisionId({
     runId: input.runId,
     requestId: input.requestId,
@@ -220,21 +125,14 @@ const buildLoopbackXhsReadGateBundle = (input: {
     issueScope: input.options.issue_scope,
     requestedExecutionMode: input.options.requested_execution_mode
   });
-  const approvalId = resolveLoopbackApprovalId(approvalRecord, decisionId);
   const gate = buildLoopbackGate(
-    buildLoopbackGateSeedOptions({
-      options: input.options,
-      decisionId,
-      approvalId,
-      approvalRecord
-    }),
+    input.options,
     input.abilityAction,
     {
       runId: input.runId,
       sessionId: input.sessionId,
       gateInvocationId: asString(input.gateInvocationId) ?? undefined,
-      decisionId,
-      approvalId: approvalId ?? undefined
+      decisionId
     }
   );
   const auditRecord = buildLoopbackAuditRecord({
@@ -925,7 +823,7 @@ class InMemoryBackgroundRelay {
         kind: "forward",
         id: request.id,
         command,
-        commandParams: mergeGateArtifactsIntoCommandParams(commandParams, gatePayload),
+        commandParams,
         runId,
         sessionId
       });

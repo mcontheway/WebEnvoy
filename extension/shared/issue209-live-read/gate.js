@@ -217,14 +217,13 @@ const resolveIssue209AuditAdmissionRequirementGaps = (
 const collectIssue209LiveReadMatrixGateReasons = (input) => {
   const gateReasons = Array.isArray(input.gateReasons) ? input.gateReasons : [];
   const admissionContext = cloneIssue209AdmissionContext(input.admissionContext);
-  const { approvalRecord, approvalRequirementGaps } =
-    validateIssue209ApprovalSourceAgainstCurrentLinkage({
-      approvalRecord: input.approvalRecord,
-      current: {
-        decisionId: input.decisionId ?? null,
-        approvalId: input.expectedApprovalId ?? null
-      }
-    });
+  const approvalRecord = buildApprovalRecordFromAdmissionEvidence(
+    normalizeApprovalAdmissionEvidence(admissionContext?.approval_admission_evidence),
+    {
+      decisionId: input.decisionId ?? null,
+      approvalId: input.expectedApprovalId ?? null
+    }
+  );
 
   if (gateReasons.length === 0 && input.state.isBlockedByStateMatrix) {
     pushReason(gateReasons, `RISK_STATE_${String(input.state.riskState).toUpperCase()}`);
@@ -321,20 +320,9 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
     : approvalRecord;
 
   if (
-    (!explicitAdmissionSatisfied &&
-      (approvalRequirementGaps.includes("approval_record_approved_true") ||
-        approvalRequirementGaps.includes("approval_record_approver_present") ||
-        approvalRequirementGaps.includes("approval_record_approved_at_present") ||
-        approvalRequirementGaps.includes("approval_record_linkage_invalid"))) ||
     approvalAdmissionRequirementGaps.length > 0
   ) {
     pushReason(gateReasons, "MANUAL_CONFIRMATION_MISSING");
-  }
-  if (
-    !explicitAdmissionSatisfied &&
-    approvalRequirementGaps.includes("approval_record_checks_all_true")
-  ) {
-    pushReason(gateReasons, "APPROVAL_CHECKS_INCOMPLETE");
   }
   if (
     approvalAdmissionRequirementGaps.includes("approval_admission_evidence_checks_all_true")

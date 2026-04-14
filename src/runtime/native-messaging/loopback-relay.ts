@@ -21,45 +21,6 @@ const XHS_READ_COMMAND_DEFAULT_ABILITY_IDS: Record<string, string> = {
   "xhs.user_home": "xhs.user.home.v1"
 };
 
-const mergeGateArtifactsIntoCommandParams = (
-  commandParams: Record<string, unknown>,
-  gatePayload?: Record<string, unknown>
-): Record<string, unknown> => {
-  if (!gatePayload) {
-    return commandParams;
-  }
-  const approvalRecord = asRecord(gatePayload.approval_record);
-  const auditRecord = asRecord(gatePayload.audit_record);
-  const gateInput = asRecord(gatePayload.gate_input);
-  const admissionContext = asRecord(gateInput?.admission_context) ?? asRecord(gatePayload.admission_context);
-  if (!approvalRecord && !auditRecord && !admissionContext) {
-    return commandParams;
-  }
-
-  const normalized: Record<string, unknown> = { ...commandParams };
-  const normalizedOptions = asRecord(commandParams.options)
-    ? { ...(asRecord(commandParams.options) as Record<string, unknown>) }
-    : {};
-
-  if (approvalRecord) {
-    normalized.approval_record = approvalRecord;
-    normalized.approval = approvalRecord;
-    normalizedOptions.approval_record = approvalRecord;
-    normalizedOptions.approval = approvalRecord;
-  }
-  if (auditRecord) {
-    normalized.audit_record = auditRecord;
-    normalizedOptions.audit_record = auditRecord;
-  }
-  if (admissionContext) {
-    normalized.admission_context = admissionContext;
-    normalizedOptions.admission_context = admissionContext;
-  }
-
-  normalized.options = normalizedOptions;
-  return normalized;
-};
-
 export class InMemoryBackgroundRelay {
   #pendingForward = new Map<
     string,
@@ -231,7 +192,7 @@ export class InMemoryBackgroundRelay {
         kind: "forward",
         id: request.id,
         command,
-        commandParams: mergeGateArtifactsIntoCommandParams(commandParams, gatePayload),
+        commandParams,
         runId,
         sessionId
       });

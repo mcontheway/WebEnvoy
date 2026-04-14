@@ -89,19 +89,15 @@ const resolveXhsGateDecisionId = (input) => {
   }
 
   const runId = asString(input?.runId);
-  const commandRequestId = asString(input?.commandRequestId);
-  if (runId && commandRequestId) {
-    return `gate_decision_${runId}_${commandRequestId}`;
-  }
   const requestId = asString(input?.requestId);
   if (runId && requestId) {
     return `gate_decision_${runId}_${requestId}`;
   }
-  if (runId) {
-    return `gate_decision_${runId}`;
-  }
   if (requestId) {
     return `gate_decision_${requestId}`;
+  }
+  if (runId) {
+    return `gate_decision_${runId}`;
   }
 
   const fallbackIssueScope = asString(input?.issueScope) ?? "unknown_scope";
