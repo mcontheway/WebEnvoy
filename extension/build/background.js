@@ -695,7 +695,7 @@ const buildIssue209GatePayloadArtifacts = (input) => {
             action_type: input.actionType,
             requested_execution_mode: input.requestedExecutionMode,
             risk_state: input.riskState,
-            admission_context: null
+            admission_context: cloneAdmissionContext(input.admissionContext ?? null)
         },
         gate_outcome: {
             decision_id: input.decisionId,
@@ -820,6 +820,7 @@ const createRelayXhsGatePayload = (input) => {
         gateReasons: input.gateReasons,
         requiresManualConfirmation: input.requiresManualConfirmation,
         approvalRecord: input.approvalRecord,
+        admissionContext: input.admissionContext,
         consumerGateResult: input.consumerGateResult,
         writeActionMatrixDecisions: input.writeActionMatrixDecisions
     });
@@ -939,6 +940,7 @@ const createBackgroundXhsGatePayload = (input) => {
         gateReasons: input.gateReasons,
         requiresManualConfirmation: input.requiresManualConfirmation,
         approvalRecord: input.approvalRecord,
+        admissionContext: input.admissionContext,
         consumerGateResult: input.consumerGateResult,
         writeActionMatrixDecisions: input.writeActionMatrixDecisions
     });

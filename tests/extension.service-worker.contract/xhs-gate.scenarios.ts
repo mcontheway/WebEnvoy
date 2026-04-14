@@ -2298,7 +2298,14 @@ describe("extension service worker recovery contract / xhs gate and live forward
           },
           audit_record: {
             gate_decision: "allowed",
-            gate_reasons: ["LIVE_MODE_APPROVED"]
+            gate_reasons: ["LIVE_MODE_APPROVED"],
+            audited_checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
           },
           fingerprint_runtime: {
             ...fingerprintContext,
