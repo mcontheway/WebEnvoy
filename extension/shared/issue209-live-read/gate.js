@@ -73,6 +73,17 @@ const normalizeAuditAdmissionEvidence = (value) => {
   };
 };
 
+const buildApprovalRecordFromAdmissionEvidence = (approvalAdmissionEvidence, expected) => ({
+  approval_id: expected.approvalId ?? null,
+  decision_id: expected.decisionId ?? null,
+  approved: approvalAdmissionEvidence.approved === true,
+  approver: approvalAdmissionEvidence.approver,
+  approved_at: approvalAdmissionEvidence.approved_at,
+  checks: Object.fromEntries(
+    APPROVAL_CHECK_KEYS.map((key) => [key, approvalAdmissionEvidence.checks[key] === true])
+  )
+});
+
 const resolveIssue209ApprovalAdmissionRequirementGaps = (
   requirements,
   approvalAdmissionEvidence,
@@ -300,17 +311,29 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
     input.state.limitedReadRolloutReadyTrue !== true
       ? ["limited_read_rollout_ready_true"]
       : [];
+  const explicitAdmissionSatisfied =
+    approvalAdmissionRequirementGaps.length === 0 && auditAdmissionRequirementGaps.length === 0;
+  const canonicalApprovalRecord = explicitAdmissionSatisfied
+    ? buildApprovalRecordFromAdmissionEvidence(approvalAdmissionEvidence, {
+        decisionId: input.decisionId ?? null,
+        approvalId: input.expectedApprovalId ?? null
+      })
+    : approvalRecord;
 
   if (
-    approvalRequirementGaps.includes("approval_record_approved_true") ||
-    approvalRequirementGaps.includes("approval_record_approver_present") ||
-    approvalRequirementGaps.includes("approval_record_approved_at_present") ||
-    approvalRequirementGaps.includes("approval_record_linkage_invalid") ||
+    (!explicitAdmissionSatisfied &&
+      (approvalRequirementGaps.includes("approval_record_approved_true") ||
+        approvalRequirementGaps.includes("approval_record_approver_present") ||
+        approvalRequirementGaps.includes("approval_record_approved_at_present") ||
+        approvalRequirementGaps.includes("approval_record_linkage_invalid"))) ||
     approvalAdmissionRequirementGaps.length > 0
   ) {
     pushReason(gateReasons, "MANUAL_CONFIRMATION_MISSING");
   }
-  if (approvalRequirementGaps.includes("approval_record_checks_all_true")) {
+  if (
+    !explicitAdmissionSatisfied &&
+    approvalRequirementGaps.includes("approval_record_checks_all_true")
+  ) {
     pushReason(gateReasons, "APPROVAL_CHECKS_INCOMPLETE");
   }
   if (
@@ -327,7 +350,7 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
 
   return {
     gateReasons,
-    approvalRecord,
+    approvalRecord: canonicalApprovalRecord,
     admissionContext: {
       approval_admission_evidence: approvalAdmissionEvidence,
       audit_admission_evidence: auditAdmissionEvidence

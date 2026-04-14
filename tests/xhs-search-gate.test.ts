@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluateXhsGateCore } from "../shared/xhs-gate.js";
+import { buildIssue209PostGateArtifacts, evaluateXhsGateCore } from "../shared/xhs-gate.js";
 import { resolveActualTargetGateReasons, resolveGate } from "../extension/xhs-search-gate.js";
 import {
   validateIssue209AuditSourceAgainstCurrentLinkage
@@ -736,6 +736,59 @@ describe("xhs-search gate helpers", () => {
     expect(gate.approval_record.approval_id).toBe(approvalId);
   });
 
+  it("allows explicit admission_context without mirrored approval_record", () => {
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      "run-extension-explicit-admission-only-001",
+      "explicit-admission-only-001"
+    );
+    const gate = resolveGate(
+      {
+        issue_scope: "issue_209",
+        risk_state: "limited",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 36,
+        target_page: "search_result_tab",
+        actual_target_domain: "www.xiaohongshu.com",
+        actual_target_tab_id: 36,
+        actual_target_page: "search_result_tab",
+        action_type: "read",
+        ability_action: "read",
+        requested_execution_mode: "live_read_limited",
+        limited_read_rollout_ready_true: true,
+        admission_context: createAdmissionContext({
+          run_id: "run-extension-explicit-admission-only-001",
+          request_id: "req-explicit-only-1",
+          session_id: "session-extension-explicit-only-001",
+          target_tab_id: 36,
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited"
+        })
+      },
+      {
+        runId: "run-extension-explicit-admission-only-001",
+        requestId: "req-explicit-only-1",
+        gateInvocationId,
+        sessionId: "session-extension-explicit-only-001",
+        profile: "profile-a"
+      }
+    );
+
+    expect(gate.gate_outcome).toMatchObject({
+      decision_id: decisionId,
+      gate_decision: "allowed",
+      effective_execution_mode: "live_read_limited",
+      gate_reasons: ["LIVE_MODE_APPROVED"]
+    });
+    expect(gate.approval_record).toMatchObject({
+      decision_id: decisionId,
+      approval_id: approvalId,
+      approved: true,
+      approver: "qa-reviewer",
+      approved_at: "2026-03-23T10:00:00.000Z",
+      checks: defaultAuditChecks
+    });
+  });
+
   it("blocks admission evidence when it carries a stale internal decision linkage", () => {
     const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
       "run-extension-linkage-mismatch-001",
@@ -1084,6 +1137,77 @@ describe("xhs-search gate helpers", () => {
         }
       })
     ).not.toThrow();
+  });
+
+  it("emits audited_checks in issued issue_209 audit artifacts", () => {
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      "run-extension-issued-audit-001",
+      "issued-audit-001"
+    );
+    const gate = resolveGate(
+      {
+        issue_scope: "issue_209",
+        risk_state: "allowed",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 12,
+        target_page: "search_result_tab",
+        actual_target_domain: "www.xiaohongshu.com",
+        actual_target_tab_id: 12,
+        actual_target_page: "search_result_tab",
+        action_type: "read",
+        ability_action: "read",
+        requested_execution_mode: "live_read_high_risk",
+        admission_context: createAdmissionContext({
+          run_id: "run-extension-issued-audit-001",
+          request_id: "req-issued-audit-1",
+          session_id: "session-extension-issued-audit-001",
+          decision_id: decisionId,
+          approval_id: approvalId
+        })
+      },
+      {
+        runId: "run-extension-issued-audit-001",
+        requestId: "req-issued-audit-1",
+        gateInvocationId,
+        sessionId: "session-extension-issued-audit-001",
+        profile: "profile-a"
+      }
+    );
+
+    const artifacts = buildIssue209PostGateArtifacts({
+      runId: "run-extension-issued-audit-001",
+      sessionId: "session-extension-issued-audit-001",
+      profile: "profile-a",
+      gate,
+      now: () => new Date("2026-03-23T10:10:00.000Z").getTime()
+    });
+
+    expect(artifacts.audit_record).toMatchObject({
+      decision_id: decisionId,
+      approval_id: approvalId,
+      gate_decision: "allowed",
+      audited_checks: defaultAuditChecks
+    });
+
+    const validation = validateIssue209AuditSourceAgainstCurrentLinkage({
+      current: {
+        commandRequestId: "req-issued-audit-1",
+        gateInvocationId,
+        decisionId,
+        approvalId,
+        issueScope: "issue_209",
+        targetDomain: "www.xiaohongshu.com",
+        targetTabId: 12,
+        targetPage: "search_result_tab",
+        actionType: "read",
+        requestedExecutionMode: "live_read_high_risk",
+        riskState: "allowed"
+      },
+      auditRecord: artifacts.audit_record
+    });
+
+    expect(validation.isValid).toBe(true);
+    expect(validation.auditRequirementGaps).toEqual([]);
   });
 
   describe("issue_209 audit source validation", () => {

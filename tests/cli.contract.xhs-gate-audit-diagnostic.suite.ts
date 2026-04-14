@@ -2202,18 +2202,6 @@ process.stdin.on("data", (chunk) => {
           risk_state: "limited",
           limited_read_rollout_ready_true: true,
           fingerprint_context: createLoopbackFingerprintContext(),
-          approval_record: {
-            approved: true,
-            approver: "qa-reviewer",
-            approved_at: "2026-03-23T10:00:00Z",
-            checks: {
-              target_domain_confirmed: true,
-              target_tab_confirmed: true,
-              target_page_confirmed: true,
-              risk_state_checked: true,
-              action_type_confirmed: true
-            }
-          },
           admission_context: admissionContext
         }
       })
@@ -2229,11 +2217,21 @@ process.stdin.on("data", (chunk) => {
     expect(approvalId).toBe(`gate_appr_${decisionId}`);
     expect(body.summary.approval_record).toMatchObject({
       decision_id: decisionId,
-      approval_id: approvalId
+      approval_id: approvalId,
+      approved: true,
+      approver: "qa-reviewer",
+      approved_at: "2026-03-23T10:00:00Z"
     });
     expect(body.summary.audit_record).toMatchObject({
       decision_id: decisionId,
-      approval_id: approvalId
+      approval_id: approvalId,
+      audited_checks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      }
     });
     expect(body.summary.gate_outcome).toMatchObject({
       effective_execution_mode: "live_read_limited",

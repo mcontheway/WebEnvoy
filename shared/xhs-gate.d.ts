@@ -29,6 +29,7 @@ export interface XhsAuditRecord {
   action_type: string | null;
   requested_execution_mode: string | null;
   gate_decision: string | null;
+  audited_checks?: Record<string, boolean>;
   recorded_at: string | null;
 }
 

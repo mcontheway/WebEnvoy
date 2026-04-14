@@ -1651,6 +1651,17 @@ const normalizeAuditAdmissionEvidence = (value) => {
   };
 };
 
+const buildApprovalRecordFromAdmissionEvidence = (approvalAdmissionEvidence, expected) => ({
+  approval_id: expected.approvalId ?? null,
+  decision_id: expected.decisionId ?? null,
+  approved: approvalAdmissionEvidence.approved === true,
+  approver: approvalAdmissionEvidence.approver,
+  approved_at: approvalAdmissionEvidence.approved_at,
+  checks: Object.fromEntries(
+    APPROVAL_CHECK_KEYS.map((key) => [key, approvalAdmissionEvidence.checks[key] === true])
+  )
+});
+
 const resolveIssue209ApprovalAdmissionRequirementGaps = (
   requirements,
   approvalAdmissionEvidence,
@@ -1878,17 +1889,29 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
     input.state.limitedReadRolloutReadyTrue !== true
       ? ["limited_read_rollout_ready_true"]
       : [];
+  const explicitAdmissionSatisfied =
+    approvalAdmissionRequirementGaps.length === 0 && auditAdmissionRequirementGaps.length === 0;
+  const canonicalApprovalRecord = explicitAdmissionSatisfied
+    ? buildApprovalRecordFromAdmissionEvidence(approvalAdmissionEvidence, {
+        decisionId: input.decisionId ?? null,
+        approvalId: input.expectedApprovalId ?? null
+      })
+    : approvalRecord;
 
   if (
-    approvalRequirementGaps.includes("approval_record_approved_true") ||
-    approvalRequirementGaps.includes("approval_record_approver_present") ||
-    approvalRequirementGaps.includes("approval_record_approved_at_present") ||
-    approvalRequirementGaps.includes("approval_record_linkage_invalid") ||
+    (!explicitAdmissionSatisfied &&
+      (approvalRequirementGaps.includes("approval_record_approved_true") ||
+        approvalRequirementGaps.includes("approval_record_approver_present") ||
+        approvalRequirementGaps.includes("approval_record_approved_at_present") ||
+        approvalRequirementGaps.includes("approval_record_linkage_invalid"))) ||
     approvalAdmissionRequirementGaps.length > 0
   ) {
     pushReason(gateReasons, "MANUAL_CONFIRMATION_MISSING");
   }
-  if (approvalRequirementGaps.includes("approval_record_checks_all_true")) {
+  if (
+    !explicitAdmissionSatisfied &&
+    approvalRequirementGaps.includes("approval_record_checks_all_true")
+  ) {
     pushReason(gateReasons, "APPROVAL_CHECKS_INCOMPLETE");
   }
   if (
@@ -1905,7 +1928,7 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
 
   return {
     gateReasons,
-    approvalRecord,
+    approvalRecord: canonicalApprovalRecord,
     admissionContext: {
       approval_admission_evidence: approvalAdmissionEvidence,
       audit_admission_evidence: auditAdmissionEvidence
@@ -1921,9 +1944,16 @@ const __webenvoy_module_issue209_postgate_audit = (() => {
 const { buildRiskTransitionAudit } = __webenvoy_module_risk_state;
 const { resolveIssue209LiveReadApprovalId } = __webenvoy_module_issue209_identity;
 const clone = (value) => structuredClone(value);
+const asRecord = (value) =>
+  typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
 
 const asString = (value) =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+
+const normalizeChecks = (value) => {
+  const record = asRecord(value);
+  return Object.fromEntries(APPROVAL_CHECK_KEYS.map((key) => [key, record?.[key] === true]));
+};
 
 const buildIssue209PostGateArtifacts = (input) => {
   const nowValue = typeof input?.now === "function" ? input.now() : Date.now();
@@ -1951,6 +1981,7 @@ const buildIssue209PostGateArtifacts = (input) => {
     : null;
   approvalRecord.decision_id = decisionId;
   approvalRecord.approval_id = approvalId;
+  const auditAdmissionEvidence = asRecord(gate.gate_input.admission_context?.audit_admission_evidence);
 
   const auditRecord = {
     event_id: `gate_evt_${decisionId}`,
@@ -1971,6 +2002,7 @@ const buildIssue209PostGateArtifacts = (input) => {
     gate_reasons: clone(gate.consumer_gate_result.gate_reasons),
     approver: approvalRecord.approver,
     approved_at: approvalRecord.approved_at,
+    audited_checks: normalizeChecks(auditAdmissionEvidence?.audited_checks),
     write_interaction_tier: gate.write_action_matrix_decisions?.write_interaction_tier ?? null,
     write_action_matrix_decisions: gate.write_action_matrix_decisions
       ? clone(gate.write_action_matrix_decisions)

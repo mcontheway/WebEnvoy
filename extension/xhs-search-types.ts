@@ -179,6 +179,7 @@ export interface XhsExecutionAuditRecord {
   gate_reasons: string[];
   approver: string | null;
   approved_at: string | null;
+  audited_checks?: Record<string, boolean>;
   write_interaction_tier?: string | null;
   write_action_matrix_decisions?: WriteActionMatrixDecisionsOutput | null;
   risk_signal?: boolean;
