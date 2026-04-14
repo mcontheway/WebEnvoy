@@ -14,6 +14,65 @@ const baseContext: RuntimeContext = {
 };
 
 describe("executeCommand", () => {
+  const createHighRiskAuditRecord = (requestId: string) => {
+    return {
+      event_id: `gate_evt_router_${requestId}`,
+      issue_scope: "issue_209",
+      target_domain: "www.xiaohongshu.com",
+      target_tab_id: 32,
+      target_page: "search_result_tab",
+      action_type: "read",
+      requested_execution_mode: "live_read_high_risk",
+      gate_decision: "allowed",
+      recorded_at: "2026-03-23T10:00:30Z"
+    } as const;
+  };
+
+  const createApprovedReadAdmissionContext = (requestId: string) => ({
+    approval_admission_evidence: {
+      approval_admission_ref: `approval_admission_${baseContext.run_id}_${requestId}`,
+      run_id: baseContext.run_id,
+      session_id: "nm-session-001",
+      issue_scope: "issue_209",
+      target_domain: "www.xiaohongshu.com",
+      target_tab_id: 32,
+      target_page: "search_result_tab",
+      action_type: "read",
+      requested_execution_mode: "live_read_high_risk",
+      approved: true,
+      approver: "qa-reviewer",
+      approved_at: "2026-03-23T10:00:00Z",
+      checks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      },
+      recorded_at: "2026-03-23T10:00:00Z"
+    },
+    audit_admission_evidence: {
+      audit_admission_ref: `audit_admission_${baseContext.run_id}_${requestId}`,
+      run_id: baseContext.run_id,
+      session_id: "nm-session-001",
+      issue_scope: "issue_209",
+      target_domain: "www.xiaohongshu.com",
+      target_tab_id: 32,
+      target_page: "search_result_tab",
+      action_type: "read",
+      requested_execution_mode: "live_read_high_risk",
+      risk_state: "allowed",
+      audited_checks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      },
+      recorded_at: "2026-03-23T10:00:30Z"
+    }
+  });
+
   const scopedXhsGateOptions = {
     target_domain: "www.xiaohongshu.com",
     target_tab_id: 32,
@@ -204,6 +263,7 @@ describe("executeCommand", () => {
   });
 
   it("returns capability summary and observability for xhs.search runtime success", async () => {
+    const requestId = "router-live-high-risk-001";
     const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
     const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
     const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
@@ -217,6 +277,7 @@ describe("executeCommand", () => {
           command: "xhs.search",
           profile: "xhs_account_001",
           params: {
+            request_id: requestId,
             ability: {
               id: "xhs.note.search.v1",
               layer: "L3",
@@ -244,7 +305,9 @@ describe("executeCommand", () => {
                   risk_state_checked: true,
                   action_type_confirmed: true
                 }
-              }
+              },
+              audit_record: createHighRiskAuditRecord(requestId),
+              admission_context: createApprovedReadAdmissionContext(requestId)
             }
           }
         },
@@ -278,6 +341,7 @@ describe("executeCommand", () => {
   });
 
   it("returns output mapping failure when xhs.search runtime success omits capability_result", async () => {
+    const requestId = "router-missing-capability-001";
     const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
     const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
     const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
@@ -292,6 +356,7 @@ describe("executeCommand", () => {
             command: "xhs.search",
             profile: "xhs_account_001",
             params: {
+              request_id: requestId,
               ability: {
                 id: "xhs.note.search.v1",
                 layer: "L3",
@@ -319,7 +384,9 @@ describe("executeCommand", () => {
                     risk_state_checked: true,
                     action_type_confirmed: true
                   }
-                }
+                },
+                audit_record: createHighRiskAuditRecord(requestId),
+                admission_context: createApprovedReadAdmissionContext(requestId)
               }
             }
           },
@@ -349,6 +416,7 @@ describe("executeCommand", () => {
   });
 
   it("returns output mapping failure when xhs.search runtime success carries invalid capability_result", async () => {
+    const requestId = "router-invalid-capability-001";
     const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
     const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
     const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
@@ -363,6 +431,7 @@ describe("executeCommand", () => {
             command: "xhs.search",
             profile: "xhs_account_001",
             params: {
+              request_id: requestId,
               ability: {
                 id: "xhs.note.search.v1",
                 layer: "L3",
@@ -390,7 +459,9 @@ describe("executeCommand", () => {
                     risk_state_checked: true,
                     action_type_confirmed: true
                   }
-                }
+                },
+                audit_record: createHighRiskAuditRecord(requestId),
+                admission_context: createApprovedReadAdmissionContext(requestId)
               }
             }
           },

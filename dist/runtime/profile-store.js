@@ -63,6 +63,13 @@ const resolveRequiredBrowserVersionFromResolvedExecutable = async () => {
     }
     return browserVersion.browserVersion;
 };
+const resolveRequiredBrowserVersionForInitializeMeta = async (input) => {
+    const browserVersion = await resolveBrowserVersionTruthSource({}, input);
+    if (typeof browserVersion.browserVersion !== "string" || browserVersion.browserVersion.length === 0) {
+        throw new Error("Browser version truth-source unavailable");
+    }
+    return browserVersion.browserVersion;
+};
 const withBrowserVersion = (input, browserVersion) => ({ ...input, browserVersion });
 const isLegacyLinuxKernelVersion = (value) => LINUX_KERNEL_VERSION_PATTERN.test(value);
 const migrateLegacyLinuxKernelBundleOsVersion = (meta) => {
@@ -272,9 +279,9 @@ export class ProfileStore {
         await this.fs.writeFile(tempPath, json, "utf8");
         await this.fs.rename(tempPath, metaPath);
     }
-    async initializeMeta(profileName, nowIso) {
+    async initializeMeta(profileName, nowIso, options) {
         const profileDir = await this.ensureProfileDir(profileName);
-        const browserVersion = await resolveRequiredBrowserVersionFromResolvedExecutable();
+        const browserVersion = await resolveRequiredBrowserVersionForInitializeMeta(options);
         const timezone = resolveCurrentTimezone();
         const meta = {
             schemaVersion: 1,

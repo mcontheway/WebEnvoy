@@ -46,6 +46,8 @@ const KNOWN_BROWSER_CANDIDATES: Record<NodeJS.Platform, string[]> = {
   cygwin: []
 };
 
+const BROWSER_VERSION_PROBE_TIMEOUT_MS = 5_000;
+
 const hasPathSegment = (value: string): boolean => /[\\/]/.test(value);
 
 export const resolvePreferredBrowserCandidates = (
@@ -150,7 +152,7 @@ const readBrowserVersionOutput = async (executablePath: string): Promise<string 
         // ignore kill failures
       }
       finish(null);
-    }, 2_000);
+    }, BROWSER_VERSION_PROBE_TIMEOUT_MS);
 
     child.stdout?.on("data", (chunk) => {
       stdout += chunk.toString();

@@ -4,6 +4,7 @@ import { buildLoopbackAuditRecord } from "./loopback-gate-audit.js";
 import { buildLoopbackGatePayload } from "./loopback-gate-payload.js";
 import type { ContentMessage, HostMessage } from "./loopback-messages.js";
 import type { InMemoryPort } from "./loopback-port.js";
+import { resolveXhsGateDecisionId } from "../../../shared/xhs-gate.js";
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -13,9 +14,12 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
-const resolveApprovalRecord = (
-  options: Record<string, unknown>
-): Record<string, unknown> | null => asRecord(options.approval_record) ?? asRecord(options.approval);
+const XHS_READ_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
+const XHS_READ_COMMAND_DEFAULT_ABILITY_IDS: Record<string, string> = {
+  "xhs.search": "xhs.note.search.v1",
+  "xhs.detail": "xhs.note.detail.v1",
+  "xhs.user_home": "xhs.user.home.v1"
+};
 
 export class InMemoryBackgroundRelay {
   #pendingForward = new Map<
@@ -95,7 +99,7 @@ export class InMemoryBackgroundRelay {
       const sessionId = String(request.params.session_id ?? this.#sessionId);
       let gatePayload: Record<string, unknown> | undefined;
 
-      if (command === "xhs.search") {
+      if (XHS_READ_COMMANDS.has(command)) {
         const ability =
           typeof commandParams.ability === "object" && commandParams.ability !== null
             ? (commandParams.ability as Record<string, unknown>)
@@ -104,13 +108,24 @@ export class InMemoryBackgroundRelay {
           typeof commandParams.options === "object" && commandParams.options !== null
             ? (commandParams.options as Record<string, unknown>)
             : {};
-        const approvalRecord = resolveApprovalRecord(options);
-        const decisionId = `gate_decision_${runId}_${request.id}`;
-        const gate = buildLoopbackGate(options, asString(ability.action), {
+        const decisionId = resolveXhsGateDecisionId({
           runId,
-          decisionId,
-          approvalId: asString(approvalRecord?.approval_id) ?? undefined
+          requestId: request.id,
+          commandRequestId: commandParams.request_id,
+          gateInvocationId: asString(commandParams.gate_invocation_id),
+          issueScope: options.issue_scope,
+          requestedExecutionMode: options.requested_execution_mode
         });
+        const gate = buildLoopbackGate(
+          options,
+          asString(ability.action),
+          {
+            runId,
+            sessionId,
+            gateInvocationId: asString(commandParams.gate_invocation_id) ?? undefined,
+            decisionId
+          }
+        );
         const auditRecord = buildLoopbackAuditRecord({
           runId,
           sessionId,
@@ -136,7 +151,11 @@ export class InMemoryBackgroundRelay {
               },
               payload: {
                 details: {
-                  ability_id: String(ability.id ?? "xhs.note.search.v1"),
+                  ability_id: String(
+                    ability.id ??
+                      XHS_READ_COMMAND_DEFAULT_ABILITY_IDS[command] ??
+                      "xhs.note.search.v1"
+                  ),
                   stage: "execution",
                   reason: "EXECUTION_MODE_GATE_BLOCKED"
                 },

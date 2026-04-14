@@ -79,6 +79,11 @@ const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
 const LOCK_ACQUIRE_MAX_RETRIES = 6;
 const STOP_LOCK_DELETE_MAX_RETRIES = 3;
 
+const hasRequestedPersistentExtensionIdentity = (params: JsonObject): boolean => {
+  const candidate = params.persistent_extension_identity ?? params.persistentExtensionIdentity;
+  return typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
+};
+
 interface RuntimeActionInput {
   cwd: string;
   profile: string;
@@ -90,7 +95,11 @@ interface ProfileStoreLike {
   ensureProfileDir(profileName: string): Promise<string>;
   getProfileDir(profileName: string): string;
   readMeta(profileName: string, options?: ReadMetaOptions): Promise<ProfileMeta | null>;
-  initializeMeta(profileName: string, nowIso: string): Promise<ProfileMeta>;
+  initializeMeta(
+    profileName: string,
+    nowIso: string,
+    options?: { allowUnsupportedExtensionBrowser?: boolean }
+  ): Promise<ProfileMeta>;
   writeMeta(profileName: string, meta: ProfileMeta): Promise<void>;
 }
 
@@ -503,7 +512,11 @@ export class ProfileRuntimeService {
               profileDir,
               nowIso
             })
-          : await store.initializeMeta(input.profile, nowIso);
+          : await store.initializeMeta(input.profile, nowIso, {
+              allowUnsupportedExtensionBrowser:
+                usesPersistentIdentityMode ||
+                hasRequestedPersistentExtensionIdentity(input.params)
+            });
       }
       let recoveredMeta =
         shouldRecoverAsDisconnected(lockAcquireResult.acquisition, existingMeta.profileState)
@@ -661,7 +674,11 @@ export class ProfileRuntimeService {
               profileDir,
               nowIso
             })
-          : await store.initializeMeta(input.profile, nowIso);
+          : await store.initializeMeta(input.profile, nowIso, {
+              allowUnsupportedExtensionBrowser:
+                usesPersistentIdentityMode ||
+                hasRequestedPersistentExtensionIdentity(input.params)
+            });
       }
       let recoveredMeta = shouldRecoverAsDisconnected(
         lockAcquireResult.acquisition,

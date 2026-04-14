@@ -5,6 +5,7 @@ import { buildLoopbackGatePayload } from "./loopback-gate-payload.js";
 import { InMemoryPort } from "./loopback-port.js";
 import { CliError } from "../../core/errors.js";
 import { parseXhsCommandInputForContract } from "../../commands/xhs-input.js";
+import { resolveXhsGateDecisionId } from "../../../shared/xhs-gate.js";
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -14,8 +15,6 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
-const resolveApprovalRecord = (options: Record<string, unknown>): Record<string, unknown> | null =>
-  asRecord(options.approval_record) ?? asRecord(options.approval);
 const XHS_READ_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
 
 export class InMemoryContentScriptRuntime {
@@ -186,13 +185,23 @@ export class InMemoryContentScriptRuntime {
         typeof message.commandParams.options === "object" && message.commandParams.options !== null
           ? (message.commandParams.options as Record<string, unknown>)
           : {};
-      const approvalRecord = resolveApprovalRecord(options);
-      const decisionId = `gate_decision_${message.runId}_${message.id}`;
-      const gate = buildLoopbackGate(options, asString(ability.action), {
+      const decisionId = resolveXhsGateDecisionId({
         runId: message.runId,
-        decisionId,
-        approvalId: asString(approvalRecord?.approval_id) ?? undefined
+        requestId: message.id,
+        commandRequestId: message.commandParams.request_id,
+        gateInvocationId: asString(message.commandParams.gate_invocation_id),
+        issueScope: options.issue_scope,
+        requestedExecutionMode: options.requested_execution_mode
       });
+      const gate = buildLoopbackGate(
+        options,
+        asString(ability.action),
+        {
+          runId: message.runId,
+          sessionId: message.sessionId,
+          decisionId
+        }
+      );
       const consumerGateResult = gate.consumerGateResult;
       const auditRecord = buildLoopbackAuditRecord({
         runId: message.runId,

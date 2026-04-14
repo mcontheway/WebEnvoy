@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createMockPort, createEditorInputProbeResult, createChromeApi, respondHandshake, waitForBridgeTurn, waitForPostedMessage, primeTrustedFingerprintContext, promoteBootstrapReadinessThroughPing, createXhsCommandParams, createXhsEditorInputCommandParams, createApprovedReadApprovalRecord, createFingerprintRuntimeContext, asRecord, resolveWriteInteractionTier, startChromeBackgroundBridge } from "./extension.service-worker.shared.js";
+import { createMockPort, createEditorInputProbeResult, createChromeApi, respondHandshake, waitForBridgeTurn, waitForPostedMessage, primeTrustedFingerprintContext, promoteBootstrapReadinessThroughPing, createXhsCommandParams, createRequestBoundXhsCommandParams, createXhsEditorInputCommandParams, createApprovedReadApprovalRecord, createApprovedReadAuditRecordForRequest, createFingerprintRuntimeContext, asRecord, resolveWriteInteractionTier, startChromeBackgroundBridge } from "./extension.service-worker.shared.js";
 
 describe("extension service worker / recovery and relay prerequisites", () => {
   it("forwards top-level requested_execution_mode live path and relays required-patch missing block", async () => {
@@ -29,10 +29,16 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-top-level-patch-missing-001",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-top-level-patch-missing-001",
+          requestId: "run-xhs-live-top-level-patch-missing-001",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           approval_record: createApprovedReadApprovalRecord(),
+          audit_record: createApprovedReadAuditRecordForRequest({
+            runId: "run-xhs-live-top-level-patch-missing-001",
+            requestId: "run-xhs-live-top-level-patch-missing-001"
+          }),
           fingerprint_context: fingerprintContext
         }),
         cwd: "/workspace/WebEnvoy"
@@ -772,7 +778,9 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-limited-approved-001",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-limited-approved-001",
+          requestId: "run-xhs-live-limited-approved-001",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           fingerprint_context: createFingerprintRuntimeContext(),
@@ -787,7 +795,11 @@ describe("extension service worker / recovery and relay prerequisites", () => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createApprovedReadAuditRecordForRequest({
+            runId: "run-xhs-live-limited-approved-001",
+            requestId: "run-xhs-live-limited-approved-001"
+          })
         }),
         cwd: "/workspace/WebEnvoy"
       },
@@ -883,7 +895,9 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-mode-approved-001",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-mode-approved-001",
+          requestId: "run-xhs-live-mode-approved-001",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           fingerprint_context: createFingerprintRuntimeContext(),
@@ -1202,6 +1216,84 @@ describe("extension service worker / recovery and relay prerequisites", () => {
           id: "queued-forward-001"
         })
       );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rebinds queued issue_209 admission context to the active session after recovery", async () => {
+    vi.useFakeTimers();
+    try {
+      const ports = [createMockPort(), createMockPort()];
+      const { chromeApi } = createChromeApi(ports);
+      chromeApi.tabs.query.mockImplementation(async () => [
+        { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+      ]);
+
+      startChromeBackgroundBridge(chromeApi, {
+        heartbeatIntervalMs: 10_000,
+        recoveryRetryIntervalMs: 5,
+        recoveryWindowMs: 100
+      });
+
+      respondHandshake(ports[0], {
+        sessionId: "nm-session-001"
+      });
+      ports[0].onDisconnectListeners[0]?.();
+      await Promise.resolve();
+      vi.advanceTimersByTime(5);
+      expect(chromeApi.runtime.connectNative).toHaveBeenCalledTimes(2);
+
+      const runId = "queued-issue209-rebind-001";
+      ports[1].onMessageListeners[0]?.({
+        id: runId,
+        method: "bridge.forward",
+        profile: "profile-a",
+        params: {
+          session_id: "nm-session-001",
+          run_id: runId,
+          command: "xhs.search",
+          command_params: createRequestBoundXhsCommandParams({
+            runId,
+            sessionId: "nm-session-001",
+            requestId: "queued-issue209-request-001",
+            requested_execution_mode: "live_read_limited",
+            risk_state: "limited",
+            approval_record: createApprovedReadApprovalRecord(),
+            audit_record: createApprovedReadAuditRecordForRequest({
+              runId,
+              requestId: "queued-issue209-request-001"
+            })
+          }),
+          cwd: "/workspace/WebEnvoy"
+        },
+        timeout_ms: 50
+      });
+      await Promise.resolve();
+
+      expect(
+        ports[1].postMessage.mock.calls.find(
+          (call) => (call[0] as { id?: string }).id === runId
+        )
+      ).toBeUndefined();
+
+      respondHandshake(ports[1], {
+        sessionId: "nm-session-002"
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const replayed = ports[1].postMessage.mock.calls
+        .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+        .find((message) => message.id === runId);
+      expect(replayed?.status).toBe("error");
+      const payload = asRecord(replayed?.payload) ?? {};
+      const gateInput = asRecord(payload.gate_input) ?? {};
+      const admissionContext = asRecord(gateInput.admission_context) ?? {};
+      const approvalEvidence = asRecord(admissionContext.approval_admission_evidence);
+      const auditEvidence = asRecord(admissionContext.audit_admission_evidence);
+      expect(approvalEvidence?.session_id).toBe("nm-session-002");
+      expect(auditEvidence?.session_id).toBe("nm-session-002");
     } finally {
       vi.useRealTimers();
     }

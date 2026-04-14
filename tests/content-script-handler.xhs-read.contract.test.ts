@@ -5,6 +5,7 @@ import { ContentScriptHandler, type BackgroundToContentMessage } from "../extens
 const approvedLiveOptions = {
   target_domain: "www.xiaohongshu.com",
   target_tab_id: 32,
+  target_page: "explore_detail_tab",
   action_type: "read",
   requested_execution_mode: "live_read_high_risk",
   risk_state: "allowed",
@@ -19,6 +20,61 @@ const approvedLiveOptions = {
       risk_state_checked: true,
       action_type_confirmed: true
     }
+  },
+  admission_context: {
+    approval_admission_evidence: {
+      approval_admission_ref: "gate_appr_content_read_001",
+      run_id: "run-contract-001",
+      session_id: "nm-session-001",
+      issue_scope: "issue_209",
+      target_domain: "www.xiaohongshu.com",
+      target_tab_id: 32,
+      target_page: "explore_detail_tab",
+      action_type: "read",
+      requested_execution_mode: "live_read_high_risk",
+      approved: true,
+      approver: "qa-reviewer",
+      approved_at: "2026-03-23T10:00:00Z",
+      checks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      },
+      recorded_at: "2026-03-23T10:00:00Z"
+    },
+    audit_admission_evidence: {
+      audit_admission_ref: "gate_evt_content_read_001",
+      run_id: "run-contract-001",
+      session_id: "nm-session-001",
+      issue_scope: "issue_209",
+      target_domain: "www.xiaohongshu.com",
+      target_tab_id: 32,
+      target_page: "explore_detail_tab",
+      action_type: "read",
+      requested_execution_mode: "live_read_high_risk",
+      risk_state: "allowed",
+      audited_checks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: true,
+        action_type_confirmed: true
+      },
+      recorded_at: "2026-03-23T10:00:30Z"
+    }
+  },
+  audit_record: {
+    event_id: "audit-content-read-001",
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: 32,
+    target_page: "explore_detail_tab",
+    action_type: "read",
+    requested_execution_mode: "live_read_high_risk",
+    gate_decision: "allowed",
+    recorded_at: "2026-03-23T10:00:30Z"
   }
 } as const;
 
@@ -81,6 +137,8 @@ const createMessage = (input: {
         session_id: "nm-session-001"
       },
       commandParams: {
+        request_id: "req-contract-001",
+        gate_invocation_id: `issue209-gate-${input.command}-001`,
         ability: {
           id: input.abilityId,
           layer: "L3",
@@ -90,6 +148,20 @@ const createMessage = (input: {
         options: {
           ...approvedLiveOptions,
           target_page: input.targetPage,
+          audit_record: {
+            ...(approvedLiveOptions.audit_record),
+            target_page: input.targetPage
+          },
+          admission_context: {
+            approval_admission_evidence: {
+              ...(approvedLiveOptions.admission_context.approval_admission_evidence),
+              target_page: input.targetPage
+            },
+            audit_admission_evidence: {
+              ...(approvedLiveOptions.admission_context.audit_admission_evidence),
+              target_page: input.targetPage
+            }
+          },
           simulate_result: "success"
         }
       }

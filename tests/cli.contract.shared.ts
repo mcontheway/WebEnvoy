@@ -623,6 +623,7 @@ const isPidAlive = (pid: number): boolean => {
 };
 
 const scopedReadGateOptions = {
+  issue_scope: "issue_209",
   target_domain: "www.xiaohongshu.com",
   target_tab_id: 32,
   target_page: "search_result_tab",

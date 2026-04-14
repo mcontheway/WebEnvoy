@@ -9,7 +9,13 @@ import {
   resolveIssueScope as resolveSharedIssueScope,
   resolveRiskState as resolveSharedRiskState
 } from "../shared/risk-state.js";
-import { evaluateXhsGate, XHS_READ_DOMAIN, XHS_WRITE_DOMAIN } from "../shared/xhs-gate.js";
+import {
+  buildIssue209PostGateArtifacts,
+  evaluateXhsGate,
+  resolveXhsGateDecisionId,
+  XHS_READ_DOMAIN,
+  XHS_WRITE_DOMAIN
+} from "../shared/xhs-gate.js";
 import {
   type XhsExecutionAuditRecord,
   type XhsExecutionContext,
@@ -51,10 +57,18 @@ const isIssue208EditorInputValidation = (options: XhsSearchOptions): boolean =>
   options.requested_execution_mode === "live_write" &&
   options.validation_action === "editor_input";
 
-const buildGateDecisionId = (context: XhsExecutionContext): string =>
-  context.requestId
-    ? `gate_decision_${context.runId}_${context.requestId}`
-    : `gate_decision_${context.runId}`;
+const buildGateDecisionId = (
+  context: XhsExecutionContext,
+  options: Pick<XhsSearchOptions, "issue_scope" | "requested_execution_mode">
+): string =>
+  resolveXhsGateDecisionId({
+    runId: context.runId,
+    requestId: context.requestId,
+    commandRequestId: context.commandRequestId,
+    gateInvocationId: context.gateInvocationId,
+    issueScope: options.issue_scope,
+    requestedExecutionMode: options.requested_execution_mode
+  });
 
 const buildGateEventId = (decisionId: string): string => `gate_evt_${decisionId}`;
 
@@ -89,7 +103,7 @@ export const resolveGate = (
 ): XhsSearchGate => {
   const providedApprovalRecord = (options.approval_record ?? options.approval) as unknown;
   const approvalRecord = asRecord(providedApprovalRecord);
-  const decisionId = buildGateDecisionId(context);
+  const decisionId = buildGateDecisionId(context, options);
   const approvalId = asNonEmptyString(approvalRecord?.approval_id) ?? undefined;
 
   return evaluateXhsGate({
@@ -105,7 +119,13 @@ export const resolveGate = (
     actionType: options.action_type,
     abilityAction: options.ability_action,
     requestedExecutionMode: options.requested_execution_mode,
+    runId: context.runId,
+    sessionId: context.sessionId,
+    gateInvocationId: context.gateInvocationId,
     approvalRecord: providedApprovalRecord,
+    auditRecord: options.audit_record,
+    admissionContext: options.admission_context,
+    limitedReadRolloutReadyTrue: options.limited_read_rollout_ready_true === true,
     decisionId,
     approvalId,
     issue208EditorInputValidation: isIssue208EditorInputValidation(options),
@@ -118,6 +138,22 @@ export const createAuditRecord = (
   gate: XhsSearchGate,
   env: XhsSearchEnvironment
 ): XhsExecutionAuditRecord => {
+  if (
+    gate.gate_input.issue_scope === "issue_209" &&
+    (gate.consumer_gate_result.requested_execution_mode === "live_read_limited" ||
+      gate.consumer_gate_result.requested_execution_mode === "live_read_high_risk")
+  ) {
+    const artifacts = buildIssue209PostGateArtifacts({
+      runId: context.runId,
+      sessionId: context.sessionId,
+      profile: context.profile,
+      gate: gate as unknown as Parameters<typeof buildIssue209PostGateArtifacts>[0]["gate"],
+      now: () => env.now()
+    });
+    gate.approval_record = artifacts.approval_record as XhsSearchGate["approval_record"];
+    return artifacts.audit_record as unknown as XhsExecutionAuditRecord;
+  }
+
   const recordedAt = new Date(env.now()).toISOString();
   const requestedMode = gate.consumer_gate_result.requested_execution_mode;
   const liveModeRequested =

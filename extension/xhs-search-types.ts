@@ -32,6 +32,9 @@ export interface XhsSearchOptions {
   risk_state?: string;
   approval?: Record<string, unknown>;
   approval_record?: Record<string, unknown>;
+  audit_record?: Record<string, unknown>;
+  admission_context?: Record<string, unknown>;
+  limited_read_rollout_ready_true?: boolean;
   validation_action?: string;
   validation_text?: string;
   editor_focus_attestation?: EditorInputFocusAttestation | Record<string, unknown>;
@@ -107,6 +110,7 @@ export interface GateInputRecord {
   action_type: ActionType | null;
   requested_execution_mode: RequestedExecutionMode | null;
   risk_state: RiskState;
+  admission_context?: unknown;
 }
 
 export interface GateOutcomeRecord {
@@ -175,6 +179,7 @@ export interface XhsExecutionAuditRecord {
   gate_reasons: string[];
   approver: string | null;
   approved_at: string | null;
+  audited_checks?: Record<string, boolean>;
   write_interaction_tier?: string | null;
   write_action_matrix_decisions?: WriteActionMatrixDecisionsOutput | null;
   risk_signal?: boolean;
@@ -190,6 +195,8 @@ export interface XhsExecutionContext {
   sessionId: string;
   profile: string;
   requestId?: string;
+  commandRequestId?: string;
+  gateInvocationId?: string;
 }
 
 export const SEARCH_ENDPOINT = "/api/sns/web/v1/search/notes";

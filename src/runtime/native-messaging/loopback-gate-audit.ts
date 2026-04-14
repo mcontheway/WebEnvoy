@@ -1,4 +1,5 @@
 import type { LoopbackGate } from "./loopback-gate.js";
+import { buildIssue209PostGateArtifacts } from "../../../shared/xhs-gate.js";
 
 export type LoopbackAuditSource = Pick<
   LoopbackGate,
@@ -11,6 +12,30 @@ export const buildLoopbackAuditRecord = (input: {
   profile: string;
   gate: LoopbackAuditSource;
 }): Record<string, unknown> => {
+  if (
+    input.gate.gateInput.issue_scope === "issue_209" &&
+    (input.gate.consumerGateResult.requested_execution_mode === "live_read_limited" ||
+      input.gate.consumerGateResult.requested_execution_mode === "live_read_high_risk")
+  ) {
+    const artifacts = buildIssue209PostGateArtifacts({
+      runId: input.runId,
+      sessionId: input.sessionId,
+      profile: input.profile,
+      gate: {
+        gate_input: input.gate.gateInput,
+        gate_outcome: input.gate.gateOutcome,
+        consumer_gate_result: input.gate.consumerGateResult,
+        approval_record: input.gate.approvalRecord,
+        write_action_matrix_decisions: input.gate.writeActionMatrixDecisions
+      } as unknown as Parameters<typeof buildIssue209PostGateArtifacts>[0]["gate"],
+      now: () => new Date("2026-03-23T10:00:00.000Z").getTime()
+    });
+    input.gate.approvalRecord = structuredClone(
+      artifacts.approval_record
+    ) as unknown as Record<string, unknown>;
+    return artifacts.audit_record;
+  }
+
   const clone = <T>(value: T): T => structuredClone(value);
   const decisionId = String(input.gate.gateOutcome.decision_id ?? `gate_decision_${input.runId}`);
   const approvalId =
@@ -26,6 +51,7 @@ export const buildLoopbackAuditRecord = (input: {
     run_id: input.runId,
     session_id: input.sessionId,
     profile: input.profile,
+    issue_scope: input.gate.gateInput.issue_scope,
     risk_state: String(input.gate.gateInput.risk_state ?? "paused"),
     target_domain: input.gate.consumerGateResult.target_domain,
     target_tab_id: input.gate.consumerGateResult.target_tab_id,

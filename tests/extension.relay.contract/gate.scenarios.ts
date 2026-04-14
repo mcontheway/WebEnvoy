@@ -13,7 +13,9 @@ const {
   approvedLimitedLiveOptions,
   approvedHighRiskLimitedOptions,
   completeIssue208ApprovalRecord,
-  createAttestedEditorInputValidationResult
+  createAttestedEditorInputValidationResult,
+  createApprovedReadAdmissionContext,
+  createApprovedReadAuditRecord
 } = ctx;
 
 describe("extension background relay contract / gate matrix", () => {
@@ -276,6 +278,8 @@ describe("extension background relay contract / gate matrix", () => {
   });
 
   it("allows live_read_limited with approval in limited risk state", async () => {
+    const runId = "run-xhs-live-limited-allowed-001";
+    const requestId = "issue209-relay-live-limited-allowed-001";
     const contentScript = new ContentScriptHandler({
       xhsEnv: {
         now: () => 1_000,
@@ -307,9 +311,10 @@ describe("extension background relay contract / gate matrix", () => {
       method: "bridge.forward",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-xhs-live-limited-allowed-001",
+        run_id: runId,
         command: "xhs.search",
         command_params: {
+          request_id: requestId,
           ability: {
             id: "xhs.note.search.v1",
             layer: "L3",
@@ -318,7 +323,21 @@ describe("extension background relay contract / gate matrix", () => {
           input: {
             query: "露营装备"
           },
-          options: approvedLimitedLiveOptions
+          options: {
+            ...approvedLimitedLiveOptions,
+            admission_context: createApprovedReadAdmissionContext({
+              run_id: runId,
+              request_id: requestId,
+              requested_execution_mode: "live_read_limited",
+              risk_state: "limited"
+            }),
+            audit_record: createApprovedReadAuditRecord({
+              run_id: runId,
+              request_id: requestId,
+              requested_execution_mode: "live_read_limited",
+              risk_state: "limited"
+            })
+          }
         },
         cwd: "/workspace/WebEnvoy"
       },

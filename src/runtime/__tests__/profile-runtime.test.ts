@@ -2,7 +2,7 @@ import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ProfileRuntimeService } from "../profile-runtime.js";
 import { BROWSER_STATE_FILENAME } from "../browser-launcher.js";
@@ -11,6 +11,10 @@ import { NativeMessagingTransportError } from "../native-messaging/bridge.js";
 import type { ProfileLock } from "../profile-lock.js";
 import { ProfileStore, type ProfileMeta } from "../profile-store.js";
 import { buildRuntimeBootstrapContextId } from "../runtime-bootstrap.js";
+import {
+  acquireBrowserEnvTestLock,
+  releaseBrowserEnvTestLock
+} from "./browser-env-test-lock.js";
 
 const tempDirs: string[] = [];
 const originalBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
@@ -196,6 +200,10 @@ const createTestService = (
     browserLauncher: options?.browserLauncher ?? createMockBrowserLauncher()
   });
 
+beforeAll(async () => {
+  await acquireBrowserEnvTestLock();
+}, 180_000);
+
 beforeEach(async () => {
   process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable();
   delete process.env.WEBENVOY_BROWSER_VERSION;
@@ -240,6 +248,10 @@ afterEach(async () => {
     }
   }
 });
+
+afterAll(async () => {
+  await releaseBrowserEnvTestLock();
+}, 180_000);
 
 class FailingWriteProfileStore {
   readonly #rootDir: string;

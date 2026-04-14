@@ -1,4 +1,4 @@
-import { WRITE_INTERACTION_TIER, ISSUE_SCOPES, getIssueActionMatrixEntry, resolveIssueScope as resolveSharedIssueScope, resolveRiskState as resolveSharedRiskState } from "../../../shared/risk-state.js";
+import { WRITE_INTERACTION_TIER, ISSUE_SCOPES, getIssueActionMatrixEntry, resolveIssueScope as resolveSharedIssueScope } from "../../../shared/risk-state.js";
 import { evaluateXhsGate } from "../../../shared/xhs-gate.js";
 export const RELAY_PATH = "host>background>content-script>background>host";
 export const LOOPBACK_PLUGIN_GATE_OWNERSHIP = {
@@ -7,18 +7,44 @@ export const LOOPBACK_PLUGIN_GATE_OWNERSHIP = {
     main_world_gate: ["signed_call_scope_check"],
     cli_role: "request_and_result_shell_only"
 };
+const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value
+    : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-const resolveLoopbackRiskState = (value) => resolveSharedRiskState(value);
 const resolveLoopbackIssueScope = (value) => ISSUE_SCOPES.includes(value)
     ? value
     : resolveSharedIssueScope(value);
 const resolveLoopbackIssueActionMatrixEntry = (issueScope, riskState) => getIssueActionMatrixEntry(issueScope, riskState);
+const cloneAdmissionContext = (admissionContext) => {
+    const normalizedAdmissionContext = asRecord(admissionContext);
+    if (!normalizedAdmissionContext) {
+        return null;
+    }
+    const approvalEvidence = asRecord(normalizedAdmissionContext.approval_admission_evidence);
+    const auditEvidence = asRecord(normalizedAdmissionContext.audit_admission_evidence);
+    return {
+        ...(approvalEvidence ? { approval_admission_evidence: { ...approvalEvidence } } : {}),
+        ...(auditEvidence ? { audit_admission_evidence: { ...auditEvidence } } : {})
+    };
+};
+const bindAdmissionContextToRequest = (input) => {
+    const admissionContext = cloneAdmissionContext(input.admissionContext);
+    if (!admissionContext) {
+        return null;
+    }
+    return admissionContext;
+};
 export const buildLoopbackGate = (options, abilityAction, linkage) => {
     const clone = (value) => structuredClone(value);
+    const boundAdmissionContext = bindAdmissionContextToRequest({
+        admissionContext: asRecord(options.admission_context)
+    });
     const issue208EditorInputValidation = options.issue_scope === "issue_208" &&
         options.requested_execution_mode === "live_write" &&
         asString(options.validation_action) === "editor_input";
     const evaluatedGate = evaluateXhsGate({
+        runId: linkage?.runId ?? asString(options.run_id),
+        sessionId: linkage?.sessionId ?? asString(options.session_id),
         issueScope: options.issue_scope,
         riskState: options.risk_state,
         targetDomain: options.target_domain,
@@ -28,7 +54,10 @@ export const buildLoopbackGate = (options, abilityAction, linkage) => {
         abilityAction,
         requestedExecutionMode: options.requested_execution_mode,
         approvalRecord: options.approval_record ?? options.approval,
-        runId: linkage?.runId,
+        auditRecord: options.audit_record,
+        admissionContext: boundAdmissionContext,
+        limitedReadRolloutReadyTrue: options.limited_read_rollout_ready_true === true,
+        gateInvocationId: linkage?.gateInvocationId,
         decisionId: linkage?.decisionId,
         approvalId: linkage?.approvalId,
         issue208EditorInputValidation,

@@ -9,11 +9,15 @@ const {
   ContentScriptHandler,
   waitForResponse,
   asRecord,
-  approvedLiveOptions
+  approvedLiveOptions,
+  createApprovedReadAdmissionContext,
+  createApprovedReadAuditRecord
 } = ctx;
 
 describe("extension background relay contract / live approval and timeouts", () => {
   it("returns structured payload when xhs.search request times out", async () => {
+    const runId = "run-xhs-timeout-001";
+    const requestId = "issue209-relay-timeout-001";
     const timeoutError = new Error("request timeout");
     timeoutError.name = "AbortError";
     const contentScript = new ContentScriptHandler({
@@ -41,9 +45,10 @@ describe("extension background relay contract / live approval and timeouts", () 
       method: "bridge.forward",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-xhs-timeout-001",
+        run_id: runId,
         command: "xhs.search",
         command_params: {
+          request_id: requestId,
           ability: {
             id: "xhs.note.search.v1",
             layer: "L3",
@@ -52,7 +57,17 @@ describe("extension background relay contract / live approval and timeouts", () 
           input: {
             query: "露营装备"
           },
-          options: approvedLiveOptions
+          options: {
+            ...approvedLiveOptions,
+            admission_context: createApprovedReadAdmissionContext({
+              run_id: runId,
+              request_id: requestId
+            }),
+            audit_record: createApprovedReadAuditRecord({
+              run_id: runId,
+              request_id: requestId
+            })
+          }
         },
         cwd: "/workspace/WebEnvoy"
       },
@@ -343,6 +358,8 @@ describe("extension background relay contract / live approval and timeouts", () 
   });
 
   it("allows live_read_high_risk with approval and returns consumer gate result", async () => {
+    const runId = "run-xhs-live-allowed-001";
+    const requestId = "issue209-relay-live-high-risk-allowed-001";
     const contentScript = new ContentScriptHandler({
       xhsEnv: {
         now: () => 1_000,
@@ -374,9 +391,10 @@ describe("extension background relay contract / live approval and timeouts", () 
       method: "bridge.forward",
       params: {
         session_id: "nm-session-001",
-        run_id: "run-xhs-live-allowed-001",
+        run_id: runId,
         command: "xhs.search",
         command_params: {
+          request_id: requestId,
           ability: {
             id: "xhs.note.search.v1",
             layer: "L3",
@@ -392,6 +410,14 @@ describe("extension background relay contract / live approval and timeouts", () 
             action_type: "read",
             requested_execution_mode: "live_read_high_risk",
             risk_state: "allowed",
+            admission_context: createApprovedReadAdmissionContext({
+              run_id: runId,
+              request_id: requestId
+            }),
+            audit_record: createApprovedReadAuditRecord({
+              run_id: runId,
+              request_id: requestId
+            }),
             approval_record: {
               approved: true,
               approver: "qa-reviewer",

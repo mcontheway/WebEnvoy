@@ -62,6 +62,105 @@ const completeIssue208ApprovalRecord = {
   }
 } as const;
 
+const createApprovedReadAdmissionContext = (input?: {
+  run_id?: string;
+  request_id?: string;
+  session_id?: string;
+  decision_id?: string;
+  approval_id?: string;
+  target_tab_id?: number;
+  target_page?: string;
+  requested_execution_mode?: "live_read_limited" | "live_read_high_risk";
+  risk_state?: "limited" | "allowed";
+}) => {
+  const runId = input?.run_id ?? "run-relay-contract-001";
+  const requestId = input?.request_id;
+  const decisionId = input?.decision_id;
+  const approvalId = input?.approval_id;
+  const refSuffix = requestId ? `${runId}_${requestId}` : runId;
+  return ({
+  approval_admission_evidence: {
+    approval_admission_ref: `approval_admission_${refSuffix}`,
+    ...(decisionId ? { decision_id: decisionId } : {}),
+    ...(approvalId ? { approval_id: approvalId } : {}),
+    ...(requestId ? { request_id: requestId } : {}),
+    run_id: runId,
+    session_id: input?.session_id ?? "nm-session-001",
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: input?.target_tab_id ?? 32,
+    target_page: input?.target_page ?? "search_result_tab",
+    action_type: "read",
+    requested_execution_mode: input?.requested_execution_mode ?? "live_read_high_risk",
+    approved: true,
+    approver: "reviewer-a",
+    approved_at: "2026-03-23T08:00:00Z",
+    checks: {
+      target_domain_confirmed: true,
+      target_tab_confirmed: true,
+      target_page_confirmed: true,
+      risk_state_checked: true,
+      action_type_confirmed: true
+    },
+    recorded_at: "2026-03-23T08:00:00Z"
+  },
+  audit_admission_evidence: {
+    audit_admission_ref: `audit_admission_${refSuffix}`,
+    ...(decisionId ? { decision_id: decisionId } : {}),
+    ...(approvalId ? { approval_id: approvalId } : {}),
+    ...(requestId ? { request_id: requestId } : {}),
+    run_id: runId,
+    session_id: input?.session_id ?? "nm-session-001",
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: input?.target_tab_id ?? 32,
+    target_page: input?.target_page ?? "search_result_tab",
+    action_type: "read",
+    requested_execution_mode: input?.requested_execution_mode ?? "live_read_high_risk",
+    risk_state: input?.risk_state ?? "allowed",
+    audited_checks: {
+      target_domain_confirmed: true,
+      target_tab_confirmed: true,
+      target_page_confirmed: true,
+      risk_state_checked: true,
+      action_type_confirmed: true
+    },
+    recorded_at: "2026-03-23T08:00:30Z"
+  }
+});
+};
+
+const createApprovedReadAuditRecord = (input?: {
+  run_id?: string;
+  request_id?: string;
+  decision_id?: string;
+  approval_id?: string;
+  target_tab_id?: number;
+  target_page?: string;
+  requested_execution_mode?: "live_read_limited" | "live_read_high_risk";
+  risk_state?: "limited" | "allowed";
+}) => {
+  const runId = input?.run_id ?? "run-relay-contract-001";
+  const requestId = input?.request_id;
+  const decisionId =
+    input?.decision_id ?? (requestId ? `gate_decision_${runId}_${requestId}` : `gate_decision_${runId}`);
+  const approvalId = input?.approval_id ?? `gate_appr_${decisionId}`;
+  return {
+    event_id: `gate_evt_${decisionId}`,
+    decision_id: decisionId,
+    approval_id: approvalId,
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: input?.target_tab_id ?? 32,
+    target_page: input?.target_page ?? "search_result_tab",
+    action_type: "read",
+    requested_execution_mode: input?.requested_execution_mode ?? "live_read_high_risk",
+    gate_decision: "allowed",
+    recorded_at: "2026-03-23T08:00:30Z",
+    risk_state: input?.risk_state ?? "allowed"
+  };
+};
+
 const createAttestedEditorInputValidationResult = (text: string) => ({
   ok: true,
   mode: "controlled_editor_input_validation" as const,
@@ -98,13 +197,29 @@ const approvedLiveOptions = {
       risk_state_checked: true,
       action_type_confirmed: true
     }
+  },
+  admission_context: createApprovedReadAdmissionContext(),
+  audit_record: {
+    event_id: "gate_evt_relay_contract_live_high_risk_allowed_001",
+    issue_scope: "issue_209",
+    target_domain: "www.xiaohongshu.com",
+    target_tab_id: 32,
+    target_page: "search_result_tab",
+    action_type: "read",
+    requested_execution_mode: "live_read_high_risk",
+    gate_decision: "allowed",
+    recorded_at: "2026-03-23T08:00:30Z"
   }
 };
 
 const approvedLimitedLiveOptions = {
   ...approvedLiveOptions,
   requested_execution_mode: "live_read_limited",
-  risk_state: "limited"
+  risk_state: "limited",
+  admission_context: createApprovedReadAdmissionContext({
+    requested_execution_mode: "live_read_limited",
+    risk_state: "limited"
+  })
 };
 
 const approvedHighRiskLimitedOptions = {
@@ -125,9 +240,11 @@ Object.assign(globalThis as Record<string, unknown>, {
     resolveWriteInteractionTier,
     approvedLiveOptions,
     approvedLimitedLiveOptions,
-    approvedHighRiskLimitedOptions,
-    completeIssue208ApprovalRecord,
-    createAttestedEditorInputValidationResult
+  approvedHighRiskLimitedOptions,
+  completeIssue208ApprovalRecord,
+  createAttestedEditorInputValidationResult,
+  createApprovedReadAdmissionContext,
+  createApprovedReadAuditRecord
   }
 });
 

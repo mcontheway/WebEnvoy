@@ -1,5 +1,5 @@
 import { buildRiskTransitionAudit, resolveIssueScope as resolveSharedIssueScope, resolveRiskState as resolveSharedRiskState } from "../shared/risk-state.js";
-import { evaluateXhsGate } from "../shared/xhs-gate.js";
+import { buildIssue209PostGateArtifacts, evaluateXhsGate, resolveXhsGateDecisionId } from "../shared/xhs-gate.js";
 import { resolveRiskStateOutput } from "./xhs-search-telemetry.js";
 export { resolveRiskStateOutput } from "./xhs-search-telemetry.js";
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
@@ -13,9 +13,14 @@ const isIssue208EditorInputValidation = (options) => options.issue_scope === "is
     options.action_type === "write" &&
     options.requested_execution_mode === "live_write" &&
     options.validation_action === "editor_input";
-const buildGateDecisionId = (context) => context.requestId
-    ? `gate_decision_${context.runId}_${context.requestId}`
-    : `gate_decision_${context.runId}`;
+const buildGateDecisionId = (context, options) => resolveXhsGateDecisionId({
+    runId: context.runId,
+    requestId: context.requestId,
+    commandRequestId: context.commandRequestId,
+    gateInvocationId: context.gateInvocationId,
+    issueScope: options.issue_scope,
+    requestedExecutionMode: options.requested_execution_mode
+});
 const buildGateEventId = (decisionId) => `gate_evt_${decisionId}`;
 export const resolveActualTargetGateReasons = (options) => {
     const gateReasons = [];
@@ -42,7 +47,7 @@ export const resolveActualTargetGateReasons = (options) => {
 export const resolveGate = (options, context) => {
     const providedApprovalRecord = (options.approval_record ?? options.approval);
     const approvalRecord = asRecord(providedApprovalRecord);
-    const decisionId = buildGateDecisionId(context);
+    const decisionId = buildGateDecisionId(context, options);
     const approvalId = asNonEmptyString(approvalRecord?.approval_id) ?? undefined;
     return evaluateXhsGate({
         issueScope: options.issue_scope,
@@ -57,7 +62,13 @@ export const resolveGate = (options, context) => {
         actionType: options.action_type,
         abilityAction: options.ability_action,
         requestedExecutionMode: options.requested_execution_mode,
+        runId: context.runId,
+        sessionId: context.sessionId,
+        gateInvocationId: context.gateInvocationId,
         approvalRecord: providedApprovalRecord,
+        auditRecord: options.audit_record,
+        admissionContext: options.admission_context,
+        limitedReadRolloutReadyTrue: options.limited_read_rollout_ready_true === true,
         decisionId,
         approvalId,
         issue208EditorInputValidation: isIssue208EditorInputValidation(options),
@@ -65,6 +76,19 @@ export const resolveGate = (options, context) => {
     });
 };
 export const createAuditRecord = (context, gate, env) => {
+    if (gate.gate_input.issue_scope === "issue_209" &&
+        (gate.consumer_gate_result.requested_execution_mode === "live_read_limited" ||
+            gate.consumer_gate_result.requested_execution_mode === "live_read_high_risk")) {
+        const artifacts = buildIssue209PostGateArtifacts({
+            runId: context.runId,
+            sessionId: context.sessionId,
+            profile: context.profile,
+            gate: gate,
+            now: () => env.now()
+        });
+        gate.approval_record = artifacts.approval_record;
+        return artifacts.audit_record;
+    }
     const recordedAt = new Date(env.now()).toISOString();
     const requestedMode = gate.consumer_gate_result.requested_execution_mode;
     const liveModeRequested = requestedMode === "live_read_limited" ||

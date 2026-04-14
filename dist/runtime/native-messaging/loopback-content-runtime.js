@@ -3,11 +3,11 @@ import { buildLoopbackAuditRecord } from "./loopback-gate-audit.js";
 import { buildLoopbackGatePayload } from "./loopback-gate-payload.js";
 import { CliError } from "../../core/errors.js";
 import { parseXhsCommandInputForContract } from "../../commands/xhs-input.js";
+import { resolveXhsGateDecisionId } from "../../../shared/xhs-gate.js";
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-const resolveApprovalRecord = (options) => asRecord(options.approval_record) ?? asRecord(options.approval);
 const XHS_READ_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
 export class InMemoryContentScriptRuntime {
     port;
@@ -150,12 +150,18 @@ export class InMemoryContentScriptRuntime {
             const options = typeof message.commandParams.options === "object" && message.commandParams.options !== null
                 ? message.commandParams.options
                 : {};
-            const approvalRecord = resolveApprovalRecord(options);
-            const decisionId = `gate_decision_${message.runId}_${message.id}`;
+            const decisionId = resolveXhsGateDecisionId({
+                runId: message.runId,
+                requestId: message.id,
+                commandRequestId: message.commandParams.request_id,
+                gateInvocationId: asString(message.commandParams.gate_invocation_id),
+                issueScope: options.issue_scope,
+                requestedExecutionMode: options.requested_execution_mode
+            });
             const gate = buildLoopbackGate(options, asString(ability.action), {
                 runId: message.runId,
-                decisionId,
-                approvalId: asString(approvalRecord?.approval_id) ?? undefined
+                sessionId: message.sessionId,
+                decisionId
             });
             const consumerGateResult = gate.consumerGateResult;
             const auditRecord = buildLoopbackAuditRecord({

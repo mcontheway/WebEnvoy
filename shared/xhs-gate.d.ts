@@ -11,11 +11,69 @@ import type {
 
 export interface XhsApprovalRecord {
   approval_id: string | null;
-  decision_id: string;
+  decision_id: string | null;
   approved: boolean;
   approver: string | null;
   approved_at: string | null;
   checks: Record<string, boolean>;
+}
+
+export interface XhsAuditRecord {
+  event_id: string | null;
+  decision_id: string | null;
+  approval_id: string | null;
+  issue_scope: string | null;
+  target_domain: string | null;
+  target_tab_id: number | null;
+  target_page: string | null;
+  action_type: string | null;
+  requested_execution_mode: string | null;
+  gate_decision: string | null;
+  audited_checks?: Record<string, boolean>;
+  recorded_at: string | null;
+}
+
+export interface XhsApprovalAdmissionEvidence {
+  approval_admission_ref: string | null;
+  decision_id: string | null;
+  approval_id: string | null;
+  request_id?: string | null;
+  run_id: string | null;
+  session_id: string | null;
+  issue_scope: string | null;
+  target_domain: string | null;
+  target_tab_id: number | null;
+  target_page: string | null;
+  action_type: string | null;
+  requested_execution_mode: string | null;
+  approved: boolean;
+  approver: string | null;
+  approved_at: string | null;
+  checks: Record<string, boolean>;
+  recorded_at: string | null;
+}
+
+export interface XhsAuditAdmissionEvidence {
+  audit_admission_ref: string | null;
+  decision_id: string | null;
+  approval_id: string | null;
+  request_id?: string | null;
+  run_id: string | null;
+  session_id: string | null;
+  issue_scope: string | null;
+  target_domain: string | null;
+  target_tab_id: number | null;
+  target_page: string | null;
+  action_type: string | null;
+  requested_execution_mode: string | null;
+  risk_state: string | null;
+  audited_checks: Record<string, boolean>;
+  recorded_at: string | null;
+}
+
+export interface XhsAdmissionContext {
+  approval_admission_evidence: XhsApprovalAdmissionEvidence;
+  audit_admission_evidence: XhsAuditAdmissionEvidence;
 }
 
 export interface XhsReadExecutionPolicy {
@@ -45,8 +103,13 @@ export interface XhsGateCoreInput {
   issueScope: unknown;
   riskState: unknown;
   runId?: unknown;
+  sessionId?: unknown;
+  gateInvocationId?: unknown;
   abilityAction?: unknown;
   approvalRecord: unknown;
+  auditRecord?: unknown;
+  admissionContext?: unknown;
+  limitedReadRolloutReadyTrue?: boolean;
   decisionId?: unknown;
   approvalId?: unknown;
   issue208EditorInputValidation?: boolean;
@@ -64,6 +127,7 @@ export interface XhsGateCoreResult {
   issueScope: IssueScope;
   riskState: RiskState;
   approvalRecord: XhsApprovalRecord;
+  admissionContext: XhsAdmissionContext;
   issueActionMatrix: IssueActionMatrixEntry;
   writeActionMatrixDecisions: WriteActionMatrixDecisionsOutput;
   writeMatrixDecision: WriteActionMatrixDecision;
@@ -93,6 +157,37 @@ export declare const resolveXhsExecutionMode: (value: unknown) => ExecutionMode 
 export declare const resolveXhsRiskState: (value: unknown) => RiskState;
 export declare const resolveXhsIssueScope: (value: unknown) => IssueScope;
 export declare const normalizeXhsApprovalRecord: (value: unknown) => XhsApprovalRecord;
+export declare const normalizeXhsApprovalAdmissionEvidence: (
+  value: unknown
+) => XhsApprovalAdmissionEvidence;
+export declare const normalizeXhsAuditAdmissionEvidence: (
+  value: unknown
+) => XhsAuditAdmissionEvidence;
+export declare const normalizeXhsAdmissionContext: (value: unknown) => XhsAdmissionContext;
+export declare const resolveXhsGateDecisionId: (input: {
+  decisionId?: unknown;
+  runId?: unknown;
+  requestId?: unknown;
+  commandRequestId?: unknown;
+  gateInvocationId?: unknown;
+  issueScope?: unknown;
+  requestedExecutionMode?: unknown;
+  targetPage?: unknown;
+  targetTabId?: unknown;
+}) => string;
+export declare const resolveXhsGateApprovalId: (input: {
+  decisionId?: unknown;
+  runId?: unknown;
+  requestId?: unknown;
+  commandRequestId?: unknown;
+  gateInvocationId?: unknown;
+  issueScope?: unknown;
+  requestedExecutionMode?: unknown;
+  targetPage?: unknown;
+  targetTabId?: unknown;
+  approvalRecord?: unknown;
+  approvalId?: unknown;
+}) => string | null;
 export declare const resolveXhsIssueActionMatrixEntry: (
   issueScope: IssueScope,
   state: RiskState
@@ -105,16 +200,48 @@ export declare const resolveXhsApprovalRequirementGaps: (
   requirements: string[],
   approvalRecord: XhsApprovalRecord
 ) => string[];
+export declare const resolveXhsApprovalAdmissionRequirementGaps: (
+  requirements: string[],
+  approvalAdmissionEvidence: XhsApprovalAdmissionEvidence,
+  expected: {
+    runId: string | null;
+    sessionId: string | null;
+    issueScope: IssueScope;
+    targetDomain: string | null;
+    targetTabId: number | null;
+    targetPage: string | null;
+    actionType: ActionType | null;
+    requestedExecutionMode: ExecutionMode | null;
+  }
+) => string[];
+export declare const resolveXhsAuditAdmissionRequirementGaps: (
+  auditAdmissionEvidence: XhsAuditAdmissionEvidence,
+  expected: {
+    runId: string | null;
+    sessionId: string | null;
+    issueScope: IssueScope;
+    targetDomain: string | null;
+    targetTabId: number | null;
+    targetPage: string | null;
+    actionType: ActionType | null;
+    requestedExecutionMode: ExecutionMode | null;
+    riskState: RiskState;
+  },
+  requirements: string[]
+) => string[];
 export declare const resolveXhsFallbackMode: (
   requestedExecutionMode: ExecutionMode | null,
   riskState: RiskState
 ) => ExecutionMode;
-export declare const evaluateXhsGateCore: (input: XhsGateCoreInput) => XhsGateCoreResult;
+export declare const evaluateXhsGateCore: (
+  input: XhsGateCoreInput
+) => XhsGateCoreResult;
 export declare const buildXhsGatePolicyState: (input: {
   issueScope: unknown;
   riskState: unknown;
   actionType: unknown;
   requestedExecutionMode: unknown;
+  limitedReadRolloutReadyTrue?: boolean;
 }) => {
   issueScope: IssueScope;
   riskState: RiskState;
@@ -128,6 +255,7 @@ export declare const buildXhsGatePolicyState: (input: {
   isLiveReadMode: boolean;
   isBlockedByStateMatrix: boolean;
   liveModeCanEnter: boolean;
+  limitedReadRolloutReadyTrue: boolean;
   fallbackMode: ExecutionMode;
 };
 export declare const collectXhsCommandGateReasons: (input: {
@@ -153,13 +281,22 @@ export declare const collectXhsMatrixGateReasons: (input: {
   gateReasons: string[];
   state: ReturnType<typeof buildXhsGatePolicyState>;
   decisionId?: string | null;
+  expectedApprovalId?: string | null;
+  runId?: string | null;
+  sessionId?: string | null;
   approvalRecord: unknown;
+  auditRecord?: unknown;
+  admissionContext?: unknown;
+  targetDomain?: unknown;
+  targetTabId?: unknown;
+  targetPage?: unknown;
   issue208EditorInputValidation?: boolean;
   includeWriteInteractionTierReason?: boolean;
   allowIssue208EligibleExecution?: boolean;
 }) => {
   gateReasons: string[];
   approvalRecord: XhsApprovalRecord;
+  admissionContext: XhsAdmissionContext;
   writeGateOnlyEligible: boolean;
   writeGateOnlyDecision: Record<string, unknown> | null;
   writeGateOnlyApprovalDecision: Record<string, unknown> | null;
@@ -202,6 +339,7 @@ export declare const evaluateXhsGate: (input: XhsGateCoreInput & {
     action_type: ActionType | null;
     requested_execution_mode: ExecutionMode | null;
     risk_state: RiskState;
+    admission_context: XhsAdmissionContext;
   };
   gate_outcome: {
     decision_id: string;
@@ -223,4 +361,46 @@ export declare const evaluateXhsGate: (input: XhsGateCoreInput & {
     write_interaction_tier: string | null;
   };
   approval_record: XhsApprovalRecord;
+};
+export declare const buildIssue209PostGateArtifacts: (input: {
+  runId: string;
+  sessionId: string;
+  profile: string | null;
+  gate: {
+    gate_input: {
+      issue_scope: IssueScope;
+      target_domain: string | null;
+      target_tab_id: number | null;
+      target_page: string | null;
+      action_type: ActionType | null;
+      requested_execution_mode: ExecutionMode | null;
+      risk_state: RiskState;
+      admission_context: XhsAdmissionContext;
+    };
+    gate_outcome: {
+      decision_id: string;
+      effective_execution_mode: ExecutionMode | null;
+      gate_decision: "allowed" | "blocked";
+      gate_reasons: string[];
+      requires_manual_confirmation: boolean;
+    };
+    consumer_gate_result: {
+      issue_scope: IssueScope;
+      target_domain: string | null;
+      target_tab_id: number | null;
+      target_page: string | null;
+      action_type: ActionType | null;
+      requested_execution_mode: ExecutionMode | null;
+      effective_execution_mode: ExecutionMode | null;
+      gate_decision: "allowed" | "blocked";
+      gate_reasons: string[];
+      write_interaction_tier: string | null;
+    };
+    approval_record: XhsApprovalRecord;
+    write_action_matrix_decisions: WriteActionMatrixDecisionsOutput | null;
+  };
+  now?: () => number;
+}) => {
+  approval_record: XhsApprovalRecord;
+  audit_record: Record<string, unknown>;
 };

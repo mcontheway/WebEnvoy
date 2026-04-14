@@ -1,3 +1,4 @@
+import { bindIssue209LiveReadEnvelopeToSessionForContract } from "../../commands/xhs-input.js";
 import { BRIDGE_PROTOCOL, DEFAULT_TRANSPORT_TIMEOUT_MS, createBridgeForwardRequest, createBridgeOpenRequest, createHeartbeatRequest, ensureBridgeRequestEnvelope, ensureBridgeSuccess } from "./protocol.js";
 import { NativeHostBridgeTransport } from "./host.js";
 import { MAX_PENDING_DURING_RECOVERY, NativeMessagingSession, RECOVERY_WINDOW_MS, classifyTransportFailure } from "./session.js";
@@ -57,6 +58,14 @@ const runWithTimeout = async (promise, timeoutMs) => {
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
+const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const resolveForwardCommandParams = (params, runId, sessionId) => {
+    return bindIssue209LiveReadEnvelopeToSessionForContract({
+        params,
+        runId,
+        sessionId
+    });
+};
 const isNonIdempotentForward = (input) => {
     if (input.command === "runtime.bootstrap" ||
         input.command === "runtime.start" ||
@@ -167,6 +176,17 @@ export class NativeMessagingBridge {
     }
     async close() {
         await this.#transport.close?.();
+    }
+    currentSessionId() {
+        return this.#session.snapshot().sessionId;
+    }
+    async ensureSession(input) {
+        const timeoutMs = readTimeoutMs(input.timeoutMs) ?? DEFAULT_TRANSPORT_TIMEOUT_MS;
+        const budget = createTimeoutBudget(timeoutMs, this.#now);
+        await this.#recoverIfDisconnected(input.profile, budget);
+        await this.#ensureReady(input.profile, budget);
+        await this.#pulseHeartbeat(budget);
+        return this.#session.sessionIdOrThrow();
     }
     async runtimePing(input) {
         const timeoutMs = readTimeoutMs(input.params.timeout_ms) ?? DEFAULT_TRANSPORT_TIMEOUT_MS;
@@ -279,13 +299,14 @@ export class NativeMessagingBridge {
         await this.#ensureReady(input.profile, budget);
         await this.#pulseHeartbeat(budget);
         const forwardTimeoutMs = budget.remainingMs();
+        const sessionId = this.#session.sessionIdOrThrow();
         const request = createBridgeForwardRequest({
             id: this.#nextId("run"),
             profile: input.profile,
-            sessionId: this.#session.sessionIdOrThrow(),
+            sessionId,
             runId: input.runId,
             command: input.command,
-            commandParams: input.params,
+            commandParams: resolveForwardCommandParams(input.params, input.runId, sessionId),
             cwd: input.cwd,
             timeoutMs: forwardTimeoutMs
         });
@@ -310,13 +331,14 @@ export class NativeMessagingBridge {
             await this.#ensureReady(input.profile, budget);
             await this.#pulseHeartbeat(budget);
             const retryTimeoutMs = budget.remainingMs();
+            const retrySessionId = this.#session.sessionIdOrThrow();
             const retryRequest = createBridgeForwardRequest({
                 id: this.#nextId("run"),
                 profile: input.profile,
-                sessionId: this.#session.sessionIdOrThrow(),
+                sessionId: retrySessionId,
                 runId: input.runId,
                 command: input.command,
-                commandParams: input.params,
+                commandParams: resolveForwardCommandParams(input.params, input.runId, retrySessionId),
                 cwd: input.cwd,
                 timeoutMs: retryTimeoutMs
             });

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, approvedLiveOptions, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
+import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, createApprovedReadAdmissionContext, createIssue209GateInvocationId, approvedLiveOptions, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
 
 describe("extension background relay contract / target binding and editor input", () => {
   it("blocks issue_208 write action in paused state and returns reversible write tier", async () => {
@@ -59,6 +59,23 @@ describe("extension background relay contract / target binding and editor input"
                 risk_state_checked: true,
                 action_type_confirmed: true
               }
+            },
+            admission_context: createApprovedReadAdmissionContext({
+              run_id: "run-xhs-live-allowed-001",
+              session_id: "nm-session-001",
+              requested_execution_mode: "live_read_high_risk",
+              risk_state: "allowed"
+            }),
+            audit_record: {
+              event_id: "gate_evt_target_binding_live_allowed_001",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              gate_decision: "allowed",
+              recorded_at: "2026-03-23T10:00:30Z"
             }
           }
         },
@@ -135,6 +152,17 @@ describe("extension background relay contract / target binding and editor input"
                 risk_state_checked: true,
                 action_type_confirmed: true
               }
+            },
+            audit_record: {
+              event_id: "gate_evt_target_binding_live_allowed_001",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              gate_decision: "allowed",
+              recorded_at: "2026-03-23T10:00:30Z"
             }
           }
         },
@@ -929,6 +957,17 @@ describe("extension background relay contract / target binding and editor input"
                 risk_state_checked: true,
                 action_type_confirmed: true
               }
+            },
+            audit_record: {
+              event_id: "gate_evt_target_binding_live_allowed_001",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              gate_decision: "allowed",
+              recorded_at: "2026-03-23T10:00:30Z"
             }
           }
         },
@@ -977,6 +1016,7 @@ describe("extension background relay contract / target binding and editor input"
         run_id: "run-xhs-timeout-001",
         command: "xhs.search",
         command_params: {
+          request_id: "issue209-relay-timeout-001",
           ability: {
             id: "xhs.note.search.v1",
             layer: "L3",
@@ -985,7 +1025,29 @@ describe("extension background relay contract / target binding and editor input"
           input: {
             query: "露营装备"
           },
-          options: approvedLiveOptions
+          options: {
+            ...approvedLiveOptions,
+            admission_context: createApprovedReadAdmissionContext({
+              run_id: "run-xhs-timeout-001",
+              request_id: "issue209-relay-timeout-001",
+              session_id: "nm-session-001",
+              requested_execution_mode: "live_read_high_risk",
+              risk_state: "allowed"
+            }),
+            audit_record: {
+              event_id: "gate_evt_target_binding_timeout_001",
+              decision_id: "gate_decision_run-xhs-timeout-001_issue209-relay-timeout-001",
+              approval_id: "gate_appr_gate_decision_run-xhs-timeout-001_issue209-relay-timeout-001",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              gate_decision: "allowed",
+              recorded_at: "2026-03-23T10:00:30Z"
+            }
+          }
         },
         cwd: "/workspace/WebEnvoy"
       },
@@ -1116,6 +1178,10 @@ describe("extension background relay contract / target binding and editor input"
         run_id: "run-xhs-issue209-write-limited-blocked-001",
         command: "xhs.search",
         command_params: {
+          gate_invocation_id: createIssue209GateInvocationId(
+            "run-xhs-issue209-write-limited-blocked-001",
+            "write-live-read-limited"
+          ),
           ability: {
             id: "xhs.note.search.v1",
             layer: "L3",
@@ -1211,6 +1277,10 @@ describe("extension background relay contract / target binding and editor input"
         run_id: "run-xhs-issue209-write-live-blocked-001",
         command: "xhs.search",
         command_params: {
+          gate_invocation_id: createIssue209GateInvocationId(
+            "run-xhs-issue209-write-live-blocked-001",
+            "write-live-read-high-risk"
+          ),
           ability: {
             id: "xhs.note.search.v1",
             layer: "L3",
@@ -1310,6 +1380,7 @@ describe("extension background relay contract / target binding and editor input"
         run_id: "run-xhs-live-allowed-001",
         command: "xhs.search",
         command_params: {
+          request_id: "issue209-relay-live-high-risk-allowed-001",
           ability: {
             id: "xhs.note.search.v1",
             layer: "L3",
@@ -1336,6 +1407,26 @@ describe("extension background relay contract / target binding and editor input"
                 risk_state_checked: true,
                 action_type_confirmed: true
               }
+            },
+            admission_context: createApprovedReadAdmissionContext({
+              run_id: "run-xhs-live-allowed-001",
+              request_id: "issue209-relay-live-high-risk-allowed-001",
+              session_id: "nm-session-001",
+              requested_execution_mode: "live_read_high_risk",
+              risk_state: "allowed"
+            }),
+            audit_record: {
+              event_id: "gate_evt_target_binding_live_allowed_001",
+              decision_id: "gate_decision_run-xhs-live-allowed-001_issue209-relay-live-high-risk-allowed-001",
+              approval_id: "gate_appr_gate_decision_run-xhs-live-allowed-001_issue209-relay-live-high-risk-allowed-001",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              gate_decision: "allowed",
+              recorded_at: "2026-03-23T10:00:30Z"
             }
           }
         },
@@ -1385,8 +1476,8 @@ describe("extension background relay contract / target binding and editor input"
         },
         approval_record: {
           approved: true,
-          approver: "qa-reviewer",
-          approved_at: "2026-03-23T10:00:00Z"
+          approver: "reviewer-a",
+          approved_at: "2026-03-23T08:00:00Z"
         },
         audit_record: {
           run_id: "run-xhs-live-allowed-001",
@@ -1401,8 +1492,15 @@ describe("extension background relay contract / target binding and editor input"
           effective_execution_mode: "live_read_high_risk",
           gate_decision: "allowed",
           gate_reasons: ["LIVE_MODE_APPROVED"],
-          approver: "qa-reviewer",
-          approved_at: "2026-03-23T10:00:00Z",
+          approver: "reviewer-a",
+          approved_at: "2026-03-23T08:00:00Z",
+          audited_checks: {
+            target_domain_confirmed: true,
+            target_tab_confirmed: true,
+            target_page_confirmed: true,
+            risk_state_checked: true,
+            action_type_confirmed: true
+          },
           risk_signal: false,
           recovery_signal: false,
           session_rhythm_state: "normal",

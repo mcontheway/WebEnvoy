@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createMockPort, createEditorInputProbeResult, createChromeApi, respondHandshake, waitForBridgeTurn, waitForPostedMessage, primeTrustedFingerprintContext, promoteBootstrapReadinessThroughPing, createXhsCommandParams, createXhsEditorInputCommandParams, createApprovedReadApprovalRecord, createFingerprintRuntimeContext, asRecord, resolveWriteInteractionTier, startChromeBackgroundBridge } from "./extension.service-worker.shared.js";
+import { createMockPort, createEditorInputProbeResult, createChromeApi, respondHandshake, waitForBridgeTurn, waitForPostedMessage, primeTrustedFingerprintContext, promoteBootstrapReadinessThroughPing, createXhsCommandParams, createRequestBoundXhsCommandParams, createXhsEditorInputCommandParams, createApprovedReadApprovalRecord, createApprovedReadAuditRecordForRequest, createFingerprintRuntimeContext, asRecord, resolveWriteInteractionTier, startChromeBackgroundBridge } from "./extension.service-worker.shared.js";
 
 describe("extension service worker / bootstrap and trust", () => {
   it("rejects mismatched protocol on bridge.open and does not enter ready", async () => {
@@ -2597,7 +2597,7 @@ describe("extension service worker / bootstrap and trust", () => {
     expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("blocks live_read_high_risk in background gate when approval is missing", async () => {
+  it("blocks live_read_high_risk in background gate when admission evidence is missing", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -2618,7 +2618,8 @@ describe("extension service worker / bootstrap and trust", () => {
         command_params: createXhsCommandParams({
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
-          fingerprint_context: createFingerprintRuntimeContext()
+          fingerprint_context: createFingerprintRuntimeContext(),
+          admission_context: null
         }),
         cwd: "/workspace/WebEnvoy"
       },
@@ -2682,7 +2683,11 @@ describe("extension service worker / bootstrap and trust", () => {
           requested_execution_mode: "live_read_high_risk",
           effective_execution_mode: "dry_run",
           gate_decision: "blocked",
-          gate_reasons: ["MANUAL_CONFIRMATION_MISSING", "APPROVAL_CHECKS_INCOMPLETE"]
+          gate_reasons: [
+            "MANUAL_CONFIRMATION_MISSING",
+            "APPROVAL_CHECKS_INCOMPLETE",
+            "AUDIT_RECORD_MISSING"
+          ]
         },
         read_execution_policy: {
           default_mode: "dry_run",
@@ -2696,12 +2701,15 @@ describe("extension service worker / bootstrap and trust", () => {
           conditional_actions: [
             {
               action: "live_read_limited",
-              requires: [
-                "approval_record_approved_true",
-                "approval_record_approver_present",
-                "approval_record_approved_at_present",
-                "approval_record_checks_all_true"
-              ]
+              requires: expect.arrayContaining([
+                "audit_admission_evidence_present",
+                "audit_admission_checks_all_true",
+                "limited_read_rollout_ready_true",
+                "approval_admission_evidence_approved_true",
+                "approval_admission_evidence_approver_present",
+                "approval_admission_evidence_approved_at_present",
+                "approval_admission_evidence_checks_all_true"
+              ])
             }
           ]
         },
@@ -2733,7 +2741,7 @@ describe("extension service worker / bootstrap and trust", () => {
     });
   });
 
-  it("blocks live_read_limited in background gate when approval is missing", async () => {
+  it("blocks live_read_limited in background gate when admission evidence is missing", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
@@ -2754,7 +2762,8 @@ describe("extension service worker / bootstrap and trust", () => {
         command_params: createXhsCommandParams({
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
-          fingerprint_context: createFingerprintRuntimeContext()
+          fingerprint_context: createFingerprintRuntimeContext(),
+          admission_context: null
         }),
         cwd: "/workspace/WebEnvoy"
       },
@@ -2795,7 +2804,10 @@ describe("extension service worker / bootstrap and trust", () => {
           requested_execution_mode: "live_read_limited",
           effective_execution_mode: "recon",
           gate_decision: "blocked",
-          gate_reasons: ["MANUAL_CONFIRMATION_MISSING", "APPROVAL_CHECKS_INCOMPLETE"]
+          gate_reasons: expect.arrayContaining([
+            "MANUAL_CONFIRMATION_MISSING",
+            "APPROVAL_CHECKS_INCOMPLETE"
+          ])
         }
       }
     });
@@ -3279,7 +3291,9 @@ describe("extension service worker / bootstrap and trust", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-blocked-by-fingerprint-001",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-blocked-by-fingerprint-001",
+          requestId: "run-xhs-live-blocked-by-fingerprint-001",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -3340,10 +3354,16 @@ describe("extension service worker / bootstrap and trust", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-blocked-by-fingerprint-002",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-blocked-by-fingerprint-002",
+          requestId: "run-xhs-live-blocked-by-fingerprint-002",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           approval_record: createApprovedReadApprovalRecord(),
+          audit_record: createApprovedReadAuditRecordForRequest({
+            runId: "run-xhs-live-blocked-by-fingerprint-002",
+            requestId: "run-xhs-live-blocked-by-fingerprint-002"
+          }),
           fingerprint_context: fingerprintContext
         }),
         cwd: "/workspace/WebEnvoy"
@@ -3388,7 +3408,9 @@ describe("extension service worker / bootstrap and trust", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-blocked-by-fingerprint-003",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-blocked-by-fingerprint-003",
+          requestId: "run-xhs-live-blocked-by-fingerprint-003",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord()
@@ -3436,7 +3458,9 @@ describe("extension service worker / bootstrap and trust", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-blocked-by-fingerprint-untrusted-001",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-blocked-by-fingerprint-untrusted-001",
+          requestId: "run-xhs-live-blocked-by-fingerprint-untrusted-001",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -3493,7 +3517,9 @@ describe("extension service worker / bootstrap and trust", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-untrusted-startup-tab-001",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-untrusted-startup-tab-001",
+          requestId: "run-xhs-live-untrusted-startup-tab-001",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -3575,7 +3601,9 @@ describe("extension service worker / bootstrap and trust", () => {
         session_id: "nm-session-001",
         run_id: liveRunId,
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: liveRunId,
+          requestId: liveRequestId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -3594,6 +3622,164 @@ describe("extension service worker / bootstrap and trust", () => {
         id: liveRequestId,
         command: "xhs.search"
       })
+    );
+  });
+
+  it("allows live xhs.search to reuse trusted fingerprint context when command fingerprint_context is omitted", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const startupRunId = "run-xhs-live-trusted-omit-fingerprint-startup-001";
+    const liveRunId = "run-xhs-live-trusted-omit-fingerprint-live-002";
+    const profile = "profile-a";
+    const fingerprintContext = createFingerprintRuntimeContext({
+      live_allowed: true,
+      live_decision: "allowed",
+      allowed_execution_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+      reason_codes: []
+    });
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: `startup-fingerprint-trust:${startupRunId}`,
+        ok: true,
+        payload: {
+          startup_fingerprint_trust: {
+            run_id: startupRunId,
+            profile,
+            session_id: "nm-session-001",
+            fingerprint_runtime: fingerprintContext,
+            trust_source: "extension_bootstrap_context",
+            bootstrap_attested: true,
+            main_world_result_used_for_trust: false
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+    chromeApi.tabs.sendMessage.mockClear();
+
+    const liveRequestId = `${liveRunId}-live`;
+    firstPort.onMessageListeners[0]?.({
+      id: liveRequestId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: liveRunId,
+        command: "xhs.search",
+        command_params: createRequestBoundXhsCommandParams({
+          runId: liveRunId,
+          requestId: liveRequestId,
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord()
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: liveRequestId,
+        command: "xhs.search"
+      })
+    );
+  });
+
+  it("keeps target_tab_id existence as a hard gate even when trusted fingerprint context is bound", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => []);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const startupRunId = "run-xhs-live-trusted-missing-tab-startup-001";
+    const liveRunId = "run-xhs-live-trusted-missing-tab-live-002";
+    const profile = "profile-a";
+    const fingerprintContext = createFingerprintRuntimeContext({
+      live_allowed: true,
+      live_decision: "allowed",
+      allowed_execution_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+      reason_codes: []
+    });
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: `startup-fingerprint-trust:${startupRunId}`,
+        ok: true,
+        payload: {
+          startup_fingerprint_trust: {
+            run_id: startupRunId,
+            profile,
+            session_id: "nm-session-001",
+            fingerprint_runtime: fingerprintContext,
+            trust_source: "extension_bootstrap_context",
+            bootstrap_attested: true,
+            main_world_result_used_for_trust: false
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+    chromeApi.tabs.sendMessage.mockClear();
+
+    const liveRequestId = `${liveRunId}-live`;
+    firstPort.onMessageListeners[0]?.({
+      id: liveRequestId,
+      method: "bridge.forward",
+      profile,
+      params: {
+        session_id: "nm-session-001",
+        run_id: liveRunId,
+        command: "xhs.search",
+        command_params: createRequestBoundXhsCommandParams({
+          runId: liveRunId,
+          requestId: liveRunId,
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord()
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === liveRequestId);
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["TARGET_TAB_NOT_FOUND"])
     );
   });
 
@@ -3666,7 +3852,9 @@ describe("extension service worker / bootstrap and trust", () => {
         session_id: "nm-session-001",
         run_id: liveRunId,
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: liveRunId,
+          requestId: liveRunId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -3744,7 +3932,10 @@ describe("extension service worker / bootstrap and trust", () => {
         session_id: "nm-session-002",
         run_id: "run-xhs-live-recovery-untrusted-001",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-recovery-untrusted-001",
+          sessionId: "nm-session-002",
+          requestId: "run-xhs-live-recovery-untrusted-001",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -3820,7 +4011,9 @@ describe("extension service worker / bootstrap and trust", () => {
         session_id: "nm-session-001",
         run_id: liveRunId,
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: liveRunId,
+          requestId: firstAttemptId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -3866,7 +4059,9 @@ describe("extension service worker / bootstrap and trust", () => {
         session_id: "nm-session-001",
         run_id: liveRunId,
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: liveRunId,
+          requestId: liveRunId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -3945,7 +4140,9 @@ describe("extension service worker / bootstrap and trust", () => {
         session_id: "nm-session-001",
         run_id: liveRunId,
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: liveRunId,
+          requestId: liveRunId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -4035,16 +4232,19 @@ describe("extension service worker / bootstrap and trust", () => {
     );
     expect(stopDispatch).toBeDefined();
 
-    const liveRequestId = `${runId}-live-after-stop`;
+    const liveRunId = `${runId}-after-stop`;
+    const liveRequestId = `${liveRunId}-live-after-stop`;
     firstPort.onMessageListeners[0]?.({
       id: liveRequestId,
       method: "bridge.forward",
       profile,
       params: {
         session_id: "nm-session-001",
-        run_id: runId,
+        run_id: liveRunId,
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: liveRunId,
+          requestId: liveRequestId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -4122,7 +4322,9 @@ describe("extension service worker / bootstrap and trust", () => {
         session_id: "nm-session-001",
         run_id: runId,
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: runId,
+          requestId: runId,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -4185,7 +4387,9 @@ describe("extension service worker / bootstrap and trust", () => {
         session_id: "nm-session-001",
         run_id: runId,
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: runId,
+          requestId: `${runId}-drifted`,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -4214,7 +4418,9 @@ describe("extension service worker / bootstrap and trust", () => {
         session_id: "nm-session-001",
         run_id: runId,
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: runId,
+          requestId: `${runId}-after-invalidation`,
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           approval_record: createApprovedReadApprovalRecord(),
@@ -4266,10 +4472,16 @@ describe("extension service worker / bootstrap and trust", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-top-level-patch-missing-001",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-top-level-patch-missing-001",
+          requestId: "run-xhs-live-top-level-patch-missing-001",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           approval_record: createApprovedReadApprovalRecord(),
+          audit_record: createApprovedReadAuditRecordForRequest({
+            runId: "run-xhs-live-top-level-patch-missing-001",
+            requestId: "run-xhs-live-top-level-patch-missing-001"
+          }),
           fingerprint_context: fingerprintContext
         }),
         cwd: "/workspace/WebEnvoy"
@@ -5009,7 +5221,9 @@ describe("extension service worker / bootstrap and trust", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-limited-approved-001",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-limited-approved-001",
+          requestId: "run-xhs-live-limited-approved-001",
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           fingerprint_context: createFingerprintRuntimeContext(),
@@ -5024,7 +5238,11 @@ describe("extension service worker / bootstrap and trust", () => {
               risk_state_checked: true,
               action_type_confirmed: true
             }
-          }
+          },
+          audit_record: createApprovedReadAuditRecordForRequest({
+            runId: "run-xhs-live-limited-approved-001",
+            requestId: "run-xhs-live-limited-approved-001"
+          })
         }),
         cwd: "/workspace/WebEnvoy"
       },
@@ -5120,7 +5338,9 @@ describe("extension service worker / bootstrap and trust", () => {
         session_id: "nm-session-001",
         run_id: "run-xhs-live-mode-approved-001",
         command: "xhs.search",
-        command_params: createXhsCommandParams({
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-live-mode-approved-001",
+          requestId: "run-xhs-live-mode-approved-001",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
           fingerprint_context: createFingerprintRuntimeContext(),

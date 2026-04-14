@@ -2,13 +2,17 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { ProfileStore, PROFILE_META_FILENAME } from "../profile-store.js";
 import {
   buildFingerprintProfileBundle,
   buildFingerprintRuntimeContext
 } from "../../../shared/fingerprint-profile.js";
+import {
+  acquireBrowserEnvTestLock,
+  releaseBrowserEnvTestLock
+} from "./browser-env-test-lock.js";
 
 const tempDirs: string[] = [];
 let browserPathBeforeTest: string | undefined;
@@ -21,6 +25,10 @@ const resolveCurrentTimezone = (): string => {
     return "UTC";
   }
 };
+
+beforeAll(async () => {
+  await acquireBrowserEnvTestLock();
+}, 180_000);
 
 beforeEach(() => {
   browserPathBeforeTest = process.env.WEBENVOY_BROWSER_PATH;
@@ -45,6 +53,10 @@ afterEach(async () => {
     }
   }
 });
+
+afterAll(async () => {
+  await releaseBrowserEnvTestLock();
+}, 180_000);
 
 const createMockBrowserExecutable = async (
   versionOutput: string = "Chromium 146.0.0.0"

@@ -38,6 +38,20 @@ const readSource = async (path) =>
 const buildContentScriptBundle = async () => {
   const fingerprintSource = await readSource(join(sharedRoot, "fingerprint-profile.js"));
   const riskStateSource = await readSource(join(sharedRoot, "risk-state.js"));
+  const issue209AdmissionSource = await readSource(
+    join(sharedRoot, "issue209-live-read", "admission.js")
+  );
+  const issue209SourceSource = await readSource(join(sharedRoot, "issue209-live-read", "source.js"));
+  const issue209IdentitySource = await readSource(
+    join(sharedRoot, "issue209-live-read", "identity.js")
+  );
+  const issue209GateSource = await readSource(join(sharedRoot, "issue209-live-read", "gate.js"));
+  const issue209PostGateAuditSource = await readSource(
+    join(sharedRoot, "issue209-live-read", "postgate-audit.js")
+  );
+  const issue209SourceValidationSource = await readSource(
+    join(sharedRoot, "issue209-live-read", "source-validation.js")
+  );
   const sharedXhsGateSource = await readSource(join(sharedRoot, "xhs-gate.js"));
   const xhsSearchTypesSource = await readSource(join(buildRoot, "xhs-search-types.js"));
   const xhsSearchTelemetrySource = await readSource(join(buildRoot, "xhs-search-telemetry.js"));
@@ -84,6 +98,94 @@ const buildContentScriptBundle = async () => {
     ]
   });
 
+  const issue209AdmissionModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_issue209_admission",
+    sourceBody: issue209AdmissionSource,
+    exports: [
+      "cloneIssue209AdmissionContext",
+      "createIssue209AdmissionDraft",
+      "bindIssue209AdmissionToSession"
+    ]
+  });
+
+  const issue209IdentityModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_issue209_identity",
+    sourceBody: issue209IdentitySource,
+    exports: [
+      "ISSUE209_LIVE_READ_EXECUTION_MODES",
+      "isIssue209LiveReadMode",
+      "isIssue209LiveReadGateRequest",
+      "prepareIssue209LiveReadIdentity",
+      "resolveIssue209LiveReadDecisionId",
+      "resolveIssue209LiveReadApprovalId"
+    ]
+  });
+
+  const issue209SourceModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_issue209_source",
+    prelude: [
+      "const { APPROVAL_CHECK_KEYS } = __webenvoy_module_risk_state;",
+      "const {",
+      "  resolveIssue209LiveReadApprovalId,",
+      "  resolveIssue209LiveReadDecisionId",
+      "} = __webenvoy_module_issue209_identity;"
+    ].join("\n"),
+    sourceBody: issue209SourceSource,
+    exports: [
+      "APPROVAL_CHECK_KEYS",
+      "cloneIssue209AdmissionContext",
+      "normalizeApprovalAdmissionEvidence",
+      "normalizeAuditAdmissionEvidence",
+      "normalizeProvidedApprovalSource",
+      "normalizeProvidedAuditSource",
+      "prepareIssue209LiveReadSource"
+    ]
+  });
+
+  const issue209GateModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_issue209_gate",
+    prelude: [
+      "const { APPROVAL_CHECK_KEYS } = __webenvoy_module_risk_state;",
+      "const { cloneIssue209AdmissionContext } = __webenvoy_module_issue209_admission;",
+      "const { normalizeProvidedApprovalSource } = __webenvoy_module_issue209_source;",
+      "const {",
+      "  validateIssue209ApprovalSourceAgainstCurrentLinkage,",
+      "  validateIssue209AuditSourceAgainstCurrentLinkage",
+      "} = __webenvoy_module_issue209_source_validation;"
+    ].join("\n"),
+    sourceBody: issue209GateSource,
+    exports: [
+      "validateIssue209ApprovalSourceAgainstCurrentLinkage",
+      "collectIssue209LiveReadMatrixGateReasons"
+    ]
+  });
+
+  const issue209SourceValidationModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_issue209_source_validation",
+    prelude: [
+      "const { APPROVAL_CHECK_KEYS } = __webenvoy_module_risk_state;",
+      "const {",
+      "  normalizeProvidedApprovalSource,",
+      "  normalizeProvidedAuditSource",
+      "} = __webenvoy_module_issue209_source;"
+    ].join("\n"),
+    sourceBody: issue209SourceValidationSource,
+    exports: [
+      "validateIssue209ApprovalSourceAgainstCurrentLinkage",
+      "validateIssue209AuditSourceAgainstCurrentLinkage"
+    ]
+  });
+
+  const issue209PostGateAuditModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_issue209_postgate_audit",
+    prelude: [
+      "const { buildRiskTransitionAudit } = __webenvoy_module_risk_state;",
+      "const { resolveIssue209LiveReadApprovalId } = __webenvoy_module_issue209_identity;"
+    ].join("\n"),
+    sourceBody: issue209PostGateAuditSource,
+    exports: ["buildIssue209PostGateArtifacts"]
+  });
+
   const sharedXhsGateModule = renderClassicModule({
     moduleVar: "__webenvoy_module_shared_xhs_gate",
     prelude: [
@@ -95,10 +197,23 @@ const buildContentScriptBundle = async () => {
       "  getWriteActionMatrixDecisions,",
       "  resolveIssueScope: resolveSharedIssueScope,",
       "  resolveRiskState: resolveSharedRiskState",
-      "} = __webenvoy_module_risk_state;"
+      "} = __webenvoy_module_risk_state;",
+      "const { collectIssue209LiveReadMatrixGateReasons } = __webenvoy_module_issue209_gate;",
+      "const { buildIssue209PostGateArtifacts } = __webenvoy_module_issue209_postgate_audit;",
+      "const {",
+      "  isIssue209LiveReadGateRequest,",
+      "  resolveIssue209LiveReadApprovalId",
+      "} = __webenvoy_module_issue209_identity;"
     ].join("\n"),
     sourceBody: sharedXhsGateSource,
-    exports: ["XHS_ALLOWED_DOMAINS", "evaluateXhsGate"]
+    exports: [
+      "XHS_ALLOWED_DOMAINS",
+      "XHS_READ_DOMAIN",
+      "XHS_WRITE_DOMAIN",
+      "buildIssue209PostGateArtifacts",
+      "evaluateXhsGate",
+      "resolveXhsGateDecisionId"
+    ]
   });
 
   const xhsSearchTypesModule = renderClassicModule({
@@ -141,7 +256,12 @@ const buildContentScriptBundle = async () => {
       "  resolveIssueScope: resolveSharedIssueScope,",
       "  resolveRiskState: resolveSharedRiskState",
       "} = __webenvoy_module_risk_state;",
-      "const { evaluateXhsGate } = __webenvoy_module_shared_xhs_gate;",
+      "const {",
+      "  evaluateXhsGate,",
+      "  resolveXhsGateDecisionId,",
+      "  XHS_READ_DOMAIN,",
+      "  XHS_WRITE_DOMAIN",
+      "} = __webenvoy_module_shared_xhs_gate;",
       "const { resolveRiskStateOutput } = __webenvoy_module_xhs_search_telemetry;"
     ].join("\n"),
     sourceBody: xhsSearchGateSource,
@@ -326,6 +446,12 @@ const buildContentScriptBundle = async () => {
     "",
     riskStateModule,
     fingerprintModule,
+    issue209AdmissionModule,
+    issue209IdentityModule,
+    issue209SourceModule,
+    issue209SourceValidationModule,
+    issue209GateModule,
+    issue209PostGateAuditModule,
     sharedXhsGateModule,
     xhsSearchTypesModule,
     xhsSearchTelemetryModule,

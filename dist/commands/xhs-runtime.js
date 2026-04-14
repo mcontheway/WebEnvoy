@@ -7,7 +7,7 @@ import { appendFingerprintContext, buildFingerprintContextForMeta } from "../run
 import { ProfileStore } from "../runtime/profile-store.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import { prepareOfficialChromeRuntime } from "../runtime/official-chrome-runtime.js";
-import { buildCapabilityResult, normalizeGateOptionsForContract, parseAbilityEnvelopeForContract, parseDetailInputForContract, parseSearchInputForContract, parseUserHomeInputForContract } from "./xhs-input.js";
+import { buildCapabilityResult, ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY, normalizeGateOptionsForContract, parseAbilityEnvelopeForContract, parseDetailInputForContract, parseSearchInputForContract, parseUserHomeInputForContract, prepareIssue209LiveReadEnvelopeForContract } from "./xhs-input.js";
 export { buildOfficialChromeRuntimeStatusParams } from "../runtime/official-chrome-runtime.js";
 export { normalizeGateOptionsForContract } from "./xhs-input.js";
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
@@ -172,15 +172,35 @@ const xhsReadCommand = async (context, inputConfig) => {
         requestedExecutionMode: gate.requestedExecutionMode
     });
     try {
+        const preparedIssue209LiveRead = prepareIssue209LiveReadEnvelopeForContract({
+            options: gate.options,
+            requestId: envelope.requestId,
+            runId: context.run_id
+        });
         await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, gate);
+        const bridgeSessionId = await bridge.ensureSession({
+            profile: context.profile
+        });
         const commandParams = appendFingerprintContext({
+            ...(preparedIssue209LiveRead.commandRequestId
+                ? { request_id: preparedIssue209LiveRead.commandRequestId }
+                : {}),
+            ...(preparedIssue209LiveRead.gateInvocationId
+                ? { gate_invocation_id: preparedIssue209LiveRead.gateInvocationId }
+                : {}),
+            ...(preparedIssue209LiveRead.admissionDraft
+                ? {
+                    [ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY]: preparedIssue209LiveRead.admissionDraft
+                }
+                : {}),
             target_domain: gate.targetDomain,
             target_tab_id: gate.targetTabId,
             target_page: gate.targetPage,
             requested_execution_mode: gate.requestedExecutionMode,
             ability: envelope.ability,
             input: parsedInput,
-            options: gate.options
+            options: preparedIssue209LiveRead.options,
+            session_id: bridgeSessionId
         }, fingerprintContext);
         const bridgeResult = await bridge.runCommand({
             runId: context.run_id,

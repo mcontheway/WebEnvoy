@@ -20,6 +20,20 @@ const APPROVAL_EVIDENCE_REQUIREMENTS = [
   "approval_record_approved_at_present",
   "approval_record_checks_all_true"
 ];
+const ISSUE_209_LIVE_READ_ADMISSION_REQUIREMENTS = [
+  "gate_input_risk_state_limited_or_allowed",
+  "audit_admission_evidence_present",
+  "audit_admission_checks_all_true",
+  "risk_state_checked",
+  "target_domain_confirmed",
+  "target_tab_confirmed",
+  "target_page_confirmed",
+  "action_type_confirmed",
+  "approval_admission_evidence_approved_true",
+  "approval_admission_evidence_approver_present",
+  "approval_admission_evidence_approved_at_present",
+  "approval_admission_evidence_checks_all_true"
+];
 const RISK_STATE_TRANSITIONS = [
   { from: "allowed", to: "limited", trigger: "risk_signal_detected" },
   { from: "limited", to: "paused", trigger: "account_alert_or_repeat_risk" },
@@ -107,10 +121,8 @@ const ISSUE_ACTION_MATRIX = [
       {
         action: "live_read_limited",
         requires: [
-          "approval_record_approved_true",
-          "approval_record_approver_present",
-          "approval_record_approved_at_present",
-          "approval_record_checks_all_true"
+          ...ISSUE_209_LIVE_READ_ADMISSION_REQUIREMENTS,
+          "limited_read_rollout_ready_true",
         ]
       }
     ],
@@ -129,20 +141,13 @@ const ISSUE_ACTION_MATRIX = [
       {
         action: "live_read_limited",
         requires: [
-          "approval_record_approved_true",
-          "approval_record_approver_present",
-          "approval_record_approved_at_present",
-          "approval_record_checks_all_true"
+          ...ISSUE_209_LIVE_READ_ADMISSION_REQUIREMENTS,
+          "limited_read_rollout_ready_true",
         ]
       },
       {
         action: "live_read_high_risk",
-        requires: [
-          "approval_record_approved_true",
-          "approval_record_approver_present",
-          "approval_record_approved_at_present",
-          "approval_record_checks_all_true"
-        ]
+        requires: [...ISSUE_209_LIVE_READ_ADMISSION_REQUIREMENTS]
       }
     ],
     blocked_actions: ["live_write", "irreversible_write", "expand_new_live_surface_without_gate"]

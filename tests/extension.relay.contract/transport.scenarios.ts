@@ -9,7 +9,9 @@ const {
   ContentScriptHandler,
   waitForResponse,
   approvedLiveOptions,
-  asRecord
+  asRecord,
+  createApprovedReadAdmissionContext,
+  createApprovedReadAuditRecord
 } = ctx;
 
 describe("extension background relay contract / transport", () => {
@@ -119,6 +121,7 @@ describe("extension background relay contract / transport", () => {
     const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
 
     const responsePromise = waitForResponse(relay);
+    const requestId = "issue209-relay-account-abnormal-001";
     relay.onNativeRequest({
       id: "forward-xhs-error-001",
       method: "bridge.forward",
@@ -127,6 +130,7 @@ describe("extension background relay contract / transport", () => {
         run_id: "run-xhs-error-001",
         command: "xhs.search",
         command_params: {
+          request_id: requestId,
           ability: {
             id: "xhs.note.search.v1",
             layer: "L3",
@@ -135,7 +139,17 @@ describe("extension background relay contract / transport", () => {
           input: {
             query: "露营装备"
           },
-          options: approvedLiveOptions
+          options: {
+            ...approvedLiveOptions,
+            admission_context: createApprovedReadAdmissionContext({
+              run_id: "run-xhs-error-001",
+              request_id: requestId
+            }),
+            audit_record: createApprovedReadAuditRecord({
+              run_id: "run-xhs-error-001",
+              request_id: requestId
+            })
+          }
         },
         cwd: "/workspace/WebEnvoy"
       },
@@ -218,6 +232,8 @@ describe("extension background relay contract / transport", () => {
       failureStage,
       keyRequestCount
     }) => {
+      const requestId = `issue209-relay-${simulateResult}-001`;
+      const runId = `run-xhs-${simulateResult}-001`;
       const contentScript = new ContentScriptHandler({
         xhsEnv: {
           now: () => 1_000,
@@ -247,9 +263,10 @@ describe("extension background relay contract / transport", () => {
         method: "bridge.forward",
         params: {
           session_id: "nm-session-001",
-          run_id: `run-xhs-${simulateResult}-001`,
+          run_id: runId,
           command: "xhs.search",
           command_params: {
+            request_id: requestId,
             ability: {
               id: "xhs.note.search.v1",
               layer: "L3",
@@ -260,6 +277,14 @@ describe("extension background relay contract / transport", () => {
             },
             options: {
               ...approvedLiveOptions,
+              admission_context: createApprovedReadAdmissionContext({
+                run_id: runId,
+                request_id: requestId
+              }),
+              audit_record: createApprovedReadAuditRecord({
+                run_id: runId,
+                request_id: requestId
+              }),
               simulate_result: simulateResult
             }
           },
