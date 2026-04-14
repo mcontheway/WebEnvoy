@@ -473,6 +473,55 @@ describe("xhs-input", () => {
     );
   });
 
+  it("accepts anonymous_context requests on an internal anonymous runtime profile", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      input: {
+        query: "露营"
+      },
+      options: {
+        requested_execution_mode: "dry_run"
+      },
+      ...buildUpstreamAuthorizationRequest({
+        resource_binding: {
+          binding_ref: "binding_001",
+          resource_kind: "anonymous_context",
+          profile_ref: null,
+          binding_constraints: {
+            anonymous_required: true,
+            reuse_logged_in_context_forbidden: true
+          }
+        },
+        authorization_grant: {
+          grant_ref: "grant_001",
+          allowed_actions: ["xhs.read_search_results"],
+          binding_scope: {
+            allowed_resource_kinds: ["anonymous_context"],
+            allowed_profile_refs: []
+          },
+          target_scope: {
+            allowed_domains: ["www.xiaohongshu.com"],
+            allowed_pages: ["search_result_tab"]
+          }
+        }
+      })
+    });
+
+    expect(
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        runtimeProfile: "anonymous.xhs",
+        upstreamAuthorization: envelope.upstreamAuthorization
+      }).options.upstream_authorization_request
+    ).toMatchObject({
+      resource_binding: {
+        resource_kind: "anonymous_context",
+        profile_ref: null
+      }
+    });
+  });
+
   it("rejects invalid resource_state_snapshot enum values", () => {
     expect(() =>
       parseAbilityEnvelopeForContract({
@@ -759,6 +808,67 @@ describe("xhs-input", () => {
       target_domain: "creator.xiaohongshu.com",
       target_tab_id: 11,
       target_page: "creator_publish_tab"
+    });
+  });
+
+  it("projects irreversible_write into legacy write gate fields while keeping the canonical action category", () => {
+    const envelope = parseAbilityEnvelopeForContract({
+      ability: { id: "xhs.editor.input.v1", layer: "L3", action: "write" },
+      input: {},
+      options: {
+        action_type: "write",
+        requested_execution_mode: "live_write",
+        validation_action: "editor_input"
+      },
+      ...buildUpstreamAuthorizationRequest({
+        action_request: {
+          request_ref: "upstream_req_003",
+          action_name: "xhs.write_editor_input",
+          action_category: "irreversible_write"
+        },
+        resource_binding: {
+          binding_ref: "binding_003",
+          resource_kind: "profile_session",
+          profile_ref: "xhs_account_001"
+        },
+        authorization_grant: {
+          grant_ref: "grant_003",
+          allowed_actions: ["xhs.write_editor_input"],
+          binding_scope: {
+            allowed_resource_kinds: ["profile_session"],
+            allowed_profile_refs: ["xhs_account_001"]
+          },
+          target_scope: {
+            allowed_domains: ["creator.xiaohongshu.com"],
+            allowed_pages: ["creator_publish_tab"]
+          }
+        },
+        runtime_target: {
+          target_ref: "target_003",
+          domain: "creator.xiaohongshu.com",
+          page: "creator_publish_tab",
+          tab_id: 11
+        }
+      })
+    });
+
+    expect(
+      normalizeGateOptionsForContract(envelope.options, envelope.ability.id, {
+        command: "xhs.search",
+        abilityAction: envelope.ability.action,
+        runtimeProfile: "xhs_account_001",
+        upstreamAuthorization: envelope.upstreamAuthorization
+      }).options
+    ).toMatchObject({
+      action_type: "write",
+      target_domain: "creator.xiaohongshu.com",
+      target_tab_id: 11,
+      target_page: "creator_publish_tab",
+      upstream_authorization_request: {
+        action_request: {
+          action_category: "irreversible_write"
+        }
+      }
     });
   });
 

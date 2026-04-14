@@ -31,6 +31,7 @@ export interface AbilityEnvelope {
 }
 
 export type GateActionType = "read" | "write" | "irreversible_write";
+type LegacyGateActionType = "read" | "write";
 export type UpstreamResourceKind = "anonymous_context" | "profile_session";
 export type ResourceStateSnapshot = "active" | "cool_down" | "paused";
 
@@ -161,6 +162,25 @@ const asStringArray = (value: unknown): string[] | null => {
     .map((item) => (typeof item === "string" ? item.trim() : ""))
     .filter((item) => item.length > 0);
   return normalized.length === value.length ? normalized : null;
+};
+
+const projectLegacyActionTypeForContract = (
+  actionType: GateActionType | null
+): LegacyGateActionType | null => {
+  if (actionType === "read") {
+    return "read";
+  }
+  if (actionType === "write" || actionType === "irreversible_write") {
+    return "write";
+  }
+  return null;
+};
+
+const isAnonymousRuntimeProfileForContract = (profile: string | null | undefined): boolean => {
+  if (!profile) {
+    return true;
+  }
+  return /^anonymous(?:[._-][A-Za-z0-9._-]+)?$/u.test(profile);
 };
 
 const resolveIssue209ScopeFromAdmissionSource = (options: JsonObject): "issue_209" | null => {
@@ -790,6 +810,7 @@ export const normalizeGateOptionsForContract = (
   const normalizedActionType = upstreamAuthorization
     ? upstreamAuthorization.action_request.action_category
     : null;
+  const legacyProjectedActionType = projectLegacyActionTypeForContract(normalizedActionType);
 
   const targetDomain = upstreamAuthorization
     ? upstreamAuthorization.runtime_target.domain
@@ -849,7 +870,7 @@ export const normalizeGateOptionsForContract = (
   }
 
   const legacyActionType = asString(options.action_type);
-  if (upstreamAuthorization && legacyActionType && legacyActionType !== normalizedActionType) {
+  if (upstreamAuthorization && legacyActionType && legacyActionType !== legacyProjectedActionType) {
     throw invalidAbilityInput("ACTION_TYPE_CONFLICT", abilityId);
   }
   if (
@@ -930,7 +951,7 @@ export const normalizeGateOptionsForContract = (
     }
     if (
       upstreamAuthorization.resource_binding.resource_kind === "anonymous_context" &&
-      input?.runtimeProfile
+      !isAnonymousRuntimeProfileForContract(input?.runtimeProfile)
     ) {
       throw invalidAbilityInput("ANONYMOUS_CONTEXT_PROFILE_CONFLICT", abilityId);
     }
@@ -944,7 +965,7 @@ export const normalizeGateOptionsForContract = (
 
   const canonicalIssueScope = resolveCanonicalIssueScopeForContract({
     ...options,
-    ...(normalizedActionType ? { action_type: normalizedActionType } : {}),
+    ...(legacyProjectedActionType ? { action_type: legacyProjectedActionType } : {}),
     target_domain: targetDomain,
     target_tab_id: targetTabId,
     target_page: targetPage,
@@ -958,7 +979,7 @@ export const normalizeGateOptionsForContract = (
     requestedExecutionMode,
     options: {
       ...options,
-      ...(normalizedActionType ? { action_type: normalizedActionType } : {}),
+      ...(legacyProjectedActionType ? { action_type: legacyProjectedActionType } : {}),
       target_domain: targetDomain,
       target_tab_id: targetTabId,
       target_page: targetPage,
