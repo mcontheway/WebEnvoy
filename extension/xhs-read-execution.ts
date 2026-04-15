@@ -607,7 +607,8 @@ const resolveSimulatedResult = (
   spec: XhsReadCommandSpec,
   payload: JsonRecord,
   env: XhsSearchEnvironment,
-  gate?: ReturnType<typeof resolveGate>
+  gate?: ReturnType<typeof resolveGate>,
+  auditRecord?: ReturnType<typeof createAuditRecord>
 ): SearchExecutionResult | null => {
   if (!input.options.simulate_result) {
     return null;
@@ -748,7 +749,8 @@ const resolveSimulatedResult = (
         reason: mapped.reason,
         summary: mapped.message
       }),
-      gate
+      gate,
+      auditRecord
     ),
     (gate?.execution_audit as JsonRecord | null) ?? null
   );
@@ -839,7 +841,7 @@ const executeXhsRead = async (
     return createGateOnlySuccess(input, spec, gate, auditRecord, env, payload);
   }
 
-  const simulated = resolveSimulatedResult(input, spec, payload, env, gate);
+  const simulated = resolveSimulatedResult(input, spec, payload, env, gate, auditRecord);
   if (simulated) {
     if (simulated.ok) {
       const summary = asRecord(simulated.payload.summary) ?? {};

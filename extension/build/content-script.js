@@ -5273,7 +5273,7 @@ const createGateOnlySuccess = (input, spec, gate, auditRecord, env, payload) => 
         }
     }
 });
-const resolveSimulatedResult = (input, spec, payload, env, gate) => {
+const resolveSimulatedResult = (input, spec, payload, env, gate, auditRecord) => {
     if (!input.options.simulate_result) {
         return null;
     }
@@ -5400,7 +5400,7 @@ const resolveSimulatedResult = (input, spec, payload, env, gate) => {
     }), createReadDiagnosis(spec, {
         reason: mapped.reason,
         summary: mapped.message
-    }), gate), gate?.execution_audit ?? null);
+    }), gate, auditRecord), gate?.execution_audit ?? null);
 };
 const buildHeaders = (env, options, signature) => ({
     Accept: "application/json, text/plain, */*",
@@ -5461,7 +5461,7 @@ const executeXhsRead = async (input, spec, env) => {
         gate.consumer_gate_result.effective_execution_mode === "recon") {
         return createGateOnlySuccess(input, spec, gate, auditRecord, env, payload);
     }
-    const simulated = resolveSimulatedResult(input, spec, payload, env, gate);
+    const simulated = resolveSimulatedResult(input, spec, payload, env, gate, auditRecord);
     if (simulated) {
         if (simulated.ok) {
             const summary = asRecord(simulated.payload.summary) ?? {};
