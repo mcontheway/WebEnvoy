@@ -136,6 +136,7 @@ const buildContentScriptBundle = async () => {
       "cloneIssue209AdmissionContext",
       "normalizeApprovalAdmissionEvidence",
       "normalizeAuditAdmissionEvidence",
+      "resolveConsumedIssue209AdmissionEvidence",
       "normalizeProvidedApprovalSource",
       "normalizeProvidedAuditSource",
       "prepareIssue209LiveReadSource"
@@ -180,7 +181,8 @@ const buildContentScriptBundle = async () => {
     moduleVar: "__webenvoy_module_issue209_postgate_audit",
     prelude: [
       "const { APPROVAL_CHECK_KEYS, buildRiskTransitionAudit } = __webenvoy_module_risk_state;",
-      "const { resolveIssue209LiveReadApprovalId } = __webenvoy_module_issue209_identity;"
+      "const { resolveIssue209LiveReadApprovalId } = __webenvoy_module_issue209_identity;",
+      "const { resolveConsumedIssue209AdmissionEvidence } = __webenvoy_module_issue209_source;"
     ].join("\n"),
     sourceBody: issue209PostGateAuditSource,
     exports: ["buildIssue209PostGateArtifacts"]
@@ -198,6 +200,7 @@ const buildContentScriptBundle = async () => {
       "  resolveIssueScope: resolveSharedIssueScope,",
       "  resolveRiskState: resolveSharedRiskState",
       "} = __webenvoy_module_risk_state;",
+      "const { resolveConsumedIssue209AdmissionEvidence } = __webenvoy_module_issue209_source;",
       "const { collectIssue209LiveReadMatrixGateReasons } = __webenvoy_module_issue209_gate;",
       "const { buildIssue209PostGateArtifacts } = __webenvoy_module_issue209_postgate_audit;",
       "const {",

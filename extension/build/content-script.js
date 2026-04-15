@@ -1465,7 +1465,7 @@ const prepareIssue209LiveReadSource = (input) => {
     auditSource: normalizeProvidedAuditSource(input?.auditRecord)
   };
 };
-return { APPROVAL_CHECK_KEYS, cloneIssue209AdmissionContext, normalizeApprovalAdmissionEvidence, normalizeAuditAdmissionEvidence, normalizeProvidedApprovalSource, normalizeProvidedAuditSource, prepareIssue209LiveReadSource };
+return { APPROVAL_CHECK_KEYS, cloneIssue209AdmissionContext, normalizeApprovalAdmissionEvidence, normalizeAuditAdmissionEvidence, resolveConsumedIssue209AdmissionEvidence, normalizeProvidedApprovalSource, normalizeProvidedAuditSource, prepareIssue209LiveReadSource };
 })();
 const __webenvoy_module_issue209_source_validation = (() => {
 const { APPROVAL_CHECK_KEYS } = __webenvoy_module_risk_state;
@@ -1967,6 +1967,7 @@ return { validateIssue209ApprovalSourceAgainstCurrentLinkage, collectIssue209Liv
 const __webenvoy_module_issue209_postgate_audit = (() => {
 const { APPROVAL_CHECK_KEYS, buildRiskTransitionAudit } = __webenvoy_module_risk_state;
 const { resolveIssue209LiveReadApprovalId } = __webenvoy_module_issue209_identity;
+const { resolveConsumedIssue209AdmissionEvidence } = __webenvoy_module_issue209_source;
 const clone = (value) => structuredClone(value);
 const asRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
@@ -2162,6 +2163,7 @@ const {
   resolveIssueScope: resolveSharedIssueScope,
   resolveRiskState: resolveSharedRiskState
 } = __webenvoy_module_risk_state;
+const { resolveConsumedIssue209AdmissionEvidence } = __webenvoy_module_issue209_source;
 const { collectIssue209LiveReadMatrixGateReasons } = __webenvoy_module_issue209_gate;
 const { buildIssue209PostGateArtifacts } = __webenvoy_module_issue209_postgate_audit;
 const {
