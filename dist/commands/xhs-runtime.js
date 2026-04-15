@@ -192,11 +192,11 @@ const xhsReadCommand = async (context, inputConfig) => {
         const { __anonymous_isolation_verified: anonymousIsolationVerified, target_site_logged_in: targetSiteLoggedIn, ...preparedGateOptions } = preparedIssue209LiveRead.options;
         const runtimeGateOptions = {
             ...preparedGateOptions,
-            ...(transportIsLoopback && anonymousIsolationVerified === true
-                ? { __anonymous_isolation_verified: true }
+            ...(transportIsLoopback && typeof anonymousIsolationVerified === "boolean"
+                ? { __anonymous_isolation_verified: anonymousIsolationVerified }
                 : {}),
-            ...(transportIsLoopback && targetSiteLoggedIn === true
-                ? { target_site_logged_in: true }
+            ...(transportIsLoopback && typeof targetSiteLoggedIn === "boolean"
+                ? { target_site_logged_in: targetSiteLoggedIn }
                 : {}),
             ...(typeof context.profile === "string" ? { __runtime_profile_ref: context.profile } : {})
         };

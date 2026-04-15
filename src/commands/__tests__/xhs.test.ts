@@ -1312,4 +1312,134 @@ describe("normalizeGateOptionsForContract", () => {
       }
     }
   });
+
+  it("preserves explicit false anonymous admission signals on the loopback runtime path for blocked runs", async () => {
+    const runId = "run-anon-loopback-blocked-001";
+    const requestId = "req-anon-loopback-blocked-001";
+    const approvalAdmissionRef = `approval_admission_${runId}_${requestId}`;
+    const auditAdmissionRef = `audit_admission_${runId}_${requestId}`;
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+    const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    process.env.WEBENVOY_NATIVE_TRANSPORT = "loopback";
+    process.env.WEBENVOY_BROWSER_PATH = join(process.cwd(), "tests", "fixtures", "mock-browser.sh");
+    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Chromium 146.0.0.0";
+
+    try {
+      await expect(
+        executeCommand(
+          {
+            cwd: "/tmp/webenvoy",
+            command: "xhs.detail",
+            profile: "profile-anon-loopback-blocked-001",
+            run_id: runId,
+            params: {
+              request_id: requestId,
+              ability: {
+                id: "xhs.note.detail.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                note_id: "abc123"
+              },
+              options: {
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "explore_detail_tab",
+                action_type: "read",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed",
+                upstream_authorization_request: {
+                  action_request: {
+                    request_ref: "upstream_req_loopback_anon_blocked_001",
+                    action_name: "xhs.read_note_detail",
+                    action_category: "read"
+                  },
+                  resource_binding: {
+                    binding_ref: "binding_loopback_anon_blocked_001",
+                    resource_kind: "anonymous_context",
+                    profile_ref: null,
+                    binding_constraints: {
+                      anonymous_required: true,
+                      reuse_logged_in_context_forbidden: true
+                    }
+                  },
+                  authorization_grant: {
+                    grant_ref: "grant_loopback_anon_blocked_001",
+                    allowed_actions: ["xhs.read_note_detail"],
+                    binding_scope: {
+                      allowed_resource_kinds: ["anonymous_context"],
+                      allowed_profile_refs: []
+                    },
+                    target_scope: {
+                      allowed_domains: ["www.xiaohongshu.com"],
+                      allowed_pages: ["explore_detail_tab"]
+                    },
+                    resource_state_snapshot: "active",
+                    approval_refs: [approvalAdmissionRef],
+                    audit_refs: [auditAdmissionRef]
+                  },
+                  runtime_target: {
+                    target_ref: "target_loopback_anon_blocked_001",
+                    domain: "www.xiaohongshu.com",
+                    page: "explore_detail_tab",
+                    tab_id: 32
+                  }
+                },
+                approval_record: {
+                  approved: true,
+                  approver: "qa-reviewer",
+                  approved_at: "2026-03-23T10:00:00Z",
+                  checks: {
+                    target_domain_confirmed: true,
+                    target_tab_confirmed: true,
+                    target_page_confirmed: true,
+                    risk_state_checked: true,
+                    action_type_confirmed: true
+                  }
+                },
+                admission_context: createApprovedAnonymousReadAdmissionContext(runId, requestId),
+                __anonymous_isolation_verified: false,
+                target_site_logged_in: false
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        details: expect.objectContaining({
+          request_admission_result: expect.objectContaining({
+            request_ref: "upstream_req_loopback_anon_blocked_001",
+            admission_decision: "blocked",
+            anonymous_isolation_ok: false
+          }),
+          execution_audit: expect.objectContaining({
+            request_ref: "upstream_req_loopback_anon_blocked_001",
+            request_admission_decision: "blocked",
+            consumed_inputs: expect.objectContaining({
+              action_request_ref: "upstream_req_loopback_anon_blocked_001",
+              resource_binding_ref: "binding_loopback_anon_blocked_001",
+              authorization_grant_ref: "grant_loopback_anon_blocked_001",
+              runtime_target_ref: "target_loopback_anon_blocked_001"
+            })
+          })
+        })
+      });
+    } finally {
+      process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
+      if (previousBrowserPath === undefined) {
+        delete process.env.WEBENVOY_BROWSER_PATH;
+      } else {
+        process.env.WEBENVOY_BROWSER_PATH = previousBrowserPath;
+      }
+      if (previousBrowserMockVersion === undefined) {
+        delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+      } else {
+        process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
+      }
+    }
+  });
 });
