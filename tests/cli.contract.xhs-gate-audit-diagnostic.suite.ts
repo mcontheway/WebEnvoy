@@ -1187,10 +1187,25 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
         code: "ERR_EXECUTION_FAILED"
       }
     });
+    const gateEnvelope = resolveCliGateEnvelope(body);
+    const consumerGateResult = asRecord(gateEnvelope.consumer_gate_result);
+    const auditRecord = asRecord(gateEnvelope.audit_record);
+    const issueActionMatrix = asRecord(gateEnvelope.issue_action_matrix);
+    const writeActionMatrixDecisions = asRecord(gateEnvelope.write_action_matrix_decisions);
+    expect(gateEnvelope).toMatchObject({
+      gate_reasons: expect.arrayContaining(["EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"])
+    });
+    expect(consumerGateResult?.gate_decision).toBe("blocked");
+    expect(issueActionMatrix?.issue_scope).toBe("issue_208");
+    expect(writeActionMatrixDecisions?.requested_execution_mode).toBe("live_write");
+    expect(gateEnvelope).toHaveProperty("request_admission_result");
+    expect(gateEnvelope).toHaveProperty("execution_audit");
+    expect(auditRecord?.requested_execution_mode).toBe("live_write");
     const payload = asRecord(body.payload) ?? {};
     const observability = asRecord(payload.observability) ?? {};
     const failureSite = asRecord(observability.failure_site) ?? {};
     expect(typeof failureSite).toBe("object");
+    expect(observability).not.toHaveProperty("execution_audit");
     expect(String(body.error?.message ?? "")).toContain("执行模式门禁阻断");
   });
 
