@@ -417,6 +417,7 @@ const xhsGateReasonMessage = (reason) => {
         TARGET_TAB_NOT_FOUND: "target tab is unavailable",
         TARGET_DOMAIN_MISMATCH: "target tab domain does not match target_domain",
         TARGET_PAGE_MISMATCH: "target tab page does not match target_page",
+        TARGET_PAGE_CONTEXT_UNRESOLVED: "target page context could not be resolved",
         TARGET_TAB_URL_INVALID: "target tab url is invalid",
         FINGERPRINT_EXECUTION_BLOCKED: "fingerprint runtime blocks live execution for this profile"
     };
@@ -639,8 +640,7 @@ const buildCanonicalGateAuditArtifacts = (input) => {
             gateInvocationId: input.gateInvocationId ?? asNonEmptyString(commandParams?.gate_invocation_id)
         }),
         issue208EditorInputValidation: input.issue208EditorInputValidation,
-        treatMissingEditorValidationAsUnsupported: false,
-        additionalGateReasons: input.additionalGateReasons
+        treatMissingEditorValidationAsUnsupported: false
     });
     if (shouldDeferAnonymousCanonicalGateDiagnostics({
         upstreamAuthorizationRequest: input.upstreamAuthorizationRequest,
@@ -3184,7 +3184,7 @@ class ChromeBackgroundBridge {
             }
             catch {
                 if (gateReasons.length === 0) {
-                    pushReason("TARGET_TAB_NOT_FOUND");
+                    pushReason("TARGET_PAGE_CONTEXT_UNRESOLVED");
                 }
             }
         }
@@ -3270,8 +3270,7 @@ class ChromeBackgroundBridge {
             admissionContext: canonicalAdmissionContext,
             limitedReadRolloutReadyTrue,
             gateInvocationId,
-            issue208EditorInputValidation,
-            additionalGateReasons: finalizedGate.gateReasons
+            issue208EditorInputValidation
         });
         const canonicalRequestAdmissionResult = asRecord(sharedCanonicalGate.request_admission_result);
         const canonicalExecutionAudit = asRecord(sharedCanonicalGate.execution_audit);
@@ -3588,9 +3587,15 @@ class ChromeBackgroundBridge {
         }
         const command = String(request.params.command ?? "");
         if (command === "runtime.ping" || command === "runtime.bootstrap") {
-            const runtimeSurfaceTabs = await this.chromeApi.tabs.query({
-                url: ["*://creator.xiaohongshu.com/*", "*://www.xiaohongshu.com/*"]
-            });
+            let runtimeSurfaceTabs = [];
+            try {
+                runtimeSurfaceTabs = await this.chromeApi.tabs.query({
+                    url: ["*://creator.xiaohongshu.com/*", "*://www.xiaohongshu.com/*"]
+                });
+            }
+            catch {
+                runtimeSurfaceTabs = [];
+            }
             const ranked = runtimeSurfaceTabs
                 .filter((tab) => typeof tab.id === "number")
                 .sort((left, right) => {
@@ -3617,15 +3622,27 @@ class ChromeBackgroundBridge {
                 "*://edith.xiaohongshu.com/*",
                 "*://*.xiaohongshu.com/*"
             ];
-            const currentWindowTabs = await this.chromeApi.tabs.query({
-                currentWindow: true,
-                url: xhsUrlPatterns
-            });
-            const xhsTabs = currentWindowTabs.length > 0
-                ? currentWindowTabs
-                : await this.chromeApi.tabs.query({
+            let currentWindowTabs = [];
+            try {
+                currentWindowTabs = await this.chromeApi.tabs.query({
+                    currentWindow: true,
                     url: xhsUrlPatterns
                 });
+            }
+            catch {
+                currentWindowTabs = [];
+            }
+            let xhsTabs = currentWindowTabs;
+            if (currentWindowTabs.length === 0) {
+                try {
+                    xhsTabs = await this.chromeApi.tabs.query({
+                        url: xhsUrlPatterns
+                    });
+                }
+                catch {
+                    xhsTabs = [];
+                }
+            }
             const resourceBoundTabs = requestedResourceId && preferredPage
                 ? xhsTabs.filter((tab) => tabMatchesRequestedXhsResource(tab, preferredPage, requestedResourceId))
                 : [];
@@ -3650,10 +3667,16 @@ class ChromeBackgroundBridge {
             const candidate = ranked[0];
             return typeof candidate?.id === "number" ? candidate.id : null;
         }
-        const tabs = await this.chromeApi.tabs.query({
-            active: true,
-            currentWindow: true
-        });
+        let tabs = [];
+        try {
+            tabs = await this.chromeApi.tabs.query({
+                active: true,
+                currentWindow: true
+            });
+        }
+        catch {
+            tabs = [];
+        }
         const first = tabs[0];
         return typeof first?.id === "number" ? first.id : null;
     }

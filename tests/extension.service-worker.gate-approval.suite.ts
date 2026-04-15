@@ -109,11 +109,146 @@ describe("extension service worker / gate and approval", () => {
           effective_execution_mode: "dry_run",
           issue_scope: "issue_209"
         },
+        request_admission_result: {
+          admission_decision: "allowed"
+        },
         details: {
           reason: "SESSION_EXPIRED"
         },
         diagnosis: {
           category: "request_failed"
+        }
+      }
+    });
+  });
+
+  it("backfills allowed execution_audit from background canonical diagnostics on execution failures", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    const fingerprintContext = createFingerprintRuntimeContext();
+    const runId = "run-xhs-live-allowed-error-payload-001";
+    const requestId = "req-xhs-live-allowed-error-payload-001";
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId,
+      profile: "profile-a",
+      fingerprintContext
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onMessageListeners[0]?.({
+      id: runId,
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: createRequestBoundXhsCommandParams({
+          runId,
+          requestId,
+          __runtime_profile_ref: "profile-session-allowed-001",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          admission_context: createApprovedReadAdmissionContext({
+            run_id: runId,
+            request_id: requestId,
+            requested_execution_mode: "live_read_high_risk",
+            risk_state: "allowed"
+          }),
+          upstream_authorization_request: {
+            action_request: {
+              request_ref: "upstream-live-profile-session-read-sw-001",
+              action_name: "xhs.read_search_results",
+              action_category: "read"
+            },
+            resource_binding: {
+              binding_ref: "binding-live-profile-session-read-sw-001",
+              resource_kind: "profile_session",
+              profile_ref: "profile-session-allowed-001"
+            },
+            authorization_grant: {
+              grant_ref: "grant-live-profile-session-read-sw-001",
+              allowed_actions: ["xhs.read_search_results"],
+              binding_scope: {
+                allowed_resource_kinds: ["profile_session"],
+                allowed_profile_refs: ["profile-session-allowed-001"]
+              },
+              target_scope: {
+                allowed_domains: ["www.xiaohongshu.com"],
+                allowed_pages: ["search_result_tab"]
+              },
+              approval_refs: [`approval_admission_${runId}_${requestId}`],
+              audit_refs: [`audit_admission_${runId}_${requestId}`],
+              resource_state_snapshot: "active"
+            },
+            runtime_target: {
+              target_ref: "target-live-profile-session-read-sw-001",
+              domain: "www.xiaohongshu.com",
+              page: "search_result_tab",
+              tab_id: 32,
+              url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+            }
+          },
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: runId,
+        ok: false,
+        error: {
+          code: "ERR_EXECUTION_FAILED",
+          message: "登录态缺失，无法执行 xhs.search"
+        },
+        payload: {
+          details: {
+            stage: "execution",
+            reason: "SESSION_EXPIRED"
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const forwardedError = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === runId);
+    expect(forwardedError).toMatchObject({
+      id: runId,
+      status: "error",
+      payload: {
+        request_admission_result: {
+          request_ref: "upstream-live-profile-session-read-sw-001",
+          admission_decision: "allowed"
+        },
+        execution_audit: {
+          request_ref: "upstream-live-profile-session-read-sw-001",
+          request_admission_decision: "allowed",
+          risk_signals: ["NO_ADDITIONAL_RISK_SIGNALS"]
+        },
+        details: {
+          reason: "SESSION_EXPIRED"
         }
       }
     });
@@ -715,6 +850,67 @@ describe("extension service worker / gate and approval", () => {
     });
     expect(failure).toMatchObject({
       status: "error",
+      error: {
+        code: "ERR_TRANSPORT_FORWARD_FAILED"
+      }
+    });
+  });
+
+  it("returns structured blocked diagnostics when auto target-tab resolution throws", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async (filter: {
+      active?: boolean;
+      currentWindow?: boolean;
+      url?: string | string[];
+    }) => {
+      if (filter.url) {
+        throw new Error("tabs query failed");
+      }
+      return [{ id: 11 }];
+    });
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-auto-tab-query-failed-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-auto-tab-query-failed-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          target_tab_id: undefined
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+
+    const blocked = await vi.waitFor(() => {
+      const message = firstPort.postMessage.mock.calls
+        .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+        .find((entry) => entry.id === "run-xhs-auto-tab-query-failed-001");
+      expect(message).toBeDefined();
+      return message;
+    });
+    expect(blocked).toMatchObject({
+      id: "run-xhs-auto-tab-query-failed-001",
+      status: "error",
+      payload: {
+        consumer_gate_result: {
+          gate_decision: "blocked",
+          target_tab_id: null,
+          gate_reasons: ["TARGET_TAB_NOT_EXPLICIT"]
+        }
+      },
       error: {
         code: "ERR_TRANSPORT_FORWARD_FAILED"
       }
@@ -1494,6 +1690,89 @@ describe("extension service worker / gate and approval", () => {
         }
       }
     });
+  });
+
+  it("blocks live actual-target query failures with unresolved target-page context", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => {
+      throw new Error("tabs query failed");
+    });
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    const fingerprintContext = createFingerprintRuntimeContext();
+    const runId = "run-xhs-live-mode-clean-query-failed-001";
+    const requestId = "req-xhs-live-mode-clean-query-failed-001";
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId,
+      profile: "profile-a",
+      fingerprintContext
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onMessageListeners[0]?.({
+      id: runId,
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: createRequestBoundXhsCommandParams({
+          runId,
+          requestId,
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          admission_context: createApprovedReadAdmissionContext({
+            run_id: runId,
+            request_id: requestId,
+            requested_execution_mode: "live_read_high_risk",
+            risk_state: "allowed"
+          }),
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as {
+        id?: string;
+        status?: string;
+        payload?: {
+          consumer_gate_result?: {
+            requested_execution_mode?: string | null;
+            gate_decision?: string;
+            gate_reasons?: string[];
+          };
+        };
+      })
+      .find((message) => message.id === runId);
+    expect(blocked).toMatchObject({
+      id: runId,
+      status: "error",
+      payload: {
+        consumer_gate_result: {
+          requested_execution_mode: "live_read_high_risk",
+          gate_decision: "blocked",
+          gate_reasons: ["TARGET_PAGE_CONTEXT_UNRESOLVED"]
+        }
+      },
+      error: {
+        code: "ERR_TRANSPORT_FORWARD_FAILED"
+      }
+    });
+    expect(
+      blocked?.payload?.consumer_gate_result?.gate_reasons?.includes("TARGET_TAB_NOT_FOUND")
+    ).toBe(false);
   });
 
   it("blocks malformed live target_domain without querying tabs and keeps structured gate diagnostics", async () => {
