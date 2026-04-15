@@ -9,6 +9,8 @@ import { resolveActualTargetGateReasons, resolveGate } from "../extension/xhs-se
 import {
   validateIssue209AuditSourceAgainstCurrentLinkage
 } from "../shared/issue209-live-read/source-validation.js";
+import { buildLoopbackGate } from "../src/runtime/native-messaging/loopback-gate.js";
+import { buildLoopbackGatePayload } from "../src/runtime/native-messaging/loopback-gate-payload.js";
 
 const createAdmissionContext = (input?: {
   run_id?: string;
@@ -270,6 +272,38 @@ describe("xhs-search gate helpers", () => {
     );
   });
 
+  it("forwards target_site_logged_in through the extension gate path", () => {
+    const gate = resolveGate(
+      {
+        issue_scope: "issue_209",
+        risk_state: "allowed",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 12,
+        target_page: "search_result_tab",
+        actual_target_domain: "www.xiaohongshu.com",
+        actual_target_tab_id: 12,
+        actual_target_page: "search_result_tab",
+        action_type: "read",
+        ability_action: "read",
+        requested_execution_mode: "dry_run",
+        upstream_authorization_request: createUpstreamAuthorizationRequest(),
+        __anonymous_isolation_verified: true,
+        target_site_logged_in: true
+      },
+      {
+        runId: "run-extension-target-site-login-001",
+        requestId: "req-extension-target-site-login-001",
+        sessionId: "session-extension-target-site-login-001",
+        profile: "profile-a"
+      }
+    );
+
+    expect(gate.request_admission_result.admission_decision).toBe("blocked");
+    expect(gate.request_admission_result.reason_codes).toContain(
+      "ANONYMOUS_CONTEXT_REQUIRES_LOGGED_OUT_SITE_CONTEXT"
+    );
+  });
+
   it("blocks anonymous_context when anonymous isolation cannot be proven", () => {
     const gate = evaluateXhsGate({
       issueScope: "issue_209",
@@ -445,6 +479,62 @@ describe("xhs-search gate helpers", () => {
     expect(gate.request_admission_result.reason_codes).toContain(
       "STALE_LEGACY_REQUESTED_EXECUTION_MODE"
     );
+  });
+
+  it("preserves request_admission_result on the loopback gate payload", () => {
+    const gate = buildLoopbackGate(
+      {
+        issue_scope: "issue_209",
+        risk_state: "allowed",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 12,
+        target_page: "search_result_tab",
+        action_type: "read",
+        ability_action: "read",
+        requested_execution_mode: "dry_run",
+        upstream_authorization_request: createUpstreamAuthorizationRequest(),
+        __anonymous_isolation_verified: true,
+        target_site_logged_in: false
+      },
+      "read",
+      {
+        runId: "run-loopback-request-admission-001",
+        sessionId: "session-loopback-request-admission-001",
+        profile: "loopback-profile-001"
+      }
+    );
+    const payload = buildLoopbackGatePayload({
+      runId: "run-loopback-request-admission-001",
+      sessionId: "session-loopback-request-admission-001",
+      profile: "loopback-profile-001",
+      gate,
+      auditRecord: {
+        event_id: "gate_evt_loopback_request_admission_001",
+        decision_id: String(gate.gateOutcome.decision_id),
+        approval_id: null,
+        run_id: "run-loopback-request-admission-001",
+        session_id: "session-loopback-request-admission-001",
+        profile: "loopback-profile-001",
+        issue_scope: "issue_209",
+        risk_state: "allowed",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 12,
+        target_page: "search_result_tab",
+        action_type: "read",
+        requested_execution_mode: "dry_run",
+        effective_execution_mode: "dry_run",
+        gate_decision: "allowed",
+        gate_reasons: ["DEFAULT_MODE_DRY_RUN"],
+        approver: null,
+        approved_at: null,
+        recorded_at: "2026-04-15T10:00:00.000Z"
+      }
+    });
+
+    expect(payload.request_admission_result).toMatchObject({
+      admission_decision: "allowed",
+      effective_runtime_mode: "dry_run"
+    });
   });
 
   it("requires gate_invocation_id for issue_209 live-read gate linkage", () => {

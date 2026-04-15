@@ -79,6 +79,7 @@ export const buildLoopbackGate = (options, abilityAction, linkage) => {
         gateInput: clone(evaluatedGate.gate_input),
         gateOutcome: clone(evaluatedGate.gate_outcome),
         consumerGateResult: clone(evaluatedGate.consumer_gate_result),
+        requestAdmissionResult: clone(evaluatedGate.request_admission_result),
         approvalRecord: clone(evaluatedGate.approval_record),
         writeInteractionTier: clone(WRITE_INTERACTION_TIER),
         writeActionMatrixDecisions: evaluatedGate.write_action_matrix_decisions

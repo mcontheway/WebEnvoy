@@ -88,6 +88,7 @@ export const buildLoopbackGate = (
   gateInput: Record<string, unknown>;
   gateOutcome: Record<string, unknown>;
   consumerGateResult: Record<string, unknown>;
+  requestAdmissionResult: Record<string, unknown>;
   approvalRecord: Record<string, unknown>;
 } => {
   const clone = <T>(value: T): T => structuredClone(value);
@@ -136,6 +137,8 @@ export const buildLoopbackGate = (
     gateInput: clone(evaluatedGate.gate_input),
     gateOutcome: clone(evaluatedGate.gate_outcome),
     consumerGateResult: clone(evaluatedGate.consumer_gate_result),
+    requestAdmissionResult:
+      clone(evaluatedGate.request_admission_result) as unknown as Record<string, unknown>,
     approvalRecord: clone(evaluatedGate.approval_record) as unknown as Record<string, unknown>,
     writeInteractionTier: clone(WRITE_INTERACTION_TIER),
     writeActionMatrixDecisions: evaluatedGate.write_action_matrix_decisions

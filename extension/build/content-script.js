@@ -4011,6 +4011,7 @@ const resolveGate = (options, context) => {
         runtimeProfileRef: options.__runtime_profile_ref ?? context.profile,
         upstreamAuthorizationRequest: options.upstream_authorization_request,
         anonymousIsolationVerified: options.__anonymous_isolation_verified === true,
+        targetSiteLoggedIn: options.target_site_logged_in === true,
         runId: context.runId,
         sessionId: context.sessionId,
         gateInvocationId: context.gateInvocationId,

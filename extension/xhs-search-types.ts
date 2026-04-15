@@ -33,6 +33,7 @@ export interface XhsSearchOptions {
   __legacy_requested_execution_mode?: string;
   __runtime_profile_ref?: string;
   __anonymous_isolation_verified?: boolean;
+  target_site_logged_in?: boolean;
   risk_state?: string;
   approval?: Record<string, unknown>;
   approval_record?: Record<string, unknown>;
