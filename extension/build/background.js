@@ -3432,12 +3432,11 @@ class ChromeBackgroundBridge {
             ? payload.summary
             : null;
         if (pending.gatePayload && backfilledExecutionFailure) {
-            // Ensure audit-trace fields reflect the final blocked decision even if content payload already had stale copies.
+            // Ensure gate/audit trace fields reflect the final blocked decision without clobbering
+            // the content-script canonical request-time result.
             for (const key of [
                 "gate_outcome",
                 "consumer_gate_result",
-                "request_admission_result",
-                "execution_audit",
                 "audit_record",
                 "fingerprint_execution"
             ]) {

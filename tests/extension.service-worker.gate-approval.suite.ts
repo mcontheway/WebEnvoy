@@ -119,6 +119,141 @@ describe("extension service worker / gate and approval", () => {
     });
   });
 
+  it("preserves content-script canonical gate diagnostics on execution-time failures", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-canonical-error-payload-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-canonical-error-payload-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          upstream_authorization_request: {
+            action_request: {
+              request_ref: "upstream-anon-read-sw-001",
+              action_name: "xhs.read_search_results",
+              action_category: "read"
+            },
+            resource_binding: {
+              binding_ref: "binding-anon-read-sw-001",
+              resource_kind: "anonymous_context",
+              profile_ref: null,
+              binding_constraints: {
+                anonymous_required: true,
+                reuse_logged_in_context_forbidden: true
+              }
+            },
+            authorization_grant: {
+              grant_ref: "grant-anon-read-sw-001",
+              allowed_actions: ["xhs.read_search_results"],
+              binding_scope: {
+                allowed_resource_kinds: ["anonymous_context"],
+                allowed_profile_refs: []
+              },
+              target_scope: {
+                allowed_domains: ["www.xiaohongshu.com"],
+                allowed_pages: ["search_result_tab"]
+              },
+              approval_refs: [],
+              audit_refs: [],
+              resource_state_snapshot: "paused"
+            },
+            runtime_target: {
+              target_ref: "target-anon-read-sw-001",
+              domain: "www.xiaohongshu.com",
+              page: "search_result_tab",
+              tab_id: 32,
+              url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+            }
+          }
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-xhs-canonical-error-payload-001",
+        ok: false,
+        error: {
+          code: "ERR_EXECUTION_FAILED",
+          message: "登录态缺失，无法执行 xhs.search"
+        },
+        payload: {
+          details: {
+            stage: "execution",
+            reason: "SESSION_EXPIRED"
+          },
+          request_admission_result: {
+            request_ref: "upstream-anon-read-sw-001",
+            admission_decision: "allowed",
+            normalized_action_type: "read",
+            normalized_resource_kind: "anonymous_context",
+            runtime_target_match: true,
+            grant_match: true,
+            anonymous_isolation_ok: true,
+            effective_runtime_mode: "dry_run",
+            reason_codes: ["NO_ADDITIONAL_RISK_SIGNALS"],
+            derived_from: {
+              gate_input_ref: "run-xhs-canonical-error-payload-001"
+            }
+          },
+          execution_audit: {
+            audit_ref: "exec_audit_sw_anon_read_001",
+            request_ref: "upstream-anon-read-sw-001",
+            request_admission_decision: "allowed",
+            risk_signals: ["NO_ADDITIONAL_RISK_SIGNALS"],
+            recorded_at: "2026-04-15T13:35:00.000Z"
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const forwardedError = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === "run-xhs-canonical-error-payload-001");
+    expect(forwardedError).toMatchObject({
+      id: "run-xhs-canonical-error-payload-001",
+      status: "error",
+      payload: {
+        details: {
+          reason: "SESSION_EXPIRED"
+        },
+        request_admission_result: {
+          request_ref: "upstream-anon-read-sw-001",
+          admission_decision: "allowed",
+          anonymous_isolation_ok: true
+        },
+        execution_audit: {
+          audit_ref: "exec_audit_sw_anon_read_001",
+          request_ref: "upstream-anon-read-sw-001",
+          request_admission_decision: "allowed"
+        }
+      }
+    });
+  });
+
   it("pins xhs.search to xiaohongshu tab instead of generic active tab", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
