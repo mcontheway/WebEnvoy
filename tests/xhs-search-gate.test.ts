@@ -173,6 +173,8 @@ const createUpstreamAuthorizationRequest = (input?: {
   page?: string;
   tabId?: number;
   url?: string;
+  anonymousRequired?: boolean;
+  reuseLoggedInContextForbidden?: boolean;
 }) => {
   const resourceKind = input?.resourceKind ?? "anonymous_context";
   const profileRef =
@@ -193,8 +195,8 @@ const createUpstreamAuthorizationRequest = (input?: {
         : {
             profile_ref: null,
             binding_constraints: {
-              anonymous_required: true,
-              reuse_logged_in_context_forbidden: true
+              anonymous_required: input?.anonymousRequired ?? true,
+              reuse_logged_in_context_forbidden: input?.reuseLoggedInContextForbidden ?? true
             }
           })
     },
@@ -330,6 +332,34 @@ describe("xhs-search gate helpers", () => {
     });
     expect(gate.request_admission_result.reason_codes).toContain(
       "ANONYMOUS_ISOLATION_UNVERIFIED"
+    );
+  });
+
+  it("blocks anonymous_context when binding constraints do not require anonymous isolation", () => {
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "dry_run",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        anonymousRequired: false
+      }),
+      anonymousIsolationVerified: true
+    });
+
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "blocked",
+      anonymous_isolation_ok: false
+    });
+    expect(gate.request_admission_result.reason_codes).toContain(
+      "ANONYMOUS_BINDING_CONSTRAINTS_INVALID"
     );
   });
 
@@ -556,6 +586,29 @@ describe("xhs-search gate helpers", () => {
     expect(gate.request_admission_result.reason_codes).toContain(
       "STALE_LEGACY_REQUESTED_EXECUTION_MODE"
     );
+  });
+
+  it("derives gate risk_state from grant snapshot when FR-0023 objects are present without legacy risk_state", () => {
+    const gate = evaluateXhsGateCore({
+      issueScope: "issue_209",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "live_read_limited",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        resourceKind: "profile_session",
+        approvalRefs: ["approval_admission_external_001"],
+        auditRefs: ["audit_admission_external_001"],
+        resourceStateSnapshot: "cool_down"
+      })
+    });
+
+    expect(gate.riskState).toBe("limited");
   });
 
   it("preserves request_admission_result on the loopback gate payload", () => {

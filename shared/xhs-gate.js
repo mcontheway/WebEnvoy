@@ -165,6 +165,19 @@ const projectRiskStateFromSnapshot = (snapshot) => {
   return null;
 };
 
+const deriveCanonicalRiskState = (inputRiskState, upstream) => {
+  const explicitRiskState = asString(inputRiskState);
+  if (explicitRiskState) {
+    return resolveXhsRiskState(explicitRiskState);
+  }
+  const projectedRiskState = projectRiskStateFromSnapshot(
+    upstream?.authorization_grant?.resource_state_snapshot
+  );
+  return projectedRiskState
+    ? resolveXhsRiskState(projectedRiskState)
+    : resolveXhsRiskState(inputRiskState);
+};
+
 const matchesRuntimeTargetUrl = (input, actualTargetUrl) => {
   const runtimeTarget = input?.runtime_target;
   if (!runtimeTarget?.url || !runtimeTarget.domain || !runtimeTarget.page) {
@@ -318,6 +331,13 @@ const applyCanonicalAdmissionReasons = (input) => {
   }
 
   if (upstream.resource_binding.resource_kind === "anonymous_context") {
+    const bindingConstraints = upstream.resource_binding.binding_constraints;
+    if (
+      bindingConstraints?.anonymous_required !== true ||
+      bindingConstraints?.reuse_logged_in_context_forbidden !== true
+    ) {
+      pushReason(input.gateReasons, "ANONYMOUS_BINDING_CONSTRAINTS_INVALID");
+    }
     if (input.targetSiteLoggedIn) {
       pushReason(input.gateReasons, "ANONYMOUS_CONTEXT_REQUIRES_LOGGED_OUT_SITE_CONTEXT");
       return;
@@ -372,10 +392,13 @@ const evaluateRequestAdmissionResult = (input) => {
 
   const anonymousIsolationVerified = input.anonymousIsolationVerified === true;
   const targetSiteLoggedIn = input.targetSiteLoggedIn === true;
+  const anonymousBindingConstraintsOk = !input.gateReasons.includes(
+    "ANONYMOUS_BINDING_CONSTRAINTS_INVALID"
+  );
   const anonymousIsolationOk =
     normalizedResourceKind !== "anonymous_context"
       ? true
-      : !targetSiteLoggedIn && anonymousIsolationVerified;
+      : !targetSiteLoggedIn && anonymousIsolationVerified && anonymousBindingConstraintsOk;
 
   const admissionDecision =
     !runtimeTargetMatch || !grantMatch || !anonymousIsolationOk || input.outcome.gateDecision === "blocked"
@@ -809,7 +832,7 @@ const evaluateXhsGateCore = (input) => {
     legacyRequestedExecutionMode
   } = deriveCanonicalRequestedExecutionMode(input);
   const issueScope = resolveXhsIssueScope(input.issueScope);
-  const riskState = resolveXhsRiskState(input.riskState);
+  const riskState = deriveCanonicalRiskState(input.riskState, upstream);
   const actionType =
     upstream.action_request?.action_category ?? resolveXhsActionType(input.actionType);
   const targetDomain = upstream.runtime_target?.domain ?? asString(input.targetDomain);
@@ -1100,7 +1123,7 @@ const buildXhsGatePolicyState = (input) => {
     legacyRequestedExecutionMode
   } = deriveCanonicalRequestedExecutionMode(input);
   const issueScope = resolveXhsIssueScope(input.issueScope);
-  const riskState = resolveXhsRiskState(input.riskState);
+  const riskState = deriveCanonicalRiskState(input.riskState, upstream);
   const actionType =
     upstream.action_request?.action_category ?? resolveXhsActionType(input.actionType);
   const issueActionMatrix = resolveXhsIssueActionMatrixEntry(issueScope, riskState);
