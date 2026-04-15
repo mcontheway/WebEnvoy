@@ -264,7 +264,7 @@ const xhsReadCommand = async (
       : context.params.target_site_logged_in === false
         ? false
         : null;
-  const anonymousIsolationVerified = targetSiteLoggedIn === false && profileMeta?.lastLoginAt === null;
+  const anonymousIsolationVerified = targetSiteLoggedIn === false;
 
   try {
     const preparedIssue209LiveRead = prepareIssue209LiveReadEnvelopeForContract({
