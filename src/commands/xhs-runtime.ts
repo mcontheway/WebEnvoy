@@ -258,14 +258,6 @@ const xhsReadCommand = async (
   const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
     requestedExecutionMode: gate.requestedExecutionMode
   });
-  const targetSiteLoggedIn =
-    context.params.target_site_logged_in === true
-      ? true
-      : context.params.target_site_logged_in === false
-        ? false
-        : null;
-  const anonymousIsolationVerified = false;
-
   try {
     const preparedIssue209LiveRead = prepareIssue209LiveReadEnvelopeForContract({
       options: gate.options,
@@ -283,18 +275,14 @@ const xhsReadCommand = async (
     const bridgeSessionId = await bridge.ensureSession({
       profile: context.profile
     });
-    const providedAnonymousIsolationVerified =
-      preparedIssue209LiveRead.options.__anonymous_isolation_verified === true;
+    const {
+      __anonymous_isolation_verified: _ignoredAnonymousIsolationVerified,
+      target_site_logged_in: _ignoredTargetSiteLoggedIn,
+      ...preparedGateOptions
+    } = preparedIssue209LiveRead.options;
     const runtimeGateOptions = {
-      ...preparedIssue209LiveRead.options,
-      ...(typeof context.profile === "string" ? { __runtime_profile_ref: context.profile } : {}),
-      ...(preparedIssue209LiveRead.options.target_site_logged_in === true ||
-      preparedIssue209LiveRead.options.target_site_logged_in === false
-        ? {}
-        : targetSiteLoggedIn !== null
-          ? { target_site_logged_in: targetSiteLoggedIn }
-          : {}),
-      __anonymous_isolation_verified: providedAnonymousIsolationVerified || anonymousIsolationVerified
+      ...preparedGateOptions,
+      ...(typeof context.profile === "string" ? { __runtime_profile_ref: context.profile } : {})
     };
     const commandParams = appendFingerprintContext(
       {

@@ -6372,6 +6372,7 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     : null;
 const LIVE_EXECUTION_MODES = new Set(["live_read_limited", "live_read_high_risk", "live_write"]);
 const XHS_READ_COMMANDS = new Set(["xhs.search", "xhs.detail", "xhs.user_home"]);
+const XHS_READ_DOMAIN = "www.xiaohongshu.com";
 const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 const toCliInvalidArgsResult = (input) => ({
@@ -6754,6 +6755,8 @@ class ContentScriptHandler {
         const locationHref = this.#xhsEnv.getLocationHref();
         const actualTargetDomain = resolveTargetDomainFromHref(locationHref);
         const actualTargetPage = resolveTargetPageFromHref(locationHref, message.command);
+        const observedTargetSiteLoggedIn = actualTargetDomain === XHS_READ_DOMAIN && containsCookie(this.#xhsEnv.getCookie(), "a1");
+        const observedAnonymousIsolationVerified = actualTargetDomain === XHS_READ_DOMAIN && observedTargetSiteLoggedIn === false;
         if (!ability || !input) {
             this.#emit({
                 kind: "result",
@@ -6814,6 +6817,14 @@ class ContentScriptHandler {
                         ? { requested_execution_mode: requestedExecutionMode }
                         : {}),
                     ...(typeof options.risk_state === "string" ? { risk_state: options.risk_state } : {}),
+                    ...(asRecord(options.upstream_authorization_request)
+                        ? {
+                            upstream_authorization_request: asRecord(options.upstream_authorization_request) ?? {}
+                        }
+                        : {}),
+                    ...(typeof options.__legacy_requested_execution_mode === "string"
+                        ? { __legacy_requested_execution_mode: options.__legacy_requested_execution_mode }
+                        : {}),
                     ...(options.limited_read_rollout_ready_true === true
                         ? { limited_read_rollout_ready_true: true }
                         : {}),
@@ -6837,7 +6848,13 @@ class ContentScriptHandler {
                     ...(asRecord(options.admission_context)
                         ? { admission_context: asRecord(options.admission_context) ?? {} }
                         : {}),
-                    ...(asRecord(options.approval) ? { approval: asRecord(options.approval) ?? {} } : {})
+                    ...(asRecord(options.approval) ? { approval: asRecord(options.approval) ?? {} } : {}),
+                    ...(actualTargetDomain === XHS_READ_DOMAIN
+                        ? {
+                            target_site_logged_in: observedTargetSiteLoggedIn,
+                            __anonymous_isolation_verified: observedAnonymousIsolationVerified
+                        }
+                        : {})
                 },
                 executionContext: {
                     runId: message.runId,

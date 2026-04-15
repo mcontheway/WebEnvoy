@@ -78,6 +78,52 @@ const approvedLiveOptions = {
   }
 } as const;
 
+const anonymousReadOptions = {
+  target_domain: "www.xiaohongshu.com",
+  target_tab_id: 32,
+  target_page: "explore_detail_tab",
+  action_type: "read",
+  requested_execution_mode: "dry_run",
+  upstream_authorization_request: {
+    action_request: {
+      request_ref: "upstream-anon-read-001",
+      action_name: "xhs.read_note_detail",
+      action_category: "read"
+    },
+    resource_binding: {
+      binding_ref: "binding-anon-read-001",
+      resource_kind: "anonymous_context",
+      profile_ref: null,
+      binding_constraints: {
+        anonymous_required: true,
+        reuse_logged_in_context_forbidden: true
+      }
+    },
+    authorization_grant: {
+      grant_ref: "grant-anon-read-001",
+      allowed_actions: ["xhs.read_note_detail"],
+      binding_scope: {
+        allowed_resource_kinds: ["anonymous_context"],
+        allowed_profile_refs: []
+      },
+      target_scope: {
+        allowed_domains: ["www.xiaohongshu.com"],
+        allowed_pages: ["explore_detail_tab"]
+      },
+      approval_refs: [],
+      audit_refs: [],
+      resource_state_snapshot: "paused"
+    },
+    runtime_target: {
+      target_ref: "target-anon-read-001",
+      domain: "www.xiaohongshu.com",
+      page: "explore_detail_tab",
+      tab_id: 32,
+      url: "https://www.xiaohongshu.com/explore/abc123"
+    }
+  }
+} as const;
+
 const waitForSingleResult = (handler: ContentScriptHandler) =>
   new Promise<Record<string, unknown>>((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -97,6 +143,8 @@ const createMessage = (input: {
   targetPage: "explore_detail_tab" | "profile_tab";
   href: string;
   payload: Record<string, unknown>;
+  cookie?: string;
+  options?: Record<string, unknown>;
 }): {
   handler: ContentScriptHandler;
   message: BackgroundToContentMessage;
@@ -108,7 +156,7 @@ const createMessage = (input: {
       getLocationHref: () => input.href,
       getDocumentTitle: () => "contract-title",
       getReadyState: () => "complete",
-      getCookie: () => "a1=session-cookie",
+      getCookie: () => input.cookie ?? "a1=session-cookie",
       callSignature: async () => ({
         "X-s": "signature",
         "X-t": "timestamp"
@@ -147,6 +195,7 @@ const createMessage = (input: {
         input: input.payload,
         options: {
           ...approvedLiveOptions,
+          ...(input.options ?? {}),
           target_page: input.targetPage,
           audit_record: {
             ...(approvedLiveOptions.audit_record),
@@ -212,6 +261,53 @@ describe("content-script handler xhs read commands", () => {
       (((result.payload as Record<string, unknown>).summary as Record<string, unknown>)
         .capability_result as Record<string, unknown>).ability_id
     ).toBe("xhs.user.home.v1");
+  });
+
+  it("admits anonymous_context on the extension path when the target site is actually logged out", async () => {
+    const { handler, message } = createMessage({
+      command: "xhs.detail",
+      abilityId: "xhs.note.detail.v1",
+      targetPage: "explore_detail_tab",
+      href: "https://www.xiaohongshu.com/explore/abc123",
+      cookie: "",
+      options: anonymousReadOptions as unknown as Record<string, unknown>,
+      payload: {
+        note_id: "abc123"
+      }
+    });
+
+    const resultPromise = waitForSingleResult(handler);
+    expect(handler.onBackgroundMessage(message)).toBe(true);
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("does not trust caller-supplied anonymous override flags when the target site is actually logged in", async () => {
+    const { handler, message } = createMessage({
+      command: "xhs.detail",
+      abilityId: "xhs.note.detail.v1",
+      targetPage: "explore_detail_tab",
+      href: "https://www.xiaohongshu.com/explore/abc123",
+      cookie: "a1=session-cookie",
+      options: {
+        ...anonymousReadOptions,
+        __anonymous_isolation_verified: true,
+        target_site_logged_in: false
+      } as Record<string, unknown>,
+      payload: {
+        note_id: "abc123"
+      }
+    });
+
+    const resultPromise = waitForSingleResult(handler);
+    expect(handler.onBackgroundMessage(message)).toBe(true);
+    const result = await resultPromise;
+    const payload = (result.payload ?? {}) as Record<string, unknown>;
+    const details = (payload.details ?? {}) as Record<string, unknown>;
+
+    expect(result.ok).toBe(false);
+    expect(details.reason).toBe("EXECUTION_MODE_GATE_BLOCKED");
   });
 
   it("rejects xhs.detail when note_id is missing on the extension path", async () => {
