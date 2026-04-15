@@ -481,6 +481,33 @@ describe("xhs-search gate helpers", () => {
     );
   });
 
+  it("still derives canonical mode when direct consumers pass upstream objects with a stale requested_execution_mode", () => {
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "live_write",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest(),
+      anonymousIsolationVerified: true
+    });
+
+    expect(gate.gate_outcome).toMatchObject({
+      gate_decision: "blocked",
+      effective_execution_mode: "dry_run"
+    });
+    expect(gate.consumer_gate_result.requested_execution_mode).toBe("dry_run");
+    expect(gate.request_admission_result.reason_codes).toContain(
+      "STALE_LEGACY_REQUESTED_EXECUTION_MODE"
+    );
+  });
+
   it("preserves request_admission_result on the loopback gate payload", () => {
     const gate = buildLoopbackGate(
       {

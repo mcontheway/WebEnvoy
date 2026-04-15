@@ -193,11 +193,17 @@ const xhsReadCommand = async (context, inputConfig) => {
         const bridgeSessionId = await bridge.ensureSession({
             profile: context.profile
         });
+        const providedAnonymousIsolationVerified = preparedIssue209LiveRead.options.__anonymous_isolation_verified === true;
         const runtimeGateOptions = {
             ...preparedIssue209LiveRead.options,
             ...(typeof context.profile === "string" ? { __runtime_profile_ref: context.profile } : {}),
-            ...(targetSiteLoggedIn !== null ? { target_site_logged_in: targetSiteLoggedIn } : {}),
-            __anonymous_isolation_verified: anonymousIsolationVerified
+            ...(preparedIssue209LiveRead.options.target_site_logged_in === true ||
+                preparedIssue209LiveRead.options.target_site_logged_in === false
+                ? {}
+                : targetSiteLoggedIn !== null
+                    ? { target_site_logged_in: targetSiteLoggedIn }
+                    : {}),
+            __anonymous_isolation_verified: providedAnonymousIsolationVerified || anonymousIsolationVerified
         };
         const commandParams = appendFingerprintContext({
             ...(preparedIssue209LiveRead.commandRequestId

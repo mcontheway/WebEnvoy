@@ -183,31 +183,38 @@ const deriveCanonicalRequestedExecutionMode = (input) => {
     };
   }
 
-  let requestedExecutionMode = explicitRequestedExecutionMode;
-  if (!requestedExecutionMode) {
-    if (actionCategory === "write" || actionCategory === "irreversible_write") {
-      requestedExecutionMode = "live_write";
-    } else if (actionCategory === "read") {
-      const hasGrantRefs =
-        upstream.authorization_grant.approval_refs.length > 0 &&
-        upstream.authorization_grant.audit_refs.length > 0;
-      if (!hasGrantRefs || targetDomain !== XHS_READ_DOMAIN) {
-        requestedExecutionMode = "dry_run";
-      } else {
-        requestedExecutionMode =
-          projectRiskStateFromSnapshot(upstream.authorization_grant.resource_state_snapshot) === "allowed"
-            ? "live_read_high_risk"
-            : "live_read_limited";
-      }
+  let requestedExecutionMode = null;
+  if (actionCategory === "write" || actionCategory === "irreversible_write") {
+    requestedExecutionMode = "live_write";
+  } else if (actionCategory === "read") {
+    const hasGrantRefs =
+      upstream.authorization_grant.approval_refs.length > 0 &&
+      upstream.authorization_grant.audit_refs.length > 0;
+    if (!hasGrantRefs || targetDomain !== XHS_READ_DOMAIN) {
+      requestedExecutionMode = "dry_run";
+    } else {
+      requestedExecutionMode =
+        projectRiskStateFromSnapshot(upstream.authorization_grant.resource_state_snapshot) === "allowed"
+          ? "live_read_high_risk"
+          : "live_read_limited";
     }
+  }
+  let legacyRequestedExecutionMode = resolveXhsExecutionMode(
+    input.legacyRequestedExecutionMode ?? input.legacy_requested_execution_mode
+  );
+  if (
+    !legacyRequestedExecutionMode &&
+    explicitRequestedExecutionMode &&
+    requestedExecutionMode &&
+    explicitRequestedExecutionMode !== requestedExecutionMode
+  ) {
+    legacyRequestedExecutionMode = explicitRequestedExecutionMode;
   }
 
   return {
-    requestedExecutionMode,
+    requestedExecutionMode: requestedExecutionMode ?? explicitRequestedExecutionMode,
     upstream,
-    legacyRequestedExecutionMode: resolveXhsExecutionMode(
-      input.legacyRequestedExecutionMode ?? input.legacy_requested_execution_mode
-    )
+    legacyRequestedExecutionMode
   };
 };
 
