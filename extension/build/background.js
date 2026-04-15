@@ -3129,7 +3129,11 @@ class ChromeBackgroundBridge {
         writeGateOnlyApprovalDecision = matrixResolution.writeGateOnlyApprovalDecision;
         const canonicalApprovalRecord = matrixResolution.approvalRecord;
         const canonicalAdmissionContext = matrixResolution.admissionContext;
-        if (requestedExecutionMode !== null && targetDomain && targetTabId !== null && targetPage) {
+        const shouldResolveActualTargetContext = targetDomain &&
+            targetTabId !== null &&
+            targetPage &&
+            (gateReasons.length === 0 || requestedLiveMode);
+        if (shouldResolveActualTargetContext) {
             const domainTabs = await this.chromeApi.tabs.query({
                 url: `*://${targetDomain}/*`
             });
