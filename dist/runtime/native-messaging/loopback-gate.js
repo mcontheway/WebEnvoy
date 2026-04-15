@@ -11,6 +11,12 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const asOptionalBoolean = (value) => typeof value === "boolean" ? value : null;
+const shouldDeferAnonymousCanonicalGateDiagnostics = (input) => {
+    const resourceBinding = asRecord(input.upstreamAuthorizationRequest?.resource_binding);
+    return (resourceBinding?.resource_kind === "anonymous_context" &&
+        (input.anonymousIsolationVerified === null || input.targetSiteLoggedIn === null));
+};
 const resolveLoopbackIssueScope = (value) => ISSUE_SCOPES.includes(value)
     ? value
     : resolveSharedIssueScope(value);
@@ -39,6 +45,8 @@ export const buildLoopbackGate = (options, abilityAction, linkage) => {
     const boundAdmissionContext = bindAdmissionContextToRequest({
         admissionContext: asRecord(options.admission_context)
     });
+    const anonymousIsolationVerified = asOptionalBoolean(options.__anonymous_isolation_verified);
+    const targetSiteLoggedIn = asOptionalBoolean(options.target_site_logged_in);
     const issue208EditorInputValidation = options.issue_scope === "issue_208" &&
         options.requested_execution_mode === "live_write" &&
         asString(options.validation_action) === "editor_input";
@@ -56,8 +64,8 @@ export const buildLoopbackGate = (options, abilityAction, linkage) => {
         legacyRequestedExecutionMode: options.__legacy_requested_execution_mode,
         runtimeProfileRef: options.__runtime_profile_ref ?? linkage?.profile,
         upstreamAuthorizationRequest: options.upstream_authorization_request,
-        anonymousIsolationVerified: options.__anonymous_isolation_verified === true,
-        targetSiteLoggedIn: options.target_site_logged_in === true,
+        ...(anonymousIsolationVerified !== null ? { anonymousIsolationVerified } : {}),
+        ...(targetSiteLoggedIn !== null ? { targetSiteLoggedIn } : {}),
         approvalRecord: options.approval_record ?? options.approval,
         auditRecord: options.audit_record,
         admissionContext: boundAdmissionContext,
@@ -71,6 +79,22 @@ export const buildLoopbackGate = (options, abilityAction, linkage) => {
         writeGateOnlyEligibleBehavior: "block"
     });
     const issueScope = resolveLoopbackIssueScope(evaluatedGate.gate_input.issue_scope);
+    const requestAdmissionResult = shouldDeferAnonymousCanonicalGateDiagnostics({
+        upstreamAuthorizationRequest: asRecord(options.upstream_authorization_request),
+        anonymousIsolationVerified,
+        targetSiteLoggedIn
+    })
+        ? null
+        : clone(evaluatedGate.request_admission_result);
+    const executionAudit = shouldDeferAnonymousCanonicalGateDiagnostics({
+        upstreamAuthorizationRequest: asRecord(options.upstream_authorization_request),
+        anonymousIsolationVerified,
+        targetSiteLoggedIn
+    })
+        ? null
+        : evaluatedGate.execution_audit
+            ? clone(evaluatedGate.execution_audit)
+            : null;
     return {
         scopeContext: clone(evaluatedGate.scope_context),
         readExecutionPolicy: clone(evaluatedGate.read_execution_policy),
@@ -79,7 +103,8 @@ export const buildLoopbackGate = (options, abilityAction, linkage) => {
         gateInput: clone(evaluatedGate.gate_input),
         gateOutcome: clone(evaluatedGate.gate_outcome),
         consumerGateResult: clone(evaluatedGate.consumer_gate_result),
-        requestAdmissionResult: clone(evaluatedGate.request_admission_result),
+        requestAdmissionResult,
+        executionAudit,
         approvalRecord: clone(evaluatedGate.approval_record),
         writeInteractionTier: clone(WRITE_INTERACTION_TIER),
         writeActionMatrixDecisions: evaluatedGate.write_action_matrix_decisions

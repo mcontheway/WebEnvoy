@@ -3,6 +3,7 @@ import path from "node:path";
 import { runInNewContext } from "node:vm";
 
 import { describe, expect, it } from "vitest";
+import { executeXhsSearch } from "../extension/xhs-search.js";
 
 const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
 const extensionRoot = path.join(repoRoot, "extension");
@@ -84,7 +85,7 @@ const buildLiveReadAdmissionContext = (input: {
   sessionId: string;
   gateInvocationId: string;
   targetTabId: number;
-  targetPage: "explore_detail_tab" | "profile_tab";
+  targetPage: "explore_detail_tab" | "profile_tab" | "search_result_tab";
 }) => {
   const decisionId = `gate_decision_${input.gateInvocationId}`;
   const approvalId = `gate_appr_${decisionId}`;
@@ -137,6 +138,50 @@ const buildLiveReadAdmissionContext = (input: {
     }
   };
 };
+
+const buildCanonicalReadAuthorizationRequest = (input: {
+  requestRef: string;
+  actionName: "xhs.read_search_results" | "xhs.read_note_detail" | "xhs.read_user_home";
+  targetPage: "explore_detail_tab" | "profile_tab" | "search_result_tab";
+  targetTabId: number;
+  profileRef: string;
+  approvalRefs?: string[];
+  auditRefs?: string[];
+  resourceStateSnapshot?: "active" | "cool_down" | "paused";
+}) => ({
+  action_request: {
+    request_ref: input.requestRef,
+    action_name: input.actionName,
+    action_category: "read",
+    requested_at: "2026-04-15T09:00:00.000Z"
+  },
+  resource_binding: {
+    binding_ref: `binding_${input.requestRef}`,
+    resource_kind: "profile_session",
+    profile_ref: input.profileRef
+  },
+  authorization_grant: {
+    grant_ref: `grant_${input.requestRef}`,
+    allowed_actions: [input.actionName],
+    binding_scope: {
+      allowed_resource_kinds: ["profile_session"],
+      allowed_profile_refs: [input.profileRef]
+    },
+    target_scope: {
+      allowed_domains: ["www.xiaohongshu.com"],
+      allowed_pages: [input.targetPage]
+    },
+    approval_refs: input.approvalRefs ?? [],
+    audit_refs: input.auditRefs ?? [],
+    resource_state_snapshot: input.resourceStateSnapshot ?? "active"
+  },
+  runtime_target: {
+    target_ref: `target_${input.requestRef}`,
+    domain: "www.xiaohongshu.com",
+    page: input.targetPage,
+    tab_id: input.targetTabId
+  }
+});
 
 describe("extension build contract", () => {
   it("generates chrome-loadable background/content-script artifacts referenced by manifest", () => {
@@ -327,7 +372,103 @@ describe("extension build contract", () => {
     });
   });
 
+  it("executes source xhs.search live-read path with canonical execution_audit in summary", async () => {
+    const admissionContext = buildLiveReadAdmissionContext({
+      runId: "run-source-search-live-001",
+      sessionId: "nm-session-source-search-live-001",
+      gateInvocationId: "issue209-gate-run-source-search-live-001",
+      targetTabId: 11,
+      targetPage: "search_result_tab"
+    });
+
+    await expect(
+      executeXhsSearch(
+        {
+          abilityId: "xhs.note.search.v1",
+          abilityLayer: "L3",
+          abilityAction: "read",
+          params: {
+            query: "露营装备"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 11,
+            target_page: "search_result_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 11,
+            actual_target_page: "search_result_tab",
+            action_type: "read",
+            risk_state: "allowed",
+            requested_execution_mode: "live_read_high_risk",
+            upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+              requestRef: "upstream_source_search_live_001",
+              actionName: "xhs.read_search_results",
+              targetPage: "search_result_tab",
+              targetTabId: 11,
+              profileRef: "profile-a",
+              approvalRefs: [
+                String(admissionContext.approval_admission_evidence.approval_admission_ref)
+              ],
+              auditRefs: [String(admissionContext.audit_admission_evidence.audit_admission_ref)]
+            }),
+            admission_context: admissionContext,
+            simulate_result: "success"
+          },
+          executionContext: {
+            runId: "run-source-search-live-001",
+            sessionId: "nm-session-source-search-live-001",
+            profile: "profile-a",
+            gateInvocationId: "issue209-gate-run-source-search-live-001"
+          }
+        },
+        {
+          now: () => 1_710_000_000_000,
+          randomId: () => "source-req-001",
+          getLocationHref: () => "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
+          getDocumentTitle: () => "Search Result",
+          getReadyState: () => "complete",
+          getCookie: () => "a1=session-cookie",
+          callSignature: async () => ({
+            "X-s": "signature",
+            "X-t": "timestamp"
+          }),
+          fetchJson: async () => ({
+            status: 200,
+            body: {
+              code: 0
+            }
+          })
+        }
+      )
+    ).resolves.toMatchObject({
+      ok: true,
+      payload: {
+        summary: {
+          capability_result: {
+            ability_id: "xhs.note.search.v1",
+            outcome: "success"
+          },
+          request_admission_result: {
+            admission_decision: "allowed"
+          },
+          execution_audit: {
+            request_admission_decision: "allowed"
+          }
+        }
+      }
+    });
+  });
+
   it("executes bundled xhs.detail live-read path without missing issue209 post-gate artifacts helper", async () => {
+    const admissionContext = buildLiveReadAdmissionContext({
+      runId: "run-bundled-detail-live-001",
+      sessionId: "nm-session-bundled-detail-live-001",
+      gateInvocationId: "issue209-gate-run-bundled-detail-live-001",
+      targetTabId: 18,
+      targetPage: "explore_detail_tab"
+    });
+
     await expect(
       executeBundledXhsCommand(contentScriptBuildPath, {
         moduleVar: "__webenvoy_module_xhs_detail",
@@ -350,13 +491,18 @@ describe("extension build contract", () => {
             action_type: "read",
             risk_state: "allowed",
             requested_execution_mode: "live_read_high_risk",
-            admission_context: buildLiveReadAdmissionContext({
-              runId: "run-bundled-detail-live-001",
-              sessionId: "nm-session-bundled-detail-live-001",
-              gateInvocationId: "issue209-gate-run-bundled-detail-live-001",
+            upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+              requestRef: "upstream_bundled_detail_live_001",
+              actionName: "xhs.read_note_detail",
+              targetPage: "explore_detail_tab",
               targetTabId: 18,
-              targetPage: "explore_detail_tab"
+              profileRef: "profile-a",
+              approvalRefs: [
+                String(admissionContext.approval_admission_evidence.approval_admission_ref)
+              ],
+              auditRefs: [String(admissionContext.audit_admission_evidence.audit_admission_ref)]
             }),
+            admission_context: admissionContext,
             simulate_result: "success"
           },
           executionContext: {
@@ -383,6 +529,9 @@ describe("extension build contract", () => {
             requested_execution_mode: "live_read_high_risk",
             gate_decision: "allowed"
           },
+          execution_audit: {
+            request_admission_decision: "allowed"
+          },
           audit_record: {
             requested_execution_mode: "live_read_high_risk",
             gate_decision: "allowed"
@@ -393,6 +542,14 @@ describe("extension build contract", () => {
   });
 
   it("executes bundled xhs.user_home live-read path without missing issue209 post-gate artifacts helper", async () => {
+    const admissionContext = buildLiveReadAdmissionContext({
+      runId: "run-bundled-user-home-live-001",
+      sessionId: "nm-session-bundled-user-home-live-001",
+      gateInvocationId: "issue209-gate-run-bundled-user-home-live-001",
+      targetTabId: 19,
+      targetPage: "profile_tab"
+    });
+
     await expect(
       executeBundledXhsCommand(contentScriptBuildPath, {
         moduleVar: "__webenvoy_module_xhs_user_home",
@@ -415,13 +572,18 @@ describe("extension build contract", () => {
             action_type: "read",
             risk_state: "allowed",
             requested_execution_mode: "live_read_high_risk",
-            admission_context: buildLiveReadAdmissionContext({
-              runId: "run-bundled-user-home-live-001",
-              sessionId: "nm-session-bundled-user-home-live-001",
-              gateInvocationId: "issue209-gate-run-bundled-user-home-live-001",
+            upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+              requestRef: "upstream_bundled_user_home_live_001",
+              actionName: "xhs.read_user_home",
+              targetPage: "profile_tab",
               targetTabId: 19,
-              targetPage: "profile_tab"
+              profileRef: "profile-a",
+              approvalRefs: [
+                String(admissionContext.approval_admission_evidence.approval_admission_ref)
+              ],
+              auditRefs: [String(admissionContext.audit_admission_evidence.audit_admission_ref)]
             }),
+            admission_context: admissionContext,
             simulate_result: "success"
           },
           executionContext: {
@@ -447,6 +609,9 @@ describe("extension build contract", () => {
           consumer_gate_result: {
             requested_execution_mode: "live_read_high_risk",
             gate_decision: "allowed"
+          },
+          execution_audit: {
+            request_admission_decision: "allowed"
           },
           audit_record: {
             requested_execution_mode: "live_read_high_risk",

@@ -239,6 +239,10 @@ describe("content-script handler xhs read commands", () => {
       (((result.payload as Record<string, unknown>).summary as Record<string, unknown>)
         .capability_result as Record<string, unknown>).ability_id
     ).toBe("xhs.note.detail.v1");
+    expect(
+      (((result.payload as Record<string, unknown>).summary as Record<string, unknown>)
+        .execution_audit as Record<string, unknown> | null)
+    ).toBeNull();
   });
 
   it("routes xhs.user_home through the unified xhs read execution path", async () => {
@@ -261,6 +265,10 @@ describe("content-script handler xhs read commands", () => {
       (((result.payload as Record<string, unknown>).summary as Record<string, unknown>)
         .capability_result as Record<string, unknown>).ability_id
     ).toBe("xhs.user.home.v1");
+    expect(
+      (((result.payload as Record<string, unknown>).summary as Record<string, unknown>)
+        .execution_audit as Record<string, unknown> | null)
+    ).toBeNull();
   });
 
   it("admits anonymous_context on the extension path when the target site is actually logged out", async () => {
@@ -285,6 +293,7 @@ describe("content-script handler xhs read commands", () => {
     expect((summary.request_admission_result as Record<string, unknown>).admission_decision).toBe(
       "allowed"
     );
+    expect(summary.execution_audit).toBeNull();
   });
 
   it("does not trust caller-supplied anonymous override flags when the target site is actually logged in", async () => {
@@ -314,6 +323,7 @@ describe("content-script handler xhs read commands", () => {
     expect(result.ok).toBe(false);
     expect(details.reason).toBe("EXECUTION_MODE_GATE_BLOCKED");
     expect(requestAdmissionResult.admission_decision).toBe("blocked");
+    expect(payload.execution_audit).toBeNull();
   });
 
   it("rejects xhs.detail when note_id is missing on the extension path", async () => {

@@ -30,6 +30,21 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const asOptionalBoolean = (value: unknown): boolean | null =>
+  typeof value === "boolean" ? value : null;
+
+const shouldDeferAnonymousCanonicalGateDiagnostics = (input: {
+  upstreamAuthorizationRequest: Record<string, unknown> | null;
+  anonymousIsolationVerified: boolean | null;
+  targetSiteLoggedIn: boolean | null;
+}): boolean => {
+  const resourceBinding = asRecord(input.upstreamAuthorizationRequest?.resource_binding);
+  return (
+    resourceBinding?.resource_kind === "anonymous_context" &&
+    (input.anonymousIsolationVerified === null || input.targetSiteLoggedIn === null)
+  );
+};
+
 const resolveLoopbackIssueScope = (value: unknown): LoopbackIssueScope =>
   ISSUE_SCOPES.includes(value as LoopbackIssueScope)
     ? (value as LoopbackIssueScope)
@@ -88,13 +103,16 @@ export const buildLoopbackGate = (
   gateInput: Record<string, unknown>;
   gateOutcome: Record<string, unknown>;
   consumerGateResult: Record<string, unknown>;
-  requestAdmissionResult: Record<string, unknown>;
+  requestAdmissionResult: Record<string, unknown> | null;
+  executionAudit: Record<string, unknown> | null;
   approvalRecord: Record<string, unknown>;
 } => {
   const clone = <T>(value: T): T => structuredClone(value);
   const boundAdmissionContext = bindAdmissionContextToRequest({
     admissionContext: asRecord(options.admission_context)
   });
+  const anonymousIsolationVerified = asOptionalBoolean(options.__anonymous_isolation_verified);
+  const targetSiteLoggedIn = asOptionalBoolean(options.target_site_logged_in);
   const issue208EditorInputValidation =
     options.issue_scope === "issue_208" &&
     options.requested_execution_mode === "live_write" &&
@@ -113,8 +131,8 @@ export const buildLoopbackGate = (
     legacyRequestedExecutionMode: options.__legacy_requested_execution_mode,
     runtimeProfileRef: options.__runtime_profile_ref ?? linkage?.profile,
     upstreamAuthorizationRequest: options.upstream_authorization_request,
-    anonymousIsolationVerified: options.__anonymous_isolation_verified === true,
-    targetSiteLoggedIn: options.target_site_logged_in === true,
+    ...(anonymousIsolationVerified !== null ? { anonymousIsolationVerified } : {}),
+    ...(targetSiteLoggedIn !== null ? { targetSiteLoggedIn } : {}),
     approvalRecord: options.approval_record ?? options.approval,
     auditRecord: options.audit_record,
     admissionContext: boundAdmissionContext,
@@ -128,6 +146,23 @@ export const buildLoopbackGate = (
     writeGateOnlyEligibleBehavior: "block"
   });
   const issueScope = resolveLoopbackIssueScope(evaluatedGate.gate_input.issue_scope);
+  const requestAdmissionResult = shouldDeferAnonymousCanonicalGateDiagnostics({
+    upstreamAuthorizationRequest: asRecord(options.upstream_authorization_request),
+    anonymousIsolationVerified,
+    targetSiteLoggedIn
+  })
+    ? null
+    : (clone(evaluatedGate.request_admission_result) as unknown as Record<string, unknown>);
+  const executionAudit =
+    shouldDeferAnonymousCanonicalGateDiagnostics({
+      upstreamAuthorizationRequest: asRecord(options.upstream_authorization_request),
+      anonymousIsolationVerified,
+      targetSiteLoggedIn
+    })
+      ? null
+      : evaluatedGate.execution_audit
+        ? (clone(evaluatedGate.execution_audit) as unknown as Record<string, unknown>)
+        : null;
 
   return {
     scopeContext: clone(evaluatedGate.scope_context) as unknown as Record<string, unknown>,
@@ -137,8 +172,8 @@ export const buildLoopbackGate = (
     gateInput: clone(evaluatedGate.gate_input),
     gateOutcome: clone(evaluatedGate.gate_outcome),
     consumerGateResult: clone(evaluatedGate.consumer_gate_result),
-    requestAdmissionResult:
-      clone(evaluatedGate.request_admission_result) as unknown as Record<string, unknown>,
+    requestAdmissionResult,
+    executionAudit,
     approvalRecord: clone(evaluatedGate.approval_record) as unknown as Record<string, unknown>,
     writeInteractionTier: clone(WRITE_INTERACTION_TIER),
     writeActionMatrixDecisions: evaluatedGate.write_action_matrix_decisions

@@ -307,6 +307,55 @@ describe("xhs-search gate helpers", () => {
     );
   });
 
+  it("defers anonymous canonical diagnostics on the extension gate path until page-state signals exist", () => {
+    const gate = resolveGate(
+      {
+        issue_scope: "issue_209",
+        risk_state: "allowed",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 12,
+        target_page: "search_result_tab",
+        actual_target_domain: "www.xiaohongshu.com",
+        actual_target_tab_id: 12,
+        actual_target_page: "search_result_tab",
+        action_type: "read",
+        ability_action: "read",
+        requested_execution_mode: "live_read_high_risk",
+        limited_read_rollout_ready_true: true,
+        upstream_authorization_request: createUpstreamAuthorizationRequest({
+          approvalRefs: [
+            "approval_admission_run-extension-anon-defer-001_req-extension-anon-defer-001"
+          ],
+          auditRefs: ["audit_admission_run-extension-anon-defer-001_req-extension-anon-defer-001"],
+          resourceStateSnapshot: "active"
+        }),
+        approval_record: createApprovalRecord(
+          "gate_decision_issue209-gate-run-extension-anon-defer-001-req-extension-anon-defer-001",
+          "gate_appr_gate_decision_issue209-gate-run-extension-anon-defer-001-req-extension-anon-defer-001"
+        ),
+        admission_context: createAdmissionContext({
+          run_id: "run-extension-anon-defer-001",
+          request_id: "req-extension-anon-defer-001",
+          target_tab_id: 12,
+          target_page: "search_result_tab",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed"
+        })
+      },
+      {
+        runId: "run-extension-anon-defer-001",
+        requestId: "req-extension-anon-defer-001",
+        sessionId: "session-extension-anon-defer-001",
+        profile: "profile-anon-001",
+        commandRequestId: "req-extension-anon-defer-001",
+        gateInvocationId: "issue209-gate-run-extension-anon-defer-001-req-extension-anon-defer-001"
+      }
+    );
+
+    expect(gate.request_admission_result).toBeNull();
+    expect(gate.execution_audit).toBeNull();
+  });
+
   it("blocks anonymous_context when anonymous isolation cannot be proven", () => {
     const gate = evaluateXhsGate({
       issueScope: "issue_209",
@@ -961,6 +1010,80 @@ describe("xhs-search gate helpers", () => {
       admission_decision: "allowed",
       effective_runtime_mode: "dry_run"
     });
+  });
+
+  it("preserves unknown anonymous state on the loopback gate payload", () => {
+    const gate = buildLoopbackGate(
+      {
+        issue_scope: "issue_209",
+        risk_state: "allowed",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 12,
+        target_page: "search_result_tab",
+        action_type: "read",
+        ability_action: "read",
+        requested_execution_mode: "live_read_high_risk",
+        limited_read_rollout_ready_true: true,
+        upstream_authorization_request: createUpstreamAuthorizationRequest({
+          approvalRefs: [
+            "approval_admission_run-loopback-anon-defer-001_req-loopback-anon-defer-001"
+          ],
+          auditRefs: ["audit_admission_run-loopback-anon-defer-001_req-loopback-anon-defer-001"],
+          resourceStateSnapshot: "active"
+        }),
+        approval_record: createApprovalRecord(
+          "gate_decision_issue209-gate-run-loopback-anon-defer-001-req-loopback-anon-defer-001",
+          "gate_appr_gate_decision_issue209-gate-run-loopback-anon-defer-001-req-loopback-anon-defer-001"
+        ),
+        admission_context: createAdmissionContext({
+          run_id: "run-loopback-anon-defer-001",
+          request_id: "req-loopback-anon-defer-001",
+          target_tab_id: 12,
+          target_page: "search_result_tab",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed"
+        })
+      },
+      "read",
+      {
+        runId: "run-loopback-anon-defer-001",
+        sessionId: "session-loopback-anon-defer-001",
+        profile: "loopback-profile-001",
+        gateInvocationId: "issue209-gate-run-loopback-anon-defer-001-req-loopback-anon-defer-001"
+      }
+    );
+    const payload = buildLoopbackGatePayload({
+      runId: "run-loopback-anon-defer-001",
+      sessionId: "session-loopback-anon-defer-001",
+      profile: "loopback-profile-001",
+      gate,
+      auditRecord: {
+        event_id: "gate_evt_loopback_anon_defer_001",
+        decision_id: String(gate.gateOutcome.decision_id),
+        approval_id: null,
+        run_id: "run-loopback-anon-defer-001",
+        session_id: "session-loopback-anon-defer-001",
+        profile: "loopback-profile-001",
+        issue_scope: "issue_209",
+        risk_state: "allowed",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 12,
+        target_page: "search_result_tab",
+        action_type: "read",
+        requested_execution_mode: "live_read_high_risk",
+        effective_execution_mode: "dry_run",
+        gate_decision: "blocked",
+        gate_reasons: ["ANONYMOUS_ISOLATION_UNVERIFIED"],
+        approver: null,
+        approved_at: null,
+        recorded_at: "2026-04-15T10:00:00.000Z"
+      }
+    });
+
+    expect(gate.requestAdmissionResult).toBeNull();
+    expect(gate.executionAudit).toBeNull();
+    expect(payload.request_admission_result ?? null).toBeNull();
+    expect(payload.execution_audit ?? null).toBeNull();
   });
 
   it("requires gate_invocation_id for issue_209 live-read gate linkage", () => {

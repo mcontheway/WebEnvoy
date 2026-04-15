@@ -7,12 +7,18 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     : null;
 const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
+const asOptionalBoolean = (value) => typeof value === "boolean" ? value : null;
 const resolveRiskState = (value) => resolveSharedRiskState(value);
 const resolveIssueScope = (value) => resolveSharedIssueScope(value);
 const isIssue208EditorInputValidation = (options) => options.issue_scope === "issue_208" &&
     options.action_type === "write" &&
     options.requested_execution_mode === "live_write" &&
     options.validation_action === "editor_input";
+const shouldDeferAnonymousCanonicalGateDiagnostics = (input) => {
+    const resourceBinding = asRecord(input.upstreamAuthorizationRequest?.resource_binding);
+    return (resourceBinding?.resource_kind === "anonymous_context" &&
+        (input.anonymousIsolationVerified === null || input.targetSiteLoggedIn === null));
+};
 const buildGateDecisionId = (context, options) => resolveXhsGateDecisionId({
     runId: context.runId,
     requestId: context.requestId,
@@ -49,7 +55,9 @@ export const resolveGate = (options, context, actualTargetUrl) => {
     const approvalRecord = asRecord(providedApprovalRecord);
     const decisionId = buildGateDecisionId(context, options);
     const approvalId = asNonEmptyString(approvalRecord?.approval_id) ?? undefined;
-    return evaluateXhsGate({
+    const anonymousIsolationVerified = asOptionalBoolean(options.__anonymous_isolation_verified);
+    const targetSiteLoggedIn = asOptionalBoolean(options.target_site_logged_in);
+    const gate = evaluateXhsGate({
         issueScope: options.issue_scope,
         riskState: options.risk_state,
         targetDomain: options.target_domain,
@@ -66,8 +74,8 @@ export const resolveGate = (options, context, actualTargetUrl) => {
         legacyRequestedExecutionMode: options.__legacy_requested_execution_mode,
         runtimeProfileRef: options.__runtime_profile_ref ?? context.profile,
         upstreamAuthorizationRequest: options.upstream_authorization_request,
-        anonymousIsolationVerified: options.__anonymous_isolation_verified === true,
-        targetSiteLoggedIn: options.target_site_logged_in === true,
+        ...(anonymousIsolationVerified !== null ? { anonymousIsolationVerified } : {}),
+        ...(targetSiteLoggedIn !== null ? { targetSiteLoggedIn } : {}),
         runId: context.runId,
         sessionId: context.sessionId,
         gateInvocationId: context.gateInvocationId,
@@ -80,6 +88,18 @@ export const resolveGate = (options, context, actualTargetUrl) => {
         issue208EditorInputValidation: isIssue208EditorInputValidation(options),
         treatMissingEditorValidationAsUnsupported: true
     });
+    if (shouldDeferAnonymousCanonicalGateDiagnostics({
+        upstreamAuthorizationRequest: options.upstream_authorization_request,
+        anonymousIsolationVerified,
+        targetSiteLoggedIn
+    })) {
+        return {
+            ...gate,
+            request_admission_result: null,
+            execution_audit: null
+        };
+    }
+    return gate;
 };
 export const createAuditRecord = (context, gate, env) => {
     if (gate.gate_input.issue_scope === "issue_209" &&
@@ -178,6 +198,7 @@ export const createGateOnlySuccess = (input, gate, auditRecord, env) => ({
             write_action_matrix_decisions: gate.write_action_matrix_decisions,
             consumer_gate_result: gate.consumer_gate_result,
             request_admission_result: gate.request_admission_result,
+            execution_audit: gate.execution_audit,
             approval_record: gate.approval_record,
             risk_state_output: resolveRiskStateOutput(gate, auditRecord),
             audit_record: auditRecord

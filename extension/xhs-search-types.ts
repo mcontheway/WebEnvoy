@@ -189,7 +189,7 @@ export interface XhsSearchGate {
   gate_input: Omit<GateInputRecord, "run_id" | "session_id" | "profile">;
   gate_outcome: GateOutcomeRecord;
   consumer_gate_result: ConsumerGateResult;
-  request_admission_result: RequestAdmissionResult;
+  request_admission_result: RequestAdmissionResult | null;
   approval_record: {
     approval_id: string | null;
     decision_id: string;

@@ -150,6 +150,59 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
   });
   };
 
+  const createCanonicalSearchAuthorizationRequest = (input: {
+    runId: string;
+    requestId: string;
+    resourceKind: "anonymous_context" | "profile_session";
+    profileRef?: string | null;
+    targetTabId?: number;
+  }): Record<string, unknown> => {
+    const profileRef =
+      input.resourceKind === "profile_session" ? (input.profileRef ?? "profile-session-001") : null;
+    return {
+      action_request: {
+        request_ref: `upstream_req_${input.requestId}`,
+        action_name: "xhs.read_search_results",
+        action_category: "read",
+        requested_at: "2026-04-15T09:00:00.000Z"
+      },
+      resource_binding: {
+        binding_ref: `binding_${input.requestId}`,
+        resource_kind: input.resourceKind,
+        ...(input.resourceKind === "profile_session"
+          ? { profile_ref: profileRef }
+          : {
+              profile_ref: null,
+              binding_constraints: {
+                anonymous_required: true,
+                reuse_logged_in_context_forbidden: true
+              }
+            })
+      },
+      authorization_grant: {
+        grant_ref: `grant_${input.requestId}`,
+        allowed_actions: ["xhs.read_search_results"],
+        binding_scope: {
+          allowed_resource_kinds: [input.resourceKind],
+          allowed_profile_refs: profileRef ? [profileRef] : []
+        },
+        target_scope: {
+          allowed_domains: ["www.xiaohongshu.com"],
+          allowed_pages: ["search_result_tab"]
+        },
+        approval_refs: [`approval_admission_${input.runId}_${input.requestId}`],
+        audit_refs: [`audit_admission_${input.runId}_${input.requestId}`],
+        resource_state_snapshot: "active"
+      },
+      runtime_target: {
+        target_ref: `target_${input.requestId}`,
+        domain: "www.xiaohongshu.com",
+        page: "search_result_tab",
+        tab_id: input.targetTabId ?? 32
+      }
+    };
+  };
+
   it("returns structured input validation error for xhs.search without ability envelope", () => {
     const result = runCli(["xhs.search", "--profile", "xhs_account_001"]);
     expect(result.status).toBe(2);
@@ -1427,6 +1480,307 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
         }
       }
     });
+  });
+
+  it("emits execution_audit in CLI success summary when canonical FR-0023 inputs are present", () => {
+    const runId = "run-cli-fr0023-execution-audit-success-001";
+    const requestId = "cli-fr0023-execution-audit-success-001";
+    const profile = "profile-session-001";
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      profile,
+      "--run-id",
+      runId,
+      "--params",
+      JSON.stringify({
+        request_id: requestId,
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          ...scopedReadGateOptions,
+          simulate_result: "success",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          upstream_authorization_request: createCanonicalSearchAuthorizationRequest({
+            runId,
+            requestId,
+            resourceKind: "profile_session",
+            profileRef: profile
+          }),
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          },
+          audit_record: createAllowedHighRiskAuditRecord({
+            runId,
+            requestId
+          }),
+          admission_context: createApprovedReadAdmissionContext({
+            runId,
+            requestId,
+            requestedExecutionMode: "live_read_high_risk",
+            riskState: "allowed"
+          })
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      status: "success",
+      summary: {
+        request_admission_result: {
+          request_ref: `upstream_req_${requestId}`,
+          admission_decision: "allowed"
+        },
+        execution_audit: {
+          request_ref: `upstream_req_${requestId}`,
+          request_admission_decision: "allowed",
+          consumed_inputs: {
+            action_request_ref: `upstream_req_${requestId}`,
+            resource_binding_ref: `binding_${requestId}`,
+            authorization_grant_ref: `grant_${requestId}`,
+            runtime_target_ref: `target_${requestId}`
+          },
+          compatibility_refs: {
+            approval_admission_ref: `approval_admission_${runId}_${requestId}`,
+            audit_admission_ref: `audit_admission_${runId}_${requestId}`
+          }
+        }
+      }
+    });
+    expect(body.observability).not.toHaveProperty("execution_audit");
+  });
+
+  it("preserves explicit null execution_audit in CLI success summary when upstream summary sets it to null", async () => {
+    const hostDir = await mkdtemp(path.join(tmpdir(), "webenvoy-native-host-null-summary-"));
+    const nativeHostPath = path.join(hostDir, "native-host-null-summary.mjs");
+    await writeFile(
+      nativeHostPath,
+      `#!/usr/bin/env node
+let buffer = Buffer.alloc(0);
+let opened = false;
+const writeMessage = (message) => {
+  const payload = Buffer.from(JSON.stringify(message), "utf8");
+  const header = Buffer.alloc(4);
+  header.writeUInt32LE(payload.length, 0);
+  process.stdout.write(Buffer.concat([header, payload]));
+};
+const onRequest = (request) => {
+  if (request.method === "bridge.open") {
+    opened = true;
+    writeMessage({
+      id: request.id,
+      status: "success",
+      summary: {
+        protocol: "webenvoy.native-bridge.v1",
+        state: "ready",
+        session_id: "nm-session-001"
+      },
+      error: null
+    });
+    return;
+  }
+  if (request.method === "__ping__") {
+    writeMessage({
+      id: request.id,
+      status: "success",
+      summary: {
+        session_id: "nm-session-001"
+      },
+      error: null
+    });
+    return;
+  }
+  if (request.method === "bridge.forward" && opened) {
+    writeMessage({
+      id: request.id,
+      status: "success",
+      summary: {
+        session_id: String(request.params?.session_id ?? "nm-session-001"),
+        run_id: String(request.params?.run_id ?? request.id),
+        command: String(request.params?.command ?? "xhs.search"),
+        relay_path: "host>background>content-script>background>host"
+      },
+      payload: {
+        summary: {
+          capability_result: {
+            ability_id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read",
+            outcome: "success"
+          },
+          request_admission_result: null,
+          execution_audit: null
+        }
+      },
+      error: null
+    });
+    process.exit(0);
+  }
+};
+process.stdin.on("data", (chunk) => {
+  buffer = Buffer.concat([buffer, chunk]);
+  while (buffer.length >= 4) {
+    const frameLength = buffer.readUInt32LE(0);
+    const frameEnd = 4 + frameLength;
+    if (buffer.length < frameEnd) {
+      return;
+    }
+    const frame = buffer.subarray(4, frameEnd);
+    buffer = buffer.subarray(frameEnd);
+    onRequest(JSON.parse(frame.toString("utf8")));
+  }
+});
+`,
+      "utf8"
+    );
+    await chmod(nativeHostPath, 0o755);
+
+    try {
+      const result = runCli(
+        [
+          "xhs.search",
+          "--profile",
+          "profile-session-001",
+          "--run-id",
+          "run-cli-fr0023-execution-audit-success-null-001",
+          "--params",
+          JSON.stringify({
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              query: "露营装备"
+            },
+            options: {
+              ...scopedReadGateOptions,
+              requested_execution_mode: "dry_run",
+              risk_state: "paused"
+            }
+          })
+        ],
+        repoRoot,
+        {
+          WEBENVOY_NATIVE_TRANSPORT: "native",
+          WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostPath)
+        }
+      );
+
+      expect(result.status).toBe(0);
+      const body = parseSingleJsonLine(result.stdout);
+      expect(body).toMatchObject({
+        status: "success",
+        summary: {
+          request_admission_result: null,
+          execution_audit: null
+        }
+      });
+      expect(body.summary).toHaveProperty("request_admission_result", null);
+      expect(body.summary).toHaveProperty("execution_audit", null);
+      expect(body.observability).not.toHaveProperty("execution_audit");
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("emits execution_audit in CLI error details when canonical FR-0023 inputs are blocked", () => {
+    const runId = "run-cli-fr0023-execution-audit-blocked-001";
+    const requestId = "cli-fr0023-execution-audit-blocked-001";
+    const result = runCli([
+      "xhs.search",
+      "--profile",
+      "anon-cli-profile-001",
+      "--run-id",
+      runId,
+      "--params",
+      JSON.stringify({
+        request_id: requestId,
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          ...scopedReadGateOptions,
+          simulate_result: "success",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          upstream_authorization_request: createCanonicalSearchAuthorizationRequest({
+            runId,
+            requestId,
+            resourceKind: "anonymous_context"
+          }),
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          },
+          admission_context: createApprovedReadAdmissionContext({
+            runId,
+            requestId,
+            requestedExecutionMode: "live_read_high_risk",
+            riskState: "allowed"
+          }),
+          __anonymous_isolation_verified: true,
+          target_site_logged_in: true
+        }
+      })
+    ], repoRoot, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    const gateEnvelope = resolveCliGateEnvelope(body);
+    expect(gateEnvelope).toMatchObject({
+      request_admission_result: {
+        request_ref: `upstream_req_${requestId}`,
+        admission_decision: "blocked",
+        anonymous_isolation_ok: false
+      },
+      execution_audit: {
+        request_ref: `upstream_req_${requestId}`,
+        request_admission_decision: "blocked",
+        consumed_inputs: {
+          action_request_ref: `upstream_req_${requestId}`,
+          resource_binding_ref: `binding_${requestId}`,
+          authorization_grant_ref: `grant_${requestId}`,
+          runtime_target_ref: `target_${requestId}`
+        }
+      }
+    });
+    expect(body.observability).not.toHaveProperty("execution_audit");
   });
 
   it("recovers official Chrome xhs.search with hidden runtime.bootstrap after runtime.start leaves bootstrap pending", async () => {

@@ -36,6 +36,18 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asArray = (value) => (Array.isArray(value) ? value : null);
+const withExecutionAuditInFailurePayload = (result, executionAudit) => {
+    if (result.ok) {
+        return result;
+    }
+    return {
+        ...result,
+        payload: {
+            ...result.payload,
+            execution_audit: executionAudit
+        }
+    };
+};
 const classifyPageKind = (href, fallback) => {
     if (href.includes("/login")) {
         return "login";
@@ -307,7 +319,7 @@ const canUsePageStateFallback = (spec, params, root) => spec.command === "xhs.de
     : hasUserHomePageStateFallback(params, root);
 const createPageStateFallbackFailure = (input, spec, gate, auditRecord, env, payload, startedAt, requestFailure) => {
     const requestId = `req-${env.randomId()}`;
-    return createFailure("ERR_EXECUTION_FAILED", requestFailure.message, {
+    return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", requestFailure.message, {
         ability_id: input.abilityId,
         stage: "execution",
         reason: requestFailure.reason
@@ -352,7 +364,7 @@ const createPageStateFallbackFailure = (input, spec, gate, auditRecord, env, pay
     }, createReadDiagnosis(spec, {
         reason: requestFailure.reason,
         summary: requestFailure.message
-    }), gate, auditRecord);
+    }), gate, auditRecord), gate.execution_audit);
 };
 const createGateOnlySuccess = (input, spec, gate, auditRecord, env, payload) => ({
     ok: true,
@@ -382,6 +394,7 @@ const createGateOnlySuccess = (input, spec, gate, auditRecord, env, payload) => 
             write_action_matrix_decisions: gate.write_action_matrix_decisions,
             consumer_gate_result: gate.consumer_gate_result,
             request_admission_result: gate.request_admission_result,
+            execution_audit: gate.execution_audit,
             approval_record: gate.approval_record,
             risk_state_output: resolveRiskStateOutput(gate, auditRecord),
             audit_record: auditRecord
@@ -398,7 +411,7 @@ const createGateOnlySuccess = (input, spec, gate, auditRecord, env, payload) => 
         }
     }
 });
-const resolveSimulatedResult = (input, spec, payload, env) => {
+const resolveSimulatedResult = (input, spec, payload, env, gate, auditRecord) => {
     if (!input.options.simulate_result) {
         return null;
     }
@@ -509,7 +522,7 @@ const resolveSimulatedResult = (input, spec, payload, env) => {
                     ? "create invoker failed"
                     : input.options.simulate_result
         });
-    return createFailure("ERR_EXECUTION_FAILED", mapped.message, {
+    return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", mapped.message, {
         ability_id: input.abilityId,
         stage: "execution",
         reason: mapped.reason
@@ -525,7 +538,7 @@ const resolveSimulatedResult = (input, spec, payload, env) => {
     }), createReadDiagnosis(spec, {
         reason: mapped.reason,
         summary: mapped.message
-    }));
+    }), gate, auditRecord), gate?.execution_audit ?? null);
 };
 const buildHeaders = (env, options, signature) => ({
     Accept: "application/json, text/plain, */*",
@@ -559,7 +572,7 @@ const executeXhsRead = async (input, spec, env) => {
         return asRecord(env.getPageStateRoot?.());
     };
     if (gate.consumer_gate_result.gate_decision === "blocked") {
-        return createFailure("ERR_EXECUTION_FAILED", `执行模式门禁阻断了当前 ${spec.command} 请求`, {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", `执行模式门禁阻断了当前 ${spec.command} 请求`, {
             ability_id: input.abilityId,
             stage: "execution",
             reason: "EXECUTION_MODE_GATE_BLOCKED"
@@ -580,13 +593,13 @@ const executeXhsRead = async (input, spec, env) => {
         }), createReadDiagnosis(spec, {
             reason: "EXECUTION_MODE_GATE_BLOCKED",
             summary: "执行模式门禁阻断"
-        }), gate, auditRecord);
+        }), gate, auditRecord), gate.execution_audit);
     }
     if (gate.consumer_gate_result.effective_execution_mode === "dry_run" ||
         gate.consumer_gate_result.effective_execution_mode === "recon") {
         return createGateOnlySuccess(input, spec, gate, auditRecord, env, payload);
     }
-    const simulated = resolveSimulatedResult(input, spec, payload, env);
+    const simulated = resolveSimulatedResult(input, spec, payload, env, gate, auditRecord);
     if (simulated) {
         if (simulated.ok) {
             const summary = asRecord(simulated.payload.summary) ?? {};
@@ -612,6 +625,7 @@ const executeXhsRead = async (input, spec, env) => {
                         issue_action_matrix: gate.issue_action_matrix,
                         consumer_gate_result: gate.consumer_gate_result,
                         request_admission_result: gate.request_admission_result,
+                        execution_audit: gate.execution_audit,
                         approval_record: gate.approval_record,
                         risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                         audit_record: auditRecord
@@ -626,13 +640,15 @@ const executeXhsRead = async (input, spec, env) => {
                 read_execution_policy: gate.read_execution_policy,
                 issue_action_matrix: gate.issue_action_matrix,
                 consumer_gate_result: gate.consumer_gate_result,
+                request_admission_result: gate.request_admission_result,
+                execution_audit: gate.execution_audit,
                 approval_record: gate.approval_record,
                 audit_record: auditRecord
             }
         };
     }
     if (!containsCookie(env.getCookie(), "a1")) {
-        return createFailure("ERR_EXECUTION_FAILED", `登录态缺失，无法执行 ${spec.command}`, {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", `登录态缺失，无法执行 ${spec.command}`, {
             ability_id: input.abilityId,
             stage: "execution",
             reason: "SESSION_EXPIRED"
@@ -647,7 +663,7 @@ const executeXhsRead = async (input, spec, env) => {
         }), createReadDiagnosis(spec, {
             reason: "SESSION_EXPIRED",
             summary: `登录态缺失，无法执行 ${spec.command}`
-        }), gate, auditRecord);
+        }), gate, auditRecord), gate.execution_audit);
     }
     let signature;
     try {
@@ -662,7 +678,7 @@ const executeXhsRead = async (input, spec, env) => {
                 detail: error instanceof Error ? error.message : String(error)
             });
         }
-        return createFailure("ERR_EXECUTION_FAILED", "页面签名入口不可用", {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "页面签名入口不可用", {
             ability_id: input.abilityId,
             stage: "execution",
             reason: "SIGNATURE_ENTRY_MISSING"
@@ -685,7 +701,7 @@ const executeXhsRead = async (input, spec, env) => {
             reason: "SIGNATURE_ENTRY_MISSING",
             summary: "页面签名入口不可用",
             category: "page_changed"
-        }), gate, auditRecord);
+        }), gate, auditRecord), gate.execution_audit);
     }
     let response;
     try {
@@ -709,7 +725,7 @@ const executeXhsRead = async (input, spec, env) => {
                 detail: failure.detail
             });
         }
-        return createFailure("ERR_EXECUTION_FAILED", failure.message, {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failure.message, {
             ability_id: input.abilityId,
             stage: "execution",
             reason: failure.reason
@@ -724,7 +740,7 @@ const executeXhsRead = async (input, spec, env) => {
         }), createReadDiagnosis(spec, {
             reason: failure.reason,
             summary: failure.message
-        }), gate, auditRecord);
+        }), gate, auditRecord), gate.execution_audit);
     }
     const responseRecord = asRecord(response.body);
     const businessCode = responseRecord?.code;
@@ -739,7 +755,7 @@ const executeXhsRead = async (input, spec, env) => {
                 statusCode: response.status
             });
         }
-        return createFailure("ERR_EXECUTION_FAILED", failure.message, {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failure.message, {
             ability_id: input.abilityId,
             stage: "execution",
             reason: failure.reason
@@ -755,7 +771,7 @@ const executeXhsRead = async (input, spec, env) => {
         }), createReadDiagnosis(spec, {
             reason: failure.reason,
             summary: failure.message
-        }), gate, auditRecord);
+        }), gate, auditRecord), gate.execution_audit);
     }
     if (!responseContainsRequestedTarget(spec, input.params, response.body)) {
         const pageStateRoot = await resolvePageStateRoot();
@@ -767,7 +783,7 @@ const executeXhsRead = async (input, spec, env) => {
                 statusCode: response.status
             });
         }
-        return createFailure("ERR_EXECUTION_FAILED", `${spec.command} 接口返回成功但未包含目标数据`, {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", `${spec.command} 接口返回成功但未包含目标数据`, {
             ability_id: input.abilityId,
             stage: "execution",
             reason: "TARGET_DATA_NOT_FOUND"
@@ -783,7 +799,7 @@ const executeXhsRead = async (input, spec, env) => {
         }), createReadDiagnosis(spec, {
             reason: "TARGET_DATA_NOT_FOUND",
             summary: `${spec.command} 接口返回成功但未包含目标数据`
-        }), gate, auditRecord);
+        }), gate, auditRecord), gate.execution_audit);
     }
     return {
         ok: true,
@@ -812,6 +828,7 @@ const executeXhsRead = async (input, spec, env) => {
                 issue_action_matrix: gate.issue_action_matrix,
                 consumer_gate_result: gate.consumer_gate_result,
                 request_admission_result: gate.request_admission_result,
+                execution_audit: gate.execution_audit,
                 approval_record: gate.approval_record,
                 risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                 audit_record: auditRecord

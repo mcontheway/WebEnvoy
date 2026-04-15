@@ -24,6 +24,13 @@ describe("native messaging loopback gate payload", () => {
         action_type: "write",
         requested_execution_mode: "live_write",
         effective_execution_mode: "dry_run"
+      },
+      executionAudit: {
+        decision_id: "gate_decision_run-001",
+        admission_decision: "blocked",
+        effective_execution_mode: "dry_run",
+        risk_signals: ["TARGET_DOMAIN_OUT_OF_SCOPE"],
+        reason_codes: ["TARGET_DOMAIN_OUT_OF_SCOPE", "LIVE_MODE_APPROVED"]
       }
     });
 
@@ -43,17 +50,6 @@ describe("native messaging loopback gate payload", () => {
       }
     });
 
-    const payloadGateReasons = payload.consumer_gate_result as
-      | { gate_reasons?: string[] }
-      | null
-      | undefined;
-    payloadGateReasons?.gate_reasons?.push("MUTATED");
-    const payloadAuditDecisions = payload.audit_record as
-      | { write_action_matrix_decisions?: { decisions?: string[] } | null }
-      | null
-      | undefined;
-    payloadAuditDecisions?.write_action_matrix_decisions?.decisions?.push("MUTATED");
-
     expect(payload).toMatchObject({
       plugin_gate_ownership: {
         background_gate: ["target_domain_check", "target_tab_check", "mode_gate", "risk_state_gate"],
@@ -69,6 +65,13 @@ describe("native messaging loopback gate payload", () => {
       },
       consumer_gate_result: {
         gate_decision: "blocked"
+      },
+      execution_audit: {
+        decision_id: "gate_decision_run-001",
+        admission_decision: "blocked",
+        effective_execution_mode: "dry_run",
+        risk_signals: ["TARGET_DOMAIN_OUT_OF_SCOPE"],
+        reason_codes: ["TARGET_DOMAIN_OUT_OF_SCOPE", "LIVE_MODE_APPROVED"]
       },
       observability: {
         page_state: {
@@ -89,7 +92,30 @@ describe("native messaging loopback gate payload", () => {
         session_id: "session-001"
       }
     });
+
+    const payloadGateReasons = payload.consumer_gate_result as
+      | { gate_reasons?: string[] }
+      | null
+      | undefined;
+    payloadGateReasons?.gate_reasons?.push("MUTATED");
+    const payloadAuditDecisions = payload.audit_record as
+      | { write_action_matrix_decisions?: { decisions?: string[] } | null }
+      | null
+      | undefined;
+    payloadAuditDecisions?.write_action_matrix_decisions?.decisions?.push("MUTATED");
+    const payloadExecutionAudit = payload.execution_audit as
+      | { risk_signals?: string[]; reason_codes?: string[] }
+      | null
+      | undefined;
+    payloadExecutionAudit?.risk_signals?.push("MUTATED");
     expect(gate.consumerGateResult.gate_reasons).toEqual(["TARGET_DOMAIN_OUT_OF_SCOPE"]);
+    expect(gate.executionAudit).toEqual({
+      decision_id: "gate_decision_run-001",
+      admission_decision: "blocked",
+      effective_execution_mode: "dry_run",
+      risk_signals: ["TARGET_DOMAIN_OUT_OF_SCOPE"],
+      reason_codes: ["TARGET_DOMAIN_OUT_OF_SCOPE", "LIVE_MODE_APPROVED"]
+    });
     expect(gate.writeActionMatrixDecisions?.decisions).toEqual([]);
     expect(gate.readExecutionPolicy.blocked_actions).toEqual(["expand_new_live_surface_without_gate"]);
   });

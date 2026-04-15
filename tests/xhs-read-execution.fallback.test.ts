@@ -883,6 +883,46 @@ describe("xhs read execution fallback", () => {
     });
   });
 
+  it("keeps simulated read failures bound to the real audit run/session/profile", async () => {
+    const runId = "run-detail-simulated-failure-001";
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-simulated-failure-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId,
+          targetPage: "explore_detail_tab",
+          overrides: {
+            simulate_result: "gateway_invoker_failed"
+          }
+        }),
+        executionContext: createFallbackExecutionContext(runId)
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-simulated-failure-001"
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected simulated read failure");
+    }
+    expect(result.payload.gate_input).toMatchObject({
+      run_id: runId,
+      session_id: "nm-session-001",
+      profile: "xhs_001"
+    });
+    expect(result.payload.audit_record).toMatchObject({
+      run_id: runId,
+      session_id: "nm-session-001",
+      profile: "xhs_001"
+    });
+  });
+
   it("keeps detail execution failed when api fails and no fallback page state exists", async () => {
     const result = await executeXhsDetail(
       {

@@ -100,6 +100,23 @@ const asRecord = (value: unknown): JsonRecord | null =>
 
 const asArray = (value: unknown): unknown[] | null => (Array.isArray(value) ? value : null);
 
+const withExecutionAuditInFailurePayload = (
+  result: SearchExecutionResult,
+  executionAudit: JsonRecord | null
+): SearchExecutionResult => {
+  if (result.ok) {
+    return result;
+  }
+
+  return {
+    ...result,
+    payload: {
+      ...result.payload,
+      execution_audit: executionAudit
+    }
+  };
+};
+
 const classifyPageKind = (href: string, fallback: XhsReadCommandSpec["pageKind"]): string => {
   if (href.includes("/login")) {
     return "login";
@@ -473,59 +490,62 @@ const createPageStateFallbackFailure = (
   }
 ): SearchExecutionResult => {
   const requestId = `req-${env.randomId()}`;
-  return createFailure(
-    "ERR_EXECUTION_FAILED",
-    requestFailure.message,
-    {
-      ability_id: input.abilityId,
-      stage: "execution",
-      reason: requestFailure.reason
-    },
-    {
-      page_state: {
-        page_kind: classifyPageKind(env.getLocationHref(), spec.pageKind),
-        url: env.getLocationHref(),
-        title: env.getDocumentTitle(),
-        ready_state: env.getReadyState(),
-        fallback_used: true
+  return withExecutionAuditInFailurePayload(
+    createFailure(
+      "ERR_EXECUTION_FAILED",
+      requestFailure.message,
+      {
+        ability_id: input.abilityId,
+        stage: "execution",
+        reason: requestFailure.reason
       },
-      key_requests: [
-        {
-          request_id: requestId,
-          stage: "request",
-          method: spec.method,
-          url: spec.endpoint,
-          outcome: "failed",
-          ...(typeof requestFailure.statusCode === "number"
-            ? { status_code: requestFailure.statusCode }
-            : {}),
-          failure_reason: requestFailure.reason,
-          request_class: spec.requestClass
-        },
-        {
-          request_id: `${requestId}-page-state`,
-          stage: "page_state_fallback",
-          method: "N/A",
+      {
+        page_state: {
+          page_kind: classifyPageKind(env.getLocationHref(), spec.pageKind),
           url: env.getLocationHref(),
-          outcome: "completed",
-          fallback_reason: requestFailure.reason,
-          data_ref: spec.buildDataRef(input.params, payload),
-          duration_ms: Math.max(0, env.now() - startedAt)
+          title: env.getDocumentTitle(),
+          ready_state: env.getReadyState(),
+          fallback_used: true
+        },
+        key_requests: [
+          {
+            request_id: requestId,
+            stage: "request",
+            method: spec.method,
+            url: spec.endpoint,
+            outcome: "failed",
+            ...(typeof requestFailure.statusCode === "number"
+              ? { status_code: requestFailure.statusCode }
+              : {}),
+            failure_reason: requestFailure.reason,
+            request_class: spec.requestClass
+          },
+          {
+            request_id: `${requestId}-page-state`,
+            stage: "page_state_fallback",
+            method: "N/A",
+            url: env.getLocationHref(),
+            outcome: "completed",
+            fallback_reason: requestFailure.reason,
+            data_ref: spec.buildDataRef(input.params, payload),
+            duration_ms: Math.max(0, env.now() - startedAt)
+          }
+        ],
+        failure_site: {
+          stage: "request",
+          component: "network",
+          target: spec.endpoint,
+          summary: requestFailure.message
         }
-      ],
-      failure_site: {
-        stage: "request",
-        component: "network",
-        target: spec.endpoint,
+      },
+      createReadDiagnosis(spec, {
+        reason: requestFailure.reason,
         summary: requestFailure.message
-      }
-    },
-    createReadDiagnosis(spec, {
-      reason: requestFailure.reason,
-      summary: requestFailure.message
-    }),
-    gate,
-    auditRecord
+      }),
+      gate,
+      auditRecord
+    ),
+    gate.execution_audit as JsonRecord | null
   );
 };
 
@@ -564,6 +584,7 @@ const createGateOnlySuccess = (
       write_action_matrix_decisions: gate.write_action_matrix_decisions,
       consumer_gate_result: gate.consumer_gate_result,
       request_admission_result: gate.request_admission_result,
+      execution_audit: gate.execution_audit,
       approval_record: gate.approval_record,
       risk_state_output: resolveRiskStateOutput(gate, auditRecord),
       audit_record: auditRecord
@@ -585,7 +606,9 @@ const resolveSimulatedResult = (
   input: XhsReadExecutionInput,
   spec: XhsReadCommandSpec,
   payload: JsonRecord,
-  env: XhsSearchEnvironment
+  env: XhsSearchEnvironment,
+  gate?: ReturnType<typeof resolveGate>,
+  auditRecord?: ReturnType<typeof createAuditRecord>
 ): SearchExecutionResult | null => {
   if (!input.options.simulate_result) {
     return null;
@@ -703,28 +726,33 @@ const resolveSimulatedResult = (
             ? "create invoker failed"
             : input.options.simulate_result
     });
-  return createFailure(
-    "ERR_EXECUTION_FAILED",
-    mapped.message,
-    {
-      ability_id: input.abilityId,
-      stage: "execution",
-      reason: mapped.reason
-    },
-    createReadObservability({
-      spec,
-      href: env.getLocationHref(),
-      title: env.getDocumentTitle(),
-      readyState: env.getReadyState(),
-      requestId,
-      outcome: "failed",
-      ...(typeof mapped.statusCode === "number" ? { statusCode: mapped.statusCode } : {}),
-      failureReason: input.options.simulate_result
-    }),
-    createReadDiagnosis(spec, {
-      reason: mapped.reason,
-      summary: mapped.message
-    })
+  return withExecutionAuditInFailurePayload(
+    createFailure(
+      "ERR_EXECUTION_FAILED",
+      mapped.message,
+      {
+        ability_id: input.abilityId,
+        stage: "execution",
+        reason: mapped.reason
+      },
+      createReadObservability({
+        spec,
+        href: env.getLocationHref(),
+        title: env.getDocumentTitle(),
+        readyState: env.getReadyState(),
+        requestId,
+        outcome: "failed",
+        ...(typeof mapped.statusCode === "number" ? { statusCode: mapped.statusCode } : {}),
+        failureReason: input.options.simulate_result
+      }),
+      createReadDiagnosis(spec, {
+        reason: mapped.reason,
+        summary: mapped.message
+      }),
+      gate,
+      auditRecord
+    ),
+    (gate?.execution_audit as JsonRecord | null) ?? null
   );
 };
 
@@ -771,35 +799,38 @@ const executeXhsRead = async (
   };
 
   if (gate.consumer_gate_result.gate_decision === "blocked") {
-    return createFailure(
-      "ERR_EXECUTION_FAILED",
-      `执行模式门禁阻断了当前 ${spec.command} 请求`,
-      {
-        ability_id: input.abilityId,
-        stage: "execution",
-        reason: "EXECUTION_MODE_GATE_BLOCKED"
-      },
-      createReadObservability({
-        spec,
-        href: env.getLocationHref(),
-        title: env.getDocumentTitle(),
-        readyState: env.getReadyState(),
-        requestId: `req-${env.randomId()}`,
-        outcome: "failed",
-        failureReason: "EXECUTION_MODE_GATE_BLOCKED",
-        failureSite: {
+    return withExecutionAuditInFailurePayload(
+      createFailure(
+        "ERR_EXECUTION_FAILED",
+        `执行模式门禁阻断了当前 ${spec.command} 请求`,
+        {
+          ability_id: input.abilityId,
           stage: "execution",
-          component: "gate",
-          target: "requested_execution_mode",
+          reason: "EXECUTION_MODE_GATE_BLOCKED"
+        },
+        createReadObservability({
+          spec,
+          href: env.getLocationHref(),
+          title: env.getDocumentTitle(),
+          readyState: env.getReadyState(),
+          requestId: `req-${env.randomId()}`,
+          outcome: "failed",
+          failureReason: "EXECUTION_MODE_GATE_BLOCKED",
+          failureSite: {
+            stage: "execution",
+            component: "gate",
+            target: "requested_execution_mode",
+            summary: "执行模式门禁阻断"
+          }
+        }),
+        createReadDiagnosis(spec, {
+          reason: "EXECUTION_MODE_GATE_BLOCKED",
           summary: "执行模式门禁阻断"
-        }
-      }),
-      createReadDiagnosis(spec, {
-        reason: "EXECUTION_MODE_GATE_BLOCKED",
-        summary: "执行模式门禁阻断"
-      }),
-      gate,
-      auditRecord
+        }),
+        gate,
+        auditRecord
+      ),
+      gate.execution_audit as JsonRecord | null
     );
   }
 
@@ -810,7 +841,7 @@ const executeXhsRead = async (
     return createGateOnlySuccess(input, spec, gate, auditRecord, env, payload);
   }
 
-  const simulated = resolveSimulatedResult(input, spec, payload, env);
+  const simulated = resolveSimulatedResult(input, spec, payload, env, gate, auditRecord);
   if (simulated) {
     if (simulated.ok) {
       const summary = asRecord(simulated.payload.summary) ?? {};
@@ -836,6 +867,7 @@ const executeXhsRead = async (
             issue_action_matrix: gate.issue_action_matrix,
             consumer_gate_result: gate.consumer_gate_result,
             request_admission_result: gate.request_admission_result,
+            execution_audit: gate.execution_audit,
             approval_record: gate.approval_record,
             risk_state_output: resolveRiskStateOutput(gate, auditRecord),
             audit_record: auditRecord
@@ -851,6 +883,8 @@ const executeXhsRead = async (
         read_execution_policy: gate.read_execution_policy,
         issue_action_matrix: gate.issue_action_matrix,
         consumer_gate_result: gate.consumer_gate_result,
+        request_admission_result: gate.request_admission_result,
+        execution_audit: gate.execution_audit,
         approval_record: gate.approval_record,
         audit_record: auditRecord
       }
@@ -858,29 +892,32 @@ const executeXhsRead = async (
   }
 
   if (!containsCookie(env.getCookie(), "a1")) {
-    return createFailure(
-      "ERR_EXECUTION_FAILED",
-      `登录态缺失，无法执行 ${spec.command}`,
-      {
-        ability_id: input.abilityId,
-        stage: "execution",
-        reason: "SESSION_EXPIRED"
-      },
-      createReadObservability({
-        spec,
-        href: env.getLocationHref(),
-        title: env.getDocumentTitle(),
-        readyState: env.getReadyState(),
-        requestId: `req-${env.randomId()}`,
-        outcome: "failed",
-        failureReason: "SESSION_EXPIRED"
-      }),
-      createReadDiagnosis(spec, {
-        reason: "SESSION_EXPIRED",
-        summary: `登录态缺失，无法执行 ${spec.command}`
-      }),
-      gate,
-      auditRecord
+    return withExecutionAuditInFailurePayload(
+      createFailure(
+        "ERR_EXECUTION_FAILED",
+        `登录态缺失，无法执行 ${spec.command}`,
+        {
+          ability_id: input.abilityId,
+          stage: "execution",
+          reason: "SESSION_EXPIRED"
+        },
+        createReadObservability({
+          spec,
+          href: env.getLocationHref(),
+          title: env.getDocumentTitle(),
+          readyState: env.getReadyState(),
+          requestId: `req-${env.randomId()}`,
+          outcome: "failed",
+          failureReason: "SESSION_EXPIRED"
+        }),
+        createReadDiagnosis(spec, {
+          reason: "SESSION_EXPIRED",
+          summary: `登录态缺失，无法执行 ${spec.command}`
+        }),
+        gate,
+        auditRecord
+      ),
+      gate.execution_audit as JsonRecord | null
     );
   }
 
@@ -896,37 +933,40 @@ const executeXhsRead = async (
         detail: error instanceof Error ? error.message : String(error)
       });
     }
-    return createFailure(
-      "ERR_EXECUTION_FAILED",
-      "页面签名入口不可用",
-      {
-        ability_id: input.abilityId,
-        stage: "execution",
-        reason: "SIGNATURE_ENTRY_MISSING"
-      },
-      createReadObservability({
-        spec,
-        href: env.getLocationHref(),
-        title: env.getDocumentTitle(),
-        readyState: env.getReadyState(),
-        requestId: `req-${env.randomId()}`,
-        outcome: "failed",
-        failureReason: error instanceof Error ? error.message : String(error),
-        includeKeyRequest: false,
-        failureSite: {
-          stage: "action",
-          component: "page",
-          target: "window._webmsxyw",
-          summary: "页面签名入口不可用"
-        }
-      }),
-      createReadDiagnosis(spec, {
-        reason: "SIGNATURE_ENTRY_MISSING",
-        summary: "页面签名入口不可用",
-        category: "page_changed"
-      }),
-      gate,
-      auditRecord
+    return withExecutionAuditInFailurePayload(
+      createFailure(
+        "ERR_EXECUTION_FAILED",
+        "页面签名入口不可用",
+        {
+          ability_id: input.abilityId,
+          stage: "execution",
+          reason: "SIGNATURE_ENTRY_MISSING"
+        },
+        createReadObservability({
+          spec,
+          href: env.getLocationHref(),
+          title: env.getDocumentTitle(),
+          readyState: env.getReadyState(),
+          requestId: `req-${env.randomId()}`,
+          outcome: "failed",
+          failureReason: error instanceof Error ? error.message : String(error),
+          includeKeyRequest: false,
+          failureSite: {
+            stage: "action",
+            component: "page",
+            target: "window._webmsxyw",
+            summary: "页面签名入口不可用"
+          }
+        }),
+        createReadDiagnosis(spec, {
+          reason: "SIGNATURE_ENTRY_MISSING",
+          summary: "页面签名入口不可用",
+          category: "page_changed"
+        }),
+        gate,
+        auditRecord
+      ),
+      gate.execution_audit as JsonRecord | null
     );
   }
 
@@ -952,29 +992,32 @@ const executeXhsRead = async (
         detail: failure.detail
       });
     }
-    return createFailure(
-      "ERR_EXECUTION_FAILED",
-      failure.message,
-      {
-        ability_id: input.abilityId,
-        stage: "execution",
-        reason: failure.reason
-      },
-      createReadObservability({
-        spec,
-        href: env.getLocationHref(),
-        title: env.getDocumentTitle(),
-        readyState: env.getReadyState(),
-        requestId: `req-${env.randomId()}`,
-        outcome: "failed",
-        failureReason: failure.detail
-      }),
-      createReadDiagnosis(spec, {
-        reason: failure.reason,
-        summary: failure.message
-      }),
-      gate,
-      auditRecord
+    return withExecutionAuditInFailurePayload(
+      createFailure(
+        "ERR_EXECUTION_FAILED",
+        failure.message,
+        {
+          ability_id: input.abilityId,
+          stage: "execution",
+          reason: failure.reason
+        },
+        createReadObservability({
+          spec,
+          href: env.getLocationHref(),
+          title: env.getDocumentTitle(),
+          readyState: env.getReadyState(),
+          requestId: `req-${env.randomId()}`,
+          outcome: "failed",
+          failureReason: failure.detail
+        }),
+        createReadDiagnosis(spec, {
+          reason: failure.reason,
+          summary: failure.message
+        }),
+        gate,
+        auditRecord
+      ),
+      gate.execution_audit as JsonRecord | null
     );
   }
 
@@ -991,30 +1034,33 @@ const executeXhsRead = async (
         statusCode: response.status
       });
     }
-    return createFailure(
-      "ERR_EXECUTION_FAILED",
-      failure.message,
-      {
-        ability_id: input.abilityId,
-        stage: "execution",
-        reason: failure.reason
-      },
-      createReadObservability({
-        spec,
-        href: env.getLocationHref(),
-        title: env.getDocumentTitle(),
-        readyState: env.getReadyState(),
-        requestId: `req-${env.randomId()}`,
-        outcome: "failed",
-        statusCode: response.status,
-        failureReason: failure.reason
-      }),
-      createReadDiagnosis(spec, {
-        reason: failure.reason,
-        summary: failure.message
-      }),
-      gate,
-      auditRecord
+    return withExecutionAuditInFailurePayload(
+      createFailure(
+        "ERR_EXECUTION_FAILED",
+        failure.message,
+        {
+          ability_id: input.abilityId,
+          stage: "execution",
+          reason: failure.reason
+        },
+        createReadObservability({
+          spec,
+          href: env.getLocationHref(),
+          title: env.getDocumentTitle(),
+          readyState: env.getReadyState(),
+          requestId: `req-${env.randomId()}`,
+          outcome: "failed",
+          statusCode: response.status,
+          failureReason: failure.reason
+        }),
+        createReadDiagnosis(spec, {
+          reason: failure.reason,
+          summary: failure.message
+        }),
+        gate,
+        auditRecord
+      ),
+      gate.execution_audit as JsonRecord | null
     );
   }
 
@@ -1028,30 +1074,33 @@ const executeXhsRead = async (
         statusCode: response.status
       });
     }
-    return createFailure(
-      "ERR_EXECUTION_FAILED",
-      `${spec.command} 接口返回成功但未包含目标数据`,
-      {
-        ability_id: input.abilityId,
-        stage: "execution",
-        reason: "TARGET_DATA_NOT_FOUND"
-      },
-      createReadObservability({
-        spec,
-        href: env.getLocationHref(),
-        title: env.getDocumentTitle(),
-        readyState: env.getReadyState(),
-        requestId: `req-${env.randomId()}`,
-        outcome: "failed",
-        statusCode: response.status,
-        failureReason: "TARGET_DATA_NOT_FOUND"
-      }),
-      createReadDiagnosis(spec, {
-        reason: "TARGET_DATA_NOT_FOUND",
-        summary: `${spec.command} 接口返回成功但未包含目标数据`
-      }),
-      gate,
-      auditRecord
+    return withExecutionAuditInFailurePayload(
+      createFailure(
+        "ERR_EXECUTION_FAILED",
+        `${spec.command} 接口返回成功但未包含目标数据`,
+        {
+          ability_id: input.abilityId,
+          stage: "execution",
+          reason: "TARGET_DATA_NOT_FOUND"
+        },
+        createReadObservability({
+          spec,
+          href: env.getLocationHref(),
+          title: env.getDocumentTitle(),
+          readyState: env.getReadyState(),
+          requestId: `req-${env.randomId()}`,
+          outcome: "failed",
+          statusCode: response.status,
+          failureReason: "TARGET_DATA_NOT_FOUND"
+        }),
+        createReadDiagnosis(spec, {
+          reason: "TARGET_DATA_NOT_FOUND",
+          summary: `${spec.command} 接口返回成功但未包含目标数据`
+        }),
+        gate,
+        auditRecord
+      ),
+      gate.execution_audit as JsonRecord | null
     );
   }
 
@@ -1082,6 +1131,7 @@ const executeXhsRead = async (
         issue_action_matrix: gate.issue_action_matrix,
         consumer_gate_result: gate.consumer_gate_result,
         request_admission_result: gate.request_admission_result,
+        execution_audit: gate.execution_audit,
         approval_record: gate.approval_record,
         risk_state_output: resolveRiskStateOutput(gate, auditRecord),
         audit_record: auditRecord

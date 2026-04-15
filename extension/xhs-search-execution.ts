@@ -29,6 +29,23 @@ const asRecord = (value: unknown): JsonRecord | null =>
     ? (value as JsonRecord)
     : null;
 
+const withExecutionAuditInFailurePayload = (
+  result: SearchExecutionResult,
+  executionAudit: JsonRecord | null
+): SearchExecutionResult => {
+  if (result.ok) {
+    return result;
+  }
+
+  return {
+    ...result,
+    payload: {
+      ...result.payload,
+      execution_audit: executionAudit
+    }
+  };
+};
+
 export const executeXhsSearch = async (
   input: {
     abilityId: string;
@@ -44,34 +61,37 @@ export const executeXhsSearch = async (
   const auditRecord = createAuditRecord(input.executionContext, gate, env);
   const startedAt = env.now();
   if (gate.consumer_gate_result.gate_decision === "blocked") {
-    return createFailure(
-      "ERR_EXECUTION_FAILED",
-      "执行模式门禁阻断了当前 xhs.search 请求",
-      {
-        ability_id: input.abilityId,
-        stage: "execution",
-        reason: "EXECUTION_MODE_GATE_BLOCKED"
-      },
-      createObservability({
-        href: env.getLocationHref(),
-        title: env.getDocumentTitle(),
-        readyState: env.getReadyState(),
-        requestId: `req-${env.randomId()}`,
-        outcome: "failed",
-        failureReason: "EXECUTION_MODE_GATE_BLOCKED",
-        failureSite: {
+    return withExecutionAuditInFailurePayload(
+      createFailure(
+        "ERR_EXECUTION_FAILED",
+        "执行模式门禁阻断了当前 xhs.search 请求",
+        {
+          ability_id: input.abilityId,
           stage: "execution",
-          component: "gate",
-          target: "requested_execution_mode",
+          reason: "EXECUTION_MODE_GATE_BLOCKED"
+        },
+        createObservability({
+          href: env.getLocationHref(),
+          title: env.getDocumentTitle(),
+          readyState: env.getReadyState(),
+          requestId: `req-${env.randomId()}`,
+          outcome: "failed",
+          failureReason: "EXECUTION_MODE_GATE_BLOCKED",
+          failureSite: {
+            stage: "execution",
+            component: "gate",
+            target: "requested_execution_mode",
+            summary: "执行模式门禁阻断"
+          }
+        }),
+        createDiagnosis({
+          reason: "EXECUTION_MODE_GATE_BLOCKED",
           summary: "执行模式门禁阻断"
-        }
-      }),
-      createDiagnosis({
-        reason: "EXECUTION_MODE_GATE_BLOCKED",
-        summary: "执行模式门禁阻断"
-      }),
-      gate,
-      auditRecord
+        }),
+        gate,
+        auditRecord
+      ),
+      gate.execution_audit as JsonRecord | null
     );
   }
 
@@ -117,36 +137,39 @@ export const executeXhsSearch = async (
         };
 
     if (!isTrustedEditorInputValidation(validationResult)) {
-      return createFailure(
-        "ERR_EXECUTION_FAILED",
-        "editor_input 真实验证失败",
-        {
-          ability_id: input.abilityId,
-          stage: "execution",
-          reason: "EDITOR_INPUT_VALIDATION_FAILED",
-          ...buildEditorInputEvidence(validationResult)
-        },
-        createObservability({
-          href: env.getLocationHref(),
-          title: env.getDocumentTitle(),
-          readyState: env.getReadyState(),
-          requestId: `req-${env.randomId()}`,
-          outcome: "failed",
-          failureReason: "EDITOR_INPUT_VALIDATION_FAILED",
-          failureSite: {
+      return withExecutionAuditInFailurePayload(
+        createFailure(
+          "ERR_EXECUTION_FAILED",
+          "editor_input 真实验证失败",
+          {
+            ability_id: input.abilityId,
             stage: "execution",
-            component: "page",
-            target: validationResult.editor_locator ?? "editor_input",
-            summary: validationResult.failure_signals[0] ?? "editor_input validation failed"
-          }
-        }),
-        createDiagnosis({
-          reason: "EDITOR_INPUT_VALIDATION_FAILED",
-          summary: validationResult.failure_signals[0] ?? "editor_input validation failed",
-          category: "page_changed"
-        }),
-        gate,
-        auditRecord
+            reason: "EDITOR_INPUT_VALIDATION_FAILED",
+            ...buildEditorInputEvidence(validationResult)
+          },
+          createObservability({
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: "EDITOR_INPUT_VALIDATION_FAILED",
+            failureSite: {
+              stage: "execution",
+              component: "page",
+              target: validationResult.editor_locator ?? "editor_input",
+              summary: validationResult.failure_signals[0] ?? "editor_input validation failed"
+            }
+          }),
+          createDiagnosis({
+            reason: "EDITOR_INPUT_VALIDATION_FAILED",
+            summary: validationResult.failure_signals[0] ?? "editor_input validation failed",
+            category: "page_changed"
+          }),
+          gate,
+          auditRecord
+        ),
+        gate.execution_audit as JsonRecord | null
       );
     }
 
@@ -179,6 +202,8 @@ export const executeXhsSearch = async (
           write_interaction_tier: gate.write_interaction_tier,
           write_action_matrix_decisions: gate.write_action_matrix_decisions,
           consumer_gate_result: gate.consumer_gate_result,
+          request_admission_result: gate.request_admission_result,
+          execution_audit: gate.execution_audit,
           approval_record: gate.approval_record,
           risk_state_output: resolveRiskStateOutput(gate, auditRecord),
           audit_record: auditRecord,
@@ -220,6 +245,8 @@ export const executeXhsSearch = async (
             read_execution_policy: gate.read_execution_policy,
             issue_action_matrix: gate.issue_action_matrix,
             consumer_gate_result: gate.consumer_gate_result,
+            request_admission_result: gate.request_admission_result,
+            execution_audit: gate.execution_audit,
             approval_record: gate.approval_record,
             risk_state_output: resolveRiskStateOutput(gate, auditRecord),
             audit_record: auditRecord
@@ -239,6 +266,8 @@ export const executeXhsSearch = async (
         read_execution_policy: gate.read_execution_policy,
         issue_action_matrix: gate.issue_action_matrix,
         consumer_gate_result: gate.consumer_gate_result,
+        request_admission_result: gate.request_admission_result,
+        execution_audit: gate.execution_audit,
         approval_record: gate.approval_record,
         audit_record: auditRecord
       }
@@ -246,28 +275,31 @@ export const executeXhsSearch = async (
   }
 
   if (!containsCookie(env.getCookie(), "a1")) {
-    return createFailure(
-      "ERR_EXECUTION_FAILED",
-      "登录态缺失，无法执行 xhs.search",
-      {
-        ability_id: input.abilityId,
-        stage: "execution",
-        reason: "SESSION_EXPIRED"
-      },
-      createObservability({
-        href: env.getLocationHref(),
-        title: env.getDocumentTitle(),
-        readyState: env.getReadyState(),
-        requestId: `req-${env.randomId()}`,
-        outcome: "failed",
-        failureReason: "SESSION_EXPIRED"
-      }),
-      createDiagnosis({
-        reason: "SESSION_EXPIRED",
-        summary: "登录态缺失，无法执行 xhs.search"
-      }),
-      gate,
-      auditRecord
+    return withExecutionAuditInFailurePayload(
+      createFailure(
+        "ERR_EXECUTION_FAILED",
+        "登录态缺失，无法执行 xhs.search",
+        {
+          ability_id: input.abilityId,
+          stage: "execution",
+          reason: "SESSION_EXPIRED"
+        },
+        createObservability({
+          href: env.getLocationHref(),
+          title: env.getDocumentTitle(),
+          readyState: env.getReadyState(),
+          requestId: `req-${env.randomId()}`,
+          outcome: "failed",
+          failureReason: "SESSION_EXPIRED"
+        }),
+        createDiagnosis({
+          reason: "SESSION_EXPIRED",
+          summary: "登录态缺失，无法执行 xhs.search"
+        }),
+        gate,
+        auditRecord
+      ),
+      gate.execution_audit as JsonRecord | null
     );
   }
 
@@ -285,35 +317,38 @@ export const executeXhsSearch = async (
     signature = await env.callSignature(SEARCH_ENDPOINT, payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return createFailure(
-      "ERR_EXECUTION_FAILED",
-      "页面签名入口不可用",
-      {
-        ability_id: input.abilityId,
-        stage: "execution",
-        reason: "SIGNATURE_ENTRY_MISSING"
-      },
-      createObservability({
-        href: env.getLocationHref(),
-        title: env.getDocumentTitle(),
-        readyState: env.getReadyState(),
-        requestId: `req-${env.randomId()}`,
-        outcome: "failed",
-        failureReason: message,
-        includeKeyRequest: false,
-        failureSite: {
-          stage: "action",
-          component: "page",
-          target: "window._webmsxyw",
+    return withExecutionAuditInFailurePayload(
+      createFailure(
+        "ERR_EXECUTION_FAILED",
+        "页面签名入口不可用",
+        {
+          ability_id: input.abilityId,
+          stage: "execution",
+          reason: "SIGNATURE_ENTRY_MISSING"
+        },
+        createObservability({
+          href: env.getLocationHref(),
+          title: env.getDocumentTitle(),
+          readyState: env.getReadyState(),
+          requestId: `req-${env.randomId()}`,
+          outcome: "failed",
+          failureReason: message,
+          includeKeyRequest: false,
+          failureSite: {
+            stage: "action",
+            component: "page",
+            target: "window._webmsxyw",
+            summary: "页面签名入口不可用"
+          }
+        }),
+        createDiagnosis({
+          reason: "SIGNATURE_ENTRY_MISSING",
           summary: "页面签名入口不可用"
-        }
-      }),
-      createDiagnosis({
-        reason: "SIGNATURE_ENTRY_MISSING",
-        summary: "页面签名入口不可用"
-      }),
-      gate,
-      auditRecord
+        }),
+        gate,
+        auditRecord
+      ),
+      gate.execution_audit as JsonRecord | null
     );
   }
 
@@ -341,28 +376,31 @@ export const executeXhsSearch = async (
     });
   } catch (error) {
     const failure = inferRequestException(error);
-    return createFailure(
-      "ERR_EXECUTION_FAILED",
-      failure.message,
-      {
-        ability_id: input.abilityId,
-        stage: "execution",
-        reason: failure.reason
-      },
-      createObservability({
-        href: env.getLocationHref(),
-        title: env.getDocumentTitle(),
-        readyState: env.getReadyState(),
-        requestId: `req-${env.randomId()}`,
-        outcome: "failed",
-        failureReason: failure.detail
-      }),
-      createDiagnosis({
-        reason: failure.reason,
-        summary: failure.message
-      }),
-      gate,
-      auditRecord
+    return withExecutionAuditInFailurePayload(
+      createFailure(
+        "ERR_EXECUTION_FAILED",
+        failure.message,
+        {
+          ability_id: input.abilityId,
+          stage: "execution",
+          reason: failure.reason
+        },
+        createObservability({
+          href: env.getLocationHref(),
+          title: env.getDocumentTitle(),
+          readyState: env.getReadyState(),
+          requestId: `req-${env.randomId()}`,
+          outcome: "failed",
+          failureReason: failure.detail
+        }),
+        createDiagnosis({
+          reason: failure.reason,
+          summary: failure.message
+        }),
+        gate,
+        auditRecord
+      ),
+      gate.execution_audit as JsonRecord | null
     );
   }
 
@@ -370,29 +408,32 @@ export const executeXhsSearch = async (
   const businessCode = responseRecord?.code;
   if (response.status >= 400 || (typeof businessCode === "number" && businessCode !== 0)) {
     const failure = inferFailure(response.status, response.body);
-    return createFailure(
-      "ERR_EXECUTION_FAILED",
-      failure.message,
-      {
-        ability_id: input.abilityId,
-        stage: "execution",
-        reason: failure.reason
-      },
-      createObservability({
-        href: env.getLocationHref(),
-        title: env.getDocumentTitle(),
-        readyState: env.getReadyState(),
-        requestId: `req-${env.randomId()}`,
-        outcome: "failed",
-        statusCode: response.status,
-        failureReason: failure.reason
-      }),
-      createDiagnosis({
-        reason: failure.reason,
-        summary: failure.message
-      }),
-      gate,
-      auditRecord
+    return withExecutionAuditInFailurePayload(
+      createFailure(
+        "ERR_EXECUTION_FAILED",
+        failure.message,
+        {
+          ability_id: input.abilityId,
+          stage: "execution",
+          reason: failure.reason
+        },
+        createObservability({
+          href: env.getLocationHref(),
+          title: env.getDocumentTitle(),
+          readyState: env.getReadyState(),
+          requestId: `req-${env.randomId()}`,
+          outcome: "failed",
+          statusCode: response.status,
+          failureReason: failure.reason
+        }),
+        createDiagnosis({
+          reason: failure.reason,
+          summary: failure.message
+        }),
+        gate,
+        auditRecord
+      ),
+      gate.execution_audit as JsonRecord | null
     );
   }
 
@@ -426,6 +467,8 @@ export const executeXhsSearch = async (
         read_execution_policy: gate.read_execution_policy,
         issue_action_matrix: gate.issue_action_matrix,
         consumer_gate_result: gate.consumer_gate_result,
+        request_admission_result: gate.request_admission_result,
+        execution_audit: gate.execution_audit,
         approval_record: gate.approval_record,
         risk_state_output: resolveRiskStateOutput(gate, auditRecord),
         audit_record: auditRecord

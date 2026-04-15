@@ -4245,12 +4245,18 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     : null;
 const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
+const asOptionalBoolean = (value) => typeof value === "boolean" ? value : null;
 const resolveRiskState = (value) => resolveSharedRiskState(value);
 const resolveIssueScope = (value) => resolveSharedIssueScope(value);
 const isIssue208EditorInputValidation = (options) => options.issue_scope === "issue_208" &&
     options.action_type === "write" &&
     options.requested_execution_mode === "live_write" &&
     options.validation_action === "editor_input";
+const shouldDeferAnonymousCanonicalGateDiagnostics = (input) => {
+    const resourceBinding = asRecord(input.upstreamAuthorizationRequest?.resource_binding);
+    return (resourceBinding?.resource_kind === "anonymous_context" &&
+        (input.anonymousIsolationVerified === null || input.targetSiteLoggedIn === null));
+};
 const buildGateDecisionId = (context, options) => resolveXhsGateDecisionId({
     runId: context.runId,
     requestId: context.requestId,
@@ -4287,7 +4293,9 @@ const resolveGate = (options, context, actualTargetUrl) => {
     const approvalRecord = asRecord(providedApprovalRecord);
     const decisionId = buildGateDecisionId(context, options);
     const approvalId = asNonEmptyString(approvalRecord?.approval_id) ?? undefined;
-    return evaluateXhsGate({
+    const anonymousIsolationVerified = asOptionalBoolean(options.__anonymous_isolation_verified);
+    const targetSiteLoggedIn = asOptionalBoolean(options.target_site_logged_in);
+    const gate = evaluateXhsGate({
         issueScope: options.issue_scope,
         riskState: options.risk_state,
         targetDomain: options.target_domain,
@@ -4304,8 +4312,8 @@ const resolveGate = (options, context, actualTargetUrl) => {
         legacyRequestedExecutionMode: options.__legacy_requested_execution_mode,
         runtimeProfileRef: options.__runtime_profile_ref ?? context.profile,
         upstreamAuthorizationRequest: options.upstream_authorization_request,
-        anonymousIsolationVerified: options.__anonymous_isolation_verified === true,
-        targetSiteLoggedIn: options.target_site_logged_in === true,
+        ...(anonymousIsolationVerified !== null ? { anonymousIsolationVerified } : {}),
+        ...(targetSiteLoggedIn !== null ? { targetSiteLoggedIn } : {}),
         runId: context.runId,
         sessionId: context.sessionId,
         gateInvocationId: context.gateInvocationId,
@@ -4318,6 +4326,18 @@ const resolveGate = (options, context, actualTargetUrl) => {
         issue208EditorInputValidation: isIssue208EditorInputValidation(options),
         treatMissingEditorValidationAsUnsupported: true
     });
+    if (shouldDeferAnonymousCanonicalGateDiagnostics({
+        upstreamAuthorizationRequest: options.upstream_authorization_request,
+        anonymousIsolationVerified,
+        targetSiteLoggedIn
+    })) {
+        return {
+            ...gate,
+            request_admission_result: null,
+            execution_audit: null
+        };
+    }
+    return gate;
 };
 const createAuditRecord = (context, gate, env) => {
     if (gate.gate_input.issue_scope === "issue_209" &&
@@ -4416,6 +4436,7 @@ const createGateOnlySuccess = (input, gate, auditRecord, env) => ({
             write_action_matrix_decisions: gate.write_action_matrix_decisions,
             consumer_gate_result: gate.consumer_gate_result,
             request_admission_result: gate.request_admission_result,
+            execution_audit: gate.execution_audit,
             approval_record: gate.approval_record,
             risk_state_output: resolveRiskStateOutput(gate, auditRecord),
             audit_record: auditRecord
@@ -4466,12 +4487,24 @@ const {
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
+const withExecutionAuditInFailurePayload = (result, executionAudit) => {
+    if (result.ok) {
+        return result;
+    }
+    return {
+        ...result,
+        payload: {
+            ...result.payload,
+            execution_audit: executionAudit
+        }
+    };
+};
 const executeXhsSearch = async (input, env) => {
     const gate = resolveGate(input.options, input.executionContext, env.getLocationHref());
     const auditRecord = createAuditRecord(input.executionContext, gate, env);
     const startedAt = env.now();
     if (gate.consumer_gate_result.gate_decision === "blocked") {
-        return createFailure("ERR_EXECUTION_FAILED", "执行模式门禁阻断了当前 xhs.search 请求", {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "执行模式门禁阻断了当前 xhs.search 请求", {
             ability_id: input.abilityId,
             stage: "execution",
             reason: "EXECUTION_MODE_GATE_BLOCKED"
@@ -4491,7 +4524,7 @@ const executeXhsSearch = async (input, env) => {
         }), createDiagnosis({
             reason: "EXECUTION_MODE_GATE_BLOCKED",
             summary: "执行模式门禁阻断"
-        }), gate, auditRecord);
+        }), gate, auditRecord), gate.execution_audit);
     }
     if (gate.consumer_gate_result.effective_execution_mode === "dry_run" ||
         gate.consumer_gate_result.effective_execution_mode === "recon") {
@@ -4528,7 +4561,7 @@ const executeXhsSearch = async (input, env) => {
                 minimum_replay: ["enter_editable_mode", "focus_editor", "type_short_text", "blur_or_reobserve"]
             };
         if (!isTrustedEditorInputValidation(validationResult)) {
-            return createFailure("ERR_EXECUTION_FAILED", "editor_input 真实验证失败", {
+            return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "editor_input 真实验证失败", {
                 ability_id: input.abilityId,
                 stage: "execution",
                 reason: "EDITOR_INPUT_VALIDATION_FAILED",
@@ -4550,7 +4583,7 @@ const executeXhsSearch = async (input, env) => {
                 reason: "EDITOR_INPUT_VALIDATION_FAILED",
                 summary: validationResult.failure_signals[0] ?? "editor_input validation failed",
                 category: "page_changed"
-            }), gate, auditRecord);
+            }), gate, auditRecord), gate.execution_audit);
         }
         return {
             ok: true,
@@ -4581,6 +4614,8 @@ const executeXhsSearch = async (input, env) => {
                     write_interaction_tier: gate.write_interaction_tier,
                     write_action_matrix_decisions: gate.write_action_matrix_decisions,
                     consumer_gate_result: gate.consumer_gate_result,
+                    request_admission_result: gate.request_admission_result,
+                    execution_audit: gate.execution_audit,
                     approval_record: gate.approval_record,
                     risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                     audit_record: auditRecord,
@@ -4621,6 +4656,8 @@ const executeXhsSearch = async (input, env) => {
                         read_execution_policy: gate.read_execution_policy,
                         issue_action_matrix: gate.issue_action_matrix,
                         consumer_gate_result: gate.consumer_gate_result,
+                        request_admission_result: gate.request_admission_result,
+                        execution_audit: gate.execution_audit,
                         approval_record: gate.approval_record,
                         risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                         audit_record: auditRecord
@@ -4639,13 +4676,15 @@ const executeXhsSearch = async (input, env) => {
                 read_execution_policy: gate.read_execution_policy,
                 issue_action_matrix: gate.issue_action_matrix,
                 consumer_gate_result: gate.consumer_gate_result,
+                request_admission_result: gate.request_admission_result,
+                execution_audit: gate.execution_audit,
                 approval_record: gate.approval_record,
                 audit_record: auditRecord
             }
         };
     }
     if (!containsCookie(env.getCookie(), "a1")) {
-        return createFailure("ERR_EXECUTION_FAILED", "登录态缺失，无法执行 xhs.search", {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "登录态缺失，无法执行 xhs.search", {
             ability_id: input.abilityId,
             stage: "execution",
             reason: "SESSION_EXPIRED"
@@ -4659,7 +4698,7 @@ const executeXhsSearch = async (input, env) => {
         }), createDiagnosis({
             reason: "SESSION_EXPIRED",
             summary: "登录态缺失，无法执行 xhs.search"
-        }), gate, auditRecord);
+        }), gate, auditRecord), gate.execution_audit);
     }
     const payload = {
         keyword: input.params.query,
@@ -4675,7 +4714,7 @@ const executeXhsSearch = async (input, env) => {
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        return createFailure("ERR_EXECUTION_FAILED", "页面签名入口不可用", {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "页面签名入口不可用", {
             ability_id: input.abilityId,
             stage: "execution",
             reason: "SIGNATURE_ENTRY_MISSING"
@@ -4696,7 +4735,7 @@ const executeXhsSearch = async (input, env) => {
         }), createDiagnosis({
             reason: "SIGNATURE_ENTRY_MISSING",
             summary: "页面签名入口不可用"
-        }), gate, auditRecord);
+        }), gate, auditRecord), gate.execution_audit);
     }
     const headers = {
         Accept: "application/json, text/plain, */*",
@@ -4721,7 +4760,7 @@ const executeXhsSearch = async (input, env) => {
     }
     catch (error) {
         const failure = inferRequestException(error);
-        return createFailure("ERR_EXECUTION_FAILED", failure.message, {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failure.message, {
             ability_id: input.abilityId,
             stage: "execution",
             reason: failure.reason
@@ -4735,13 +4774,13 @@ const executeXhsSearch = async (input, env) => {
         }), createDiagnosis({
             reason: failure.reason,
             summary: failure.message
-        }), gate, auditRecord);
+        }), gate, auditRecord), gate.execution_audit);
     }
     const responseRecord = asRecord(response.body);
     const businessCode = responseRecord?.code;
     if (response.status >= 400 || (typeof businessCode === "number" && businessCode !== 0)) {
         const failure = inferFailure(response.status, response.body);
-        return createFailure("ERR_EXECUTION_FAILED", failure.message, {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failure.message, {
             ability_id: input.abilityId,
             stage: "execution",
             reason: failure.reason
@@ -4756,7 +4795,7 @@ const executeXhsSearch = async (input, env) => {
         }), createDiagnosis({
             reason: failure.reason,
             summary: failure.message
-        }), gate, auditRecord);
+        }), gate, auditRecord), gate.execution_audit);
     }
     const count = parseCount(response.body);
     return {
@@ -4788,6 +4827,8 @@ const executeXhsSearch = async (input, env) => {
                 read_execution_policy: gate.read_execution_policy,
                 issue_action_matrix: gate.issue_action_matrix,
                 consumer_gate_result: gate.consumer_gate_result,
+                request_admission_result: gate.request_admission_result,
+                execution_audit: gate.execution_audit,
                 approval_record: gate.approval_record,
                 risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                 audit_record: auditRecord
@@ -4857,6 +4898,18 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asArray = (value) => (Array.isArray(value) ? value : null);
+const withExecutionAuditInFailurePayload = (result, executionAudit) => {
+    if (result.ok) {
+        return result;
+    }
+    return {
+        ...result,
+        payload: {
+            ...result.payload,
+            execution_audit: executionAudit
+        }
+    };
+};
 const classifyPageKind = (href, fallback) => {
     if (href.includes("/login")) {
         return "login";
@@ -5128,7 +5181,7 @@ const canUsePageStateFallback = (spec, params, root) => spec.command === "xhs.de
     : hasUserHomePageStateFallback(params, root);
 const createPageStateFallbackFailure = (input, spec, gate, auditRecord, env, payload, startedAt, requestFailure) => {
     const requestId = `req-${env.randomId()}`;
-    return createFailure("ERR_EXECUTION_FAILED", requestFailure.message, {
+    return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", requestFailure.message, {
         ability_id: input.abilityId,
         stage: "execution",
         reason: requestFailure.reason
@@ -5173,7 +5226,7 @@ const createPageStateFallbackFailure = (input, spec, gate, auditRecord, env, pay
     }, createReadDiagnosis(spec, {
         reason: requestFailure.reason,
         summary: requestFailure.message
-    }), gate, auditRecord);
+    }), gate, auditRecord), gate.execution_audit);
 };
 const createGateOnlySuccess = (input, spec, gate, auditRecord, env, payload) => ({
     ok: true,
@@ -5203,6 +5256,7 @@ const createGateOnlySuccess = (input, spec, gate, auditRecord, env, payload) => 
             write_action_matrix_decisions: gate.write_action_matrix_decisions,
             consumer_gate_result: gate.consumer_gate_result,
             request_admission_result: gate.request_admission_result,
+            execution_audit: gate.execution_audit,
             approval_record: gate.approval_record,
             risk_state_output: resolveRiskStateOutput(gate, auditRecord),
             audit_record: auditRecord
@@ -5219,7 +5273,7 @@ const createGateOnlySuccess = (input, spec, gate, auditRecord, env, payload) => 
         }
     }
 });
-const resolveSimulatedResult = (input, spec, payload, env) => {
+const resolveSimulatedResult = (input, spec, payload, env, gate, auditRecord) => {
     if (!input.options.simulate_result) {
         return null;
     }
@@ -5330,7 +5384,7 @@ const resolveSimulatedResult = (input, spec, payload, env) => {
                     ? "create invoker failed"
                     : input.options.simulate_result
         });
-    return createFailure("ERR_EXECUTION_FAILED", mapped.message, {
+    return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", mapped.message, {
         ability_id: input.abilityId,
         stage: "execution",
         reason: mapped.reason
@@ -5346,7 +5400,7 @@ const resolveSimulatedResult = (input, spec, payload, env) => {
     }), createReadDiagnosis(spec, {
         reason: mapped.reason,
         summary: mapped.message
-    }));
+    }), gate, auditRecord), gate?.execution_audit ?? null);
 };
 const buildHeaders = (env, options, signature) => ({
     Accept: "application/json, text/plain, */*",
@@ -5380,7 +5434,7 @@ const executeXhsRead = async (input, spec, env) => {
         return asRecord(env.getPageStateRoot?.());
     };
     if (gate.consumer_gate_result.gate_decision === "blocked") {
-        return createFailure("ERR_EXECUTION_FAILED", `执行模式门禁阻断了当前 ${spec.command} 请求`, {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", `执行模式门禁阻断了当前 ${spec.command} 请求`, {
             ability_id: input.abilityId,
             stage: "execution",
             reason: "EXECUTION_MODE_GATE_BLOCKED"
@@ -5401,13 +5455,13 @@ const executeXhsRead = async (input, spec, env) => {
         }), createReadDiagnosis(spec, {
             reason: "EXECUTION_MODE_GATE_BLOCKED",
             summary: "执行模式门禁阻断"
-        }), gate, auditRecord);
+        }), gate, auditRecord), gate.execution_audit);
     }
     if (gate.consumer_gate_result.effective_execution_mode === "dry_run" ||
         gate.consumer_gate_result.effective_execution_mode === "recon") {
         return createGateOnlySuccess(input, spec, gate, auditRecord, env, payload);
     }
-    const simulated = resolveSimulatedResult(input, spec, payload, env);
+    const simulated = resolveSimulatedResult(input, spec, payload, env, gate, auditRecord);
     if (simulated) {
         if (simulated.ok) {
             const summary = asRecord(simulated.payload.summary) ?? {};
@@ -5433,6 +5487,7 @@ const executeXhsRead = async (input, spec, env) => {
                         issue_action_matrix: gate.issue_action_matrix,
                         consumer_gate_result: gate.consumer_gate_result,
                         request_admission_result: gate.request_admission_result,
+                        execution_audit: gate.execution_audit,
                         approval_record: gate.approval_record,
                         risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                         audit_record: auditRecord
@@ -5447,13 +5502,15 @@ const executeXhsRead = async (input, spec, env) => {
                 read_execution_policy: gate.read_execution_policy,
                 issue_action_matrix: gate.issue_action_matrix,
                 consumer_gate_result: gate.consumer_gate_result,
+                request_admission_result: gate.request_admission_result,
+                execution_audit: gate.execution_audit,
                 approval_record: gate.approval_record,
                 audit_record: auditRecord
             }
         };
     }
     if (!containsCookie(env.getCookie(), "a1")) {
-        return createFailure("ERR_EXECUTION_FAILED", `登录态缺失，无法执行 ${spec.command}`, {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", `登录态缺失，无法执行 ${spec.command}`, {
             ability_id: input.abilityId,
             stage: "execution",
             reason: "SESSION_EXPIRED"
@@ -5468,7 +5525,7 @@ const executeXhsRead = async (input, spec, env) => {
         }), createReadDiagnosis(spec, {
             reason: "SESSION_EXPIRED",
             summary: `登录态缺失，无法执行 ${spec.command}`
-        }), gate, auditRecord);
+        }), gate, auditRecord), gate.execution_audit);
     }
     let signature;
     try {
@@ -5483,7 +5540,7 @@ const executeXhsRead = async (input, spec, env) => {
                 detail: error instanceof Error ? error.message : String(error)
             });
         }
-        return createFailure("ERR_EXECUTION_FAILED", "页面签名入口不可用", {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "页面签名入口不可用", {
             ability_id: input.abilityId,
             stage: "execution",
             reason: "SIGNATURE_ENTRY_MISSING"
@@ -5506,7 +5563,7 @@ const executeXhsRead = async (input, spec, env) => {
             reason: "SIGNATURE_ENTRY_MISSING",
             summary: "页面签名入口不可用",
             category: "page_changed"
-        }), gate, auditRecord);
+        }), gate, auditRecord), gate.execution_audit);
     }
     let response;
     try {
@@ -5530,7 +5587,7 @@ const executeXhsRead = async (input, spec, env) => {
                 detail: failure.detail
             });
         }
-        return createFailure("ERR_EXECUTION_FAILED", failure.message, {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failure.message, {
             ability_id: input.abilityId,
             stage: "execution",
             reason: failure.reason
@@ -5545,7 +5602,7 @@ const executeXhsRead = async (input, spec, env) => {
         }), createReadDiagnosis(spec, {
             reason: failure.reason,
             summary: failure.message
-        }), gate, auditRecord);
+        }), gate, auditRecord), gate.execution_audit);
     }
     const responseRecord = asRecord(response.body);
     const businessCode = responseRecord?.code;
@@ -5560,7 +5617,7 @@ const executeXhsRead = async (input, spec, env) => {
                 statusCode: response.status
             });
         }
-        return createFailure("ERR_EXECUTION_FAILED", failure.message, {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failure.message, {
             ability_id: input.abilityId,
             stage: "execution",
             reason: failure.reason
@@ -5576,7 +5633,7 @@ const executeXhsRead = async (input, spec, env) => {
         }), createReadDiagnosis(spec, {
             reason: failure.reason,
             summary: failure.message
-        }), gate, auditRecord);
+        }), gate, auditRecord), gate.execution_audit);
     }
     if (!responseContainsRequestedTarget(spec, input.params, response.body)) {
         const pageStateRoot = await resolvePageStateRoot();
@@ -5588,7 +5645,7 @@ const executeXhsRead = async (input, spec, env) => {
                 statusCode: response.status
             });
         }
-        return createFailure("ERR_EXECUTION_FAILED", `${spec.command} 接口返回成功但未包含目标数据`, {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", `${spec.command} 接口返回成功但未包含目标数据`, {
             ability_id: input.abilityId,
             stage: "execution",
             reason: "TARGET_DATA_NOT_FOUND"
@@ -5604,7 +5661,7 @@ const executeXhsRead = async (input, spec, env) => {
         }), createReadDiagnosis(spec, {
             reason: "TARGET_DATA_NOT_FOUND",
             summary: `${spec.command} 接口返回成功但未包含目标数据`
-        }), gate, auditRecord);
+        }), gate, auditRecord), gate.execution_audit);
     }
     return {
         ok: true,
@@ -5633,6 +5690,7 @@ const executeXhsRead = async (input, spec, env) => {
                 issue_action_matrix: gate.issue_action_matrix,
                 consumer_gate_result: gate.consumer_gate_result,
                 request_admission_result: gate.request_admission_result,
+                execution_audit: gate.execution_audit,
                 approval_record: gate.approval_record,
                 risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                 audit_record: auditRecord

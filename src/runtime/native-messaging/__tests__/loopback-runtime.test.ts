@@ -74,6 +74,49 @@ const createIssue209InvocationLinkage = (runId: string, suffix: string) => {
   return { gateInvocationId, decisionId, approvalId };
 };
 
+const buildCanonicalReadAuthorizationRequest = (input: {
+  requestRef: string;
+  targetTabId: number;
+  targetPage?: "search_result_tab";
+  profileRef: string;
+  approvalRefs?: string[];
+  auditRefs?: string[];
+  resourceStateSnapshot?: "active" | "cool_down" | "paused";
+}) => ({
+  action_request: {
+    request_ref: input.requestRef,
+    action_name: "xhs.read_search_results",
+    action_category: "read",
+    requested_at: "2026-04-15T09:00:00.000Z"
+  },
+  resource_binding: {
+    binding_ref: `binding_${input.requestRef}`,
+    resource_kind: "profile_session",
+    profile_ref: input.profileRef
+  },
+  authorization_grant: {
+    grant_ref: `grant_${input.requestRef}`,
+    allowed_actions: ["xhs.read_search_results"],
+    binding_scope: {
+      allowed_resource_kinds: ["profile_session"],
+      allowed_profile_refs: [input.profileRef]
+    },
+    target_scope: {
+      allowed_domains: ["www.xiaohongshu.com"],
+      allowed_pages: [input.targetPage ?? "search_result_tab"]
+    },
+    approval_refs: input.approvalRefs ?? [],
+    audit_refs: input.auditRefs ?? [],
+    resource_state_snapshot: input.resourceStateSnapshot ?? "active"
+  },
+  runtime_target: {
+    target_ref: `target_${input.requestRef}`,
+    domain: "www.xiaohongshu.com",
+    page: input.targetPage ?? "search_result_tab",
+    tab_id: input.targetTabId
+  }
+});
+
 describe("native messaging legacy loopback runtime", () => {
   it("keeps xhs.search observability page_state aligned with the shared contract", async () => {
     const bridge = new NativeMessagingBridge({
@@ -120,12 +163,14 @@ describe("native messaging legacy loopback runtime", () => {
     });
 
     expect(result.payload).toMatchObject({
+      execution_audit: null,
       observability: {
         page_state: {
           observation_status: "complete"
         }
       }
     });
+    expect(result.payload.observability).not.toHaveProperty("execution_audit");
   });
 
   it("blocks stale approval linkage in live loopback bundles", async () => {
@@ -161,6 +206,13 @@ describe("native messaging legacy loopback runtime", () => {
           action_type: "read",
           requested_execution_mode: "live_read_high_risk",
           risk_state: "allowed",
+          upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+            requestRef: "upstream_loopback_custom_approval_001",
+            targetTabId: 32,
+            profileRef: "loopback_profile",
+            approvalRefs: ["approval_admission_external_001"],
+            auditRefs: ["audit_admission_external_001"]
+          }),
           approval_record: {
             approval_id: "gate_appr_custom_run-loopback-custom-approval-001",
             decision_id: "gate_decision_custom_run-loopback-custom-approval-001",
@@ -182,11 +234,29 @@ describe("native messaging legacy loopback runtime", () => {
     expect(result.ok).toBe(false);
     expect(result.payload).toEqual(
       expect.objectContaining({
+        execution_audit: expect.objectContaining({
+          audit_ref: `exec_audit_${decisionId}`,
+          request_ref: "upstream_loopback_custom_approval_001",
+          request_admission_decision: "blocked",
+          compatibility_refs: expect.objectContaining({
+            approval_admission_ref: null,
+            audit_admission_ref: null,
+            approval_record_ref: null,
+            audit_record_ref: `gate_evt_${decisionId}`
+          }),
+          risk_signals: expect.arrayContaining([
+            "MANUAL_CONFIRMATION_MISSING",
+            "AUDIT_RECORD_MISSING"
+          ])
+        }),
         gate_outcome: expect.objectContaining({
           decision_id: decisionId,
           effective_execution_mode: "dry_run",
           gate_decision: "blocked",
-          gate_reasons: expect.arrayContaining(["MANUAL_CONFIRMATION_MISSING"])
+          gate_reasons: expect.arrayContaining([
+            "MANUAL_CONFIRMATION_MISSING",
+            "AUDIT_RECORD_MISSING"
+          ])
         }),
         approval_record: expect.objectContaining({
           approval_id: null,
@@ -198,6 +268,12 @@ describe("native messaging legacy loopback runtime", () => {
         })
       })
     );
+    expect(result.payload.observability).toMatchObject({
+      failure_site: {
+        summary: "MANUAL_CONFIRMATION_MISSING"
+      }
+    });
+    expect(result.payload.observability).not.toHaveProperty("execution_audit");
   });
 
   it("keeps approval_id null in blocked loopback gate bundles without approval", async () => {
@@ -268,6 +344,17 @@ describe("native messaging legacy loopback runtime", () => {
       runId,
       "live-limited-001"
     );
+    const admissionContext = createApprovedReadAdmissionContext({
+      runId,
+      requestId,
+      targetTabId: 33,
+      requestedExecutionMode: "live_read_limited",
+      riskState: "limited"
+    });
+    const approvalAdmissionRef = String(
+      admissionContext.approval_admission_evidence.approval_admission_ref
+    );
+    const auditAdmissionRef = String(admissionContext.audit_admission_evidence.audit_admission_ref);
     const bridge = new NativeMessagingBridge({
       transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
     });
@@ -298,6 +385,14 @@ describe("native messaging legacy loopback runtime", () => {
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           limited_read_rollout_ready_true: true,
+          upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+            requestRef: `upstream_req_${requestId}`,
+            targetTabId: 33,
+            profileRef: "loopback_profile",
+            approvalRefs: [approvalAdmissionRef],
+            auditRefs: [auditAdmissionRef],
+            resourceStateSnapshot: "cool_down"
+          }),
           approval_record: {
             approved: true,
             approver: "qa-reviewer",
@@ -310,13 +405,7 @@ describe("native messaging legacy loopback runtime", () => {
             action_type_confirmed: true
             }
           },
-          admission_context: createApprovedReadAdmissionContext({
-            runId,
-            requestId,
-            targetTabId: 33,
-            requestedExecutionMode: "live_read_limited",
-            riskState: "limited"
-          }),
+          admission_context: admissionContext,
           audit_record: {
             event_id: "audit-live-read-limited-loopback-001",
             decision_id: decisionId,
@@ -338,6 +427,22 @@ describe("native messaging legacy loopback runtime", () => {
     expect(result.payload).toEqual(
       expect.objectContaining({
         summary: expect.objectContaining({
+          execution_audit: expect.objectContaining({
+            audit_ref: `exec_audit_${decisionId}`,
+            request_ref: `upstream_req_${requestId}`,
+            request_admission_decision: "allowed",
+            consumed_inputs: {
+              action_request_ref: `upstream_req_${requestId}`,
+              resource_binding_ref: `binding_upstream_req_${requestId}`,
+              authorization_grant_ref: `grant_upstream_req_${requestId}`,
+              runtime_target_ref: `target_upstream_req_${requestId}`
+            },
+            compatibility_refs: expect.objectContaining({
+              approval_admission_ref: approvalAdmissionRef,
+              audit_admission_ref: auditAdmissionRef
+            }),
+            risk_signals: expect.not.arrayContaining(["LIVE_MODE_APPROVED"])
+          }),
           approval_record: expect.objectContaining({
             approval_id: approvalId,
             decision_id: decisionId
@@ -357,6 +462,11 @@ describe("native messaging legacy loopback runtime", () => {
         })
       })
     );
+    expect(result.payload.observability).toMatchObject({
+      page_state: {
+        observation_status: "complete"
+      }
+    });
     expect(result.payload).toEqual(
       expect.objectContaining({
         summary: expect.objectContaining({
@@ -368,6 +478,119 @@ describe("native messaging legacy loopback runtime", () => {
         })
       })
     );
+  });
+
+  it("keeps canonical execution_audit on execution failures without leaking into observability", async () => {
+    const runId = "run-loopback-live-read-failure-001";
+    const requestId = "issue209-live-read-failure-001";
+    const targetTabId = 37;
+    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+      runId,
+      "live-read-failure-001"
+    );
+    const admissionContext = createApprovedReadAdmissionContext({
+      runId,
+      requestId,
+      targetTabId,
+      requestedExecutionMode: "live_read_limited",
+      riskState: "limited"
+    });
+    const approvalAdmissionRef = String(
+      admissionContext.approval_admission_evidence.approval_admission_ref
+    );
+    const auditAdmissionRef = String(admissionContext.audit_admission_evidence.audit_admission_ref);
+    const bridge = new NativeMessagingBridge({
+      transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
+    });
+
+    const result = await bridge.runCommand({
+      runId,
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "xhs.search",
+      params: {
+        request_id: requestId,
+        gate_invocation_id: gateInvocationId,
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          simulate_result: "login_required",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: targetTabId,
+          target_page: "search_result_tab",
+          issue_scope: "issue_209",
+          action_type: "read",
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          limited_read_rollout_ready_true: true,
+          upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+            requestRef: `upstream_req_${requestId}`,
+            targetTabId,
+            profileRef: "loopback_profile",
+            approvalRefs: [approvalAdmissionRef],
+            auditRefs: [auditAdmissionRef],
+            resourceStateSnapshot: "cool_down"
+          }),
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          },
+          admission_context: admissionContext,
+          audit_record: {
+            event_id: `audit-${requestId}`,
+            decision_id: decisionId,
+            approval_id: `gate_appr_${decisionId}`,
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: targetTabId,
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "live_read_limited",
+            gate_decision: "allowed",
+            recorded_at: "2026-03-23T10:00:30Z"
+          }
+        }
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.payload).toEqual(
+      expect.objectContaining({
+        execution_audit: expect.objectContaining({
+          audit_ref: `exec_audit_${decisionId}`,
+          request_ref: `upstream_req_${requestId}`,
+          request_admission_decision: "allowed",
+          compatibility_refs: expect.objectContaining({
+            approval_admission_ref: approvalAdmissionRef,
+            audit_admission_ref: auditAdmissionRef
+          }),
+          risk_signals: expect.not.arrayContaining(["LIVE_MODE_APPROVED"])
+        }),
+        details: expect.objectContaining({
+          reason: "SESSION_EXPIRED"
+        })
+      })
+    );
+    expect(result.payload.observability).toMatchObject({
+      failure_site: {
+        summary: "login_required"
+      }
+    });
+    expect(result.payload.observability).not.toHaveProperty("execution_audit");
   });
 
   it("blocks loopback live read when audit_record linkage mismatches", async () => {

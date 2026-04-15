@@ -35,6 +35,7 @@ import {
   buildXhsGatePolicyState,
   buildIssue209PostGateArtifacts,
   collectXhsCommandGateReasons,
+  evaluateXhsGate,
   collectXhsMatrixGateReasons,
   finalizeXhsGateOutcome,
   resolveXhsGateApprovalId,
@@ -542,6 +543,16 @@ const asInteger = (value: unknown): number | null =>
 
 const asBoolean = (value: unknown): boolean => value === true;
 
+const asOptionalBoolean = (value: unknown): boolean | null => {
+  if (value === true) {
+    return true;
+  }
+  if (value === false) {
+    return false;
+  }
+  return null;
+};
+
 const cloneAdmissionContext = (
   admissionContext: Record<string, unknown> | null
 ): Record<string, unknown> | null => {
@@ -658,6 +669,18 @@ const parseUrl = (value: string): URL | null => {
   }
 };
 
+const buildChromeUrlPatternForDomain = (value: string): string | null => {
+  const normalized = value.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return null;
+  }
+  const parsed = parseUrl(`https://${normalized}/`);
+  if (!parsed || parsed.hostname !== normalized) {
+    return null;
+  }
+  return `*://${normalized}/*`;
+};
+
 const classifyXhsPage = (url: string, domain: string): string => {
   const parsed = parseUrl(url);
   if (!parsed) {
@@ -726,6 +749,7 @@ const xhsGateReasonMessage = (reason: string): string => {
     TARGET_TAB_NOT_FOUND: "target tab is unavailable",
     TARGET_DOMAIN_MISMATCH: "target tab domain does not match target_domain",
     TARGET_PAGE_MISMATCH: "target tab page does not match target_page",
+    TARGET_PAGE_CONTEXT_UNRESOLVED: "target page context could not be resolved",
     TARGET_TAB_URL_INVALID: "target tab url is invalid",
     FINGERPRINT_EXECUTION_BLOCKED: "fingerprint runtime blocks live execution for this profile"
   };
@@ -848,6 +872,11 @@ const XHS_FORWARD_OPTION_KEYS = [
   "approval_record",
   "audit_record",
   "admission_context",
+  "upstream_authorization_request",
+  "__legacy_requested_execution_mode",
+  "__runtime_profile_ref",
+  "__anonymous_isolation_verified",
+  "target_site_logged_in",
   "approval",
   "limited_read_rollout_ready_true",
   "timeout_ms",
@@ -900,6 +929,11 @@ type ResolvedXhsGateCommandInput = {
   approvalRecord: XhsApprovalRecord;
   auditRecord: Record<string, unknown> | null;
   admissionContext: Record<string, unknown> | null;
+  upstreamAuthorizationRequest: Record<string, unknown> | null;
+  legacyRequestedExecutionMode: XhsExecutionMode | null;
+  runtimeProfileRef: string | null;
+  anonymousIsolationVerified: boolean | null;
+  targetSiteLoggedIn: boolean | null;
   limitedReadRolloutReadyTrue: boolean;
   validationAction: string | null;
   requestedFingerprintContext: FingerprintRuntimeContext | null;
@@ -934,10 +968,29 @@ const resolveXhsGateCommandInput = (
     ) as XhsApprovalRecord,
     auditRecord: asRecord(readGateParam("audit_record")),
     admissionContext: asRecord(readGateParam("admission_context")),
+    upstreamAuthorizationRequest: asRecord(readGateParam("upstream_authorization_request")),
+    legacyRequestedExecutionMode: resolveXhsExecutionMode(
+      readGateParam("__legacy_requested_execution_mode")
+    ),
+    runtimeProfileRef: asNonEmptyString(readGateParam("__runtime_profile_ref")),
+    anonymousIsolationVerified: asOptionalBoolean(readGateParam("__anonymous_isolation_verified")),
+    targetSiteLoggedIn: asOptionalBoolean(readGateParam("target_site_logged_in")),
     limitedReadRolloutReadyTrue: readGateParam("limited_read_rollout_ready_true") === true,
     validationAction: asNonEmptyString(readGateParam("validation_action")),
     requestedFingerprintContext: resolveFingerprintContext(commandParams)
   };
+};
+
+const shouldDeferAnonymousCanonicalGateDiagnostics = (input: {
+  upstreamAuthorizationRequest: Record<string, unknown> | null;
+  anonymousIsolationVerified: boolean | null;
+  targetSiteLoggedIn: boolean | null;
+}): boolean => {
+  const resourceBinding = asRecord(input.upstreamAuthorizationRequest?.resource_binding);
+  return (
+    resourceBinding?.resource_kind === "anonymous_context" &&
+    (input.anonymousIsolationVerified === null || input.targetSiteLoggedIn === null)
+  );
 };
 
 const resolveBridgeRequestGateDecisionId = (request: BridgeRequest): string => {
@@ -958,6 +1011,95 @@ const resolveBridgeRequestGateDecisionId = (request: BridgeRequest): string => {
     issueScope: readGateParam("issue_scope"),
     requestedExecutionMode: readGateParam("requested_execution_mode")
   });
+};
+
+const buildCanonicalGateAuditArtifacts = (input: {
+  request: BridgeRequest;
+  issueScope: IssueScope | null;
+  riskState: XhsRiskState;
+  targetDomain: string | null;
+  targetTabId: number | null;
+  targetPage: string | null;
+  actualTargetDomain: string | null;
+  actualTargetTabId: number | null;
+  actualTargetPage: string | null;
+  actualTargetUrl: string | null;
+  actionType: XhsActionType | null;
+  abilityActionType: XhsActionType | null;
+  requestedExecutionMode: XhsExecutionMode | null;
+  legacyRequestedExecutionMode: XhsExecutionMode | null;
+  runtimeProfileRef: string | null;
+  upstreamAuthorizationRequest: Record<string, unknown> | null;
+  anonymousIsolationVerified: boolean | null;
+  targetSiteLoggedIn: boolean | null;
+  approvalRecord: XhsApprovalRecord;
+  auditRecord: Record<string, unknown> | null;
+  admissionContext: Record<string, unknown> | null;
+  limitedReadRolloutReadyTrue: boolean;
+  gateInvocationId: string | null;
+  issue208EditorInputValidation: boolean;
+}) => {
+  const commandParams = asRecord(input.request.params.command_params);
+  const canonicalGate = evaluateXhsGate({
+    issueScope: input.issueScope,
+    riskState: input.riskState,
+    targetDomain: input.targetDomain,
+    targetTabId: input.targetTabId,
+    targetPage: input.targetPage,
+    actualTargetDomain: input.actualTargetDomain,
+    actualTargetTabId: input.actualTargetTabId,
+    actualTargetPage: input.actualTargetPage,
+    actualTargetUrl: input.actualTargetUrl,
+    requireActualTargetPage: true,
+    actionType: input.actionType,
+    abilityActionType: input.abilityActionType,
+    requestedExecutionMode: input.requestedExecutionMode,
+    legacyRequestedExecutionMode: input.legacyRequestedExecutionMode,
+    runtimeProfileRef: input.runtimeProfileRef,
+    upstreamAuthorizationRequest: input.upstreamAuthorizationRequest,
+    ...(input.anonymousIsolationVerified !== null
+      ? { anonymousIsolationVerified: input.anonymousIsolationVerified }
+      : {}),
+    ...(input.targetSiteLoggedIn !== null ? { targetSiteLoggedIn: input.targetSiteLoggedIn } : {}),
+    runId: String(input.request.params.run_id ?? input.request.id),
+    sessionId: String(input.request.params.session_id ?? "nm-session-001"),
+    gateInvocationId: input.gateInvocationId,
+    approvalRecord: input.approvalRecord,
+    auditRecord: input.auditRecord,
+    admissionContext: input.admissionContext,
+    limitedReadRolloutReadyTrue: input.limitedReadRolloutReadyTrue,
+    decisionId: resolveBridgeRequestGateDecisionId(input.request),
+    approvalId: resolveGatePayloadApprovalId({
+      approvalActive:
+        input.requestedExecutionMode === "live_read_limited" ||
+        input.requestedExecutionMode === "live_read_high_risk" ||
+        input.requestedExecutionMode === "live_write",
+      approvalRecord: input.approvalRecord,
+      decisionId: resolveBridgeRequestGateDecisionId(input.request),
+      issueScope: input.issueScope,
+      requestedExecutionMode: input.requestedExecutionMode,
+      gateInvocationId:
+        input.gateInvocationId ?? asNonEmptyString(commandParams?.gate_invocation_id)
+    }),
+    issue208EditorInputValidation: input.issue208EditorInputValidation,
+    treatMissingEditorValidationAsUnsupported: false
+  });
+
+  if (
+    shouldDeferAnonymousCanonicalGateDiagnostics({
+      upstreamAuthorizationRequest: input.upstreamAuthorizationRequest,
+      anonymousIsolationVerified: input.anonymousIsolationVerified,
+      targetSiteLoggedIn: input.targetSiteLoggedIn
+    })
+  ) {
+    return {
+      ...canonicalGate,
+      request_admission_result: null,
+      execution_audit: null
+    };
+  }
+
+  return canonicalGate;
 };
 
 const resolveGateOnlyPageState = (
@@ -1380,6 +1522,8 @@ const createBackgroundXhsGatePayload = (input: {
   fingerprintExecution: FingerprintRuntimeContext["execution"] | null;
   consumerGateResult: Record<string, unknown>;
   approvalRecord: XhsApprovalRecord;
+  requestAdmissionResult: Record<string, unknown> | null;
+  executionAudit: Record<string, unknown> | null;
   admissionContext?: Record<string, unknown> | null;
   writeActionMatrixDecisions: XhsWriteActionMatrixDecisionsOutput | null;
   writeMatrixDecision: WriteActionMatrixDecision | null;
@@ -1486,6 +1630,7 @@ const createBackgroundXhsGatePayload = (input: {
     },
     fingerprint_execution: input.fingerprintExecution ? { ...input.fingerprintExecution } : null,
     consumer_gate_result: input.consumerGateResult,
+    request_admission_result: input.requestAdmissionResult,
     approval_record: approvalRecord,
     issue_action_matrix:
       input.issueScope !== null
@@ -1499,6 +1644,7 @@ const createBackgroundXhsGatePayload = (input: {
       now: asNonEmptyString(auditRecord.recorded_at) ?? recordedAt
     }),
     audit_record: auditRecord,
+    execution_audit: input.executionAudit,
     risk_transition_audit: input.riskTransitionAudit
   };
 };
@@ -3781,6 +3927,11 @@ class ChromeBackgroundBridge {
       approvalRecord,
       auditRecord,
       admissionContext,
+      upstreamAuthorizationRequest,
+      legacyRequestedExecutionMode,
+      runtimeProfileRef,
+      anonymousIsolationVerified,
+      targetSiteLoggedIn,
       gateInvocationId,
       limitedReadRolloutReadyTrue,
       validationAction,
@@ -3803,6 +3954,10 @@ class ChromeBackgroundBridge {
     let fingerprintGateDecision: "allowed" | "blocked" = "allowed";
     let resolvedFingerprintReasonCodes = [...fingerprintReasonCodes];
     const gateReasons: string[] = [];
+    let actualTargetDomain: string | null = null;
+    let actualTargetTabId: number | null = null;
+    let actualTargetPage: string | null = null;
+    let actualTargetUrl: string | null = null;
     let writeGateOnlyApprovalDecision: Record<string, unknown> | null = null;
     let writeGateOnlyEligible = false;
     const requestRunId = String(request.params.run_id ?? request.id);
@@ -3885,35 +4040,54 @@ class ChromeBackgroundBridge {
     const canonicalApprovalRecord = matrixResolution.approvalRecord;
     const canonicalAdmissionContext = matrixResolution.admissionContext;
 
-    if (gateReasons.length === 0 && targetDomain && targetTabId !== null && targetPage) {
-      const trustedEntry = this.#resolveTrustedFingerprintContext(request);
-      const trustedTargetBound =
-        trustedEntry?.sourceTabId === targetTabId && trustedEntry?.sourceDomain === targetDomain;
-      const domainTabs = await this.chromeApi.tabs.query({
-        url: `*://${targetDomain}/*`
-      });
-      const targetTab = domainTabs.find((tab) => tab.id === targetTabId);
-      if (!targetTab) {
-        pushReason("TARGET_TAB_NOT_FOUND");
-      } else {
-        const tabUrl = typeof targetTab.url === "string" ? targetTab.url : "";
-        const parsed = parseUrl(tabUrl);
-        if (!parsed) {
-          pushReason("TARGET_TAB_URL_INVALID");
+    const resolvedTargetDomainForLookup =
+      targetDomain !== null && XHS_DOMAIN_ALLOWLIST.has(targetDomain) ? targetDomain : null;
+    const actualTargetQueryPattern =
+      resolvedTargetDomainForLookup !== null
+        ? buildChromeUrlPatternForDomain(resolvedTargetDomainForLookup)
+        : null;
+    const shouldResolveActualTargetContext =
+      actualTargetQueryPattern !== null &&
+      targetTabId !== null &&
+      targetPage &&
+      (gateReasons.length === 0 || requestedLiveMode);
+
+    if (shouldResolveActualTargetContext && resolvedTargetDomainForLookup) {
+      try {
+        const domainTabs = await this.chromeApi.tabs.query({
+          url: actualTargetQueryPattern
+        });
+        const targetTab = domainTabs.find((tab) => tab.id === targetTabId);
+        if (!targetTab) {
+          pushReason("TARGET_TAB_NOT_FOUND");
         } else {
-          if (parsed.hostname !== targetDomain) {
-            pushReason("TARGET_DOMAIN_MISMATCH");
+          const tabUrl = typeof targetTab.url === "string" ? targetTab.url : "";
+          const parsed = parseUrl(tabUrl);
+          if (!parsed) {
+            pushReason("TARGET_TAB_URL_INVALID");
+          } else {
+            actualTargetDomain = parsed.hostname;
+            actualTargetTabId = targetTabId;
+            actualTargetUrl = tabUrl;
+            if (parsed.hostname !== resolvedTargetDomainForLookup) {
+              pushReason("TARGET_DOMAIN_MISMATCH");
+            }
+            const actualPage = classifyXhsPage(tabUrl, resolvedTargetDomainForLookup);
+            actualTargetPage = actualPage;
+            if (actualPage !== targetPage) {
+              pushReason("TARGET_PAGE_MISMATCH");
+            }
+            if (
+              issue208EditorInputValidation &&
+              !isCreatorArticlePublishPage(tabUrl, resolvedTargetDomainForLookup)
+            ) {
+              pushReason("TARGET_PAGE_ARTICLE_REQUIRED");
+            }
           }
-          const actualPage = classifyXhsPage(tabUrl, targetDomain);
-          if (actualPage !== targetPage) {
-            pushReason("TARGET_PAGE_MISMATCH");
-          }
-          if (
-            issue208EditorInputValidation &&
-            !isCreatorArticlePublishPage(tabUrl, targetDomain)
-          ) {
-            pushReason("TARGET_PAGE_ARTICLE_REQUIRED");
-          }
+        }
+      } catch {
+        if (gateReasons.length === 0) {
+          pushReason("TARGET_PAGE_CONTEXT_UNRESOLVED");
         }
       }
     }
@@ -3982,6 +4156,40 @@ class ChromeBackgroundBridge {
     const allowed = finalizedGate.allowed;
     const resolvedEffectiveExecutionMode =
       finalizedGate.effectiveExecutionMode ?? gateState.fallbackMode;
+    const sharedCanonicalGate = buildCanonicalGateAuditArtifacts({
+      request,
+      issueScope,
+      riskState,
+      targetDomain,
+      targetTabId,
+      targetPage,
+      actualTargetDomain,
+      actualTargetTabId,
+      actualTargetPage,
+      actualTargetUrl,
+      actionType,
+      abilityActionType,
+      requestedExecutionMode,
+      legacyRequestedExecutionMode,
+      runtimeProfileRef,
+      upstreamAuthorizationRequest,
+      anonymousIsolationVerified,
+      targetSiteLoggedIn,
+      approvalRecord: canonicalApprovalRecord,
+      auditRecord,
+      admissionContext: canonicalAdmissionContext as unknown as Record<string, unknown> | null,
+      limitedReadRolloutReadyTrue,
+      gateInvocationId,
+      issue208EditorInputValidation
+    });
+    const canonicalRequestAdmissionResult = asRecord(sharedCanonicalGate.request_admission_result);
+    const canonicalExecutionAudit = asRecord(sharedCanonicalGate.execution_audit);
+    // Approval linkage remains owned by the background/matrix path; shared gate output
+    // only supplies request-level admission/audit diagnostics.
+    const canonicalApprovalPayloadRecord: XhsApprovalRecord = {
+      ...canonicalApprovalRecord,
+      checks: { ...canonicalApprovalRecord.checks }
+    };
     const requiresManualConfirmation =
       !gateState.issue208WriteGateOnly &&
       (requestedExecutionMode === "live_read_limited" ||
@@ -4020,8 +4228,8 @@ class ChromeBackgroundBridge {
       effective_execution_mode: resolvedEffectiveExecutionMode,
       gate_decision: gateDecision,
       gate_reasons: finalizedGate.gateReasons,
-      approver: canonicalApprovalRecord.approver,
-      approved_at: canonicalApprovalRecord.approved_at,
+      approver: canonicalApprovalPayloadRecord.approver,
+      approved_at: canonicalApprovalPayloadRecord.approved_at,
       write_interaction_tier: gateState.writeActionMatrixDecisions?.write_interaction_tier ?? null,
       write_matrix_decision: gateState.writeMatrixDecision?.decision ?? null,
       recorded_at: recordedAt
@@ -4034,7 +4242,7 @@ class ChromeBackgroundBridge {
       decision: gateDecision,
       gateReasons: finalizedGate.gateReasons,
       requestedExecutionMode,
-      approvalRecord: canonicalApprovalRecord,
+      approvalRecord: canonicalApprovalPayloadRecord,
       auditRecords: [gateAuditSeed],
       now: gateAuditSeed.recorded_at
     });
@@ -4056,7 +4264,9 @@ class ChromeBackgroundBridge {
       fingerprintGateDecision,
       fingerprintExecution,
       consumerGateResult,
-      approvalRecord: canonicalApprovalRecord,
+      approvalRecord: canonicalApprovalPayloadRecord,
+      requestAdmissionResult: canonicalRequestAdmissionResult,
+      executionAudit: canonicalExecutionAudit,
       admissionContext: canonicalAdmissionContext as unknown as Record<string, unknown> | null,
       writeActionMatrixDecisions: gateState.writeActionMatrixDecisions,
       writeMatrixDecision: gateState.writeMatrixDecision,
@@ -4218,7 +4428,8 @@ class ChromeBackgroundBridge {
         ? (payload.summary as Record<string, unknown>)
         : null;
     if (pending.gatePayload && backfilledExecutionFailure) {
-      // Ensure audit-trace fields reflect the final blocked decision even if content payload already had stale copies.
+      // Ensure gate/audit trace fields reflect the final blocked decision without clobbering
+      // the content-script canonical request-time result.
       for (const key of [
         "gate_outcome",
         "consumer_gate_result",
@@ -4324,9 +4535,14 @@ class ChromeBackgroundBridge {
 
     const command = String(request.params.command ?? "");
     if (command === "runtime.ping" || command === "runtime.bootstrap") {
-      const runtimeSurfaceTabs = await this.chromeApi.tabs.query({
-        url: ["*://creator.xiaohongshu.com/*", "*://www.xiaohongshu.com/*"]
-      });
+      let runtimeSurfaceTabs: ExtensionTab[] = [];
+      try {
+        runtimeSurfaceTabs = await this.chromeApi.tabs.query({
+          url: ["*://creator.xiaohongshu.com/*", "*://www.xiaohongshu.com/*"]
+        });
+      } catch {
+        runtimeSurfaceTabs = [];
+      }
       const ranked = runtimeSurfaceTabs
         .filter((tab) => typeof tab.id === "number")
         .sort((left, right) => {
@@ -4357,16 +4573,25 @@ class ChromeBackgroundBridge {
         "*://edith.xiaohongshu.com/*",
         "*://*.xiaohongshu.com/*"
       ];
-      const currentWindowTabs = await this.chromeApi.tabs.query({
-        currentWindow: true,
-        url: xhsUrlPatterns
-      });
-      const xhsTabs =
-        currentWindowTabs.length > 0
-          ? currentWindowTabs
-          : await this.chromeApi.tabs.query({
-              url: xhsUrlPatterns
-            });
+      let currentWindowTabs: ExtensionTab[] = [];
+      try {
+        currentWindowTabs = await this.chromeApi.tabs.query({
+          currentWindow: true,
+          url: xhsUrlPatterns
+        });
+      } catch {
+        currentWindowTabs = [];
+      }
+      let xhsTabs: ExtensionTab[] = currentWindowTabs;
+      if (currentWindowTabs.length === 0) {
+        try {
+          xhsTabs = await this.chromeApi.tabs.query({
+            url: xhsUrlPatterns
+          });
+        } catch {
+          xhsTabs = [];
+        }
+      }
       const resourceBoundTabs =
         requestedResourceId && preferredPage
           ? xhsTabs.filter((tab) => tabMatchesRequestedXhsResource(tab, preferredPage, requestedResourceId))
@@ -4392,10 +4617,15 @@ class ChromeBackgroundBridge {
       const candidate = ranked[0];
       return typeof candidate?.id === "number" ? candidate.id : null;
     }
-    const tabs = await this.chromeApi.tabs.query({
-      active: true,
-      currentWindow: true
-    });
+    let tabs: ExtensionTab[] = [];
+    try {
+      tabs = await this.chromeApi.tabs.query({
+        active: true,
+        currentWindow: true
+      });
+    } catch {
+      tabs = [];
+    }
     const first = tabs[0];
     return typeof first?.id === "number" ? first.id : null;
   }
