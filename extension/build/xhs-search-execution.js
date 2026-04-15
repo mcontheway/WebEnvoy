@@ -55,12 +55,43 @@ export const executeXhsSearch = async (input, env) => {
             ? input.options.validation_text.trim()
             : "WebEnvoy editor_input validation";
         const focusAttestation = input.options.editor_focus_attestation ?? null;
-        const validationResult = env.performEditorInputValidation
-            ? await env.performEditorInputValidation({
-                text: validationText,
-                focusAttestation: focusAttestation
-            })
-            : {
+        let validationResult;
+        if (env.performEditorInputValidation) {
+            try {
+                validationResult = await env.performEditorInputValidation({
+                    text: validationText,
+                    focusAttestation: focusAttestation
+                });
+            }
+            catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "editor_input 真实验证失败", {
+                    ability_id: input.abilityId,
+                    stage: "execution",
+                    reason: "EDITOR_INPUT_VALIDATION_FAILED",
+                    validation_exception: message
+                }, createObservability({
+                    href: env.getLocationHref(),
+                    title: env.getDocumentTitle(),
+                    readyState: env.getReadyState(),
+                    requestId: `req-${env.randomId()}`,
+                    outcome: "failed",
+                    failureReason: message,
+                    failureSite: {
+                        stage: "execution",
+                        component: "page",
+                        target: "editor_input",
+                        summary: message || "editor_input validation failed"
+                    }
+                }), createDiagnosis({
+                    reason: "EDITOR_INPUT_VALIDATION_FAILED",
+                    summary: message || "editor_input validation failed",
+                    category: "page_changed"
+                }), gate, auditRecord), gate.execution_audit);
+            }
+        }
+        else {
+            validationResult = {
                 ok: false,
                 mode: "dom_editor_input_validation",
                 attestation: "dom_self_certified",
@@ -77,6 +108,7 @@ export const executeXhsSearch = async (input, env) => {
                 failure_signals: ["missing_focus_attestation", "dom_variant"],
                 minimum_replay: ["enter_editable_mode", "focus_editor", "type_short_text", "blur_or_reobserve"]
             };
+        }
         if (!isTrustedEditorInputValidation(validationResult)) {
             return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "editor_input 真实验证失败", {
                 ability_id: input.abilityId,
