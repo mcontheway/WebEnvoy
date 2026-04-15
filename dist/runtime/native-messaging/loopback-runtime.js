@@ -313,6 +313,10 @@ class InMemoryContentScriptRuntime {
             }
         });
         if (consumerGateResult.gate_decision === "blocked") {
+            const isEditorInputValidation = options.validation_action === "editor_input";
+            const editorInputFailureSignals = Array.isArray(consumerGateResult.gate_reasons)
+                ? consumerGateResult.gate_reasons.map((reason) => String(reason))
+                : ["EXECUTION_MODE_GATE_BLOCKED"];
             return {
                 kind: "result",
                 id: message.id,
@@ -325,7 +329,18 @@ class InMemoryContentScriptRuntime {
                     details: {
                         ability_id: String(ability.id ?? spec.abilityId),
                         stage: "execution",
-                        reason: "EXECUTION_MODE_GATE_BLOCKED"
+                        reason: "EXECUTION_MODE_GATE_BLOCKED",
+                        ...(isEditorInputValidation
+                            ? {
+                                validation_action: "editor_input",
+                                target_page: "creator_publish_tab",
+                                focus_confirmed: false,
+                                preserved_after_blur: false,
+                                failure_signals: editorInputFailureSignals,
+                                minimum_replay: ["focus_editor", "type_short_text", "blur_or_reobserve"],
+                                out_of_scope_actions: ["image_upload", "submit", "publish_confirm"]
+                            }
+                            : {})
                     },
                     ...gateBundle.payload
                 }
@@ -351,11 +366,33 @@ class InMemoryContentScriptRuntime {
             const validationText = typeof options.validation_text === "string" && options.validation_text.trim().length > 0
                 ? options.validation_text.trim()
                 : "WebEnvoy editor_input validation";
+            const interactionResult = {
+                validation_action: "editor_input",
+                target_page: "creator_publish_tab",
+                focus_confirmed: false,
+                preserved_after_blur: false,
+                success_signals: [],
+                failure_signals: ["EDITOR_INPUT_VALIDATION_REQUIRED"],
+                minimum_replay: ["focus_editor", "type_short_text", "blur_or_reobserve"],
+                out_of_scope_actions: ["image_upload", "submit", "publish_confirm"]
+            };
             return {
                 kind: "result",
                 id: message.id,
                 ok: false,
                 payload: {
+                    details: {
+                        ability_id: String(ability.id ?? "xhs.issue208.editor_input"),
+                        stage: "execution",
+                        reason: "EDITOR_INPUT_VALIDATION_REQUIRED",
+                        ...interactionResult,
+                        consumer_gate_result: gateBundle.payload.consumer_gate_result,
+                        request_admission_result: gateBundle.payload.request_admission_result,
+                        execution_audit: gateBundle.payload.execution_audit,
+                        approval_record: gateBundle.payload.approval_record,
+                        audit_record: gateBundle.payload.audit_record
+                    },
+                    ...gateBundle.payload,
                     summary: {
                         capability_result: {
                             ability_id: String(ability.id ?? "xhs.issue208.editor_input"),
@@ -370,14 +407,7 @@ class InMemoryContentScriptRuntime {
                             }
                         },
                         ...gateBundle.payload,
-                        interaction_result: {
-                            validation_action: "editor_input",
-                            target_page: "creator.xiaohongshu.com/publish",
-                            success_signals: [],
-                            failure_signals: ["EDITOR_INPUT_VALIDATION_REQUIRED"],
-                            minimum_replay: ["focus_editor", "type_short_text", "blur_or_reobserve"],
-                            out_of_scope_actions: ["image_upload", "submit", "publish_confirm"]
-                        }
+                        interaction_result: interactionResult
                     },
                     observability: {
                         page_state: {
@@ -624,6 +654,10 @@ class InMemoryBackgroundRelay {
                 });
                 gatePayload = gateBundle.payload;
                 if (gateBundle.consumerGateResult.gate_decision === "blocked") {
+                    const isEditorInputValidation = options.validation_action === "editor_input";
+                    const editorInputFailureSignals = Array.isArray(gateBundle.consumerGateResult.gate_reasons)
+                        ? gateBundle.consumerGateResult.gate_reasons.map((reason) => String(reason))
+                        : ["EXECUTION_MODE_GATE_BLOCKED"];
                     this.hostPort.postMessage({
                         kind: "response",
                         envelope: {
@@ -638,7 +672,18 @@ class InMemoryBackgroundRelay {
                                         XHS_READ_COMMAND_DEFAULT_ABILITY_IDS[command] ??
                                         "xhs.note.search.v1"),
                                     stage: "execution",
-                                    reason: "EXECUTION_MODE_GATE_BLOCKED"
+                                    reason: "EXECUTION_MODE_GATE_BLOCKED",
+                                    ...(isEditorInputValidation
+                                        ? {
+                                            validation_action: "editor_input",
+                                            target_page: "creator_publish_tab",
+                                            focus_confirmed: false,
+                                            preserved_after_blur: false,
+                                            failure_signals: editorInputFailureSignals,
+                                            minimum_replay: ["focus_editor", "type_short_text", "blur_or_reobserve"],
+                                            out_of_scope_actions: ["image_upload", "submit", "publish_confirm"]
+                                        }
+                                        : {})
                                 },
                                 ...gatePayload
                             },

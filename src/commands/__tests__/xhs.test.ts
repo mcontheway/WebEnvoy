@@ -1556,4 +1556,94 @@ describe("normalizeGateOptionsForContract", () => {
     }
   });
 
+  it("keeps issue_208 editor_input gate and interaction diagnostics in CLI error details", async () => {
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+    const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    process.env.WEBENVOY_NATIVE_TRANSPORT = "loopback";
+    process.env.WEBENVOY_BROWSER_PATH = join(process.cwd(), "tests", "fixtures", "mock-browser.sh");
+    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Chromium 146.0.0.0";
+
+    try {
+      await expect(
+        executeCommand(
+          {
+            cwd: "/tmp/webenvoy",
+            command: "xhs.search",
+            profile: "profile-loopback-editor-input-001",
+            run_id: "run-loopback-editor-input-001",
+            params: {
+              ability: {
+                id: "xhs.note.search.v1",
+                layer: "L3",
+                action: "write"
+              },
+              input: {
+                query: "露营装备"
+              },
+              options: {
+                issue_scope: "issue_208",
+                target_domain: "creator.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "creator_publish_tab",
+                action_type: "write",
+                requested_execution_mode: "live_write",
+                validation_action: "editor_input",
+                risk_state: "allowed",
+                approval_record: {
+                  approved: true,
+                  approver: "qa-reviewer",
+                  approved_at: "2026-03-23T10:00:00Z",
+                  checks: {
+                    target_domain_confirmed: true,
+                    target_tab_confirmed: true,
+                    target_page_confirmed: true,
+                    risk_state_checked: true,
+                    action_type_confirmed: true
+                  }
+                }
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        details: expect.objectContaining({
+          gate_reasons: expect.arrayContaining(["EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"]),
+          issue_action_matrix: expect.objectContaining({
+            issue_scope: "issue_208"
+          }),
+          write_action_matrix_decisions: expect.objectContaining({
+            requested_execution_mode: "live_write",
+            write_interaction_tier: "reversible_interaction"
+          }),
+          consumer_gate_result: expect.objectContaining({
+            gate_decision: "blocked",
+            requested_execution_mode: "live_write"
+          }),
+          request_admission_result: expect.objectContaining({
+            admission_decision: "blocked"
+          }),
+          execution_audit: null,
+          audit_record: expect.objectContaining({
+            requested_execution_mode: "live_write"
+          })
+        })
+      });
+    } finally {
+      process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
+      if (previousBrowserPath === undefined) {
+        delete process.env.WEBENVOY_BROWSER_PATH;
+      } else {
+        process.env.WEBENVOY_BROWSER_PATH = previousBrowserPath;
+      }
+      if (previousBrowserMockVersion === undefined) {
+        delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+      } else {
+        process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
+      }
+    }
+  });
+
 });

@@ -1377,6 +1377,123 @@ describe("extension service worker / gate and approval", () => {
     });
   });
 
+  it("keeps issue_208 canonical diagnostics blocked when editor_input validation action is missing", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const runId = "run-xhs-issue-208-editor-input-missing-validation-001";
+    const fingerprintContext = createFingerprintRuntimeContext({
+      live_allowed: true,
+      live_decision: "allowed",
+      allowed_execution_modes: [
+        "dry_run",
+        "recon",
+        "live_read_limited",
+        "live_read_high_risk",
+        "live_write"
+      ]
+    });
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId,
+      profile: "profile-a",
+      fingerprintContext,
+      tabId: 32,
+      tabUrl: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: runId,
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: createXhsEditorInputCommandParams({
+          run_id: runId,
+          validation_action: undefined,
+          validation_text: undefined,
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: runId,
+        ok: false,
+        error: {
+          code: "ERR_EXECUTION_FAILED",
+          message: "editor_input failed"
+        },
+        payload: {
+          details: {
+            stage: "execution",
+            reason: "EDITOR_INPUT_VALIDATION_FAILED"
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article"
+        }
+      }
+    );
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: runId,
+        command: "xhs.search"
+      })
+    );
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map(
+        (call) =>
+          call[0] as {
+            id?: string;
+            status?: string;
+            payload?: {
+              request_admission_result?: {
+                admission_decision?: string;
+                reason_codes?: string[];
+              };
+              execution_audit?: {
+                request_admission_decision?: string;
+                request_admission_reason_codes?: string[];
+              };
+            };
+          }
+      )
+      .find((message) => message.id === runId);
+    expect(blocked).toMatchObject({
+      id: runId,
+      status: "error",
+      payload: {
+        request_admission_result: {
+          admission_decision: "blocked",
+          reason_codes: expect.arrayContaining(["EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND"])
+        },
+        execution_audit: null
+      }
+    });
+  });
+
   it("falls back to global xhs tab resolution when currentWindow query is empty", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);

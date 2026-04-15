@@ -640,7 +640,7 @@ const buildCanonicalGateAuditArtifacts = (input) => {
             gateInvocationId: input.gateInvocationId ?? asNonEmptyString(commandParams?.gate_invocation_id)
         }),
         issue208EditorInputValidation: input.issue208EditorInputValidation,
-        treatMissingEditorValidationAsUnsupported: false
+        treatMissingEditorValidationAsUnsupported: true
     });
     if (shouldDeferAnonymousCanonicalGateDiagnostics({
         upstreamAuthorizationRequest: input.upstreamAuthorizationRequest,
@@ -3116,7 +3116,7 @@ class ChromeBackgroundBridge {
             targetPage,
             issue208WriteGateOnly: gateState.issue208WriteGateOnly,
             issue208EditorInputValidation,
-            treatMissingEditorValidationAsUnsupported: false
+            treatMissingEditorValidationAsUnsupported: true
         });
         if (!isAllowedTargetPageForXhsReadCommand(command, targetPage)) {
             pushReason("TARGET_PAGE_MISMATCH");

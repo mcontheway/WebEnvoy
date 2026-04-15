@@ -4696,7 +4696,7 @@ describe("extension service worker / bootstrap and trust", () => {
     expect(consumerGateResult?.effective_execution_mode).toBe("dry_run");
     expect(consumerGateResult?.gate_reasons).toEqual(
       expect.arrayContaining([
-        "EDITOR_INPUT_VALIDATION_REQUIRED",
+        "EXECUTION_MODE_UNSUPPORTED_FOR_COMMAND",
         "WRITE_INTERACTION_TIER_REVERSIBLE_INTERACTION"
       ])
     );

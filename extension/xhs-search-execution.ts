@@ -113,28 +113,69 @@ export const executeXhsSearch = async (
         ? input.options.validation_text.trim()
         : "WebEnvoy editor_input validation";
     const focusAttestation = input.options.editor_focus_attestation ?? null;
-    const validationResult: EditorInputValidationResult = env.performEditorInputValidation
-      ? await env.performEditorInputValidation({
+    let validationResult: EditorInputValidationResult;
+    if (env.performEditorInputValidation) {
+      try {
+        validationResult = await env.performEditorInputValidation({
           text: validationText,
           focusAttestation: focusAttestation as never
-        })
-      : {
-          ok: false,
-          mode: "dom_editor_input_validation",
-          attestation: "dom_self_certified",
-          editor_locator: null,
-          input_text: validationText,
-          before_text: "",
-          visible_text: "",
-          post_blur_text: "",
-          focus_confirmed: false,
-          focus_attestation_source: null,
-          focus_attestation_reason: null,
-          preserved_after_blur: false,
-          success_signals: [],
-          failure_signals: ["missing_focus_attestation", "dom_variant"],
-          minimum_replay: ["enter_editable_mode", "focus_editor", "type_short_text", "blur_or_reobserve"]
-        };
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return withExecutionAuditInFailurePayload(
+          createFailure(
+            "ERR_EXECUTION_FAILED",
+            "editor_input 真实验证失败",
+            {
+              ability_id: input.abilityId,
+              stage: "execution",
+              reason: "EDITOR_INPUT_VALIDATION_FAILED",
+              validation_exception: message
+            },
+            createObservability({
+              href: env.getLocationHref(),
+              title: env.getDocumentTitle(),
+              readyState: env.getReadyState(),
+              requestId: `req-${env.randomId()}`,
+              outcome: "failed",
+              failureReason: message,
+              failureSite: {
+                stage: "execution",
+                component: "page",
+                target: "editor_input",
+                summary: message || "editor_input validation failed"
+              }
+            }),
+            createDiagnosis({
+              reason: "EDITOR_INPUT_VALIDATION_FAILED",
+              summary: message || "editor_input validation failed",
+              category: "page_changed"
+            }),
+            gate,
+            auditRecord
+          ),
+          gate.execution_audit as JsonRecord | null
+        );
+      }
+    } else {
+      validationResult = {
+        ok: false,
+        mode: "dom_editor_input_validation",
+        attestation: "dom_self_certified",
+        editor_locator: null,
+        input_text: validationText,
+        before_text: "",
+        visible_text: "",
+        post_blur_text: "",
+        focus_confirmed: false,
+        focus_attestation_source: null,
+        focus_attestation_reason: null,
+        preserved_after_blur: false,
+        success_signals: [],
+        failure_signals: ["missing_focus_attestation", "dom_variant"],
+        minimum_replay: ["enter_editable_mode", "focus_editor", "type_short_text", "blur_or_reobserve"]
+      };
+    }
 
     if (!isTrustedEditorInputValidation(validationResult)) {
       return withExecutionAuditInFailurePayload(

@@ -650,6 +650,97 @@ describe("extension background relay contract / target binding and editor input"
     expect(consumerGateResult?.gate_decision).toBe("allowed");
   });
 
+  it("returns structured failure with audit metadata when editor_input validation throws", async () => {
+    let validationCalled = false;
+    const runId = "run-xhs-issue-208-editor-input-validation-throw-001";
+    const contentScript = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_000,
+        randomId: () => "relay-editor-input-validation-throw-id",
+        getLocationHref: () => "https://creator.xiaohongshu.com/publish/publish",
+        getDocumentTitle: () => "Creator Publish",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=valid;",
+        callSignature: async () => {
+          throw new Error("editor_input validation throw case should not reach signature fetch");
+        },
+        fetchJson: async () => {
+          throw new Error("editor_input validation throw case should not reach live fetch");
+        },
+        performEditorInputValidation: async () => {
+          validationCalled = true;
+          throw new Error("editor_input probe crashed");
+        }
+      }
+    });
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-issue-208-editor-input-validation-throw-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: {
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "write"
+          },
+          input: {
+            query: "最小正式验证"
+          },
+          options: {
+            issue_scope: "issue_208",
+            target_domain: "creator.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "creator_publish_tab",
+            action_type: "write",
+            requested_execution_mode: "live_write",
+            risk_state: "allowed",
+            validation_action: "editor_input",
+            validation_text: "最小正式验证",
+            editor_focus_attestation: {
+              source: "chrome_debugger",
+              target_tab_id: 32,
+              editable_state: "entered",
+              focus_confirmed: true,
+              entry_button_locator: "button.新的创作",
+              entry_button_target_key: "body > button:nth-of-type(1)",
+              editor_locator: "div.tiptap.ProseMirror",
+              editor_target_key: "body > div:nth-of-type(1)",
+              failure_reason: null
+            },
+            approval_record: completeIssue208ApprovalRecord
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    const response = await responsePromise;
+    expect(validationCalled).toBe(true);
+    expect(response.status).toBe("error");
+    expect(response.error?.code).toBe("ERR_EXECUTION_FAILED");
+    const payload = asRecord(response.payload) ?? {};
+    const details = asRecord(payload.details);
+    const gateInput = asRecord(payload.gate_input);
+    const auditRecord = asRecord(payload.audit_record);
+    expect(details?.reason).toBe("EDITOR_INPUT_VALIDATION_FAILED");
+    expect(details?.validation_exception).toBe("editor_input probe crashed");
+    expect(gateInput?.run_id).toBe(runId);
+    expect(gateInput?.session_id).toBe("nm-session-001");
+    expect(gateInput?.profile).toBe("profile-a");
+    expect(auditRecord?.run_id).toBe(runId);
+    expect(auditRecord?.session_id).toBe("nm-session-001");
+    expect(auditRecord?.profile).toBe("profile-a");
+    expect(payload.execution_audit ?? null).toBeNull();
+  });
+
   it.each([
     {
       label: "missing editor_input validation",
@@ -744,11 +835,100 @@ describe("extension background relay contract / target binding and editor input"
     const payload = asRecord(response.payload) ?? {};
     const details = asRecord(payload.details);
     const consumerGateResult = asRecord(payload.consumer_gate_result);
+    const requestAdmissionResult = asRecord(payload.request_admission_result);
     expect(details?.reason).toBe("EXECUTION_MODE_GATE_BLOCKED");
     expect(consumerGateResult).toMatchObject({
       gate_decision: "blocked"
     });
     expect(consumerGateResult?.gate_reasons).toEqual(expect.arrayContaining([expectedReason]));
+    expect(requestAdmissionResult?.admission_decision).toBe("blocked");
+    expect(requestAdmissionResult?.reason_codes).toEqual(expect.arrayContaining([expectedReason]));
+    expect(payload.execution_audit ?? null).toBeNull();
+  });
+
+  it("returns structured execution failure when editor_input validation throws", async () => {
+    let fetchCalled = false;
+    const contentScript = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_000,
+        randomId: () => "relay-editor-input-throw-id",
+        getLocationHref: () => "https://creator.xiaohongshu.com/publish/publish",
+        getDocumentTitle: () => "Creator Publish",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=valid;",
+        callSignature: async () => {
+          throw new Error("editor_input validation throw should not reach signature fetch");
+        },
+        fetchJson: async () => {
+          fetchCalled = true;
+          throw new Error("editor_input validation throw should not reach live fetch");
+        },
+        performEditorInputValidation: async () => {
+          throw new Error("debugger detached before validation completed");
+        }
+      }
+    });
+    const relay = new BackgroundRelay(contentScript, { forwardTimeoutMs: 200 });
+
+    const responsePromise = waitForResponse(relay);
+    relay.onNativeRequest({
+      id: "forward-xhs-issue-208-editor-input-throw-001",
+      method: "bridge.forward",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-issue-208-editor-input-throw-001",
+        command: "xhs.search",
+        command_params: {
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "write"
+          },
+          input: {
+            query: "最小正式验证"
+          },
+          options: {
+            issue_scope: "issue_208",
+            target_domain: "creator.xiaohongshu.com",
+            target_tab_id: 32,
+            target_page: "creator_publish_tab",
+            action_type: "write",
+            requested_execution_mode: "live_write",
+            risk_state: "allowed",
+            validation_action: "editor_input",
+            validation_text: "最小正式验证",
+            editor_focus_attestation: {
+              source: "chrome_debugger",
+              target_tab_id: 32,
+              editable_state: "entered",
+              focus_confirmed: true,
+              entry_button_locator: "button.新的创作",
+              entry_button_target_key: "body > button:nth-of-type(1)",
+              editor_locator: "div.tiptap.ProseMirror",
+              editor_target_key: "body > div:nth-of-type(1)",
+              failure_reason: null
+            },
+            approval_record: completeIssue208ApprovalRecord
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      profile: "profile-a",
+      timeout_ms: 200
+    });
+
+    const response = await responsePromise;
+    expect(response.status).toBe("error");
+    expect(response.error?.code).toBe("ERR_EXECUTION_FAILED");
+    expect(fetchCalled).toBe(false);
+    const payload = asRecord(response.payload) ?? {};
+    const details = asRecord(payload.details);
+    const auditRecord = asRecord(payload.audit_record);
+    expect(details?.reason).toBe("EDITOR_INPUT_VALIDATION_FAILED");
+    expect(details?.validation_exception).toBe("debugger detached before validation completed");
+    expect(auditRecord?.run_id).toBe("run-xhs-issue-208-editor-input-throw-001");
+    expect(auditRecord?.session_id).toBe("nm-session-001");
+    expect(payload.execution_audit ?? null).toBeNull();
   });
 
   it("keeps issue_208 irreversible_write blocked and returns irreversible write tier", async () => {

@@ -100,6 +100,14 @@ const pickGateErrorDetails = (payload, details) => {
         const object = asObject(value);
         if (object) {
             picked[key] = object;
+            continue;
+        }
+        if (Array.isArray(value)) {
+            picked[key] = value;
+            continue;
+        }
+        if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+            picked[key] = value;
         }
     }
     return picked;
