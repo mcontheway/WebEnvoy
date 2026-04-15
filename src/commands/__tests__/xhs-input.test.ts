@@ -1173,7 +1173,7 @@ describe("xhs-input", () => {
     );
   });
 
-  it("synthesizes issue_209 live admission draft from upstream authorization grant refs", () => {
+  it("does not synthesize issue_209 live admission draft from upstream authorization grant refs", () => {
     const envelope = parseAbilityEnvelopeForContract({
       ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
       input: {
@@ -1194,26 +1194,10 @@ describe("xhs-input", () => {
       runId: "run-cli-issue209-live-upstream"
     });
 
-    expect(prepared.admissionDraft).toMatchObject({
-      kind: "draft",
-      admission_context: {
-        approval_admission_evidence: {
-          approval_admission_ref: "approval_admission_001",
-          issue_scope: "issue_209",
-          requested_execution_mode: "live_read_high_risk",
-          approved: true
-        },
-        audit_admission_evidence: {
-          audit_admission_ref: "audit_admission_001",
-          issue_scope: "issue_209",
-          requested_execution_mode: "live_read_high_risk",
-          risk_state: "allowed"
-        }
-      }
-    });
+    expect(prepared.admissionDraft).toEqual({ kind: "missing" });
   });
 
-  it("ignores unvalidated options.upstream_authorization_request on legacy live-read requests", () => {
+  it("ignores options.upstream_authorization_request on legacy live-read requests", () => {
     const prepared = prepareIssue209LiveReadEnvelopeForContract({
       options: {
         issue_scope: "issue_209",

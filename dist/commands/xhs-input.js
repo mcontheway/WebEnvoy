@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { CliError } from "../core/errors.js";
 import { prepareIssue209LiveReadSource } from "../../shared/issue209-live-read/source.js";
-import { APPROVAL_CHECK_KEYS } from "../../shared/issue209-live-read/source.js";
 import { validateIssue209ApprovalSourceAgainstCurrentLinkage, validateIssue209AuditSourceAgainstCurrentLinkage } from "../../shared/issue209-live-read/source-validation.js";
 const ABILITY_LAYERS = new Set(["L3", "L2", "L1"]);
 const ABILITY_ACTIONS = new Set(["read", "write", "download"]);
@@ -43,7 +42,6 @@ const XHS_COMMAND_ACTION_NAMES = {
 const ISSUE209_LIVE_REQUEST_ID_PREFIX = "issue209-live";
 const ISSUE209_GATE_INVOCATION_ID_PREFIX = "issue209-gate";
 export const ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY = "__issue209_admission_draft";
-const VALIDATED_UPSTREAM_AUTHORIZATION_REQUEST_KEY = "__validated_upstream_authorization_request";
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
@@ -715,7 +713,6 @@ export const normalizeGateOptionsForContract = (options, abilityId, input) => {
             ...(normalizedRiskState ? { risk_state: normalizedRiskState } : {}),
             ...(upstreamAuthorization
                 ? {
-                    [VALIDATED_UPSTREAM_AUTHORIZATION_REQUEST_KEY]: true,
                     upstream_authorization_request: cloneJsonObject(upstreamAuthorization)
                 }
                 : {}),
@@ -751,80 +748,6 @@ const cloneAdmissionDraftForContract = (value) => {
         admission_context: admissionContext
     };
 };
-const asUpstreamAuthorizationRequestForContract = (value, validated) => {
-    if (!validated) {
-        return null;
-    }
-    const record = asObject(value);
-    if (!record) {
-        return null;
-    }
-    const actionRequest = asObject(record.action_request);
-    const resourceBinding = asObject(record.resource_binding);
-    const authorizationGrant = asObject(record.authorization_grant);
-    const runtimeTarget = asObject(record.runtime_target);
-    if (!actionRequest || !resourceBinding || !authorizationGrant || !runtimeTarget) {
-        return null;
-    }
-    return record;
-};
-const buildIssue209DerivedTimestampForContract = (upstreamAuthorization) => {
-    return (asString(upstreamAuthorization.authorization_grant.granted_at) ??
-        asString(upstreamAuthorization.action_request.requested_at) ??
-        "1970-01-01T00:00:00.000Z");
-};
-const buildIssue209AllTrueChecksForContract = () => Object.fromEntries(APPROVAL_CHECK_KEYS.map((key) => [key, true]));
-const synthesizeIssue209AdmissionDraftFromUpstreamAuthorizationForContract = (input) => {
-    const upstreamAuthorization = input.upstreamAuthorization;
-    if (!upstreamAuthorization) {
-        return null;
-    }
-    const approvalRef = upstreamAuthorization.authorization_grant.approval_refs?.[0] ?? null;
-    const auditRef = upstreamAuthorization.authorization_grant.audit_refs?.[0] ?? null;
-    if (!approvalRef || !auditRef) {
-        return null;
-    }
-    const recordedAt = buildIssue209DerivedTimestampForContract(upstreamAuthorization);
-    const approver = `upstream_grant:${upstreamAuthorization.authorization_grant.grant_ref}`;
-    const checks = buildIssue209AllTrueChecksForContract();
-    return {
-        kind: "draft",
-        admission_context: {
-            approval_admission_evidence: {
-                approval_admission_ref: approvalRef,
-                ...(input.current.commandRequestId ? { request_id: input.current.commandRequestId } : {}),
-                run_id: input.current.runId,
-                session_id: null,
-                issue_scope: input.current.issueScope,
-                target_domain: input.current.targetDomain,
-                target_tab_id: input.current.targetTabId,
-                target_page: input.current.targetPage,
-                action_type: input.current.actionType,
-                requested_execution_mode: input.current.requestedExecutionMode,
-                approved: true,
-                approver,
-                approved_at: recordedAt,
-                checks,
-                recorded_at: recordedAt
-            },
-            audit_admission_evidence: {
-                audit_admission_ref: auditRef,
-                ...(input.current.commandRequestId ? { request_id: input.current.commandRequestId } : {}),
-                run_id: input.current.runId,
-                session_id: null,
-                issue_scope: input.current.issueScope,
-                target_domain: input.current.targetDomain,
-                target_tab_id: input.current.targetTabId,
-                target_page: input.current.targetPage,
-                action_type: input.current.actionType,
-                requested_execution_mode: input.current.requestedExecutionMode,
-                ...(input.current.riskState ? { risk_state: input.current.riskState } : {}),
-                audited_checks: checks,
-                recorded_at: recordedAt
-            }
-        }
-    };
-};
 const isIssue209LiveReadRequest = (options) => options.issue_scope === "issue_209" &&
     typeof options.requested_execution_mode === "string" &&
     XHS_LIVE_READ_EXECUTION_MODES.has(options.requested_execution_mode);
@@ -847,8 +770,6 @@ const resolveIssue209AdmissionDraftForContract = (input) => {
         approvalRecord: input.options.approval_record ?? input.options.approval,
         auditRecord: input.options.audit_record
     });
-    const validatedUpstreamAuthorization = input.options[VALIDATED_UPSTREAM_AUTHORIZATION_REQUEST_KEY] === true;
-    const upstreamAuthorization = asUpstreamAuthorizationRequestForContract(input.options.upstream_authorization_request, validatedUpstreamAuthorization);
     const current = source.current;
     const hasAllTrueChecks = (checks) => Object.keys(checks).length > 0 && Object.values(checks).every((value) => value === true);
     const bindingMatches = (evidence, includeRiskState = false, riskState) => {
@@ -1003,13 +924,6 @@ const resolveIssue209AdmissionDraftForContract = (input) => {
             }
         };
     }
-    const derivedUpstreamDraft = synthesizeIssue209AdmissionDraftFromUpstreamAuthorizationForContract({
-        current,
-        upstreamAuthorization
-    });
-    if (derivedUpstreamDraft) {
-        return derivedUpstreamDraft;
-    }
     return { kind: "missing" };
 };
 const bindIssue209AdmissionContextToSession = (admissionContext, sessionId) => {
@@ -1031,7 +945,6 @@ const bindIssue209AdmissionContextToSession = (admissionContext, sessionId) => {
 export const prepareIssue209LiveReadEnvelopeForContract = (input) => {
     const nextOptions = cloneJsonObject(input.options);
     if (!isIssue209LiveReadRequest(nextOptions)) {
-        delete nextOptions[VALIDATED_UPSTREAM_AUTHORIZATION_REQUEST_KEY];
         const admissionDraft = cloneAdmissionDraftForContract(input.admissionDraft);
         delete nextOptions.admission_context;
         delete nextOptions[ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY];
@@ -1054,7 +967,6 @@ export const prepareIssue209LiveReadEnvelopeForContract = (input) => {
         gateInvocationId,
         admissionDraft: input.admissionDraft
     });
-    delete nextOptions[VALIDATED_UPSTREAM_AUTHORIZATION_REQUEST_KEY];
     delete nextOptions.admission_context;
     delete nextOptions[ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY];
     return {
