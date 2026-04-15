@@ -38,6 +38,7 @@ export interface XhsSearchOptions {
   requested_execution_mode?: string;
   upstream_authorization_request?: Record<string, unknown>;
   __legacy_requested_execution_mode?: string;
+  __runtime_profile_ref?: string;
   __anonymous_isolation_verified?: boolean;
   risk_state?: string;
   approval?: Record<string, unknown>;

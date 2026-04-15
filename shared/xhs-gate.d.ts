@@ -181,6 +181,8 @@ export interface XhsGateCoreInput {
   writeGateOnlyEligibleBehavior?: "allow" | "block";
   legacyRequestedExecutionMode?: unknown;
   legacy_requested_execution_mode?: unknown;
+  runtimeProfileRef?: unknown;
+  __runtime_profile_ref?: unknown;
   upstreamAuthorizationRequest?: unknown;
   upstream_authorization_request?: unknown;
   anonymousIsolationVerified?: boolean;

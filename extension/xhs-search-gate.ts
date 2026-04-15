@@ -120,6 +120,7 @@ export const resolveGate = (
     abilityAction: options.ability_action,
     requestedExecutionMode: options.requested_execution_mode,
     legacyRequestedExecutionMode: options.__legacy_requested_execution_mode,
+    runtimeProfileRef: options.__runtime_profile_ref ?? context.profile,
     upstreamAuthorizationRequest: options.upstream_authorization_request,
     anonymousIsolationVerified: options.__anonymous_isolation_verified === true,
     runId: context.runId,

@@ -177,7 +177,12 @@ const xhsReadCommand = async (context, inputConfig) => {
     const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
         requestedExecutionMode: gate.requestedExecutionMode
     });
-    const anonymousIsolationVerified = typeof context.profile === "string" && profileMeta?.lastLoginAt === null;
+    const targetSiteLoggedIn = context.params.target_site_logged_in === true
+        ? true
+        : context.params.target_site_logged_in === false
+            ? false
+            : null;
+    const anonymousIsolationVerified = targetSiteLoggedIn === false && profileMeta?.lastLoginAt === null;
     try {
         const preparedIssue209LiveRead = prepareIssue209LiveReadEnvelopeForContract({
             options: gate.options,
@@ -190,6 +195,8 @@ const xhsReadCommand = async (context, inputConfig) => {
         });
         const runtimeGateOptions = {
             ...preparedIssue209LiveRead.options,
+            ...(typeof context.profile === "string" ? { __runtime_profile_ref: context.profile } : {}),
+            ...(targetSiteLoggedIn !== null ? { target_site_logged_in: targetSiteLoggedIn } : {}),
             __anonymous_isolation_verified: anonymousIsolationVerified
         };
         const commandParams = appendFingerprintContext({

@@ -2239,6 +2239,7 @@ const applyCanonicalAdmissionReasons = (input) => {
   if (!upstream?.action_request || !upstream?.resource_binding || !upstream?.authorization_grant || !upstream?.runtime_target) {
     return;
   }
+  const runtimeProfileRef = asString(input.runtimeProfileRef);
 
   if (
     input.legacyRequestedExecutionMode &&
@@ -2268,6 +2269,21 @@ const applyCanonicalAdmissionReasons = (input) => {
     pushReason(input.gateReasons, "PROFILE_REF_OUT_OF_SCOPE");
   }
   if (
+    upstream.resource_binding.resource_kind === "profile_session" &&
+    runtimeProfileRef &&
+    upstream.resource_binding.profile_ref &&
+    upstream.resource_binding.profile_ref !== runtimeProfileRef
+  ) {
+    pushReason(input.gateReasons, "PROFILE_SESSION_RUNTIME_PROFILE_MISMATCH");
+  }
+  if (
+    upstream.resource_binding.resource_kind === "profile_session" &&
+    runtimeProfileRef &&
+    !upstream.authorization_grant.binding_scope.allowed_profile_refs.includes(runtimeProfileRef)
+  ) {
+    pushReason(input.gateReasons, "PROFILE_SESSION_RUNTIME_PROFILE_OUT_OF_SCOPE");
+  }
+  if (
     !upstream.authorization_grant.target_scope.allowed_domains.includes(upstream.runtime_target.domain)
   ) {
     pushReason(input.gateReasons, "TARGET_DOMAIN_OUT_OF_SCOPE");
@@ -2295,6 +2311,7 @@ const evaluateRequestAdmissionResult = (input) => {
   const requestRef = upstream?.action_request?.request_ref ?? asString(input.commandRequestId) ?? asString(input.requestId);
   const normalizedActionType = upstream?.action_request?.action_category ?? state.actionType ?? null;
   const normalizedResourceKind = upstream?.resource_binding?.resource_kind ?? null;
+  const runtimeProfileRef = asString(input.runtimeProfileRef);
   const runtimeTargetMatch =
     !input.gateReasons.includes("TARGET_DOMAIN_CONTEXT_MISMATCH") &&
     !input.gateReasons.includes("TARGET_TAB_CONTEXT_MISMATCH") &&
@@ -2319,6 +2336,21 @@ const evaluateRequestAdmissionResult = (input) => {
       upstream.resource_binding.resource_kind === "profile_session" &&
       upstream.resource_binding.profile_ref &&
       !allowedProfileRefs.includes(upstream.resource_binding.profile_ref)
+    ) {
+      grantMatch = false;
+    }
+    if (
+      upstream.resource_binding.resource_kind === "profile_session" &&
+      runtimeProfileRef &&
+      upstream.resource_binding.profile_ref &&
+      upstream.resource_binding.profile_ref !== runtimeProfileRef
+    ) {
+      grantMatch = false;
+    }
+    if (
+      upstream.resource_binding.resource_kind === "profile_session" &&
+      runtimeProfileRef &&
+      !allowedProfileRefs.includes(runtimeProfileRef)
     ) {
       grantMatch = false;
     }
@@ -3436,6 +3468,7 @@ const evaluateXhsGate = (input) => {
     upstream: state.upstreamAuthorizationRequest,
     requestedExecutionMode: state.requestedExecutionMode,
     legacyRequestedExecutionMode: state.legacyRequestedExecutionMode,
+    runtimeProfileRef: input.runtimeProfileRef ?? input.__runtime_profile_ref,
     anonymousIsolationVerified:
       input.anonymousIsolationVerified === true || input.__anonymous_isolation_verified === true,
     targetSiteLoggedIn: input.targetSiteLoggedIn === true || input.target_site_logged_in === true
@@ -3467,6 +3500,7 @@ const evaluateXhsGate = (input) => {
     state,
     upstream: state.upstreamAuthorizationRequest,
     legacyRequestedExecutionMode: state.legacyRequestedExecutionMode,
+    runtimeProfileRef: input.runtimeProfileRef ?? input.__runtime_profile_ref,
     anonymousIsolationVerified:
       input.anonymousIsolationVerified === true || input.__anonymous_isolation_verified === true,
     targetSiteLoggedIn: input.targetSiteLoggedIn === true || input.target_site_logged_in === true,
@@ -3974,6 +4008,7 @@ const resolveGate = (options, context) => {
         abilityAction: options.ability_action,
         requestedExecutionMode: options.requested_execution_mode,
         legacyRequestedExecutionMode: options.__legacy_requested_execution_mode,
+        runtimeProfileRef: options.__runtime_profile_ref ?? context.profile,
         upstreamAuthorizationRequest: options.upstream_authorization_request,
         anonymousIsolationVerified: options.__anonymous_isolation_verified === true,
         runId: context.runId,

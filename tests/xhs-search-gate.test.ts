@@ -381,6 +381,41 @@ describe("xhs-search gate helpers", () => {
     expect(gate.request_admission_result.reason_codes).toContain("RESOURCE_KIND_OUT_OF_SCOPE");
   });
 
+  it("blocks profile_session when the actual runtime profile does not match the canonical binding", () => {
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "dry_run",
+      runtimeProfileRef: "runtime-profile-b",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        resourceKind: "profile_session",
+        profileRef: "runtime-profile-a",
+        allowedResourceKinds: ["profile_session"],
+        allowedProfileRefs: ["runtime-profile-a"]
+      })
+    });
+
+    expect(gate.gate_outcome).toMatchObject({
+      gate_decision: "blocked",
+      effective_execution_mode: "dry_run"
+    });
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "blocked",
+      grant_match: false
+    });
+    expect(gate.request_admission_result.reason_codes).toContain(
+      "PROFILE_SESSION_RUNTIME_PROFILE_MISMATCH"
+    );
+  });
+
   it("blocks stale legacy requested_execution_mode instead of letting it own canonical mode", () => {
     const gate = evaluateXhsGate({
       issueScope: "issue_209",

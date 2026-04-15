@@ -73,6 +73,7 @@ export const buildLoopbackGate = (
   linkage?: {
     runId?: string;
     sessionId?: string;
+    profile?: string;
     gateInvocationId?: string;
     decisionId?: string;
     approvalId?: string;
@@ -109,6 +110,7 @@ export const buildLoopbackGate = (
     abilityAction,
     requestedExecutionMode: options.requested_execution_mode,
     legacyRequestedExecutionMode: options.__legacy_requested_execution_mode,
+    runtimeProfileRef: options.__runtime_profile_ref ?? linkage?.profile,
     upstreamAuthorizationRequest: options.upstream_authorization_request,
     anonymousIsolationVerified: options.__anonymous_isolation_verified === true,
     targetSiteLoggedIn: options.target_site_logged_in === true,
