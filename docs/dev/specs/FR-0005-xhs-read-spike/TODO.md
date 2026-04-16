@@ -34,7 +34,7 @@
 - [x] 仓库内已固化样本中的 `search` 已获得合法 fresh rerun 样本，但只达到 `dry_run` 成功壳；请求 `live_read_high_risk` 时会被 `risk_state=paused` + `ISSUE_ACTION_MATRIX_BLOCKED` 阻断，未形成 API primary success
 - [x] current latest head `c9ba10a9772006119bfd29f6c15f93d04eebc22a` 已确认：`xhs.detail` / `xhs.user_home` 公开 CLI 命令面存在，且 dry_run fresh rerun 可成功
 - [x] current latest-head gate refresh 已收口到 FR-0016 新治理口径：PR `live_evidence_record` 维护 latest-head 证据，repo formal docs 只保留 fixed/historical sample；formal 结论继续保持 `No-Go/paused`
-- [x] 当前 formal FR 的文档收口已完成；正式功能停点更新为：`search/detail/user_home` 仍缺 latest-head fresh live primary success，正式结论继续 `No-Go/paused`
+- [x] 当前 formal FR 的文档收口已完成；正式功能停点继续保持为：`search/detail/user_home` 仍缺 `route_role=primary + path_kind=api + evidence_status=success + reproduced_multi_round`；其中 `search` 还需补齐 required headers 最小必要集矩阵，正式结论继续 `No-Go/paused`
 
 ## #185 阻断点吸收（本次规约修订）
 
@@ -65,6 +65,7 @@
   - `xhs.search live` 命中 `GATEWAY_INVOKER_FAILED`
   - `xhs.detail dry_run` 成功，`xhs.detail live` 命中 `ERR_PROFILE_LOCKED`
   - `xhs.user_home dry_run` 成功，`xhs.user_home live` 命中 `ERR_PROFILE_LOCKED`
+- [x] 上述 2026-04-16 latest-head fresh rerun 只更新当前 blocker 证据，不改写 FR-0005 formal closeout bar；正式解除停点仍以 `primary + api + success + reproduced_multi_round` 与 required headers 最小必要集矩阵收口为准
 - [ ] 在风险状态满足准入、且具备合法 approval / gate 前提后，重新执行 `search` 的 managed-profile `real_browser` live primary API 复核，并补齐 required headers 最小必要集矩阵
 - [ ] 收口 latest-head `xhs.search live` 的 `GATEWAY_INVOKER_FAILED`，再重新执行 fresh live rerun
 - [ ] 收口 latest-head `xhs.detail live` / `xhs.user_home live` 的 runtime transport disconnect / `ERR_PROFILE_LOCKED`，再重新执行 fresh live rerun
