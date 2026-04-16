@@ -62,6 +62,7 @@
 - [x] 2026-04-16 已形成一轮 dated blocker refresh 样本；该样本不在 formal FR docs 内被表述成 current-head / latest-head gate evidence
 - [x] 上述 blocker refresh 不改写 FR-0005 formal closeout bar；正式解除停点仍以 `primary + api + success + reproduced_multi_round` 与 required headers 最小必要集矩阵收口为准
 - [ ] 在风险状态满足准入、且具备合法 approval / gate 前提后，重新执行 `search` 的 managed-profile `real_browser` live primary API 复核，并补齐 required headers 最小必要集矩阵
+- [ ] 保持 `detail/user_home` 的 managed-profile official-runtime 可回放 rerun 路径；在该前提未稳定前，不判定对应场景的 live closeout
 - [ ] 在满足上述前提后，再次判定 `search/detail/user_home` 是否达到 `route_role=primary + path_kind=api + evidence_status=success + reproduced_multi_round`
 - [ ] 完成浏览器内复核后，再决定是否进入后续实现 FR
 - [ ] 若存在 fallback-only 场景：先补 API primary 成功证据，或提交“实现范围修订”并通过独立 spec review
