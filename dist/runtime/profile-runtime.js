@@ -1117,10 +1117,7 @@ export class ProfileRuntimeService {
             });
         }
         const parsedState = this.#parseBrowserInstanceState(stateRaw);
-        const expectedControllerPid = typeof input.lock.controllerPid === "number" ? input.lock.controllerPid : input.lock.ownerPid;
-        if (parsedState === null ||
-            (!input.orphanRecoverable && parsedState.controllerPid !== expectedControllerPid) ||
-            parsedState.runId !== input.lock.ownerRunId) {
+        if (parsedState === null || parsedState.runId !== input.lock.ownerRunId) {
             throw new CliError("ERR_RUNTIME_UNAVAILABLE", "浏览器实例状态与当前锁所有者不一致，无法安全接管", {
                 retryable: true
             });
@@ -1132,12 +1129,15 @@ export class ProfileRuntimeService {
         const nextLock = {
             ...input.lock,
             ownerPid: input.nextOwnerPid,
-            controllerPid: typeof input.lock.controllerPid === "number"
-                ? input.lock.controllerPid
-                : parsedState.controllerPid,
             ownerRunId: input.nextRunId,
             lastHeartbeatAt: input.nowIso
         };
+        if (!input.orphanRecoverable) {
+            nextLock.controllerPid = parsedState.controllerPid;
+        }
+        else {
+            delete nextLock.controllerPid;
+        }
         await this.#lockFileAdapter.writeFile(statePath, `${JSON.stringify(nextState, null, 2)}\n`, "utf8");
         try {
             await this.#writeLock(input.lockPath, nextLock);

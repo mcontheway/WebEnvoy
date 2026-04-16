@@ -9,15 +9,16 @@ export const shouldRecoverAsDisconnected = (acquisition, state) => acquisition !
 export const inspectProfileLock = (input) => {
     const browserInstanceState = input.browserInstanceState;
     const lockOwnerAlive = input.isProcessAlive(input.lock.ownerPid);
-    const expectedControllerPid = typeof input.lock.controllerPid === "number" ? input.lock.controllerPid : input.lock.ownerPid;
-    const stateMatchesController = browserInstanceState !== null && browserInstanceState.controllerPid === expectedControllerPid;
-    const controllerAlive = stateMatchesController && input.isProcessAlive(expectedControllerPid);
+    const stateMatchesRun = browserInstanceState !== null && browserInstanceState.runId === input.lock.ownerRunId;
+    const stateMatchesPinnedController = stateMatchesRun &&
+        (typeof input.lock.controllerPid !== "number" ||
+            browserInstanceState.controllerPid === input.lock.controllerPid);
+    const controllerAlive = stateMatchesPinnedController && input.isProcessAlive(browserInstanceState.controllerPid);
     const browserAlive = browserInstanceState !== null && input.isProcessAlive(browserInstanceState.browserPid);
     const orphanRecoverable = !lockOwnerAlive &&
         !controllerAlive &&
-        stateMatchesController &&
+        stateMatchesPinnedController &&
         browserInstanceState !== null &&
-        browserInstanceState.runId === input.lock.ownerRunId &&
         browserAlive;
     return {
         blocksReuse: lockOwnerAlive || controllerAlive || browserAlive,
