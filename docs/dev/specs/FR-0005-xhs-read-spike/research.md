@@ -730,13 +730,13 @@
 
 ### 5.5 2026-04-16 blocker refresh 的治理分层说明
 
-2026-04-16 曾执行一轮 current-head fresh rerun，用于更新 issue `#445` 的 blocker 证据链。根据 5.4 已冻结的 FR-0016 治理口径：
+2026-04-16 曾形成一轮 blocker refresh 样本，用于更新 issue `#445` 的外部证据链。根据 5.4 已冻结的 FR-0016 治理口径：
 
-- current-head fresh rerun 的详细执行现场、artifact、逐命令结果与 blocker 归因，只应锚定在 issue comment
-- repo formal docs 不再把 moving latest-head SHA、逐命令结果或 blocker 明细回写成“当前值”
+- repo formal docs 不承接 moving latest-head gate truth
 - formal FR 在仓库内只保留 stable closeout bar 与 fixed/historical sample
+- dated blocker refresh 样本不得在 formal docs 内被表述成 current-head / latest-head 证据
 
-因此，2026-04-16 这轮 blocker refresh 的 current-head 证据不再在本文件逐项展开；formal 结论也未因此发生变化，FR-0005 继续保持 `No-Go/paused`，直到正式 closeout bar 被满足为止。
+因此，2026-04-16 这轮 blocker refresh 不在本文件逐项展开；formal 结论也未因此发生变化，FR-0005 继续保持 `No-Go/paused`，直到正式 closeout bar 被满足为止。
 
 ## 未决项（进入下一轮复核前保留）
 

@@ -33,7 +33,7 @@
 - [x] 同一轮 fresh rerun 已确认 `xhs_001` 仍满足 managed-profile / official runtime / `real_browser` 启动前提，且 `runtime.start`、`runtime.ping`、internal `runtime.tabs` 均可达
 - [x] 仓库内已固化样本中的 `search` 已获得合法 fresh rerun 样本，但只达到 `dry_run` 成功壳；请求 `live_read_high_risk` 时会被 `risk_state=paused` + `ISSUE_ACTION_MATRIX_BLOCKED` 阻断，未形成 API primary success
 - [x] 仓库当前已具备 repo 内可复核的 `xhs.detail` / `xhs.user_home` 公开命令面；对应 fresh rerun 证据只在 issue / PR 当前记录中维护，不再在 formal FR docs 中逐头追写
-- [x] FR-0016 新治理口径已收口：moving latest-head 证据以 issue 当前 comment 为准，repo formal docs 只保留 fixed/historical sample 与稳定 closeout bar；formal 结论继续保持 `No-Go/paused`
+- [x] FR-0016 新治理口径已收口：repo formal docs 只保留 fixed/historical sample 与稳定 closeout bar，不再在仓库 formal 记录中承接 moving latest-head gate truth；formal 结论继续保持 `No-Go/paused`
 - [x] 当前 formal FR 的文档收口已完成；正式功能停点继续保持为：`search/detail/user_home` 仍缺 `route_role=primary + path_kind=api + evidence_status=success + reproduced_multi_round`；其中 `search` 还需补齐 required headers 最小必要集矩阵，正式结论继续 `No-Go/paused`
 
 ## #185 阻断点吸收（本次规约修订）
@@ -60,7 +60,7 @@
 - [x] 2026-04-10 晚间已按最新 managed-profile / official runtime 现场重做 Go/No-Go 判定，结论继续维持 `No-Go/paused`
 - [x] 2026-04-11 已在 main 目录完成恢复后再复核，并把 “worktree 路径污染不是最终结论” 写回正式记录
 - [x] 2026-04-11 已在 latest head 重新确认：此前的 XHS read bundle 阻断已被 `#445-A` 解除，但 FR-0005 的正式停点尚未解除
-- [x] 2026-04-16 已完成一轮 blocker refresh；其 current-head fresh rerun 证据锚定在 issue `#445` 当前 comment 中，不再在 formal FR docs 内作为 current truth 逐项展开
+- [x] 2026-04-16 已形成一轮 dated blocker refresh 样本；该样本不在 formal FR docs 内被表述成 current-head / latest-head gate evidence
 - [x] 上述 blocker refresh 不改写 FR-0005 formal closeout bar；正式解除停点仍以 `primary + api + success + reproduced_multi_round` 与 required headers 最小必要集矩阵收口为准
 - [ ] 在风险状态满足准入、且具备合法 approval / gate 前提后，重新执行 `search` 的 managed-profile `real_browser` live primary API 复核，并补齐 required headers 最小必要集矩阵
 - [ ] 在满足上述前提后，再次判定 `search/detail/user_home` 是否达到 `route_role=primary + path_kind=api + evidence_status=success + reproduced_multi_round`
