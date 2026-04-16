@@ -2,7 +2,7 @@ export interface ProfileLock {
   profileName: string;
   lockPath: string;
   ownerPid: number;
-  controllerPid?: number;
+  controllerPid?: number | null;
   ownerRunId: string;
   acquiredAt: string;
   lastHeartbeatAt: string;
