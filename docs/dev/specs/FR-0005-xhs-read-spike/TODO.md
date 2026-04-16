@@ -63,8 +63,6 @@
 - [x] 2026-04-16 已完成一轮 blocker refresh；其 current-head fresh rerun 证据锚定在 issue `#445` comment 与 PR `#488` 元数据中，不再在 formal FR docs 内作为 current truth 逐项展开
 - [x] 上述 blocker refresh 不改写 FR-0005 formal closeout bar；正式解除停点仍以 `primary + api + success + reproduced_multi_round` 与 required headers 最小必要集矩阵收口为准
 - [ ] 在风险状态满足准入、且具备合法 approval / gate 前提后，重新执行 `search` 的 managed-profile `real_browser` live primary API 复核，并补齐 required headers 最小必要集矩阵
-- [ ] 收口 `xhs.search` live 路径当前暴露的 `GATEWAY_INVOKER_FAILED`，再重新执行 fresh live rerun
-- [ ] 收口 `xhs.detail` / `xhs.user_home` live 路径当前暴露的 runtime transport disconnect / `ERR_PROFILE_LOCKED`，再重新执行 fresh live rerun
 - [ ] 在满足上述前提后，再次判定 `search/detail/user_home` 是否达到 `route_role=primary + path_kind=api + evidence_status=success + reproduced_multi_round`
 - [ ] 完成浏览器内复核后，再决定是否进入后续实现 FR
 - [ ] 若存在 fallback-only 场景：先补 API primary 成功证据，或提交“实现范围修订”并通过独立 spec review
