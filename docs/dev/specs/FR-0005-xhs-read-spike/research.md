@@ -732,7 +732,7 @@
 
 2026-04-16 曾执行一轮 current-head fresh rerun，用于更新 issue `#445` 的 blocker 证据链。根据 5.4 已冻结的 FR-0016 治理口径：
 
-- current-head fresh rerun 的详细执行现场、artifact、逐命令结果与 blocker 归因，只应锚定在 issue comment 与 PR 元数据
+- current-head fresh rerun 的详细执行现场、artifact、逐命令结果与 blocker 归因，只应锚定在 issue comment
 - repo formal docs 不再把 moving latest-head SHA、逐命令结果或 blocker 明细回写成“当前值”
 - formal FR 在仓库内只保留 stable closeout bar 与 fixed/historical sample
 
