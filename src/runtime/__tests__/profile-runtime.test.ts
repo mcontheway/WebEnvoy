@@ -2042,6 +2042,792 @@ describe("profile-runtime identity preflight", () => {
     expect(browserState.runId).toBe("run-runtime-attach-next-001");
   });
 
+  it("allows attaching a recoverable ready runtime when the controller is gone but browser state still matches the lock owner", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-attach-recoverable-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "attach_recoverable_profile"
+    });
+    const alivePids = new Set<number>([999998, 999999, process.pid]);
+    const profileDir = join(baseDir, ".webenvoy", "profiles", "attach_recoverable_profile");
+    const browserStatePath = join(profileDir, BROWSER_STATE_FILENAME);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid),
+      bridgeFactory: () => ({
+        runCommand: async ({
+          command,
+          params,
+          profile,
+          runId
+        }: {
+          command: string;
+          params: Record<string, unknown>;
+          profile: string | null;
+          runId: string;
+        }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: String(params.runtime_context_id),
+                  profile,
+                  status: "ready"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          if (command === "runtime.readiness") {
+            const browserStateRaw = await readFile(browserStatePath, "utf8");
+            const browserState = JSON.parse(browserStateRaw) as { runId?: unknown };
+            return {
+              ok: true as const,
+              payload: {
+                transport_state: "ready",
+                bootstrap_state:
+                  browserState.runId === runId &&
+                  profile === "attach_recoverable_profile" &&
+                  String(params.run_id) === runId
+                    ? "ready"
+                    : "stale"
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "attach_recoverable_profile",
+      runId: "run-runtime-attach-recoverable-owner-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+    const lockPath = join(profileDir, "__webenvoy_lock.json");
+    const metaPath = join(profileDir, "__webenvoy_meta.json");
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as ProfileLock;
+    lock.ownerPid = 12345;
+    lock.controllerPid = 12345;
+    lock.ownerRunId = "run-runtime-attach-recoverable-legacy-001";
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+    const browserPid = 223344;
+    await writeFile(
+      browserStatePath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          launchToken: "attach-recoverable-token-001",
+          profileDir,
+          runId: "run-runtime-attach-recoverable-legacy-001",
+          browserPath: "/mock/chrome",
+          controllerPid: 12345,
+          browserPid,
+          launchedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    const metaRaw = await readFile(metaPath, "utf8");
+    const meta = JSON.parse(metaRaw) as { profileState?: unknown; lastDisconnectedAt?: unknown };
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          ...meta,
+          profileState: "disconnected",
+          lastDisconnectedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    alivePids.delete(999998);
+    alivePids.delete(999999);
+    alivePids.add(browserPid);
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile: "attach_recoverable_profile",
+        runId: "run-runtime-attach-recoverable-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "disconnected",
+      lockHeld: false,
+      runtimeReadiness: "recoverable"
+    });
+
+    await expect(
+      service.attach({
+        cwd: baseDir,
+        profile: "attach_recoverable_profile",
+        runId: "run-runtime-attach-recoverable-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      browserState: "ready",
+      lockHeld: true,
+      transportState: "ready",
+      runtimeReadiness: "ready"
+    });
+
+    const nextLockRaw = await readFile(lockPath, "utf8");
+    const nextLock = JSON.parse(nextLockRaw) as ProfileLock;
+    expect(nextLock.ownerRunId).toBe("run-runtime-attach-recoverable-next-001");
+    expect(nextLock.ownerPid).toBe(process.pid);
+    expect(nextLock.controllerPid).toBe(12345);
+    expect(nextLock.controllerPidState).toBe("stale");
+    const nextMetaRaw = await readFile(metaPath, "utf8");
+    const nextMeta = JSON.parse(nextMetaRaw) as { profileState?: unknown };
+    expect(nextMeta.profileState).toBe("ready");
+
+    const browserStateRaw = await readFile(browserStatePath, "utf8");
+    const browserState = JSON.parse(browserStateRaw) as { runId?: unknown; controllerPid?: unknown };
+    expect(browserState.runId).toBe("run-runtime-attach-recoverable-next-001");
+    expect(browserState.controllerPid).toBe(12345);
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile: "attach_recoverable_profile",
+        runId: "run-runtime-attach-recoverable-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: true,
+      transportState: "ready",
+      runtimeReadiness: "ready"
+    });
+  });
+
+  it("allows runtime.stop after recoverable attach when the stale controller pid has been reused", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-stop-stale-controller-reused-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "stop_stale_controller_reused_profile"
+    });
+    const alivePids = new Set<number>([999998, 999999, process.pid]);
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
+      if (signal === 0) {
+        return alivePids.has(pid);
+      }
+      alivePids.delete(pid);
+      return true;
+    }) as typeof process.kill);
+    const profileDir = join(baseDir, ".webenvoy", "profiles", "stop_stale_controller_reused_profile");
+    const browserStatePath = join(profileDir, BROWSER_STATE_FILENAME);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid),
+      bridgeFactory: () => ({
+        runCommand: async ({
+          command,
+          params,
+          profile,
+          runId
+        }: {
+          command: string;
+          params: Record<string, unknown>;
+          profile: string | null;
+          runId: string;
+        }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: String(params.runtime_context_id),
+                  profile,
+                  status: "ready"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          if (command === "runtime.readiness") {
+            const browserStateRaw = await readFile(browserStatePath, "utf8");
+            const browserState = JSON.parse(browserStateRaw) as { runId?: unknown };
+            return {
+              ok: true as const,
+              payload: {
+                transport_state: "ready",
+                bootstrap_state:
+                  browserState.runId === runId &&
+                  profile === "stop_stale_controller_reused_profile" &&
+                  String(params.run_id) === runId
+                    ? "ready"
+                    : "stale"
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    try {
+      await service.start({
+        cwd: baseDir,
+        profile: "stop_stale_controller_reused_profile",
+        runId: "run-runtime-stop-stale-controller-owner-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      });
+
+      const lockPath = join(profileDir, "__webenvoy_lock.json");
+      const metaPath = join(profileDir, "__webenvoy_meta.json");
+      const lockRaw = await readFile(lockPath, "utf8");
+      const lock = JSON.parse(lockRaw) as ProfileLock;
+      lock.ownerPid = 12345;
+      lock.controllerPid = 12345;
+      lock.ownerRunId = "run-runtime-stop-stale-controller-legacy-001";
+      await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+      const browserPid = 223388;
+      await writeFile(
+        browserStatePath,
+        `${JSON.stringify(
+          {
+            schemaVersion: 1,
+            launchToken: "stop-stale-controller-token-001",
+            profileDir,
+            runId: "run-runtime-stop-stale-controller-legacy-001",
+            browserPath: "/mock/chrome",
+            controllerPid: 12345,
+            browserPid,
+            launchedAt: new Date().toISOString()
+          },
+          null,
+          2
+        )}\n`,
+        "utf8"
+      );
+      const metaRaw = await readFile(metaPath, "utf8");
+      const meta = JSON.parse(metaRaw) as { profileState?: unknown; lastDisconnectedAt?: unknown };
+      await writeFile(
+        metaPath,
+        `${JSON.stringify(
+          {
+            ...meta,
+            profileState: "disconnected",
+            lastDisconnectedAt: new Date().toISOString()
+          },
+          null,
+          2
+        )}\n`,
+        "utf8"
+      );
+      alivePids.delete(999998);
+      alivePids.delete(999999);
+      alivePids.add(browserPid);
+
+      await expect(
+        service.attach({
+          cwd: baseDir,
+          profile: "stop_stale_controller_reused_profile",
+          runId: "run-runtime-stop-stale-controller-next-001",
+          params: {
+            persistent_extension_identity: {
+              extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              manifest_path: manifestPath
+            }
+          }
+        })
+      ).resolves.toMatchObject({
+        profileState: "ready",
+        lockHeld: true,
+        transportState: "ready",
+        runtimeReadiness: "ready"
+      });
+
+      alivePids.add(12345);
+
+      await expect(
+        service.stop({
+          cwd: baseDir,
+          profile: "stop_stale_controller_reused_profile",
+          runId: "run-runtime-stop-stale-controller-next-001",
+          params: {}
+        })
+      ).resolves.toMatchObject({
+        profile: "stop_stale_controller_reused_profile",
+        profileState: "stopped",
+        lockHeld: false,
+        orphanRecovered: false
+      });
+
+      expect(alivePids.has(browserPid)).toBe(false);
+      expect(alivePids.has(12345)).toBe(true);
+      await expect(readFile(lockPath, "utf8")).rejects.toMatchObject({
+        code: "ENOENT"
+      });
+      await expect(readFile(browserStatePath, "utf8")).rejects.toMatchObject({
+        code: "ENOENT"
+      });
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it("keeps stale disconnected runtime out of orphan recovery attach until bootstrap validity is proven", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-attach-stale-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "attach_stale_profile"
+    });
+    const alivePids = new Set<number>([999998, 999999, process.pid]);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid),
+      bridgeFactory: () => ({
+        runCommand: async ({
+          command,
+          params,
+          profile,
+          runId
+        }: {
+          command: string;
+          params: Record<string, unknown>;
+          profile: string | null;
+          runId: string;
+        }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: String(params.runtime_context_id),
+                  profile,
+                  status: "ready"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          if (command === "runtime.readiness") {
+            return {
+              ok: true as const,
+              payload: {
+                transport_state: "ready",
+                bootstrap_state: "stale"
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "attach_stale_profile",
+      runId: "run-runtime-attach-stale-owner-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    const profileDir = join(baseDir, ".webenvoy", "profiles", "attach_stale_profile");
+    const lockPath = join(profileDir, "__webenvoy_lock.json");
+    const metaPath = join(profileDir, "__webenvoy_meta.json");
+    const browserStatePath = join(profileDir, BROWSER_STATE_FILENAME);
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as ProfileLock;
+    lock.ownerPid = 12345;
+    lock.controllerPid = 12345;
+    lock.ownerRunId = "run-runtime-attach-stale-legacy-001";
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+    const browserPid = 223366;
+    await writeFile(
+      browserStatePath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          launchToken: "attach-stale-token-001",
+          profileDir,
+          runId: "run-runtime-attach-stale-legacy-001",
+          browserPath: "/mock/chrome",
+          controllerPid: 12345,
+          browserPid,
+          launchedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    const metaRaw = await readFile(metaPath, "utf8");
+    const meta = JSON.parse(metaRaw) as { profileState?: unknown; lastDisconnectedAt?: unknown };
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          ...meta,
+          profileState: "disconnected",
+          lastDisconnectedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    alivePids.delete(999998);
+    alivePids.delete(999999);
+    alivePids.add(browserPid);
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile: "attach_stale_profile",
+        runId: "run-runtime-attach-stale-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "disconnected",
+      lockHeld: false,
+      bootstrapState: "stale",
+      runtimeReadiness: "blocked"
+    });
+
+    await expect(
+      service.attach({
+        cwd: baseDir,
+        profile: "attach_stale_profile",
+        runId: "run-runtime-attach-stale-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_LOCKED"
+    });
+
+    const finalLockRaw = await readFile(lockPath, "utf8");
+    const finalLock = JSON.parse(finalLockRaw) as ProfileLock;
+    expect(finalLock.ownerRunId).toBe("run-runtime-attach-stale-legacy-001");
+    expect(finalLock.ownerPid).toBe(12345);
+
+    const finalMetaRaw = await readFile(metaPath, "utf8");
+    const finalMeta = JSON.parse(finalMetaRaw) as { profileState?: unknown };
+    expect(finalMeta.profileState).toBe("disconnected");
+
+    const finalBrowserStateRaw = await readFile(browserStatePath, "utf8");
+    const finalBrowserState = JSON.parse(finalBrowserStateRaw) as { runId?: unknown };
+    expect(finalBrowserState.runId).toBe("run-runtime-attach-stale-legacy-001");
+  });
+
+  it("keeps disconnected runtime blocked until transport is actually recoverable", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-attach-not-connected-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "attach_not_connected_profile"
+    });
+    const alivePids = new Set<number>([999998, 999999, process.pid]);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid),
+      bridgeFactory: () => ({
+        runCommand: async ({
+          command,
+          params,
+          profile,
+          runId
+        }: {
+          command: string;
+          params: Record<string, unknown>;
+          profile: string | null;
+          runId: string;
+        }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: String(params.runtime_context_id),
+                  profile,
+                  status: "ready"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          if (command === "runtime.readiness") {
+            return {
+              ok: true as const,
+              payload: {
+                transport_state: "not_connected",
+                bootstrap_state: "pending"
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "attach_not_connected_profile",
+      runId: "run-runtime-attach-not-connected-owner-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    const profileDir = join(baseDir, ".webenvoy", "profiles", "attach_not_connected_profile");
+    const lockPath = join(profileDir, "__webenvoy_lock.json");
+    const metaPath = join(profileDir, "__webenvoy_meta.json");
+    const browserStatePath = join(profileDir, BROWSER_STATE_FILENAME);
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as ProfileLock;
+    lock.ownerPid = 12345;
+    lock.controllerPid = 12345;
+    lock.ownerRunId = "run-runtime-attach-not-connected-legacy-001";
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+    const browserPid = 223367;
+    await writeFile(
+      browserStatePath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          launchToken: "attach-not-connected-token-001",
+          profileDir,
+          runId: "run-runtime-attach-not-connected-legacy-001",
+          browserPath: "/mock/chrome",
+          controllerPid: 12345,
+          browserPid,
+          launchedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    const metaRaw = await readFile(metaPath, "utf8");
+    const meta = JSON.parse(metaRaw) as { profileState?: unknown; lastDisconnectedAt?: unknown };
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          ...meta,
+          profileState: "disconnected",
+          lastDisconnectedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    alivePids.delete(999998);
+    alivePids.delete(999999);
+    alivePids.add(browserPid);
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile: "attach_not_connected_profile",
+        runId: "run-runtime-attach-not-connected-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "disconnected",
+      lockHeld: false,
+      transportState: "not_connected",
+      bootstrapState: "pending",
+      runtimeReadiness: "blocked"
+    });
+
+    await expect(
+      service.attach({
+        cwd: baseDir,
+        profile: "attach_not_connected_profile",
+        runId: "run-runtime-attach-not-connected-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_LOCKED"
+    });
+
+    const finalLockRaw = await readFile(lockPath, "utf8");
+    const finalLock = JSON.parse(finalLockRaw) as ProfileLock;
+    expect(finalLock.ownerRunId).toBe("run-runtime-attach-not-connected-legacy-001");
+    expect(finalLock.ownerPid).toBe(12345);
+
+    const finalMetaRaw = await readFile(metaPath, "utf8");
+    const finalMeta = JSON.parse(finalMetaRaw) as { profileState?: unknown };
+    expect(finalMeta.profileState).toBe("disconnected");
+
+    const finalBrowserStateRaw = await readFile(browserStatePath, "utf8");
+    const finalBrowserState = JSON.parse(finalBrowserStateRaw) as { runId?: unknown };
+    expect(finalBrowserState.runId).toBe("run-runtime-attach-not-connected-legacy-001");
+  });
+
+  it("keeps recoverable disconnected runtime blocked when browser state no longer matches the lock owner", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-attach-mismatch-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "attach_recoverable_mismatch_profile"
+    });
+    const alivePids = new Set<number>([999998, 999999]);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid)
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "attach_recoverable_mismatch_profile",
+      runId: "run-runtime-attach-mismatch-owner-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    const profileDir = join(baseDir, ".webenvoy", "profiles", "attach_recoverable_mismatch_profile");
+    const lockPath = join(profileDir, "__webenvoy_lock.json");
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as ProfileLock;
+    lock.ownerPid = 12345;
+    lock.controllerPid = 12345;
+    lock.ownerRunId = "run-runtime-attach-mismatch-legacy-001";
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+    const browserPid = 223355;
+    await writeFile(
+      join(profileDir, BROWSER_STATE_FILENAME),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          launchToken: "attach-mismatch-token-001",
+          profileDir,
+          runId: "run-runtime-attach-mismatch-legacy-001",
+          browserPath: "/mock/chrome",
+          controllerPid: 54321,
+          browserPid,
+          launchedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    alivePids.delete(999998);
+    alivePids.delete(999999);
+    alivePids.add(browserPid);
+
+    await expect(
+      service.attach({
+        cwd: baseDir,
+        profile: "attach_recoverable_mismatch_profile",
+        runId: "run-runtime-attach-mismatch-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_LOCKED"
+    });
+  });
+
   it("accepts relocated manifest path when stable identity still matches", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-relocate-"));
     tempDirs.push(baseDir);
@@ -2583,6 +3369,7 @@ describe("profile-runtime stale lock reclaim", () => {
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as ProfileLock;
     lock.ownerPid = 12345;
+    lock.controllerPid = 12345;
     lock.ownerRunId = "run-runtime-test-legacy-controller";
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
@@ -2679,6 +3466,7 @@ describe("profile-runtime stale lock reclaim", () => {
       const lockRaw = await readFile(lockPath, "utf8");
       const lock = JSON.parse(lockRaw) as ProfileLock;
       lock.ownerPid = 12345;
+      lock.controllerPid = 12345;
       await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
       const browserPid = 223355;
@@ -2765,6 +3553,7 @@ describe("profile-runtime stale lock reclaim", () => {
       const lockRaw = await readFile(lockPath, "utf8");
       const lock = JSON.parse(lockRaw) as ProfileLock;
       lock.ownerPid = 12345;
+      lock.controllerPid = 12345;
       await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
       const browserStatePath = join(profileDir, BROWSER_STATE_FILENAME);
@@ -2849,6 +3638,7 @@ describe("profile-runtime stale lock reclaim", () => {
       const lockRaw = await readFile(lockPath, "utf8");
       const lock = JSON.parse(lockRaw) as ProfileLock;
       lock.ownerPid = 12345;
+      lock.controllerPid = 12345;
       await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
       const browserStatePath = join(profileDir, BROWSER_STATE_FILENAME);
@@ -2901,6 +3691,66 @@ describe("profile-runtime stale lock reclaim", () => {
     } finally {
       killSpy.mockRestore();
     }
+  });
+
+  it("rejects runtime.stop when browser state drifts away from the pinned controller", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-stop-controller-drift-"));
+    tempDirs.push(baseDir);
+    const alivePids = new Set<number>([999998, 999999, 223355, 223356]);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid)
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "stop_controller_drift_profile",
+      runId: "run-runtime-test-731",
+      params: {}
+    });
+
+    const profileDir = join(baseDir, ".webenvoy", "profiles", "stop_controller_drift_profile");
+    const lockPath = join(profileDir, "__webenvoy_lock.json");
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as ProfileLock;
+    lock.ownerPid = 12345;
+    lock.controllerPid = 12345;
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+    const browserStatePath = join(profileDir, BROWSER_STATE_FILENAME);
+    await writeFile(
+      browserStatePath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          launchToken: "state-token-731",
+          profileDir,
+          runId: "run-runtime-test-731",
+          browserPath: "/mock/chrome",
+          controllerPid: 223355,
+          browserPid: 223356,
+          launchedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    alivePids.delete(999998);
+    alivePids.delete(999999);
+
+    await expect(
+      service.stop({
+        cwd: baseDir,
+        profile: "stop_controller_drift_profile",
+        runId: "run-runtime-test-731",
+        params: {}
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_UNAVAILABLE"
+    });
+
+    const lockAfterReject = JSON.parse(await readFile(lockPath, "utf8")) as ProfileLock;
+    expect(lockAfterReject.ownerRunId).toBe("run-runtime-test-731");
   });
 });
 

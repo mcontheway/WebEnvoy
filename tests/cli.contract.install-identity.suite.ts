@@ -3078,6 +3078,7 @@ describe("webenvoy cli contract / install and identity", () => {
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as Record<string, unknown>;
     lock.ownerPid = 999999;
+    lock.controllerPid = 999999;
     lock.lastHeartbeatAt = new Date().toISOString();
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
     await rm(browserStatePath, { force: true });
@@ -3305,6 +3306,7 @@ describe("webenvoy cli contract / install and identity", () => {
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as Record<string, unknown>;
     lock.ownerPid = 999999;
+    lock.controllerPid = 999999;
     lock.lastHeartbeatAt = new Date().toISOString();
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
     await rm(browserStatePath, { force: true });
@@ -3347,6 +3349,7 @@ describe("webenvoy cli contract / install and identity", () => {
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as Record<string, unknown>;
     lock.ownerPid = 999999;
+    lock.controllerPid = 999999;
     lock.lastHeartbeatAt = new Date().toISOString();
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
     const browserStateRaw = await readFile(browserStatePath, "utf8");
@@ -3399,9 +3402,11 @@ describe("webenvoy cli contract / install and identity", () => {
 
   it("allows explicit runtime.stop orphan recovery from a new run_id after controller ownership is lost", async () => {
     const runtimeCwd = await createRuntimeCwd();
+    const runtimeEnv = { WEBENVOY_BROWSER_MOCK_TTL: "10" };
     const start = runCli(
       ["runtime.start", "--profile", "orphan_recover_profile", "--run-id", "run-contract-507"],
-      runtimeCwd
+      runtimeCwd,
+      runtimeEnv
     );
     expect(start.status).toBe(0);
     const startBody = parseSingleJsonLine(start.stdout);
@@ -3413,6 +3418,7 @@ describe("webenvoy cli contract / install and identity", () => {
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as Record<string, unknown>;
     lock.ownerPid = 999999;
+    lock.controllerPid = 999999;
     lock.lastHeartbeatAt = new Date().toISOString();
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
     const browserStateRaw = await readFile(browserStatePath, "utf8");
@@ -3422,7 +3428,8 @@ describe("webenvoy cli contract / install and identity", () => {
 
     const blockedStart = runCli(
       ["runtime.start", "--profile", "orphan_recover_profile", "--run-id", "run-contract-508"],
-      runtimeCwd
+      runtimeCwd,
+      runtimeEnv
     );
     expect(blockedStart.status).toBe(5);
     const blockedStartBody = parseSingleJsonLine(blockedStart.stdout);
@@ -3434,7 +3441,8 @@ describe("webenvoy cli contract / install and identity", () => {
 
     const stop = runCli(
       ["runtime.stop", "--profile", "orphan_recover_profile", "--run-id", "run-contract-509"],
-      runtimeCwd
+      runtimeCwd,
+      runtimeEnv
     );
     expect(stop.status).toBe(0);
     const stopBody = parseSingleJsonLine(stop.stdout);
@@ -3459,7 +3467,8 @@ describe("webenvoy cli contract / install and identity", () => {
 
     const restarted = runCli(
       ["runtime.start", "--profile", "orphan_recover_profile", "--run-id", "run-contract-510"],
-      runtimeCwd
+      runtimeCwd,
+      runtimeEnv
     );
     expect(restarted.status).toBe(0);
   });

@@ -927,6 +927,7 @@ export class ProfileRuntimeService {
       runtimeReadiness: readiness.runtimeReadiness,
       identityPreflight: buildIdentityPreflightOutput(identityPreflight),
       lockOwnerPid: lock?.ownerPid ?? null,
+      orphanRecoverable: lockInspection?.orphanRecoverable ?? false,
       recoverableSession: buildRecoverableSessionSummary(meta),
       fingerprint_runtime: fingerprintRuntime,
       updatedAt: meta?.updatedAt ?? null
@@ -942,7 +943,8 @@ export class ProfileRuntimeService {
       mode: readFingerprintMetaMode(input.params) ?? "readonly"
     });
     const storedProfileState: ProfileState = meta?.profileState ?? "uninitialized";
-    const activeState = isRuntimeActiveProfileState(storedProfileState);
+    const activeState =
+      isRuntimeActiveProfileState(storedProfileState) || storedProfileState === "disconnected";
     if (!activeState) {
       throw new CliError(
         "ERR_PROFILE_STATE_CONFLICT",
@@ -965,7 +967,19 @@ export class ProfileRuntimeService {
       lockInspection,
       runtimeRunId: input.runId
     });
-    if (!accessState.healthyLock || !accessState.controlConnected || accessState.profileState !== "ready") {
+    const pinnedControllerPid =
+      typeof lock.controllerPid === "number"
+        ? lock.controllerPid
+        : lock.ownerPid;
+    const attachableReadyRuntime =
+      accessState.healthyLock &&
+      accessState.controlConnected &&
+      accessState.profileState === "ready" &&
+      Number.isInteger(pinnedControllerPid);
+    const attachableRecoverableRuntime =
+      (storedProfileState === "ready" || storedProfileState === "disconnected") &&
+      lockInspection.orphanRecoverable;
+    if (!attachableReadyRuntime && !attachableRecoverableRuntime) {
       throw new CliError("ERR_PROFILE_LOCKED", "profile 当前不存在可安全接管的 ready runtime", {
         retryable: true
       });
@@ -993,28 +1007,89 @@ export class ProfileRuntimeService {
       requestedExecutionMode
     });
     ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
+    if (attachableRecoverableRuntime) {
+      const preAttachReadiness = await this.#readRuntimeReadiness({
+        runtimeInput: input,
+        lockHeld: false,
+        observedRunId: accessState.observedRunId,
+        identityPreflight,
+        profileState: accessState.profileState
+      });
+      if (
+        preAttachReadiness.bootstrapState === "stale" ||
+        preAttachReadiness.transportState === "not_connected" ||
+        preAttachReadiness.runtimeReadiness !== "recoverable"
+      ) {
+        throw new CliError("ERR_PROFILE_LOCKED", "profile 当前不存在可安全接管的 ready runtime", {
+          retryable: true
+        });
+      }
+    }
 
-    if (lock.ownerRunId !== input.runId) {
-      await this.#rebindActiveRuntimeOwnership({
+    const nextOwnerPid = attachableRecoverableRuntime ? process.pid : lock.ownerPid;
+    let attachedLock = lock;
+    if (
+      lock.ownerRunId !== input.runId ||
+      (attachableRecoverableRuntime && lock.ownerPid !== nextOwnerPid)
+    ) {
+      attachedLock = await this.#rebindActiveRuntimeOwnership({
         profileDir,
         lockPath,
         lock,
         nextRunId: input.runId,
+        nextOwnerPid,
+        orphanRecoverable: attachableRecoverableRuntime,
         nowIso
       });
     }
 
+    let attachedProfileState: ProfileState = accessState.profileState;
+    let nextMeta = meta;
+    if (attachableRecoverableRuntime && meta && meta.profileState !== attachedProfileState) {
+      nextMeta = this.#patchMeta(meta, {
+        profileName: input.profile,
+        profileDir,
+        profileState: attachedProfileState,
+        proxyBinding: meta.proxyBinding,
+        persistentExtensionBinding: meta.persistentExtensionBinding ?? null,
+        fingerprintProfileBundle: meta.fingerprintProfileBundle ?? null,
+        updatedAt: nowIso,
+        lastDisconnectedAt: meta.lastDisconnectedAt ?? nowIso
+      });
+      await store.writeMeta(input.profile, nextMeta);
+    }
     const readiness = await this.#readRuntimeReadiness({
       runtimeInput: input,
       lockHeld: true,
       identityPreflight,
-      profileState: accessState.profileState
+      profileState: attachedProfileState
     });
+    if (
+      attachableRecoverableRuntime &&
+      readiness.runtimeReadiness === "ready" &&
+      readiness.transportState === "ready" &&
+      readiness.bootstrapState === "ready"
+    ) {
+      attachedProfileState = "ready";
+      if (nextMeta) {
+        nextMeta = this.#patchMeta(nextMeta, {
+          profileName: input.profile,
+          profileDir,
+          profileState: attachedProfileState,
+          proxyBinding: nextMeta.proxyBinding,
+          persistentExtensionBinding: nextMeta.persistentExtensionBinding ?? null,
+          fingerprintProfileBundle: nextMeta.fingerprintProfileBundle ?? null,
+          updatedAt: nowIso,
+          lastDisconnectedAt: nextMeta.lastDisconnectedAt ?? nowIso
+        });
+        await store.writeMeta(input.profile, nextMeta);
+      }
+    }
 
     return {
       profile: input.profile,
-      profileState: accessState.profileState,
-      browserState: browserStateFromProfileState(accessState.profileState, true),
+      profileState: attachedProfileState,
+      browserState: browserStateFromProfileState(attachedProfileState, true),
       profileDir,
       proxyUrl: meta?.proxyBinding?.url ?? null,
       lockHeld: true,
@@ -1023,10 +1098,11 @@ export class ProfileRuntimeService {
       bootstrapState: readiness.bootstrapState,
       runtimeReadiness: readiness.runtimeReadiness,
       identityPreflight: buildIdentityPreflightOutput(identityPreflight),
-      lockOwnerPid: lock.ownerPid,
-      recoverableSession: buildRecoverableSessionSummary(meta),
+      lockOwnerPid: attachedLock.ownerPid,
+      orphanRecoverable: attachableRecoverableRuntime,
+      recoverableSession: buildRecoverableSessionSummary(nextMeta),
       fingerprint_runtime: fingerprintRuntime,
-      updatedAt: meta?.updatedAt ?? null
+      updatedAt: nextMeta?.updatedAt ?? null
     };
   }
 
@@ -1078,21 +1154,57 @@ export class ProfileRuntimeService {
     const previousMeta = existingMeta;
     try {
       const browserState = await this.#readBrowserInstanceState(profileDir);
-      const controllerAlive = this.#isProcessAlive(lock.ownerPid);
+      const pinnedControllerPid =
+        typeof lock.controllerPid === "number"
+          ? lock.controllerPid
+          : lock.ownerPid;
+      const stalePinnedController = lock.controllerPidState === "stale";
       if (
-        !controllerAlive &&
         browserState &&
-        browserState.controllerPid === lock.ownerPid &&
+        (browserState.runId !== stopOwnerRunId ||
+          browserState.controllerPid !== pinnedControllerPid)
+      ) {
+        throw new CliError("ERR_RUNTIME_UNAVAILABLE", "浏览器实例状态与当前锁所有者不一致，无法安全停止 live runtime", {
+          retryable: true
+        });
+      }
+      const shutdownControllerPid =
+        !stalePinnedController
+          ? pinnedControllerPid
+          : browserState?.controllerPid ?? null;
+      const controllerAlive =
+        typeof shutdownControllerPid === "number" && this.#isProcessAlive(shutdownControllerPid);
+      const browserPidAlive =
+        browserState &&
         browserState.runId === stopOwnerRunId &&
-        this.#isProcessAlive(browserState.browserPid)
+        this.#isProcessAlive(browserState.browserPid);
+      if (
+        stalePinnedController &&
+        browserState &&
+        browserPidAlive
       ) {
         await this.#terminateProcess(browserState.browserPid);
         await this.#deleteBrowserStateFiles(profileDir);
-      } else {
+      } else if (
+        !controllerAlive &&
+        browserState &&
+        browserPidAlive
+      ) {
+        await this.#terminateProcess(browserState.browserPid);
+        await this.#deleteBrowserStateFiles(profileDir);
+      } else if (stalePinnedController && controllerAlive) {
+        throw new CliError("ERR_RUNTIME_UNAVAILABLE", "缺少锁定的浏览器控制者，无法安全停止 live runtime", {
+          retryable: true
+        });
+      } else if (typeof shutdownControllerPid === "number") {
         await this.#browserLauncher.shutdown({
           profileDir,
-          controllerPid: lock.ownerPid,
+          controllerPid: shutdownControllerPid,
           runId: stopOwnerRunId
+        });
+      } else {
+        throw new CliError("ERR_RUNTIME_UNAVAILABLE", "缺少可验证的浏览器控制者，无法安全停止 live runtime", {
+          retryable: true
         });
       }
       await store.writeMeta(
@@ -1212,6 +1324,8 @@ export class ProfileRuntimeService {
     const updated: ProfileLock = {
       ...existing,
       ownerPid,
+      controllerPid: ownerPid,
+      controllerPidState: "live",
       lastHeartbeatAt: nowIso
     };
     await this.#writeLock(lockPath, updated);
@@ -1311,6 +1425,11 @@ export class ProfileRuntimeService {
         const updatedLock: ProfileLock = {
           ...existingLock,
           ownerPid,
+          controllerPid:
+            typeof existingLock.controllerPid === "number"
+              ? existingLock.controllerPid
+              : existingLock.ownerPid,
+          controllerPidState: existingLock.controllerPidState ?? "live",
           lastHeartbeatAt: input.nowIso
         };
         await this.#writeLock(input.lockPath, updatedLock);
@@ -1426,8 +1545,10 @@ export class ProfileRuntimeService {
     lockPath: string;
     lock: ProfileLock;
     nextRunId: string;
+    nextOwnerPid: number;
+    orphanRecoverable: boolean;
     nowIso: string;
-  }): Promise<void> {
+  }): Promise<ProfileLock> {
     const statePath = join(input.profileDir, BROWSER_STATE_FILENAME);
     let stateRaw: string;
     try {
@@ -1438,9 +1559,14 @@ export class ProfileRuntimeService {
       });
     }
     const parsedState = this.#parseBrowserInstanceState(stateRaw);
+    const pinnedControllerPid =
+      typeof input.lock.controllerPid === "number"
+        ? input.lock.controllerPid
+        : input.lock.ownerPid;
     if (
       parsedState === null ||
-      parsedState.controllerPid !== input.lock.ownerPid
+      parsedState.runId !== input.lock.ownerRunId ||
+      parsedState.controllerPid !== pinnedControllerPid
     ) {
       throw new CliError("ERR_RUNTIME_UNAVAILABLE", "浏览器实例状态与当前锁所有者不一致，无法安全接管", {
         retryable: true
@@ -1453,9 +1579,17 @@ export class ProfileRuntimeService {
     };
     const nextLock: ProfileLock = {
       ...input.lock,
+      ownerPid: input.nextOwnerPid,
       ownerRunId: input.nextRunId,
       lastHeartbeatAt: input.nowIso
     };
+    if (!input.orphanRecoverable) {
+      nextLock.controllerPid = parsedState.controllerPid;
+      nextLock.controllerPidState = "live";
+    } else {
+      nextLock.controllerPid = parsedState.controllerPid;
+      nextLock.controllerPidState = "stale";
+    }
 
     await this.#lockFileAdapter.writeFile(statePath, `${JSON.stringify(nextState, null, 2)}\n`, "utf8");
     try {
@@ -1464,6 +1598,7 @@ export class ProfileRuntimeService {
       await this.#lockFileAdapter.writeFile(statePath, stateRaw, "utf8").catch(() => undefined);
       throw error;
     }
+    return nextLock;
   }
 
   async #inspectProfileLock(lock: ProfileLock, profileDir: string): Promise<ProfileLockInspection> {
@@ -1623,7 +1758,11 @@ export class ProfileRuntimeService {
       });
     }
     if (!input.lockHeld) {
-      if (baseIdentity === "bound" && input.profileState === "ready" && input.observedRunId) {
+      if (
+        baseIdentity === "bound" &&
+        input.observedRunId &&
+        (input.profileState === "ready" || input.profileState === "disconnected")
+      ) {
         const readiness = await this.#readPersistentRuntimeReadiness({
           ...input,
           runtimeInput: {
@@ -1635,12 +1774,18 @@ export class ProfileRuntimeService {
         });
         return {
           ...readiness,
-          runtimeReadiness: buildRuntimeReadiness({
-            lockHeld: false,
-            identityBindingState: readiness.identityBindingState,
-            transportState: readiness.transportState,
-            bootstrapState: readiness.bootstrapState
-          })
+          runtimeReadiness:
+            input.profileState === "disconnected"
+              ? readiness.bootstrapState === "stale" ||
+                readiness.transportState === "not_connected"
+                ? "blocked"
+                : "recoverable"
+              : buildRuntimeReadiness({
+                  lockHeld: false,
+                  identityBindingState: readiness.identityBindingState,
+                  transportState: readiness.transportState,
+                  bootstrapState: readiness.bootstrapState
+                })
         };
       }
       return buildUnlockedPersistentRuntimeReadiness({

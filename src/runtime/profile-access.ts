@@ -50,25 +50,32 @@ export const inspectProfileLock = (input: {
 }): ProfileLockInspection => {
   const browserInstanceState = input.browserInstanceState;
   const lockOwnerAlive = input.isProcessAlive(input.lock.ownerPid);
-  const stateMatchesLockOwner =
-    browserInstanceState !== null && browserInstanceState.controllerPid === input.lock.ownerPid;
+  const pinnedControllerPid =
+    typeof input.lock.controllerPid === "number"
+      ? input.lock.controllerPid
+      : input.lock.ownerPid;
+  const stalePinnedController = input.lock.controllerPidState === "stale";
+  const stateMatchesRun =
+    browserInstanceState !== null && browserInstanceState.runId === input.lock.ownerRunId;
+  const stateMatchesPinnedController =
+    stateMatchesRun && browserInstanceState.controllerPid === pinnedControllerPid;
   const controllerAlive =
-    lockOwnerAlive ||
-    (browserInstanceState !== null &&
-      stateMatchesLockOwner &&
-      input.isProcessAlive(browserInstanceState.controllerPid));
+    stateMatchesRun &&
+    !stalePinnedController &&
+    stateMatchesPinnedController &&
+    input.isProcessAlive(browserInstanceState.controllerPid);
   const browserAlive =
     browserInstanceState !== null && input.isProcessAlive(browserInstanceState.browserPid);
   const orphanRecoverable =
+    !lockOwnerAlive &&
     !controllerAlive &&
-    stateMatchesLockOwner &&
+    stateMatchesPinnedController &&
     browserInstanceState !== null &&
-    browserInstanceState.runId === input.lock.ownerRunId &&
     browserAlive;
 
   return {
-    blocksReuse: controllerAlive || browserAlive,
-    controlConnected: controllerAlive,
+    blocksReuse: lockOwnerAlive || controllerAlive || browserAlive,
+    controlConnected: lockOwnerAlive || controllerAlive,
     browserPid: browserAlive ? browserInstanceState?.browserPid ?? null : null,
     stateRunId: browserInstanceState?.runId ?? null,
     orphanRecoverable
@@ -81,7 +88,9 @@ export const resolveProfileAccessState = (input: {
   lockInspection: ProfileLockInspection | null;
   runtimeRunId: string;
 }): ResolvedProfileAccessState => {
-  const activeState = isRuntimeActiveProfileState(input.storedProfileState);
+  const activeState =
+    isRuntimeActiveProfileState(input.storedProfileState) ||
+    input.storedProfileState === "disconnected";
   const healthyLock = input.lockInspection?.blocksReuse ?? false;
   const controlConnected = input.lockInspection?.controlConnected ?? false;
   const profileState: ProfileState =

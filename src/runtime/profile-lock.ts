@@ -2,6 +2,8 @@ export interface ProfileLock {
   profileName: string;
   lockPath: string;
   ownerPid: number;
+  controllerPid?: number;
+  controllerPidState?: "live" | "stale";
   ownerRunId: string;
   acquiredAt: string;
   lastHeartbeatAt: string;
@@ -57,6 +59,8 @@ export const createProfileLock = (input: AcquireLockInput): ProfileLock => ({
   profileName: input.profileName,
   lockPath: input.lockPath,
   ownerPid: input.ownerPid,
+  controllerPid: input.ownerPid,
+  controllerPidState: "live",
   ownerRunId: input.ownerRunId,
   acquiredAt: input.nowIso,
   lastHeartbeatAt: input.nowIso
