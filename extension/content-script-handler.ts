@@ -323,7 +323,9 @@ export class ContentScriptHandler {
     }
 
     if (XHS_READ_COMMANDS.has(message.command)) {
-      void this.#handleXhsReadCommand(message);
+      void this.#handleXhsReadCommand(message).catch((error) => {
+        this.#emitUnexpectedXhsReadFailure(message, error);
+      });
       return true;
     }
 
@@ -332,6 +334,38 @@ export class ContentScriptHandler {
       listener(result);
     }
     return true;
+  }
+
+  #emitUnexpectedXhsReadFailure(
+    message: BackgroundToContentMessage,
+    error: unknown
+  ): void {
+    const fingerprintRuntime = resolveFingerprintContextFromMessage(message);
+    if (error instanceof ExtensionContractError && error.code === "ERR_CLI_INVALID_ARGS") {
+      this.#emit(
+        toCliInvalidArgsResult({
+          id: message.id,
+          error,
+          fingerprintRuntime: fingerprintRuntime as unknown as Record<string, unknown> | null
+        })
+      );
+      return;
+    }
+
+    this.#emit({
+      kind: "result",
+      id: message.id,
+      ok: false,
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        message: error instanceof Error ? error.message : String(error)
+      },
+      payload: fingerprintRuntime
+        ? {
+            fingerprint_runtime: fingerprintRuntime as unknown as Record<string, unknown>
+          }
+        : {}
+    });
   }
 
   async #installFingerprintIfPresent(

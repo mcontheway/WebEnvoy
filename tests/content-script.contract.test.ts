@@ -287,6 +287,73 @@ afterEach(() => {
 });
 
 describe("content-script bootstrap contract", () => {
+  it("normalizes content results before relay and falls back to structured relay error on send rejection", async () => {
+    const { runtime } = createRuntime();
+    const sendMessage = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("message port closed"))
+      .mockReturnValue(undefined);
+    runtime.sendMessage = sendMessage as typeof runtime.sendMessage;
+
+    let emitResult:
+      | ((message: {
+          kind: "result";
+          id: string;
+          ok: boolean;
+          payload?: Record<string, unknown>;
+          error?: { code: string; message: string };
+        }) => void)
+      | null = null;
+    vi.spyOn(ContentScriptHandler.prototype, "onResult").mockImplementation((listener) => {
+      emitResult = listener;
+      return () => undefined;
+    });
+
+    expect(bootstrapContentScript(runtime)).toBe(true);
+    expect(emitResult).not.toBeNull();
+
+    emitResult?.({
+      kind: "result",
+      id: "relay-json-001",
+      ok: true,
+      payload: {
+        summary: {
+          completed_at: new Date("2026-04-16T05:00:00.000Z")
+        }
+      }
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendMessage.mock.calls[0]?.[0]).toEqual({
+      kind: "result",
+      id: "relay-json-001",
+      ok: true,
+      payload: {
+        summary: {
+          completed_at: "2026-04-16T05:00:00.000Z"
+        }
+      }
+    });
+    expect(sendMessage.mock.calls[1]?.[0]).toEqual({
+      kind: "result",
+      id: "relay-json-001",
+      ok: false,
+      error: {
+        code: "ERR_TRANSPORT_FORWARD_FAILED",
+        message: "content script result relay failed"
+      },
+      payload: {
+        details: {
+          stage: "relay",
+          reason: "CONTENT_RESULT_RELAY_FAILED",
+          relay_error: "message port closed"
+        }
+      }
+    });
+  });
+
   it("auto-installs fingerprint patch from startup bootstrap payload and emits startup trust via extension runtime", async () => {
     const context = createFingerprintContext();
     (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = {
