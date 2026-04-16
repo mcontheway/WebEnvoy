@@ -4,12 +4,12 @@ const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 export const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
-const MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
+const DEFAULT_MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
 type MainWorldRequestType =
   | "fingerprint-install"
   | "fingerprint-verify"
   | "page-state-read"
-  | "xhs-request";
+  | "xhs-search-request";
 
 type MainWorldFetchResult = {
   status: number;
@@ -199,10 +199,16 @@ const mainWorldCall = async <T>(request: {
       reject(new Error("main world event channel unavailable"));
       return;
     }
+    const responseTimeoutMs =
+      request.type === "xhs-search-request" &&
+      typeof request.payload.timeoutMs === "number" &&
+      Number.isFinite(request.payload.timeoutMs)
+        ? Math.max(DEFAULT_MAIN_WORLD_CALL_TIMEOUT_MS, Math.trunc(request.payload.timeoutMs) + 1_000)
+        : DEFAULT_MAIN_WORLD_CALL_TIMEOUT_MS;
     const timeout = setTimeout(() => {
       pendingMainWorldRequests.delete(requestId);
       reject(new Error("main world event channel response timeout"));
-    }, MAIN_WORLD_CALL_TIMEOUT_MS);
+    }, responseTimeoutMs);
     pendingMainWorldRequests.set(requestId, {
       resolve: (value) => resolve(value as T),
       reject,
@@ -248,7 +254,7 @@ export const readPageStateViaMainWorld = async (): Promise<Record<string, unknow
     : null;
 };
 
-export const requestXhsJsonViaMainWorld = async (input: {
+export const requestXhsSearchJsonViaMainWorld = async (input: {
   url: string;
   method: "POST" | "GET";
   headers: Record<string, string>;
@@ -258,7 +264,7 @@ export const requestXhsJsonViaMainWorld = async (input: {
   referrerPolicy?: string;
 }): Promise<MainWorldFetchResult> => {
   const result = await mainWorldCall<unknown>({
-    type: "xhs-request",
+    type: "xhs-search-request",
     payload: {
       url: input.url,
       method: input.method,

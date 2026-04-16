@@ -21,7 +21,7 @@ import {
   installFingerprintRuntimeViaMainWorld,
   MAIN_WORLD_EVENT_BOOTSTRAP,
   readPageStateViaMainWorld,
-  requestXhsJsonViaMainWorld,
+  requestXhsSearchJsonViaMainWorld,
   resetMainWorldEventChannelForContract,
   resolveMainWorldEventNamesForSecret
 } from "./content-script-main-world.js";
@@ -37,7 +37,7 @@ export {
   installMainWorldEventChannelSecret,
   MAIN_WORLD_EVENT_BOOTSTRAP,
   readPageStateViaMainWorld,
-  requestXhsJsonViaMainWorld,
+  requestXhsSearchJsonViaMainWorld,
   resetMainWorldEventChannelForContract,
   resolveMainWorldEventNamesForSecret
 };
@@ -228,7 +228,7 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
   ) => await requestXhsSignatureViaExtension(uri, payload),
   fetchJson: async (input: Parameters<XhsSearchEnvironment["fetchJson"]>[0]) => {
     if (input.pageContextRequest === true) {
-      return await requestXhsJsonViaMainWorld({
+      return await requestXhsSearchJsonViaMainWorld({
         url: input.url,
         method: input.method,
         headers: input.headers,

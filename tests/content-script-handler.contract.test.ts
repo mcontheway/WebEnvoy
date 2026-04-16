@@ -5,6 +5,7 @@ import {
   encodeMainWorldPayload,
   installMainWorldEventChannelSecret,
   MAIN_WORLD_EVENT_BOOTSTRAP,
+  requestXhsSearchJsonViaMainWorld,
   resetMainWorldEventChannelForContract,
   resolveFingerprintContextForContract,
   resolveMainWorldEventNamesForSecret
@@ -333,7 +334,7 @@ const withMockMainWorld = async (
         return;
       }
 
-      if (requestType === "xhs-request") {
+      if (requestType === "xhs-search-request") {
         if (
           (mockWindow as Window & Record<string, unknown>).__disableMainWorldBridgeXhsRequest__ ===
           true
@@ -1371,6 +1372,63 @@ describe("content-script handler contract", () => {
         (globalThis as { fetch?: typeof fetch }).fetch = previousFetch;
       }
     });
+  });
+
+  it("keeps xhs.search main-world requests alive past the default channel timeout when request timeout is longer", async () => {
+    vi.useFakeTimers();
+    try {
+      await withMockMainWorld(async ({ mockWindow }) => {
+        const mainWorldFetch = vi.fn(
+          async () =>
+            await new Promise<Response>((resolve) => {
+              setTimeout(() => {
+                resolve(
+                  new Response(JSON.stringify({ code: 0, data: { items: [] } }), {
+                    status: 200,
+                    headers: { "content-type": "application/json" }
+                  })
+                );
+              }, 6_000);
+            })
+        );
+        (mockWindow as Window & Record<string, unknown>).__mainWorldFetchHandler__ = mainWorldFetch;
+
+        let settled = false;
+        const request = requestXhsSearchJsonViaMainWorld({
+          url: "/api/sns/web/v1/search/notes",
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json;charset=utf-8",
+            "X-s": "signed",
+            "X-t": "1"
+          },
+          body: "{\"keyword\":\"露营\"}",
+          timeoutMs: 7_000,
+          referrer: "https://www.xiaohongshu.com/search_result?keyword=test",
+          referrerPolicy: "strict-origin-when-cross-origin"
+        }).then((result) => {
+          settled = true;
+          return result;
+        });
+
+        await vi.advanceTimersByTimeAsync(5_500);
+        expect(settled).toBe(false);
+
+        await vi.advanceTimersByTimeAsync(600);
+        await expect(request).resolves.toMatchObject({
+          status: 200,
+          body: {
+            code: 0,
+            data: {
+              items: []
+            }
+          }
+        });
+        expect(mainWorldFetch).toHaveBeenCalledTimes(1);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([

@@ -4,10 +4,10 @@ import { executeXhsUserHome } from "./xhs-user-home.js";
 import { performEditorInputValidation } from "./xhs-editor-input.js";
 import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 import { buildFailedFingerprintInjectionContext, hasInstalledFingerprintInjection, installFingerprintRuntimeWithVerification, resolveFingerprintContextForContract, resolveFingerprintContextFromMessage, resolveMissingRequiredFingerprintPatches, summarizeFingerprintRuntimeContext } from "./content-script-fingerprint.js";
-import { encodeMainWorldPayload, installMainWorldEventChannelSecret, installFingerprintRuntimeViaMainWorld, MAIN_WORLD_EVENT_BOOTSTRAP, readPageStateViaMainWorld, requestXhsJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret } from "./content-script-main-world.js";
+import { encodeMainWorldPayload, installMainWorldEventChannelSecret, installFingerprintRuntimeViaMainWorld, MAIN_WORLD_EVENT_BOOTSTRAP, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret } from "./content-script-main-world.js";
 import { ExtensionContractError, validateXhsCommandInputForExtension } from "./xhs-command-contract.js";
 import { containsCookie } from "./xhs-search-telemetry.js";
-export { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readPageStateViaMainWorld, requestXhsJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret };
+export { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret };
 export { resolveFingerprintContextForContract };
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
@@ -115,7 +115,7 @@ const createBrowserEnvironment = () => ({
     callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
     fetchJson: async (input) => {
         if (input.pageContextRequest === true) {
-            return await requestXhsJsonViaMainWorld({
+            return await requestXhsSearchJsonViaMainWorld({
                 url: input.url,
                 method: input.method,
                 headers: input.headers,

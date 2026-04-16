@@ -6247,7 +6247,7 @@ const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
-const MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
+const DEFAULT_MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
 let mainWorldEventChannel = null;
 let mainWorldResultListener = null;
 let mainWorldResultListenerEventName = null;
@@ -6375,10 +6375,15 @@ const mainWorldCall = async (request) => {
             reject(new Error("main world event channel unavailable"));
             return;
         }
+        const responseTimeoutMs = request.type === "xhs-search-request" &&
+            typeof request.payload.timeoutMs === "number" &&
+            Number.isFinite(request.payload.timeoutMs)
+            ? Math.max(DEFAULT_MAIN_WORLD_CALL_TIMEOUT_MS, Math.trunc(request.payload.timeoutMs) + 1_000)
+            : DEFAULT_MAIN_WORLD_CALL_TIMEOUT_MS;
         const timeout = setTimeout(() => {
             pendingMainWorldRequests.delete(requestId);
             reject(new Error("main world event channel response timeout"));
-        }, MAIN_WORLD_CALL_TIMEOUT_MS);
+        }, responseTimeoutMs);
         pendingMainWorldRequests.set(requestId, {
             resolve: (value) => resolve(value),
             reject,
@@ -6417,9 +6422,9 @@ const readPageStateViaMainWorld = async () => {
         ? result
         : null;
 };
-const requestXhsJsonViaMainWorld = async (input) => {
+const requestXhsSearchJsonViaMainWorld = async (input) => {
     const result = await mainWorldCall({
-        type: "xhs-request",
+        type: "xhs-search-request",
         payload: {
             url: input.url,
             method: input.method,
@@ -6837,7 +6842,7 @@ const createBrowserEnvironment = () => ({
     callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
     fetchJson: async (input) => {
         if (input.pageContextRequest === true) {
-            return await requestXhsJsonViaMainWorld({
+            return await requestXhsSearchJsonViaMainWorld({
                 url: input.url,
                 method: input.method,
                 headers: input.headers,

@@ -177,7 +177,7 @@ describe("main-world bridge contract", () => {
     });
   });
 
-  it("routes xhs request through the bootstrapped event channel with structured fetch result", async () => {
+  it("routes xhs search request through the bootstrapped event channel with structured fetch result", async () => {
     const { added, dispatched, mockWindow, mockDocument } = createMockMainWorldEnvironment();
     const previousFetch = (globalThis as { fetch?: typeof fetch }).fetch;
     const fetchMock = vi.fn(async () =>
@@ -219,7 +219,7 @@ describe("main-world bridge contract", () => {
         type: secretChannel.requestEvent,
         detail: {
           id: "xhs-request-001",
-          type: "xhs-request",
+          type: "xhs-search-request",
           payload: {
             url: "https://edith.xiaohongshu.com/api/sns/web/v1/search/notes",
             method: "POST",
@@ -263,6 +263,70 @@ describe("main-world bridge contract", () => {
             }
           }
         }
+      });
+    } finally {
+      (globalThis as { fetch?: typeof fetch }).fetch = previousFetch;
+    }
+  });
+
+  it("rejects xhs search requests outside the approved endpoint allowlist", async () => {
+    const { added, dispatched, mockWindow, mockDocument } = createMockMainWorldEnvironment();
+    const previousFetch = (globalThis as { fetch?: typeof fetch }).fetch;
+    const fetchMock = vi.fn();
+    (globalThis as { fetch?: typeof fetch }).fetch = fetchMock;
+
+    try {
+      (globalThis as { window?: unknown }).window = mockWindow;
+      (globalThis as { document?: unknown }).document = mockDocument;
+      (globalThis as { CustomEvent?: unknown }).CustomEvent = class MockCustomEvent<T> {
+        readonly type: string;
+        readonly detail: T;
+
+        constructor(type: string, init: { detail: T }) {
+          this.type = type;
+          this.detail = init.detail;
+        }
+      };
+
+      const { resolveMainWorldEventNamesForSecret } = await import("../extension/content-script-handler.js");
+      await import("../extension/main-world-bridge.js");
+
+      const bootstrapListener = added.find((entry) => entry.type === "__mw_bootstrap__")?.listener;
+      const secretChannel = resolveMainWorldEventNamesForSecret("contract-secret-004");
+      bootstrapListener?.({
+        type: "__mw_bootstrap__",
+        detail: {
+          request_event: secretChannel.requestEvent,
+          result_event: secretChannel.resultEvent
+        }
+      } as unknown as Event);
+
+      const requestListener = added.find((entry) => entry.type === secretChannel.requestEvent)?.listener;
+      requestListener?.({
+        type: secretChannel.requestEvent,
+        detail: {
+          id: "xhs-request-denied-001",
+          type: "xhs-search-request",
+          payload: {
+            url: "https://evil.example/api/sns/web/v1/search/notes",
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json;charset=utf-8"
+            },
+            body: "{\"keyword\":\"露营\"}",
+            timeoutMs: 1_000
+          }
+        }
+      } as unknown as Event);
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      const resultEvent = dispatched.find((entry) => entry.type === secretChannel.resultEvent);
+      expect(resultEvent?.detail).toMatchObject({
+        id: "xhs-request-denied-001",
+        ok: false,
+        message: "invalid xhs search request payload"
       });
     } finally {
       (globalThis as { fetch?: typeof fetch }).fetch = previousFetch;

@@ -2,6 +2,11 @@
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
+const XHS_SEARCH_REQUEST_PATH = "/api/sns/web/v1/search/notes";
+const XHS_SEARCH_REQUEST_HOST_ALLOWLIST = new Set([
+    "www.xiaohongshu.com",
+    "edith.xiaohongshu.com"
+]);
 let activeMainWorldEventChannel = null;
 let activeMainWorldRequestListener = null;
 let activeMainWorldBootstrapListener = null;
@@ -50,6 +55,27 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
 const asString = (value) => typeof value === "string" && value.length > 0 ? value : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 const asNumber = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
+const resolveAllowedXhsSearchRequestUrl = (value) => {
+    try {
+        const baseHref = typeof mainWindow.location?.href === "string" && mainWindow.location.href.length > 0
+            ? mainWindow.location.href
+            : "https://www.xiaohongshu.com/";
+        const resolved = new URL(value, baseHref);
+        if (resolved.protocol !== "https:") {
+            return null;
+        }
+        if (!XHS_SEARCH_REQUEST_HOST_ALLOWLIST.has(resolved.hostname)) {
+            return null;
+        }
+        if (resolved.pathname !== XHS_SEARCH_REQUEST_PATH) {
+            return null;
+        }
+        return resolved.toString();
+    }
+    catch {
+        return null;
+    }
+};
 const extractFetchBody = async (response) => {
     const text = await response.text();
     if (text.length === 0) {
@@ -330,7 +356,7 @@ const parseMainWorldRequest = (event) => {
         (type !== "fingerprint-install" &&
             type !== "fingerprint-verify" &&
             type !== "page-state-read" &&
-            type !== "xhs-request")) {
+            type !== "xhs-search-request")) {
         return null;
     }
     return {
@@ -368,16 +394,17 @@ const handlePageStateReadRequest = async (request) => {
         result: initialState ?? null
     });
 };
-const handleXhsRequest = async (request) => {
-    const url = asString(request.payload.url);
-    const method = request.payload.method === "GET" ? "GET" : request.payload.method === "POST" ? "POST" : null;
+const handleXhsSearchRequest = async (request) => {
+    const rawUrl = asString(request.payload.url);
+    const url = rawUrl ? resolveAllowedXhsSearchRequestUrl(rawUrl) : null;
+    const method = request.payload.method === "POST" ? "POST" : null;
     const headers = asRecord(request.payload.headers) ?? {};
     const body = asString(request.payload.body);
     const timeoutMs = asNumber(request.payload.timeoutMs);
     const referrer = asString(request.payload.referrer);
     const referrerPolicy = asString(request.payload.referrerPolicy);
     if (!url || !method || timeoutMs === null) {
-        throw new Error("invalid xhs request payload");
+        throw new Error("invalid xhs search request payload");
     }
     const controller = new AbortController();
     const timer = setTimeout(() => {
@@ -431,8 +458,8 @@ const handleRequest = async (request) => {
         await handlePageStateReadRequest(request);
         return;
     }
-    if (request.type === "xhs-request") {
-        await handleXhsRequest(request);
+    if (request.type === "xhs-search-request") {
+        await handleXhsSearchRequest(request);
         return;
     }
     await handleFingerprintInstallRequest(request);

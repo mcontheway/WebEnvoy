@@ -4,7 +4,7 @@ type MainWorldRequestType =
   | "fingerprint-install"
   | "fingerprint-verify"
   | "page-state-read"
-  | "xhs-request";
+  | "xhs-search-request";
 
 type MainWorldRequest = {
   id: string;
@@ -36,6 +36,11 @@ type FingerprintPatchInstallContext = {
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
+const XHS_SEARCH_REQUEST_PATH = "/api/sns/web/v1/search/notes";
+const XHS_SEARCH_REQUEST_HOST_ALLOWLIST = new Set([
+  "www.xiaohongshu.com",
+  "edith.xiaohongshu.com"
+]);
 declare const EXPECTED_MAIN_WORLD_REQUEST_EVENT: string | undefined;
 declare const EXPECTED_MAIN_WORLD_RESULT_EVENT: string | undefined;
 let activeMainWorldEventChannel: MainWorldEventChannel | null = null;
@@ -97,6 +102,28 @@ const asStringArray = (value: unknown): string[] =>
 
 const asNumber = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
+
+const resolveAllowedXhsSearchRequestUrl = (value: string): string | null => {
+  try {
+    const baseHref =
+      typeof mainWindow.location?.href === "string" && mainWindow.location.href.length > 0
+        ? mainWindow.location.href
+        : "https://www.xiaohongshu.com/";
+    const resolved = new URL(value, baseHref);
+    if (resolved.protocol !== "https:") {
+      return null;
+    }
+    if (!XHS_SEARCH_REQUEST_HOST_ALLOWLIST.has(resolved.hostname)) {
+      return null;
+    }
+    if (resolved.pathname !== XHS_SEARCH_REQUEST_PATH) {
+      return null;
+    }
+    return resolved.toString();
+  } catch {
+    return null;
+  }
+};
 
 const extractFetchBody = async (response: Response): Promise<unknown> => {
   const text = await response.text();
@@ -448,7 +475,7 @@ const parseMainWorldRequest = (event: Event): MainWorldRequest | null => {
     (type !== "fingerprint-install" &&
       type !== "fingerprint-verify" &&
       type !== "page-state-read" &&
-      type !== "xhs-request")
+      type !== "xhs-search-request")
   ) {
     return null;
   }
@@ -495,16 +522,17 @@ const handlePageStateReadRequest = async (request: MainWorldRequest): Promise<vo
   });
 };
 
-const handleXhsRequest = async (request: MainWorldRequest): Promise<void> => {
-  const url = asString(request.payload.url);
-  const method = request.payload.method === "GET" ? "GET" : request.payload.method === "POST" ? "POST" : null;
+const handleXhsSearchRequest = async (request: MainWorldRequest): Promise<void> => {
+  const rawUrl = asString(request.payload.url);
+  const url = rawUrl ? resolveAllowedXhsSearchRequestUrl(rawUrl) : null;
+  const method = request.payload.method === "POST" ? "POST" : null;
   const headers = asRecord(request.payload.headers) ?? {};
   const body = asString(request.payload.body);
   const timeoutMs = asNumber(request.payload.timeoutMs);
   const referrer = asString(request.payload.referrer);
   const referrerPolicy = asString(request.payload.referrerPolicy);
   if (!url || !method || timeoutMs === null) {
-    throw new Error("invalid xhs request payload");
+    throw new Error("invalid xhs search request payload");
   }
 
   const controller = new AbortController();
@@ -564,8 +592,8 @@ const handleRequest = async (request: MainWorldRequest): Promise<void> => {
     await handlePageStateReadRequest(request);
     return;
   }
-  if (request.type === "xhs-request") {
-    await handleXhsRequest(request);
+  if (request.type === "xhs-search-request") {
+    await handleXhsSearchRequest(request);
     return;
   }
   await handleFingerprintInstallRequest(request);
