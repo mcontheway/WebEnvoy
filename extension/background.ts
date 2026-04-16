@@ -92,6 +92,7 @@ const defaultHandshakeTimeoutMs = 30_000;
 const defaultNativeHostName = "com.webenvoy.host";
 const bridgeProtocol = "webenvoy.native-bridge.v1";
 const debuggerProtocolVersion = "1.3";
+const MAIN_WORLD_BRIDGE_PROBE_NAMESPACE = "webenvoy.main_world.bridge_probe.v1";
 const editorInputDebuggerProbeWaitMs = 150;
 const editorInputDebuggerEntryLabels = ["新的创作"] as const;
 const editorInputSelectors = [
@@ -108,6 +109,15 @@ const readTimeoutMs = (value: unknown): number | null => {
     return null;
   }
   return Math.floor(value);
+};
+
+const hashMainWorldBridgeProbeSecret = (value: string): string => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `mwprobe_${(hash >>> 0).toString(36)}`;
 };
 
 type RuntimeMessageSender = {
@@ -4727,18 +4737,20 @@ class ChromeBackgroundBridge {
       return null;
     }
     const requestRunId = asNonEmptyString(request.params.run_id);
-    const requestSessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
-    const bootstrap = this.#runtimeTrustState.getBootstrap(profile);
-    if (
-      !bootstrap ||
-      bootstrap.sessionId !== requestSessionId ||
-      !requestRunId ||
-      bootstrap.runId !== requestRunId ||
-      (bootstrap.status !== "pending" && bootstrap.status !== "ready")
-    ) {
+    if (!requestRunId) {
       return null;
     }
-    return bootstrap.mainWorldSecret;
+    const requestSessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
+    const command = asNonEmptyString(request.params.command) ?? "bridge.forward";
+    return hashMainWorldBridgeProbeSecret(
+      [
+        MAIN_WORLD_BRIDGE_PROBE_NAMESPACE,
+        profile,
+        requestSessionId,
+        requestRunId,
+        command
+      ].join("|")
+    );
   }
 
   async #isMainWorldBridgeInstalled(tabId: number, mainWorldSecret: string): Promise<boolean> {

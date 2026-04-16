@@ -666,11 +666,10 @@ describe("extension service worker / recovery and relay prerequisites", () => {
     });
   });
 
-  it("does not reinject main-world bridge after a trusted bootstrap secret probes the tab as ready", async () => {
+  it("does not reinject main-world bridge after worker-state loss when a request-derived probe proves the tab is ready", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
     const fingerprintContext = createFingerprintRuntimeContext();
-    let mainWorldProbeCount = 0;
     executeScript.mockImplementation(
       async (
         input:
@@ -678,8 +677,7 @@ describe("extension service worker / recovery and relay prerequisites", () => {
           | { world?: "MAIN" | "ISOLATED"; func?: (...args: unknown[]) => unknown; args?: unknown[] }
       ) => {
         if (input.world === "MAIN" && "func" in input && typeof input.func === "function") {
-          mainWorldProbeCount += 1;
-          return [{ result: mainWorldProbeCount >= 2 }];
+          return [{ result: true }];
         }
         return [{ result: { "X-s": "signed", "X-t": "1700000000" } }];
       }
@@ -698,40 +696,6 @@ describe("extension service worker / recovery and relay prerequisites", () => {
       runtimeContextId: "ctx-xhs-live-bridge-dedupe-001",
       tabId: 32,
       tabUrl: "https://www.xiaohongshu.com/search_result?keyword=露营"
-    });
-
-    firstPort.onMessageListeners[0]?.({
-      id: "run-xhs-live-bridge-bootstrap-000",
-      method: "bridge.forward",
-      profile: "profile-a",
-      params: {
-        session_id: "nm-session-001",
-        run_id: "run-xhs-live-bridge-dedupe-001",
-        command: "runtime.bootstrap",
-        command_params: {
-          version: "v1",
-          run_id: "run-xhs-live-bridge-dedupe-001",
-          runtime_context_id: "ctx-xhs-live-bridge-dedupe-001",
-          profile: "profile-a",
-          fingerprint_runtime: fingerprintContext,
-          fingerprint_patch_manifest: {
-            required_patches: ["audio_context"]
-          },
-          main_world_secret: "secret-xhs-live-bridge-dedupe-001"
-        },
-        cwd: "/workspace/WebEnvoy"
-      },
-      timeout_ms: 100
-    });
-    await waitForPostedMessage(firstPort.postMessage, {
-      id: "run-xhs-live-bridge-bootstrap-000",
-      status: "success",
-      payload: expect.objectContaining({
-        method: "runtime.bootstrap.ack",
-        result: expect.objectContaining({
-          status: "ready"
-        })
-      })
     });
 
     const emitForward = (id: string, runId: string) => {
@@ -770,7 +734,7 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         (call[0] as { world?: string; files?: string[] }).world === "MAIN" &&
         ((call[0] as { files?: string[] }).files ?? []).includes("build/main-world-bridge.js")
     );
-    expect(mainWorldBridgeInjectCalls).toHaveLength(1);
+    expect(mainWorldBridgeInjectCalls).toHaveLength(0);
   });
 
   it("annotates editor_input forward with debugger attach failure attestation", async () => {
