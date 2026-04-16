@@ -725,14 +725,23 @@
   - `risk_state_output.current_state=paused`
 - 该组 PR gate refresh 参考样本结论：
   - 与 5.4 历史固定样本保持一致：`#445-A` 已解除 bundle 缺陷，但 `search` 仍只达到 `dry_run` 成功壳，`live_read_high_risk` 仍被 formal runtime gate 阻断。
-  - `detail` / `user_home` 在对应 gate refresh 样本下仍无公开 CLI 命令入口，因此 formal `No-Go/paused` 结论保持不变。
-  - 后续 current latest-head 若继续发生 docs-only 推进，只允许在 PR `live_evidence_record` 中更新 latest-head gate evidence；repo formal docs 不再把该 SHA 误写成“当前值”。
+- `detail` / `user_home` 在对应 gate refresh 样本下仍无公开 CLI 命令入口，因此 formal `No-Go/paused` 结论保持不变。
+- 后续 current latest-head 若继续发生 docs-only 推进，只允许在 PR `live_evidence_record` 中更新 latest-head gate evidence；repo formal docs 不再把该 SHA 误写成“当前值”。
+
+### 5.5 2026-04-16 blocker refresh 的治理分层说明
+
+2026-04-16 曾形成一轮 blocker refresh 样本，用于更新 issue `#445` 的外部证据链。根据 5.4 已冻结的 FR-0016 治理口径：
+
+- repo formal docs 不承接 moving latest-head gate truth
+- formal FR 在仓库内只保留 stable closeout bar 与 fixed/historical sample
+- dated blocker refresh 样本不得在 formal docs 内被表述成 current-head / latest-head 证据
+
+因此，2026-04-16 这轮 blocker refresh 不在本文件逐项展开；formal 结论也未因此发生变化，FR-0005 继续保持 `No-Go/paused`，直到正式 closeout bar 被满足为止。
 
 ## 未决项（进入下一轮复核前保留）
 
 - 保持 `xhs_001` 的 main 目录绑定不再回写到 worktree 路径
 - 在风险状态满足准入、且具备合法 approval / gate 前提后，再重新执行 `search` 的 managed-profile `real_browser` fresh live rerun
-- 为 `detail` / `user_home` 提供 repo 内可复核的正式命令入口，或通过独立 formal review 明确其 latest-head 复核路径
 - 在满足上述前提后，再重新执行 `search/detail/user_home` 的 managed-profile `real_browser` fresh live rerun
 - 在新会话样本中复核 `detail` 的成功路径与最小必要请求上下文
 - 在新会话样本中复核 `user_home` 主端点（含 `otherinfo` 与候选聚合端点）的成功路径
