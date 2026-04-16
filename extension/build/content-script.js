@@ -6889,7 +6889,9 @@ class ContentScriptHandler {
             return true;
         }
         if (XHS_READ_COMMANDS.has(message.command)) {
-            void this.#handleXhsReadCommand(message);
+            void this.#handleXhsReadCommand(message).catch((error) => {
+                this.#emitUnexpectedXhsReadFailure(message, error);
+            });
             return true;
         }
         const result = this.#handleForward(message);
@@ -6897,6 +6899,31 @@ class ContentScriptHandler {
             listener(result);
         }
         return true;
+    }
+    #emitUnexpectedXhsReadFailure(message, error) {
+        const fingerprintRuntime = resolveFingerprintContextFromMessage(message);
+        if (error instanceof ExtensionContractError && error.code === "ERR_CLI_INVALID_ARGS") {
+            this.#emit(toCliInvalidArgsResult({
+                id: message.id,
+                error,
+                fingerprintRuntime: fingerprintRuntime
+            }));
+            return;
+        }
+        this.#emit({
+            kind: "result",
+            id: message.id,
+            ok: false,
+            error: {
+                code: "ERR_EXECUTION_FAILED",
+                message: error instanceof Error ? error.message : String(error)
+            },
+            payload: fingerprintRuntime
+                ? {
+                    fingerprint_runtime: fingerprintRuntime
+                }
+                : {}
+        });
     }
     async #installFingerprintIfPresent(message) {
         const fingerprintRuntime = resolveFingerprintContextFromMessage(message);
@@ -7573,6 +7600,55 @@ const emitStartupFingerprintTrust = (runtime, input) => {
         }
     });
 };
+const relayContentResultToBackground = (runtime, message, options) => {
+    const sendMessage = runtime.sendMessage;
+    if (!sendMessage) {
+        return;
+    }
+    const relayFailure = (reason, error) => {
+        if (options?.allowFallback === false) {
+            return;
+        }
+        const relayErrorMessage = error instanceof Error ? error.message : String(error);
+        relayContentResultToBackground(runtime, {
+            kind: "result",
+            id: message.id,
+            ok: false,
+            error: {
+                code: "ERR_TRANSPORT_FORWARD_FAILED",
+                message: "content script result relay failed"
+            },
+            payload: {
+                details: {
+                    stage: "relay",
+                    reason,
+                    relay_error: relayErrorMessage
+                }
+            }
+        }, {
+            allowFallback: false
+        });
+    };
+    let normalizedMessage;
+    try {
+        normalizedMessage = JSON.parse(JSON.stringify(message));
+    }
+    catch (error) {
+        relayFailure("CONTENT_RESULT_SERIALIZATION_FAILED", error);
+        return;
+    }
+    try {
+        const maybePromise = sendMessage(normalizedMessage);
+        if (maybePromise && typeof maybePromise.catch === "function") {
+            void maybePromise.catch((error) => {
+                relayFailure("CONTENT_RESULT_RELAY_FAILED", error);
+            });
+        }
+    }
+    catch (error) {
+        relayFailure("CONTENT_RESULT_RELAY_FAILED", error);
+    }
+};
 const bootstrapContentScript = (runtime) => {
     if (!runtime.onMessage?.addListener || !runtime.sendMessage) {
         return false;
@@ -7634,7 +7710,7 @@ const bootstrapContentScript = (runtime) => {
         });
     }
     handler.onResult((message) => {
-        runtime.sendMessage?.(message);
+        relayContentResultToBackground(runtime, message);
     });
     runtime.onMessage.addListener((message) => {
         const request = message;

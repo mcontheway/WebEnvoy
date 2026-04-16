@@ -1620,4 +1620,77 @@ describe("content-script handler contract", () => {
       ).toBe(false);
     });
   });
+
+  it("returns structured xhs.search failure when pre-execution content-script env access throws", async () => {
+    const handler = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => Date.now(),
+        randomId: () => "req-test-001",
+        getLocationHref: () => {
+          throw new Error("location unavailable");
+        },
+        getDocumentTitle: () => "Search",
+        getReadyState: () => "complete",
+        getCookie: () => "",
+        callSignature: async () => ({
+          "X-s": "signature",
+          "X-t": "1700000000"
+        }),
+        fetchJson: async () => ({
+          status: 200,
+          body: {
+            code: 0,
+            data: {
+              items: []
+            }
+          }
+        })
+      }
+    });
+    const results: Array<Record<string, unknown>> = [];
+    handler.onResult((message) => {
+      results.push(message as unknown as Record<string, unknown>);
+    });
+
+    handler.onBackgroundMessage({
+      kind: "forward",
+      id: "run-xhs-location-throw-001",
+      runId: "run-xhs-location-throw-001",
+      tabId: 1,
+      profile: "profile-a",
+      cwd: "/workspace/WebEnvoy",
+      timeoutMs: 1_000,
+      command: "xhs.search",
+      params: {
+        session_id: "nm-session-001"
+      },
+      commandParams: {
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营"
+        },
+        options: {
+          issue_scope: "issue_209",
+          action_type: "read",
+          requested_execution_mode: "dry_run",
+          risk_state: "limited"
+        }
+      },
+      fingerprintContext: null
+    });
+
+    await waitForResult(results);
+
+    expect(results[0]?.ok).toBe(false);
+    expect((results[0]?.error as { code?: string } | undefined)?.code).toBe(
+      "ERR_EXECUTION_FAILED"
+    );
+    expect((results[0]?.error as { message?: string } | undefined)?.message).toBe(
+      "location unavailable"
+    );
+  });
 });

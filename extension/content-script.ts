@@ -37,7 +37,7 @@ type ContentScriptRuntime = {
   onMessage?: {
     addListener(listener: (message: unknown) => void): void;
   };
-  sendMessage?: (message: ContentToBackgroundMessage) => void;
+  sendMessage?: (message: ContentToBackgroundMessage) => Promise<unknown> | void;
   getURL?: (path: string) => string;
 };
 
@@ -392,6 +392,71 @@ const emitStartupFingerprintTrust = (
   });
 };
 
+const relayContentResultToBackground = (
+  runtime: ContentScriptRuntime,
+  message: ContentToBackgroundMessage,
+  options?: {
+    allowFallback?: boolean;
+  }
+): void => {
+  const sendMessage = runtime.sendMessage;
+  if (!sendMessage) {
+    return;
+  }
+
+  const relayFailure = (
+    reason: "CONTENT_RESULT_SERIALIZATION_FAILED" | "CONTENT_RESULT_RELAY_FAILED",
+    error: unknown
+  ): void => {
+    if (options?.allowFallback === false) {
+      return;
+    }
+
+    const relayErrorMessage = error instanceof Error ? error.message : String(error);
+    relayContentResultToBackground(
+      runtime,
+      {
+        kind: "result",
+        id: message.id,
+        ok: false,
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: "content script result relay failed"
+        },
+        payload: {
+          details: {
+            stage: "relay",
+            reason,
+            relay_error: relayErrorMessage
+          }
+        }
+      },
+      {
+        allowFallback: false
+      }
+    );
+  };
+
+  let normalizedMessage: ContentToBackgroundMessage;
+  try {
+    normalizedMessage = JSON.parse(JSON.stringify(message)) as ContentToBackgroundMessage;
+  } catch (error) {
+    relayFailure("CONTENT_RESULT_SERIALIZATION_FAILED", error);
+    return;
+  }
+
+  try {
+    const maybePromise = sendMessage(normalizedMessage);
+    if (maybePromise && typeof (maybePromise as Promise<unknown>).catch === "function") {
+      void (maybePromise as Promise<unknown>).catch((error) => {
+        relayFailure("CONTENT_RESULT_RELAY_FAILED", error);
+      });
+    }
+  } catch (error) {
+    relayFailure("CONTENT_RESULT_RELAY_FAILED", error);
+  }
+};
+
 export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean => {
   if (!runtime.onMessage?.addListener || !runtime.sendMessage) {
     return false;
@@ -459,7 +524,7 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
   }
 
   handler.onResult((message) => {
-    runtime.sendMessage?.(message);
+    relayContentResultToBackground(runtime, message);
   });
 
   runtime.onMessage.addListener((message: unknown) => {
