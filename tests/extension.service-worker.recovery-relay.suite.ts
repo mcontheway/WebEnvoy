@@ -4,7 +4,7 @@ import { createMockPort, createEditorInputProbeResult, createChromeApi, respondH
 describe("extension service worker / recovery and relay prerequisites", () => {
   it("forwards top-level requested_execution_mode live path and relays required-patch missing block", async () => {
     const firstPort = createMockPort();
-    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
     chromeApi.tabs.query.mockImplementation(async () => [
       { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
     ]);
@@ -45,8 +45,7 @@ describe("extension service worker / recovery and relay prerequisites", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       32,
@@ -58,6 +57,12 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         })
       })
     );
+    const mainWorldBridgeInject = executeScript.mock.calls.find(
+      (call) =>
+        (call[0] as { world?: string; files?: string[] }).world === "MAIN" &&
+        ((call[0] as { files?: string[] }).files ?? []).includes("build/main-world-bridge.js")
+    );
+    expect(mainWorldBridgeInject).toBeDefined();
 
     runtimeMessageListeners[0]?.(
       {
@@ -358,6 +363,12 @@ describe("extension service worker / recovery and relay prerequisites", () => {
         ((call[0] as { files?: string[] }).files ?? []).includes("build/content-script.js")
     );
     expect(proactiveContentScriptInject).toBeUndefined();
+    const proactiveMainWorldBridgeInject = executeScript.mock.calls.find(
+      (call) =>
+        (call[0] as { world?: string; files?: string[] }).world === "MAIN" &&
+        ((call[0] as { files?: string[] }).files ?? []).includes("build/main-world-bridge.js")
+    );
+    expect(proactiveMainWorldBridgeInject).toBeUndefined();
     await vi.waitFor(() => {
       expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
         32,
@@ -805,8 +816,7 @@ describe("extension service worker / recovery and relay prerequisites", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       32,
@@ -918,8 +928,7 @@ describe("extension service worker / recovery and relay prerequisites", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       32,

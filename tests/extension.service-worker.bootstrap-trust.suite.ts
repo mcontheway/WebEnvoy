@@ -3613,8 +3613,7 @@ describe("extension service worker / bootstrap and trust", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       32,
@@ -3691,8 +3690,7 @@ describe("extension service worker / bootstrap and trust", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       32,
@@ -4137,8 +4135,7 @@ describe("extension service worker / bootstrap and trust", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     const liveDispatch = chromeApi.tabs.sendMessage.mock.calls.find(
       (call) => (call[1] as { id?: string } | undefined)?.id === liveRunId
@@ -4554,8 +4551,7 @@ describe("extension service worker / bootstrap and trust", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       32,
@@ -5314,8 +5310,7 @@ describe("extension service worker / bootstrap and trust", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       32,
@@ -5427,8 +5422,7 @@ describe("extension service worker / bootstrap and trust", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       32,

@@ -2537,6 +2537,28 @@ class ChromeBackgroundBridge {
             });
             return;
         }
+        if (this.#shouldEnsureMainWorldBridge(command, requestedExecutionMode)) {
+            try {
+                await this.#ensureMainWorldBridgeInjected(tabId);
+            }
+            catch (error) {
+                if (suppressHostResponse) {
+                    return;
+                }
+                this.#emit({
+                    id: dispatchRequest.id,
+                    status: "error",
+                    summary: {
+                        relay_path: "host>background>main-world>background>host"
+                    },
+                    error: {
+                        code: "ERR_TRANSPORT_FORWARD_FAILED",
+                        message: error instanceof Error ? error.message : "main world bridge injection failed"
+                    }
+                });
+                return;
+            }
+        }
         if (issue208EditorInputValidation) {
             const editorFocusAttestation = await this.#buildEditorInputFocusAttestation(tabId);
             commandParams = this.#injectEditorFocusAttestation(commandParams, editorFocusAttestation);
@@ -3708,6 +3730,23 @@ class ChromeBackgroundBridge {
             world: "ISOLATED",
             files: ["build/content-script.js"]
         });
+    }
+    async #ensureMainWorldBridgeInjected(tabId) {
+        if (!this.chromeApi.scripting?.executeScript) {
+            return;
+        }
+        await this.chromeApi.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            files: ["build/main-world-bridge.js"]
+        });
+    }
+    #shouldEnsureMainWorldBridge(command, requestedExecutionMode) {
+        if (command !== "xhs.search") {
+            return false;
+        }
+        return (requestedExecutionMode === "live_read_limited" ||
+            requestedExecutionMode === "live_read_high_risk");
     }
     async #sendMessageWithContentScriptRecovery(tabId, forward) {
         try {
