@@ -2076,6 +2076,7 @@ describe("profile-runtime identity preflight", () => {
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as ProfileLock;
     lock.ownerPid = 12345;
+    lock.controllerPid = 12345;
     lock.ownerRunId = "run-runtime-attach-recoverable-legacy-001";
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
@@ -2167,7 +2168,7 @@ describe("profile-runtime identity preflight", () => {
     const browserStateRaw = await readFile(join(profileDir, BROWSER_STATE_FILENAME), "utf8");
     const browserState = JSON.parse(browserStateRaw) as { runId?: unknown; controllerPid?: unknown };
     expect(browserState.runId).toBe("run-runtime-attach-recoverable-next-001");
-    expect(browserState.controllerPid).toBe(process.pid);
+    expect(browserState.controllerPid).toBe(12345);
 
     await expect(
       service.status({
@@ -2222,6 +2223,7 @@ describe("profile-runtime identity preflight", () => {
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as ProfileLock;
     lock.ownerPid = 12345;
+    lock.controllerPid = 12345;
     lock.ownerRunId = "run-runtime-attach-mismatch-legacy-001";
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
@@ -2806,6 +2808,7 @@ describe("profile-runtime stale lock reclaim", () => {
     const lockRaw = await readFile(lockPath, "utf8");
     const lock = JSON.parse(lockRaw) as ProfileLock;
     lock.ownerPid = 12345;
+    lock.controllerPid = 12345;
     lock.ownerRunId = "run-runtime-test-legacy-controller";
     await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
@@ -2902,6 +2905,7 @@ describe("profile-runtime stale lock reclaim", () => {
       const lockRaw = await readFile(lockPath, "utf8");
       const lock = JSON.parse(lockRaw) as ProfileLock;
       lock.ownerPid = 12345;
+      lock.controllerPid = 12345;
       await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
       const browserPid = 223355;
@@ -2988,6 +2992,7 @@ describe("profile-runtime stale lock reclaim", () => {
       const lockRaw = await readFile(lockPath, "utf8");
       const lock = JSON.parse(lockRaw) as ProfileLock;
       lock.ownerPid = 12345;
+      lock.controllerPid = 12345;
       await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
       const browserStatePath = join(profileDir, BROWSER_STATE_FILENAME);
@@ -3072,6 +3077,7 @@ describe("profile-runtime stale lock reclaim", () => {
       const lockRaw = await readFile(lockPath, "utf8");
       const lock = JSON.parse(lockRaw) as ProfileLock;
       lock.ownerPid = 12345;
+      lock.controllerPid = 12345;
       await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
       const browserStatePath = join(profileDir, BROWSER_STATE_FILENAME);

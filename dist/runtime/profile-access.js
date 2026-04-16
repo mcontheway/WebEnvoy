@@ -9,20 +9,19 @@ export const shouldRecoverAsDisconnected = (acquisition, state) => acquisition !
 export const inspectProfileLock = (input) => {
     const browserInstanceState = input.browserInstanceState;
     const lockOwnerAlive = input.isProcessAlive(input.lock.ownerPid);
-    const stateMatchesLockOwner = browserInstanceState !== null && browserInstanceState.controllerPid === input.lock.ownerPid;
-    const controllerAlive = lockOwnerAlive ||
-        (browserInstanceState !== null &&
-            stateMatchesLockOwner &&
-            input.isProcessAlive(browserInstanceState.controllerPid));
+    const expectedControllerPid = typeof input.lock.controllerPid === "number" ? input.lock.controllerPid : input.lock.ownerPid;
+    const stateMatchesController = browserInstanceState !== null && browserInstanceState.controllerPid === expectedControllerPid;
+    const controllerAlive = stateMatchesController && input.isProcessAlive(expectedControllerPid);
     const browserAlive = browserInstanceState !== null && input.isProcessAlive(browserInstanceState.browserPid);
-    const orphanRecoverable = !controllerAlive &&
-        stateMatchesLockOwner &&
+    const orphanRecoverable = !lockOwnerAlive &&
+        !controllerAlive &&
+        stateMatchesController &&
         browserInstanceState !== null &&
         browserInstanceState.runId === input.lock.ownerRunId &&
         browserAlive;
     return {
-        blocksReuse: controllerAlive || browserAlive,
-        controlConnected: controllerAlive,
+        blocksReuse: lockOwnerAlive || controllerAlive || browserAlive,
+        controlConnected: lockOwnerAlive || controllerAlive,
         browserPid: browserAlive ? browserInstanceState?.browserPid ?? null : null,
         stateRunId: browserInstanceState?.runId ?? null,
         orphanRecoverable

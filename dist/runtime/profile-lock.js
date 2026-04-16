@@ -16,6 +16,7 @@ export const createProfileLock = (input) => ({
     profileName: input.profileName,
     lockPath: input.lockPath,
     ownerPid: input.ownerPid,
+    controllerPid: input.ownerPid,
     ownerRunId: input.ownerRunId,
     acquiredAt: input.nowIso,
     lastHeartbeatAt: input.nowIso

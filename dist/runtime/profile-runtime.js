@@ -652,6 +652,7 @@ export class ProfileRuntimeService {
             runtimeReadiness: readiness.runtimeReadiness,
             identityPreflight: buildIdentityPreflightOutput(identityPreflight),
             lockOwnerPid: lock?.ownerPid ?? null,
+            orphanRecoverable: lockInspection?.orphanRecoverable ?? false,
             recoverableSession: buildRecoverableSessionSummary(meta),
             fingerprint_runtime: fingerprintRuntime,
             updatedAt: meta?.updatedAt ?? null
@@ -722,6 +723,7 @@ export class ProfileRuntimeService {
                 lock,
                 nextRunId: input.runId,
                 nextOwnerPid,
+                orphanRecoverable: attachableRecoverableRuntime,
                 nowIso
             });
         }
@@ -759,6 +761,7 @@ export class ProfileRuntimeService {
             runtimeReadiness: readiness.runtimeReadiness,
             identityPreflight: buildIdentityPreflightOutput(identityPreflight),
             lockOwnerPid: attachedLock.ownerPid,
+            orphanRecoverable: attachableRecoverableRuntime,
             recoverableSession: buildRecoverableSessionSummary(meta),
             fingerprint_runtime: fingerprintRuntime,
             updatedAt: meta?.updatedAt ?? null
@@ -802,10 +805,10 @@ export class ProfileRuntimeService {
         const previousMeta = existingMeta;
         try {
             const browserState = await this.#readBrowserInstanceState(profileDir);
-            const controllerAlive = this.#isProcessAlive(lock.ownerPid);
+            const shutdownControllerPid = browserState?.controllerPid ?? lock.ownerPid;
+            const controllerAlive = this.#isProcessAlive(shutdownControllerPid);
             if (!controllerAlive &&
                 browserState &&
-                browserState.controllerPid === lock.ownerPid &&
                 browserState.runId === stopOwnerRunId &&
                 this.#isProcessAlive(browserState.browserPid)) {
                 await this.#terminateProcess(browserState.browserPid);
@@ -814,7 +817,7 @@ export class ProfileRuntimeService {
             else {
                 await this.#browserLauncher.shutdown({
                     profileDir,
-                    controllerPid: lock.ownerPid,
+                    controllerPid: shutdownControllerPid,
                     runId: stopOwnerRunId
                 });
             }
@@ -914,6 +917,7 @@ export class ProfileRuntimeService {
         const updated = {
             ...existing,
             ownerPid,
+            controllerPid: ownerPid,
             lastHeartbeatAt: nowIso
         };
         await this.#writeLock(lockPath, updated);
@@ -999,6 +1003,9 @@ export class ProfileRuntimeService {
                 const updatedLock = {
                     ...existingLock,
                     ownerPid,
+                    controllerPid: typeof existingLock.controllerPid === "number"
+                        ? existingLock.controllerPid
+                        : existingLock.ownerPid,
                     lastHeartbeatAt: input.nowIso
                 };
                 await this.#writeLock(input.lockPath, updatedLock);
@@ -1110,20 +1117,24 @@ export class ProfileRuntimeService {
             });
         }
         const parsedState = this.#parseBrowserInstanceState(stateRaw);
+        const expectedControllerPid = typeof input.lock.controllerPid === "number" ? input.lock.controllerPid : input.lock.ownerPid;
         if (parsedState === null ||
-            parsedState.controllerPid !== input.lock.ownerPid) {
+            (!input.orphanRecoverable && parsedState.controllerPid !== expectedControllerPid) ||
+            parsedState.runId !== input.lock.ownerRunId) {
             throw new CliError("ERR_RUNTIME_UNAVAILABLE", "浏览器实例状态与当前锁所有者不一致，无法安全接管", {
                 retryable: true
             });
         }
         const nextState = {
             ...parsedState,
-            runId: input.nextRunId,
-            controllerPid: input.nextOwnerPid
+            runId: input.nextRunId
         };
         const nextLock = {
             ...input.lock,
             ownerPid: input.nextOwnerPid,
+            controllerPid: typeof input.lock.controllerPid === "number"
+                ? input.lock.controllerPid
+                : parsedState.controllerPid,
             ownerRunId: input.nextRunId,
             lastHeartbeatAt: input.nowIso
         };
