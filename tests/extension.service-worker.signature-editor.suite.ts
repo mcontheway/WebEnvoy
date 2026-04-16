@@ -308,4 +308,131 @@ describe("extension service worker / signature and editor input", () => {
       }
     });
   });
+
+  it("executes xhs main-world request in MAIN world through extension-private rpc", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    executeScript.mockResolvedValueOnce([
+      {
+        result: {
+          status: 200,
+          body: {
+            code: 0,
+            data: {
+              items: [{ id: "note-001" }]
+            }
+          }
+        }
+      }
+    ]);
+
+    startChromeBackgroundBridge(chromeApi);
+
+    let response: unknown;
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "xhs-main-world-request",
+        url: "/api/sns/web/v1/search/notes",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json;charset=utf-8",
+          "X-s": "signed",
+          "X-t": "1700000000"
+        },
+        body: "{\"keyword\":\"露营\"}",
+        timeout_ms: 7_000
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://www.xiaohongshu.com/search_result/?keyword=%E9%9C%B2%E8%90%A5&type=51"
+        }
+      },
+      (message) => {
+        response = message;
+      }
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 32 },
+        world: "MAIN",
+        args: [
+          "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
+          "POST",
+          {
+            "Content-Type": "application/json;charset=utf-8",
+            "X-s": "signed",
+            "X-t": "1700000000"
+          },
+          "{\"keyword\":\"露营\"}",
+          7_000,
+          undefined,
+          undefined
+        ]
+      })
+    );
+    expect(response).toEqual({
+      ok: true,
+      result: {
+        status: 200,
+        body: {
+          code: 0,
+          data: {
+            items: [{ id: "note-001" }]
+          }
+        }
+      }
+    });
+  });
+
+  it("preserves AbortError metadata when xhs main-world request executeScript times out", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    const timeoutError = new Error("request aborted by timeout");
+    timeoutError.name = "AbortError";
+    executeScript.mockRejectedValueOnce(timeoutError);
+
+    startChromeBackgroundBridge(chromeApi);
+
+    let response: unknown;
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "xhs-main-world-request",
+        url: "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json;charset=utf-8",
+          "X-s": "signed",
+          "X-t": "1700000000"
+        },
+        body: "{\"keyword\":\"露营\"}",
+        timeout_ms: 7_000
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://www.xiaohongshu.com/search_result/?keyword=%E9%9C%B2%E8%90%A5&type=51"
+        }
+      },
+      (message) => {
+        response = message;
+      }
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(response).toEqual({
+      ok: false,
+      error: {
+        code: "ERR_XHS_MAIN_WORLD_REQUEST_FAILED",
+        message: "request aborted by timeout",
+        name: "AbortError"
+      }
+    });
+  });
 });

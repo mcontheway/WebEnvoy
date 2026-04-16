@@ -243,7 +243,7 @@ type XhsMainWorldRequestResponseMessage = {
     status: number;
     body: unknown;
   };
-  error?: { code: string; message: string };
+  error?: { code: string; message: string; name?: string };
 };
 
 interface NativeHeartbeatMessage {
@@ -693,9 +693,9 @@ const emitCliInvalidArgs = (
   });
 };
 
-const parseUrl = (value: string): URL | null => {
+const parseUrl = (value: string, base?: string | URL): URL | null => {
   try {
-    return new URL(value);
+    return base ? new URL(value, base) : new URL(value);
   } catch {
     return null;
   }
@@ -4579,7 +4579,7 @@ class ChromeBackgroundBridge {
     const tabId = asInteger(sender.tab?.id);
     const senderUrl = asNonEmptyString(sender.tab?.url);
     const parsedSenderUrl = senderUrl ? parseUrl(senderUrl) : null;
-    const parsedRequestUrl = parseUrl(message.url);
+    const parsedRequestUrl = parsedSenderUrl ? parseUrl(message.url, parsedSenderUrl) : parseUrl(message.url);
     if (
       tabId === null ||
       !parsedSenderUrl ||
@@ -4600,7 +4600,7 @@ class ChromeBackgroundBridge {
 
     try {
       const result = await this.#executeXhsRequestInMainWorld(tabId, {
-        url: message.url,
+        url: parsedRequestUrl.toString(),
         method: message.method,
         headers: message.headers,
         ...(typeof message.body === "string" ? { body: message.body } : {}),
@@ -4619,7 +4619,10 @@ class ChromeBackgroundBridge {
         ok: false,
         error: {
           code: "ERR_XHS_MAIN_WORLD_REQUEST_FAILED",
-          message: error instanceof Error ? error.message : String(error)
+          message: error instanceof Error ? error.message : String(error),
+          ...(error instanceof Error && typeof error.name === "string" && error.name.length > 0
+            ? { name: error.name }
+            : {})
         }
       });
     }

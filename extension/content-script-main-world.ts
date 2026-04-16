@@ -29,7 +29,7 @@ type XhsMainWorldRequestMessage = {
 type XhsMainWorldRequestResponseMessage = {
   ok: boolean;
   result?: MainWorldFetchResult;
-  error?: { code?: string; message?: string };
+  error?: { code?: string; message?: string; name?: string };
 };
 
 type MainWorldResultEnvelope = {
@@ -282,6 +282,14 @@ export const readPageStateViaMainWorld = async (): Promise<Record<string, unknow
     : null;
 };
 
+const resolveMainWorldRequestUrl = (value: string): string => {
+  const baseHref =
+    typeof globalThis.location?.href === "string" && globalThis.location.href.length > 0
+      ? globalThis.location.href
+      : "https://www.xiaohongshu.com/";
+  return new URL(value, baseHref).toString();
+};
+
 export const requestXhsSearchJsonViaMainWorld = async (input: {
   url: string;
   method: "POST" | "GET";
@@ -308,7 +316,7 @@ export const requestXhsSearchJsonViaMainWorld = async (input: {
 
   const request: XhsMainWorldRequestMessage = {
     kind: "xhs-main-world-request",
-    url: input.url,
+    url: resolveMainWorldRequestUrl(input.url),
     method: input.method,
     headers: input.headers,
     ...(typeof input.body === "string" ? { body: input.body } : {}),
@@ -339,11 +347,15 @@ export const requestXhsSearchJsonViaMainWorld = async (input: {
     }
   });
   if (!response.ok || !response.result) {
-    throw new Error(
+    const error = new Error(
       typeof response.error?.message === "string"
         ? response.error.message
         : "xhs main-world request failed"
     );
+    if (typeof response.error?.name === "string" && response.error.name.length > 0) {
+      error.name = response.error.name;
+    }
+    throw error;
   }
   return response.result;
 };

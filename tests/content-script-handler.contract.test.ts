@@ -778,7 +778,10 @@ const withMockMainWorld = async (
                 ok: false,
                 error: {
                   code: "ERR_XHS_MAIN_WORLD_REQUEST_FAILED",
-                  message: error instanceof Error ? error.message : String(error)
+                  message: error instanceof Error ? error.message : String(error),
+                  ...(error instanceof Error && typeof error.name === "string" && error.name.length > 0
+                    ? { name: error.name }
+                    : {})
                 }
               };
             }
@@ -1404,7 +1407,7 @@ describe("content-script handler contract", () => {
         expect(results[0]?.ok).toBe(true);
         expect(mainWorldFetch).toHaveBeenCalledTimes(1);
         expect(mainWorldFetch).toHaveBeenCalledWith(
-          "/api/sns/web/v1/search/notes",
+          "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
           expect.objectContaining({
             method: "POST",
             credentials: "include",
@@ -1477,10 +1480,44 @@ describe("content-script handler contract", () => {
           }
         });
         expect(mainWorldFetch).toHaveBeenCalledTimes(1);
+        expect(mainWorldFetch).toHaveBeenCalledWith(
+          "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
+          expect.objectContaining({
+            method: "POST",
+            credentials: "include"
+          })
+        );
       });
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("preserves AbortError name when main-world search request times out via extension rpc", async () => {
+    await withMockMainWorld(async ({ mockWindow }) => {
+      const timeoutError = new Error("request aborted by timeout");
+      timeoutError.name = "AbortError";
+      (mockWindow as Window & Record<string, unknown>).__mainWorldFetchHandler__ = vi.fn(async () => {
+        throw timeoutError;
+      });
+
+      await expect(
+        requestXhsSearchJsonViaMainWorld({
+          url: "/api/sns/web/v1/search/notes",
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json;charset=utf-8",
+            "X-s": "signed",
+            "X-t": "1"
+          },
+          body: "{\"keyword\":\"露营\"}",
+          timeoutMs: 7_000
+        })
+      ).rejects.toMatchObject({
+        name: "AbortError",
+        message: "request aborted by timeout"
+      });
+    });
   });
 
   it.each([
