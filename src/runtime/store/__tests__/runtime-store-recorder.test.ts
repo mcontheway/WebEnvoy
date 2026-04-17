@@ -343,6 +343,89 @@ describe("runtime-store-recorder", () => {
     );
   });
 
+  it("persists canonical live-read approvals synthesized from authorization_grant", async () => {
+    const upsertRun = vi.fn().mockResolvedValue(undefined);
+    const appendRunEvent = vi.fn().mockResolvedValue(undefined);
+    const upsertGateApproval = vi.fn().mockResolvedValue({
+      approval_id: "gate_appr_gate_decision_run-recorder-grant_req-1",
+      decision_id: "gate_decision_run-recorder-grant_req-1"
+    });
+    const appendGateAuditRecord = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn();
+    const recorder = new RuntimeStoreRecorder(baseContext.cwd, {
+      upsertRun,
+      appendRunEvent,
+      upsertGateApproval,
+      appendGateAuditRecord,
+      close
+    });
+
+    await recorder.recordSuccess(
+      { ...baseContext, command: "xhs.search" },
+      {
+        run_id: "run-recorder-grant",
+        gate_outcome: {
+          decision_id: "gate_decision_run-recorder-grant_req-1"
+        },
+        approval_record: {
+          approval_id: "gate_appr_gate_decision_run-recorder-grant_req-1",
+          decision_id: "gate_decision_run-recorder-grant_req-1",
+          approved: true,
+          approver: "authorization_grant",
+          approved_at: "2026-04-15T09:00:00.000Z",
+          checks: {
+            target_domain_confirmed: true,
+            target_tab_confirmed: true,
+            target_page_confirmed: true,
+            risk_state_checked: true,
+            action_type_confirmed: true
+          }
+        },
+        audit_record: {
+          event_id: "gate_evt_gate_decision_run-recorder-grant_req-1",
+          decision_id: "gate_decision_run-recorder-grant_req-1",
+          approval_id: "gate_appr_gate_decision_run-recorder-grant_req-1",
+          run_id: "run-recorder-grant",
+          session_id: "session-recorder-grant",
+          profile: "default",
+          issue_scope: "issue_209",
+          risk_state: "allowed",
+          next_state: "allowed",
+          transition_trigger: "canonical_authorization_grant",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 9,
+          target_page: "search_result_tab",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          effective_execution_mode: "live_read_high_risk",
+          gate_decision: "allowed",
+          gate_reasons: ["LIVE_MODE_APPROVED"],
+          approver: "authorization_grant",
+          approved_at: "2026-04-15T09:00:00.000Z",
+          recorded_at: "2026-04-15T09:00:01.000Z"
+        }
+      }
+    );
+
+    expect(upsertGateApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approvalId: "gate_appr_gate_decision_run-recorder-grant_req-1",
+        decisionId: "gate_decision_run-recorder-grant_req-1",
+        runId: "run-recorder-grant",
+        approver: "authorization_grant",
+        approvedAt: "2026-04-15T09:00:00.000Z"
+      })
+    );
+    expect(appendGateAuditRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: "gate_evt_gate_decision_run-recorder-grant_req-1",
+        approvalId: "gate_appr_gate_decision_run-recorder-grant_req-1",
+        decisionId: "gate_decision_run-recorder-grant_req-1",
+        approver: "authorization_grant"
+      })
+    );
+  });
+
   it("does not persist synthetic approval rows for gate results without real approval", async () => {
     const upsertRun = vi.fn().mockResolvedValue(undefined);
     const appendRunEvent = vi.fn().mockResolvedValue(undefined);
