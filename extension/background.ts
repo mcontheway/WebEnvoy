@@ -4061,6 +4061,8 @@ class ChromeBackgroundBridge {
       riskState,
       actionType,
       requestedExecutionMode,
+      upstreamAuthorizationRequest,
+      legacyRequestedExecutionMode,
       limitedReadRolloutReadyTrue
     });
     collectXhsCommandGateReasons({

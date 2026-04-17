@@ -171,6 +171,8 @@ const buildCanonicalReadAuthorizationRequest = (input: {
   approvalRefs?: string[];
   auditRefs?: string[];
   resourceStateSnapshot?: "active" | "cool_down" | "paused";
+  grantedAt?: string;
+  targetUrl?: string;
 }) => ({
   action_request: {
     request_ref: input.requestRef,
@@ -196,13 +198,15 @@ const buildCanonicalReadAuthorizationRequest = (input: {
     },
     approval_refs: input.approvalRefs ?? [],
     audit_refs: input.auditRefs ?? [],
-    resource_state_snapshot: input.resourceStateSnapshot ?? "active"
+    resource_state_snapshot: input.resourceStateSnapshot ?? "active",
+    ...(input.grantedAt ? { granted_at: input.grantedAt } : {})
   },
   runtime_target: {
     target_ref: `target_${input.requestRef}`,
     domain: "www.xiaohongshu.com",
     page: input.targetPage,
-    tab_id: input.targetTabId
+    tab_id: input.targetTabId,
+    ...(input.targetUrl ? { url: input.targetUrl } : {})
   }
 });
 
@@ -570,6 +574,184 @@ describe("extension build contract", () => {
       method: "POST",
       referrer: searchHref
     });
+  });
+
+  it("executes bundled content-script handler xhs.search live-read with canonical grant only", async () => {
+    const runtimeMessages: Array<Record<string, unknown>> = [];
+    const searchHref = "https://www.xiaohongshu.com/search_result/?keyword=AI&type=51";
+    const { ContentScriptHandler } = loadBundledContentScriptHandlerModule(contentScriptBuildPath, {
+      chrome: {
+        runtime: {
+          sendMessage: (
+            message: Record<string, unknown>,
+            callback?: (response?: Record<string, unknown>) => void
+          ) => {
+            runtimeMessages.push(message);
+            const response =
+              message.kind === "xhs-sign-request"
+                ? {
+                    ok: true,
+                    result: {
+                      "X-s": "signature",
+                      "X-t": "timestamp"
+                    }
+                  }
+                : message.kind === "xhs-main-world-request"
+                  ? {
+                      ok: true,
+                      result: {
+                        status: 200,
+                        body: {
+                          code: 0,
+                          data: {
+                            items: []
+                          }
+                        }
+                      }
+                    }
+                  : {
+                      ok: false,
+                      error: {
+                        message: `unexpected message kind: ${String(message.kind)}`
+                      }
+                    };
+
+            callback?.(response);
+            return Promise.resolve(response);
+          }
+        }
+      },
+      crypto: {
+        randomUUID: () => "bundle-live-uuid-002"
+      },
+      URL,
+      location: {
+        href: searchHref
+      },
+      window: {
+        location: {
+          href: searchHref
+        },
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => true
+      },
+      document: {
+        title: "Search Result",
+        readyState: "complete",
+        cookie: "a1=session-cookie"
+      },
+      CustomEvent: class CustomEventShim {
+        type: string;
+        detail: unknown;
+
+        constructor(type: string, init?: { detail?: unknown }) {
+          this.type = type;
+          this.detail = init?.detail;
+        }
+      }
+    });
+    const handler = new ContentScriptHandler();
+
+    const resultPromise = new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        off();
+        reject(new Error("did not receive bundled canonical-grant-only handler result"));
+      }, 1_000);
+      const off = handler.onResult((message) => {
+        clearTimeout(timeout);
+        off();
+        resolve(message as Record<string, unknown>);
+      });
+    });
+
+    expect(
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "msg-bundled-handler-search-live-002",
+        runId: "run-bundled-handler-search-live-002",
+        tabId: 21,
+        profile: "profile-a",
+        cwd: "/tmp/webenvoy",
+        timeoutMs: 3_000,
+        command: "xhs.search",
+        params: {
+          session_id: "nm-session-bundled-handler-search-live-002"
+        },
+        commandParams: {
+          request_id: "req-bundled-handler-search-live-002",
+          gate_invocation_id: "issue209-gate-run-bundled-handler-search-live-002",
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "AI"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 21,
+            target_page: "search_result_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 21,
+            actual_target_page: "search_result_tab",
+            action_type: "read",
+            risk_state: "allowed",
+            requested_execution_mode: "live_read_high_risk",
+            upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+              requestRef: "upstream_bundled_handler_search_live_002",
+              actionName: "xhs.read_search_results",
+              targetPage: "search_result_tab",
+              targetTabId: 21,
+              profileRef: "profile-a",
+              approvalRefs: ["approval_admission_issue493_search_live_001"],
+              auditRefs: ["audit_admission_issue493_search_live_001"],
+              grantedAt: "2026-04-17T08:06:31.000Z",
+              targetUrl: searchHref
+            })
+          }
+        }
+      })
+    ).toBe(true);
+
+    await expect(resultPromise).resolves.toMatchObject({
+      kind: "result",
+      ok: true,
+      payload: {
+        summary: {
+          capability_result: {
+            ability_id: "xhs.note.search.v1",
+            outcome: "success"
+          },
+          consumer_gate_result: {
+            requested_execution_mode: "live_read_high_risk",
+            effective_execution_mode: "live_read_high_risk",
+            gate_decision: "allowed",
+            gate_reasons: ["LIVE_MODE_APPROVED"]
+          },
+          request_admission_result: {
+            admission_decision: "allowed",
+            derived_from: {
+              approval_admission_ref: "approval_admission_issue493_search_live_001",
+              audit_admission_ref: "audit_admission_issue493_search_live_001"
+            }
+          },
+          execution_audit: {
+            request_admission_decision: "allowed",
+            compatibility_refs: {
+              approval_admission_ref: "approval_admission_issue493_search_live_001",
+              audit_admission_ref: "audit_admission_issue493_search_live_001"
+            }
+          }
+        }
+      }
+    });
+    expect(runtimeMessages.map((message) => message.kind)).toEqual([
+      "xhs-sign-request",
+      "xhs-main-world-request"
+    ]);
   });
 
   it("executes bundled xhs.detail classic module without unresolved implementation references", async () => {
