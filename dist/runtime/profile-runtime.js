@@ -22,9 +22,21 @@ const hasRequestedPersistentExtensionIdentity = (params) => {
     const candidate = params.persistent_extension_identity ?? params.persistentExtensionIdentity;
     return typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
 };
+const hasVerifiedBootstrapAttestation = (readiness) => {
+    if (readiness.bootstrapState === "ready") {
+        return true;
+    }
+    if (readiness.bootstrapState !== "failed") {
+        return false;
+    }
+    const code = readiness.details?.code;
+    return (code === undefined ||
+        code === "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH" ||
+        code === "ERR_RUNTIME_READY_SIGNAL_CONFLICT");
+};
 const hasVerifiedReadyRuntimeSignal = (readiness) => readiness.identityBindingState === "bound" &&
     readiness.transportState === "ready" &&
-    readiness.bootstrapState !== "stale" &&
+    hasVerifiedBootstrapAttestation(readiness) &&
     (readiness.details?.code !== "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH") &&
     (readiness.details?.code !== "ERR_RUNTIME_READY_SIGNAL_CONFLICT");
 const canAttachReadyRuntime = (input) => input.healthyLock &&

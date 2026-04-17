@@ -2139,6 +2139,103 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
+  it("keeps ready-runtime attach blocked when readiness never verified the runtime", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-ready-unverified-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "attach_ready_unverified_profile"
+    });
+    const alivePids = new Set<number>([999998, 999999, process.pid]);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid),
+      bridgeFactory: () => ({
+        runCommand: async ({ command, params, profile, runId }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: String((params as { runtime_context_id?: unknown }).runtime_context_id),
+                  profile,
+                  status: "ready"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          if (command === "runtime.readiness") {
+            return {
+              ok: false as const,
+              error: {
+                code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+                message: "runtime readiness 未验证当前执行面"
+              },
+              payload: null,
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "attach_ready_unverified_profile",
+      runId: "run-runtime-ready-unverified-owner-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile: "attach_ready_unverified_profile",
+        runId: "run-runtime-ready-unverified-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: false,
+      transportState: "ready",
+      bootstrapState: "pending",
+      runtimeReadiness: "blocked",
+      attachableReadyRuntime: false
+    });
+
+    await expect(
+      service.attach({
+        cwd: baseDir,
+        profile: "attach_ready_unverified_profile",
+        runId: "run-runtime-ready-unverified-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_LOCKED"
+    });
+  });
+
   it("keeps a ready runtime attachable when transport is healthy but the previous bootstrap failed", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-ready-bootstrap-failed-"));
     tempDirs.push(baseDir);

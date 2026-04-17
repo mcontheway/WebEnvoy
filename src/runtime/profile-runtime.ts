@@ -84,10 +84,25 @@ const hasRequestedPersistentExtensionIdentity = (params: JsonObject): boolean =>
   return typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
 };
 
+const hasVerifiedBootstrapAttestation = (readiness: RuntimeReadinessSnapshot): boolean => {
+  if (readiness.bootstrapState === "ready") {
+    return true;
+  }
+  if (readiness.bootstrapState !== "failed") {
+    return false;
+  }
+  const code = readiness.details?.code as string | undefined;
+  return (
+    code === undefined ||
+    code === "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH" ||
+    code === "ERR_RUNTIME_READY_SIGNAL_CONFLICT"
+  );
+};
+
 const hasVerifiedReadyRuntimeSignal = (readiness: RuntimeReadinessSnapshot): boolean =>
   readiness.identityBindingState === "bound" &&
   readiness.transportState === "ready" &&
-  readiness.bootstrapState !== "stale" &&
+  hasVerifiedBootstrapAttestation(readiness) &&
   ((readiness.details?.code as string | undefined) !== "ERR_RUNTIME_BOOTSTRAP_IDENTITY_MISMATCH") &&
   ((readiness.details?.code as string | undefined) !== "ERR_RUNTIME_READY_SIGNAL_CONFLICT");
 

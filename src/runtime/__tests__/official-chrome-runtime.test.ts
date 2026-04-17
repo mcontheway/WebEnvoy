@@ -592,6 +592,62 @@ describe("prepareOfficialChromeRuntime", () => {
     expect(bridge.runCommand).not.toHaveBeenCalled();
   });
 
+  it("does not attempt attach when the readiness probe never verified the ready runtime", async () => {
+    const readStatus = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "blocked",
+      identityBindingState: "bound",
+      bootstrapState: "pending",
+      transportState: "ready",
+      lockHeld: false,
+      orphanRecoverable: false,
+      attachableReadyRuntime: false
+    }));
+    const attachRuntime = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "recoverable",
+      identityBindingState: "bound",
+      bootstrapState: "pending",
+      transportState: "ready",
+      lockHeld: true,
+      orphanRecoverable: false
+    }));
+    const bridge = {
+      runCommand: vi.fn()
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_unverified_attach_profile",
+          run_id: "run-runtime-unverified-attach-001",
+          command: "xhs.detail",
+          params: {}
+        } as never,
+        consumerId: "xhs.detail",
+        requestedExecutionMode: "live_read_high_risk",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        attachRuntime,
+        readStatus
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_LOCKED"
+    });
+
+    expect(attachRuntime).not.toHaveBeenCalled();
+    expect(bridge.runCommand).not.toHaveBeenCalled();
+  });
+
   it("does not attach a recoverable runtime unless status proves it is orphan-recoverable", async () => {
     const readStatus = vi.fn(async () => ({
       identityPreflight: {
