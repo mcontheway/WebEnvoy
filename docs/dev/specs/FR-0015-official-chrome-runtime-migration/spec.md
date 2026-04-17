@@ -98,6 +98,15 @@
 - `runtime.status` 后续承接时，必须能表达这些 runtime readiness 事实，而不是把它们折叠成单一 `ready`。
 - `runtime.status` 的 readiness 增量必须通过独立 formal contract 冻结，并明确与 FR-0003 `profileState/browserState` 的兼容关系。
 - readiness 视图如需引入新的共享对象或持久化事实，必须在正式 `data-model.md` 中写清“哪些是衍生视图，哪些是持久实体”。
+- `runtime.status` 后续承接时，必须为接管路径提供显式机器可读信号：
+  - `attachableReadyRuntime`
+  - `orphanRecoverable`
+- `attachableReadyRuntime=true` 只允许表示“现存 runtime 已被 status 聚合器独立验证为 ready，新的 `run_id` 可安全 attach/rebind”；不得把 attested failed 或其他 recoverable handoff 语义混入该字段。
+- `attachableReadyRuntime=true` 还必须排除“另一条 controller 仍有效持有该 profile 独占控制”的真实 owner 冲突。
+- `orphanRecoverable=true` 只允许表示“现存 runtime 处于 recoverable handoff 场景，且新的 `run_id` 已被证明可安全 attach/rebind”；不得替代 ready-runtime attach 或业务命令放行门禁。
+- 上述 takeover 字段都是 additive 派生事实；不得借它们重解释 `lockHeld`、`transportState`、`bootstrapState`、`runtimeReadiness` 的既有单实例语义。
+- 上述 takeover 字段都不能单独授权接管动作；真正执行 attach/rebind 前，当前调用方仍必须先持有 FR-0003 profile 独占锁。
+- `orphanRecoverable=true` 只适用于尚未有 controller 重新取得有效独占控制的 pre-lock handoff 视图；一旦 replacement controller 或其他 controller 重新持有有效独占锁，该字段必须回落为 `false`。
 
 ### 5. 迁移实施切片
 
@@ -145,6 +154,27 @@ When 运行时准备进入业务执行前阶段
 Then 系统必须通过独立 bootstrap contract 下发 run/session 上下文
 And 不得把 `run_id` 或等价 bootstrap 字段塞回 FR-0002 握手字段
 And link-layer handshake 失败与 bootstrap 失败必须可区分
+
+### 场景 3A：只有已验证 ready 的旧 runtime 才能被标记为 `attachableReadyRuntime=true`
+
+Given 一个新的 `run_id` 正在查询现存 official Chrome runtime
+And 当前调用方自己尚未持有该 profile 的独占锁
+When `runtime.status` 评估 ready-runtime handoff 条件
+Then 只有在 status 聚合器已明确证明现存 runtime 处于 ready 时，才允许 `attachableReadyRuntime=true`
+And `pending` / `not_started` / `ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED` / `ERR_RUNTIME_BOOTSTRAP_ACK_TIMEOUT` / attested failed 都不得被提升为 `attachableReadyRuntime=true`
+And 调用方不得被要求通过当前 top-level `bootstrapState` / `transportState` 去反向推断另一条 runtime 实例
+And 若另一条 controller 仍被证明有效持有该 profile 的独占控制，则 `attachableReadyRuntime` 必须保持 `false`
+And 即使 `attachableReadyRuntime=true`，当前调用方在真正执行 attach/rebind 前仍必须先持有 FR-0003 profile 独占锁
+
+### 场景 3B：recoverable handoff 必须通过 `orphanRecoverable` 单独表达
+
+Given 一个新的 `run_id` 正在查询现存 official Chrome runtime
+And 当前 runtime 不处于 ready attach，而是 owner/rebind 级的 recoverable handoff 场景
+When `runtime.status` 评估 recoverable takeover 条件
+Then 只有在 `runtimeReadiness=recoverable`、`identityBindingState=bound`、旧 owner 已失去有效独占控制、没有其他 controller 已重新取得有效独占控制且 browser/controller 连续性仍成立时，才允许 `orphanRecoverable=true`
+And `orphanRecoverable=true` 不得被解释为业务命令已可直接执行
+And replacement `run_id` 在真正执行 attach/rebind 前仍必须先持有 FR-0003 profile 独占锁
+And replacement controller 重新取得 FR-0003 独占锁后，`runtime.status` 不得继续暴露 `orphanRecoverable=true`
 
 ### 场景 4：candidate 安装路径不会被误写成正式主方案
 

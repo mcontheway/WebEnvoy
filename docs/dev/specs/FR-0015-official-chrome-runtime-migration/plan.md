@@ -62,6 +62,21 @@
   - bootstrap ack 成功 / 超时 / stale ack / identity mismatch
   - 断连后同 run 重试与幂等 bootstrap
   - `runtime.status` 对 identity / bootstrap readiness 的状态回读
+  - `attachableReadyRuntime`
+    - 仅在 status 聚合器已独立验证现存 runtime 为 ready 时为 `true`
+    - `pending` / `not_started` / `ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED` / `ERR_RUNTIME_BOOTSTRAP_ACK_TIMEOUT` 继续为 `false`
+    - attested failed、identity/context conflict 与 stale bootstrap 继续为 `false`
+    - 不得要求调用方通过当前 top-level `bootstrapState` / `transportState` 去反向推断另一条 runtime 实例
+    - 若另一条 controller 仍有效持有该 profile 的独占控制，必须继续为 `false`
+    - 真正执行 attach/rebind 前，当前调用方仍必须先持有 FR-0003 profile 独占锁
+  - `orphanRecoverable`
+    - 仅在 `runtimeReadiness=recoverable`、`identityBindingState=bound`、旧 owner 已失去有效独占控制、没有其他 controller 已重新取得有效独占控制且 browser/controller 连续性仍成立时为 `true`
+    - identity 缺失/冲突、旧 owner 仍持有有效独占控制、已有其他 controller 抢先取得有效独占控制、`transportState=not_connected` 或 `bootstrapState=stale` 时继续为 `false`
+    - 只适用于尚未有 controller 重新取得有效独占控制的 pre-lock handoff 视图；replacement controller 或其他 controller 一旦重新持有有效独占锁，该字段必须回落为 `false`
+    - 真正执行 attach/rebind 前，当前调用方仍必须先持有 FR-0003 profile 独占锁
+  - attach/rebind gate 消费面
+    - ready-runtime attach 只能消费 `attachableReadyRuntime=true`
+    - recoverable rebind 只能消费 `runtimeReadiness=recoverable + orphanRecoverable=true`
   - 控制进程死 / 浏览器活
   - 锁仍持有但控制链断开
   - ready marker 陈旧
@@ -91,6 +106,7 @@
 - 控制进程死 / 浏览器活：
   - 不得沿用旧控制面 ready 判定
   - 必须重新验证 lock、transport 与 bootstrap ack 归属
+  - 若需要走 recoverable rebind，还必须证明 `identityBindingState=bound` 且旧 owner 已失去有效独占控制
 - 锁仍持有但控制链断开：
   - 必须先判定为 `recoverable` 或 `blocked`
   - 不得直接放行业务命令
