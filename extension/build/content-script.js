@@ -1633,10 +1633,91 @@ const asBoolean = (value) => value === true;
 const hasOwnNonNullValue = (record, key) =>
   Object.prototype.hasOwnProperty.call(record, key) && record[key] !== null;
 
+const asStringArray = (value) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const normalized = value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+  return normalized.length === value.length ? normalized : [];
+};
+
 const pushReason = (target, reason) => {
   if (!target.includes(reason)) {
     target.push(reason);
   }
+};
+
+const hasExplicitAdmissionEvidence = (admissionContext) => {
+  const approvalEvidence = asRecord(admissionContext?.approval_admission_evidence);
+  const auditEvidence = asRecord(admissionContext?.audit_admission_evidence);
+
+  const hasMeaningfulEvidence = (record) => {
+    if (!record) {
+      return false;
+    }
+    return Object.values(record).some((value) => {
+      if (value === true) {
+        return true;
+      }
+      if (typeof value === "string") {
+        return value.trim().length > 0;
+      }
+      if (typeof value === "number") {
+        return true;
+      }
+      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        return Object.values(value).some((nested) => nested === true);
+      }
+      return false;
+    });
+  };
+
+  return hasMeaningfulEvidence(approvalEvidence) || hasMeaningfulEvidence(auditEvidence);
+};
+
+const resolveCanonicalGrantApprovedAt = (input) =>
+  asString(input.state?.upstreamAuthorizationRequest?.authorization_grant?.granted_at);
+
+const hasCanonicalGrantBackedAdmission = (input, liveRequirements) => {
+  const upstream = asRecord(input.state?.upstreamAuthorizationRequest);
+  const actionRequest = asRecord(upstream?.action_request);
+  const resourceBinding = asRecord(upstream?.resource_binding);
+  const authorizationGrant = asRecord(upstream?.authorization_grant);
+  const runtimeTarget = asRecord(upstream?.runtime_target);
+  const actionRequestRef = asString(actionRequest?.request_ref);
+  const resourceBindingRef = asString(resourceBinding?.binding_ref);
+  const authorizationGrantRef = asString(authorizationGrant?.grant_ref);
+  const runtimeTargetRef = asString(runtimeTarget?.target_ref);
+
+  return (
+    liveRequirements.length > 0 &&
+    input.state?.issueScope === "issue_209" &&
+    input.state?.actionType === "read" &&
+    (input.state?.requestedExecutionMode === "live_read_limited" ||
+      input.state?.requestedExecutionMode === "live_read_high_risk") &&
+    actionRequest !== null &&
+    resourceBinding !== null &&
+    authorizationGrant !== null &&
+    runtimeTarget !== null &&
+    actionRequestRef !== null &&
+    resourceBindingRef !== null &&
+    authorizationGrantRef !== null &&
+    runtimeTargetRef !== null &&
+    resolveCanonicalGrantApprovedAt(input) !== null &&
+    asStringArray(authorizationGrant.approval_refs).length > 0 &&
+    asStringArray(authorizationGrant.audit_refs).length > 0
+  );
+};
+
+const explicitAdmissionRefMatchesCurrentGrant = (grantRefs, explicitRef) => {
+  const normalizedExplicitRef = asString(explicitRef);
+  if (normalizedExplicitRef === null) {
+    return false;
+  }
+
+  return asStringArray(grantRefs).includes(normalizedExplicitRef);
 };
 
 const normalizeApprovalAdmissionEvidence = (value) => {
@@ -1696,6 +1777,15 @@ const buildApprovalRecordFromAdmissionEvidence = (approvalAdmissionEvidence, exp
   checks: Object.fromEntries(
     APPROVAL_CHECK_KEYS.map((key) => [key, approvalAdmissionEvidence.checks[key] === true])
   )
+});
+
+const buildSyntheticApprovalRecordFromCanonicalGrant = (expected) => ({
+  approval_id: expected.approvalId ?? null,
+  decision_id: expected.decisionId ?? null,
+  approved: true,
+  approver: "authorization_grant",
+  approved_at: expected.approvedAt ?? null,
+  checks: Object.fromEntries(APPROVAL_CHECK_KEYS.map((key) => [key, true]))
 });
 
 const resolveIssue209ApprovalAdmissionRequirementGaps = (
@@ -1924,26 +2014,58 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
     input.state.limitedReadRolloutReadyTrue !== true
       ? ["limited_read_rollout_ready_true"]
       : [];
-  const explicitAdmissionSatisfied =
-    approvalAdmissionRequirementGaps.length === 0 && auditAdmissionRequirementGaps.length === 0;
-  const canonicalApprovalRecord = explicitAdmissionSatisfied
+  const canonicalGrantBackedAdmission = hasCanonicalGrantBackedAdmission(input, liveRequirements);
+  const explicitApprovalAlignedWithCurrentGrant =
+    !canonicalGrantBackedAdmission ||
+    explicitAdmissionRefMatchesCurrentGrant(
+      input.state?.upstreamAuthorizationRequest?.authorization_grant?.approval_refs,
+      approvalAdmissionEvidence.approval_admission_ref
+    );
+  const explicitAuditAlignedWithCurrentGrant =
+    !canonicalGrantBackedAdmission ||
+    explicitAdmissionRefMatchesCurrentGrant(
+      input.state?.upstreamAuthorizationRequest?.authorization_grant?.audit_refs,
+      auditAdmissionEvidence.audit_admission_ref
+    );
+  const explicitApprovalUsable =
+    approvalAdmissionRequirementGaps.length === 0 && explicitApprovalAlignedWithCurrentGrant;
+  const explicitAuditUsable =
+    auditAdmissionRequirementGaps.length === 0 && explicitAuditAlignedWithCurrentGrant;
+  const explicitAdmissionUsable =
+    explicitApprovalUsable && explicitAuditUsable;
+  const effectiveApprovalAdmissionEvidence =
+    canonicalGrantBackedAdmission && !explicitApprovalUsable
+      ? normalizeApprovalAdmissionEvidence(null)
+      : approvalAdmissionEvidence;
+  const effectiveAuditAdmissionEvidence =
+    canonicalGrantBackedAdmission && !explicitAuditUsable
+      ? normalizeAuditAdmissionEvidence(null)
+      : auditAdmissionEvidence;
+  const liveAdmissionSatisfied =
+    explicitAdmissionUsable || canonicalGrantBackedAdmission;
+  const canonicalApprovalRecord = explicitApprovalUsable
     ? buildApprovalRecordFromAdmissionEvidence(approvalAdmissionEvidence, {
         decisionId: input.decisionId ?? null,
         approvalId: input.expectedApprovalId ?? null
       })
-    : approvalRecord;
+    : canonicalGrantBackedAdmission
+      ? buildSyntheticApprovalRecordFromCanonicalGrant({
+          decisionId: input.decisionId ?? null,
+          approvalId: input.expectedApprovalId ?? null,
+          approvedAt: resolveCanonicalGrantApprovedAt(input)
+        })
+      : approvalRecord;
 
-  if (
-    approvalAdmissionRequirementGaps.length > 0
-  ) {
+  if (!liveAdmissionSatisfied && approvalAdmissionRequirementGaps.length > 0) {
     pushReason(gateReasons, "MANUAL_CONFIRMATION_MISSING");
   }
   if (
+    !liveAdmissionSatisfied &&
     approvalAdmissionRequirementGaps.includes("approval_admission_evidence_checks_all_true")
   ) {
     pushReason(gateReasons, "APPROVAL_CHECKS_INCOMPLETE");
   }
-  if (auditAdmissionRequirementGaps.length > 0) {
+  if (!liveAdmissionSatisfied && auditAdmissionRequirementGaps.length > 0) {
     pushReason(gateReasons, "AUDIT_RECORD_MISSING");
   }
   if (rolloutRequirementGaps.length > 0) {
@@ -1954,8 +2076,8 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
     gateReasons,
     approvalRecord: canonicalApprovalRecord,
     admissionContext: {
-      approval_admission_evidence: approvalAdmissionEvidence,
-      audit_admission_evidence: auditAdmissionEvidence
+      approval_admission_evidence: effectiveApprovalAdmissionEvidence,
+      audit_admission_evidence: effectiveAuditAdmissionEvidence
     },
     writeGateOnlyEligible: false,
     writeGateOnlyDecision: null,
@@ -2028,6 +2150,10 @@ const buildIssue209ExecutionAudit = (input) => {
   const consumedEvidence = resolveConsumedIssue209AdmissionEvidence(
     input.gate?.gate_input?.admission_context
   );
+  const admissionAllowed = requestAdmissionResult.admission_decision === "allowed";
+  const blockedWithMatchingGrant =
+    requestAdmissionResult.admission_decision === "blocked" &&
+    requestAdmissionResult.grant_match === true;
   const riskSignals =
     asStringArray(input.executionAuditRiskSignals).length > 0
       ? asStringArray(input.executionAuditRiskSignals)
@@ -2044,10 +2170,14 @@ const buildIssue209ExecutionAudit = (input) => {
     },
     compatibility_refs: {
       gate_run_id: asString(input.runId),
-      approval_admission_ref: hasApprovalEvidenceValidationIssue(reasonCodes)
+      approval_admission_ref:
+        (!admissionAllowed && !blockedWithMatchingGrant) ||
+        hasApprovalEvidenceValidationIssue(reasonCodes)
         ? null
         : consumedEvidence.approvalAdmissionRef,
-      audit_admission_ref: hasAuditEvidenceValidationIssue(reasonCodes)
+      audit_admission_ref:
+        (!admissionAllowed && !blockedWithMatchingGrant) ||
+        hasAuditEvidenceValidationIssue(reasonCodes)
         ? null
         : consumedEvidence.auditAdmissionRef,
       approval_record_ref: asString(input.approvalRecord?.approval_id),
@@ -2239,6 +2369,8 @@ const asStringArray = (value) => {
   return normalized.length === value.length ? normalized : null;
 };
 
+const normalizeGrantRefs = (value) => asStringArray(value) ?? [];
+
 const normalizeUpstreamAuthorizationRequest = (value) => {
   const record = asRecord(value);
   const actionRequest = asRecord(record?.action_request);
@@ -2292,8 +2424,9 @@ const normalizeUpstreamAuthorizationRequest = (value) => {
             allowed_domains: asStringArray(targetScope?.allowed_domains) ?? [],
             allowed_pages: asStringArray(targetScope?.allowed_pages) ?? []
           },
-          approval_refs: asStringArray(authorizationGrant.approval_refs) ?? [],
-          audit_refs: asStringArray(authorizationGrant.audit_refs) ?? [],
+          approval_refs: normalizeGrantRefs(authorizationGrant.approval_refs),
+          audit_refs: normalizeGrantRefs(authorizationGrant.audit_refs),
+          granted_at: asString(authorizationGrant.granted_at),
           resource_state_snapshot:
             resourceStateSnapshot && XHS_RESOURCE_STATE_SNAPSHOTS.has(resourceStateSnapshot)
               ? resourceStateSnapshot
@@ -2582,6 +2715,32 @@ const deriveExecutionAuditRiskSignals = (reasonCodes) => {
   return riskSignals.length > 0 ? riskSignals : [NO_ADDITIONAL_RISK_SIGNALS];
 };
 
+const firstValidGrantRef = (value) => normalizeGrantRefs(value)[0] ?? null;
+
+const resolveCanonicalCompatibilityRefs = (input) => {
+  const upstreamApprovalRef = firstValidGrantRef(input.upstream?.authorization_grant?.approval_refs);
+  const upstreamAuditRef = firstValidGrantRef(input.upstream?.authorization_grant?.audit_refs);
+  const admissionApprovalRef =
+    input.admissionContext?.approval_admission_evidence?.approval_admission_ref ?? null;
+  const admissionAuditRef =
+    input.admissionContext?.audit_admission_evidence?.audit_admission_ref ?? null;
+
+  return {
+    approvalAdmissionRef:
+      typeof admissionApprovalRef === "string" && admissionApprovalRef.length > 0
+        ? admissionApprovalRef
+        : typeof upstreamApprovalRef === "string" && upstreamApprovalRef.length > 0
+          ? upstreamApprovalRef
+          : null,
+    auditAdmissionRef:
+      typeof admissionAuditRef === "string" && admissionAuditRef.length > 0
+        ? admissionAuditRef
+        : typeof upstreamAuditRef === "string" && upstreamAuditRef.length > 0
+          ? upstreamAuditRef
+          : null
+  };
+};
+
 const evaluateRequestAdmissionResult = (input) => {
   const state = input.state ?? {};
   const upstream = input.upstream;
@@ -2639,6 +2798,10 @@ const evaluateRequestAdmissionResult = (input) => {
     normalizedResourceKind !== "anonymous_context"
       ? true
       : !targetSiteLoggedIn && anonymousIsolationVerified && anonymousBindingConstraintsOk;
+  const compatibilityRefs = resolveCanonicalCompatibilityRefs({
+    upstream,
+    admissionContext: input.admissionContext
+  });
 
   const admissionDecision =
     !runtimeTargetMatch || !grantMatch || !anonymousIsolationOk || input.outcome.gateDecision === "blocked"
@@ -2663,8 +2826,8 @@ const evaluateRequestAdmissionResult = (input) => {
       resource_binding_ref: upstream?.resource_binding?.binding_ref ?? null,
       authorization_grant_ref: upstream?.authorization_grant?.grant_ref ?? null,
       runtime_target_ref: upstream?.runtime_target?.target_ref ?? null,
-      approval_admission_ref: input.admissionContext?.approval_admission_evidence?.approval_admission_ref ?? null,
-      audit_admission_ref: input.admissionContext?.audit_admission_evidence?.audit_admission_ref ?? null
+      approval_admission_ref: compatibilityRefs.approvalAdmissionRef,
+      audit_admission_ref: compatibilityRefs.auditAdmissionRef
     }
   };
 };
@@ -3844,14 +4007,46 @@ const evaluateXhsGate = (input) => {
     state.requestedExecutionMode &&
     XHS_LIVE_READ_EXECUTION_MODE_SET.has(state.requestedExecutionMode)
   ) {
-    result.execution_audit = buildIssue209PostGateArtifacts({
+    const postGateArtifacts = buildIssue209PostGateArtifacts({
       runId: asString(input.runId),
       sessionId: asString(input.sessionId),
       profile: asString(input.profile),
       gate: result,
       executionAuditRiskSignals,
       now: typeof input.now === "function" ? input.now : undefined
-    }).execution_audit;
+    });
+    result.execution_audit = postGateArtifacts.execution_audit;
+    const compatibilityRefs = asRecord(result.execution_audit?.compatibility_refs);
+    const derivedFrom = asRecord(requestAdmissionResult?.derived_from);
+    const explicitAdmissionContext = asRecord(result.gate_input?.admission_context);
+    const explicitApprovalEvidence = asRecord(explicitAdmissionContext?.approval_admission_evidence);
+    const explicitAuditEvidence = asRecord(explicitAdmissionContext?.audit_admission_evidence);
+    const canBackfillApprovalAdmissionRef =
+      asString(explicitApprovalEvidence?.approval_admission_ref) === null;
+    const canBackfillAuditAdmissionRef =
+      asString(explicitAuditEvidence?.audit_admission_ref) === null;
+    const shouldBackfillCanonicalCompatibilityRefs =
+      requestAdmissionResult?.admission_decision === "allowed" ||
+      (requestAdmissionResult?.admission_decision === "blocked" &&
+        requestAdmissionResult?.grant_match === true);
+    if (compatibilityRefs && derivedFrom && shouldBackfillCanonicalCompatibilityRefs) {
+      if (
+        canBackfillApprovalAdmissionRef &&
+        compatibilityRefs.approval_admission_ref === null &&
+        typeof derivedFrom.approval_admission_ref === "string" &&
+        derivedFrom.approval_admission_ref.length > 0
+      ) {
+        compatibilityRefs.approval_admission_ref = derivedFrom.approval_admission_ref;
+      }
+      if (
+        canBackfillAuditAdmissionRef &&
+        compatibilityRefs.audit_admission_ref === null &&
+        typeof derivedFrom.audit_admission_ref === "string" &&
+        derivedFrom.audit_admission_ref.length > 0
+      ) {
+        compatibilityRefs.audit_admission_ref = derivedFrom.audit_admission_ref;
+      }
+    }
   }
   return result;
 };

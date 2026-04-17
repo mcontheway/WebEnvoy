@@ -19,10 +19,91 @@ const asBoolean = (value) => value === true;
 const hasOwnNonNullValue = (record, key) =>
   Object.prototype.hasOwnProperty.call(record, key) && record[key] !== null;
 
+const asStringArray = (value) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const normalized = value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+  return normalized.length === value.length ? normalized : [];
+};
+
 const pushReason = (target, reason) => {
   if (!target.includes(reason)) {
     target.push(reason);
   }
+};
+
+const hasExplicitAdmissionEvidence = (admissionContext) => {
+  const approvalEvidence = asRecord(admissionContext?.approval_admission_evidence);
+  const auditEvidence = asRecord(admissionContext?.audit_admission_evidence);
+
+  const hasMeaningfulEvidence = (record) => {
+    if (!record) {
+      return false;
+    }
+    return Object.values(record).some((value) => {
+      if (value === true) {
+        return true;
+      }
+      if (typeof value === "string") {
+        return value.trim().length > 0;
+      }
+      if (typeof value === "number") {
+        return true;
+      }
+      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        return Object.values(value).some((nested) => nested === true);
+      }
+      return false;
+    });
+  };
+
+  return hasMeaningfulEvidence(approvalEvidence) || hasMeaningfulEvidence(auditEvidence);
+};
+
+const resolveCanonicalGrantApprovedAt = (input) =>
+  asString(input.state?.upstreamAuthorizationRequest?.authorization_grant?.granted_at);
+
+const hasCanonicalGrantBackedAdmission = (input, liveRequirements) => {
+  const upstream = asRecord(input.state?.upstreamAuthorizationRequest);
+  const actionRequest = asRecord(upstream?.action_request);
+  const resourceBinding = asRecord(upstream?.resource_binding);
+  const authorizationGrant = asRecord(upstream?.authorization_grant);
+  const runtimeTarget = asRecord(upstream?.runtime_target);
+  const actionRequestRef = asString(actionRequest?.request_ref);
+  const resourceBindingRef = asString(resourceBinding?.binding_ref);
+  const authorizationGrantRef = asString(authorizationGrant?.grant_ref);
+  const runtimeTargetRef = asString(runtimeTarget?.target_ref);
+
+  return (
+    liveRequirements.length > 0 &&
+    input.state?.issueScope === "issue_209" &&
+    input.state?.actionType === "read" &&
+    (input.state?.requestedExecutionMode === "live_read_limited" ||
+      input.state?.requestedExecutionMode === "live_read_high_risk") &&
+    actionRequest !== null &&
+    resourceBinding !== null &&
+    authorizationGrant !== null &&
+    runtimeTarget !== null &&
+    actionRequestRef !== null &&
+    resourceBindingRef !== null &&
+    authorizationGrantRef !== null &&
+    runtimeTargetRef !== null &&
+    resolveCanonicalGrantApprovedAt(input) !== null &&
+    asStringArray(authorizationGrant.approval_refs).length > 0 &&
+    asStringArray(authorizationGrant.audit_refs).length > 0
+  );
+};
+
+const explicitAdmissionRefMatchesCurrentGrant = (grantRefs, explicitRef) => {
+  const normalizedExplicitRef = asString(explicitRef);
+  if (normalizedExplicitRef === null) {
+    return false;
+  }
+
+  return asStringArray(grantRefs).includes(normalizedExplicitRef);
 };
 
 const normalizeApprovalAdmissionEvidence = (value) => {
@@ -82,6 +163,15 @@ const buildApprovalRecordFromAdmissionEvidence = (approvalAdmissionEvidence, exp
   checks: Object.fromEntries(
     APPROVAL_CHECK_KEYS.map((key) => [key, approvalAdmissionEvidence.checks[key] === true])
   )
+});
+
+const buildSyntheticApprovalRecordFromCanonicalGrant = (expected) => ({
+  approval_id: expected.approvalId ?? null,
+  decision_id: expected.decisionId ?? null,
+  approved: true,
+  approver: "authorization_grant",
+  approved_at: expected.approvedAt ?? null,
+  checks: Object.fromEntries(APPROVAL_CHECK_KEYS.map((key) => [key, true]))
 });
 
 const resolveIssue209ApprovalAdmissionRequirementGaps = (
@@ -310,26 +400,58 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
     input.state.limitedReadRolloutReadyTrue !== true
       ? ["limited_read_rollout_ready_true"]
       : [];
-  const explicitAdmissionSatisfied =
-    approvalAdmissionRequirementGaps.length === 0 && auditAdmissionRequirementGaps.length === 0;
-  const canonicalApprovalRecord = explicitAdmissionSatisfied
+  const canonicalGrantBackedAdmission = hasCanonicalGrantBackedAdmission(input, liveRequirements);
+  const explicitApprovalAlignedWithCurrentGrant =
+    !canonicalGrantBackedAdmission ||
+    explicitAdmissionRefMatchesCurrentGrant(
+      input.state?.upstreamAuthorizationRequest?.authorization_grant?.approval_refs,
+      approvalAdmissionEvidence.approval_admission_ref
+    );
+  const explicitAuditAlignedWithCurrentGrant =
+    !canonicalGrantBackedAdmission ||
+    explicitAdmissionRefMatchesCurrentGrant(
+      input.state?.upstreamAuthorizationRequest?.authorization_grant?.audit_refs,
+      auditAdmissionEvidence.audit_admission_ref
+    );
+  const explicitApprovalUsable =
+    approvalAdmissionRequirementGaps.length === 0 && explicitApprovalAlignedWithCurrentGrant;
+  const explicitAuditUsable =
+    auditAdmissionRequirementGaps.length === 0 && explicitAuditAlignedWithCurrentGrant;
+  const explicitAdmissionUsable =
+    explicitApprovalUsable && explicitAuditUsable;
+  const effectiveApprovalAdmissionEvidence =
+    canonicalGrantBackedAdmission && !explicitApprovalUsable
+      ? normalizeApprovalAdmissionEvidence(null)
+      : approvalAdmissionEvidence;
+  const effectiveAuditAdmissionEvidence =
+    canonicalGrantBackedAdmission && !explicitAuditUsable
+      ? normalizeAuditAdmissionEvidence(null)
+      : auditAdmissionEvidence;
+  const liveAdmissionSatisfied =
+    explicitAdmissionUsable || canonicalGrantBackedAdmission;
+  const canonicalApprovalRecord = explicitApprovalUsable
     ? buildApprovalRecordFromAdmissionEvidence(approvalAdmissionEvidence, {
         decisionId: input.decisionId ?? null,
         approvalId: input.expectedApprovalId ?? null
       })
-    : approvalRecord;
+    : canonicalGrantBackedAdmission
+      ? buildSyntheticApprovalRecordFromCanonicalGrant({
+          decisionId: input.decisionId ?? null,
+          approvalId: input.expectedApprovalId ?? null,
+          approvedAt: resolveCanonicalGrantApprovedAt(input)
+        })
+      : approvalRecord;
 
-  if (
-    approvalAdmissionRequirementGaps.length > 0
-  ) {
+  if (!liveAdmissionSatisfied && approvalAdmissionRequirementGaps.length > 0) {
     pushReason(gateReasons, "MANUAL_CONFIRMATION_MISSING");
   }
   if (
+    !liveAdmissionSatisfied &&
     approvalAdmissionRequirementGaps.includes("approval_admission_evidence_checks_all_true")
   ) {
     pushReason(gateReasons, "APPROVAL_CHECKS_INCOMPLETE");
   }
-  if (auditAdmissionRequirementGaps.length > 0) {
+  if (!liveAdmissionSatisfied && auditAdmissionRequirementGaps.length > 0) {
     pushReason(gateReasons, "AUDIT_RECORD_MISSING");
   }
   if (rolloutRequirementGaps.length > 0) {
@@ -340,8 +462,8 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
     gateReasons,
     approvalRecord: canonicalApprovalRecord,
     admissionContext: {
-      approval_admission_evidence: approvalAdmissionEvidence,
-      audit_admission_evidence: auditAdmissionEvidence
+      approval_admission_evidence: effectiveApprovalAdmissionEvidence,
+      audit_admission_evidence: effectiveAuditAdmissionEvidence
     },
     writeGateOnlyEligible: false,
     writeGateOnlyDecision: null,

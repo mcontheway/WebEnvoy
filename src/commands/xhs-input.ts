@@ -1205,8 +1205,85 @@ const resolveIssue209AdmissionDraftForContract = (input: {
     approvalRecord: input.options.approval_record ?? input.options.approval,
     auditRecord: input.options.audit_record
   });
-
   const current = source.current;
+  const canonicalGrant = asObject(asObject(input.options.upstream_authorization_request)?.authorization_grant);
+  const canonicalGrantUpstream = asObject(input.options.upstream_authorization_request);
+  const canonicalGrantActionRequest = asObject(canonicalGrantUpstream?.action_request);
+  const canonicalGrantResourceBinding = asObject(canonicalGrantUpstream?.resource_binding);
+  const canonicalGrantRuntimeTarget = asObject(canonicalGrantUpstream?.runtime_target);
+  const canonicalActionRequestRef = asString(canonicalGrantActionRequest?.request_ref);
+  const canonicalBindingRef = asString(canonicalGrantResourceBinding?.binding_ref);
+  const canonicalGrantRef = asString(canonicalGrant?.grant_ref);
+  const canonicalTargetRef = asString(canonicalGrantRuntimeTarget?.target_ref);
+  const canonicalBindingScope = asObject(canonicalGrant?.binding_scope);
+  const canonicalTargetScope = asObject(canonicalGrant?.target_scope);
+  const canonicalGrantApprovalRefs = asStringArray(canonicalGrant?.approval_refs);
+  const canonicalGrantAuditRefs = asStringArray(canonicalGrant?.audit_refs);
+  const canonicalGrantActionType = asString(canonicalGrantActionRequest?.action_category);
+  const canonicalGrantResourceKind = asString(canonicalGrantResourceBinding?.resource_kind);
+  const canonicalGrantProfileRef = asString(canonicalGrantResourceBinding?.profile_ref);
+  const canonicalGrantBindingConstraints = asObject(canonicalGrantResourceBinding?.binding_constraints);
+  const canonicalGrantDomain = asString(canonicalGrantRuntimeTarget?.domain);
+  const canonicalGrantPage = asString(canonicalGrantRuntimeTarget?.page);
+  const canonicalGrantTabId = asInteger(canonicalGrantRuntimeTarget?.tab_id);
+  const canonicalGrantRiskState = projectRiskStateForContract(
+    asString(canonicalGrant?.resource_state_snapshot) as ResourceStateSnapshot | undefined
+  );
+  const canonicalGrantApprovedAt = asString(canonicalGrant?.granted_at);
+  const canonicalGrantSupportsRequestedMode =
+    input.options.requested_execution_mode === "live_read_high_risk"
+      ? canonicalGrantRiskState === "allowed"
+      : input.options.requested_execution_mode === "live_read_limited"
+        ? canonicalGrantRiskState === "limited" || canonicalGrantRiskState === "allowed"
+        : false;
+  const canonicalGrantMatchesCurrentTarget =
+    canonicalGrantDomain === current.targetDomain &&
+    canonicalGrantPage === current.targetPage &&
+    canonicalGrantTabId === current.targetTabId;
+  const canonicalGrantHasSupportedResourceKind =
+    canonicalGrantResourceKind !== null &&
+    UPSTREAM_RESOURCE_KINDS.has(canonicalGrantResourceKind as UpstreamResourceKind);
+  const canonicalGrantHasExecutableBinding =
+    canonicalGrantResourceKind === "profile_session"
+      ? canonicalGrantProfileRef !== null
+      : canonicalGrantResourceKind === "anonymous_context"
+        ? canonicalGrantProfileRef === null &&
+          canonicalGrantBindingConstraints?.anonymous_required === true &&
+          canonicalGrantBindingConstraints?.reuse_logged_in_context_forbidden === true
+        : false;
+  const canonicalGrantCanDriveAdmission =
+    canonicalGrantActionRequest !== null &&
+    canonicalGrantResourceBinding !== null &&
+    canonicalGrant !== null &&
+    canonicalGrantRuntimeTarget !== null &&
+    canonicalActionRequestRef !== null &&
+    canonicalBindingRef !== null &&
+    canonicalGrantRef !== null &&
+    canonicalTargetRef !== null &&
+    canonicalGrantApprovalRefs !== null &&
+    canonicalGrantApprovalRefs.length > 0 &&
+    canonicalGrantAuditRefs !== null &&
+    canonicalGrantAuditRefs.length > 0 &&
+    canonicalGrantApprovedAt !== null &&
+    canonicalGrantSupportsRequestedMode &&
+    canonicalGrantActionType === current.actionType &&
+    canonicalGrantMatchesCurrentTarget &&
+    canonicalGrantHasSupportedResourceKind &&
+    canonicalGrantHasExecutableBinding &&
+    canonicalGrantDomain !== null &&
+    canonicalGrantPage !== null &&
+    (asStringArray(canonicalGrant?.allowed_actions)?.includes(
+      asString(canonicalGrantActionRequest?.action_name) ?? ""
+    ) ?? false) &&
+    (asStringArray(canonicalBindingScope?.allowed_resource_kinds)?.includes(canonicalGrantResourceKind) ??
+      false) &&
+    (canonicalGrantResourceKind !== "profile_session" ||
+      !canonicalGrantProfileRef ||
+      (asStringArray(canonicalBindingScope?.allowed_profile_refs)?.includes(canonicalGrantProfileRef) ??
+        false)) &&
+    (asStringArray(canonicalTargetScope?.allowed_domains)?.includes(canonicalGrantDomain) ?? false) &&
+    (asStringArray(canonicalTargetScope?.allowed_pages)?.includes(canonicalGrantPage) ?? false);
+
   const hasAllTrueChecks = (checks: Record<string, boolean>): boolean =>
     Object.keys(checks).length > 0 && Object.values(checks).every((value) => value === true);
   const bindingMatches = (
@@ -1283,50 +1360,6 @@ const resolveIssue209AdmissionDraftForContract = (input: {
     hasAllTrueChecks(explicitAudit.audited_checks) &&
     bindingMatches(explicitAudit, true, explicitAudit.risk_state) &&
     linkageMatches(explicitAudit.decision_id, explicitAudit.approval_id);
-  if (explicitSourceValid) {
-    return {
-      kind: "draft",
-      admission_context: {
-        approval_admission_evidence: {
-          approval_admission_ref: explicitApproval.approval_admission_ref,
-          decision_id: current.decisionId,
-          approval_id: current.approvalId,
-          ...(current.commandRequestId ? { request_id: current.commandRequestId } : {}),
-          run_id: current.runId,
-          session_id: null,
-          issue_scope: current.issueScope,
-          target_domain: current.targetDomain,
-          target_tab_id: current.targetTabId,
-          target_page: current.targetPage,
-          action_type: current.actionType,
-          requested_execution_mode: current.requestedExecutionMode,
-          approved: true,
-          approver: explicitApproval.approver,
-          approved_at: explicitApproval.approved_at,
-          checks: explicitApproval.checks,
-          recorded_at: explicitApproval.recorded_at
-        },
-        audit_admission_evidence: {
-          audit_admission_ref: explicitAudit.audit_admission_ref,
-          decision_id: current.decisionId,
-          approval_id: current.approvalId,
-          ...(current.commandRequestId ? { request_id: current.commandRequestId } : {}),
-          run_id: current.runId,
-          session_id: null,
-          issue_scope: current.issueScope,
-          target_domain: current.targetDomain,
-          target_tab_id: current.targetTabId,
-          target_page: current.targetPage,
-          action_type: current.actionType,
-          requested_execution_mode: current.requestedExecutionMode,
-          risk_state: current.riskState,
-          audited_checks: explicitAudit.audited_checks,
-          recorded_at: explicitAudit.recorded_at
-        }
-      }
-    };
-  }
-
   const approvalSource = source.approvalSource;
   const auditSource = source.auditSource;
   const validatedApprovalSource = validateIssue209ApprovalSourceAgainstCurrentLinkage({
@@ -1342,7 +1375,53 @@ const resolveIssue209AdmissionDraftForContract = (input: {
   const formalAuditValid = validatedAuditSource.isValid;
   const completeFormalSource = formalApprovalValid && formalAuditValid;
 
-  if (source.explicitAdmissionContext !== null && completeFormalSource && !explicitSourceValid) {
+  if (source.explicitAdmissionContext !== null) {
+    if (explicitSourceValid) {
+      return {
+        kind: "draft",
+        admission_context: {
+          approval_admission_evidence: {
+            approval_admission_ref: explicitApproval.approval_admission_ref,
+            decision_id: current.decisionId,
+            approval_id: current.approvalId,
+            ...(current.commandRequestId ? { request_id: current.commandRequestId } : {}),
+            run_id: current.runId,
+            session_id: null,
+            issue_scope: current.issueScope,
+            target_domain: current.targetDomain,
+            target_tab_id: current.targetTabId,
+            target_page: current.targetPage,
+            action_type: current.actionType,
+            requested_execution_mode: current.requestedExecutionMode,
+            approved: true,
+            approver: explicitApproval.approver,
+            approved_at: explicitApproval.approved_at,
+            checks: explicitApproval.checks,
+            recorded_at: explicitApproval.recorded_at
+          },
+          audit_admission_evidence: {
+            audit_admission_ref: explicitAudit.audit_admission_ref,
+            decision_id: current.decisionId,
+            approval_id: current.approvalId,
+            ...(current.commandRequestId ? { request_id: current.commandRequestId } : {}),
+            run_id: current.runId,
+            session_id: null,
+            issue_scope: current.issueScope,
+            target_domain: current.targetDomain,
+            target_tab_id: current.targetTabId,
+            target_page: current.targetPage,
+            action_type: current.actionType,
+            requested_execution_mode: current.requestedExecutionMode,
+            risk_state: current.riskState,
+            audited_checks: explicitAudit.audited_checks,
+            recorded_at: explicitAudit.recorded_at
+          }
+        }
+      };
+    }
+  }
+
+  if (completeFormalSource && canonicalGrantCanDriveAdmission) {
     return { kind: "missing" };
   }
 

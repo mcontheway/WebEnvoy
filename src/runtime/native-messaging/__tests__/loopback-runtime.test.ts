@@ -82,6 +82,7 @@ const buildCanonicalReadAuthorizationRequest = (input: {
   approvalRefs?: string[];
   auditRefs?: string[];
   resourceStateSnapshot?: "active" | "cool_down" | "paused";
+  grantedAt?: string | null;
 }) => ({
   action_request: {
     request_ref: input.requestRef,
@@ -107,7 +108,10 @@ const buildCanonicalReadAuthorizationRequest = (input: {
     },
     approval_refs: input.approvalRefs ?? [],
     audit_refs: input.auditRefs ?? [],
-    resource_state_snapshot: input.resourceStateSnapshot ?? "active"
+    resource_state_snapshot: input.resourceStateSnapshot ?? "active",
+    ...(input.grantedAt === null
+      ? {}
+      : { granted_at: input.grantedAt ?? "2026-04-15T09:00:00.000Z" })
   },
   runtime_target: {
     target_ref: `target_${input.requestRef}`,
@@ -173,8 +177,8 @@ describe("native messaging legacy loopback runtime", () => {
     expect(result.payload.observability).not.toHaveProperty("execution_audit");
   });
 
-  it("blocks stale approval linkage in live loopback bundles", async () => {
-    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+  it("ignores stale caller approval linkage in live loopback bundles when canonical grant refs authorize the request", async () => {
+    const { gateInvocationId } = createIssue209InvocationLinkage(
       "run-loopback-custom-approval-001",
       "custom-approval-001"
     );
@@ -231,47 +235,70 @@ describe("native messaging legacy loopback runtime", () => {
       }
     });
 
-    expect(result.ok).toBe(false);
-    expect(result.payload).toEqual(
+    expect(result.ok).toBe(true);
+    expect(result.payload.summary).toEqual(
       expect.objectContaining({
-        execution_audit: expect.objectContaining({
-          audit_ref: `exec_audit_${decisionId}`,
+        request_admission_result: expect.objectContaining({
           request_ref: "upstream_loopback_custom_approval_001",
-          request_admission_decision: "blocked",
+          admission_decision: "allowed",
+          effective_runtime_mode: "live_read_high_risk",
+          derived_from: expect.objectContaining({
+            approval_admission_ref: "approval_admission_external_001",
+            audit_admission_ref: "audit_admission_external_001"
+          })
+        }),
+        execution_audit: expect.objectContaining({
+          audit_ref: expect.stringMatching(/^exec_audit_gate_decision_issue209-gate-run-loopback-custom-approval-001-/),
+          request_ref: "upstream_loopback_custom_approval_001",
+          request_admission_decision: "allowed",
           compatibility_refs: expect.objectContaining({
-            approval_admission_ref: null,
-            audit_admission_ref: null,
-            approval_record_ref: null,
-            audit_record_ref: `gate_evt_${decisionId}`
+            approval_admission_ref: "approval_admission_external_001",
+            audit_admission_ref: "audit_admission_external_001",
+            approval_record_ref: expect.stringMatching(/^gate_appr_gate_decision_issue209-gate-run-loopback-custom-approval-001-/),
+            audit_record_ref: expect.stringMatching(/^gate_evt_gate_decision_issue209-gate-run-loopback-custom-approval-001-/)
           }),
-          risk_signals: expect.arrayContaining([
-            "MANUAL_CONFIRMATION_MISSING",
-            "AUDIT_RECORD_MISSING"
-          ])
+          risk_signals: ["NO_ADDITIONAL_RISK_SIGNALS"]
         }),
         gate_outcome: expect.objectContaining({
-          decision_id: decisionId,
-          effective_execution_mode: "dry_run",
-          gate_decision: "blocked",
-          gate_reasons: expect.arrayContaining([
-            "MANUAL_CONFIRMATION_MISSING",
-            "AUDIT_RECORD_MISSING"
-          ])
+          effective_execution_mode: "live_read_high_risk",
+          gate_decision: "allowed",
+          gate_reasons: ["LIVE_MODE_APPROVED"]
         }),
         approval_record: expect.objectContaining({
-          approval_id: null,
-          decision_id: decisionId
+          approval_id: expect.stringMatching(/^gate_appr_gate_decision_issue209-gate-run-loopback-custom-approval-001-/),
+          decision_id: expect.stringMatching(/^gate_decision_issue209-gate-run-loopback-custom-approval-001-/),
+          approved: true,
+          approver: "authorization_grant",
+          approved_at: "2026-04-15T09:00:00.000Z",
+          checks: {
+            target_domain_confirmed: true,
+            target_tab_confirmed: true,
+            target_page_confirmed: true,
+            risk_state_checked: true,
+            action_type_confirmed: true
+          }
         }),
         audit_record: expect.objectContaining({
-          approval_id: null,
-          decision_id: decisionId
+          approval_id: expect.stringMatching(/^gate_appr_gate_decision_issue209-gate-run-loopback-custom-approval-001-/),
+          decision_id: expect.stringMatching(/^gate_decision_issue209-gate-run-loopback-custom-approval-001-/),
+          gate_decision: "allowed"
+        })
+      })
+    );
+    expect(result.payload.summary?.gate_input).toEqual(
+      expect.objectContaining({
+        admission_context: expect.objectContaining({
+          approval_admission_evidence: expect.objectContaining({
+            approval_admission_ref: null
+          }),
+          audit_admission_evidence: expect.objectContaining({
+            audit_admission_ref: null
+          })
         })
       })
     );
     expect(result.payload.observability).toMatchObject({
-      failure_site: {
-        summary: "MANUAL_CONFIRMATION_MISSING"
-      }
+      failure_site: null
     });
     expect(result.payload.observability).not.toHaveProperty("execution_audit");
   });
@@ -476,6 +503,370 @@ describe("native messaging legacy loopback runtime", () => {
             gate_reasons: ["LIVE_MODE_APPROVED"]
           })
         })
+      })
+    );
+  });
+
+  it("ignores stale legacy admission_context on the loopback path when canonical grant-backed live-read is valid", async () => {
+    const runId = "run-loopback-stale-admission-001";
+    const requestId = "issue209-live-stale-admission-001";
+    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+      runId,
+      "stale-admission-001"
+    );
+    const staleAdmissionContext = createApprovedReadAdmissionContext({
+      runId: "run-loopback-stale-admission-old",
+      requestId,
+      targetTabId: 33,
+      requestedExecutionMode: "live_read_high_risk",
+      riskState: "allowed"
+    });
+    const bridge = new NativeMessagingBridge({
+      transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
+    });
+
+    const result = await bridge.runCommand({
+      runId,
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "xhs.search",
+      params: {
+        request_id: requestId,
+        gate_invocation_id: gateInvocationId,
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          simulate_result: "success",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 33,
+          target_page: "search_result_tab",
+          issue_scope: "issue_209",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          admission_context: staleAdmissionContext,
+          upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+            requestRef: `upstream_req_${requestId}`,
+            targetTabId: 33,
+            profileRef: "loopback_profile",
+            approvalRefs: ["approval_admission_external_stale_001"],
+            auditRefs: ["audit_admission_external_stale_001"],
+            resourceStateSnapshot: "active"
+          })
+        }
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.payload).toEqual(
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          request_admission_result: expect.objectContaining({
+            admission_decision: "allowed",
+            derived_from: expect.objectContaining({
+              approval_admission_ref: "approval_admission_external_stale_001",
+              audit_admission_ref: "audit_admission_external_stale_001"
+            })
+          }),
+          gate_input: expect.objectContaining({
+            admission_context: expect.objectContaining({
+              approval_admission_evidence: expect.objectContaining({
+                approval_admission_ref: null
+              }),
+              audit_admission_evidence: expect.objectContaining({
+                audit_admission_ref: null
+              })
+            })
+          }),
+          approval_record: expect.objectContaining({
+            approval_id: expect.stringMatching(
+              /^gate_appr_gate_decision_issue209-gate-run-loopback-stale-admission-001-/
+            ),
+            decision_id: decisionId,
+            approved: true,
+            approver: "authorization_grant"
+          }),
+          gate_outcome: expect.objectContaining({
+            gate_decision: "allowed",
+            effective_execution_mode: "live_read_high_risk",
+            gate_reasons: ["LIVE_MODE_APPROVED"]
+          })
+        })
+      })
+    );
+  });
+
+  it("preserves explicit approval evidence when only the audit side falls back to the canonical grant on loopback", async () => {
+    const runId = "run-loopback-partial-admission-001";
+    const requestId = "issue209-live-partial-admission-001";
+    const targetTabId = 39;
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      runId,
+      "partial-admission-001"
+    );
+    const admissionContext = createApprovedReadAdmissionContext({
+      runId,
+      requestId,
+      targetTabId,
+      requestedExecutionMode: "live_read_high_risk",
+      riskState: "allowed",
+      decisionId,
+      approvalId
+    });
+    const approvalAdmissionRef = String(
+      admissionContext.approval_admission_evidence.approval_admission_ref
+    );
+    admissionContext.audit_admission_evidence.audit_admission_ref = null;
+    admissionContext.audit_admission_evidence.recorded_at = null;
+    const bridge = new NativeMessagingBridge({
+      transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
+    });
+
+    const result = await bridge.runCommand({
+      runId,
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "xhs.search",
+      params: {
+        request_id: requestId,
+        gate_invocation_id: gateInvocationId,
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          simulate_result: "success",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: targetTabId,
+          target_page: "search_result_tab",
+          issue_scope: "issue_209",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          admission_context: admissionContext,
+          upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+            requestRef: `upstream_req_${requestId}`,
+            targetTabId,
+            profileRef: "loopback_profile",
+            approvalRefs: [approvalAdmissionRef],
+            auditRefs: ["audit_admission_external_partial_loopback_001"],
+            resourceStateSnapshot: "active"
+          })
+        }
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.payload).toEqual(
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          request_admission_result: expect.objectContaining({
+            admission_decision: "allowed",
+            derived_from: expect.objectContaining({
+              approval_admission_ref: approvalAdmissionRef,
+              audit_admission_ref: "audit_admission_external_partial_loopback_001"
+            })
+          }),
+          execution_audit: expect.objectContaining({
+            request_admission_decision: "allowed",
+            compatibility_refs: expect.objectContaining({
+              approval_admission_ref: approvalAdmissionRef,
+              audit_admission_ref: "audit_admission_external_partial_loopback_001"
+            })
+          })
+        })
+      })
+    );
+  });
+
+  it("drops stale explicit audit refs before canonical fallback on loopback", async () => {
+    const runId = "run-loopback-stale-audit-admission-001";
+    const requestId = "issue209-live-stale-audit-admission-001";
+    const targetTabId = 39;
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      runId,
+      "stale-audit-admission-001"
+    );
+    const admissionContext = createApprovedReadAdmissionContext({
+      runId,
+      requestId,
+      targetTabId,
+      requestedExecutionMode: "live_read_high_risk",
+      riskState: "allowed",
+      decisionId,
+      approvalId
+    });
+    const approvalAdmissionRef = String(
+      admissionContext.approval_admission_evidence.approval_admission_ref
+    );
+    admissionContext.audit_admission_evidence.audit_admission_ref =
+      "audit_admission_external_stale_loopback_001";
+    const bridge = new NativeMessagingBridge({
+      transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
+    });
+
+    const result = await bridge.runCommand({
+      runId,
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "xhs.search",
+      params: {
+        request_id: requestId,
+        gate_invocation_id: gateInvocationId,
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          simulate_result: "success",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: targetTabId,
+          target_page: "search_result_tab",
+          issue_scope: "issue_209",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          admission_context: admissionContext,
+          upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+            requestRef: `upstream_req_${requestId}`,
+            targetTabId,
+            profileRef: "loopback_profile",
+            approvalRefs: [approvalAdmissionRef],
+            auditRefs: ["audit_admission_external_current_loopback_001"],
+            resourceStateSnapshot: "active"
+          })
+        }
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.payload).toEqual(
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          request_admission_result: expect.objectContaining({
+            admission_decision: "allowed",
+            derived_from: expect.objectContaining({
+              approval_admission_ref: approvalAdmissionRef,
+              audit_admission_ref: "audit_admission_external_current_loopback_001"
+            })
+          }),
+          execution_audit: expect.objectContaining({
+            request_admission_decision: "allowed",
+            compatibility_refs: expect.objectContaining({
+              approval_admission_ref: approvalAdmissionRef,
+              audit_admission_ref: "audit_admission_external_current_loopback_001"
+            })
+          })
+        })
+      })
+    );
+    expect(result.payload?.summary?.gate_input?.admission_context).toEqual(
+      expect.objectContaining({
+        approval_admission_evidence: expect.objectContaining({
+          approval_admission_ref: approvalAdmissionRef
+        }),
+        audit_admission_evidence: expect.objectContaining({
+          audit_admission_ref: null
+        })
+      })
+    );
+  });
+
+  it("does not expose execution_audit compatibility refs when a canonical loopback grant is blocked", async () => {
+    const runId = "run-loopback-blocked-canonical-grant-001";
+    const requestId = "issue209-live-blocked-canonical-grant-001";
+    const targetTabId = 38;
+    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+      runId,
+      "blocked-canonical-grant-001"
+    );
+    const bridge = new NativeMessagingBridge({
+      transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
+    });
+
+    const blockedAuthorizationRequest = buildCanonicalReadAuthorizationRequest({
+      requestRef: `upstream_req_${requestId}`,
+      targetTabId,
+      profileRef: "loopback_profile",
+      approvalRefs: ["approval_admission_external_blocked_loopback_001"],
+      auditRefs: ["audit_admission_external_blocked_loopback_001"],
+      resourceStateSnapshot: "active"
+    });
+    blockedAuthorizationRequest.authorization_grant.target_scope.allowed_domains = [
+      "creator.xiaohongshu.com"
+    ];
+
+    const result = await bridge.runCommand({
+      runId,
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "xhs.search",
+      params: {
+        request_id: requestId,
+        gate_invocation_id: gateInvocationId,
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "read"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          simulate_result: "success",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: targetTabId,
+          target_page: "search_result_tab",
+          issue_scope: "issue_209",
+          action_type: "read",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          upstream_authorization_request: blockedAuthorizationRequest
+        }
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.payload).toEqual(
+      expect.objectContaining({
+        gate_outcome: expect.objectContaining({
+          decision_id: decisionId,
+          gate_decision: "blocked",
+          gate_reasons: expect.arrayContaining(["TARGET_DOMAIN_OUT_OF_SCOPE"])
+        }),
+        request_admission_result: expect.objectContaining({
+          admission_decision: "blocked",
+          derived_from: expect.objectContaining({
+            approval_admission_ref: "approval_admission_external_blocked_loopback_001",
+            audit_admission_ref: "audit_admission_external_blocked_loopback_001"
+          })
+        }),
+        execution_audit: expect.objectContaining({
+          request_admission_decision: "blocked",
+          compatibility_refs: expect.objectContaining({
+            approval_admission_ref: null,
+            audit_admission_ref: null
+          })
+        })
+      })
+    );
+    expect(result.payload?.details).toEqual(
+      expect.objectContaining({
+        reason: "EXECUTION_MODE_GATE_BLOCKED"
       })
     );
   });
@@ -1005,13 +1396,24 @@ describe("native messaging legacy loopback runtime", () => {
     );
   });
 
-  it("blocks stale admission evidence in loopback bundles even when caller records match current decision", async () => {
+  it("drops stale admission evidence in loopback bundles so canonical grant refs still allow live reads", async () => {
     const runId = "run-loopback-live-admission-stale-001";
     const requestId = "issue209-live-admission-current-001";
     const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
       runId,
       "live-admission-stale-001"
     );
+    const admissionContext = createApprovedReadAdmissionContext({
+      runId: "run-loopback-live-admission-stale-legacy-001",
+      requestId,
+      targetTabId: 35,
+      requestedExecutionMode: "live_read_limited",
+      riskState: "limited"
+    });
+    const approvalAdmissionRef = String(
+      admissionContext.approval_admission_evidence.approval_admission_ref
+    );
+    const auditAdmissionRef = String(admissionContext.audit_admission_evidence.audit_admission_ref);
     const bridge = new NativeMessagingBridge({
       transport: createInMemoryLoopbackTransport("host>background>content-script>background>host")
     });
@@ -1042,6 +1444,14 @@ describe("native messaging legacy loopback runtime", () => {
           requested_execution_mode: "live_read_limited",
           risk_state: "limited",
           limited_read_rollout_ready_true: true,
+          upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+            requestRef: `upstream_req_${requestId}`,
+            targetTabId: 35,
+            profileRef: "loopback_profile",
+            approvalRefs: [approvalAdmissionRef],
+            auditRefs: [auditAdmissionRef],
+            resourceStateSnapshot: "cool_down"
+          }),
           approval_record: {
             approval_id: approvalId,
             decision_id: decisionId,
@@ -1056,13 +1466,7 @@ describe("native messaging legacy loopback runtime", () => {
               action_type_confirmed: true
             }
           },
-          admission_context: createApprovedReadAdmissionContext({
-            runId: "run-loopback-live-admission-stale-legacy-001",
-            requestId,
-            targetTabId: 35,
-            requestedExecutionMode: "live_read_limited",
-            riskState: "limited"
-          }),
+          admission_context: admissionContext,
           audit_record: {
             event_id: "audit-live-read-limited-loopback-stale-admission-001",
             decision_id: decisionId,
@@ -1080,22 +1484,31 @@ describe("native messaging legacy loopback runtime", () => {
       }
     });
 
-    expect(result.ok).toBe(false);
-    expect(result.payload).toEqual(
+    expect(result.ok).toBe(true);
+    expect(result.payload?.summary).toEqual(
       expect.objectContaining({
         gate_outcome: expect.objectContaining({
           decision_id: decisionId,
-          gate_decision: "blocked",
-          effective_execution_mode: "recon",
-          gate_reasons: expect.arrayContaining(["MANUAL_CONFIRMATION_MISSING", "AUDIT_RECORD_MISSING"])
+          gate_decision: "allowed",
+          effective_execution_mode: "live_read_limited"
         }),
         approval_record: expect.objectContaining({
-          approval_id: null,
-          decision_id: decisionId
+          approval_id: approvalId,
+          decision_id: decisionId,
+          approved: true,
+          approver: "authorization_grant"
         }),
         audit_record: expect.objectContaining({
-          approval_id: null,
+          approval_id: approvalId,
           decision_id: decisionId
+        }),
+        request_admission_result: expect.objectContaining({
+          admission_decision: "allowed",
+          effective_runtime_mode: "live_read_limited",
+          derived_from: expect.objectContaining({
+            approval_admission_ref: approvalAdmissionRef,
+            audit_admission_ref: auditAdmissionRef
+          })
         })
       })
     );
