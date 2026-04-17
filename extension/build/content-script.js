@@ -2144,6 +2144,9 @@ const buildIssue209ExecutionAudit = (input) => {
     input.gate?.gate_input?.admission_context
   );
   const admissionAllowed = requestAdmissionResult.admission_decision === "allowed";
+  const blockedWithMatchingGrant =
+    requestAdmissionResult.admission_decision === "blocked" &&
+    requestAdmissionResult.grant_match === true;
   const riskSignals =
     asStringArray(input.executionAuditRiskSignals).length > 0
       ? asStringArray(input.executionAuditRiskSignals)
@@ -2161,11 +2164,13 @@ const buildIssue209ExecutionAudit = (input) => {
     compatibility_refs: {
       gate_run_id: asString(input.runId),
       approval_admission_ref:
-        !admissionAllowed || hasApprovalEvidenceValidationIssue(reasonCodes)
+        (!admissionAllowed && !blockedWithMatchingGrant) ||
+        hasApprovalEvidenceValidationIssue(reasonCodes)
         ? null
         : consumedEvidence.approvalAdmissionRef,
       audit_admission_ref:
-        !admissionAllowed || hasAuditEvidenceValidationIssue(reasonCodes)
+        (!admissionAllowed && !blockedWithMatchingGrant) ||
+        hasAuditEvidenceValidationIssue(reasonCodes)
         ? null
         : consumedEvidence.auditAdmissionRef,
       approval_record_ref: asString(input.approvalRecord?.approval_id),
@@ -4013,7 +4018,11 @@ const evaluateXhsGate = (input) => {
       asString(explicitApprovalEvidence?.approval_admission_ref) === null;
     const canBackfillAuditAdmissionRef =
       asString(explicitAuditEvidence?.audit_admission_ref) === null;
-    if (compatibilityRefs && derivedFrom && requestAdmissionResult?.admission_decision === "allowed") {
+    const shouldBackfillCanonicalCompatibilityRefs =
+      requestAdmissionResult?.admission_decision === "allowed" ||
+      (requestAdmissionResult?.admission_decision === "blocked" &&
+        requestAdmissionResult?.grant_match === true);
+    if (compatibilityRefs && derivedFrom && shouldBackfillCanonicalCompatibilityRefs) {
       if (
         canBackfillApprovalAdmissionRef &&
         compatibilityRefs.approval_admission_ref === null &&

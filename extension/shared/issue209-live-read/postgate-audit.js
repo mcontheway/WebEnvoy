@@ -63,6 +63,9 @@ const buildIssue209ExecutionAudit = (input) => {
     input.gate?.gate_input?.admission_context
   );
   const admissionAllowed = requestAdmissionResult.admission_decision === "allowed";
+  const blockedWithMatchingGrant =
+    requestAdmissionResult.admission_decision === "blocked" &&
+    requestAdmissionResult.grant_match === true;
   const riskSignals =
     asStringArray(input.executionAuditRiskSignals).length > 0
       ? asStringArray(input.executionAuditRiskSignals)
@@ -80,11 +83,13 @@ const buildIssue209ExecutionAudit = (input) => {
     compatibility_refs: {
       gate_run_id: asString(input.runId),
       approval_admission_ref:
-        !admissionAllowed || hasApprovalEvidenceValidationIssue(reasonCodes)
+        (!admissionAllowed && !blockedWithMatchingGrant) ||
+        hasApprovalEvidenceValidationIssue(reasonCodes)
         ? null
         : consumedEvidence.approvalAdmissionRef,
       audit_admission_ref:
-        !admissionAllowed || hasAuditEvidenceValidationIssue(reasonCodes)
+        (!admissionAllowed && !blockedWithMatchingGrant) ||
+        hasAuditEvidenceValidationIssue(reasonCodes)
         ? null
         : consumedEvidence.auditAdmissionRef,
       approval_record_ref: asString(input.approvalRecord?.approval_id),

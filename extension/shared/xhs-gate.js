@@ -1746,7 +1746,11 @@ const evaluateXhsGate = (input) => {
       asString(explicitApprovalEvidence?.approval_admission_ref) === null;
     const canBackfillAuditAdmissionRef =
       asString(explicitAuditEvidence?.audit_admission_ref) === null;
-    if (compatibilityRefs && derivedFrom && requestAdmissionResult?.admission_decision === "allowed") {
+    const shouldBackfillCanonicalCompatibilityRefs =
+      requestAdmissionResult?.admission_decision === "allowed" ||
+      (requestAdmissionResult?.admission_decision === "blocked" &&
+        requestAdmissionResult?.grant_match === true);
+    if (compatibilityRefs && derivedFrom && shouldBackfillCanonicalCompatibilityRefs) {
       if (
         canBackfillApprovalAdmissionRef &&
         compatibilityRefs.approval_admission_ref === null &&

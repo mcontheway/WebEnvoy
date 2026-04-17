@@ -1023,6 +1023,70 @@ describe("xhs-search gate helpers", () => {
     });
   });
 
+  it("preserves canonical compatibility refs when a live-read is blocked after grant matching succeeds", () => {
+    const runId = "run-extension-execution-audit-003aa";
+    const requestId = "req-execution-audit-003aa";
+    const sessionId = "session-extension-execution-audit-003aa";
+    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+      runId,
+      "execution-audit-003aa"
+    );
+
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      runId,
+      requestId,
+      sessionId,
+      gateInvocationId,
+      profile: "profile-session-001",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "creator.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      runtimeProfileRef: "profile-session-001",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        resourceKind: "profile_session",
+        profileRef: "profile-session-001",
+        allowedResourceKinds: ["profile_session"],
+        allowedProfileRefs: ["profile-session-001"],
+        approvalRefs: ["approval_admission_external_blocked_trace_001"],
+        auditRefs: ["audit_admission_external_blocked_trace_001"],
+        resourceStateSnapshot: "active"
+      })
+    });
+
+    expect(gate.gate_outcome).toMatchObject({
+      decision_id: decisionId,
+      gate_decision: "blocked",
+      effective_execution_mode: "dry_run",
+      gate_reasons: expect.arrayContaining(["TARGET_DOMAIN_CONTEXT_MISMATCH"])
+    });
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "blocked",
+      grant_match: true,
+      runtime_target_match: false,
+      derived_from: {
+        approval_admission_ref: "approval_admission_external_blocked_trace_001",
+        audit_admission_ref: "audit_admission_external_blocked_trace_001"
+      }
+    });
+    expect(gate.execution_audit).toMatchObject({
+      request_admission_decision: "blocked",
+      compatibility_refs: {
+        approval_admission_ref: "approval_admission_external_blocked_trace_001",
+        audit_admission_ref: "audit_admission_external_blocked_trace_001",
+        approval_record_ref: null,
+        audit_record_ref: `gate_evt_${decisionId}`
+      }
+    });
+  });
+
   it("drops stale mixed-client admission_context before canonical grant-backed live-read gating", () => {
     const runId = "run-extension-execution-audit-003b";
     const requestId = "req-execution-audit-003b";

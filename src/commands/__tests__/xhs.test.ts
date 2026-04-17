@@ -1424,6 +1424,10 @@ describe("normalizeGateOptionsForContract", () => {
               resource_binding_ref: "binding_loopback_anon_blocked_001",
               authorization_grant_ref: "grant_loopback_anon_blocked_001",
               runtime_target_ref: "target_loopback_anon_blocked_001"
+            }),
+            compatibility_refs: expect.objectContaining({
+              approval_admission_ref: approvalAdmissionRef,
+              audit_admission_ref: auditAdmissionRef
             })
           })
         })
