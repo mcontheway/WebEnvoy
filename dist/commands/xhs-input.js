@@ -748,6 +748,8 @@ const resolveIssue209AdmissionDraftForContract = (input) => {
     if (legacyDraft) {
         return legacyDraft;
     }
+    const hasExplicitLegacyExecutionArtifacts = asObject(input.options.approval_record ?? input.options.approval) !== null ||
+        asObject(input.options.audit_record) !== null;
     const source = prepareIssue209LiveReadSource({
         commandRequestId: input.requestId,
         gateInvocationId: input.gateInvocationId,
@@ -870,6 +872,9 @@ const resolveIssue209AdmissionDraftForContract = (input) => {
                     }
                 }
             };
+        }
+        if (!hasExplicitLegacyExecutionArtifacts) {
+            return { kind: "missing" };
         }
         return {
             kind: "draft",
