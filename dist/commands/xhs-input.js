@@ -763,10 +763,47 @@ const resolveIssue209AdmissionDraftForContract = (input) => {
         auditRecord: input.options.audit_record
     });
     const canonicalGrant = asObject(asObject(input.options.upstream_authorization_request)?.authorization_grant);
-    const canonicalGrantCarriesAdmissionRefs = Array.isArray(canonicalGrant?.approval_refs) &&
-        canonicalGrant.approval_refs.length > 0 &&
-        Array.isArray(canonicalGrant?.audit_refs) &&
-        canonicalGrant.audit_refs.length > 0;
+    const canonicalGrantUpstream = asObject(input.options.upstream_authorization_request);
+    const canonicalGrantActionRequest = asObject(canonicalGrantUpstream?.action_request);
+    const canonicalGrantResourceBinding = asObject(canonicalGrantUpstream?.resource_binding);
+    const canonicalGrantRuntimeTarget = asObject(canonicalGrantUpstream?.runtime_target);
+    const canonicalBindingScope = asObject(canonicalGrant?.binding_scope);
+    const canonicalTargetScope = asObject(canonicalGrant?.target_scope);
+    const canonicalGrantApprovalRefs = asStringArray(canonicalGrant?.approval_refs);
+    const canonicalGrantAuditRefs = asStringArray(canonicalGrant?.audit_refs);
+    const canonicalGrantResourceKind = asString(canonicalGrantResourceBinding?.resource_kind);
+    const canonicalGrantProfileRef = asString(canonicalGrantResourceBinding?.profile_ref);
+    const canonicalGrantDomain = asString(canonicalGrantRuntimeTarget?.domain);
+    const canonicalGrantPage = asString(canonicalGrantRuntimeTarget?.page);
+    const canonicalGrantRiskState = projectRiskStateForContract(asString(canonicalGrant?.resource_state_snapshot));
+    const canonicalGrantRequestedAt = asString(canonicalGrantActionRequest?.requested_at) ?? asString(canonicalGrant?.granted_at);
+    const canonicalGrantSupportsRequestedMode = input.options.requested_execution_mode === "live_read_high_risk"
+        ? canonicalGrantRiskState === "allowed"
+        : input.options.requested_execution_mode === "live_read_limited"
+            ? canonicalGrantRiskState === "limited" || canonicalGrantRiskState === "allowed"
+            : false;
+    const canonicalGrantCanDriveAdmission = canonicalGrantActionRequest !== null &&
+        canonicalGrantResourceBinding !== null &&
+        canonicalGrant !== null &&
+        canonicalGrantRuntimeTarget !== null &&
+        canonicalGrantApprovalRefs !== null &&
+        canonicalGrantApprovalRefs.length > 0 &&
+        canonicalGrantAuditRefs !== null &&
+        canonicalGrantAuditRefs.length > 0 &&
+        canonicalGrantRequestedAt !== null &&
+        canonicalGrantSupportsRequestedMode &&
+        canonicalGrantResourceKind !== null &&
+        canonicalGrantDomain !== null &&
+        canonicalGrantPage !== null &&
+        (asStringArray(canonicalGrant?.allowed_actions)?.includes(asString(canonicalGrantActionRequest?.action_name) ?? "") ?? false) &&
+        (asStringArray(canonicalBindingScope?.allowed_resource_kinds)?.includes(canonicalGrantResourceKind) ??
+            false) &&
+        (canonicalGrantResourceKind !== "profile_session" ||
+            !canonicalGrantProfileRef ||
+            (asStringArray(canonicalBindingScope?.allowed_profile_refs)?.includes(canonicalGrantProfileRef) ??
+                false)) &&
+        (asStringArray(canonicalTargetScope?.allowed_domains)?.includes(canonicalGrantDomain) ?? false) &&
+        (asStringArray(canonicalTargetScope?.allowed_pages)?.includes(canonicalGrantPage) ?? false);
     const current = source.current;
     const hasAllTrueChecks = (checks) => Object.keys(checks).length > 0 && Object.values(checks).every((value) => value === true);
     const bindingMatches = (evidence, includeRiskState = false, riskState) => {
@@ -877,7 +914,7 @@ const resolveIssue209AdmissionDraftForContract = (input) => {
             };
         }
     }
-    if (completeFormalSource && canonicalGrantCarriesAdmissionRefs) {
+    if (completeFormalSource && canonicalGrantCanDriveAdmission) {
         return { kind: "missing" };
     }
     if (completeFormalSource) {
