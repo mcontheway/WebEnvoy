@@ -3187,6 +3187,177 @@ describe("extension service worker recovery contract / xhs gate and live forward
     });
   });
 
+  it("forwards canonical-grant-backed live_read_high_risk through the real background bridge without legacy admission_context", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      {
+        id: 32,
+        url: "https://www.xiaohongshu.com/search_result/?keyword=AI&type=51",
+        active: true
+      }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-live-mode-canonical-grant-001",
+      profile: "profile-a",
+      fingerprintContext: createFingerprintRuntimeContext()
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-live-mode-canonical-grant-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-live-mode-canonical-grant-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          request_id: "issue209-live-run-xhs-live-mode-canonical-grant-001",
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          fingerprint_context: createFingerprintRuntimeContext(),
+          admission_context: null,
+          approval_record: null,
+          audit_record: null,
+          upstream_authorization_request: {
+            action_request: {
+              request_ref: "upstream_req_live_mode_canonical_grant_001",
+              action_name: "xhs.read_search_results",
+              action_category: "read",
+              requested_at: "2026-04-17T08:06:30.000Z"
+            },
+            resource_binding: {
+              binding_ref: "binding_live_mode_canonical_grant_001",
+              resource_kind: "profile_session",
+              profile_ref: "profile-a"
+            },
+            authorization_grant: {
+              grant_ref: "grant_live_mode_canonical_grant_001",
+              allowed_actions: ["xhs.read_search_results"],
+              binding_scope: {
+                allowed_resource_kinds: ["profile_session"],
+                allowed_profile_refs: ["profile-a"]
+              },
+              target_scope: {
+                allowed_domains: ["www.xiaohongshu.com"],
+                allowed_pages: ["search_result_tab"]
+              },
+              resource_state_snapshot: "active",
+              approval_refs: ["approval_admission_live_mode_canonical_grant_001"],
+              audit_refs: ["audit_admission_live_mode_canonical_grant_001"],
+              granted_at: "2026-04-17T08:06:31.000Z"
+            },
+            runtime_target: {
+              target_ref: "target_live_mode_canonical_grant_001",
+              domain: "www.xiaohongshu.com",
+              page: "search_result_tab",
+              tab_id: 32,
+              url: "https://www.xiaohongshu.com/search_result/?keyword=AI&type=51"
+            }
+          }
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "run-xhs-live-mode-canonical-grant-001",
+        command: "xhs.search"
+      })
+    );
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-xhs-live-mode-canonical-grant-001",
+        ok: true,
+        payload: {
+          summary: {
+            capability_result: {
+              outcome: "success",
+              action: "read"
+            },
+            consumer_gate_result: {
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              effective_execution_mode: "live_read_high_risk",
+              gate_decision: "allowed",
+              gate_reasons: ["LIVE_MODE_APPROVED"]
+            },
+            request_admission_result: {
+              admission_decision: "allowed",
+              derived_from: {
+                approval_admission_ref: "approval_admission_live_mode_canonical_grant_001",
+                audit_admission_ref: "audit_admission_live_mode_canonical_grant_001"
+              }
+            },
+            execution_audit: {
+              request_admission_decision: "allowed",
+              compatibility_refs: {
+                approval_admission_ref: "approval_admission_live_mode_canonical_grant_001",
+                audit_admission_ref: "audit_admission_live_mode_canonical_grant_001"
+              }
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const approved = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: { summary?: Record<string, unknown> } })
+      .find((message) => message.id === "run-xhs-live-mode-canonical-grant-001");
+    expect(approved).toMatchObject({
+      id: "run-xhs-live-mode-canonical-grant-001",
+      status: "success",
+      payload: {
+        summary: {
+          capability_result: {
+            outcome: "success",
+            action: "read"
+          },
+          consumer_gate_result: {
+            requested_execution_mode: "live_read_high_risk",
+            effective_execution_mode: "live_read_high_risk",
+            gate_decision: "allowed",
+            gate_reasons: ["LIVE_MODE_APPROVED"]
+          },
+          request_admission_result: {
+            admission_decision: "allowed",
+            derived_from: {
+              approval_admission_ref: "approval_admission_live_mode_canonical_grant_001",
+              audit_admission_ref: "audit_admission_live_mode_canonical_grant_001"
+            }
+          },
+          execution_audit: {
+            request_admission_decision: "allowed",
+            compatibility_refs: {
+              approval_admission_ref: "approval_admission_live_mode_canonical_grant_001",
+              audit_admission_ref: "audit_admission_live_mode_canonical_grant_001"
+            }
+          }
+        }
+      }
+    });
+  });
+
   it("blocks xhs.search when target_domain is outside xhs read/write scope", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);

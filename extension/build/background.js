@@ -550,6 +550,49 @@ const normalizeXhsSearchCommandParams = (commandParams, resolvedTargetTabId) => 
     }
     return normalized;
 };
+const applyCanonicalXhsForwardCommandParams = (input) => {
+    const normalized = { ...input.commandParams };
+    const optionParams = asRecord(input.commandParams.options);
+    const normalizedOptions = optionParams ? { ...optionParams } : {};
+    if (input.requestedExecutionMode !== null) {
+        normalized.requested_execution_mode = input.requestedExecutionMode;
+        normalizedOptions.requested_execution_mode = input.requestedExecutionMode;
+    }
+    if (input.legacyRequestedExecutionMode !== null) {
+        normalized.__legacy_requested_execution_mode = input.legacyRequestedExecutionMode;
+        normalizedOptions.__legacy_requested_execution_mode = input.legacyRequestedExecutionMode;
+    }
+    if (input.upstreamAuthorizationRequest !== null) {
+        normalized.upstream_authorization_request = input.upstreamAuthorizationRequest;
+        normalizedOptions.upstream_authorization_request = input.upstreamAuthorizationRequest;
+    }
+    if (Object.keys(normalizedOptions).length > 0) {
+        normalized.options = normalizedOptions;
+    }
+    return normalized;
+};
+const resolveDispatchXhsForwardState = (command, commandParams) => {
+    const optionParams = asRecord(commandParams.options);
+    const readParam = (key) => {
+        if (Object.prototype.hasOwnProperty.call(commandParams, key)) {
+            return commandParams[key];
+        }
+        return optionParams?.[key];
+    };
+    const validationAction = asNonEmptyString(readParam("validation_action"));
+    const issueScope = asNonEmptyString(readParam("issue_scope"));
+    const requestedExecutionMode = parseRequestedExecutionMode(readParam("requested_execution_mode"));
+    return {
+        validationAction,
+        issueScope,
+        requestedExecutionMode,
+        issue208EditorInputValidation: XHS_GATE_COMMANDS.has(command) &&
+            issueScope === "issue_208" &&
+            requestedExecutionMode === "live_write" &&
+            validationAction === "editor_input",
+        requestedFingerprintContext: resolveFingerprintContext(commandParams)
+    };
+};
 const resolveXhsGateCommandInput = (input) => {
     const commandParams = normalizeXhsSearchCommandParams(input);
     const abilityParams = asRecord(commandParams.ability);
@@ -2462,21 +2505,8 @@ class ChromeBackgroundBridge {
                 throw error;
             }
         }
-        const optionParams = asRecord(commandParams.options);
-        const validationAction = asNonEmptyString(Object.prototype.hasOwnProperty.call(commandParams, "validation_action")
-            ? commandParams.validation_action
-            : optionParams?.validation_action);
-        const issueScope = asNonEmptyString(Object.prototype.hasOwnProperty.call(commandParams, "issue_scope")
-            ? commandParams.issue_scope
-            : optionParams?.issue_scope);
-        const requestedExecutionMode = parseRequestedExecutionMode(Object.prototype.hasOwnProperty.call(commandParams, "requested_execution_mode")
-            ? commandParams.requested_execution_mode
-            : optionParams?.requested_execution_mode);
-        const issue208EditorInputValidation = XHS_GATE_COMMANDS.has(command) &&
-            issueScope === "issue_208" &&
-            requestedExecutionMode === "live_write" &&
-            validationAction === "editor_input";
-        const requestedFingerprintContext = resolveFingerprintContext(commandParams);
+        let xhsForwardState = resolveDispatchXhsForwardState(command, commandParams);
+        let requestedFingerprintContext = xhsForwardState.requestedFingerprintContext;
         let forwardFingerprintContext = requestedFingerprintContext;
         let tabId;
         let consumerGateResult;
@@ -2525,7 +2555,16 @@ class ChromeBackgroundBridge {
                 return;
             }
             tabId = gateResult.targetTabId;
-            commandParams = normalizeXhsSearchCommandParams(commandParams, tabId);
+            commandParams = gateResult.forwardCommandParams;
+            dispatchRequest = {
+                ...dispatchRequest,
+                params: {
+                    ...dispatchRequest.params,
+                    command_params: commandParams
+                }
+            };
+            xhsForwardState = resolveDispatchXhsForwardState(command, commandParams);
+            requestedFingerprintContext = xhsForwardState.requestedFingerprintContext;
             forwardFingerprintContext =
                 this.#resolveValidatedTrustedFingerprintContext({
                     ...dispatchRequest,
@@ -2555,7 +2594,7 @@ class ChromeBackgroundBridge {
             });
             return;
         }
-        if (this.#shouldEnsureMainWorldBridge(command, requestedExecutionMode)) {
+        if (this.#shouldEnsureMainWorldBridge(command, xhsForwardState.requestedExecutionMode)) {
             try {
                 await this.#ensureMainWorldBridgeInjected(dispatchRequest, tabId);
             }
@@ -2577,9 +2616,16 @@ class ChromeBackgroundBridge {
                 return;
             }
         }
-        if (issue208EditorInputValidation) {
+        if (xhsForwardState.issue208EditorInputValidation) {
             const editorFocusAttestation = await this.#buildEditorInputFocusAttestation(tabId);
             commandParams = this.#injectEditorFocusAttestation(commandParams, editorFocusAttestation);
+            dispatchRequest = {
+                ...dispatchRequest,
+                params: {
+                    ...dispatchRequest.params,
+                    command_params: commandParams
+                }
+            };
         }
         const timeoutMs = requestDeadlineMs - Date.now();
         if (timeoutMs <= 0) {
@@ -3085,10 +3131,6 @@ class ChromeBackgroundBridge {
         let fingerprintExecution = requestedFingerprintContext?.execution ?? null;
         let fingerprintReasonCodes = (Array.isArray(fingerprintExecution?.reason_codes) ? fingerprintExecution.reason_codes : []).filter((code) => typeof code === "string");
         let targetTabId = initialTargetTabId;
-        const issue208EditorInputValidation = targetPage === "creator_publish_tab" &&
-            requestedExecutionMode === "live_write" &&
-            validationAction === "editor_input";
-        const requestedLiveMode = requestedExecutionMode !== null && XHS_LIVE_EXECUTION_MODES.has(requestedExecutionMode);
         let fingerprintContextMissing = false;
         let fingerprintContextUntrusted = false;
         let fingerprintLiveBlocked = false;
@@ -3102,20 +3144,40 @@ class ChromeBackgroundBridge {
         let writeGateOnlyApprovalDecision = null;
         let writeGateOnlyEligible = false;
         const requestRunId = String(request.params.run_id ?? request.id);
+        const gateState = buildXhsGatePolicyState({
+            issueScope,
+            riskState,
+            actionType,
+            requestedExecutionMode,
+            upstreamAuthorizationRequest,
+            legacyRequestedExecutionMode,
+            limitedReadRolloutReadyTrue
+        });
+        const canonicalIssueScope = gateState.issueScope;
+        const canonicalRiskState = gateState.riskState;
+        const canonicalActionType = gateState.actionType;
+        const canonicalRequestedExecutionMode = gateState.requestedExecutionMode;
+        const canonicalLegacyRequestedExecutionMode = gateState.legacyRequestedExecutionMode;
+        const canonicalUpstreamAuthorizationRequest = gateState.upstreamAuthorizationRequest;
+        const issue208EditorInputValidation = targetPage === "creator_publish_tab" &&
+            canonicalRequestedExecutionMode === "live_write" &&
+            validationAction === "editor_input";
+        const requestedLiveMode = canonicalRequestedExecutionMode !== null &&
+            XHS_LIVE_EXECUTION_MODES.has(canonicalRequestedExecutionMode);
         const gateDecisionId = resolveXhsGateDecisionId({
             runId: requestRunId,
             requestId: request.id,
             commandRequestId: commandParams.request_id,
             gateInvocationId,
-            issueScope,
-            requestedExecutionMode
+            issueScope: canonicalIssueScope,
+            requestedExecutionMode: canonicalRequestedExecutionMode
         });
         const expectedApprovalId = resolveGatePayloadApprovalId({
             approvalActive: requestedLiveMode,
             approvalRecord,
             decisionId: gateDecisionId,
-            issueScope,
-            requestedExecutionMode,
+            issueScope: canonicalIssueScope,
+            requestedExecutionMode: canonicalRequestedExecutionMode,
             gateInvocationId
         });
         const pushReason = (reason) => {
@@ -3136,17 +3198,10 @@ class ChromeBackgroundBridge {
         const boundAdmissionContext = bindAdmissionContextToRequest({
             admissionContext
         });
-        const gateState = buildXhsGatePolicyState({
-            issueScope,
-            riskState,
-            actionType,
-            requestedExecutionMode,
-            limitedReadRolloutReadyTrue
-        });
         collectXhsCommandGateReasons({
             gateReasons,
-            actionType,
-            requestedExecutionMode,
+            actionType: canonicalActionType,
+            requestedExecutionMode: canonicalRequestedExecutionMode,
             abilityAction: abilityActionType,
             targetDomain,
             targetTabId,
@@ -3253,10 +3308,10 @@ class ChromeBackgroundBridge {
                 }
                 pushReason("FINGERPRINT_EXECUTION_BLOCKED");
             }
-            else if (requestedExecutionMode !== null &&
+            else if (canonicalRequestedExecutionMode !== null &&
                 (fingerprintExecution.live_allowed !== true ||
                     fingerprintExecution.live_decision === "dry_run_only" ||
-                    !fingerprintExecution.allowed_execution_modes.includes(requestedExecutionMode))) {
+                    !fingerprintExecution.allowed_execution_modes.includes(canonicalRequestedExecutionMode))) {
                 fingerprintLiveBlocked = true;
                 pushReason("FINGERPRINT_EXECUTION_BLOCKED");
                 resolvedFingerprintReasonCodes = [...fingerprintReasonCodes];
@@ -3283,10 +3338,23 @@ class ChromeBackgroundBridge {
         const gateDecision = finalizedGate.gateDecision;
         const allowed = finalizedGate.allowed;
         const resolvedEffectiveExecutionMode = finalizedGate.effectiveExecutionMode ?? gateState.fallbackMode;
+        const forwardCommandParams = applyCanonicalXhsForwardCommandParams({
+            commandParams: normalizeXhsSearchCommandParams(commandParams, targetTabId),
+            requestedExecutionMode: canonicalRequestedExecutionMode,
+            legacyRequestedExecutionMode: canonicalLegacyRequestedExecutionMode,
+            upstreamAuthorizationRequest: canonicalUpstreamAuthorizationRequest
+        });
+        const canonicalGateRequest = {
+            ...request,
+            params: {
+                ...request.params,
+                command_params: forwardCommandParams
+            }
+        };
         const sharedCanonicalGate = buildCanonicalGateAuditArtifacts({
-            request,
-            issueScope,
-            riskState,
+            request: canonicalGateRequest,
+            issueScope: canonicalIssueScope,
+            riskState: canonicalRiskState,
             targetDomain,
             targetTabId,
             targetPage,
@@ -3294,12 +3362,12 @@ class ChromeBackgroundBridge {
             actualTargetTabId,
             actualTargetPage,
             actualTargetUrl,
-            actionType,
+            actionType: canonicalActionType,
             abilityActionType,
-            requestedExecutionMode,
-            legacyRequestedExecutionMode,
+            requestedExecutionMode: canonicalRequestedExecutionMode,
+            legacyRequestedExecutionMode: canonicalLegacyRequestedExecutionMode,
             runtimeProfileRef,
-            upstreamAuthorizationRequest,
+            upstreamAuthorizationRequest: canonicalUpstreamAuthorizationRequest,
             anonymousIsolationVerified,
             targetSiteLoggedIn,
             approvalRecord: canonicalApprovalRecord,
@@ -3318,16 +3386,16 @@ class ChromeBackgroundBridge {
             checks: { ...canonicalApprovalRecord.checks }
         };
         const requiresManualConfirmation = !gateState.issue208WriteGateOnly &&
-            (requestedExecutionMode === "live_read_limited" ||
-                requestedExecutionMode === "live_read_high_risk" ||
-                requestedExecutionMode === "live_write");
+            (canonicalRequestedExecutionMode === "live_read_limited" ||
+                canonicalRequestedExecutionMode === "live_read_high_risk" ||
+                canonicalRequestedExecutionMode === "live_write");
         const consumerGateResult = {
-            issue_scope: issueScope,
+            issue_scope: canonicalIssueScope,
             target_domain: targetDomain,
             target_tab_id: targetTabId,
             target_page: targetPage,
-            action_type: actionType,
-            requested_execution_mode: requestedExecutionMode,
+            action_type: canonicalActionType,
+            requested_execution_mode: canonicalRequestedExecutionMode,
             effective_execution_mode: resolvedEffectiveExecutionMode,
             gate_decision: gateDecision,
             gate_reasons: finalizedGate.gateReasons,
@@ -3344,13 +3412,13 @@ class ChromeBackgroundBridge {
             run_id: runId,
             session_id: sessionId,
             profile,
-            issue_scope: issueScope,
-            risk_state: riskState,
+            issue_scope: canonicalIssueScope,
+            risk_state: canonicalRiskState,
             target_domain: targetDomain,
             target_tab_id: targetTabId,
             target_page: targetPage,
-            action_type: actionType,
-            requested_execution_mode: requestedExecutionMode,
+            action_type: canonicalActionType,
+            requested_execution_mode: canonicalRequestedExecutionMode,
             effective_execution_mode: resolvedEffectiveExecutionMode,
             gate_decision: gateDecision,
             gate_reasons: finalizedGate.gateReasons,
@@ -3363,26 +3431,26 @@ class ChromeBackgroundBridge {
         const riskTransitionAudit = buildRiskTransitionAudit({
             runId,
             sessionId,
-            issueScope,
-            prevState: riskState,
+            issueScope: canonicalIssueScope,
+            prevState: canonicalRiskState,
             decision: gateDecision,
             gateReasons: finalizedGate.gateReasons,
-            requestedExecutionMode,
+            requestedExecutionMode: canonicalRequestedExecutionMode,
             approvalRecord: canonicalApprovalPayloadRecord,
             auditRecords: [gateAuditSeed],
             now: gateAuditSeed.recorded_at
         });
         const resolvedRiskState = resolveSharedRiskState(riskTransitionAudit.next_state);
         const gatePayload = createBackgroundXhsGatePayload({
-            request,
-            issueScope,
-            riskState,
+            request: canonicalGateRequest,
+            issueScope: canonicalIssueScope,
+            riskState: canonicalRiskState,
             resolvedRiskState,
             targetDomain,
             targetTabId,
             targetPage,
-            actionType,
-            requestedExecutionMode,
+            actionType: canonicalActionType,
+            requestedExecutionMode: canonicalRequestedExecutionMode,
             effectiveExecutionMode: resolvedEffectiveExecutionMode,
             gateDecision,
             gateReasons: finalizedGate.gateReasons,
@@ -3406,6 +3474,7 @@ class ChromeBackgroundBridge {
                 ? ""
                 : xhsGateReasonMessage(finalizedGate.gateReasons[0] ?? "TARGET_TAB_NOT_EXPLICIT"),
             gateOnly: allowed && gateState.issue208WriteGateOnly && !writeGateOnlyEligible,
+            forwardCommandParams,
             consumerGateResult,
             gatePayload
         };

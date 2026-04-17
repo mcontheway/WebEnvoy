@@ -186,6 +186,7 @@ describe("extension service worker / gate and approval", () => {
               },
               approval_refs: [`approval_admission_${runId}_${requestId}`],
               audit_refs: [`audit_admission_${runId}_${requestId}`],
+              granted_at: "2026-04-17T09:00:00.000Z",
               resource_state_snapshot: "active"
             },
             runtime_target: {
@@ -249,6 +250,164 @@ describe("extension service worker / gate and approval", () => {
           reason: "SESSION_EXPIRED"
         }
       }
+    });
+  });
+
+  it("keeps background live gate on canonical mode when top-level mode is omitted", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const runId = "run-xhs-canonical-live-mode-001";
+    const requestId = "req-xhs-canonical-live-mode-001";
+    const fingerprintContext = createFingerprintRuntimeContext();
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId,
+      profile: "profile-a",
+      fingerprintContext
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onMessageListeners[0]?.({
+      id: runId,
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: createRequestBoundXhsCommandParams({
+          runId,
+          requestId,
+          gate_invocation_id: "issue209-canonical-live-mode-001",
+          __runtime_profile_ref: "profile-a",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
+          requested_execution_mode: undefined,
+          risk_state: "allowed",
+          approval_record: null,
+          audit_record: null,
+          admission_context: null,
+          upstream_authorization_request: {
+            action_request: {
+              request_ref: "upstream-live-profile-session-read-sw-canonical-001",
+              action_name: "xhs.read_search_results",
+              action_category: "read"
+            },
+            resource_binding: {
+              binding_ref: "binding-live-profile-session-read-sw-canonical-001",
+              resource_kind: "profile_session",
+              profile_ref: "profile-a"
+            },
+            authorization_grant: {
+              grant_ref: "grant-live-profile-session-read-sw-canonical-001",
+              allowed_actions: ["xhs.read_search_results"],
+              binding_scope: {
+                allowed_resource_kinds: ["profile_session"],
+                allowed_profile_refs: ["profile-a"]
+              },
+              target_scope: {
+                allowed_domains: ["www.xiaohongshu.com"],
+                allowed_pages: ["search_result_tab"]
+              },
+              approval_refs: [`approval_admission_${runId}_${requestId}`],
+              audit_refs: [`audit_admission_${runId}_${requestId}`],
+              granted_at: "2026-04-17T09:00:00.000Z",
+              resource_state_snapshot: "active"
+            },
+            runtime_target: {
+              target_ref: "target-live-profile-session-read-sw-canonical-001",
+              domain: "www.xiaohongshu.com",
+              page: "search_result_tab",
+              tab_id: 32,
+              url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+            }
+          },
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: runId,
+        command: "xhs.search",
+        commandParams: expect.objectContaining({
+          requested_execution_mode: "live_read_high_risk",
+          upstream_authorization_request: expect.objectContaining({
+            authorization_grant: expect.objectContaining({
+              granted_at: "2026-04-17T09:00:00.000Z"
+            })
+          }),
+          options: expect.objectContaining({
+            requested_execution_mode: "live_read_high_risk"
+          })
+        })
+      })
+    );
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: runId,
+        ok: false,
+        error: {
+          code: "ERR_EXECUTION_FAILED",
+          message: "登录态缺失，无法执行 xhs.search"
+        },
+        payload: {
+          details: {
+            stage: "execution",
+            reason: "SESSION_EXPIRED"
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const forwarded = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === runId);
+    expect(forwarded?.status).toBe("error");
+    const payload = asRecord(forwarded?.payload) ?? {};
+    const gateOutcome = asRecord(payload.gate_outcome);
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    const approvalRecord = asRecord(payload.approval_record);
+    const auditRecord = asRecord(payload.audit_record);
+    const requestAdmissionResult = asRecord(payload.request_admission_result);
+    const executionAudit = asRecord(payload.execution_audit);
+    expect(consumerGateResult).toMatchObject({
+      requested_execution_mode: "live_read_high_risk",
+      effective_execution_mode: "live_read_high_risk",
+      issue_scope: "issue_209"
+    });
+    expect(gateOutcome?.decision_id).toBe(approvalRecord?.decision_id);
+    expect(gateOutcome?.decision_id).toBe(auditRecord?.decision_id);
+    expect(approvalRecord?.approval_id).toBe(auditRecord?.approval_id);
+    expect(requestAdmissionResult).toMatchObject({
+      admission_decision: "allowed",
+      effective_runtime_mode: "live_read_high_risk",
+      grant_match: true
+    });
+    expect(executionAudit).toMatchObject({
+      request_admission_decision: "allowed",
+      risk_signals: expect.not.arrayContaining(["LIVE_MODE_APPROVED"])
     });
   });
 
@@ -1488,6 +1647,137 @@ describe("extension service worker / gate and approval", () => {
         execution_audit: null
       }
     });
+  });
+
+  it("forwards canonical issue_208 live_write with editor focus attestation when top-level mode is omitted", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const creatorUrl = "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article";
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: creatorUrl, active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const runId = "run-xhs-issue-208-canonical-editor-input-001";
+    const fingerprintContext = createFingerprintRuntimeContext({
+      live_allowed: true,
+      live_decision: "allowed",
+      allowed_execution_modes: [
+        "dry_run",
+        "recon",
+        "live_read_limited",
+        "live_read_high_risk",
+        "live_write"
+      ]
+    });
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId,
+      profile: "profile-a",
+      fingerprintContext,
+      tabId: 32,
+      tabUrl: creatorUrl
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: runId,
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: createXhsEditorInputCommandParams({
+          run_id: runId,
+          requested_execution_mode: undefined,
+          __runtime_profile_ref: "profile-a",
+          fingerprint_context: fingerprintContext,
+          upstream_authorization_request: {
+            action_request: {
+              request_ref: "upstream-issue208-editor-input-001",
+              action_name: "xhs.write_note_publish",
+              action_category: "write"
+            },
+            resource_binding: {
+              binding_ref: "binding-issue208-editor-input-001",
+              resource_kind: "profile_session",
+              profile_ref: "profile-a"
+            },
+            authorization_grant: {
+              grant_ref: "grant-issue208-editor-input-001",
+              allowed_actions: ["xhs.write_note_publish"],
+              binding_scope: {
+                allowed_resource_kinds: ["profile_session"],
+                allowed_profile_refs: ["profile-a"]
+              },
+              target_scope: {
+                allowed_domains: ["creator.xiaohongshu.com"],
+                allowed_pages: ["creator_publish_tab"]
+              },
+              approval_refs: ["approval_admission_issue208_editor_input_001"],
+              audit_refs: ["audit_admission_issue208_editor_input_001"],
+              granted_at: "2026-04-17T09:00:00.000Z",
+              resource_state_snapshot: "active"
+            },
+            runtime_target: {
+              target_ref: "target-issue208-editor-input-001",
+              domain: "creator.xiaohongshu.com",
+              page: "creator_publish_tab",
+              tab_id: 32,
+              url: creatorUrl
+            }
+          }
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+    await vi.waitFor(() => {
+      expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+        32,
+        expect.objectContaining({
+          id: runId,
+          command: "xhs.search",
+          commandParams: expect.objectContaining({
+            requested_execution_mode: "live_write",
+            editor_focus_attestation: expect.objectContaining({
+              target_tab_id: 32,
+              focus_confirmed: true
+            }),
+            options: expect.objectContaining({
+              requested_execution_mode: "live_write",
+              editor_focus_attestation: expect.objectContaining({
+                target_tab_id: 32,
+                focus_confirmed: true
+              })
+            })
+          })
+        })
+      );
+    });
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: runId,
+        ok: true,
+        payload: {
+          summary: {
+            outcome: "editor_input_forwarded"
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32,
+          url: creatorUrl
+        }
+      }
+    );
+    await Promise.resolve();
   });
 
   it("falls back to global xhs tab resolution when currentWindow query is empty", async () => {
