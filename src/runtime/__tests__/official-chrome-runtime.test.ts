@@ -360,7 +360,7 @@ describe("prepareOfficialChromeRuntime", () => {
     );
   });
 
-  it("attempts attach for a ready runtime when a new run loses lock ownership before execution", async () => {
+  it("attempts attach for a ready runtime only after status proves a live transport is still available", async () => {
     const readStatus = vi
       .fn()
       .mockResolvedValueOnce({
@@ -370,8 +370,8 @@ describe("prepareOfficialChromeRuntime", () => {
         profileState: "ready",
         runtimeReadiness: "blocked",
         identityBindingState: "bound",
-        bootstrapState: "not_started",
-        transportState: "not_connected",
+        bootstrapState: "ready",
+        transportState: "ready",
         lockHeld: false,
         orphanRecoverable: false,
         attachableReadyRuntime: true
@@ -502,7 +502,7 @@ describe("prepareOfficialChromeRuntime", () => {
     expect(bridge.runCommand).not.toHaveBeenCalled();
   });
 
-  it("does not attach a ready runtime unless status proves it can be safely reclaimed", async () => {
+  it("does not attach a ready runtime when the transport signal contradicts attachableReadyRuntime", async () => {
     const readStatus = vi.fn(async () => ({
       identityPreflight: {
         mode: "official_chrome_persistent_extension"
@@ -514,7 +514,7 @@ describe("prepareOfficialChromeRuntime", () => {
       transportState: "not_connected",
       lockHeld: false,
       orphanRecoverable: false,
-      attachableReadyRuntime: false
+      attachableReadyRuntime: true
     }));
     const attachRuntime = vi.fn(async () => ({
       identityPreflight: {

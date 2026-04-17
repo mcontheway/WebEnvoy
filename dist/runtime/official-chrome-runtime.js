@@ -228,7 +228,7 @@ export const prepareOfficialChromeRuntime = async (input) => {
     const shouldAttemptAttach = !lockHeld &&
         identityBindingState === "bound" &&
         bootstrapState !== "stale" &&
-        (attachableReadyRuntime ||
+        ((attachableReadyRuntime && transportState === "ready") ||
             (runtimeReadiness === "recoverable" &&
                 orphanRecoverable &&
                 (profileState === "disconnected" || profileState === "ready")));

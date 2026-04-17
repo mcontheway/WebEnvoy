@@ -84,6 +84,23 @@ const hasRequestedPersistentExtensionIdentity = (params: JsonObject): boolean =>
   return typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
 };
 
+const hasVerifiedReadyRuntimeSignal = (readiness: RuntimeReadinessSnapshot): boolean =>
+  readiness.transportState === "ready" &&
+  (readiness.bootstrapState === "ready" ||
+    readiness.bootstrapState === "pending" ||
+    readiness.bootstrapState === "not_started");
+
+const canAttachReadyRuntime = (input: {
+  healthyLock: boolean;
+  profileState: ProfileState;
+  pinnedControllerPid: number | null | undefined;
+  readiness: RuntimeReadinessSnapshot;
+}): boolean =>
+  input.healthyLock &&
+  input.profileState === "ready" &&
+  Number.isInteger(input.pinnedControllerPid) &&
+  hasVerifiedReadyRuntimeSignal(input.readiness);
+
 interface RuntimeActionInput {
   cwd: string;
   profile: string;
@@ -899,11 +916,6 @@ export class ProfileRuntimeService {
     });
     const pinnedControllerPid =
       typeof lock?.controllerPid === "number" ? lock.controllerPid : lock?.ownerPid;
-    const attachableReadyRuntime =
-      accessState.healthyLock &&
-      accessState.controlConnected &&
-      accessState.profileState === "ready" &&
-      Number.isInteger(pinnedControllerPid);
     const requestedExecutionMode = readRequestedExecutionMode(input.params);
     const fingerprintRuntime = buildFingerprintContextForMeta(input.profile, meta, {
       requestedExecutionMode
@@ -919,6 +931,12 @@ export class ProfileRuntimeService {
       observedRunId: accessState.observedRunId,
       identityPreflight,
       profileState: accessState.profileState
+    });
+    const attachableReadyRuntime = canAttachReadyRuntime({
+      healthyLock: accessState.healthyLock,
+      profileState: accessState.profileState,
+      pinnedControllerPid,
+      readiness
     });
 
     return {
@@ -979,19 +997,6 @@ export class ProfileRuntimeService {
       typeof lock.controllerPid === "number"
         ? lock.controllerPid
         : lock.ownerPid;
-    const attachableReadyRuntime =
-      accessState.healthyLock &&
-      accessState.controlConnected &&
-      accessState.profileState === "ready" &&
-      Number.isInteger(pinnedControllerPid);
-    const attachableRecoverableRuntime =
-      (storedProfileState === "ready" || storedProfileState === "disconnected") &&
-      lockInspection.orphanRecoverable;
-    if (!attachableReadyRuntime && !attachableRecoverableRuntime) {
-      throw new CliError("ERR_PROFILE_LOCKED", "profile 当前不存在可安全接管的 ready runtime", {
-        retryable: true
-      });
-    }
 
     const identityPreflight = await this.#runIdentityPreflight({
       input,
@@ -1015,23 +1020,29 @@ export class ProfileRuntimeService {
       requestedExecutionMode
     });
     ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
-    if (attachableRecoverableRuntime) {
-      const preAttachReadiness = await this.#readRuntimeReadiness({
-        runtimeInput: input,
-        lockHeld: false,
-        observedRunId: accessState.observedRunId,
-        identityPreflight,
-        profileState: accessState.profileState
+    const preAttachReadiness = await this.#readRuntimeReadiness({
+      runtimeInput: input,
+      lockHeld: false,
+      observedRunId: accessState.observedRunId,
+      identityPreflight,
+      profileState: accessState.profileState
+    });
+    const attachableReadyRuntime = canAttachReadyRuntime({
+      healthyLock: accessState.healthyLock,
+      profileState: accessState.profileState,
+      pinnedControllerPid,
+      readiness: preAttachReadiness
+    });
+    const attachableRecoverableRuntime =
+      (storedProfileState === "ready" || storedProfileState === "disconnected") &&
+      lockInspection.orphanRecoverable &&
+      preAttachReadiness.bootstrapState !== "stale" &&
+      preAttachReadiness.transportState !== "not_connected" &&
+      preAttachReadiness.runtimeReadiness === "recoverable";
+    if (!attachableReadyRuntime && !attachableRecoverableRuntime) {
+      throw new CliError("ERR_PROFILE_LOCKED", "profile 当前不存在可安全接管的 ready runtime", {
+        retryable: true
       });
-      if (
-        preAttachReadiness.bootstrapState === "stale" ||
-        preAttachReadiness.transportState === "not_connected" ||
-        preAttachReadiness.runtimeReadiness !== "recoverable"
-      ) {
-        throw new CliError("ERR_PROFILE_LOCKED", "profile 当前不存在可安全接管的 ready runtime", {
-          retryable: true
-        });
-      }
     }
 
     const nextOwnerPid = attachableRecoverableRuntime ? process.pid : lock.ownerPid;

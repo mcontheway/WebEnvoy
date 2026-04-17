@@ -2043,6 +2043,102 @@ describe("profile-runtime identity preflight", () => {
     expect(browserState.runId).toBe("run-runtime-attach-next-001");
   });
 
+  it("does not mark a ready runtime attachable when only the owner stays alive but runtime transport is gone", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-ready-transport-gone-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "attach_ready_transport_gone_profile"
+    });
+    const alivePids = new Set<number>([999998, 999999, process.pid]);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid),
+      bridgeFactory: () => ({
+        runCommand: async ({ command, params, profile, runId }) => {
+          if (command === "runtime.bootstrap") {
+            return {
+              ok: true as const,
+              payload: {
+                result: {
+                  version: "v1",
+                  run_id: runId,
+                  runtime_context_id: String((params as { runtime_context_id?: unknown }).runtime_context_id),
+                  profile,
+                  status: "ready"
+                }
+              },
+              relay_path: "host>background"
+            };
+          }
+          if (command === "runtime.readiness") {
+            return {
+              ok: true as const,
+              payload: {
+                bootstrap_state: "not_started",
+                transport_state: "not_connected"
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "attach_ready_transport_gone_profile",
+      runId: "run-runtime-ready-transport-gone-owner-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile: "attach_ready_transport_gone_profile",
+        runId: "run-runtime-ready-transport-gone-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: false,
+      transportState: "not_connected",
+      bootstrapState: "not_started",
+      runtimeReadiness: "blocked",
+      attachableReadyRuntime: false
+    });
+
+    await expect(
+      service.attach({
+        cwd: baseDir,
+        profile: "attach_ready_transport_gone_profile",
+        runId: "run-runtime-ready-transport-gone-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_LOCKED"
+    });
+  });
+
   it("allows attaching a recoverable ready runtime when the controller is gone but browser state still matches the lock owner", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-attach-recoverable-"));
     tempDirs.push(baseDir);
