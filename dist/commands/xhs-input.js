@@ -768,6 +768,10 @@ const resolveIssue209AdmissionDraftForContract = (input) => {
     const canonicalGrantActionRequest = asObject(canonicalGrantUpstream?.action_request);
     const canonicalGrantResourceBinding = asObject(canonicalGrantUpstream?.resource_binding);
     const canonicalGrantRuntimeTarget = asObject(canonicalGrantUpstream?.runtime_target);
+    const canonicalActionRequestRef = asString(canonicalGrantActionRequest?.request_ref);
+    const canonicalBindingRef = asString(canonicalGrantResourceBinding?.binding_ref);
+    const canonicalGrantRef = asString(canonicalGrant?.grant_ref);
+    const canonicalTargetRef = asString(canonicalGrantRuntimeTarget?.target_ref);
     const canonicalBindingScope = asObject(canonicalGrant?.binding_scope);
     const canonicalTargetScope = asObject(canonicalGrant?.target_scope);
     const canonicalGrantApprovalRefs = asStringArray(canonicalGrant?.approval_refs);
@@ -802,6 +806,10 @@ const resolveIssue209AdmissionDraftForContract = (input) => {
         canonicalGrantResourceBinding !== null &&
         canonicalGrant !== null &&
         canonicalGrantRuntimeTarget !== null &&
+        canonicalActionRequestRef !== null &&
+        canonicalBindingRef !== null &&
+        canonicalGrantRef !== null &&
+        canonicalTargetRef !== null &&
         canonicalGrantApprovalRefs !== null &&
         canonicalGrantApprovalRefs.length > 0 &&
         canonicalGrantAuditRefs !== null &&
