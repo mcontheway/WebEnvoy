@@ -19,10 +19,35 @@ const asBoolean = (value) => value === true;
 const hasOwnNonNullValue = (record, key) =>
   Object.prototype.hasOwnProperty.call(record, key) && record[key] !== null;
 
+const asStringArray = (value) =>
+  Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+
 const pushReason = (target, reason) => {
   if (!target.includes(reason)) {
     target.push(reason);
   }
+};
+
+const hasCanonicalGrantBackedAdmission = (input, liveRequirements) => {
+  const upstream = asRecord(input.state?.upstreamAuthorizationRequest);
+  const actionRequest = asRecord(upstream?.action_request);
+  const resourceBinding = asRecord(upstream?.resource_binding);
+  const authorizationGrant = asRecord(upstream?.authorization_grant);
+  const runtimeTarget = asRecord(upstream?.runtime_target);
+
+  return (
+    liveRequirements.length > 0 &&
+    input.state?.issueScope === "issue_209" &&
+    input.state?.actionType === "read" &&
+    (input.state?.requestedExecutionMode === "live_read_limited" ||
+      input.state?.requestedExecutionMode === "live_read_high_risk") &&
+    actionRequest !== null &&
+    resourceBinding !== null &&
+    authorizationGrant !== null &&
+    runtimeTarget !== null &&
+    asStringArray(authorizationGrant.approval_refs).length > 0 &&
+    asStringArray(authorizationGrant.audit_refs).length > 0
+  );
 };
 
 const normalizeApprovalAdmissionEvidence = (value) => {
@@ -310,8 +335,11 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
     input.state.limitedReadRolloutReadyTrue !== true
       ? ["limited_read_rollout_ready_true"]
       : [];
+  const canonicalGrantBackedAdmission = hasCanonicalGrantBackedAdmission(input, liveRequirements);
   const explicitAdmissionSatisfied =
     approvalAdmissionRequirementGaps.length === 0 && auditAdmissionRequirementGaps.length === 0;
+  const liveAdmissionSatisfied =
+    explicitAdmissionSatisfied || canonicalGrantBackedAdmission;
   const canonicalApprovalRecord = explicitAdmissionSatisfied
     ? buildApprovalRecordFromAdmissionEvidence(approvalAdmissionEvidence, {
         decisionId: input.decisionId ?? null,
@@ -319,17 +347,16 @@ const collectIssue209LiveReadMatrixGateReasons = (input) => {
       })
     : approvalRecord;
 
-  if (
-    approvalAdmissionRequirementGaps.length > 0
-  ) {
+  if (!liveAdmissionSatisfied && approvalAdmissionRequirementGaps.length > 0) {
     pushReason(gateReasons, "MANUAL_CONFIRMATION_MISSING");
   }
   if (
+    !liveAdmissionSatisfied &&
     approvalAdmissionRequirementGaps.includes("approval_admission_evidence_checks_all_true")
   ) {
     pushReason(gateReasons, "APPROVAL_CHECKS_INCOMPLETE");
   }
-  if (auditAdmissionRequirementGaps.length > 0) {
+  if (!liveAdmissionSatisfied && auditAdmissionRequirementGaps.length > 0) {
     pushReason(gateReasons, "AUDIT_RECORD_MISSING");
   }
   if (rolloutRequirementGaps.length > 0) {

@@ -861,7 +861,7 @@ describe("xhs-search gate helpers", () => {
     });
   });
 
-  it("does not fabricate consumed admission refs from grant refs alone", () => {
+  it("allows canonical live-read from grant refs alone without synthesizing legacy admission_context", () => {
     const runId = "run-extension-execution-audit-003";
     const requestId = "req-execution-audit-003";
     const sessionId = "session-extension-execution-audit-003";
@@ -900,18 +900,32 @@ describe("xhs-search gate helpers", () => {
     });
 
     expect(gate.gate_outcome).toMatchObject({
-      gate_decision: "blocked",
-      effective_execution_mode: "dry_run"
+      gate_decision: "allowed",
+      effective_execution_mode: "live_read_high_risk"
     });
-    expect(gate.request_admission_result.reason_codes).toEqual(
-      expect.arrayContaining(["MANUAL_CONFIRMATION_MISSING", "AUDIT_RECORD_MISSING"])
-    );
+    expect(gate.gate_input.admission_context).toEqual({
+      approval_admission_evidence: expect.objectContaining({
+        approval_admission_ref: null
+      }),
+      audit_admission_evidence: expect.objectContaining({
+        audit_admission_ref: null
+      })
+    });
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "allowed",
+      effective_runtime_mode: "live_read_high_risk",
+      derived_from: {
+        approval_admission_ref: "approval_admission_external_001",
+        audit_admission_ref: "audit_admission_external_001"
+      }
+    });
     expect(gate.execution_audit).toMatchObject({
       audit_ref: `exec_audit_${decisionId}`,
+      request_admission_decision: "allowed",
       compatibility_refs: {
-        approval_admission_ref: null,
-        audit_admission_ref: null,
-        approval_record_ref: null,
+        approval_admission_ref: "approval_admission_external_001",
+        audit_admission_ref: "audit_admission_external_001",
+        approval_record_ref: `gate_appr_${decisionId}`,
         audit_record_ref: `gate_evt_${decisionId}`
       }
     });
