@@ -1653,7 +1653,28 @@ const hasExplicitAdmissionEvidence = (admissionContext) => {
   const approvalEvidence = asRecord(admissionContext?.approval_admission_evidence);
   const auditEvidence = asRecord(admissionContext?.audit_admission_evidence);
 
-  return approvalEvidence !== null || auditEvidence !== null;
+  const hasMeaningfulEvidence = (record) => {
+    if (!record) {
+      return false;
+    }
+    return Object.values(record).some((value) => {
+      if (value === true) {
+        return true;
+      }
+      if (typeof value === "string") {
+        return value.trim().length > 0;
+      }
+      if (typeof value === "number") {
+        return true;
+      }
+      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        return Object.values(value).some((nested) => nested === true);
+      }
+      return false;
+    });
+  };
+
+  return hasMeaningfulEvidence(approvalEvidence) || hasMeaningfulEvidence(auditEvidence);
 };
 
 const resolveCanonicalGrantApprovedAt = (input) =>

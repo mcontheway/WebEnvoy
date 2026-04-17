@@ -1205,6 +1205,12 @@ const resolveIssue209AdmissionDraftForContract = (input: {
     approvalRecord: input.options.approval_record ?? input.options.approval,
     auditRecord: input.options.audit_record
   });
+  const canonicalGrant = asObject(asObject(input.options.upstream_authorization_request)?.authorization_grant);
+  const canonicalGrantCarriesAdmissionRefs =
+    Array.isArray(canonicalGrant?.approval_refs) &&
+    canonicalGrant.approval_refs.length > 0 &&
+    Array.isArray(canonicalGrant?.audit_refs) &&
+    canonicalGrant.audit_refs.length > 0;
 
   const current = source.current;
   const hasAllTrueChecks = (checks: Record<string, boolean>): boolean =>
@@ -1342,6 +1348,10 @@ const resolveIssue209AdmissionDraftForContract = (input: {
         }
       };
     }
+  }
+
+  if (completeFormalSource && canonicalGrantCarriesAdmissionRefs) {
+    return { kind: "missing" };
   }
 
   if (completeFormalSource) {

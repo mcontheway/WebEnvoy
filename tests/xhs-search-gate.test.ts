@@ -1022,6 +1022,58 @@ describe("xhs-search gate helpers", () => {
     });
   });
 
+  it("ignores empty admission shells when deciding canonical grant-backed fallback", () => {
+    const runId = "run-extension-execution-audit-003bb";
+    const requestId = "req-execution-audit-003bb";
+    const sessionId = "session-extension-execution-audit-003bb";
+    const { gateInvocationId } = createIssue209InvocationLinkage(runId, "execution-audit-003bb");
+
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      runId,
+      requestId,
+      sessionId,
+      gateInvocationId,
+      profile: "profile-session-001",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      runtimeProfileRef: "profile-session-001",
+      admissionContext: {
+        approval_admission_evidence: {},
+        audit_admission_evidence: {}
+      },
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        resourceKind: "profile_session",
+        profileRef: "profile-session-001",
+        allowedResourceKinds: ["profile_session"],
+        allowedProfileRefs: ["profile-session-001"],
+        approvalRefs: ["approval_admission_external_003bb"],
+        auditRefs: ["audit_admission_external_003bb"],
+        resourceStateSnapshot: "active"
+      })
+    });
+
+    expect(gate.gate_outcome).toMatchObject({
+      gate_decision: "allowed",
+      effective_execution_mode: "live_read_high_risk"
+    });
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "allowed",
+      derived_from: expect.objectContaining({
+        approval_admission_ref: "approval_admission_external_003bb",
+        audit_admission_ref: "audit_admission_external_003bb"
+      })
+    });
+  });
+
   it("fails closed when canonical grant ref arrays contain malformed entries", () => {
     const runId = "run-extension-execution-audit-003a";
     const requestId = "req-execution-audit-003a";
