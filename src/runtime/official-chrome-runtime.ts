@@ -324,6 +324,7 @@ export const prepareOfficialChromeRuntime = async (input: {
   let transportState =
     typeof status.transportState === "string" ? status.transportState : "not_connected";
   let orphanRecoverable = status.orphanRecoverable === true;
+  let attachableReadyRuntime = status.attachableReadyRuntime === true;
 
   const syncRuntimeStatus = (nextStatus: JsonObject): void => {
     status = nextStatus;
@@ -340,6 +341,7 @@ export const prepareOfficialChromeRuntime = async (input: {
     transportState =
       typeof status.transportState === "string" ? status.transportState : "not_connected";
     orphanRecoverable = status.orphanRecoverable === true;
+    attachableReadyRuntime = status.attachableReadyRuntime === true;
   };
 
   const buildBaseDetails = () => ({
@@ -358,7 +360,7 @@ export const prepareOfficialChromeRuntime = async (input: {
     !lockHeld &&
     identityBindingState === "bound" &&
     bootstrapState !== "stale" &&
-    ((profileState === "ready" && transportState === "ready") ||
+    (attachableReadyRuntime ||
       (runtimeReadiness === "recoverable" &&
         orphanRecoverable &&
         (profileState === "disconnected" || profileState === "ready")));

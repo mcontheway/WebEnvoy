@@ -193,7 +193,8 @@ describe("prepareOfficialChromeRuntime", () => {
         identityBindingState: "bound",
         bootstrapState: "ready",
         transportState: "ready",
-        lockHeld: false
+        lockHeld: false,
+        attachableReadyRuntime: true
       })
       .mockResolvedValueOnce({
         identityPreflight: {
@@ -372,7 +373,8 @@ describe("prepareOfficialChromeRuntime", () => {
         bootstrapState: "ready",
         transportState: "ready",
         lockHeld: false,
-        orphanRecoverable: false
+        orphanRecoverable: false,
+        attachableReadyRuntime: true
       })
       .mockResolvedValueOnce({
         identityPreflight: {
@@ -459,7 +461,8 @@ describe("prepareOfficialChromeRuntime", () => {
         bootstrapState: "failed",
         transportState: "ready",
         lockHeld: false,
-        orphanRecoverable: false
+        orphanRecoverable: false,
+        attachableReadyRuntime: true
       })
       .mockResolvedValueOnce({
         identityPreflight: {
@@ -533,6 +536,62 @@ describe("prepareOfficialChromeRuntime", () => {
     );
   });
 
+  it("does not attempt attach when status reports a failed-ready conflict as non-attachable", async () => {
+    const readStatus = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "blocked",
+      identityBindingState: "bound",
+      bootstrapState: "failed",
+      transportState: "ready",
+      lockHeld: false,
+      orphanRecoverable: false,
+      attachableReadyRuntime: false
+    }));
+    const attachRuntime = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "recoverable",
+      identityBindingState: "bound",
+      bootstrapState: "failed",
+      transportState: "ready",
+      lockHeld: true,
+      orphanRecoverable: false
+    }));
+    const bridge = {
+      runCommand: vi.fn()
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_conflicted_attach_profile",
+          run_id: "run-runtime-conflicted-attach-001",
+          command: "xhs.detail",
+          params: {}
+        } as never,
+        consumerId: "xhs.detail",
+        requestedExecutionMode: "live_read_high_risk",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        attachRuntime,
+        readStatus
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_LOCKED"
+    });
+
+    expect(attachRuntime).not.toHaveBeenCalled();
+    expect(bridge.runCommand).not.toHaveBeenCalled();
+  });
+
   it("does not attach a recoverable runtime unless status proves it is orphan-recoverable", async () => {
     const readStatus = vi.fn(async () => ({
       identityPreflight: {
@@ -598,7 +657,8 @@ describe("prepareOfficialChromeRuntime", () => {
       bootstrapState: "not_started",
       transportState: "not_connected",
       lockHeld: false,
-      orphanRecoverable: false
+      orphanRecoverable: false,
+      attachableReadyRuntime: false
     }));
     const attachRuntime = vi.fn(async () => ({
       identityPreflight: {
