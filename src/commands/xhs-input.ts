@@ -1229,8 +1229,7 @@ const resolveIssue209AdmissionDraftForContract = (input: {
   const canonicalGrantRiskState = projectRiskStateForContract(
     asString(canonicalGrant?.resource_state_snapshot) as ResourceStateSnapshot | undefined
   );
-  const canonicalGrantRequestedAt =
-    asString(canonicalGrant?.granted_at) ?? asString(canonicalGrantActionRequest?.requested_at);
+  const canonicalGrantApprovedAt = asString(canonicalGrant?.granted_at);
   const canonicalGrantSupportsRequestedMode =
     input.options.requested_execution_mode === "live_read_high_risk"
       ? canonicalGrantRiskState === "allowed"
@@ -1265,7 +1264,7 @@ const resolveIssue209AdmissionDraftForContract = (input: {
     canonicalGrantApprovalRefs.length > 0 &&
     canonicalGrantAuditRefs !== null &&
     canonicalGrantAuditRefs.length > 0 &&
-    canonicalGrantRequestedAt !== null &&
+    canonicalGrantApprovedAt !== null &&
     canonicalGrantSupportsRequestedMode &&
     canonicalGrantActionType === current.actionType &&
     canonicalGrantMatchesCurrentTarget &&

@@ -184,6 +184,7 @@ const createUpstreamAuthorizationRequest = (input?: {
     resourceKind === "profile_session" ? (input?.profileRef ?? "profile-session-001") : null;
   const requestedAt =
     input?.requestedAt === undefined ? "2026-04-15T09:00:00.000Z" : input.requestedAt;
+  const grantedAt = input?.grantedAt === undefined ? requestedAt : input.grantedAt;
 
   return {
     action_request: {
@@ -220,7 +221,7 @@ const createUpstreamAuthorizationRequest = (input?: {
       approval_refs: input?.approvalRefs ?? [],
       audit_refs: input?.auditRefs ?? [],
       resource_state_snapshot: input?.resourceStateSnapshot ?? "paused",
-      ...(input?.grantedAt ? { granted_at: input.grantedAt } : {})
+      ...(grantedAt ? { granted_at: grantedAt } : {})
     },
     runtime_target: {
       target_ref: "target_gate_001",
@@ -1422,6 +1423,62 @@ describe("xhs-search gate helpers", () => {
       approval_id: `gate_appr_${decisionId}`,
       decision_id: decisionId,
       approved_at: "2026-04-16T10:00:00.000Z"
+    });
+  });
+
+  it("fails closed when canonical grant omits granted_at even if requested_at is present", () => {
+    const runId = "run-extension-execution-audit-003cb";
+    const requestId = "req-execution-audit-003cb";
+    const sessionId = "session-extension-execution-audit-003cb";
+    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+      runId,
+      "execution-audit-003cb"
+    );
+
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      runId,
+      requestId,
+      sessionId,
+      gateInvocationId,
+      profile: "profile-session-001",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      runtimeProfileRef: "profile-session-001",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        resourceKind: "profile_session",
+        profileRef: "profile-session-001",
+        allowedResourceKinds: ["profile_session"],
+        allowedProfileRefs: ["profile-session-001"],
+        approvalRefs: ["approval_admission_external_003cb"],
+        auditRefs: ["audit_admission_external_003cb"],
+        resourceStateSnapshot: "active",
+        requestedAt: "2026-04-16T09:00:00.000Z",
+        grantedAt: null
+      })
+    });
+
+    expect(gate.gate_outcome).toMatchObject({
+      decision_id: decisionId,
+      gate_decision: "blocked",
+      effective_execution_mode: "dry_run",
+      gate_reasons: expect.arrayContaining([
+        "MANUAL_CONFIRMATION_MISSING",
+        "APPROVAL_CHECKS_INCOMPLETE",
+        "AUDIT_RECORD_MISSING"
+      ])
+    });
+    expect(gate.approval_record).toMatchObject({
+      approval_id: null,
+      decision_id: decisionId
     });
   });
 

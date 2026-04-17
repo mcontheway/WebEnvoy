@@ -82,6 +82,7 @@ const buildCanonicalReadAuthorizationRequest = (input: {
   approvalRefs?: string[];
   auditRefs?: string[];
   resourceStateSnapshot?: "active" | "cool_down" | "paused";
+  grantedAt?: string | null;
 }) => ({
   action_request: {
     request_ref: input.requestRef,
@@ -107,7 +108,10 @@ const buildCanonicalReadAuthorizationRequest = (input: {
     },
     approval_refs: input.approvalRefs ?? [],
     audit_refs: input.auditRefs ?? [],
-    resource_state_snapshot: input.resourceStateSnapshot ?? "active"
+    resource_state_snapshot: input.resourceStateSnapshot ?? "active",
+    ...(input.grantedAt === null
+      ? {}
+      : { granted_at: input.grantedAt ?? "2026-04-15T09:00:00.000Z" })
   },
   runtime_target: {
     target_ref: `target_${input.requestRef}`,

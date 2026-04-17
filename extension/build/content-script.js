@@ -1678,8 +1678,7 @@ const hasExplicitAdmissionEvidence = (admissionContext) => {
 };
 
 const resolveCanonicalGrantApprovedAt = (input) =>
-  asString(input.state?.upstreamAuthorizationRequest?.authorization_grant?.granted_at) ??
-  asString(input.state?.upstreamAuthorizationRequest?.action_request?.requested_at);
+  asString(input.state?.upstreamAuthorizationRequest?.authorization_grant?.granted_at);
 
 const hasCanonicalGrantBackedAdmission = (input, liveRequirements) => {
   const upstream = asRecord(input.state?.upstreamAuthorizationRequest);
