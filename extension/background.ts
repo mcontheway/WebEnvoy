@@ -1002,6 +1002,42 @@ type ResolvedXhsGateCommandInput = {
   requestedFingerprintContext: FingerprintRuntimeContext | null;
 };
 
+type ResolvedDispatchXhsForwardState = {
+  validationAction: string | null;
+  issueScope: string | null;
+  requestedExecutionMode: XhsExecutionMode | null;
+  issue208EditorInputValidation: boolean;
+  requestedFingerprintContext: FingerprintRuntimeContext | null;
+};
+
+const resolveDispatchXhsForwardState = (
+  command: string,
+  commandParams: Record<string, unknown>
+): ResolvedDispatchXhsForwardState => {
+  const optionParams = asRecord(commandParams.options);
+  const readParam = (key: string): unknown => {
+    if (Object.prototype.hasOwnProperty.call(commandParams, key)) {
+      return commandParams[key];
+    }
+    return optionParams?.[key];
+  };
+  const validationAction = asNonEmptyString(readParam("validation_action"));
+  const issueScope = asNonEmptyString(readParam("issue_scope"));
+  const requestedExecutionMode = parseRequestedExecutionMode(readParam("requested_execution_mode"));
+
+  return {
+    validationAction,
+    issueScope,
+    requestedExecutionMode,
+    issue208EditorInputValidation:
+      XHS_GATE_COMMANDS.has(command) &&
+      issueScope === "issue_208" &&
+      requestedExecutionMode === "live_write" &&
+      validationAction === "editor_input",
+    requestedFingerprintContext: resolveFingerprintContext(commandParams)
+  };
+};
+
 const resolveXhsGateCommandInput = (
   input: Record<string, unknown>
 ): ResolvedXhsGateCommandInput => {
@@ -3297,28 +3333,8 @@ class ChromeBackgroundBridge {
         throw error;
       }
     }
-    const optionParams = asRecord(commandParams.options);
-    const validationAction = asNonEmptyString(
-      Object.prototype.hasOwnProperty.call(commandParams, "validation_action")
-        ? commandParams.validation_action
-        : optionParams?.validation_action
-    );
-    const issueScope = asNonEmptyString(
-      Object.prototype.hasOwnProperty.call(commandParams, "issue_scope")
-        ? commandParams.issue_scope
-        : optionParams?.issue_scope
-    );
-    const requestedExecutionMode = parseRequestedExecutionMode(
-      Object.prototype.hasOwnProperty.call(commandParams, "requested_execution_mode")
-        ? commandParams.requested_execution_mode
-        : optionParams?.requested_execution_mode
-    );
-    const issue208EditorInputValidation =
-      XHS_GATE_COMMANDS.has(command) &&
-      issueScope === "issue_208" &&
-      requestedExecutionMode === "live_write" &&
-      validationAction === "editor_input";
-    const requestedFingerprintContext = resolveFingerprintContext(commandParams);
+    let xhsForwardState = resolveDispatchXhsForwardState(command, commandParams);
+    let requestedFingerprintContext = xhsForwardState.requestedFingerprintContext;
     let forwardFingerprintContext = requestedFingerprintContext;
     let tabId: number | null;
     let consumerGateResult: XhsTargetGateResult["consumerGateResult"] | undefined;
@@ -3375,6 +3391,8 @@ class ChromeBackgroundBridge {
           command_params: commandParams
         }
       };
+      xhsForwardState = resolveDispatchXhsForwardState(command, commandParams);
+      requestedFingerprintContext = xhsForwardState.requestedFingerprintContext;
       forwardFingerprintContext =
         this.#resolveValidatedTrustedFingerprintContext(
           {
@@ -3408,7 +3426,7 @@ class ChromeBackgroundBridge {
       return;
     }
 
-    if (this.#shouldEnsureMainWorldBridge(command, requestedExecutionMode)) {
+    if (this.#shouldEnsureMainWorldBridge(command, xhsForwardState.requestedExecutionMode)) {
       try {
         await this.#ensureMainWorldBridgeInjected(dispatchRequest, tabId);
       } catch (error) {
@@ -3431,9 +3449,16 @@ class ChromeBackgroundBridge {
       }
     }
 
-    if (issue208EditorInputValidation) {
+    if (xhsForwardState.issue208EditorInputValidation) {
       const editorFocusAttestation = await this.#buildEditorInputFocusAttestation(tabId);
       commandParams = this.#injectEditorFocusAttestation(commandParams, editorFocusAttestation);
+      dispatchRequest = {
+        ...dispatchRequest,
+        params: {
+          ...dispatchRequest.params,
+          command_params: commandParams
+        }
+      };
     }
 
     const timeoutMs = requestDeadlineMs - Date.now();

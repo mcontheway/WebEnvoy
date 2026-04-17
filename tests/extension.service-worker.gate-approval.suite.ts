@@ -1649,6 +1649,137 @@ describe("extension service worker / gate and approval", () => {
     });
   });
 
+  it("forwards canonical issue_208 live_write with editor focus attestation when top-level mode is omitted", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const creatorUrl = "https://creator.xiaohongshu.com/publish/publish?from=menu&target=article";
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: creatorUrl, active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const runId = "run-xhs-issue-208-canonical-editor-input-001";
+    const fingerprintContext = createFingerprintRuntimeContext({
+      live_allowed: true,
+      live_decision: "allowed",
+      allowed_execution_modes: [
+        "dry_run",
+        "recon",
+        "live_read_limited",
+        "live_read_high_risk",
+        "live_write"
+      ]
+    });
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId,
+      profile: "profile-a",
+      fingerprintContext,
+      tabId: 32,
+      tabUrl: creatorUrl
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: runId,
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: createXhsEditorInputCommandParams({
+          run_id: runId,
+          requested_execution_mode: undefined,
+          __runtime_profile_ref: "profile-a",
+          fingerprint_context: fingerprintContext,
+          upstream_authorization_request: {
+            action_request: {
+              request_ref: "upstream-issue208-editor-input-001",
+              action_name: "xhs.write_note_publish",
+              action_category: "write"
+            },
+            resource_binding: {
+              binding_ref: "binding-issue208-editor-input-001",
+              resource_kind: "profile_session",
+              profile_ref: "profile-a"
+            },
+            authorization_grant: {
+              grant_ref: "grant-issue208-editor-input-001",
+              allowed_actions: ["xhs.write_note_publish"],
+              binding_scope: {
+                allowed_resource_kinds: ["profile_session"],
+                allowed_profile_refs: ["profile-a"]
+              },
+              target_scope: {
+                allowed_domains: ["creator.xiaohongshu.com"],
+                allowed_pages: ["creator_publish_tab"]
+              },
+              approval_refs: ["approval_admission_issue208_editor_input_001"],
+              audit_refs: ["audit_admission_issue208_editor_input_001"],
+              granted_at: "2026-04-17T09:00:00.000Z",
+              resource_state_snapshot: "active"
+            },
+            runtime_target: {
+              target_ref: "target-issue208-editor-input-001",
+              domain: "creator.xiaohongshu.com",
+              page: "creator_publish_tab",
+              tab_id: 32,
+              url: creatorUrl
+            }
+          }
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+    await vi.waitFor(() => {
+      expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+        32,
+        expect.objectContaining({
+          id: runId,
+          command: "xhs.search",
+          commandParams: expect.objectContaining({
+            requested_execution_mode: "live_write",
+            editor_focus_attestation: expect.objectContaining({
+              target_tab_id: 32,
+              focus_confirmed: true
+            }),
+            options: expect.objectContaining({
+              requested_execution_mode: "live_write",
+              editor_focus_attestation: expect.objectContaining({
+                target_tab_id: 32,
+                focus_confirmed: true
+              })
+            })
+          })
+        })
+      );
+    });
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: runId,
+        ok: true,
+        payload: {
+          summary: {
+            outcome: "editor_input_forwarded"
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32,
+          url: creatorUrl
+        }
+      }
+    );
+    await Promise.resolve();
+  });
+
   it("falls back to global xhs tab resolution when currentWindow query is empty", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);
