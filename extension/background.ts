@@ -297,6 +297,7 @@ interface XhsTargetGateResult {
   targetTabId: number | null;
   errorMessage: string;
   gateOnly: boolean;
+  forwardCommandParams: Record<string, unknown>;
   consumerGateResult: {
     issue_scope: XhsIssueScope;
     target_domain: string | null;
@@ -938,6 +939,36 @@ const normalizeXhsSearchCommandParams = (
   if (typeof resolvedTargetTabId === "number" && Number.isInteger(resolvedTargetTabId)) {
     normalized.target_tab_id = resolvedTargetTabId;
     normalizedOptions.target_tab_id = resolvedTargetTabId;
+  }
+
+  if (Object.keys(normalizedOptions).length > 0) {
+    normalized.options = normalizedOptions;
+  }
+
+  return normalized;
+};
+
+const applyCanonicalXhsForwardCommandParams = (input: {
+  commandParams: Record<string, unknown>;
+  requestedExecutionMode: XhsExecutionMode | null;
+  legacyRequestedExecutionMode: XhsExecutionMode | null;
+  upstreamAuthorizationRequest: Record<string, unknown> | null;
+}): Record<string, unknown> => {
+  const normalized: Record<string, unknown> = { ...input.commandParams };
+  const optionParams = asRecord(input.commandParams.options);
+  const normalizedOptions: Record<string, unknown> = optionParams ? { ...optionParams } : {};
+
+  if (input.requestedExecutionMode !== null) {
+    normalized.requested_execution_mode = input.requestedExecutionMode;
+    normalizedOptions.requested_execution_mode = input.requestedExecutionMode;
+  }
+  if (input.legacyRequestedExecutionMode !== null) {
+    normalized.__legacy_requested_execution_mode = input.legacyRequestedExecutionMode;
+    normalizedOptions.__legacy_requested_execution_mode = input.legacyRequestedExecutionMode;
+  }
+  if (input.upstreamAuthorizationRequest !== null) {
+    normalized.upstream_authorization_request = input.upstreamAuthorizationRequest;
+    normalizedOptions.upstream_authorization_request = input.upstreamAuthorizationRequest;
   }
 
   if (Object.keys(normalizedOptions).length > 0) {
@@ -3336,7 +3367,14 @@ class ChromeBackgroundBridge {
         return;
       }
       tabId = gateResult.targetTabId;
-      commandParams = normalizeXhsSearchCommandParams(commandParams, tabId);
+      commandParams = gateResult.forwardCommandParams;
+      dispatchRequest = {
+        ...dispatchRequest,
+        params: {
+          ...dispatchRequest.params,
+          command_params: commandParams
+        }
+      };
       forwardFingerprintContext =
         this.#resolveValidatedTrustedFingerprintContext(
           {
@@ -4341,6 +4379,12 @@ class ChromeBackgroundBridge {
       writeGateOnlyDecision: writeGateOnlyApprovalDecision,
       riskTransitionAudit
     });
+    const forwardCommandParams = applyCanonicalXhsForwardCommandParams({
+      commandParams: normalizeXhsSearchCommandParams(commandParams, targetTabId),
+      requestedExecutionMode: canonicalRequestedExecutionMode,
+      legacyRequestedExecutionMode: canonicalLegacyRequestedExecutionMode,
+      upstreamAuthorizationRequest: canonicalUpstreamAuthorizationRequest
+    });
     return {
       allowed,
       targetTabId: allowed ? targetTabId : null,
@@ -4349,6 +4393,7 @@ class ChromeBackgroundBridge {
           ? ""
           : xhsGateReasonMessage(finalizedGate.gateReasons[0] ?? "TARGET_TAB_NOT_EXPLICIT"),
       gateOnly: allowed && gateState.issue208WriteGateOnly && !writeGateOnlyEligible,
+      forwardCommandParams,
       consumerGateResult,
       gatePayload
     };

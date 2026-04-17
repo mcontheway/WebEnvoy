@@ -341,7 +341,18 @@ describe("extension service worker / gate and approval", () => {
       32,
       expect.objectContaining({
         id: runId,
-        command: "xhs.search"
+        command: "xhs.search",
+        commandParams: expect.objectContaining({
+          requested_execution_mode: "live_read_high_risk",
+          upstream_authorization_request: expect.objectContaining({
+            authorization_grant: expect.objectContaining({
+              granted_at: "2026-04-17T09:00:00.000Z"
+            })
+          }),
+          options: expect.objectContaining({
+            requested_execution_mode: "live_read_high_risk"
+          })
+        })
       })
     );
 
