@@ -1205,6 +1205,7 @@ const resolveIssue209AdmissionDraftForContract = (input: {
     approvalRecord: input.options.approval_record ?? input.options.approval,
     auditRecord: input.options.audit_record
   });
+  const current = source.current;
   const canonicalGrant = asObject(asObject(input.options.upstream_authorization_request)?.authorization_grant);
   const canonicalGrantUpstream = asObject(input.options.upstream_authorization_request);
   const canonicalGrantActionRequest = asObject(canonicalGrantUpstream?.action_request);
@@ -1214,10 +1215,12 @@ const resolveIssue209AdmissionDraftForContract = (input: {
   const canonicalTargetScope = asObject(canonicalGrant?.target_scope);
   const canonicalGrantApprovalRefs = asStringArray(canonicalGrant?.approval_refs);
   const canonicalGrantAuditRefs = asStringArray(canonicalGrant?.audit_refs);
+  const canonicalGrantActionType = asString(canonicalGrantActionRequest?.action_category);
   const canonicalGrantResourceKind = asString(canonicalGrantResourceBinding?.resource_kind);
   const canonicalGrantProfileRef = asString(canonicalGrantResourceBinding?.profile_ref);
   const canonicalGrantDomain = asString(canonicalGrantRuntimeTarget?.domain);
   const canonicalGrantPage = asString(canonicalGrantRuntimeTarget?.page);
+  const canonicalGrantTabId = asInteger(canonicalGrantRuntimeTarget?.tab_id);
   const canonicalGrantRiskState = projectRiskStateForContract(
     asString(canonicalGrant?.resource_state_snapshot) as ResourceStateSnapshot | undefined
   );
@@ -1229,6 +1232,10 @@ const resolveIssue209AdmissionDraftForContract = (input: {
       : input.options.requested_execution_mode === "live_read_limited"
         ? canonicalGrantRiskState === "limited" || canonicalGrantRiskState === "allowed"
         : false;
+  const canonicalGrantMatchesCurrentTarget =
+    canonicalGrantDomain === current.targetDomain &&
+    canonicalGrantPage === current.targetPage &&
+    canonicalGrantTabId === current.targetTabId;
   const canonicalGrantCanDriveAdmission =
     canonicalGrantActionRequest !== null &&
     canonicalGrantResourceBinding !== null &&
@@ -1240,6 +1247,8 @@ const resolveIssue209AdmissionDraftForContract = (input: {
     canonicalGrantAuditRefs.length > 0 &&
     canonicalGrantRequestedAt !== null &&
     canonicalGrantSupportsRequestedMode &&
+    canonicalGrantActionType === current.actionType &&
+    canonicalGrantMatchesCurrentTarget &&
     canonicalGrantResourceKind !== null &&
     canonicalGrantDomain !== null &&
     canonicalGrantPage !== null &&
@@ -1255,7 +1264,6 @@ const resolveIssue209AdmissionDraftForContract = (input: {
     (asStringArray(canonicalTargetScope?.allowed_domains)?.includes(canonicalGrantDomain) ?? false) &&
     (asStringArray(canonicalTargetScope?.allowed_pages)?.includes(canonicalGrantPage) ?? false);
 
-  const current = source.current;
   const hasAllTrueChecks = (checks: Record<string, boolean>): boolean =>
     Object.keys(checks).length > 0 && Object.values(checks).every((value) => value === true);
   const bindingMatches = (

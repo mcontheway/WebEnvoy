@@ -762,6 +762,103 @@ describe("xhs-input", () => {
     });
   });
 
+  it("keeps formal admission fallback when upstream runtime_target drifts away from the current verified target", () => {
+    const options = ensureIssue209AdmissionContextForContract({
+      options: {
+        issue_scope: "issue_209",
+        target_domain: "creator.xiaohongshu.com",
+        target_tab_id: 41,
+        target_page: "creator_publish_tab",
+        action_type: "read",
+        requested_execution_mode: "live_read_limited",
+        risk_state: "limited",
+        upstream_authorization_request: {
+          action_request: {
+            request_ref: "upstream_req_issue209_target_drift_001",
+            action_name: "xhs.read_search_results",
+            action_category: "read",
+            requested_at: "2026-04-15T09:00:00.000Z"
+          },
+          resource_binding: {
+            binding_ref: "binding_issue209_target_drift_001",
+            resource_kind: "profile_session",
+            profile_ref: "profile-session-001"
+          },
+          authorization_grant: {
+            grant_ref: "grant_issue209_target_drift_001",
+            allowed_actions: ["xhs.read_search_results"],
+            binding_scope: {
+              allowed_resource_kinds: ["profile_session"],
+              allowed_profile_refs: ["profile-session-001"]
+            },
+            target_scope: {
+              allowed_domains: ["www.xiaohongshu.com"],
+              allowed_pages: ["search_result_tab"]
+            },
+            approval_refs: ["approval_admission_external_target_drift_001"],
+            audit_refs: ["audit_admission_external_target_drift_001"],
+            resource_state_snapshot: "cool_down"
+          },
+          runtime_target: {
+            target_ref: "target_issue209_target_drift_001",
+            domain: "www.xiaohongshu.com",
+            page: "search_result_tab",
+            tab_id: 32
+          }
+        },
+        approval_record: {
+          approved: true,
+          approver: "qa-reviewer",
+          approved_at: "2026-03-23T10:00:00Z",
+          checks: {
+            target_domain_confirmed: true,
+            target_tab_confirmed: true,
+            target_page_confirmed: true,
+            risk_state_checked: true,
+            action_type_confirmed: true
+          }
+        },
+        audit_record: {
+          event_id: "gate_evt_formal_source_target_drift_001",
+          decision_id: "gate_decision_issue209-gate-run-cli-issue209-target-drift-001-001",
+          approval_id:
+            "gate_appr_gate_decision_issue209-gate-run-cli-issue209-target-drift-001-001",
+          issue_scope: "issue_209",
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 41,
+          target_page: "creator_publish_tab",
+          action_type: "read",
+          requested_execution_mode: "live_read_limited",
+          risk_state: "limited",
+          gate_decision: "allowed",
+          audited_checks: {
+            target_domain_confirmed: true,
+            target_tab_confirmed: true,
+            target_page_confirmed: true,
+            risk_state_checked: true,
+            action_type_confirmed: true
+          },
+          recorded_at: "2026-03-23T10:05:00Z"
+        }
+      },
+      runId: "run-cli-issue209-target-drift-001",
+      requestId: "issue209-live-target-drift-001",
+      gateInvocationId: "issue209-gate-run-cli-issue209-target-drift-001-001",
+      sessionId: "nm-session-001"
+    });
+
+    expect(options.admission_context).toMatchObject({
+      approval_admission_evidence: {
+        approval_admission_ref:
+          "approval_admission_issue209-gate-run-cli-issue209-target-drift-001-001"
+      },
+      audit_admission_evidence: {
+        audit_admission_ref:
+          "audit_admission_issue209-gate-run-cli-issue209-target-drift-001-001"
+      }
+    });
+  });
+
   it("does not synthesize issue_209 live admission_context when the audit source decision linkage is stale", () => {
     const options = ensureIssue209AdmissionContextForContract({
       options: {
