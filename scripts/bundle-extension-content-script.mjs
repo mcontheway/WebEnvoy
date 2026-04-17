@@ -359,6 +359,7 @@ const buildContentScriptBundle = async () => {
       "installMainWorldEventChannelSecret",
       "MAIN_WORLD_EVENT_BOOTSTRAP",
       "readPageStateViaMainWorld",
+      "requestXhsSearchJsonViaMainWorld",
       "resetMainWorldEventChannelForContract",
       "resolveMainWorldEventNamesForSecret",
       "verifyFingerprintRuntimeViaMainWorld"
@@ -414,6 +415,7 @@ const buildContentScriptBundle = async () => {
       "  installMainWorldEventChannelSecret,",
       "  MAIN_WORLD_EVENT_BOOTSTRAP,",
       "  readPageStateViaMainWorld,",
+      "  requestXhsSearchJsonViaMainWorld,",
       "  resetMainWorldEventChannelForContract,",
       "  resolveMainWorldEventNamesForSecret",
       "} = __webenvoy_module_content_script_main_world;"

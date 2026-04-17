@@ -6488,7 +6488,7 @@ const requestXhsSearchJsonViaMainWorld = async (input) => {
     }
     return response.result;
 };
-return { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readPageStateViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret, verifyFingerprintRuntimeViaMainWorld };
+return { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret, verifyFingerprintRuntimeViaMainWorld };
 })();
 const __webenvoy_module_content_script_fingerprint = (() => {
 const { ensureFingerprintRuntimeContext } = __webenvoy_module_fingerprint_profile;
@@ -6772,6 +6772,7 @@ const {
   installMainWorldEventChannelSecret,
   MAIN_WORLD_EVENT_BOOTSTRAP,
   readPageStateViaMainWorld,
+  requestXhsSearchJsonViaMainWorld,
   resetMainWorldEventChannelForContract,
   resolveMainWorldEventNamesForSecret
 } = __webenvoy_module_content_script_main_world;

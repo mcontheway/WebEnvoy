@@ -62,10 +62,11 @@ const loadBundleExports = (bundlePath: string, moduleVar: BundledXhsModuleVar) =
 };
 
 const loadBundledContentScriptHandlerModule = (
-  bundlePath: string
+  bundlePath: string,
+  contextOverrides: Record<string, unknown> = {}
 ): BundledContentScriptHandlerModule => {
   const bundleSource = fs.readFileSync(bundlePath, "utf8");
-  const context: Record<string, unknown> = {};
+  const context: Record<string, unknown> = { ...contextOverrides };
   context.globalThis = context;
   context.structuredClone = structuredClone;
   runInNewContext(
@@ -253,6 +254,7 @@ describe("extension build contract", () => {
     expect(contentScriptBuild).toContain("installMainWorldEventChannelSecret");
     expect(contentScriptBuild).toContain("installFingerprintRuntimeViaMainWorld");
     expect(contentScriptBuild).toContain("readPageStateViaMainWorld");
+    expect(contentScriptBuild).toContain("requestXhsSearchJsonViaMainWorld");
     expect(xhsEditorInputBuild).toContain("performEditorInputValidation");
     expect(xhsEditorInputBuild).toContain("新的创作");
     expect(xhsEditorInputBuild).toContain("enter_editable_mode");
@@ -388,6 +390,186 @@ describe("extension build contract", () => {
     expect((result.error as { message?: string } | undefined)?.message).not.toBe(
       "containsCookie is not defined"
     );
+  });
+
+  it("executes bundled content-script handler xhs.search live-read via main-world request bridge", async () => {
+    const admissionContext = buildLiveReadAdmissionContext({
+      runId: "run-bundled-handler-search-live-001",
+      sessionId: "nm-session-bundled-handler-search-live-001",
+      gateInvocationId: "issue209-gate-run-bundled-handler-search-live-001",
+      targetTabId: 21,
+      targetPage: "search_result_tab"
+    });
+    const runtimeMessages: Array<Record<string, unknown>> = [];
+    const searchHref = "https://www.xiaohongshu.com/search_result/?keyword=%E9%9C%B2%E8%90%A5";
+    const { ContentScriptHandler } = loadBundledContentScriptHandlerModule(contentScriptBuildPath, {
+      chrome: {
+        runtime: {
+          sendMessage: (
+            message: Record<string, unknown>,
+            callback?: (response?: Record<string, unknown>) => void
+          ) => {
+            runtimeMessages.push(message);
+            let response: Record<string, unknown>;
+            if (message.kind === "xhs-sign-request") {
+              response = {
+                ok: true,
+                result: {
+                  "X-s": "signature",
+                  "X-t": "timestamp"
+                }
+              };
+            } else if (message.kind === "xhs-main-world-request") {
+              response = {
+                ok: true,
+                result: {
+                  status: 200,
+                  body: {
+                    code: 0,
+                    data: {
+                      items: []
+                    }
+                  }
+                }
+              };
+            } else {
+              response = {
+                ok: false,
+                error: {
+                  message: `unexpected message kind: ${String(message.kind)}`
+                }
+              };
+            }
+
+            callback?.(response);
+            return Promise.resolve(response);
+          }
+        }
+      },
+      crypto: {
+        randomUUID: () => "bundle-live-uuid-001"
+      },
+      URL,
+      location: {
+        href: searchHref
+      },
+      window: {
+        location: {
+          href: searchHref
+        },
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => true
+      },
+      document: {
+        title: "Search Result",
+        readyState: "complete",
+        cookie: "a1=session-cookie"
+      },
+      CustomEvent: class CustomEventShim {
+        type: string;
+        detail: unknown;
+
+        constructor(type: string, init?: { detail?: unknown }) {
+          this.type = type;
+          this.detail = init?.detail;
+        }
+      }
+    });
+    const handler = new ContentScriptHandler();
+
+    const resultPromise = new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        off();
+        reject(new Error("did not receive bundled live content-script handler result"));
+      }, 1_000);
+      const off = handler.onResult((message) => {
+        clearTimeout(timeout);
+        off();
+        resolve(message as Record<string, unknown>);
+      });
+    });
+
+    expect(
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "msg-bundled-handler-search-live-001",
+        runId: "run-bundled-handler-search-live-001",
+        tabId: 21,
+        profile: "profile-a",
+        cwd: "/tmp/webenvoy",
+        timeoutMs: 3_000,
+        command: "xhs.search",
+        params: {
+          session_id: "nm-session-bundled-handler-search-live-001"
+        },
+        commandParams: {
+          request_id: "req-bundled-handler-search-live-001",
+          gate_invocation_id: "issue209-gate-run-bundled-handler-search-live-001",
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 21,
+            target_page: "search_result_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 21,
+            actual_target_page: "search_result_tab",
+            action_type: "read",
+            risk_state: "allowed",
+            requested_execution_mode: "live_read_high_risk",
+            upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+              requestRef: "upstream_bundled_handler_search_live_001",
+              actionName: "xhs.read_search_results",
+              targetPage: "search_result_tab",
+              targetTabId: 21,
+              profileRef: "profile-a",
+              approvalRefs: [
+                String(admissionContext.approval_admission_evidence.approval_admission_ref)
+              ],
+              auditRefs: [String(admissionContext.audit_admission_evidence.audit_admission_ref)]
+            }),
+            admission_context: admissionContext
+          }
+        }
+      })
+    ).toBe(true);
+
+    await expect(resultPromise).resolves.toMatchObject({
+      kind: "result",
+      ok: true,
+      payload: {
+        summary: {
+          capability_result: {
+            ability_id: "xhs.note.search.v1",
+            outcome: "success"
+          },
+          consumer_gate_result: {
+            requested_execution_mode: "live_read_high_risk",
+            gate_decision: "allowed"
+          },
+          execution_audit: {
+            request_admission_decision: "allowed"
+          }
+        }
+      }
+    });
+    expect(runtimeMessages.map((message) => message.kind)).toEqual([
+      "xhs-sign-request",
+      "xhs-main-world-request"
+    ]);
+    expect(runtimeMessages[1]).toMatchObject({
+      kind: "xhs-main-world-request",
+      method: "POST",
+      referrer: searchHref
+    });
   });
 
   it("executes bundled xhs.detail classic module without unresolved implementation references", async () => {
