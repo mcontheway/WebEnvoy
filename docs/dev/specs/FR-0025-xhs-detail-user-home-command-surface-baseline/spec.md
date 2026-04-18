@@ -17,7 +17,7 @@ Canonical Issue: #504
 ## 目标
 
 1. 冻结 `xhs.detail` 与 `xhs.user_home` 已属于 current main 公共 CLI command surface 的正式结论。
-2. 冻结两个命令的 canonical command input、target-page baseline 与 public CLI request-context baseline。
+2. 冻结两个命令的 canonical command input、canonical shared-path ability 对齐边界、target-page baseline 与 public CLI request-context baseline。
 3. 冻结两个命令如何消费 `FR-0023` 的 `action_request/resource_binding/authorization_grant/runtime_target` 四对象。
 4. 冻结 `request_admission_result` 与 `execution_audit` 在这两个命令上的 command-level ownership，并与 current implementation 对齐。
 5. 显式声明 detail identity 不在本 FR 冻结，`image_scenes` 继续转交 `#505`。
@@ -48,33 +48,41 @@ Canonical Issue: #504
 
 ### 2. canonical command input
 
-系统必须冻结以下 canonical command input：
+系统必须冻结以下 canonical command input 与 current canonical shared-path ability 对齐边界：
 
 - `xhs.detail`
   - command: `xhs.detail`
-  - ability id: `xhs.note.detail.v1`
   - required input: `note_id`
+  - canonical shared-path ability alignment: `xhs.note.detail.v1`
 - `xhs.user_home`
   - command: `xhs.user_home`
-  - ability id: `xhs.user.home.v1`
   - required input: `user_id`
+  - canonical shared-path ability alignment: `xhs.user.home.v1`
 
 约束：
 
 - `note_id` 与 `user_id` 都必须是必填、非空、去首尾空白后的字符串。
 - 这两个命令不消费 `query`、`limit`、`search_id`、`sort`、`note_type` 这一类 search-only 输入。
+- canonical `upstream_authorization_request` path 与 current bundled runtime / contract outputs 继续把两条命令分别对齐到上述 canonical ability id。
+- legacy public CLI path 当前仍按 command + input 进入 shared parser；只要 `ability.id` 非空且未进入 canonical action-name 对齐校验，current main 不会仅因 ability id 不是上述 canonical 值就直接拒绝输入；本 FR 不把 legacy path 预先收紧为更严格的 rejection 规则。
 - 本 FR 只冻结 command input，不冻结 detail request identity 的附加字段。
 
 ### 3. target-page 与 public CLI request-context baseline
 
-系统必须冻结以下 target-page baseline：
+系统必须冻结以下 target-page 与 request-context baseline：
 
-- `xhs.detail` 的 current target-page baseline 是 `explore_detail_tab`
-- `xhs.user_home` 的 current target-page baseline 是 `profile_tab`
+- legacy public CLI path
+  - `xhs.detail` 的 current target-page baseline 是 `explore_detail_tab`
+  - `xhs.user_home` 的 current target-page baseline 是 `profile_tab`
+  - shared gate fields `target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode` 都必须显式提供
+- canonical `upstream_authorization_request` path
+  - `xhs.detail` 的 current target-page baseline 继续由 `runtime_target.page = "explore_detail_tab"` 承载
+  - `xhs.user_home` 的 current target-page baseline 继续由 `runtime_target.page = "profile_tab"` 承载
+  - `target_domain`、`target_tab_id`、`target_page` 继续从 `runtime_target` 派生，`requested_execution_mode` 继续由 current parser 行为推导
 
 约束：
 
-- 在 legacy public CLI path 中，shared gate fields `target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode` 都必须显式提供；缺失时必须按 invalid args 处理。
+- 在 legacy public CLI path 中，上述 shared gate fields 缺失时必须按 invalid args 处理。
 - 在 canonical `upstream_authorization_request` path 中，`target_domain`、`target_tab_id`、`target_page` 必须继续由 `runtime_target` 派生，`requested_execution_mode` 必须继续由 current parser 行为推导；本 FR 不得把这些派生字段重新外显为第二套必填输入。
 - `target_domain` 仍是 legacy public CLI path 的必填 shared gate field；当前 parser 只要求其为非空字符串，本 FR 不把它额外收紧为新的固定域常量。
 - `xhs.detail` 在 target-page 不为 `explore_detail_tab` 时，必须按 invalid-args / blocked 输入处理。
@@ -214,7 +222,15 @@ Then `target_domain`、`target_tab_id`、`target_page` 必须继续由 `runtime_
 And `requested_execution_mode` 必须继续由 current parser 行为推导
 And 本 FR 不得要求调用方再额外提供一套 legacy gate fields
 
-### 场景 11：canonical upstream objects 被命令面消费后保留请求级结果
+### 场景 11：legacy path 不得被 formal 预先收紧为“必须匹配 canonical ability id”
+
+Given 调用方通过 legacy public CLI path 发起 `xhs.detail` 或 `xhs.user_home`
+And 输入已满足当前 command input 与 shared gate fields 基线
+When `ability.id` 不是 canonical shared-path ability id 但仍为非空字符串
+Then 本 FR 不得把该情况预先冻结为 current main 必然拒绝
+And 只能把 canonical ability 对齐冻结为 canonical upstream path 与 current shared runtime 输出边界
+
+### 场景 12：canonical upstream objects 被命令面消费后保留请求级结果
 
 Given 调用方为 `xhs.detail` 或 `xhs.user_home` 提供 canonical `upstream_authorization_request`
 When 命令完成 summary 或 error details 映射

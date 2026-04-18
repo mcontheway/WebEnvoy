@@ -40,3 +40,14 @@
   - 破坏 `FR-0023` 已冻结的 ownership 边界
 - 缓解：
   - 本 FR 只冻结 command-level ownership，不扩写长期状态语义
+
+## 风险 5：把 shared contract 误报为 local-only
+
+- 表现：
+  - PR 元数据继续把 `FR-0025` 申报为 `integration_applicable=no`
+- 影响：
+  - 与 `FR-0023` 已冻结的 shared upstream contract / request-level result 边界不一致
+  - guardian 会持续把 formal spec review PR 阻断为 integration 元数据不合规
+- 缓解：
+  - 沿用 `#464` 作为当前本地 integration 锚点
+  - 在 PR 描述中显式声明 shared contract changed、`merge_gate=integration_check_required` 与 integration 状态核对结果

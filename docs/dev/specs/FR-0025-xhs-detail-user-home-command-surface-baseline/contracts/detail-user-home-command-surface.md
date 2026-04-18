@@ -5,11 +5,7 @@
 ```ts
 type XhsDetailCommand = {
   command: "xhs.detail";
-  ability: {
-    id: "xhs.note.detail.v1";
-    layer: "L3";
-    action: "read";
-  };
+  canonical_shared_path_ability_id: "xhs.note.detail.v1";
   input: {
     note_id: string;
   };
@@ -17,11 +13,7 @@ type XhsDetailCommand = {
 
 type XhsUserHomeCommand = {
   command: "xhs.user_home";
-  ability: {
-    id: "xhs.user.home.v1";
-    layer: "L3";
-    action: "read";
-  };
+  canonical_shared_path_ability_id: "xhs.user.home.v1";
   input: {
     user_id: string;
   };
@@ -33,22 +25,42 @@ type XhsUserHomeCommand = {
 - 两条命令都属于 current public CLI command surface。
 - 两条命令都 `requiresProfile=true`。
 - `note_id` / `user_id` 都必须为必填、trim 后非空的字符串。
+- canonical `upstream_authorization_request` path 与 current runtime / contract output path 继续分别对齐 `xhs.note.detail.v1` / `xhs.user.home.v1`。
+- legacy public CLI path 当前不因 ability id 偏离上述 canonical 值而单独形成 formal rejection；本契约不预先冻结更严格的 ability-mismatch 阻断。
 
 ## 2. Target baseline
 
 ```ts
-type XhsDetailTargetBaseline = {
+type LegacyXhsDetailTargetBaseline = {
   target_page: "explore_detail_tab";
   target_domain: string;
   target_tab_id: number;
   requested_execution_mode: string;
 };
 
-type XhsUserHomeTargetBaseline = {
+type LegacyXhsUserHomeTargetBaseline = {
   target_page: "profile_tab";
   target_domain: string;
   target_tab_id: number;
   requested_execution_mode: string;
+};
+
+type CanonicalXhsDetailTargetBaseline = {
+  runtime_target: {
+    domain: string;
+    tab_id: number;
+    page: "explore_detail_tab";
+  };
+  derived_requested_execution_mode: string;
+};
+
+type CanonicalXhsUserHomeTargetBaseline = {
+  runtime_target: {
+    domain: string;
+    tab_id: number;
+    page: "profile_tab";
+  };
+  derived_requested_execution_mode: string;
 };
 ```
 

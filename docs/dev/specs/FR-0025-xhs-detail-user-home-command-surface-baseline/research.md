@@ -21,10 +21,12 @@
 - `src/commands/xhs-input.ts`
   - `parseDetailInputForContract()` 要求 `note_id`
   - `parseUserHomeInputForContract()` 要求 `user_id`
+  - `parseXhsCommandInputForContract()` 当前按 `command` 分派到 detail / user_home shared parser，而不是在 legacy path 先强制校验 canonical ability id
   - `xhs.note.detail.v1` 只允许 `explore_detail_tab`
   - `xhs.user.home.v1` 只允许 `profile_tab`
   - `normalizeGateOptionsForContract()` 在 legacy public CLI contract 下要求显式 `target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode`
   - `normalizeGateOptionsForContract()` 在 canonical `upstream_authorization_request` path 下继续从 `runtime_target` 派生 `target_domain`、`target_tab_id`、`target_page`，并推导 `requested_execution_mode`
+  - `ACTION_NAME_COMMAND_MISMATCH` 只在 canonical `upstream_authorization_request` path 下执行 command-to-action 对齐，不构成 legacy path 的通用 ability-mismatch 阻断
 
 ### 3. current tests 已证明 command surface 与 unified read path 存在
 
@@ -43,6 +45,7 @@
 - 当前 formal freeze 只能冻结两条现有入口的真实边界：
   - legacy public CLI path：`target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode` 仍需显式提供
   - canonical upstream path：shared gate fields 继续从 `runtime_target` 与 current parser 行为派生，不另起第二套输入
+- canonical shared-path ability 映射当前存在，但 formal 只能把它冻结为 canonical upstream path 与 current runtime / contract output 的对齐边界，不能提前把 legacy path 写成更严格的 ability-mismatch rejection
 
 ### 4. current implementation 已消费 FR-0023 四对象输入
 

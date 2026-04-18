@@ -5,6 +5,7 @@
 - [ ] reviewer 确认 `xhs.detail` / `xhs.user_home` 已冻结为 current public CLI command surface
 - [ ] reviewer 确认 `FR-0005` 中“缺失公开命令面”只保留为 dated historical fact
 - [ ] reviewer 确认 `note_id` / `user_id` 是唯一 required canonical command input
+- [ ] reviewer 确认 canonical shared-path ability 只冻结为 current canonical 对齐边界，而不是被误写成 legacy public CLI path 的新 rejection 规则
 - [ ] reviewer 确认 `explore_detail_tab` / `profile_tab` 是唯一 target-page baseline
 - [ ] reviewer 确认 legacy public CLI request-context 仍要求显式 `target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode`
 - [ ] reviewer 确认 canonical `upstream_authorization_request` path 继续从 `runtime_target` / current parser 行为派生 shared gate fields，而不是新增第二套外显输入
@@ -15,7 +16,8 @@
 - [ ] reviewer 确认 canonical upstream path 下 `execution_audit` 允许为 `null`，formal 未误写为强制产出
 - [ ] reviewer 确认 `execution_audit` 不进入 `observability`
 - [ ] reviewer 确认 detail identity 与 `image_scenes` 已显式转交 `#505`
-- [ ] reviewer 确认 PR 描述已显式填写 `integration_check.integration_applicable=no` 与 `integration_check.integration_ref=none`
+- [ ] reviewer 确认 PR 描述已显式填写 integration-gated 元数据：`integration_applicable=yes`、`integration_touchpoint=active`、`integration_ref=#464`
+- [ ] reviewer 确认 PR 描述已显式填写 `shared_contract_changed=yes`、`merge_gate=integration_check_required`、`joint_acceptance_needed=yes`
 - [ ] reviewer 确认 PR 描述已完整填写 formal spec review PR 所需 `gate_applicability` 字段：`review_lane`、`governance_context_issue_ref`、`governance_scope_targets`、`in_scope`、`trigger_reasons`、`n_a_allowed`
 - [ ] reviewer 确认 `Closing=Refs #504` 与 `live_evidence_record=N/A`
 - [ ] reviewer 确认 `bash scripts/check-pr-purity.sh docs/FR-0025-xhs-detail-user-home-command-surface-baseline main` 与单分支职责一致
