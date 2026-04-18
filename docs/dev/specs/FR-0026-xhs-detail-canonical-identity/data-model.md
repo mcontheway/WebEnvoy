@@ -22,13 +22,13 @@
 
 | 对象 | 当前 formal 状态 |
 | --- | --- |
-| `/api/sns/web/v1/feed` request body `source_note_id` | observed-only request-side field; not-in-identity baseline; no alias/derivation semantics frozen |
+| `/api/sns/web/v1/feed` request body `source_note_id` | current-detail artifact observed field; resolves to canonical `note_id` value when consumed as an admitted detail artifact, but does not become a second identity field |
 
 约束：
 
-- 当前 formal 不把它冻结为 transport alias、artifact-side derivation input、placement 或 route 规则
+- 当前 formal 只冻结它在 current-detail artifact 中到 canonical `note_id` 的最小值解析关系
 - 不新增第二个 identity 字段
-- 不扩写为更广 verified transport truth 或其他 normalization 语义
+- 不冻结更广 transport alias、placement、route admission、compatibility 或其他 normalization 语义
 
 ### 3. exclusion boundary
 
@@ -48,7 +48,7 @@
 - target-page baseline
 - 四对象输入 ownership
 - detail/user_home request-context baseline
-- `source_note_id` 的 transport alias、artifact-side derivation、placement 与 normalization 规则
+- 更广 `source_note_id` transport alias / placement / route admission / normalization 规则
 - compatibility、rejected-source matching、template reuse 等 request-context 行为
 
-这些对象属于 `#504`，不在本 FR 重新定义。
+其中前四项已由 `#504` / FR-0025 冻结；后两项必须由后续实现 FR / 实现 PR 在消费 `#504 + #505` 后继续回答，不在本 FR 重新定义。

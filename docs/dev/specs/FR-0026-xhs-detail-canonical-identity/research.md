@@ -30,7 +30,8 @@
 补充观测：
 
 - `tests/xhs-read-execution.fallback.test.ts` 已验证 `/api/sns/web/v1/feed` POST body 使用 `source_note_id`
-- 但当前仓库仍缺少足够证据去把它冻结成 verified request transport truth、transport alias、artifact-side derivation input、其他 placement 或其他路由的一般化规则
+- 该证据已经足够支撑一个更窄的 formal 结论：在 current-detail artifact 被后续实现承认为可消费 detail artifact 时，`source_note_id` 的 trim 后字符串值可以解析为 canonical `note_id`
+- 但当前仓库仍缺少足够证据去把它冻结成 verified request transport truth、跨路由 transport alias、route admission 规则、其他 placement 或其他路由的一般化 normalization 规则
 - formal 也不应把未验证的其他字段、未验证路由或未验证 mapping relation 写成 identity truth
 
 ### 3. 仓库内缺少 image_scenes admission-ready 证据
@@ -61,7 +62,7 @@
 
 当前仓库内还只能支持一个更窄的 artifact-side 结论：
 
-- 在当前已观测到的 `/api/sns/web/v1/feed` request artifact 上，`source_note_id` 只是一条 request-side 观测事实
-- 但它仍不足以被 formalize 为 verified transport truth、transport alias、artifact-side derivation input、第二个 identity 字段或其他 route 的通用 normalization 规则
+- 在当前已观测到的 `/api/sns/web/v1/feed` request artifact 上，`source_note_id` 可以作为 current-detail artifact 到 canonical `note_id` 的最小值解析来源
+- 但它仍不足以被 formalize 为 verified transport truth、跨路由 transport alias、第二个 identity 字段或其他 route 的通用 normalization 规则
 
-因此，本 FR 应冻结“current v1 canonical identity = note_id only；image_scenes 当前不进入 identity；source_note_id 暂不进入 formal freeze”，而不是继续扩 scope。
+因此，本 FR 应冻结“current v1 canonical identity = note_id only；image_scenes 当前不进入 identity；current-detail artifact 中 `source_note_id -> note_id` 的最小值解析规则成立，但不扩写成更广 transport truth”，而不是继续扩 scope。

@@ -45,10 +45,12 @@ type ExcludeImageScenesFromIdentityV1 = (
 约束：
 
 - current v1 canonical identity 仍只围绕 canonical `note_id` 建立。
-- 当前已观测到的 `source_note_id` 不新增第二个 identity 字段，也不进入 frozen identity baseline。
-- 本 FR 不把 `source_note_id` 冻结为 transport alias、artifact-side derivation input、normalization 规则或更广 verified transport truth。
+- 当后续实现消费已承认的 current-detail artifact，且该 artifact 只提供当前已观测到的 request body 字段 `source_note_id` 时，canonical `note_id` 必须解析为该字段的 trim 后字符串值。
+- 上述规则只回答 current-detail artifact 如何得到 frozen canonical `note_id` 值，不新增第二个 identity 字段，也不改变 `note_id` only identity anchor。
+- `source_note_id` 本身不进入 frozen identity baseline。
+- 本 FR 不把 `source_note_id` 扩写为跨路由 transport alias、route admission 规则、一般化 normalization 规则或更广 verified transport truth。
 - 其他 request/artifact 字段不在本 FR scope。
-- 若未来需要 formalize request/artifact alias、normalization 或 artifact-side identity derivation，必须基于新的仓库证据和新的 spec 修订。
+- 若未来需要 formalize 更广 request/artifact alias、normalization 或 artifact-side identity derivation，必须基于新的仓库证据和新的 spec 修订。
 
 ## 5. Future revision gate
 
