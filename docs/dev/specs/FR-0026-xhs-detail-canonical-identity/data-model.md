@@ -24,7 +24,6 @@
 | 字段 | 角色 |
 | --- | --- |
 | `image_scenes` | diagnostics / compatibility context |
-| `CRD_PRV_WEBP` | diagnostics / compatibility context |
 
 约束：
 

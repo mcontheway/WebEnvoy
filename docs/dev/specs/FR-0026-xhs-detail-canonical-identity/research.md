@@ -35,7 +35,6 @@
 在 current repo 中检索：
 
 - `image_scenes`
-- `CRD_PRV_WEBP`
 
 未发现 runtime / extension / tests / formal contract 中的稳定 identity 使用证据。
 
@@ -55,7 +54,6 @@
 当前仓库内还不能支持以下结论：
 
 - `image_scenes` 必须进入 identity
-- `CRD_PRV_WEBP` 必须进入 identity
 - detail current identity 需要多字段组合
 
 当前仓库内还能支持一个附加的兼容性结论：

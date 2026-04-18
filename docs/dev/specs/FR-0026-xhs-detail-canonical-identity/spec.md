@@ -10,7 +10,7 @@ Canonical Issue: #505
 
 - current main 上，`xhs.detail` 的 command input、runtime、bridge、contract test 和 fallback test 都稳定围绕 `note_id` 运转。
 - current in-tree fallback artifact 已出现 `source_note_id`，但当前仓库证据只证明 canonical `note_id` 会被写出到该兼容字段，尚未证明存在反向 identity 归一化读路径。
-- 仓库内没有足够的 runtime/test/formal contract 证据证明 `image_scenes` 或 `CRD_PRV_WEBP` 是 admission-ready 的 canonical identity 字段。
+- 仓库内没有足够的 runtime/test/formal contract 证据证明 `image_scenes` 是 admission-ready 的 canonical identity 字段。
 - `#503` guardian 的多轮阻断已经反复指出：在证据不足前把 `image_scenes` 冻结进 detail identity，会把未验证字段写成正式真相。
 
 因此，本 FR 的职责不是继续寻找额外字段，而是先把 current v1 可被仓库内证据支撑的最小 identity 冻结为 formal contract：`xhs.detail` canonical identity 当前只包含 `note_id`，`image_scenes` 不进入 `shape` / `shape_key` / lookup / eligibility`。
@@ -18,7 +18,7 @@ Canonical Issue: #505
 ## 目标
 
 1. 冻结 current v1 `xhs.detail` canonical identity 只包含 `note_id`。
-2. 冻结 `image_scenes` 与 `CRD_PRV_WEBP` 当前不进入 canonical shape。
+2. 冻结 `image_scenes` 当前不进入 canonical shape。
 3. 冻结这些字段在 current v1 中只允许作为 non-identity diagnostics / compatibility context。
 4. 冻结后续实现 PR 在 `#505` 之外不得擅自把 `image_scenes` 写入 detail identity。
 5. 明确未来如果出现 admission-ready 仓库证据，必须通过新的 spec 修订再讨论 identity 扩张。
@@ -57,7 +57,6 @@ type XhsDetailCanonicalIdentityV1 = {
 系统必须冻结以下 current v1 结论：
 
 - `image_scenes` 不进入 canonical identity
-- `CRD_PRV_WEBP` 不进入 canonical identity
 
 这些字段在 current v1 中只允许作为：
 
@@ -75,12 +74,12 @@ type XhsDetailCanonicalIdentityV1 = {
 
 ### 3. identity derivation baseline
 
-系统必须冻结：只要当前请求或模板能够稳定提供 `note_id`，就可以构成 current v1 detail identity；不得要求在 identity derivation 阶段额外等待 `image_scenes` 或 `CRD_PRV_WEBP`。
+系统必须冻结：只要当前请求或模板能够稳定提供 `note_id`，就可以构成 current v1 detail identity；不得要求在 identity derivation 阶段额外等待 `image_scenes`。
 
 约束：
 
 - 缺少 `image_scenes` 不能单独导致 current v1 detail identity 不可导出。
-- current v1 detail identity 的导出前提只绑定 `note_id`，不绑定 `image_scenes` 或 `CRD_PRV_WEBP`。
+- current v1 detail identity 的导出前提只绑定 `note_id`，不绑定 `image_scenes`。
 - 如果当前实现需要保留 `image_scenes` 供诊断输出使用，必须与 identity derivation 解耦。
 - 当 command-side input 已提供 `note_id` 时，canonical identity 直接使用 trim 后的 `note_id`。
 - 当前仓库证据只证明 canonical `note_id` 可以被写出到兼容字段 `source_note_id`；本 FR 不把“仅凭 artifact 的 `source_note_id` 反向归一化回 canonical `note_id`”写成 current v1 formal truth。
@@ -91,7 +90,7 @@ type XhsDetailCanonicalIdentityV1 = {
 系统必须冻结以下 current v1 lookup / eligibility 规则：
 
 - 两条 detail request/template 只要 `note_id` 相同，就属于同一个 current v1 canonical identity。
-- 仅因 `image_scenes` 或 `CRD_PRV_WEBP` 不同，不得判定为 identity mismatch。
+- 仅因 `image_scenes` 不同，不得判定为 identity mismatch。
 - `image_scenes` 缺失、为空、未观测到或值不同，不得单独触发 `shape_mismatch`、`rejected_source` 或 stale 行为。
 
 补充约束：
@@ -113,7 +112,7 @@ type XhsDetailCanonicalIdentityV1 = {
 
 ### 6. 未来扩 identity 的准入条件
 
-若未来要把 `image_scenes`、`CRD_PRV_WEBP` 或其他候选字段纳入 detail identity，必须同时满足：
+若未来要把 `image_scenes` 或其他候选字段纳入 detail identity，必须同时满足：
 
 1. 仓库内出现可复核的 runtime / test / artifact 证据
 2. 该证据能稳定证明 `note_id` 单独使用会造成 false-hit、false-miss 或错误复用
@@ -151,7 +150,7 @@ And 不得仅因 `image_scenes` 差异触发 mismatch
 
 ### 场景 4：image_scenes 只能作为 non-identity context
 
-Given detail runtime 或 test 现场观测到了 `image_scenes` 或 `CRD_PRV_WEBP`
+Given detail runtime 或 test 现场观测到了 `image_scenes`
 When 系统记录当前 v1 contract
 Then 这些字段只能进入 diagnostics / compatibility context
 And 不得进入 `shape`、`shape_key`、lookup key 或 eligibility gate
@@ -173,7 +172,7 @@ And 必须等待新的 spec 修订
 ## 验收标准
 
 1. current v1 `xhs.detail` canonical identity 已冻结为 `note_id` only。
-2. `image_scenes` 与 `CRD_PRV_WEBP` 已冻结为 non-identity context。
+2. `image_scenes` 已冻结为 non-identity context。
 3. `lookup`、`eligibility`、`shape` 与 `shape_key` 当前都不得依赖这些字段。
 4. 后续实现 PR 不得以“当前 formal 未明确禁止”为由擅自把这些字段写入 identity。
 5. future identity expansion 的准入条件已明确为“仓库内 admission-ready evidence + 新 spec 修订”。

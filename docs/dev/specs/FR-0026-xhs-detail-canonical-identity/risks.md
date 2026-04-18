@@ -3,7 +3,7 @@
 ## 风险 1：过早把 image_scenes 写成正式 identity
 
 - 表现：
-  - 后续实现 PR 直接把 `image_scenes` / `CRD_PRV_WEBP` 写入 `shape` / `shape_key`
+  - 后续实现 PR 直接把 `image_scenes` 写入 `shape` / `shape_key`
 - 影响：
   - 把未验证字段写成正式真相
   - 新实现可能围绕错误 identity 收敛

@@ -20,7 +20,6 @@ type XhsDetailCanonicalIdentityV1 = {
 ```ts
 type XhsDetailNonIdentityContext = {
   image_scenes?: unknown;
-  CRD_PRV_WEBP?: unknown;
 };
 ```
 
@@ -42,7 +41,7 @@ type CompareXhsDetailIdentityV1 = (
 约束：
 
 - 只要 `note_id` 相同，current v1 comparison 就必须返回 `exact_match`
-- `image_scenes`、`CRD_PRV_WEBP` 差异不得单独导致 `mismatch`
+- `image_scenes` 差异不得单独导致 `mismatch`
 
 ## 4. Current v1 compatibility note
 
@@ -61,7 +60,7 @@ type XhsDetailCompatibilityObservationV1 = {
 
 ## 5. Future revision gate
 
-若未来要把 `image_scenes`、`CRD_PRV_WEBP` 或其他候选字段纳入 identity，必须同时满足：
+若未来要把 `image_scenes` 或其他候选字段纳入 identity，必须同时满足：
 
 - 仓库内出现 admission-ready runtime / test / artifact 证据
 - 该证据能稳定证明 `note_id` only identity 不足

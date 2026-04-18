@@ -2,7 +2,7 @@
 
 ## 实施目标
 
-冻结 current v1 `xhs.detail` canonical identity 只包含 `note_id`，并明确 `image_scenes` / `CRD_PRV_WEBP` 当前只属于 non-identity diagnostics / compatibility context，为后续实现 PR 提供不可歧义的 identity 基线。
+冻结 current v1 `xhs.detail` canonical identity 只包含 `note_id`，并明确 `image_scenes` 当前只属于 non-identity diagnostics / compatibility context，为后续实现 PR 提供不可歧义的 identity 基线。
 
 ## 分阶段拆分
 
@@ -59,7 +59,7 @@
   - `source_note_id` 继续只作为兼容输出字段 / future evidence candidate，不被误写成 current v1 identity 依据
   - `image_scenes` 不进入 `shape` / `shape_key`
   - 同 `note_id` 且 `image_scenes` 差异不触发 mismatch
-  - future revision 前，`image_scenes` / `CRD_PRV_WEBP` 只留在 diagnostics / compatibility context
+  - future revision 前，`image_scenes` 只留在 diagnostics / compatibility context
 
 ## 并行 / 串行关系
 
@@ -75,6 +75,6 @@
 - FR-0026 spec review 通过。
 - reviewer 确认 current v1 detail identity 只包含 `note_id`。
 - reviewer 确认 `source_note_id` 当前只属于兼容输出字段 / future evidence candidate，formal 未误写成反向 identity 归一化规则。
-- reviewer 确认 `image_scenes` / `CRD_PRV_WEBP` 当前只属于 non-identity context。
+- reviewer 确认 `image_scenes` 当前只属于 non-identity context。
 - reviewer 确认 lookup / eligibility / `shape_key` 当前不得依赖这些字段。
 - reviewer 确认 future identity expansion 必须等待新的仓库内证据和新的 spec 修订。
