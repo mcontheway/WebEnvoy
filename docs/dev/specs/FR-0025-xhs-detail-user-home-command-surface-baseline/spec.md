@@ -114,13 +114,15 @@ Canonical Issue: #504
 
 系统必须冻结以下 command-level 结果 ownership：
 
-- 当 canonical `upstream_authorization_request` 存在且通过 command-level mapping 时：
-  - `request_admission_result` 必须进入 summary 或 error details
-  - `execution_audit` 必须进入 summary 或 error details
+- `request_admission_result` 与 `execution_audit` 是这两个命令当前共享的 canonical request-level output slot。
+- 当 current implementation 产出 `request_admission_result` 或 `execution_audit` 时：
+  - 它们必须进入 summary 或 error details
   - `execution_audit` 不得泄露到 `observability`
 - 当 canonical `upstream_authorization_request` 缺失时：
   - current implementation 允许 legacy path 下的 `request_admission_result` / `execution_audit` 为 `null`
-  - 这不改变两个命令已经属于公共 command surface 的正式结论
+- 当 canonical `upstream_authorization_request` 存在时：
+  - current implementation 仍可能让 `execution_audit` 保持 `null` 或缺席；本 FR 不把“必然产出 execution_audit”写成 formal truth
+- 上述兼容性都不改变两个命令已经属于公共 command surface 的正式结论
 
 补充约束：
 
@@ -197,8 +199,9 @@ And 本 FR 不得把内部 auto pinning 写成公共 CLI 基线
 
 Given 调用方为 `xhs.detail` 或 `xhs.user_home` 提供 canonical `upstream_authorization_request`
 When 命令完成 summary 或 error details 映射
-Then `request_admission_result` 与 `execution_audit` 必须按 current implementation 保留
+Then 若 current implementation 产出了 `request_admission_result` 或 `execution_audit`，它们必须按 current implementation 保留在 canonical slot
 And `execution_audit` 不得出现在 `observability`
+And 本 FR 不把 `execution_audit` 的必然产出写成 formal truth
 
 ### 场景 10：#505 之前不得把 image_scenes 写成 detail identity
 
@@ -214,6 +217,7 @@ And 必须等待 `#505` 的正式结论
 - `target_page` 越界、`runtime_target.page` 越界或 `target_tab_id` / `runtime_target.tab_id` 缺失时，必须返回结构化 invalid-args 结果。
 - background/extension direct path 若存在内部 auto target-tab resolution，不得被本 FR 误写为 current public CLI contract。
 - legacy path 下允许 `request_admission_result` 与 `execution_audit` 为 `null`，但不得把 `null` 误解释为“命令面不存在”。
+- canonical upstream path 下 `execution_audit` 仍可能为 `null`；这代表当前实现尚未为该场景产出 audit，不代表 command surface 缺失。
 - 若当前 formal 文档仍引用“detail/user_home 尚无公开命令面”的历史表述，后续 closeout 必须按 dated historical fact 处理，不得回退为 current blocker。
 
 ## 验收标准
@@ -222,7 +226,7 @@ And 必须等待 `#505` 的正式结论
 2. 两个命令的 canonical command input 已冻结为 `note_id` / `user_id`。
 3. 两个命令的 target-page baseline 已冻结为 `explore_detail_tab` / `profile_tab`，且 public CLI request-context 仍要求显式 target tab。
 4. 两个命令消费 `FR-0023` 四对象输入的 command-level ownership 已冻结，且不新增第二套授权输入。
-5. `request_admission_result` 与 `execution_audit` 的 command-level ownership 已与 current implementation 对齐。
+5. `request_admission_result` 与 `execution_audit` 的 canonical output slot / 位置约束已与 current implementation 对齐，而非强制每次都产出 audit。
 6. 本 FR 已显式把 detail identity 与 `image_scenes` 转交 `#505`。
 7. formal 套件足以支撑后续实现 PR 和 `#445` closeout 不再把“缺少公开命令面”当成 current blocker。
 

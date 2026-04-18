@@ -47,7 +47,9 @@
   - detail/user_home 通过同一套 envelope 消费 canonical `upstream_authorization_request`
   - command-level action mapping 已对齐 `xhs.read_note_detail` / `xhs.read_user_home`
 - `src/commands/xhs-runtime.ts`
-  - summary / error details 会按 current implementation 承载 `request_admission_result` / `execution_audit`
+  - 若 bridge payload 已产出 `request_admission_result` / `execution_audit`，summary / error details 会按 current implementation 透传到 canonical slot
+- `tests/content-script-handler.xhs-read.contract.test.ts`
+  - canonical upstream path 下已存在 `request_admission_result` 为 allowed 但 `execution_audit` 仍为 `null` 的 current behavior
 
 ### 5. 与 FR-0005 的 formal 冲突
 

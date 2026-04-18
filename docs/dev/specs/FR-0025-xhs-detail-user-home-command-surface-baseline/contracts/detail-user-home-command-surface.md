@@ -86,9 +86,11 @@ type CommandLevelSummary = {
 
 约束：
 
-- canonical upstream input 存在时，`request_admission_result` / `execution_audit` 必须保留在 summary 或 error details
+- `request_admission_result` / `execution_audit` 是 canonical request-level output slot
+- 当 current implementation 产出这两个字段时，它们必须保留在 summary 或 error details
 - `execution_audit` 不得进入 `observability`
 - legacy path 下允许二者为 `null`
+- canonical upstream path 下，`execution_audit` 仍允许保持 `null` 或缺席
 
 ## 5. Deferred scope
 

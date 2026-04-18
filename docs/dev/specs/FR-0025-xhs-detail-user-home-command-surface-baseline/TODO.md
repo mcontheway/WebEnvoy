@@ -9,7 +9,8 @@
 - [ ] reviewer 确认 public CLI request-context 仍要求显式 `target_tab_id` / `runtime_target.tab_id`
 - [ ] reviewer 确认 background/extension direct path 的内部 auto target-tab resolution 未被误冻结为公共 CLI 契约
 - [ ] reviewer 确认两条命令只消费 `FR-0023` 四对象输入，不新增第二套授权输入
-- [ ] reviewer 确认 `request_admission_result` / `execution_audit` 的 command-level ownership 与 current implementation 对齐
+- [ ] reviewer 确认 `request_admission_result` / `execution_audit` 的 canonical slot / 位置约束与 current implementation 对齐
+- [ ] reviewer 确认 canonical upstream path 下 `execution_audit` 允许为 `null`，formal 未误写为强制产出
 - [ ] reviewer 确认 `execution_audit` 不进入 `observability`
 - [ ] reviewer 确认 detail identity 与 `image_scenes` 已显式转交 `#505`
 - [ ] reviewer 确认 PR 描述已显式填写 `integration_check.integration_applicable=no` 与 `integration_check.integration_ref=none`
