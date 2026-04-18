@@ -8,6 +8,10 @@ const profileRuntime = new ProfileRuntimeService();
 const asObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
+const readRuntimeTakeoverEvidence = (status) => {
+    const evidence = asObject(status.runtimeTakeoverEvidence);
+    return evidence ?? {};
+};
 const isTransportFailureCode = (code) => code === "ERR_TRANSPORT_HANDSHAKE_FAILED" ||
     code === "ERR_TRANSPORT_TIMEOUT" ||
     code === "ERR_TRANSPORT_DISCONNECTED" ||
@@ -195,8 +199,9 @@ export const prepareOfficialChromeRuntime = async (input) => {
     let identityBindingState = typeof status.identityBindingState === "string" ? status.identityBindingState : "missing";
     let bootstrapState = typeof status.bootstrapState === "string" ? status.bootstrapState : "not_started";
     let transportState = typeof status.transportState === "string" ? status.transportState : "not_connected";
-    const preLockOrphanRecoverable = status.orphanRecoverable === true;
-    const preLockAttachableReadyRuntime = status.attachableReadyRuntime === true;
+    const runtimeTakeoverEvidence = readRuntimeTakeoverEvidence(status);
+    const preLockOrphanRecoverable = runtimeTakeoverEvidence.orphanRecoverable === true;
+    const preLockAttachableReadyRuntime = runtimeTakeoverEvidence.attachableReadyRuntime === true;
     const syncRuntimeStatus = (nextStatus) => {
         status = nextStatus;
         profileState =

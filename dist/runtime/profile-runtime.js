@@ -667,6 +667,26 @@ export class ProfileRuntimeService {
             pinnedControllerPid,
             readiness
         });
+        const attachableRecoverableRuntime = !accessState.lockHeld &&
+            (accessState.profileState === "ready" || accessState.profileState === "disconnected") &&
+            (lockInspection?.orphanRecoverable ?? false) &&
+            readiness.identityBindingState === "bound" &&
+            readiness.bootstrapState !== "stale" &&
+            readiness.transportState !== "not_connected" &&
+            readiness.runtimeReadiness === "recoverable";
+        const runtimeTakeoverEvidence = this.#buildRuntimeTakeoverEvidence({
+            profile: input.profile,
+            lockHeld: accessState.lockHeld,
+            healthyLock: accessState.healthyLock,
+            controlConnected: accessState.controlConnected,
+            observedRunId: accessState.observedRunId,
+            readiness,
+            attachableReadyRuntime,
+            orphanRecoverable: attachableRecoverableRuntime,
+            pinnedControllerPid,
+            browserPid: lockInspection?.browserPid ?? null,
+            stateRunId: lockInspection?.stateRunId ?? null
+        });
         return {
             profile: input.profile,
             profileState: accessState.profileState,
@@ -680,8 +700,7 @@ export class ProfileRuntimeService {
             runtimeReadiness: readiness.runtimeReadiness,
             identityPreflight: buildIdentityPreflightOutput(identityPreflight),
             lockOwnerPid: lock?.ownerPid ?? null,
-            attachableReadyRuntime,
-            orphanRecoverable: lockInspection?.orphanRecoverable ?? false,
+            runtimeTakeoverEvidence,
             recoverableSession: buildRecoverableSessionSummary(meta),
             fingerprint_runtime: fingerprintRuntime,
             updatedAt: meta?.updatedAt ?? null
@@ -753,16 +772,26 @@ export class ProfileRuntimeService {
             preAttachReadiness.bootstrapState !== "stale" &&
             preAttachReadiness.transportState !== "not_connected" &&
             preAttachReadiness.runtimeReadiness === "recoverable";
-        const takeoverMode = attachableReadyRuntime
-            ? "ready_attach"
-            : attachableRecoverableRuntime
-                ? "recoverable_rebind"
-                : null;
-        if (!attachableReadyRuntime && !attachableRecoverableRuntime) {
+        const runtimeTakeoverEvidence = this.#buildRuntimeTakeoverEvidence({
+            profile: input.profile,
+            lockHeld: false,
+            healthyLock: accessState.healthyLock,
+            controlConnected: accessState.controlConnected,
+            observedRunId: accessState.observedRunId,
+            readiness: preAttachReadiness,
+            attachableReadyRuntime,
+            orphanRecoverable: attachableRecoverableRuntime,
+            pinnedControllerPid,
+            browserPid: lockInspection.browserPid,
+            stateRunId: lockInspection.stateRunId
+        });
+        if (!runtimeTakeoverEvidence.attachableReadyRuntime &&
+            !runtimeTakeoverEvidence.orphanRecoverable) {
             throw new CliError("ERR_PROFILE_LOCKED", "profile 当前不存在可安全接管的 ready runtime", {
                 retryable: true
             });
         }
+        const takeoverMode = runtimeTakeoverEvidence.mode;
         const nextOwnerPid = takeoverMode === "recoverable_rebind" ? process.pid : lock.ownerPid;
         let attachedLock = lock;
         if (lock.ownerRunId !== input.runId ||
@@ -830,7 +859,6 @@ export class ProfileRuntimeService {
             runtimeReadiness: readiness.runtimeReadiness,
             identityPreflight: buildIdentityPreflightOutput(identityPreflight),
             lockOwnerPid: attachedLock.ownerPid,
-            orphanRecoverable: false,
             recoverableSession: buildRecoverableSessionSummary(nextMeta),
             fingerprint_runtime: fingerprintRuntime,
             updatedAt: nextMeta?.updatedAt ?? null
@@ -1206,6 +1234,33 @@ export class ProfileRuntimeService {
         catch {
             return null;
         }
+    }
+    #buildRuntimeTakeoverEvidence(input) {
+        const controllerBrowserContinuity = Number.isInteger(input.pinnedControllerPid) &&
+            Number.isInteger(input.browserPid) &&
+            input.stateRunId === input.observedRunId;
+        const transportBootstrapViable = input.readiness.transportState !== "not_connected" &&
+            input.readiness.bootstrapState !== "stale";
+        const readyAttach = !input.lockHeld && input.attachableReadyRuntime;
+        const recoverableRebind = !input.lockHeld && !readyAttach && input.orphanRecoverable;
+        return {
+            mode: readyAttach ? "ready_attach" : recoverableRebind ? "recoverable_rebind" : null,
+            attachableReadyRuntime: readyAttach,
+            orphanRecoverable: recoverableRebind,
+            freshness: controllerBrowserContinuity && transportBootstrapViable && input.healthyLock
+                ? "fresh"
+                : "stale",
+            identityBound: input.readiness.identityBindingState === "bound",
+            ownerConflictFree: input.lockHeld ||
+                recoverableRebind ||
+                (readyAttach && input.healthyLock && input.controlConnected),
+            controllerBrowserContinuity,
+            transportBootstrapViable,
+            observedRunId: input.observedRunId,
+            runtimeContextId: input.observedRunId.length > 0
+                ? buildRuntimeBootstrapContextId(input.profile, input.observedRunId)
+                : null
+        };
     }
     async #rebindActiveRuntimeOwnership(input) {
         const statePath = join(input.profileDir, BROWSER_STATE_FILENAME);

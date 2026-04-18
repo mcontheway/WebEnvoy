@@ -5,6 +5,20 @@ import {
   prepareOfficialChromeRuntime
 } from "../official-chrome-runtime.js";
 
+const buildRuntimeTakeoverEvidence = (input: {
+  mode?: "ready_attach" | "recoverable_rebind" | null;
+  attachableReadyRuntime?: boolean;
+  orphanRecoverable?: boolean;
+  observedRunId?: string;
+  runtimeContextId?: string | null;
+} = {}) => ({
+  mode: input.mode ?? null,
+  attachableReadyRuntime: input.attachableReadyRuntime ?? false,
+  orphanRecoverable: input.orphanRecoverable ?? false,
+  observedRunId: input.observedRunId ?? "observed-runtime-001",
+  runtimeContextId: input.runtimeContextId ?? null
+});
+
 describe("prepareOfficialChromeRuntime", () => {
   it("does not forward persistent extension identity into runtime.status params", () => {
     expect(
@@ -194,7 +208,11 @@ describe("prepareOfficialChromeRuntime", () => {
         bootstrapState: "ready",
         transportState: "ready",
         lockHeld: false,
-        attachableReadyRuntime: true
+        runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+          mode: "ready_attach",
+          attachableReadyRuntime: true,
+          observedRunId: "run-runtime-attach-owner-001"
+        })
       })
       .mockResolvedValueOnce({
         identityPreflight: {
@@ -273,7 +291,7 @@ describe("prepareOfficialChromeRuntime", () => {
     );
   });
 
-  it("attempts attach from pre-lock orphan-recovery facts even when attach clears top-level orphanRecoverable", async () => {
+  it("attempts attach from pre-lock orphan recovery facts even after attach rebinding", async () => {
     const readStatus = vi
       .fn()
       .mockResolvedValueOnce({
@@ -286,7 +304,11 @@ describe("prepareOfficialChromeRuntime", () => {
         bootstrapState: "ready",
         transportState: "disconnected",
         lockHeld: false,
-        orphanRecoverable: true
+        runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+          mode: "recoverable_rebind",
+          orphanRecoverable: true,
+          observedRunId: "run-runtime-recoverable-owner-001"
+        })
       })
       .mockResolvedValueOnce({
         identityPreflight: {
@@ -297,8 +319,7 @@ describe("prepareOfficialChromeRuntime", () => {
         identityBindingState: "bound",
         bootstrapState: "ready",
         transportState: "ready",
-        lockHeld: true,
-        orphanRecoverable: false
+        lockHeld: true
       });
     const attachRuntime = vi.fn(async () => ({
       identityPreflight: {
@@ -309,8 +330,7 @@ describe("prepareOfficialChromeRuntime", () => {
       identityBindingState: "bound",
       bootstrapState: "pending",
       transportState: "ready",
-      lockHeld: true,
-      orphanRecoverable: false
+      lockHeld: true
     }));
     const bridge = {
       runCommand: vi.fn(async (request: { params: { runtime_context_id: string } }) => ({
@@ -373,8 +393,11 @@ describe("prepareOfficialChromeRuntime", () => {
         bootstrapState: "ready",
         transportState: "ready",
         lockHeld: false,
-        orphanRecoverable: false,
-        attachableReadyRuntime: true
+        runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+          mode: "ready_attach",
+          attachableReadyRuntime: true,
+          observedRunId: "run-runtime-owner-001"
+        })
       })
       .mockResolvedValueOnce({
         identityPreflight: {
@@ -385,8 +408,7 @@ describe("prepareOfficialChromeRuntime", () => {
         identityBindingState: "bound",
         bootstrapState: "ready",
         transportState: "ready",
-        lockHeld: true,
-        orphanRecoverable: false
+        lockHeld: true
       });
     const attachRuntime = vi.fn(async () => ({
       identityPreflight: {
@@ -397,8 +419,7 @@ describe("prepareOfficialChromeRuntime", () => {
       identityBindingState: "bound",
       bootstrapState: "pending",
       transportState: "ready",
-      lockHeld: true,
-      orphanRecoverable: false
+      lockHeld: true
     }));
     const bridge = {
       runCommand: vi.fn(async (request: { params: { runtime_context_id: string } }) => ({
@@ -461,8 +482,11 @@ describe("prepareOfficialChromeRuntime", () => {
         bootstrapState: "failed",
         transportState: "ready",
         lockHeld: false,
-        orphanRecoverable: false,
-        attachableReadyRuntime: true
+        runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+          mode: "ready_attach",
+          attachableReadyRuntime: true,
+          observedRunId: "run-runtime-bootstrap-failed-owner-001"
+        })
       })
       .mockResolvedValueOnce({
         identityPreflight: {
@@ -473,8 +497,7 @@ describe("prepareOfficialChromeRuntime", () => {
         identityBindingState: "bound",
         bootstrapState: "ready",
         transportState: "ready",
-        lockHeld: true,
-        orphanRecoverable: false
+        lockHeld: true
       });
     const attachRuntime = vi.fn(async () => ({
       identityPreflight: {
@@ -485,8 +508,7 @@ describe("prepareOfficialChromeRuntime", () => {
       identityBindingState: "bound",
       bootstrapState: "failed",
       transportState: "ready",
-      lockHeld: true,
-      orphanRecoverable: false
+      lockHeld: true
     }));
     const bridge = {
       runCommand: vi.fn(async (request: { params: { runtime_context_id: string } }) => ({
@@ -547,8 +569,10 @@ describe("prepareOfficialChromeRuntime", () => {
       bootstrapState: "failed",
       transportState: "ready",
       lockHeld: false,
-      orphanRecoverable: false,
-      attachableReadyRuntime: false
+      runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+        mode: null,
+        attachableReadyRuntime: false
+      })
     }));
     const attachRuntime = vi.fn(async () => ({
       identityPreflight: {
@@ -559,8 +583,7 @@ describe("prepareOfficialChromeRuntime", () => {
       identityBindingState: "bound",
       bootstrapState: "failed",
       transportState: "ready",
-      lockHeld: true,
-      orphanRecoverable: false
+      lockHeld: true
     }));
     const bridge = {
       runCommand: vi.fn()
@@ -603,8 +626,10 @@ describe("prepareOfficialChromeRuntime", () => {
       bootstrapState: "pending",
       transportState: "ready",
       lockHeld: false,
-      orphanRecoverable: false,
-      attachableReadyRuntime: false
+      runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+        mode: null,
+        attachableReadyRuntime: false
+      })
     }));
     const attachRuntime = vi.fn(async () => ({
       identityPreflight: {
@@ -615,8 +640,7 @@ describe("prepareOfficialChromeRuntime", () => {
       identityBindingState: "bound",
       bootstrapState: "pending",
       transportState: "ready",
-      lockHeld: true,
-      orphanRecoverable: false
+      lockHeld: true
     }));
     const bridge = {
       runCommand: vi.fn()
@@ -659,7 +683,10 @@ describe("prepareOfficialChromeRuntime", () => {
       bootstrapState: "ready",
       transportState: "disconnected",
       lockHeld: false,
-      orphanRecoverable: false
+      runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+        mode: null,
+        orphanRecoverable: false
+      })
     }));
     const attachRuntime = vi.fn(async () => ({
       identityPreflight: {
@@ -713,8 +740,10 @@ describe("prepareOfficialChromeRuntime", () => {
       bootstrapState: "not_started",
       transportState: "not_connected",
       lockHeld: false,
-      orphanRecoverable: false,
-      attachableReadyRuntime: false
+      runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+        mode: null,
+        attachableReadyRuntime: false
+      })
     }));
     const attachRuntime = vi.fn(async () => ({
       identityPreflight: {

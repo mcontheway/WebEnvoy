@@ -14,6 +14,14 @@ type TransportState = "not_connected" | "ready" | "disconnected";
 type RuntimeStatusReader = () => Promise<JsonObject>;
 type RuntimeAttachReader = () => Promise<JsonObject>;
 
+type RuntimeTakeoverEvidence = {
+  mode?: "ready_attach" | "recoverable_rebind" | null;
+  attachableReadyRuntime?: boolean;
+  orphanRecoverable?: boolean;
+  observedRunId?: string;
+  runtimeContextId?: string | null;
+};
+
 const OFFICIAL_CHROME_BOOTSTRAP_READINESS_MAX_ATTEMPTS = 5;
 const OFFICIAL_CHROME_BOOTSTRAP_READINESS_RETRY_DELAY_MS = 50;
 const profileRuntime = new ProfileRuntimeService();
@@ -22,6 +30,11 @@ const asObject = (value: unknown): JsonObject | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as JsonObject)
     : null;
+
+const readRuntimeTakeoverEvidence = (status: JsonObject): RuntimeTakeoverEvidence => {
+  const evidence = asObject(status.runtimeTakeoverEvidence);
+  return evidence ?? {};
+};
 
 const isTransportFailureCode = (code: unknown): code is string =>
   code === "ERR_TRANSPORT_HANDSHAKE_FAILED" ||
@@ -323,8 +336,9 @@ export const prepareOfficialChromeRuntime = async (input: {
     typeof status.bootstrapState === "string" ? status.bootstrapState : "not_started";
   let transportState =
     typeof status.transportState === "string" ? status.transportState : "not_connected";
-  const preLockOrphanRecoverable = status.orphanRecoverable === true;
-  const preLockAttachableReadyRuntime = status.attachableReadyRuntime === true;
+  const runtimeTakeoverEvidence = readRuntimeTakeoverEvidence(status);
+  const preLockOrphanRecoverable = runtimeTakeoverEvidence.orphanRecoverable === true;
+  const preLockAttachableReadyRuntime = runtimeTakeoverEvidence.attachableReadyRuntime === true;
 
   const syncRuntimeStatus = (nextStatus: JsonObject): void => {
     status = nextStatus;

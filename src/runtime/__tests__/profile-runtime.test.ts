@@ -1899,7 +1899,12 @@ describe("profile-runtime identity preflight", () => {
       transportState: "ready",
       bootstrapState: "ready",
       runtimeReadiness: "blocked",
-      attachableReadyRuntime: true
+      runtimeTakeoverEvidence: expect.objectContaining({
+        mode: "ready_attach",
+        attachableReadyRuntime: true,
+        orphanRecoverable: false,
+        observedRunId: "run-runtime-status-owner-001"
+      })
     });
   });
 
@@ -2119,7 +2124,10 @@ describe("profile-runtime identity preflight", () => {
       transportState: "not_connected",
       bootstrapState: "not_started",
       runtimeReadiness: "blocked",
-      attachableReadyRuntime: false
+      runtimeTakeoverEvidence: expect.objectContaining({
+        mode: null,
+        attachableReadyRuntime: false
+      })
     });
 
     await expect(
@@ -2216,7 +2224,10 @@ describe("profile-runtime identity preflight", () => {
       transportState: "ready",
       bootstrapState: "pending",
       runtimeReadiness: "blocked",
-      attachableReadyRuntime: false
+      runtimeTakeoverEvidence: expect.objectContaining({
+        mode: null,
+        attachableReadyRuntime: false
+      })
     });
 
     await expect(
@@ -2341,7 +2352,11 @@ describe("profile-runtime identity preflight", () => {
       transportState: "ready",
       bootstrapState: "failed",
       runtimeReadiness: "blocked",
-      attachableReadyRuntime: true
+      runtimeTakeoverEvidence: expect.objectContaining({
+        mode: "ready_attach",
+        attachableReadyRuntime: true,
+        orphanRecoverable: false
+      })
     });
 
     await expect(
@@ -2485,7 +2500,7 @@ describe("profile-runtime identity preflight", () => {
     });
   });
 
-  it("attaches a recoverable runtime and clears top-level orphanRecoverable after ownership is rebound", async () => {
+  it("attaches a recoverable runtime and clears pre-lock recoverable evidence after ownership is rebound", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-attach-recoverable-"));
     tempDirs.push(baseDir);
     process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
@@ -2643,8 +2658,7 @@ describe("profile-runtime identity preflight", () => {
       browserState: "ready",
       lockHeld: true,
       transportState: "ready",
-      runtimeReadiness: "ready",
-      orphanRecoverable: false
+      runtimeReadiness: "ready"
     });
 
     const nextLockRaw = await readFile(lockPath, "utf8");
@@ -2679,7 +2693,11 @@ describe("profile-runtime identity preflight", () => {
       lockHeld: true,
       transportState: "ready",
       runtimeReadiness: "ready",
-      orphanRecoverable: false
+      runtimeTakeoverEvidence: expect.objectContaining({
+        mode: null,
+        attachableReadyRuntime: false,
+        orphanRecoverable: false
+      })
     });
   });
 
@@ -3164,7 +3182,10 @@ describe("profile-runtime identity preflight", () => {
       transportState: "not_connected",
       bootstrapState: "pending",
       runtimeReadiness: "blocked",
-      attachableReadyRuntime: false
+      runtimeTakeoverEvidence: expect.objectContaining({
+        mode: null,
+        attachableReadyRuntime: false
+      })
     });
 
     await expect(
