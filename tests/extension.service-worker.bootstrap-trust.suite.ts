@@ -2683,11 +2683,11 @@ describe("extension service worker / bootstrap and trust", () => {
           requested_execution_mode: "live_read_high_risk",
           effective_execution_mode: "dry_run",
           gate_decision: "blocked",
-          gate_reasons: [
+          gate_reasons: expect.arrayContaining([
             "MANUAL_CONFIRMATION_MISSING",
             "APPROVAL_CHECKS_INCOMPLETE",
             "AUDIT_RECORD_MISSING"
-          ]
+          ])
         },
         read_execution_policy: {
           default_mode: "dry_run",

@@ -1542,6 +1542,72 @@ describe("xhs-search gate helpers", () => {
     });
   });
 
+  it("keeps legacy live-read blockers when requested_at fallback exists but canonical grant scope does not match", () => {
+    const runId = "run-extension-execution-audit-003cc";
+    const requestId = "req-execution-audit-003cc";
+    const sessionId = "session-extension-execution-audit-003cc";
+    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+      runId,
+      "execution-audit-003cc"
+    );
+
+    const gate = evaluateXhsGate({
+      issueScope: "issue_209",
+      runId,
+      requestId,
+      sessionId,
+      gateInvocationId,
+      profile: "profile-session-001",
+      riskState: "allowed",
+      targetDomain: "www.xiaohongshu.com",
+      targetTabId: 12,
+      targetPage: "search_result_tab",
+      actualTargetDomain: "www.xiaohongshu.com",
+      actualTargetTabId: 12,
+      actualTargetPage: "search_result_tab",
+      actionType: "read",
+      abilityAction: "read",
+      requestedExecutionMode: "live_read_high_risk",
+      runtimeProfileRef: "profile-session-001",
+      upstreamAuthorizationRequest: createUpstreamAuthorizationRequest({
+        resourceKind: "profile_session",
+        profileRef: "profile-session-001",
+        allowedResourceKinds: ["profile_session"],
+        allowedProfileRefs: ["profile-session-001"],
+        allowedDomains: ["creator.xiaohongshu.com"],
+        approvalRefs: ["approval_admission_external_003cc"],
+        auditRefs: ["audit_admission_external_003cc"],
+        resourceStateSnapshot: "active",
+        requestedAt: "2026-04-16T09:00:00.000Z",
+        grantedAt: null
+      })
+    });
+
+    expect(gate.gate_outcome).toMatchObject({
+      decision_id: decisionId,
+      gate_decision: "blocked",
+      effective_execution_mode: "dry_run",
+      gate_reasons: expect.arrayContaining([
+        "MANUAL_CONFIRMATION_MISSING",
+        "APPROVAL_CHECKS_INCOMPLETE",
+        "AUDIT_RECORD_MISSING"
+      ])
+    });
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "blocked",
+      grant_match: false,
+      derived_from: {
+        approval_admission_ref: "approval_admission_external_003cc",
+        audit_admission_ref: "audit_admission_external_003cc"
+      }
+    });
+    expect(gate.approval_record).toMatchObject({
+      approved: false,
+      approver: null,
+      approved_at: null
+    });
+  });
+
   it("fails closed when canonical grant input lacks a real approval timestamp source", () => {
     const runId = "run-extension-execution-audit-003d";
     const requestId = "req-execution-audit-003d";
