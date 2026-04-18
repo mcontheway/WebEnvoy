@@ -9,7 +9,7 @@ Canonical Issue: #505
 当前 GitHub 与仓库证据已经稳定收敛出一个最小结论：
 
 - current main 上，`xhs.detail` 的 command input、runtime、bridge、contract test 和 fallback test 都稳定围绕 `note_id` 运转。
-- 仓库内没有足够的 runtime/test/formal contract 证据证明 `image_scenes`、`CRD_PRV_WEBP` 或其他 media-scene 字段是 admission-ready 的 canonical identity 字段。
+- 仓库内没有足够的 runtime/test/formal contract 证据证明 `image_scenes` 或 `CRD_PRV_WEBP` 是 admission-ready 的 canonical identity 字段。
 - `#503` guardian 的多轮阻断已经反复指出：在证据不足前把 `image_scenes` 冻结进 detail identity，会把未验证字段写成正式真相。
 
 因此，本 FR 的职责不是继续寻找额外字段，而是先把 current v1 可被仓库内证据支撑的最小 identity 冻结为 formal contract：`xhs.detail` canonical identity 当前只包含 `note_id`，`image_scenes` 不进入 `shape` / `shape_key` / lookup / eligibility`。
@@ -17,7 +17,7 @@ Canonical Issue: #505
 ## 目标
 
 1. 冻结 current v1 `xhs.detail` canonical identity 只包含 `note_id`。
-2. 冻结 `image_scenes`、`CRD_PRV_WEBP` 与其他 media-scene 字段当前不进入 canonical shape。
+2. 冻结 `image_scenes` 与 `CRD_PRV_WEBP` 当前不进入 canonical shape。
 3. 冻结这些字段在 current v1 中只允许作为 non-identity diagnostics / compatibility context。
 4. 冻结后续实现 PR 在 `#505` 之外不得擅自把 `image_scenes` 写入 detail identity。
 5. 明确未来如果出现 admission-ready 仓库证据，必须通过新的 spec 修订再讨论 identity 扩张。
@@ -28,6 +28,7 @@ Canonical Issue: #505
 - 不在本 FR 内修复 `#500` 或 `#489`。
 - 不在本 FR 内重写 `FR-0024` search-only request-shape truth。
 - 不在本 FR 内新增 detail 命令参数、public CLI/API surface 或 request-context 采集逻辑。
+- 不在本 FR 内冻结 detail/user_home command surface、target-page baseline、四对象输入 ownership 或 request-context behavior。
 - 不在本 FR 内承诺 `image_scenes` 永远不可能进入 identity；这里只冻结 current v1 结论。
 - 不在本 FR 内推进 `#445` closeout、latest-main rerun 或 live evidence。
 
@@ -56,7 +57,6 @@ type XhsDetailCanonicalIdentityV1 = {
 
 - `image_scenes` 不进入 canonical identity
 - `CRD_PRV_WEBP` 不进入 canonical identity
-- 其他 media-scene / image-classification / rendered-scene 字段都不进入 canonical identity
 
 这些字段在 current v1 中只允许作为：
 
@@ -74,12 +74,12 @@ type XhsDetailCanonicalIdentityV1 = {
 
 ### 3. identity derivation baseline
 
-系统必须冻结：只要当前请求或模板能够稳定提供 `note_id`，就可以构成 current v1 detail identity；不得要求在 identity derivation 阶段额外等待 `image_scenes` 或其他 media-scene 字段。
+系统必须冻结：只要当前请求或模板能够稳定提供 `note_id`，就可以构成 current v1 detail identity；不得要求在 identity derivation 阶段额外等待 `image_scenes` 或 `CRD_PRV_WEBP`。
 
 约束：
 
 - 缺少 `image_scenes` 不能单独导致 current v1 detail identity 不可导出。
-- current v1 detail identity 的导出前提只绑定 `note_id`，不绑定 media-scene 字段。
+- current v1 detail identity 的导出前提只绑定 `note_id`，不绑定 `image_scenes` 或 `CRD_PRV_WEBP`。
 - 如果当前实现需要保留 `image_scenes` 供诊断输出使用，必须与 identity derivation 解耦。
 
 ### 4. lookup / eligibility 行为
@@ -87,7 +87,7 @@ type XhsDetailCanonicalIdentityV1 = {
 系统必须冻结以下 current v1 lookup / eligibility 规则：
 
 - 两条 detail request/template 只要 `note_id` 相同，就属于同一个 current v1 canonical identity。
-- 仅因 `image_scenes`、`CRD_PRV_WEBP` 或其他 media-scene 字段不同，不得判定为 identity mismatch。
+- 仅因 `image_scenes` 或 `CRD_PRV_WEBP` 不同，不得判定为 identity mismatch。
 - `image_scenes` 缺失、为空、未观测到或值不同，不得单独触发 `shape_mismatch`、`rejected_source` 或 stale 行为。
 
 补充约束：
@@ -95,20 +95,21 @@ type XhsDetailCanonicalIdentityV1 = {
 - 这只是 current v1 formal 结论，不代表未来一定不扩 identity。
 - 若未来 evidence 证明 `note_id` 不足，必须通过新的 spec 修订来改变上述规则。
 
-### 5. 与 #504 的边界
+### 5. 不属于本 FR 的边界
 
-本 FR 必须显式依赖 `#504` 已冻结的 detail command surface 与 request-context baseline，但不重新定义：
+以下内容不在本 FR 内冻结，继续由 `#504` 承接：
 
 - public command surface
 - canonical command input
 - target-page baseline
 - 四对象输入 ownership
+- request-context behavior
 
-本 FR 只回答 detail identity 问题，不重写 `#504`。
+本 FR 只回答 detail identity 问题，不把这些行为写成 de facto request-context spec。
 
 ### 6. 未来扩 identity 的准入条件
 
-若未来要把 `image_scenes` 或其他字段纳入 detail identity，必须同时满足：
+若未来要把 `image_scenes`、`CRD_PRV_WEBP` 或其他候选字段纳入 detail identity，必须同时满足：
 
 1. 仓库内出现可复核的 runtime/test/formal contract 证据
 2. 该证据能稳定证明 `note_id` 单独使用会造成 false-hit、false-miss 或错误复用
@@ -146,7 +147,7 @@ And 不得仅因 `image_scenes` 差异触发 mismatch
 
 ### 场景 4：image_scenes 只能作为 non-identity context
 
-Given detail runtime 或 test 现场观测到了 `image_scenes`、`CRD_PRV_WEBP` 或其他 media-scene 字段
+Given detail runtime 或 test 现场观测到了 `image_scenes` 或 `CRD_PRV_WEBP`
 When 系统记录当前 v1 contract
 Then 这些字段只能进入 diagnostics / compatibility context
 And 不得进入 `shape`、`shape_key`、lookup key 或 eligibility gate
@@ -168,7 +169,7 @@ And 必须等待新的 spec 修订
 ## 验收标准
 
 1. current v1 `xhs.detail` canonical identity 已冻结为 `note_id` only。
-2. `image_scenes`、`CRD_PRV_WEBP` 与其他 media-scene 字段已冻结为 non-identity context。
+2. `image_scenes` 与 `CRD_PRV_WEBP` 已冻结为 non-identity context。
 3. `lookup`、`eligibility`、`shape` 与 `shape_key` 当前都不得依赖这些字段。
 4. 后续实现 PR 不得以“当前 formal 未明确禁止”为由擅自把这些字段写入 identity。
 5. future identity expansion 的准入条件已明确为“仓库内 admission-ready evidence + 新 spec 修订”。

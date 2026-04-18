@@ -25,7 +25,6 @@
 | --- | --- |
 | `image_scenes` | diagnostics / compatibility context |
 | `CRD_PRV_WEBP` | diagnostics / compatibility context |
-| `media_scene` | diagnostics / compatibility context |
 
 约束：
 

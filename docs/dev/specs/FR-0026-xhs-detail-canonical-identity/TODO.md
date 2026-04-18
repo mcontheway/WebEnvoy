@@ -3,7 +3,7 @@
 - [x] 建立 `FR-0026-xhs-detail-canonical-identity` 正式套件
 - [x] 建立 canonical issue 绑定 `#505`
 - [ ] reviewer 确认 current v1 `xhs.detail` canonical identity 只包含 `note_id`
-- [ ] reviewer 确认 `image_scenes` / `CRD_PRV_WEBP` / media-scene 字段当前不进入 identity
+- [ ] reviewer 确认 `image_scenes` / `CRD_PRV_WEBP` 当前不进入 identity
 - [ ] reviewer 确认这些字段只属于 diagnostics / compatibility context
 - [ ] reviewer 确认 lookup / eligibility / `shape_key` 当前不得依赖这些字段
 - [ ] reviewer 确认仓库内不存在 admission-ready `image_scenes` 证据，不能据此扩 identity

@@ -2,7 +2,7 @@
 
 ## 实施目标
 
-冻结 current v1 `xhs.detail` canonical identity 只包含 `note_id`，并明确 `image_scenes` / `CRD_PRV_WEBP` / media-scene 字段当前只属于 non-identity diagnostics / compatibility context，为后续实现 PR 提供不可歧义的 identity 基线。
+冻结 current v1 `xhs.detail` canonical identity 只包含 `note_id`，并明确 `image_scenes` / `CRD_PRV_WEBP` 当前只属于 non-identity diagnostics / compatibility context，为后续实现 PR 提供不可歧义的 identity 基线。
 
 ## 分阶段拆分
 
@@ -29,7 +29,7 @@
 ## 实现约束
 
 - 不修改 runtime、extension、CLI、测试实现或真实执行路径代码。
-- 不重写 `#504` 的 command surface / request-context baseline。
+- 不重写 `#504` 的 command surface / request-context baseline，也不把其行为前提写成 current main formal truth。
 - 不重写 `FR-0024` 的 search-only contract。
 - 不在当前 PR 中推进 `#500` 修复、`#445` closeout、latest-main rerun 或 live evidence。
 - 不提前承诺 future identity expansion。
@@ -57,7 +57,7 @@
   - `note_id` only identity 不回退
   - `image_scenes` 不进入 `shape` / `shape_key`
   - 同 `note_id` 且 `image_scenes` 差异不触发 mismatch
-  - future revision 前，media-scene 字段只留在 diagnostics / compatibility context
+  - future revision 前，`image_scenes` / `CRD_PRV_WEBP` 只留在 diagnostics / compatibility context
 
 ## 并行 / 串行关系
 
@@ -72,6 +72,6 @@
 
 - FR-0026 spec review 通过。
 - reviewer 确认 current v1 detail identity 只包含 `note_id`。
-- reviewer 确认 `image_scenes` / `CRD_PRV_WEBP` / media-scene 字段当前只属于 non-identity context。
+- reviewer 确认 `image_scenes` / `CRD_PRV_WEBP` 当前只属于 non-identity context。
 - reviewer 确认 lookup / eligibility / `shape_key` 当前不得依赖这些字段。
 - reviewer 确认 future identity expansion 必须等待新的仓库内证据和新的 spec 修订。
