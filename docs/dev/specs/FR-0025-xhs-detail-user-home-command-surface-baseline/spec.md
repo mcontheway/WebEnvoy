@@ -76,7 +76,7 @@ Canonical Issue: #504
 
 - 在 legacy public CLI path 中，shared gate fields `target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode` 都必须显式提供；缺失时必须按 invalid args 处理。
 - 在 canonical `upstream_authorization_request` path 中，`target_domain`、`target_tab_id`、`target_page` 必须继续由 `runtime_target` 派生，`requested_execution_mode` 必须继续由 current parser 行为推导；本 FR 不得把这些派生字段重新外显为第二套必填输入。
-- `target_domain` 必须继续对齐 current XHS read domain baseline，不得在本 FR 中被放宽为任意域。
+- `target_domain` 仍是 legacy public CLI path 的必填 shared gate field；当前 parser 只要求其为非空字符串，本 FR 不把它额外收紧为新的固定域常量。
 - `xhs.detail` 在 target-page 不为 `explore_detail_tab` 时，必须按 invalid-args / blocked 输入处理。
 - `xhs.user_home` 在 target-page 不为 `profile_tab` 时，必须按 invalid-args / blocked 输入处理。
 - `requested_execution_mode` 必须继续对齐 current CLI 支持的 XHS read execution modes，不得在本 FR 中被放宽或另起一套模式定义。
