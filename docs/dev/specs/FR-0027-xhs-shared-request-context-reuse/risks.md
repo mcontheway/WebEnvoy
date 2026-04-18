@@ -29,4 +29,15 @@
 - 缓解：
   - 当前 FR 只冻结 `note_id` / `user_id` only reuse-shape
   - 非 canonical 字段只允许作为归一来源或命中后的上下文，不进入 `shape_key`
-  - detail capture admission 只允许使用 canonical `note_id` 或当前 detail 页 referrer 恢复出的 `note_id`
+  - detail capture admission 只允许使用 canonical `note_id` 或在 `explore_detail_tab` 下由当前 detail 页 referrer 恢复出的 `note_id`
+
+## 风险 4：slot identity 与 referrer fallback 同时写成多套 truth
+
+- 表现：
+  - `spec.md` 与 `contracts/request-context-reuse.md` 对 slot identity 的组成不一致
+  - detail referrer 派生 `note_id` 被直接写成 formal truth，但没有仓库内 research 承接
+- 影响：
+  - guardian 会持续把同类 formal 缺口反复打回，replacement implementation 也会缺少单一上游输入
+- 缓解：
+  - route bucket identity 与 shape slot identity 分开冻结，不再混写成并列 slot 公式
+  - detail referrer fallback 只允许收窄到 `explore_detail_tab -> /explore/<note_id>`，并由 `research.md` 承接证据

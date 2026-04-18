@@ -18,7 +18,7 @@
 | 字段 | 角色 |
 | --- | --- |
 | `page_context_namespace` | 页面现场隔离键，不得退化成 command-family 枚举 |
-| `route_scope` | `command + method + pathname` 组成的 route family |
+| `route_scope` | `command + method + pathname` 组成的 route family，也是 route bucket identity 的一部分 |
 
 ### 2. request-context shape slot
 
@@ -30,7 +30,13 @@
 
 | 字段 | 角色 |
 | --- | --- |
-| `shape_key` | canonical shape 的稳定 key |
+| `shape_key` | canonical shape 的稳定 key，也是 shape slot identity 的一部分 |
+
+约束：
+
+- route bucket identity 是 `page_context_namespace + route_scope`。
+- shape slot identity 是 `page_context_namespace + shape_key`。
+- `route_scope` 只负责当前 namespace 内的 route bucket 选择，不得被并列写成第二套 shape slot identity。
 
 ### 3. bucket state
 
@@ -61,3 +67,4 @@
 
 - search-only canonical shape 继续由 `FR-0024` 承载。
 - detail identity 继续由 `#505` 承载；本 FR 只冻结其 reuse-shape、artifact-side derivation source 和 slotting 语义。
+- detail referrer 派生 `note_id` 只允许收窄到 `explore_detail_tab -> /explore/<note_id>` 的 page-local 恢复路径，并由 `research.md` 承接证据。

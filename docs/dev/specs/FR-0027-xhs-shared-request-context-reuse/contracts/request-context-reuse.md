@@ -3,13 +3,19 @@
 ## 1. Slotting identity
 
 ```ts
-type RequestContextSlotIdV1 = {
+type RequestContextRouteScopeV1 = {
+  command: "xhs.search" | "xhs.detail" | "xhs.user_home";
+  method: "POST" | "GET";
+  pathname: string;
+};
+
+type RequestContextRouteBucketIdV1 = {
   page_context_namespace: string;
-  route_scope: {
-    command: "xhs.search" | "xhs.detail" | "xhs.user_home";
-    method: "POST" | "GET";
-    pathname: string;
-  };
+  route_scope: RequestContextRouteScopeV1;
+};
+
+type RequestContextShapeSlotIdV1 = {
+  page_context_namespace: string;
   shape_key: string;
 };
 ```
@@ -18,7 +24,9 @@ type RequestContextSlotIdV1 = {
 
 - `shape_key` 只能来自 canonical shape 的稳定序列化。
 - `page_context_namespace` 必须是 page-local / document-local namespace token，不得退化成 command-family 常量。
-- 实际 shape slot identity 是 `page_context_namespace + route_scope + shape_key`；lookup 必须先选 route bucket，再在 bucket 内按 `shape_key` 命中。
+- route bucket identity 是 `page_context_namespace + route_scope`。
+- 实际 shape slot identity 是 `page_context_namespace + shape_key`；lookup 必须先选 route bucket，再在 bucket 内按 `shape_key` 命中。
+- `route_scope` 是 route bucket 选择前置，不得被写成与 `shape_key` 并列的第二套 shape slot identity。
 
 ## 2. Read-family canonical shape
 
@@ -41,7 +49,7 @@ type XhsUserHomeReuseShapeV1 = {
 约束：
 
 - `xhs.detail` reuse-shape 不包含 `source_note_id` 或 `image_scenes`。
-- detail capture admission 只允许使用 canonical `note_id` 或当前 detail 页 referrer 恢复出的 `note_id`。
+- detail capture admission 只允许使用 canonical `note_id` 或在 `explore_detail_tab` 下由当前 detail 页 referrer 恢复出的 `note_id`。
 - `xhs.user_home` reuse-shape 最终只保留 canonical `user_id`。
 
 ## 3. Bucket state
@@ -66,8 +74,8 @@ type CapturedRequestContextShapeSlotV1 = {
 };
 
 type CapturedRequestContextRouteBucketV1 = {
-  page_context_namespace: RequestContextSlotIdV1["page_context_namespace"];
-  route_scope: RequestContextSlotIdV1["route_scope"];
+  page_context_namespace: RequestContextRouteBucketIdV1["page_context_namespace"];
+  route_scope: RequestContextRouteBucketIdV1["route_scope"];
   incompatible_observation: (SharedCapturedArtifactStateV1 & Record<string, unknown>) | null;
   available_shape_keys: string[];
 };

@@ -6,7 +6,7 @@ Canonical Issue: #508
 
 `#503 / FR-0024` 已冻结 `xhs.search` request-shape truth；`#504 / FR-0025` 已冻结 `xhs.detail / xhs.user_home` command surface 与 request-context baseline；`#505 / FR-0026` 负责把 `xhs.detail` canonical identity 收窄为 identity-only formal freeze。
 
-但 replacement implementation 仍缺少一条独立 formal owner，去回答当前已经被代码和 guardian 同时锁定的 shared reuse 语义：
+但 replacement implementation 仍缺少一条独立 formal owner，去回答当前已经被代码、测试与 guardian 同时锁定的 shared reuse 语义：
 
 - `shape_key` 如何成为稳定 request identity key
 - `page_context_namespace + shape_key` 如何组成实际 slotting identity
@@ -65,11 +65,12 @@ Canonical Issue: #508
 补充约束：
 
 - `xhs.detail` 的 `note_id` 继续与 `#505` 的 identity-only formal freeze 对齐。
-- detail capture admission 在导出 canonical shape 前，必须先冻结 artifact-side `note_id` derivation source；current v1 只允许使用已经 canonical 的 `note_id`，或当前 detail 页 referrer `/explore/<note_id>` 恢复出的 page-local `note_id`。
+- detail capture admission 在导出 canonical shape 前，必须先冻结 artifact-side `note_id` derivation source；current v1 只允许使用已经 canonical 的 `note_id`，或在 `explore_detail_tab` target-page baseline 下由当前 detail 页 referrer `/explore/<note_id>` 恢复出的 page-local `note_id`。
 - `source_note_id` 当前不得作为 detail capture admission 的 admitted canonical derivation input。
 - `source_note_id`、`image_scenes`、headers、trace、referrer 不进入 `xhs.detail` `shape_key`。
 - `xhs.user_home` 最终只保留 canonical `user_id`；`userId` 或 query `user_id` 只允许作为归一来源，不得并列进入 `shape_key`。
 - `xhs.search` 的 `keyword/page/page_size/sort/note_type` 继续由 `FR-0024` 负责，不在本 FR 重新列举为新 truth。
+- 上述 detail referrer 派生边界必须由 `research.md` 中的仓库内证据承接；不得把更宽的 referrer / transport 推断直接升格为 formal truth。
 
 ### 3. page-local namespace 与 route bucket
 
@@ -84,12 +85,16 @@ Canonical Issue: #508
 
 ### 4. slotting identity
 
-系统必须冻结：实际 request-context slotting identity 是 `page_context_namespace + shape_key`。
+系统必须冻结：shared reuse 存在两层身份，不得混写成并行 slot 公式：
+
+- route bucket identity：`page_context_namespace + route_scope`
+- shape slot identity：`page_context_namespace + shape_key`
 
 约束：
 
 - 不同 namespace 即使 `shape_key` 相同，也不得共享同一 shape slot。
 - 同一 namespace 内必须先按 route family 分桶，再在 route bucket 内按 canonical `shape_key` 分 shape slot。
+- `route_scope` 是 route bucket 选择前置，不得被表述成与 `shape_key` 并列的第二套 shape slot identity；route family 已包含在 canonical shape 与 `shape_key` 中。
 - shape slot 只允许承载 `admitted_template` 与 `rejected_observation`。
 - `incompatible_observation` 必须挂在当前 namespace 的 route bucket 层，用来记录 sibling-shape lookup 产生的最近不兼容候选；不得错误放入 shape-keyed slot。
 - replacement implementation 不得回退到裸 `path`、裸 `shape_key` 或 command-only slotting。
@@ -195,7 +200,7 @@ Given 当前请求是 `xhs.detail`
 When 系统生成 canonical shape
 Then shape 必须只包含 `command/method/pathname/note_id`
 And `source_note_id` 与 `image_scenes` 不得进入 `shape_key`
-And detail capture admission 只允许使用 canonical `note_id` 或当前 detail 页 referrer 恢复出的 `note_id`
+And detail capture admission 只允许使用 canonical `note_id` 或在 `explore_detail_tab` 下由当前 detail 页 referrer 恢复出的 `note_id`
 
 ### 场景 3：user_home canonical shape 只保留 user_id
 
@@ -232,6 +237,7 @@ And 不得宣称 formal 输入已经齐备
 
 - `xhs.search` 的 search-only shape 仍以后 `FR-0024` 为准；本 FR 不得与其冲突。
 - `xhs.detail` canonical identity 仍以 `#505` 为准；本 FR 只冻结其 reuse-shape、artifact-side derivation source 与 slotting 语义。
+- detail referrer 派生 `note_id` 的 formal 边界只允许收窄到 `explore_detail_tab -> /explore/<note_id>` 这一条 page-local 恢复路径；更宽的 referrer / transport 推断不在本 FR 内承诺。
 - `xhs.user_home` canonical shape 不得被误写成 `body.userId` 与 `query user_id` 并列双主键。
 - shape 命中但模板过旧时，结果必须是 `stale`，而不是 `hit`。
 - rejected observation 允许保留最近一次可诊断 candidate，但不得升级为 admitted template。
@@ -242,7 +248,7 @@ And 不得宣称 formal 输入已经齐备
 1. `xhs.detail` / `xhs.user_home` 已进入与 `xhs.search` 同构的 shared request-context reuse model。
 2. page-local/document-local `page_context_namespace`、route bucket 与 `shape_key` 的层级关系已冻结。
 3. admitted / rejected / incompatible 三类 bucket 状态及其 freshness / rejected-source 所需最小结构字段已冻结，且 incompatible observation 位于 route bucket 层，synthetic / failed source 不进入 admitted template。
-4. detail/user_home 的 canonical shape 已冻结为 `note_id` / `user_id` only，且 detail capture-side `note_id` derivation source 已先冻结。
+4. detail/user_home 的 canonical shape 已冻结为 `note_id` / `user_id` only，且 detail capture-side `note_id` derivation source 已先冻结并由仓库内 research 证据承接。
 5. exact-match / freshness / fail-closed 的共享 reuse 规则已冻结。
 6. replacement implementation 的 formal gate 已明确包含 `#508`，不再误写成只等 `#504/#505`。
 
@@ -255,6 +261,7 @@ And 不得宣称 formal 输入已经齐备
 - `docs/dev/specs/FR-0024-xhs-request-shape-truth/spec.md`
 - `docs/dev/specs/FR-0025-xhs-detail-user-home-command-surface-baseline/spec.md`
 - `docs/dev/specs/FR-0026-xhs-detail-canonical-identity/spec.md`
+- `docs/dev/specs/FR-0027-xhs-shared-request-context-reuse/research.md`
 - GitHub issue `#502`
 - GitHub issue `#504`
 - GitHub issue `#505`

@@ -8,13 +8,13 @@
 
 ### 阶段 1：shared model scope 收敛
 
-- 产出：`spec.md`
-- 重点：把 `#503/#504/#505` 已冻结内容与尚未拥有的 shared reuse semantics 拆清，避免 formal owner 重叠
+- 产出：`spec.md`、`research.md`
+- 重点：把 `#502/#504/#505` 已冻结内容与尚未拥有的 shared reuse semantics 拆清，避免 formal owner 重叠，并为 detail referrer 派生 `note_id` 的收窄规则补足仓库内证据
 
 ### 阶段 2：共享契约冻结
 
 - 产出：`contracts/request-context-reuse.md`、`data-model.md`
-- 重点：冻结 page-local `page_context_namespace`、route bucket、shape slot、bucket state 与 read-family canonical shape
+- 重点：冻结 page-local `page_context_namespace`、route bucket identity、shape slot identity、bucket state 与 read-family canonical shape
 
 ### 阶段 3：风险与 gate 收口
 
@@ -41,6 +41,7 @@
   - 对照 `FR-0025`，确认 command surface / request-context baseline 继续由 `#504` 承载
   - 对照 `#505` 当前 issue truth，确认 detail identity 继续独立于 shared reuse semantics
   - 对照 replacement implementation 与相关测试，确认 shared slotting / bucket state / freshness 字段 / rejected-source / detail `note_id` derivation 语义已成为必须 formalize 的输入
+  - 对照 `research.md`，确认 detail referrer 派生 `note_id` 只冻结为 `explore_detail_tab -> /explore/<note_id>` 的 page-local 恢复路径
 - 文档门禁：
   - `bash scripts/docs-guard.sh`
   - `bash scripts/spec-guard.sh`
@@ -75,6 +76,6 @@
 
 - FR-0027 spec review 通过。
 - reviewer 确认 `#502/#504/#505/#508` 的 formal owner 已无重叠或缺口。
-- reviewer 确认 page-local namespace、route bucket、shape slot、bucket state、exact-match / freshness / fail-closed 已冻结为 shared reuse truth。
+- reviewer 确认 page-local namespace、route bucket identity、shape slot identity、bucket state、exact-match / freshness / fail-closed 已冻结为 shared reuse truth。
 - reviewer 确认 detail/user_home canonical reuse-shape 已冻结为 `note_id` / `user_id` only，且 detail capture-side `note_id` derivation 已先冻结，并与 `#505` 不冲突。
 - reviewer 确认 replacement implementation formal gate 已更新为必须等待 `#508`。
