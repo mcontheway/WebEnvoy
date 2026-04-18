@@ -6,7 +6,7 @@
 - [ ] reviewer 确认 `source_note_id` 当前只属于兼容输出字段 / future evidence candidate，formal 未误写成反向 identity 归一化规则
 - [ ] reviewer 确认 `image_scenes` 当前不进入 identity
 - [ ] reviewer 确认这些字段只属于 diagnostics / compatibility context
-- [ ] reviewer 确认 lookup / eligibility / `shape_key` 当前不得依赖这些字段
+- [ ] reviewer 确认本 FR 未把完整 detail shape / lookup / eligibility / `shape_key` 预先冻结为 formal truth
 - [ ] reviewer 确认仓库内不存在 admission-ready `image_scenes` 证据，不能据此扩 identity
 - [ ] reviewer 确认 future identity expansion 必须等待新的 spec 修订
 - [ ] reviewer 确认 `Closing=Refs #505`、`review_lane=formal_spec_review_pr`、`live_evidence_record=N/A`

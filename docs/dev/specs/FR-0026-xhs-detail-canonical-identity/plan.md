@@ -57,8 +57,7 @@
 - 后续实现 PR 至少应补齐以下测试矩阵：
   - `note_id` only identity 不回退
   - `source_note_id` 继续只作为兼容输出字段 / future evidence candidate，不被误写成 current v1 identity 依据
-  - `image_scenes` 不进入 `shape` / `shape_key`
-  - 同 `note_id` 且 `image_scenes` 差异不触发 mismatch
+  - `image_scenes` 不进入 canonical identity anchor，也不成为额外 identity discriminator
   - future revision 前，`image_scenes` 只留在 diagnostics / compatibility context
 
 ## 并行 / 串行关系
@@ -76,5 +75,5 @@
 - reviewer 确认 current v1 detail identity 只包含 `note_id`。
 - reviewer 确认 `source_note_id` 当前只属于兼容输出字段 / future evidence candidate，formal 未误写成反向 identity 归一化规则。
 - reviewer 确认 `image_scenes` 当前只属于 non-identity context。
-- reviewer 确认 lookup / eligibility / `shape_key` 当前不得依赖这些字段。
+- reviewer 确认本 FR 未把完整 detail shape / lookup / eligibility / `shape_key` 预先冻结为 formal truth。
 - reviewer 确认 future identity expansion 必须等待新的仓库内证据和新的 spec 修订。

@@ -13,12 +13,12 @@ Canonical Issue: #505
 - 仓库内没有足够的 runtime/test/formal contract 证据证明 `image_scenes` 是 admission-ready 的 canonical identity 字段。
 - `#503` guardian 的多轮阻断已经反复指出：在证据不足前把 `image_scenes` 冻结进 detail identity，会把未验证字段写成正式真相。
 
-因此，本 FR 的职责不是继续寻找额外字段，而是先把 current v1 可被仓库内证据支撑的最小 identity 冻结为 formal contract：`xhs.detail` canonical identity 当前只包含 `note_id`，`image_scenes` 不进入 `shape` / `shape_key` / lookup / eligibility`。
+因此，本 FR 的职责不是继续寻找额外字段，也不是替 `#504` 定义完整 detail request shape，而是先把 current v1 可被仓库内证据支撑的最小 identity anchor 冻结为 formal contract：`xhs.detail` 当前只有 `note_id` 被 formal 认可为 canonical identity anchor，`image_scenes` 不进入该 identity anchor。
 
 ## 目标
 
 1. 冻结 current v1 `xhs.detail` canonical identity 只包含 `note_id`。
-2. 冻结 `image_scenes` 当前不进入 canonical shape。
+2. 冻结 `image_scenes` 当前不进入 canonical identity anchor。
 3. 冻结这些字段在 current v1 中只允许作为 non-identity diagnostics / compatibility context。
 4. 冻结后续实现 PR 在 `#505` 之外不得擅自把 `image_scenes` 写入 detail identity。
 5. 明确未来如果出现 admission-ready 仓库证据，必须通过新的 spec 修订再讨论 identity 扩张。
@@ -35,22 +35,21 @@ Canonical Issue: #505
 
 ## 功能需求
 
-### 1. current v1 canonical identity
+### 1. current v1 canonical identity anchor
 
-系统必须冻结以下 current v1 `xhs.detail` canonical identity：
+系统必须冻结以下 current v1 `xhs.detail` canonical identity anchor：
 
 ```ts
-type XhsDetailCanonicalIdentityV1 = {
-  command: "xhs.detail";
+type XhsDetailCanonicalIdentityAnchorV1 = {
   note_id: string;
 };
 ```
 
 约束：
 
-- `note_id` 是 current v1 唯一 canonical identity 字段。
+- `note_id` 是 current v1 唯一被本 FR 正式冻结的 canonical identity anchor 字段。
 - `note_id` 必须是 trim 后非空字符串。
-- 当前 v1 的 detail lookup、eligibility、shape 与 `shape_key` 都只能围绕 `note_id` 建立。
+- 本 FR 不定义完整 detail request shape、route metadata、lookup key、`shape_key` 或 eligibility tuple。
 
 ### 2. current v1 non-identity fields
 
@@ -66,32 +65,28 @@ type XhsDetailCanonicalIdentityV1 = {
 
 不得作为：
 
-- `shape`
-- `shape_key`
-- lookup key
-- eligibility gate
-- exact-match identity 组成部分
+- canonical identity anchor 的组成部分
+- 额外 identity discriminator
 
 ### 3. identity derivation baseline
 
-系统必须冻结：只要当前请求或模板能够稳定提供 `note_id`，就可以构成 current v1 detail identity；不得要求在 identity derivation 阶段额外等待 `image_scenes`。
+系统必须冻结：只要 command-side input 能够稳定提供 `note_id`，就可以构成 current v1 detail identity anchor；不得要求在 identity derivation 阶段额外等待 `image_scenes`。
 
 约束：
 
-- 缺少 `image_scenes` 不能单独导致 current v1 detail identity 不可导出。
-- current v1 detail identity 的导出前提只绑定 `note_id`，不绑定 `image_scenes`。
+- 缺少 `image_scenes` 不能单独导致 current v1 detail identity anchor 不可导出。
+- current v1 detail identity anchor 的导出前提只绑定 `note_id`，不绑定 `image_scenes`。
 - 如果当前实现需要保留 `image_scenes` 供诊断输出使用，必须与 identity derivation 解耦。
 - 当 command-side input 已提供 `note_id` 时，canonical identity 直接使用 trim 后的 `note_id`。
 - 当前仓库证据只证明 canonical `note_id` 可以被写出到兼容字段 `source_note_id`；本 FR 不把“仅凭 artifact 的 `source_note_id` 反向归一化回 canonical `note_id`”写成 current v1 formal truth。
 - 若当前实现未来需要把 artifact-only `source_note_id` 升格为 identity derivation 依据，必须先补齐仓库内可复核证据并通过新的 spec 修订。
 
-### 4. lookup / eligibility 行为
+### 4. identity exclusion 行为
 
-系统必须冻结以下 current v1 lookup / eligibility 规则：
+系统必须冻结以下 current v1 exclusion 规则：
 
-- 两条 detail request/template 只要 `note_id` 相同，就属于同一个 current v1 canonical identity。
-- 仅因 `image_scenes` 不同，不得判定为 identity mismatch。
-- `image_scenes` 缺失、为空、未观测到或值不同，不得单独触发 `shape_mismatch`、`rejected_source` 或 stale 行为。
+- 仅因 `image_scenes` 不同，不得把它提升为额外 identity discriminator。
+- `image_scenes` 缺失、为空、未观测到或值不同，不得单独被 formal 认定为 canonical identity 变化。
 
 补充约束：
 
@@ -130,50 +125,50 @@ type XhsDetailCanonicalIdentityV1 = {
 Given 调用方发起 `xhs.detail`
 And 当前请求包含合法 `note_id`
 When 系统导出 current v1 detail identity
-Then identity 必须可以仅基于 `note_id` 建立
+Then identity anchor 必须可以仅基于 `note_id` 建立
 And 不得要求 `image_scenes`
 
 ### 场景 2：image_scenes 缺失不会阻断 current v1 identity
 
 Given 当前 detail 请求未携带 `image_scenes`
 When 系统导出 current v1 detail identity
-Then identity 仍必须可导出
+Then identity anchor 仍必须可导出
 And 不得因缺失 `image_scenes` 把请求判为 identity 不完整
 
 ### 场景 3：同 note_id 不因 image_scenes 不同而变成不同 identity
 
 Given 两条 detail request 或 template 的 `note_id` 相同
 And 它们的 `image_scenes` 不同、缺失或一方不存在
-When 系统比较 current v1 canonical identity
-Then 结果必须仍视为同一个 identity
-And 不得仅因 `image_scenes` 差异触发 mismatch
+When 系统判断当前 formal 是否允许把 `image_scenes` 加入 identity
+Then 当前 formal 结果必须是不允许
+And 不得仅因 `image_scenes` 差异认定 identity anchor 改变
 
 ### 场景 4：image_scenes 只能作为 non-identity context
 
 Given detail runtime 或 test 现场观测到了 `image_scenes`
 When 系统记录当前 v1 contract
 Then 这些字段只能进入 diagnostics / compatibility context
-And 不得进入 `shape`、`shape_key`、lookup key 或 eligibility gate
+And 不得进入 canonical identity anchor
 
 ### 场景 5：未来扩 identity 必须重新过 spec review
 
 Given 后续实现或 guardian 提出把 `image_scenes` 纳入 detail identity
-When 当前仓库仍缺少 admission-ready runtime/test/formal evidence
+When 当前仓库仍缺少 admission-ready runtime / test / artifact evidence
 Then 该提议不得直接进入 current implementation
 And 必须等待新的 spec 修订
 
 ## 异常与边界场景
 
-- `note_id` 缺失时，当前 detail identity 不可导出；这是 command input 问题，不是 `image_scenes` 问题。
+- `note_id` 缺失时，当前 detail identity anchor 不可导出；这是 command input 问题，不是 `image_scenes` 问题。
 - `image_scenes` 缺失、为空或值不稳定时，当前 formal 结论仍必须保持 `note_id`-only identity。
 - 若未来仓库证据证明 `note_id` 单独使用会产生错误复用，本 FR 不阻止未来修订，但在修订完成前 current implementation 仍必须遵守 current v1 结论。
-- `image_scenes` 不入 identity 不等于禁止记录该字段；只是不允许它驱动 current v1 exact-match 规则。
+- `image_scenes` 不入 identity 不等于禁止记录该字段；只是不允许它驱动 current v1 canonical identity anchor。
 
 ## 验收标准
 
-1. current v1 `xhs.detail` canonical identity 已冻结为 `note_id` only。
+1. current v1 `xhs.detail` canonical identity anchor 已冻结为 `note_id` only。
 2. `image_scenes` 已冻结为 non-identity context。
-3. `lookup`、`eligibility`、`shape` 与 `shape_key` 当前都不得依赖这些字段。
+3. 本 FR 未把完整 detail request shape、lookup、eligibility 或 `shape_key` 写成 de facto formal truth。
 4. 后续实现 PR 不得以“当前 formal 未明确禁止”为由擅自把这些字段写入 identity。
 5. future identity expansion 的准入条件已明确为“仓库内 admission-ready evidence + 新 spec 修订”。
 
