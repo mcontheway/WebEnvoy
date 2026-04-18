@@ -74,7 +74,8 @@ type CanonicalTopLevelFr0023TargetBaseline = {
 - `target_domain` 在 current parser truth 下仍只要求非空字符串
 - `requested_execution_mode` 继续对齐 current CLI parser 接受面；若当前命令组合在后续 gate/runtime 校验中被拒绝，本契约按 existing rejection chain 处理，而不提前收窄为 read-only allowlist
 - canonical top-level `FR-0023` object path 下，`target_domain`、`target_tab_id`、`target_page` 继续从 `runtime_target` 派生，`requested_execution_mode` 继续由 current parser 行为推导
-- 归一化后的 `options.upstream_authorization_request` 只是 current parser 的内部下游表示，不是 caller-facing canonical 输入
+- 归一化后的 `options.upstream_authorization_request` 继续保留为 current command/runtime payload 的兼容 mirror 与现有调用路径
+- 它不得被写成可替代四个顶层对象 ownership truth 的独立 formal object family
 - background/extension direct path 的内部 target-tab resolution 不属于本契约冻结范围
 
 ## 3. FR-0023 top-level ownership
@@ -93,7 +94,8 @@ type CanonicalUpstreamAuthorizationRequest = {
 约束：
 
 - 四个对象在 current caller-facing CLI baseline 中必须保持顶层输入形态
-- 仅嵌套 `options.upstream_authorization_request` 的 payload 不属于本契约冻结的 caller-facing canonical 输入
+- 嵌套 `options.upstream_authorization_request` 继续保留为 current command/runtime payload 的兼容 mirror 与现有调用路径
+- 它不得被降格为 internal-only，也不得替代四个顶层对象 ownership truth
 - `xhs.detail` 对应 `action_request.action_name = "xhs.read_note_detail"`
 - `xhs.user_home` 对应 `action_request.action_name = "xhs.read_user_home"`
 - `runtime_target.page` 必须分别与 `explore_detail_tab` / `profile_tab` 对齐
@@ -104,18 +106,18 @@ type CanonicalUpstreamAuthorizationRequest = {
 
 ```ts
 type CommandLevelSummary = {
-  request_admission_result?: Record<string, unknown> | null;
-  execution_audit?: Record<string, unknown> | null;
+  request_admission_result?: Record<string, unknown>;
+  execution_audit?: Record<string, unknown>;
 };
 ```
 
 约束：
 
 - `request_admission_result` / `execution_audit` 是 canonical request-level output slot
-- 当 current implementation 产出这两个字段时，它们必须保留在 summary 或 error details
+- 当命令消费 canonical top-level `FR-0023` object path 或 nested compatibility mirror 时，这两个字段必须继续遵循 `FR-0023` 已冻结的请求级结果契约
+- 本契约只冻结它们在 summary 或 error details 的 canonical slot / 位置约束
 - `execution_audit` 不得进入 `observability`
-- legacy path 下允许二者为 `null`
-- canonical top-level path 下，`request_admission_result` 与 `execution_audit` 都仍允许保持 `null` 或缺席
+- 本契约不得放宽 `FR-0023` 对 admission / audit 结果的要求
 
 ## 5. Deferred scope
 

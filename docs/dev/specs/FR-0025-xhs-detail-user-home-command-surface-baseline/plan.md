@@ -77,9 +77,9 @@
   - legacy public CLI path 下 target-page mismatch 与缺失 `target_domain` / `target_tab_id` / `requested_execution_mode` 的入口失败
   - `requested_execution_mode` 继续对齐 current CLI parser 接受面，并保留后续 gate/runtime rejection chain
   - canonical top-level `FR-0023` path 下 shared gate fields 继续从 `runtime_target` / parser 派生，不回退为第二套外显输入
-  - 仅嵌套 `options.upstream_authorization_request` 不被误写成 caller-facing canonical 输入
+  - `options.upstream_authorization_request` 兼容 mirror 路径继续保留，不被降格为 internal-only
   - canonical top-level objects 存在时的 `request_admission_result` / `execution_audit` canonical slot ownership
-  - canonical top-level path 下 `request_admission_result` / `execution_audit` 允许为 `null` 的现状兼容
+  - 本 FR 不放宽 `FR-0023` 对 `request_admission_result` / `execution_audit` 的结果边界
   - legacy path 下 `request_admission_result` / `execution_audit` 为 `null` 时的兼容行为
 
 ## 并行 / 串行关系
@@ -98,7 +98,8 @@
 - reviewer 确认 `xhs.detail` / `xhs.user_home` 已冻结为 current public CLI command surface。
 - reviewer 确认 caller-facing `ability` envelope、`note_id` / `user_id`、canonical shared-path ability metadata 对齐边界、`explore_detail_tab` / `profile_tab`、legacy public CLI shared gate fields，以及 canonical top-level path 的派生规则都无阻断歧义。
 - reviewer 确认两个命令在 canonical top-level path 下的四个顶层对象输入 ownership 与 current implementation 对齐，且没有第二套授权输入。
-- reviewer 确认 `options.upstream_authorization_request` 只被冻结为 parser 归一化后的内部下游表示，而非 caller-facing canonical 输入。
+- reviewer 确认 `options.upstream_authorization_request` 继续冻结为 current command/runtime payload 的兼容 mirror 与现有调用路径，而未被降格为 internal-only。
+- reviewer 确认本 FR 未放宽 `FR-0023` 对 `request_admission_result` / `execution_audit` 的结果边界。
 - reviewer 确认 canonical ability 对齐只冻结为 metadata 边界，且 non-canonical `ability.id` 未被 formal 误报为受支持公共契约。
 - reviewer 确认 legacy public CLI path 未被 formal 误删或误写成无效输入模型。
 - reviewer 确认 `request_admission_result` / `execution_audit` 的 canonical slot / 位置约束已冻结，且未把其产出写成强制真相。

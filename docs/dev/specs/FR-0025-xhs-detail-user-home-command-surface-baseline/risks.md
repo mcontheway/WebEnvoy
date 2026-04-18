@@ -26,14 +26,14 @@
 ## 风险 3：重新发明第二套授权输入
 
 - 表现：
-  - detail/user_home command-level spec 把仅嵌套 `options.upstream_authorization_request` 误写成 caller-facing canonical 输入
+  - detail/user_home command-level spec 把 nested `options.upstream_authorization_request` 降格为 internal-only
   - detail/user_home command-level spec 再定义一套新的 upstream auth fields
 - 影响：
   - 与 `FR-0023` 冲突
   - 后续实现出现双重输入真相源
 - 缓解：
   - 本 FR 明确只消费 `FR-0023` 四个顶层对象输入
-  - 明确 `options.upstream_authorization_request` 只是 current parser 的内部归一化结果
+  - 明确 `options.upstream_authorization_request` 继续保留为 current command/runtime payload 的兼容 mirror，但不替代四个顶层对象 ownership truth
 
 ## 风险 4：漏掉 caller-facing ability envelope
 

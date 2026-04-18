@@ -52,7 +52,7 @@
 
 - `src/commands/xhs-input.ts`
   - detail/user_home 通过同一套 caller-facing envelope 消费 canonical top-level `FR-0023` 四个对象
-  - current parser 会把这四个顶层对象归一化到 `options.upstream_authorization_request` 供下游消费，但 caller-facing 输入仍是四个顶层对象
+  - current parser 会把这四个顶层对象归一化到 `options.upstream_authorization_request` 供下游消费；这个 nested mirror 已经是 current command/runtime payload 的现有调用路径之一，不能在 formal 中被降格为 internal-only
   - command-level action mapping 已对齐 `xhs.read_note_detail` / `xhs.read_user_home`
 - `src/commands/xhs-runtime.ts`
   - 若 bridge payload 已产出 `request_admission_result` / `execution_audit`，summary / error details 会按 current implementation 透传到 canonical slot
@@ -63,7 +63,7 @@
 
 - canonical top-level path 的四对象 ownership 已存在，但它不是 detail/user_home 唯一的 command-level input model
 - legacy public CLI path 在 current main 上仍然存在，formal 只能把四对象 ownership 限定为“当 canonical top-level path 存在时”的规则
-- 当前仓库没有证据支持把仅嵌套 `options.upstream_authorization_request` 写成与四个顶层对象等价的 caller-facing canonical 输入
+- 当前仓库没有证据支持把 nested `options.upstream_authorization_request` 写成可替代四个顶层对象 ownership truth 的独立 formal object family
 
 ### 5. 与 FR-0005 的 formal 冲突
 

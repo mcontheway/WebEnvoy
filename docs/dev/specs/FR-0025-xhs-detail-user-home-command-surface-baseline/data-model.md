@@ -33,7 +33,8 @@
 约束：
 
 - 四个对象在 current caller-facing CLI baseline 中保持顶层输入形态
-- `options.upstream_authorization_request` 只是解析后的内部下游表示，不构成新的 caller-facing 真相源
+- `options.upstream_authorization_request` 继续保留为 current command/runtime payload 的兼容 mirror 与现有调用路径
+- 它不得替代四个顶层对象 ownership truth，也不构成新的独立 formal object family
 
 ### 4. request-level result view
 
