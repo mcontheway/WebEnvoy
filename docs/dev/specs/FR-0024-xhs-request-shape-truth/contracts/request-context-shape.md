@@ -35,6 +35,7 @@ type RequestShape =
 
 - `RequestShape` 必须由共享的 `deriveRequestShape()` 产生。
 - `capture`、`cache key`、`lookup`、`eligibility` 必须全部消费同一个 `RequestShape`。
+- `deriveRequestShape()` 的输入必须是 canonical command input 加上当前正在被评估的 request artifact；该 artifact 可以是页面真实请求，或 capture admission 明确拒绝的 synthetic request artifact。
 - 对于 `xhs.search`，derive 阶段必须显式归一 canonical 默认值，避免用 stale page state 或旧模板字段补默认值。
 - 对于 `xhs.search`，`note_type` 在进入 `RequestShape` 前必须被归一为 canonical integer 表示。
 - 对于 `xhs.detail`，`image_scenes` 必须先归一为稳定的字符串数组表示后再进入 `RequestShape`。
@@ -198,9 +199,10 @@ type RequestContextMissReason =
 
 ### capture
 
-- 只能对真实页面请求运行 `deriveRequestShape()`
+- capture admission 必须先对当前候选 request artifact 运行 `deriveRequestShape()`
 - 无法导出 `RequestShape` 时，必须拒绝缓存
 - synthetic request、失败请求、非 2xx 请求必须拒绝缓存
+- synthetic request 在被 capture admission 拒绝时，允许复用同一套 `deriveRequestShape()` 产出 `RejectedRequestContextObservation`
 - capture admission 拒绝时，允许写入 `RejectedRequestContextObservation`，但不得写入 `CapturedRequestTemplateRecord`
 
 ### lookup

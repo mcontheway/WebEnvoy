@@ -55,7 +55,8 @@ Canonical Issue: #502
 约束：
 
 - 不允许各阶段分别定义自己的“同一请求”规则。
-- `RequestShape` 必须从 canonical command input 与真实页面请求共同可推导的字段产生，而不是从临时 header、trace 或页面局部状态猜测。
+- `RequestShape` 必须从 canonical command input 与当前正在被 capture / lookup / reject 评估的 request artifact 共同可推导的字段产生，而不是从临时 header、trace 或页面局部状态猜测。
+- 对 admitted template 而言，合法 artifact 仍然只允许是真实页面请求；synthetic request 只能用于 rejected observation 的 shape-level 诊断，不得借此放宽 template admission。
 - `xhs.search` 的默认值必须在 derive 阶段被显式归一，不能由 stale page state、旧模板字段或 fallback 分支隐式补入。
 
 ### 2. canonical request identity
@@ -110,6 +111,7 @@ Canonical Issue: #502
 - 不允许把“抓到过请求”直接等价成“可复用模板”
 - 被 capture admission 拒绝的候选请求只允许进入 page-local rejected-attempt diagnostics，不允许进入 template cache
 - admitted template record 的 canonical 类型不得保留任何 synthetic source kind
+- synthetic request 在被拒绝时允许先走同一套 `deriveRequestShape()` 导出 `shape + shape_key`，但该导出结果只能写入 rejected-attempt diagnostics，不能提升为 admitted template
 
 ### 5. lookup 与 eligibility 规则
 

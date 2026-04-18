@@ -44,7 +44,7 @@
 
 | 字段 | 角色 | 说明 |
 | --- | --- | --- |
-| `shape` | canonical identity snapshot | 由 capture 时的 `deriveRequestShape()` 生成 |
+| `shape` | canonical identity snapshot | 由 capture / reject 评估时的 `deriveRequestShape()` 生成 |
 | `shape_key` | cache / lookup 唯一键 | 由 `shape` 稳定序列化得到；其中 `note_type` 必须先归一为 integer |
 | `page_context_namespace` | 页面现场命名空间 | 用于隔离不同文档生命周期、tab 或等价页面现场 |
 | `template_headers` | exact hit 后可复用上下文 | 不参与 identity |
@@ -86,7 +86,7 @@ request-context cache 的有效存储身份必须是 `page_context_namespace + s
 2. 不同页面现场即使形状完全相同，也只能在各自 namespace 内覆盖和命中。
 3. `incompatible` 只能发生在“同 namespace、同 command + method + pathname、不同 shape”的候选集合里。
 4. `rejected_source` 只能来自同 namespace、同 `shape_key` 内的 `RejectedRequestContextObservation`。
-5. `synthetic_request_rejected` observation 只允许在 full shape 已成功导出后产生；否则必须在更早阶段以 `miss` / `incompatible` 终止。
+5. `synthetic_request_rejected` observation 只允许在同一套 `deriveRequestShape()` 已对该 synthetic request artifact 成功导出 full shape 后产生；否则必须在更早阶段以 `miss` / `incompatible` 终止。
 6. synthetic request 自身永远不得作为 `CapturedRequestTemplateRecord.source_kind` 进入 admitted template 类型。
 
 ## 生命周期
