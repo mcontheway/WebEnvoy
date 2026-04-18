@@ -19,7 +19,7 @@ Canonical Issue: #505
 
 1. 冻结 current v1 `xhs.detail` canonical identity 只包含 `note_id`。
 2. 冻结 `image_scenes` 当前不进入 canonical identity anchor。
-3. 冻结 `image_scenes` 当前不进入 canonical identity，并明确其它 detail-specific 候选字段在 current v1 仍不进入 formal identity 边界。
+3. 冻结 `image_scenes` 当前不进入 canonical identity，并明确 `source_note_id` 当前仍不进入 formal identity truth。
 4. 冻结后续实现 PR 在 `#505` 之外不得擅自把 `image_scenes` 写入 detail identity。
 5. 明确未来如果出现 admission-ready 仓库证据，必须通过新的 spec 修订再讨论 identity 扩张。
 
@@ -59,7 +59,7 @@ type XhsDetailCanonicalIdentityAnchorV1 = {
 
 - current v1 formal 只回答“它不进入 canonical identity”
 - 当前仓库未验证稳定的 diagnostics / compatibility field shape；本 FR 不冻结其 placement 或输出位置
-- `image_scenes` 与其他未验证候选字段都不得作为 canonical identity anchor 的组成部分或额外 identity discriminator
+- `image_scenes` 不得作为 canonical identity anchor 的组成部分或额外 identity discriminator
 
 ### 3. identity derivation baseline
 
@@ -72,7 +72,7 @@ type XhsDetailCanonicalIdentityAnchorV1 = {
 - 如果当前实现需要保留 `image_scenes` 供诊断输出使用，必须与 identity derivation 解耦。
 - 当 command-side input 已提供 `note_id` 时，canonical identity 直接使用 trim 后的 `note_id`。
 - 当前仓库虽已观测到 `source_note_id` 请求侧字段，但本 FR 不把 request-artifact normalization 或 verified transport truth 写成 current v1 identity 契约。
-- 除 canonical `note_id` 之外，本 FR 不把其他 artifact-only 或 body-side 字段写成 current v1 identity derivation truth。
+- 除 canonical `note_id` 之外，本 FR 不把 `source_note_id` 写成 current v1 identity derivation truth。
 
 ### 4. identity exclusion 行为
 
@@ -154,7 +154,7 @@ And 必须等待新的 spec 修订
 
 - `note_id` 缺失时，当前 detail identity anchor 不可导出；这是 command input 问题，不是 `image_scenes` 问题。
 - `image_scenes` 缺失、为空或值不稳定时，当前 formal 结论仍必须保持 `note_id`-only identity。
-- `source_note_id` 与其他 request/artifact 字段当前都不构成已冻结的 identity truth；如未来要 formalize，必须基于新的仓库证据和新的 spec 修订。
+- `source_note_id` 当前不构成已冻结的 identity truth；如未来要 formalize，必须基于新的仓库证据和新的 spec 修订。
 - 若未来仓库证据证明 `note_id` 单独使用会产生错误复用，本 FR 不阻止未来修订，但在修订完成前 current implementation 仍必须遵守 current v1 结论。
 - `image_scenes` 不入 identity 不等于禁止记录该字段；只是不允许它驱动 current v1 canonical identity anchor。
 

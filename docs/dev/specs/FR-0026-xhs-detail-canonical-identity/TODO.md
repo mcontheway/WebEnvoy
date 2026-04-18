@@ -3,9 +3,9 @@
 - [x] 建立 `FR-0026-xhs-detail-canonical-identity` 正式套件
 - [x] 建立 canonical issue 绑定 `#505`
 - [ ] reviewer 确认 current v1 `xhs.detail` canonical identity 只包含 `note_id`
-- [ ] reviewer 确认 `source_note_id` 与其他 request/artifact 字段当前仍未被 formalize 为 verified transport truth 或 identity normalization 规则
+- [ ] reviewer 确认 `source_note_id` 当前仍未被 formalize 为 verified transport truth 或 identity normalization 规则
 - [ ] reviewer 确认 `image_scenes` 当前不进入 identity
-- [ ] reviewer 确认本 FR 未把 `image_scenes` 或其他候选字段的 diagnostics / compatibility placement 写成 current v1 formal truth
+- [ ] reviewer 确认本 FR 未把 `image_scenes` 的 placement 写成 current v1 formal truth
 - [ ] reviewer 确认本 FR 未把完整 detail shape / lookup / eligibility / `shape_key` 预先冻结为 formal truth
 - [ ] reviewer 确认仓库内不存在 admission-ready `image_scenes` 证据，不能据此扩 identity
 - [ ] reviewer 确认 future identity expansion 必须等待新的 spec 修订

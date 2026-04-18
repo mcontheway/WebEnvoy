@@ -22,7 +22,7 @@ type XhsDetailNonIdentityBoundaryV1 = "no_additional_detail_identity_fields_froz
 
 约束：
 
-- current v1 formal 只冻结：`image_scenes` 与其他未验证候选字段当前都不是 canonical identity 的组成部分。
+- current v1 formal 只冻结：`image_scenes` 当前不是 canonical identity 的组成部分。
 - 本 FR 不冻结这些字段的 diagnostics / compatibility placement、输出位置或具体 shape。
 - 它们不得进入 canonical identity anchor，也不得成为额外 identity discriminator。
 
@@ -45,7 +45,8 @@ type ExcludeImageScenesFromIdentityV1 = (
 约束：
 
 - current v1 canonical identity 仍只围绕 canonical `note_id` 建立。
-- 本 FR 不冻结 `source_note_id` 或其他 request/artifact 字段的 verified transport truth、normalization 规则或 placement。
+- 本 FR 不冻结 `source_note_id` 的 verified transport truth、normalization 规则或 placement。
+- 其他 request/artifact 字段不在本 FR scope。
 - 若未来需要 formalize request/artifact normalization，必须基于新的仓库证据和新的 spec 修订。
 
 ## 5. Future revision gate

@@ -61,6 +61,6 @@
 
 当前仓库内还只能支持一个更窄的边界结论：
 
-- `source_note_id` 等 request/artifact 字段当前还不足以被 formalize 为 current v1 identity truth
+- `source_note_id` 当前还不足以被 formalize 为 current v1 identity truth
 
 因此，本 FR 应冻结“当前不纳入 identity”，而不是继续悬空。

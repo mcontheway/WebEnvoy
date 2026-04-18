@@ -2,14 +2,14 @@
 
 ## 实施目标
 
-冻结 current v1 `xhs.detail` canonical identity 只包含 `note_id`，明确 `image_scenes` 当前不进入 identity，并保留 request/artifact 字段仍未 formalize 的边界，为后续实现 PR 提供不可歧义的 identity 基线。
+冻结 current v1 `xhs.detail` canonical identity 只包含 `note_id`，明确 `image_scenes` 当前不进入 identity，并保留 `source_note_id` 仍未 formalize 的边界，为后续实现 PR 提供不可歧义的 identity 基线。
 
 ## 分阶段拆分
 
 ### 阶段 1：仓库内证据收敛
 
 - 产出：`research.md`
-- 重点：收口 current runtime/tests 只围绕 `note_id` 工作、request/artifact 字段尚不足以 formalize 为 identity truth、以及仓库内缺少 `image_scenes` admission-ready 证据这一事实
+- 重点：收口 current runtime/tests 只围绕 `note_id` 工作、`source_note_id` 尚不足以 formalize 为 identity truth、以及仓库内缺少 `image_scenes` admission-ready 证据这一事实
 
 ### 阶段 2：identity contract 冻结
 
@@ -56,7 +56,7 @@
 - 当前 formal suite 不进入实现代码 TDD。
 - 后续实现 PR 至少应补齐以下测试矩阵：
   - `note_id` only identity 不回退
-  - `source_note_id` 与其他 request/artifact 字段继续不进入 current v1 formal identity truth
+  - `source_note_id` 继续不进入 current v1 formal identity truth
   - `image_scenes` 不进入 canonical identity anchor，也不成为额外 identity discriminator
   - future revision 前，不得把 `image_scenes` 的 placement 或非 identity shape 误写成 current v1 formal truth
 
@@ -73,7 +73,7 @@
 
 - FR-0026 spec review 通过。
 - reviewer 确认 current v1 detail identity 只包含 `note_id`。
-- reviewer 确认 `source_note_id` 与其他 request/artifact 字段当前仍未被 formalize 为 verified transport truth 或 identity normalization 规则。
+- reviewer 确认 `source_note_id` 当前仍未被 formalize 为 verified transport truth 或 identity normalization 规则。
 - reviewer 确认 `image_scenes` 当前只被冻结为 not-in-identity，而未被扩写成 placement 或非 identity shape 真相。
 - reviewer 确认本 FR 未把完整 detail shape / lookup / eligibility / `shape_key` 预先冻结为 formal truth。
 - reviewer 确认 future identity expansion 必须等待新的仓库内证据和新的 spec 修订。

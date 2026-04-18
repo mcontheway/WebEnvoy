@@ -33,10 +33,10 @@
 ## 风险 4：把 request/artifact 字段误冻结成 current v1 formal truth
 
 - 表现：
-  - 后续实现 PR 把 `source_note_id`、`image_scenes` 或其他 request/artifact 字段直接写成 current v1 formal truth
+  - 后续实现 PR 把 `source_note_id` 或 `image_scenes` 直接写成 current v1 formal truth
 - 影响：
   - detail canonical identity 被错误扩张
   - `#505` 再次偏离“note_id only + image_scenes not-in-shape”的主结论
 - 缓解：
   - 当前 FR 只冻结 `note_id` only identity 与 `image_scenes` not-in-identity
-  - 明确 request/artifact 字段的 verified transport truth、normalization 与 placement 仍待未来证据和新 spec 修订
+  - 明确 `source_note_id` 的 verified transport truth、normalization 与 placement 仍待未来证据和新 spec 修订
