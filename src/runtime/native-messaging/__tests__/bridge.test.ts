@@ -1081,4 +1081,87 @@ describe("native messaging bridge", () => {
       }
     ]);
   });
+
+  it("materializes granted_at from requested_at before forwarding canonical live admission", async () => {
+    let forwardedCommandParams: Record<string, unknown> | null = null;
+
+    const bridge = new NativeMessagingBridge({
+      transport: {
+        async open(request) {
+          return {
+            id: request.id,
+            status: "success",
+            summary: {
+              protocol: "webenvoy.native-bridge.v1",
+              session_id: "nm-session-001",
+              state: "ready"
+            },
+            error: null
+          };
+        },
+        async heartbeat(request) {
+          return {
+            id: request.id,
+            status: "success",
+            summary: {
+              session_id: "nm-session-001"
+            },
+            error: null
+          };
+        },
+        async forward(request) {
+          forwardedCommandParams = request.params.command_params as Record<string, unknown>;
+          return {
+            id: request.id,
+            status: "success",
+            summary: {
+              relay_path: "host>background>content-script>background>host"
+            },
+            payload: {
+              summary: {
+                capability_result: {
+                  outcome: "success"
+                }
+              }
+            },
+            error: null
+          };
+        }
+      }
+    });
+
+    await bridge.runCommand({
+      runId: "run-canonical-requested-at-001",
+      profile: "profile-a",
+      cwd: "/tmp",
+      command: "xhs.search",
+      params: {
+        request_id: "issue493-canonical-live-001",
+        upstream_authorization_request: {
+          action_request: {
+            action_name: "xhs.read_search_results",
+            requested_at: "2026-04-18T01:02:03.000Z"
+          },
+          authorization_grant: {
+            grant_ref: "grant-001",
+            approval_refs: ["approval-001"],
+            audit_refs: ["audit-001"],
+            resource_state_snapshot: "active"
+          }
+        },
+        options: {}
+      }
+    });
+
+    const topLevelUpstream = forwardedCommandParams?.upstream_authorization_request as
+      | Record<string, unknown>
+      | undefined;
+    const topLevelGrant = topLevelUpstream?.authorization_grant as Record<string, unknown> | undefined;
+    const optionUpstream = (forwardedCommandParams?.options as Record<string, unknown> | undefined)
+      ?.upstream_authorization_request as Record<string, unknown> | undefined;
+    const optionGrant = optionUpstream?.authorization_grant as Record<string, unknown> | undefined;
+
+    expect(topLevelGrant?.granted_at).toBe("2026-04-18T01:02:03.000Z");
+    expect(optionGrant?.granted_at).toBe("2026-04-18T01:02:03.000Z");
+  });
 });

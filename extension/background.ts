@@ -637,6 +637,33 @@ const bindAdmissionContextToRequest = (input: {
   };
 };
 
+const normalizeIssue209AdmissionDraft = (
+  admissionDraft: Record<string, unknown> | null
+): Record<string, unknown> | null => {
+  const draft = asRecord(admissionDraft);
+  if (!draft) {
+    return null;
+  }
+
+  if (draft.kind === "missing") {
+    return { kind: "missing" };
+  }
+
+  if (draft.kind !== "draft" && draft.kind !== "explicit_context" && draft.kind !== "derived_draft") {
+    return null;
+  }
+
+  const admissionContext = cloneAdmissionContext(asRecord(draft.admission_context));
+  if (!admissionContext) {
+    return null;
+  }
+
+  return {
+    kind: "draft",
+    admission_context: admissionContext
+  };
+};
+
 const bindXhsCommandParamsToSession = (input: {
   commandParams: Record<string, unknown>;
   sessionId?: string | null;
@@ -953,6 +980,8 @@ const applyCanonicalXhsForwardCommandParams = (input: {
   requestedExecutionMode: XhsExecutionMode | null;
   legacyRequestedExecutionMode: XhsExecutionMode | null;
   upstreamAuthorizationRequest: Record<string, unknown> | null;
+  approvalRecord?: XhsApprovalRecord | null;
+  admissionContext?: Record<string, unknown> | null;
 }): Record<string, unknown> => {
   const normalized: Record<string, unknown> = { ...input.commandParams };
   const optionParams = asRecord(input.commandParams.options);
@@ -969,6 +998,21 @@ const applyCanonicalXhsForwardCommandParams = (input: {
   if (input.upstreamAuthorizationRequest !== null) {
     normalized.upstream_authorization_request = input.upstreamAuthorizationRequest;
     normalizedOptions.upstream_authorization_request = input.upstreamAuthorizationRequest;
+  }
+  if (input.approvalRecord) {
+    const clonedApprovalRecord = {
+      ...input.approvalRecord,
+      checks: { ...input.approvalRecord.checks }
+    };
+    normalized.approval_record = clonedApprovalRecord;
+    normalizedOptions.approval_record = clonedApprovalRecord;
+  }
+  if (input.admissionContext) {
+    const clonedAdmissionContext = cloneAdmissionContext(input.admissionContext);
+    if (clonedAdmissionContext) {
+      normalized.admission_context = clonedAdmissionContext;
+      normalizedOptions.admission_context = clonedAdmissionContext;
+    }
   }
 
   if (Object.keys(normalizedOptions).length > 0) {
@@ -992,6 +1036,7 @@ type ResolvedXhsGateCommandInput = {
   approvalRecord: XhsApprovalRecord;
   auditRecord: Record<string, unknown> | null;
   admissionContext: Record<string, unknown> | null;
+  admissionDraft: Record<string, unknown> | null;
   upstreamAuthorizationRequest: Record<string, unknown> | null;
   legacyRequestedExecutionMode: XhsExecutionMode | null;
   runtimeProfileRef: string | null;
@@ -1067,6 +1112,7 @@ const resolveXhsGateCommandInput = (
     ) as XhsApprovalRecord,
     auditRecord: asRecord(readGateParam("audit_record")),
     admissionContext: asRecord(readGateParam("admission_context")),
+    admissionDraft: asRecord(readGateParam("__issue209_admission_draft")),
     upstreamAuthorizationRequest: asRecord(readGateParam("upstream_authorization_request")),
     legacyRequestedExecutionMode: resolveXhsExecutionMode(
       readGateParam("__legacy_requested_execution_mode")
@@ -1090,6 +1136,44 @@ const shouldDeferAnonymousCanonicalGateDiagnostics = (input: {
     resourceBinding?.resource_kind === "anonymous_context" &&
     (input.anonymousIsolationVerified === null || input.targetSiteLoggedIn === null)
   );
+};
+
+const bindIssue209AdmissionArtifactsToRequest = (input: {
+  issueScope: IssueScope | null;
+  requestedExecutionMode: XhsExecutionMode | null;
+  admissionContext: Record<string, unknown> | null;
+  admissionDraft: Record<string, unknown> | null;
+  sessionId?: string | null;
+}): Record<string, unknown> | null => {
+  const isIssue209LiveRead =
+    input.issueScope === "issue_209" &&
+    (input.requestedExecutionMode === "live_read_limited" ||
+      input.requestedExecutionMode === "live_read_high_risk");
+
+  if (!isIssue209LiveRead) {
+    return bindAdmissionContextToRequest({
+      admissionContext: input.admissionContext,
+      sessionId: input.sessionId
+    });
+  }
+
+  const explicitAdmissionContext = bindAdmissionContextToRequest({
+    admissionContext: input.admissionContext,
+    sessionId: input.sessionId
+  });
+  if (explicitAdmissionContext) {
+    return explicitAdmissionContext;
+  }
+
+  const normalizedDraft = normalizeIssue209AdmissionDraft(input.admissionDraft);
+  if (!normalizedDraft || normalizedDraft.kind === "missing") {
+    return null;
+  }
+
+  return bindAdmissionContextToRequest({
+    admissionContext: asRecord(normalizedDraft.admission_context),
+    sessionId: input.sessionId
+  });
 };
 
 const resolveBridgeRequestGateDecisionId = (request: BridgeRequest): string => {
@@ -4048,6 +4132,7 @@ class ChromeBackgroundBridge {
       approvalRecord,
       auditRecord,
       admissionContext,
+      admissionDraft,
       upstreamAuthorizationRequest,
       legacyRequestedExecutionMode,
       runtimeProfileRef,
@@ -4132,8 +4217,12 @@ class ChromeBackgroundBridge {
     }
 
     const requestSessionId = String(request.params.session_id ?? this.#sessionId);
-    const boundAdmissionContext = bindAdmissionContextToRequest({
-      admissionContext
+    const boundAdmissionContext = bindIssue209AdmissionArtifactsToRequest({
+      issueScope: canonicalIssueScope,
+      requestedExecutionMode: canonicalRequestedExecutionMode,
+      admissionContext,
+      admissionDraft,
+      sessionId: requestSessionId
     });
 
     collectXhsCommandGateReasons({
@@ -4283,11 +4372,9 @@ class ChromeBackgroundBridge {
       writeGateOnlyEligible,
       nonBlockingReasons: [gateState.writeTierReason]
     });
-    const gateDecision = finalizedGate.gateDecision;
-    const allowed = finalizedGate.allowed;
     const resolvedEffectiveExecutionMode =
       finalizedGate.effectiveExecutionMode ?? gateState.fallbackMode;
-    const forwardCommandParams = applyCanonicalXhsForwardCommandParams({
+    const baseForwardCommandParams = applyCanonicalXhsForwardCommandParams({
       commandParams: normalizeXhsSearchCommandParams(commandParams, targetTabId),
       requestedExecutionMode: canonicalRequestedExecutionMode,
       legacyRequestedExecutionMode: canonicalLegacyRequestedExecutionMode,
@@ -4297,7 +4384,7 @@ class ChromeBackgroundBridge {
       ...request,
       params: {
         ...request.params,
-        command_params: forwardCommandParams
+        command_params: baseForwardCommandParams
       }
     };
     const sharedCanonicalGate = buildCanonicalGateAuditArtifacts({
@@ -4328,12 +4415,58 @@ class ChromeBackgroundBridge {
     });
     const canonicalRequestAdmissionResult = asRecord(sharedCanonicalGate.request_admission_result);
     const canonicalExecutionAudit = asRecord(sharedCanonicalGate.execution_audit);
-    // Approval linkage remains owned by the background/matrix path; shared gate output
-    // only supplies request-level admission/audit diagnostics.
-    const canonicalApprovalPayloadRecord: XhsApprovalRecord = {
-      ...canonicalApprovalRecord,
-      checks: { ...canonicalApprovalRecord.checks }
-    };
+    const canonicalConsumerGateResult = asRecord(sharedCanonicalGate.consumer_gate_result);
+    const legacyAdmissionOnlyBlocked =
+      finalizedGate.gateDecision === "blocked" &&
+      finalizedGate.gateReasons.length > 0 &&
+      finalizedGate.gateReasons.every(
+        (reason) =>
+          reason === "MANUAL_CONFIRMATION_MISSING" ||
+          reason === "APPROVAL_CHECKS_INCOMPLETE" ||
+          reason === "AUDIT_RECORD_MISSING"
+      );
+    const canAdoptCanonicalLiveAdmission =
+      canonicalIssueScope === "issue_209" &&
+      (canonicalRequestedExecutionMode === "live_read_limited" ||
+        canonicalRequestedExecutionMode === "live_read_high_risk") &&
+      fingerprintGateDecision === "allowed" &&
+      canonicalRequestAdmissionResult?.admission_decision === "allowed" &&
+      canonicalConsumerGateResult?.gate_decision === "allowed" &&
+      legacyAdmissionOnlyBlocked;
+    const adoptedGateDecision = canAdoptCanonicalLiveAdmission
+      ? "allowed"
+      : finalizedGate.gateDecision;
+    const adoptedEffectiveExecutionMode =
+      canAdoptCanonicalLiveAdmission &&
+      (canonicalRequestedExecutionMode === "live_read_limited" ||
+        canonicalRequestedExecutionMode === "live_read_high_risk")
+        ? canonicalRequestedExecutionMode
+        : resolvedEffectiveExecutionMode;
+    const adoptedGateReasons = canAdoptCanonicalLiveAdmission
+      ? asStringArray(canonicalConsumerGateResult?.gate_reasons)
+      : finalizedGate.gateReasons;
+    const adoptedAllowed = adoptedGateDecision === "allowed";
+    const sharedCanonicalApprovalRecord = normalizeXhsApprovalRecord(
+      asRecord(sharedCanonicalGate.approval_record)
+    );
+    const canonicalApprovalPayloadRecord: XhsApprovalRecord =
+      canAdoptCanonicalLiveAdmission && sharedCanonicalApprovalRecord
+        ? {
+            ...sharedCanonicalApprovalRecord,
+            checks: { ...sharedCanonicalApprovalRecord.checks }
+          }
+        : {
+            ...canonicalApprovalRecord,
+            checks: { ...canonicalApprovalRecord.checks }
+          };
+    const forwardCommandParams = applyCanonicalXhsForwardCommandParams({
+      commandParams: baseForwardCommandParams,
+      requestedExecutionMode: canonicalRequestedExecutionMode,
+      legacyRequestedExecutionMode: canonicalLegacyRequestedExecutionMode,
+      upstreamAuthorizationRequest: canonicalUpstreamAuthorizationRequest,
+      approvalRecord: canonicalApprovalPayloadRecord,
+      admissionContext: canonicalAdmissionContext as unknown as Record<string, unknown> | null
+    });
     const requiresManualConfirmation =
       !gateState.issue208WriteGateOnly &&
       (canonicalRequestedExecutionMode === "live_read_limited" ||
@@ -4346,9 +4479,9 @@ class ChromeBackgroundBridge {
       target_page: targetPage,
       action_type: canonicalActionType,
       requested_execution_mode: canonicalRequestedExecutionMode,
-      effective_execution_mode: resolvedEffectiveExecutionMode,
-      gate_decision: gateDecision,
-      gate_reasons: finalizedGate.gateReasons,
+      effective_execution_mode: adoptedEffectiveExecutionMode,
+      gate_decision: adoptedGateDecision,
+      gate_reasons: adoptedGateReasons,
       fingerprint_gate_decision: fingerprintGateDecision,
       fingerprint_reason_codes: resolvedFingerprintReasonCodes,
       write_interaction_tier: gateState.writeActionMatrixDecisions?.write_interaction_tier ?? null
@@ -4369,9 +4502,9 @@ class ChromeBackgroundBridge {
       target_page: targetPage,
       action_type: canonicalActionType,
       requested_execution_mode: canonicalRequestedExecutionMode,
-      effective_execution_mode: resolvedEffectiveExecutionMode,
-      gate_decision: gateDecision,
-      gate_reasons: finalizedGate.gateReasons,
+      effective_execution_mode: adoptedEffectiveExecutionMode,
+      gate_decision: adoptedGateDecision,
+      gate_reasons: adoptedGateReasons,
       approver: canonicalApprovalPayloadRecord.approver,
       approved_at: canonicalApprovalPayloadRecord.approved_at,
       write_interaction_tier: gateState.writeActionMatrixDecisions?.write_interaction_tier ?? null,
@@ -4383,8 +4516,8 @@ class ChromeBackgroundBridge {
       sessionId,
       issueScope: canonicalIssueScope,
       prevState: canonicalRiskState,
-      decision: gateDecision,
-      gateReasons: finalizedGate.gateReasons,
+      decision: adoptedGateDecision,
+      gateReasons: adoptedGateReasons,
       requestedExecutionMode: canonicalRequestedExecutionMode,
       approvalRecord: canonicalApprovalPayloadRecord,
       auditRecords: [gateAuditSeed],
@@ -4401,9 +4534,9 @@ class ChromeBackgroundBridge {
       targetPage,
       actionType: canonicalActionType,
       requestedExecutionMode: canonicalRequestedExecutionMode,
-      effectiveExecutionMode: resolvedEffectiveExecutionMode,
-      gateDecision,
-      gateReasons: finalizedGate.gateReasons,
+      effectiveExecutionMode: adoptedEffectiveExecutionMode,
+      gateDecision: adoptedGateDecision,
+      gateReasons: adoptedGateReasons,
       requiresManualConfirmation,
       fingerprintGateDecision,
       fingerprintExecution,
@@ -4418,13 +4551,13 @@ class ChromeBackgroundBridge {
       riskTransitionAudit
     });
     return {
-      allowed,
-      targetTabId: allowed ? targetTabId : null,
+      allowed: adoptedAllowed,
+      targetTabId: adoptedAllowed ? targetTabId : null,
       errorMessage:
-        allowed
+        adoptedAllowed
           ? ""
-          : xhsGateReasonMessage(finalizedGate.gateReasons[0] ?? "TARGET_TAB_NOT_EXPLICIT"),
-      gateOnly: allowed && gateState.issue208WriteGateOnly && !writeGateOnlyEligible,
+          : xhsGateReasonMessage(adoptedGateReasons[0] ?? "TARGET_TAB_NOT_EXPLICIT"),
+      gateOnly: adoptedAllowed && gateState.issue208WriteGateOnly && !writeGateOnlyEligible,
       forwardCommandParams,
       consumerGateResult,
       gatePayload

@@ -571,7 +571,7 @@ describe("xhs-input", () => {
     expect(options).not.toHaveProperty("admission_context");
   });
 
-  it("keeps formal admission fallback when canonical grant refs omit granted_at but still carry requested_at", () => {
+  it("does not rebuild legacy admission_context when canonical grant uses action_request.requested_at as approval time", () => {
     const options = ensureIssue209AdmissionContextForContract({
       options: {
         issue_scope: "issue_209",
@@ -657,16 +657,7 @@ describe("xhs-input", () => {
       sessionId: "nm-session-001"
     });
 
-    expect(options.admission_context).toMatchObject({
-      approval_admission_evidence: {
-        approval_admission_ref:
-          "approval_admission_issue209-gate-run-cli-issue209-mixed-missing-granted-at-001-001"
-      },
-      audit_admission_evidence: {
-        audit_admission_ref:
-          "audit_admission_issue209-gate-run-cli-issue209-mixed-missing-granted-at-001-001"
-      }
-    });
+    expect(options).not.toHaveProperty("admission_context");
   });
 
   it("keeps formal admission fallback when canonical grant refs are present but unusable", () => {

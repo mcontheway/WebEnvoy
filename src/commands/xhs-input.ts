@@ -1220,6 +1220,8 @@ const resolveIssue209AdmissionDraftForContract = (input: {
   const canonicalGrantApprovalRefs = asStringArray(canonicalGrant?.approval_refs);
   const canonicalGrantAuditRefs = asStringArray(canonicalGrant?.audit_refs);
   const canonicalGrantActionType = asString(canonicalGrantActionRequest?.action_category);
+  const canonicalGrantApprovedAt =
+    asString(canonicalGrant?.granted_at) ?? asString(canonicalGrantActionRequest?.requested_at);
   const canonicalGrantResourceKind = asString(canonicalGrantResourceBinding?.resource_kind);
   const canonicalGrantProfileRef = asString(canonicalGrantResourceBinding?.profile_ref);
   const canonicalGrantBindingConstraints = asObject(canonicalGrantResourceBinding?.binding_constraints);
@@ -1229,7 +1231,6 @@ const resolveIssue209AdmissionDraftForContract = (input: {
   const canonicalGrantRiskState = projectRiskStateForContract(
     asString(canonicalGrant?.resource_state_snapshot) as ResourceStateSnapshot | undefined
   );
-  const canonicalGrantApprovedAt = asString(canonicalGrant?.granted_at);
   const canonicalGrantSupportsRequestedMode =
     input.options.requested_execution_mode === "live_read_high_risk"
       ? canonicalGrantRiskState === "allowed"
@@ -1260,11 +1261,11 @@ const resolveIssue209AdmissionDraftForContract = (input: {
     canonicalBindingRef !== null &&
     canonicalGrantRef !== null &&
     canonicalTargetRef !== null &&
+    canonicalGrantApprovedAt !== null &&
     canonicalGrantApprovalRefs !== null &&
     canonicalGrantApprovalRefs.length > 0 &&
     canonicalGrantAuditRefs !== null &&
     canonicalGrantAuditRefs.length > 0 &&
-    canonicalGrantApprovedAt !== null &&
     canonicalGrantSupportsRequestedMode &&
     canonicalGrantActionType === current.actionType &&
     canonicalGrantMatchesCurrentTarget &&

@@ -59,12 +59,41 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const normalizeCanonicalGrantApprovalTimestamp = (params) => {
+    const normalizedParams = { ...params };
+    const options = asObject(params.options);
+    const normalizedOptions = options ? { ...options } : null;
+    const upstreamFromTopLevel = asObject(params.upstream_authorization_request);
+    const upstreamFromOptions = asObject(normalizedOptions?.upstream_authorization_request);
+    const upstreamSource = upstreamFromTopLevel ?? upstreamFromOptions;
+    const actionRequest = asObject(upstreamSource?.action_request);
+    const authorizationGrant = asObject(upstreamSource?.authorization_grant);
+    const requestedAt = asString(actionRequest?.requested_at);
+    const grantedAt = asString(authorizationGrant?.granted_at);
+    if (!upstreamSource || !requestedAt || grantedAt) {
+        return normalizedParams;
+    }
+    const normalizedUpstream = {
+        ...upstreamSource,
+        authorization_grant: {
+            ...authorizationGrant,
+            granted_at: requestedAt
+        }
+    };
+    normalizedParams.upstream_authorization_request = normalizedUpstream;
+    if (normalizedOptions) {
+        normalizedOptions.upstream_authorization_request = normalizedUpstream;
+        normalizedParams.options = normalizedOptions;
+    }
+    return normalizedParams;
+};
 const resolveForwardCommandParams = (params, runId, sessionId) => {
-    return bindIssue209LiveReadEnvelopeToSessionForContract({
+    const boundParams = bindIssue209LiveReadEnvelopeToSessionForContract({
         params,
         runId,
         sessionId
     });
+    return normalizeCanonicalGrantApprovalTimestamp(boundParams);
 };
 const isNonIdempotentForward = (input) => {
     if (input.command === "runtime.bootstrap" ||

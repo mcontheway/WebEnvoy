@@ -114,16 +114,50 @@ const asObject = (value: unknown): Record<string, unknown> | null =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const normalizeCanonicalGrantApprovalTimestamp = (params: JsonObject): JsonObject => {
+  const normalizedParams: JsonObject = { ...params };
+  const options = asObject(params.options);
+  const normalizedOptions: JsonObject | null = options ? { ...options } : null;
+  const upstreamFromTopLevel = asObject(params.upstream_authorization_request);
+  const upstreamFromOptions = asObject(normalizedOptions?.upstream_authorization_request);
+  const upstreamSource = upstreamFromTopLevel ?? upstreamFromOptions;
+  const actionRequest = asObject(upstreamSource?.action_request);
+  const authorizationGrant = asObject(upstreamSource?.authorization_grant);
+  const requestedAt = asString(actionRequest?.requested_at);
+  const grantedAt = asString(authorizationGrant?.granted_at);
+
+  if (!upstreamSource || !requestedAt || grantedAt) {
+    return normalizedParams;
+  }
+
+  const normalizedUpstream = {
+    ...upstreamSource,
+    authorization_grant: {
+      ...authorizationGrant,
+      granted_at: requestedAt
+    }
+  };
+
+  normalizedParams.upstream_authorization_request = normalizedUpstream;
+  if (normalizedOptions) {
+    normalizedOptions.upstream_authorization_request = normalizedUpstream;
+    normalizedParams.options = normalizedOptions;
+  }
+
+  return normalizedParams;
+};
+
 const resolveForwardCommandParams = (
   params: JsonObject,
   runId: string,
   sessionId: string
 ): JsonObject => {
-  return bindIssue209LiveReadEnvelopeToSessionForContract({
+  const boundParams = bindIssue209LiveReadEnvelopeToSessionForContract({
     params,
     runId,
     sessionId
   });
+  return normalizeCanonicalGrantApprovalTimestamp(boundParams);
 };
 
 const isNonIdempotentForward = (input: BridgeCommandInput): boolean => {

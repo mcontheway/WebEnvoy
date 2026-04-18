@@ -1486,11 +1486,11 @@ describe("xhs-search gate helpers", () => {
     });
   });
 
-  it("fails closed when canonical grant omits granted_at even if requested_at is present", () => {
+  it("allows canonical live-read when grant omits granted_at but refs and requested_at are present", () => {
     const runId = "run-extension-execution-audit-003cb";
     const requestId = "req-execution-audit-003cb";
     const sessionId = "session-extension-execution-audit-003cb";
-    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
       runId,
       "execution-audit-003cb"
     );
@@ -1528,17 +1528,17 @@ describe("xhs-search gate helpers", () => {
 
     expect(gate.gate_outcome).toMatchObject({
       decision_id: decisionId,
-      gate_decision: "blocked",
-      effective_execution_mode: "dry_run",
-      gate_reasons: expect.arrayContaining([
-        "MANUAL_CONFIRMATION_MISSING",
-        "APPROVAL_CHECKS_INCOMPLETE",
-        "AUDIT_RECORD_MISSING"
-      ])
+      gate_decision: "allowed",
+      effective_execution_mode: "live_read_high_risk",
+      gate_reasons: ["LIVE_MODE_APPROVED"]
     });
     expect(gate.approval_record).toMatchObject({
-      approval_id: null,
-      decision_id: decisionId
+      approval_id: approvalId,
+      decision_id: decisionId,
+      approved_at: "2026-04-16T09:00:00.000Z"
+    });
+    expect(gate.execution_audit).toMatchObject({
+      request_admission_decision: "allowed"
     });
   });
 
@@ -1546,7 +1546,7 @@ describe("xhs-search gate helpers", () => {
     const runId = "run-extension-execution-audit-003d";
     const requestId = "req-execution-audit-003d";
     const sessionId = "session-extension-execution-audit-003d";
-    const { gateInvocationId, decisionId } = createIssue209InvocationLinkage(
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
       runId,
       "execution-audit-003d"
     );
@@ -1595,6 +1595,13 @@ describe("xhs-search gate helpers", () => {
     expect(gate.approval_record).toMatchObject({
       approval_id: null,
       decision_id: decisionId
+    });
+    expect(gate.request_admission_result).toMatchObject({
+      admission_decision: "blocked",
+      effective_runtime_mode: "dry_run"
+    });
+    expect(gate.execution_audit).toMatchObject({
+      request_admission_decision: "blocked"
     });
   });
 
