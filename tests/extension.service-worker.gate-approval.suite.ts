@@ -567,6 +567,110 @@ describe("extension service worker / gate and approval", () => {
     });
   });
 
+  it("does not adopt canonical live admission before trusted fingerprint gate is evaluated", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const runId = "run-xhs-canonical-live-fingerprint-missing-001";
+    const requestId = "req-xhs-canonical-live-fingerprint-missing-001";
+
+    firstPort.onMessageListeners[0]?.({
+      id: runId,
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: createRequestBoundXhsCommandParams({
+          runId,
+          requestId,
+          gate_invocation_id: "issue209-canonical-live-fingerprint-missing-001",
+          __runtime_profile_ref: "profile-a",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
+          requested_execution_mode: undefined,
+          risk_state: "allowed",
+          approval_record: null,
+          audit_record: null,
+          admission_context: null,
+          upstream_authorization_request: {
+            action_request: {
+              request_ref: "upstream-live-profile-session-read-sw-canonical-fingerprint-missing-001",
+              action_name: "xhs.read_search_results",
+              action_category: "read",
+              requested_at: "2026-04-17T09:00:00.000Z"
+            },
+            resource_binding: {
+              binding_ref: "binding-live-profile-session-read-sw-canonical-fingerprint-missing-001",
+              resource_kind: "profile_session",
+              profile_ref: "profile-a"
+            },
+            authorization_grant: {
+              grant_ref: "grant-live-profile-session-read-sw-canonical-fingerprint-missing-001",
+              allowed_actions: ["xhs.read_search_results"],
+              binding_scope: {
+                allowed_resource_kinds: ["profile_session"],
+                allowed_profile_refs: ["profile-a"]
+              },
+              target_scope: {
+                allowed_domains: ["www.xiaohongshu.com"],
+                allowed_pages: ["search_result_tab"]
+              },
+              approval_refs: [`approval_admission_${runId}_${requestId}`],
+              audit_refs: [`audit_admission_${runId}_${requestId}`],
+              resource_state_snapshot: "active"
+            },
+            runtime_target: {
+              target_ref: "target-live-profile-session-read-sw-canonical-fingerprint-missing-001",
+              domain: "www.xiaohongshu.com",
+              page: "search_result_tab",
+              tab_id: 32,
+              url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+            }
+          }
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+
+    const blocked = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === runId);
+    expect(blocked?.status).toBe("error");
+    const payload = asRecord(blocked?.payload) ?? {};
+    const consumerGateResult = asRecord(payload.consumer_gate_result);
+    expect(consumerGateResult).toMatchObject({
+      requested_execution_mode: "live_read_high_risk",
+      effective_execution_mode: "dry_run",
+      gate_decision: "blocked",
+      fingerprint_gate_decision: "blocked",
+      fingerprint_reason_codes: ["FINGERPRINT_CONTEXT_MISSING"]
+    });
+    expect(consumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining(["FINGERPRINT_CONTEXT_MISSING", "FINGERPRINT_EXECUTION_BLOCKED"])
+    );
+    expect(asRecord(payload.request_admission_result)).toMatchObject({
+      admission_decision: "allowed",
+      effective_runtime_mode: "live_read_high_risk",
+      grant_match: true
+    });
+    expect(asRecord(payload.execution_audit)).toMatchObject({
+      request_admission_decision: "allowed"
+    });
+  });
+
   it("rehydrates issue209 admission drafts before background gate evaluation", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
@@ -2294,12 +2398,7 @@ describe("extension service worker / gate and approval", () => {
           action_type: "read",
           requested_execution_mode: "live_read_high_risk",
           effective_execution_mode: "dry_run",
-          gate_decision: "blocked",
-          gate_reasons: [
-            "MANUAL_CONFIRMATION_MISSING",
-            "APPROVAL_CHECKS_INCOMPLETE",
-            "AUDIT_RECORD_MISSING"
-          ]
+          gate_decision: "blocked"
         },
         read_execution_policy: {
           default_mode: "dry_run",
@@ -2351,6 +2450,20 @@ describe("extension service worker / gate and approval", () => {
         }
       }
     });
+    const blockedConsumerGateResult = asRecord(asRecord(blocked?.payload)?.consumer_gate_result);
+    expect(blockedConsumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(blockedConsumerGateResult?.fingerprint_reason_codes).toEqual([
+      "FINGERPRINT_CONTEXT_UNTRUSTED"
+    ]);
+    expect(blockedConsumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining([
+        "MANUAL_CONFIRMATION_MISSING",
+        "APPROVAL_CHECKS_INCOMPLETE",
+        "AUDIT_RECORD_MISSING",
+        "FINGERPRINT_CONTEXT_UNTRUSTED",
+        "FINGERPRINT_EXECUTION_BLOCKED"
+      ])
+    );
     expect(blocked?.payload).toMatchObject({
       request_admission_result: {
         runtime_target_match: true,
@@ -2416,15 +2529,24 @@ describe("extension service worker / gate and approval", () => {
         consumer_gate_result: {
           requested_execution_mode: "live_read_high_risk",
           effective_execution_mode: "dry_run",
-          gate_decision: "blocked",
-          gate_reasons: [
-            "MANUAL_CONFIRMATION_MISSING",
-            "APPROVAL_CHECKS_INCOMPLETE",
-            "AUDIT_RECORD_MISSING"
-          ]
+          gate_decision: "blocked"
         }
       }
     });
+    const blockedConsumerGateResult = asRecord(asRecord(blocked?.payload)?.consumer_gate_result);
+    expect(blockedConsumerGateResult?.fingerprint_gate_decision).toBe("blocked");
+    expect(blockedConsumerGateResult?.fingerprint_reason_codes).toEqual([
+      "FINGERPRINT_CONTEXT_UNTRUSTED"
+    ]);
+    expect(blockedConsumerGateResult?.gate_reasons).toEqual(
+      expect.arrayContaining([
+        "MANUAL_CONFIRMATION_MISSING",
+        "APPROVAL_CHECKS_INCOMPLETE",
+        "AUDIT_RECORD_MISSING",
+        "FINGERPRINT_CONTEXT_UNTRUSTED",
+        "FINGERPRINT_EXECUTION_BLOCKED"
+      ])
+    );
   });
 
   it("blocks live actual-target query failures with unresolved target-page context", async () => {

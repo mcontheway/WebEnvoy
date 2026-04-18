@@ -3346,10 +3346,19 @@ class ChromeBackgroundBridge {
                 }
             }
         }
+        const legacyAdmissionOnlyBlockedBeforeFingerprint = canonicalIssueScope === "issue_209" &&
+            (canonicalRequestedExecutionMode === "live_read_limited" ||
+                canonicalRequestedExecutionMode === "live_read_high_risk") &&
+            gateReasons.length > 0 &&
+            gateReasons.every((reason) => reason === "MANUAL_CONFIRMATION_MISSING" ||
+                reason === "APPROVAL_CHECKS_INCOMPLETE" ||
+                reason === "AUDIT_RECORD_MISSING");
         const shouldEvaluateTrustedFingerprintGate = requestedLiveMode &&
             (!gateState.issue208WriteGateOnly || writeGateOnlyEligible) &&
-            gateReasons.length === 0;
+            (gateReasons.length === 0 || legacyAdmissionOnlyBlockedBeforeFingerprint);
+        let fingerprintGateEvaluated = false;
         if (shouldEvaluateTrustedFingerprintGate) {
+            fingerprintGateEvaluated = true;
             const trustedGateRequest = {
                 ...request,
                 params: {
@@ -3444,14 +3453,11 @@ class ChromeBackgroundBridge {
         const canonicalRequestAdmissionResult = asRecord(sharedCanonicalGate.request_admission_result);
         const canonicalExecutionAudit = asRecord(sharedCanonicalGate.execution_audit);
         const canonicalConsumerGateResult = asRecord(sharedCanonicalGate.consumer_gate_result);
-        const legacyAdmissionOnlyBlocked = finalizedGate.gateDecision === "blocked" &&
-            finalizedGate.gateReasons.length > 0 &&
-            finalizedGate.gateReasons.every((reason) => reason === "MANUAL_CONFIRMATION_MISSING" ||
-                reason === "APPROVAL_CHECKS_INCOMPLETE" ||
-                reason === "AUDIT_RECORD_MISSING");
+        const legacyAdmissionOnlyBlocked = finalizedGate.gateDecision === "blocked" && legacyAdmissionOnlyBlockedBeforeFingerprint;
         const canAdoptCanonicalLiveAdmission = canonicalIssueScope === "issue_209" &&
             (canonicalRequestedExecutionMode === "live_read_limited" ||
                 canonicalRequestedExecutionMode === "live_read_high_risk") &&
+            fingerprintGateEvaluated &&
             fingerprintGateDecision === "allowed" &&
             canonicalRequestAdmissionResult?.admission_decision === "allowed" &&
             canonicalConsumerGateResult?.gate_decision === "allowed" &&
