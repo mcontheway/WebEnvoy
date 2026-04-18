@@ -54,8 +54,10 @@
 
 - `src/commands/xhs-input.ts`
   - detail/user_home 通过同一套 caller-facing envelope 消费 canonical top-level `FR-0023` 四个对象
-- current parser 会把这四个顶层对象归一化到 `options.upstream_authorization_request` 供下游消费；这个 nested mirror 已经是 current command/runtime payload 的现有调用路径之一，不能在 formal 中被降格为 internal-only
+  - `XHS_COMMAND_ACTION_NAMES` 只为 `xhs.detail::xhs.note.detail.v1` 与 `xhs.user_home::xhs.user.home.v1` 提供 canonical action-name 映射；canonical top-level path 下非 canonical `ability.id` 会直接触发 `ABILITY_COMMAND_UNSUPPORTED`
+  - current parser 会把这四个顶层对象归一化到 `options.upstream_authorization_request` 供下游消费；这个 nested mirror 已经是 current command/runtime payload 的现有调用路径之一，不能在 formal 中被降格为 internal-only
   - command-level action mapping 已对齐 `xhs.read_note_detail` / `xhs.read_user_home`
+  - canonical top-level path 下若 `ability.action` 与 upstream `action_request.action_category` 投影出的 read-side action 不一致，会触发 `ACTION_NAME_COMMAND_MISMATCH`
   - `requested_execution_mode` 在 canonical top-level path 下继续由 parser / runtime 推导，而不是 `FR-0023` top-level object family 的新增正式字段
 - `src/commands/xhs-runtime.ts`
   - 若 bridge payload 已产出 `request_admission_result` / `execution_audit`，summary / error details 会按 current implementation 透传到 canonical slot
@@ -66,6 +68,7 @@
 
 - canonical top-level path 的四对象 ownership 已存在，但它不是 detail/user_home 唯一的 command-level input model
 - legacy public CLI path 在 current main 上仍然存在，formal 只能把四对象 ownership 限定为“当 canonical top-level path 存在时”的规则
+- canonical top-level path 的 `ability.id` / `ability.action` 约束比 legacy path 更严格：它必须命中 canonical shared-path ability，并与 upstream read action 对齐
 - 当前仓库没有证据支持把 nested `options.upstream_authorization_request` 写成可替代四个顶层对象 ownership truth 的独立 formal object family
 - `request_admission_result` / `execution_audit` 在 current compatibility behavior 中允许对象 / 显式 `null` / 缺失三种结果形态；formal 只能冻结 canonical slot / 位置约束，不能把显式 `null` 收窄为非法
 

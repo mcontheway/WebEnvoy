@@ -15,6 +15,7 @@
 
 - 产出：`contracts/detail-user-home-command-surface.md`
 - 重点：冻结 caller-facing `ability` envelope、`note_id` / `user_id`、canonical shared-path ability metadata 对齐边界、`explore_detail_tab` / `profile_tab`、legacy/canonical 两条 request-context 入口的真实差异，以及四个顶层对象输入 ownership
+- 重点：同时写明 canonical top-level `FR-0023` caller path 上更严格的 `ability.id` / `ability.action` 约束，避免 formal baseline 比 current main 更宽松
 
 ### 阶段 3：风险与研究边界收口
 
@@ -40,6 +41,7 @@
 - 规约对照：
   - 对照 `src/commands/xhs-runtime.ts`，确认 current main 已公开注册 `xhs.detail` / `xhs.user_home`
   - 对照 `src/commands/xhs-input.ts` 与相关 tests，确认 caller-facing `ability` envelope、`note_id` / `user_id`、canonical shared-path ability metadata 对齐边界、`target_page`、四个顶层对象输入消费方式与 current implementation 一致，且不把 legacy path 的 `ability.layer` / `ability.action` 误写成强制 `L3/read`
+  - 对照 `XHS_COMMAND_ACTION_NAMES` 与 canonical upstream 校验链，确认 top-level `FR-0023` path 继续要求 canonical `ability.id` 命中命令映射，且 `ability.action` 与 upstream read action 对齐
   - 对照 `src/commands/xhs-runtime.ts` 与相关 tests，确认 `request_admission_result` / `execution_audit` 的 canonical slot 继续允许对象 / 显式 `null` / 缺失三种结果形态
   - 对照 `FR-0005` research/TODO，确认当前已完成 command-surface 口径对齐，而不提前关闭 `#445` 或改判其 live blocker 语义
   - 对照 `FR-0023`，确认 command-level ownership 不发明第二套授权输入
@@ -102,6 +104,7 @@
 - reviewer 确认 `options.upstream_authorization_request` 继续冻结为 current command/runtime payload 的兼容 mirror 与现有调用路径，而未被降格为 internal-only。
 - reviewer 确认本 FR 未放宽 `FR-0023` 对 `request_admission_result` / `execution_audit` 的结果边界，且未把 current compatibility behavior 中的显式 `null` 收窄为非法。
 - reviewer 确认 canonical ability 对齐只冻结为 metadata 边界，且 non-canonical `ability.id` 未被 formal 误报为受支持公共契约。
+- reviewer 确认 canonical top-level `FR-0023` path 下的 `ability.id` / `ability.action` 约束与 current main 对齐，没有把该 caller path 误放宽成任意非空 ability。
 - reviewer 确认 legacy public CLI path 未被 formal 误删或误写成无效输入模型。
 - reviewer 确认 `request_admission_result` / `execution_audit` 的 canonical slot / 位置约束已冻结，且未把其产出写成强制真相。
 - reviewer 确认 detail identity 与 `image_scenes` 已显式转交 `#505`。

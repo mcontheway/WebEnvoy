@@ -33,6 +33,8 @@
 约束：
 
 - 四个对象在 current caller-facing CLI baseline 中保持顶层输入形态
+- canonical top-level path 下，`ability.id` 必须继续映射到 `xhs.detail -> xhs.note.detail.v1`、`xhs.user_home -> xhs.user.home.v1`
+- canonical top-level path 下，`ability.action` 必须继续与 upstream `action_request.action_category=read` 对齐
 - `options.upstream_authorization_request` 继续保留为 current command/runtime payload 的兼容 mirror 与现有调用路径
 - 它不得替代四个顶层对象 ownership truth，也不构成新的独立 formal object family
 

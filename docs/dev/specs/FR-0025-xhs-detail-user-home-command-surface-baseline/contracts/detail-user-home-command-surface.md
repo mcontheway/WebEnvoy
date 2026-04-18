@@ -33,6 +33,8 @@ type XhsUserHomeCommand = {
 - current public CLI request 仍必须显式携带 `ability.id`、`ability.layer`、`ability.action`。
 - current legacy public CLI path 只把 `ability.layer` / `ability.action` 冻结为“字段存在且枚举合法”的 caller-facing envelope；本契约不得把 non-`L3/read` 误写成 current parser 的通用硬阻断。
 - canonical top-level `FR-0023` object path 与 current runtime / contract output metadata 继续把两条命令对齐到 `L3/read` read-command family。
+- canonical top-level `FR-0023` object path 下，`ability.id` 必须分别命中 `xhs.note.detail.v1` / `xhs.user.home.v1`。
+- canonical top-level `FR-0023` object path 下，`ability.action` 必须与 upstream `action_request.action_category=read` 对齐。
 - `note_id` / `user_id` 都必须为必填、trim 后非空的字符串。
 - current top-level `FR-0023` object path 与 current runtime / contract output metadata 继续分别对齐 `xhs.note.detail.v1` / `xhs.user.home.v1`。
 - legacy public CLI path 的非 canonical `ability.id` 行为不属于本契约冻结范围；本契约不把这类输入申报为受支持的公共 CLI 契约。
@@ -95,6 +97,8 @@ type CanonicalUpstreamAuthorizationRequest = {
 约束：
 
 - 四个对象在 current caller-facing CLI baseline 中必须保持顶层输入形态
+- canonical top-level path 下，`ability.id` 必须继续映射到命令对应的 canonical shared-path ability，而不能是任意非空字符串
+- canonical top-level path 下，`ability.action` 必须继续与 `action_request.action_category` 投影出的 read-side ability action 对齐
 - 嵌套 `options.upstream_authorization_request` 继续保留为 current command/runtime payload 的兼容 mirror 与现有调用路径
 - 它不得被降格为 internal-only，也不得替代四个顶层对象 ownership truth
 - `xhs.detail` 对应 `action_request.action_name = "xhs.read_note_detail"`

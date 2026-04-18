@@ -62,6 +62,8 @@ Canonical Issue: #504
 - current public CLI request 仍必须显式携带 `ability.id`、`ability.layer`、`ability.action` 组成的 `ability` envelope。
 - current legacy public CLI path 只把 `ability.layer` / `ability.action` 冻结为“字段存在且枚举合法”的 caller-facing envelope；本 FR 不得把 non-`L3/read` 误写成 current parser 的通用硬阻断。
 - canonical top-level `FR-0023` object path 与 current shared runtime / contract output metadata 继续把两条命令对齐到 `L3/read` read-command family。
+- canonical top-level `FR-0023` object path 下，`ability.id` 必须显式对齐到命令对应的 canonical ability：`xhs.detail -> xhs.note.detail.v1`、`xhs.user_home -> xhs.user.home.v1`。
+- canonical top-level `FR-0023` object path 下，`ability.action` 必须与 upstream `action_request.action_category=read` 对齐；本 FR 不得把非 read `ability.action` 冻结为该 caller path 的合法输入。
 - `note_id` 与 `user_id` 都必须是必填、非空、去首尾空白后的字符串。
 - 这两个命令不消费 `query`、`limit`、`search_id`、`sort`、`note_type` 这一类 search-only 输入。
 - current top-level `FR-0023` object path 与 current bundled runtime / contract outputs 继续把两条命令分别对齐到 canonical ability metadata：`xhs.detail -> xhs.note.detail.v1`、`xhs.user_home -> xhs.user.home.v1`。
@@ -120,6 +122,8 @@ Canonical Issue: #504
 
 - 这两个命令在 canonical top-level path 下不得新增第二套上游授权输入。
 - 这四个对象在 current canonical ownership truth 中必须保持顶层对象语义。
+- canonical top-level path 下，`ability.id` 必须继续命中 `XHS_COMMAND_ACTION_NAMES` 中该命令对应的 canonical shared-path ability，不能放宽为任意非空字符串。
+- canonical top-level path 下，`ability.action` 必须继续与 `action_request.action_category` 投影出的 read-side ability action 对齐；不匹配时必须按 invalid args / command mismatch 处理。
 - 嵌套 `options.upstream_authorization_request` 继续保留为 current command/runtime payload 的兼容 mirror 与现有调用路径；本 FR 不得把它降格为 internal-only。
 - 本 FR 也不得把该 nested mirror 写成可替代四个顶层对象 ownership truth 的独立 formal object family。
 - `action_request.action_name` 必须分别与 `xhs.read_note_detail`、`xhs.read_user_home` 对齐。
@@ -228,6 +232,20 @@ When 系统处理 `xhs.detail` 或 `xhs.user_home`
 Then `target_domain`、`target_tab_id`、`target_page` 必须继续由 `runtime_target` 派生
 And `requested_execution_mode` 必须继续由 current parser 行为推导
 And 本 FR 不得要求调用方再额外提供一套 legacy gate fields
+
+### 场景 10A：canonical upstream path 必须命中 canonical ability id
+
+Given 调用方提供 canonical top-level `FR-0023` 四个对象
+When `xhs.detail` 的 `ability.id` 不是 `xhs.note.detail.v1`，或 `xhs.user_home` 的 `ability.id` 不是 `xhs.user.home.v1`
+Then 系统必须把该输入视为 invalid args / command mismatch
+And 本 FR 不得把任意非空 `ability.id` 冻结为 canonical caller path 的合法输入
+
+### 场景 10B：canonical upstream path 的 ability.action 必须与 read action 对齐
+
+Given 调用方提供 canonical top-level `FR-0023` 四个对象
+When `ability.action` 不等于 upstream `action_request.action_category` 投影出的 read-side ability action
+Then 系统必须把该输入视为 invalid args / command mismatch
+And 本 FR 不得把非 read `ability.action` 冻结为该 caller path 的合法输入
 
 ### 场景 11：legacy path 不得把非 canonical ability 输入误报为公共契约
 
