@@ -19,16 +19,20 @@
 
 - 第一刀切片必须限定在 FR-0015 已冻结的 implementation-prep 约束内：仅包含 identity preflight、`runtime_bootstrap_envelope` contract、`runtime.status` read model，以及 bootstrap 失败后的 stop/retry/recover 边界；不得外扩到安装器产品化、candidate 分发或 `FR-0020` 验证体系。
 - 如后续实现继续改 `runtime.status` 或 `runtime_bootstrap_envelope`，先核对 `contracts/` 中已冻结的状态语义与错误分类，避免通过 `TODO.md` 临时改口径。
-- 如后续实现继续改 `attachableReadyRuntime` 或 `orphanRecoverable`，先满足 formal 验证矩阵：
-  - `attachableReadyRuntime=true` 只能建立在 status 聚合器已独立验证现存 runtime 为 ready 的前提下
-  - `pending` / `not_started` / `ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED` / `ERR_RUNTIME_BOOTSTRAP_ACK_TIMEOUT` / attested failed 不得被提升为 `attachableReadyRuntime=true`
+- 如后续实现继续改 pre-lock handoff facts、`RuntimeTakeoverEvidence` 或 `postLockTakeoverGate`，先满足 formal 验证矩阵：
+  - `runtime.status` 顶层只允许返回单实例状态视图；`attachableReadyRuntime` / `orphanRecoverable` 不得再作为顶层字段直接暴露
+  - `RuntimeTakeoverEvidence.attachableReadyRuntime=true` 只能建立在 status 聚合器已独立验证现存 runtime 为 ready 的前提下
+  - `pending` / `not_started` / `ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED` / `ERR_RUNTIME_BOOTSTRAP_ACK_TIMEOUT` / attested failed 不得被提升为 `RuntimeTakeoverEvidence.attachableReadyRuntime=true`
   - 调用方不得被要求通过当前 top-level `bootstrapState` / `transportState` 去反向推断另一条 runtime 实例
-  - 若另一条 controller 仍有效持有该 profile 的独占控制，`attachableReadyRuntime` 必须继续为 `false`
-  - 真正执行 attach/rebind 前，当前调用方仍必须先持有 FR-0003 profile 独占锁
-  - `orphanRecoverable=true` 只能建立在 `runtimeReadiness=recoverable`、`identityBindingState=bound`、旧 owner 已失去有效独占控制、没有其他 controller 已重新取得有效独占控制且 browser/controller 连续性仍成立的前提下
-  - identity 缺失/冲突、旧 owner 仍持有有效独占控制、已有其他 controller 抢先取得有效独占控制、`transportState=not_connected` 或 `bootstrapState=stale` 时，`orphanRecoverable` 必须继续为 `false`
-  - `orphanRecoverable` 只适用于尚未有 controller 重新取得有效独占控制的 pre-lock handoff 视图；replacement controller 或其他 controller 一旦重新持有有效独占锁，该字段必须回落为 `false`
-  - 真正执行 attach/rebind 前，当前调用方仍必须先持有 FR-0003 profile 独占锁
+  - 若另一条 controller 仍有效持有该 profile 的独占控制，`RuntimeTakeoverEvidence.attachableReadyRuntime` 必须继续为 `false`
+  - `RuntimeTakeoverEvidence.orphanRecoverable=true` 只能建立在 `runtimeReadiness=recoverable`、`identityBindingState=bound`、旧 owner 已失去有效独占控制、没有其他 controller 已重新取得有效独占控制且 browser/controller 连续性仍成立的前提下
+  - identity 缺失/冲突、旧 owner 仍持有有效独占控制、已有其他 controller 抢先取得有效独占控制、`transportState=not_connected` 或 `bootstrapState=stale` 时，`RuntimeTakeoverEvidence.orphanRecoverable` 必须继续为 `false`
+  - `RuntimeTakeoverEvidence.orphanRecoverable` 只适用于尚未有 controller 重新取得有效独占控制的 pre-lock handoff 视图；replacement controller 或其他 controller 一旦重新持有有效独占锁，新的 pre-lock evidence 中该字段必须回落为 `false`
+  - `RuntimeTakeoverEvidence` 必须作为锁切换前冻结的 transient evidence 存在，不得写入 profile 持久元数据
+  - `RuntimeTakeoverEvidence` 必须绑定到具体 observed runtime instance（例如 `observedRunId`、`runtimeContextId` 或等价 attach-target identity）
+  - 真正执行 attach/rebind 时，当前调用方必须先持有 FR-0003 profile 独占锁，并通过 `postLockTakeoverGate` 消费锁切换前已成立的 `RuntimeTakeoverEvidence`
+  - `postLockTakeoverGate` 必须校验 evidence 仍对应同一个 observed runtime instance，不能把旧 evidence 套到新的 attach 目标
+  - relock 后不得继续要求新的 pre-lock evidence 维持 `orphanRecoverable=true` 作为 attach/rebind 前提
 - 如进入实现阶段需要推进恢复链路、健康矩阵或 stop-ship 规则，先确认对应验证入口、失败回退与证据产物已在 formal 文档中冻结，而不是通过 `TODO.md` 临时补约束。
 - 开始第一刀前，先明确 stop-ship 触发条件：identity mismatch、stale bootstrap ack、多信号冲突、陈旧 ready marker、bootstrap 非幂等恢复失败；触发后必须阻断 `runtime.start` 成功路径并产出可复核状态。
 - 开始第一刀前，先冻结验证入口：`tests/cli.contract.test.ts` 并发/恢复契约、runtime status contract 回读、bootstrap ack/失败注入、断连恢复与幂等 stop/start 证据。
