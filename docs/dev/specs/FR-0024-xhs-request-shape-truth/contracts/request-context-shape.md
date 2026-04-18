@@ -14,7 +14,7 @@ type RequestShape =
       page: number;
       page_size: number;
       sort: string;
-      note_type: string | number;
+      note_type: number;
     }
   | {
       command: "xhs.detail";
@@ -36,14 +36,22 @@ type RequestShape =
 - `RequestShape` 必须由共享的 `deriveRequestShape()` 产生。
 - `capture`、`cache key`、`lookup`、`eligibility` 必须全部消费同一个 `RequestShape`。
 - 对于 `xhs.search`，derive 阶段必须显式归一 canonical 默认值，避免用 stale page state 或旧模板字段补默认值。
+- 对于 `xhs.search`，`note_type` 在进入 `RequestShape` 前必须被归一为 canonical integer 表示。
 - 对于 `xhs.detail`，`image_scenes` 必须先归一为稳定的字符串数组表示后再进入 `RequestShape`。
+- 对于 `xhs.detail`，当前 baseline 必须先冻结 `image_scenes` 的派生规则，确保 `lookup`/`eligibility` 在网络活动前就能计算稳定 shape。
 - 对于 `xhs.user_home`，当前只有 `user_id` 进入 identity；后续新增 identity 字段必须经过新的 spec review。
 
 兼容映射：
 
 - 现有 `xhs.search` 命令输入 `query` 映射为 `RequestShape.keyword`
+- 现有 `xhs.search` 命令输入 `note_type?: string | number` 映射为 `RequestShape.note_type: number`
 - 现有 `xhs.detail` 命令输入 `note_id` 映射为 `RequestShape.source_note_id`
 - 现有 `xhs.user_home` 命令输入 `user_id` 直接映射为 `RequestShape.user_id`
+
+当前 baseline 的 detail 派生规则：
+
+- `xhs.detail` 的 `image_scenes` 当前冻结为 canonical singleton `["CRD_PRV_WEBP"]`
+- 若未来 detail 路径需要支持其他 `image_scenes` 变体，必须在新的 spec review 中显式扩展
 
 以下字段当前明确不属于 `RequestShape`：
 
@@ -113,9 +121,8 @@ type CapturedRequestTemplateRecord = {
 ```ts
 type RejectedRequestContextObservation = {
   page_context_namespace: string;
-  command: RequestShape["command"];
-  method: RequestShape["method"];
-  pathname: RequestShape["pathname"];
+  shape: RequestShape;
+  shape_key: RequestShapeKey;
   rejection_reason: "synthetic_request_rejected" | "failed_request_rejected";
   observed_at: number;
 };
@@ -124,8 +131,9 @@ type RejectedRequestContextObservation = {
 约束：
 
 - 只有在 capture admission 明确拒绝某条候选请求时，才允许写入 `RejectedRequestContextObservation`
+- `RejectedRequestContextObservation` 必须在 capture admission 拒绝时保留当时已导出的 `shape` 与 `shape_key`
 - 它只能作为 page-local 诊断来源，不得被当成可复用模板
-- 它不需要承载完整 `RequestShape`；它只服务于“当前页面现场最近一次为什么没有可缓存模板”的结构化解释
+- `rejected_source` 只能对当前请求的同 namespace、同 `shape_key` observation 成立，不允许仅按 route-level 误归因
 
 ## 5. `TemplateLookupResult`
 

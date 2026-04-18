@@ -45,7 +45,7 @@
 | 字段 | 角色 | 说明 |
 | --- | --- | --- |
 | `shape` | canonical identity snapshot | 由 capture 时的 `deriveRequestShape()` 生成 |
-| `shape_key` | cache / lookup 唯一键 | 由 `shape` 稳定序列化得到 |
+| `shape_key` | cache / lookup 唯一键 | 由 `shape` 稳定序列化得到；其中 `note_type` 必须先归一为 integer |
 | `page_context_namespace` | 页面现场命名空间 | 用于隔离不同文档生命周期、tab 或等价页面现场 |
 | `template_headers` | exact hit 后可复用上下文 | 不参与 identity |
 | `template_body` | exact hit 后可复用上下文 | 不得成为第二 identity truth |
@@ -59,7 +59,8 @@
 | 字段 | 角色 | 说明 |
 | --- | --- | --- |
 | `page_context_namespace` | 页面现场命名空间 | 只在当前页面现场有效 |
-| `command/method/pathname` | 路由诊断锚点 | 只用于解释当前为什么没有可复用模板 |
+| `shape` | shape-level 诊断锚点 | 记录 capture admission 拒绝时已导出的 canonical shape |
+| `shape_key` | shape-level 诊断键 | 只允许与当前请求同 `shape_key` 的 observation 命中 |
 | `rejection_reason` | 结构化拒绝原因 | 只允许 `synthetic_request_rejected` / `failed_request_rejected` |
 | `observed_at` | 最近观测时间 | 用于返回最近一次 rejected-source 解释 |
 
@@ -84,7 +85,7 @@ request-context cache 的有效存储身份必须是 `page_context_namespace + s
 1. `shape_key` 不是跨页面全局主键。
 2. 不同页面现场即使形状完全相同，也只能在各自 namespace 内覆盖和命中。
 3. `incompatible` 只能发生在“同 namespace、同 command + method + pathname、不同 shape”的候选集合里。
-4. `rejected_source` 只能来自同 namespace 内的 `RejectedRequestContextObservation`。
+4. `rejected_source` 只能来自同 namespace、同 `shape_key` 内的 `RejectedRequestContextObservation`。
 
 ## 生命周期
 
@@ -121,8 +122,9 @@ request-context cache 的有效存储身份必须是 `page_context_namespace + s
 
 - 若实现继续用 `method + pathname`、keyword-only 或 note_id-only scope 做旁路 lookup，会重新引入第二套 identity truth。
 - 若实现把 `shape_key` 当成跨页面全局主键，会重新引入跨页污染。
+- 若实现允许 `note_type` 以字符串和数字两种形态进入 `shape_key`，会重新引入 false miss。
 - 若实现把 `template_body` 当作 fallback identity 来源，会重新引入 detail body 混用与 stale field 覆盖。
-- 若实现保留 `rejected_source` 枚举但没有 page-local rejected observation 数据来源，该结果会再次变成不可达分支。
+- 若实现保留 `rejected_source` 枚举但 observation 不携带 shape-level 身份，该结果会重新退化为 route-level 误归因。
 - 若实现把 page-local template 持久化为 replay truth，会越过 `FR-0018` 的 formal ownership。
 
 ## 与 FR-0018 的边界提醒
