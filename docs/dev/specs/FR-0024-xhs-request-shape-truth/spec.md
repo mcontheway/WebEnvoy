@@ -73,7 +73,7 @@ Canonical Issue: #502
 - `xhs.search` 的 canonical identity 不包含 `search_id`、`X-S-Common`、trace headers 或 referrer。
 - `xhs.search` 的 `note_type` 必须在进入 `RequestShape` 前归一为 canonical integer；同一语义不得同时以字符串与数字参与 key 序列化。
 - `xhs.detail` 的 canonical identity 必须显式包含 `image_scenes`，避免旧 body 变体在同一 `note_id` 下被误复用。
-- `xhs.detail` 当前 baseline 必须先冻结 `image_scenes=["CRD_PRV_WEBP"]` 作为 canonical 派生值；后续若支持其他 detail 变体，必须重新过 spec review。
+- `xhs.detail` 当前 baseline 必须冻结 `image_scenes` 的物化规则，但不得仅凭单一样本值硬编码默认常量；完整 shape 必须来自当前 page-local candidate evidence。
 - `xhs.user_home` 当前 canonical identity 只包含 `user_id`；若后续接口出现新的正式 query 语义，必须通过后续 spec review 扩展，不得由实现自行补字段。
 - `headers`、`referrer`、`trace`、`search_id` 属于“shape 命中后的可复用上下文字段”，不是 identity。
 
@@ -141,6 +141,7 @@ Canonical Issue: #502
 - `detail` 不允许再把旧 body 整包摊平到当前请求上；只能在 exact hit 后复用经过 shape 约束的 canonical template fields
 - `incompatible` 只允许来自“同 page-local namespace、同 command + method + pathname，但 shape 不同”的候选记录
 - `rejected_source` 只允许来自同 namespace、同 `shape_key` 下最近一次被 capture admission 拒绝的 rejected-attempt observation
+- `synthetic_request_rejected` 只有在 full shape 已成功导出后才允许产生；未能先导出 shape 的请求，不得被记录为 synthetic reject
 
 ### 6. fail-closed miss 规则
 
@@ -237,12 +238,21 @@ When 系统执行 lookup 与 eligibility
 Then 结果必须是 `request_context_incompatible`
 And 不得把旧 body 的其他字段整包混入当前请求
 
-### 场景 6A：detail 的当前请求必须能在网络活动前导出稳定 `image_scenes`
+### 场景 6A：detail 的当前请求必须由 page-local candidate evidence 物化 `image_scenes`
 
 Given 当前命令是 `xhs.detail(note_id=note-001)`
+And 当前 page-local namespace 内存在且仅存在一条 `source_note_id=note-001` 的 captured template
 When 系统在发起网络请求前执行 `deriveRequestShape()`
-Then 必须能直接导出 `image_scenes=["CRD_PRV_WEBP"]`
-And 不得等到网络活动之后再反推当前请求 shape
+Then 必须能从该 captured template 物化出完整的 `source_note_id + image_scenes` shape
+And 不得凭单一样本常量或网络后反推来猜测当前请求 shape
+
+### 场景 6B：detail 候选存在多个 `image_scenes` 变体时必须拒绝猜测
+
+Given 当前命令是 `xhs.detail(note_id=note-001)`
+And 当前 page-local namespace 内存在多条 `source_note_id=note-001` 但 `image_scenes` 不同的 captured templates
+When 系统执行 `deriveRequestShape()` 与 lookup
+Then 结果必须是 `request_context_incompatible`
+And 不得自行挑选其中一个 `image_scenes` 继续执行
 
 ### 场景 7：user_home 只按 `user_id` 建立 canonical identity
 
@@ -276,6 +286,7 @@ When 系统执行 lookup
 Then 结果必须是 `rejected_source`
 And reason 必须是 `synthetic_request_rejected` 或 `failed_request_rejected`
 And 不得把该 observation 当成 template record 继续复用
+And 若 full shape 尚未成功导出，则该请求不得被记为 `synthetic_request_rejected`
 
 ### 场景 10：shape 命中但模板过旧时必须 fail closed
 

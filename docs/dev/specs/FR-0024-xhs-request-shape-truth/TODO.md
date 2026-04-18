@@ -7,7 +7,7 @@
 - [ ] reviewer 确认 `xhs.search` canonical identity 至少覆盖 `keyword/page/page_size/sort/note_type`
 - [ ] reviewer 确认 `note_type` 在进入 `RequestShapeKey` 前先归一为 canonical integer
 - [ ] reviewer 确认 `xhs.detail` canonical identity 包含 `source_note_id + image_scenes`
-- [ ] reviewer 确认 `xhs.detail` 当前 baseline 的 `image_scenes` 派生规则已冻结且可前置导出
+- [ ] reviewer 确认 `xhs.detail` 当前 baseline 的 `image_scenes` 派生规则已冻结、可前置导出，且未把未证实样本硬编码成默认常量
 - [ ] reviewer 确认 `xhs.user_home` 当前 canonical identity 只包含 `user_id`
 - [ ] reviewer 确认 headers/referrer/trace/search_id 只属于 exact hit 后的可复用上下文字段，不属于 identity
 - [ ] reviewer 确认 template 只有在真实页面请求、成功完成、非 synthetic request 时才允许进入缓存

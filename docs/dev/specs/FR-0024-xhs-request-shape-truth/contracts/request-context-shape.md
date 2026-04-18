@@ -38,7 +38,7 @@ type RequestShape =
 - 对于 `xhs.search`，derive 阶段必须显式归一 canonical 默认值，避免用 stale page state 或旧模板字段补默认值。
 - 对于 `xhs.search`，`note_type` 在进入 `RequestShape` 前必须被归一为 canonical integer 表示。
 - 对于 `xhs.detail`，`image_scenes` 必须先归一为稳定的字符串数组表示后再进入 `RequestShape`。
-- 对于 `xhs.detail`，当前 baseline 必须先冻结 `image_scenes` 的派生规则，确保 `lookup`/`eligibility` 在网络活动前就能计算稳定 shape。
+- 对于 `xhs.detail`，当前 baseline 必须冻结 `image_scenes` 的派生规则：它不能凭单一样本常量硬编码，而必须从当前 page-local candidate evidence 物化为稳定 shape。
 - 对于 `xhs.user_home`，当前只有 `user_id` 进入 identity；后续新增 identity 字段必须经过新的 spec review。
 
 兼容映射：
@@ -50,8 +50,11 @@ type RequestShape =
 
 当前 baseline 的 detail 派生规则：
 
-- `xhs.detail` 的 `image_scenes` 当前冻结为 canonical singleton `["CRD_PRV_WEBP"]`
-- 若未来 detail 路径需要支持其他 `image_scenes` 变体，必须在新的 spec review 中显式扩展
+- 对 capture 到的 detail 页面真实请求，`image_scenes` 必须直接从被捕获请求体归一后进入 `RequestShape`
+- 对当前 `xhs.detail(note_id=...)` 请求，`deriveRequestShape()` 必须在当前 page-local namespace 的同路由 candidate bucket 内解析 `source_note_id` 对应的 captured templates
+- 当且仅当该 bucket 内存在唯一可用的 `source_note_id + image_scenes` 候选时，当前请求才允许物化出完整 `RequestShape`
+- 若不存在候选，当前请求必须返回 `template_missing`
+- 若同一 `source_note_id` 在当前 namespace 内存在多个不同 `image_scenes` 候选，当前请求必须返回 `incompatible`，不得凭实现猜测其一
 
 以下字段当前明确不属于 `RequestShape`：
 
@@ -134,6 +137,7 @@ type RejectedRequestContextObservation = {
 - `RejectedRequestContextObservation` 必须在 capture admission 拒绝时保留当时已导出的 `shape` 与 `shape_key`
 - 它只能作为 page-local 诊断来源，不得被当成可复用模板
 - `rejected_source` 只能对当前请求的同 namespace、同 `shape_key` observation 成立，不允许仅按 route-level 误归因
+- `synthetic_request_rejected` 只有在 full `RequestShape` 已成功导出后才允许写入；若 shape 尚未物化，系统必须提前返回 `miss` 或 `incompatible`，而不是生成无 shape 的 synthetic reject
 
 ## 5. `TemplateLookupResult`
 

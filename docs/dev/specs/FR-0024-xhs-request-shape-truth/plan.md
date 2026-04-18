@@ -84,7 +84,7 @@
 - reviewer 确认 `xhs.search` canonical identity 至少覆盖 `keyword/page/page_size/sort/note_type`。
 - reviewer 确认 `note_type` 在进入 `RequestShapeKey` 前已冻结为单一 canonical integer 表示。
 - reviewer 确认 `xhs.detail` canonical identity 显式包含 `image_scenes`，不再允许 body 整包混用。
-- reviewer 确认 `xhs.detail` 当前 baseline 的 `image_scenes` 派生规则已冻结，且可在网络活动前导出稳定 shape。
+- reviewer 确认 `xhs.detail` 当前 baseline 的 `image_scenes` 派生规则已冻结，但没有把未证实的单一样本值硬编码成默认常量。
 - reviewer 确认 `xhs.user_home` 当前 identity 只包含 `user_id`，且 query/header 变体不会被误写成 identity。
 - reviewer 确认 exact template miss 的正式规则是 fail closed，而不是 silent synthetic fallback。
 - reviewer 确认 `incompatible` 与 `rejected_source` 都具有 shape-level、可实现的数据来源，而不是不可达分支。

@@ -86,6 +86,7 @@ request-context cache 的有效存储身份必须是 `page_context_namespace + s
 2. 不同页面现场即使形状完全相同，也只能在各自 namespace 内覆盖和命中。
 3. `incompatible` 只能发生在“同 namespace、同 command + method + pathname、不同 shape”的候选集合里。
 4. `rejected_source` 只能来自同 namespace、同 `shape_key` 内的 `RejectedRequestContextObservation`。
+5. `synthetic_request_rejected` observation 只允许在 full shape 已成功导出后产生；否则必须在更早阶段以 `miss` / `incompatible` 终止。
 
 ## 生命周期
 
@@ -125,6 +126,7 @@ request-context cache 的有效存储身份必须是 `page_context_namespace + s
 - 若实现允许 `note_type` 以字符串和数字两种形态进入 `shape_key`，会重新引入 false miss。
 - 若实现把 `template_body` 当作 fallback identity 来源，会重新引入 detail body 混用与 stale field 覆盖。
 - 若实现保留 `rejected_source` 枚举但 observation 不携带 shape-level 身份，该结果会重新退化为 route-level 误归因。
+- 若实现把 `xhs.detail.image_scenes` 仅凭单一样本值硬编码为常量，会把未证实的 detail 变体直接冻结进 formal contract。
 - 若实现把 page-local template 持久化为 replay truth，会越过 `FR-0018` 的 formal ownership。
 
 ## 与 FR-0018 的边界提醒
