@@ -51,4 +51,4 @@
 - `source_note_id` 的 canonical mapping、transport alias、placement、route admission / normalization 规则
 - compatibility、rejected-source matching、template reuse 等 request-context 行为
 
-其中前四项已由 `#504` / FR-0025 冻结；后两项必须由后续实现 FR / 实现 PR 在消费 `#504 + #505` 后继续回答，不在本 FR 重新定义。
+其中前四项已由 `#504` / FR-0025 冻结；后两项必须先通过新的 formal spec review 在消费 `#504 + #505` 的前提下继续回答，不在本 FR 重新定义；单独实现 PR 不得越权定义这些共享规则。

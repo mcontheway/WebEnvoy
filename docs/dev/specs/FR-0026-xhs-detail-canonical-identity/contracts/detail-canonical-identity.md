@@ -26,6 +26,7 @@ type XhsDetailNonIdentityBoundaryV1 = "no_additional_detail_identity_fields_froz
 - 本 FR 不冻结这些字段的 diagnostics / compatibility placement、输出位置或具体 shape。
 - 它们不得进入 canonical identity anchor，也不得成为额外 identity discriminator。
 - 本 FR 不定义 detail compatibility、rejected-source matching、template reuse 或其他 request-context 语义。
+- 若未来需要冻结 detail request-shape truth、shape_key、lookup slotting、route eligibility 或 reuse 语义，必须先通过新的 formal spec review；单独实现 PR 不得自行定义这些共享规则。
 
 ## 3. Current v1 exclusion rule
 
