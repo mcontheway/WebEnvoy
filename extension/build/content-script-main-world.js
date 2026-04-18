@@ -192,7 +192,8 @@ export const readCapturedXhsRequestContextViaMainWorld = async (input) => {
         type: "xhs-request-context-read",
         payload: {
             url: input.url,
-            method: input.method
+            method: input.method,
+            ...(typeof input.scopeKey === "string" ? { scope_key: input.scopeKey } : {})
         }
     });
     if (typeof result !== "object" || result === null || Array.isArray(result)) {

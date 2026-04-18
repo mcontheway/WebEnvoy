@@ -114,7 +114,8 @@ const createBrowserEnvironment = () => ({
     readPageStateRoot: async () => await readPageStateViaMainWorld(),
     readCapturedRequestContext: async (input) => await readCapturedXhsRequestContextViaMainWorld({
         url: input.url,
-        method: input.method
+        method: input.method,
+        ...(typeof input.scopeKey === "string" ? { scopeKey: input.scopeKey } : {})
     }).catch(() => null),
     callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
     fetchJson: async (input) => {

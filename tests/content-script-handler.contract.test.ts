@@ -409,11 +409,17 @@ const withMockMainWorld = async (
             : requestPayload?.method === "POST"
               ? "POST"
               : "POST";
+        const scopeKey =
+          typeof requestPayload?.scope_key === "string" && requestPayload.scope_key.length > 0
+            ? requestPayload.scope_key
+            : null;
         const trackedContexts =
           ((mockWindow as Window & Record<string, unknown>).__capturedXhsRequestContexts__ as
             | Record<string, unknown>
             | undefined) ?? {};
-        const key = `${requestMethod} ${new URL(requestUrl, mockWindow.location.href).pathname}`;
+        const key = scopeKey
+          ? `${requestMethod} ${new URL(requestUrl, mockWindow.location.href).pathname} ${scopeKey}`
+          : "";
         emitResult({
           id: requestId,
           ok: true,

@@ -295,12 +295,14 @@ export const readPageStateViaMainWorld = async (): Promise<Record<string, unknow
 export const readCapturedXhsRequestContextViaMainWorld = async (input: {
   url: string;
   method: "POST" | "GET";
+  scopeKey?: string;
 }): Promise<CapturedXhsRequestContext | null> => {
   const result = await mainWorldCall<unknown>({
     type: "xhs-request-context-read",
     payload: {
       url: input.url,
-      method: input.method
+      method: input.method,
+      ...(typeof input.scopeKey === "string" ? { scope_key: input.scopeKey } : {})
     }
   });
   if (typeof result !== "object" || result === null || Array.isArray(result)) {

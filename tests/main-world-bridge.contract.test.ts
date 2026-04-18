@@ -262,7 +262,8 @@ describe("main-world bridge contract", () => {
         type: "xhs-request-context-read",
         payload: {
           url: "/api/sns/web/v1/search/notes",
-          method: "POST"
+          method: "POST",
+          scope_key: "AI"
         }
       }
     } as unknown as Event);

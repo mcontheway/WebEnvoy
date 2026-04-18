@@ -591,7 +591,10 @@ const executeXhsRead = async (input, spec, env) => {
     const capturedRequestContext = env.readCapturedRequestContext
         ? await env.readCapturedRequestContext({
             url: spec.buildUrl(input.params),
-            method: spec.method
+            method: spec.method,
+            scopeKey: spec.command === "xhs.detail"
+                ? input.params.note_id
+                : input.params.user_id
         }).catch(() => null)
         : null;
     const capturedHeaders = resolveCapturedRequestHeaders(capturedRequestContext?.headers);

@@ -282,11 +282,13 @@ export const executeXhsSearch = async (input, env) => {
     const capturedRequestContext = env.readCapturedRequestContext
         ? await env.readCapturedRequestContext({
             url: SEARCH_ENDPOINT,
-            method: "POST"
+            method: "POST",
+            scopeKey: input.params.query
         }).catch(() => null)
         : null;
     const capturedPayload = parseCapturedJsonBody(capturedRequestContext?.body ?? null);
-    if (capturedPayload) {
+    const capturedKeyword = asString(capturedPayload?.keyword);
+    if (capturedPayload && capturedKeyword === input.params.query) {
         payload.page = input.params.page ?? capturedPayload.page ?? payload.page;
         payload.page_size = input.params.limit ?? capturedPayload.page_size ?? payload.page_size;
         payload.search_id =

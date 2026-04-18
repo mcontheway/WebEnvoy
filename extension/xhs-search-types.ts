@@ -68,6 +68,7 @@ export interface XhsSearchEnvironment {
   readCapturedRequestContext?(input: {
     url: string;
     method: "POST" | "GET";
+    scopeKey?: string;
   }): Promise<CapturedXhsRequestContext | null>;
   callSignature(uri: string, payload: JsonRecord): Promise<SignatureResult>;
   fetchJson(input: {

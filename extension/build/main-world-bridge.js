@@ -66,15 +66,45 @@ const normalizeTrackedXhsRequest = (inputUrl, inputMethod) => {
         }
         const method = inputMethod.toUpperCase() === "GET" ? "GET" : "POST";
         return {
-            key: `${method} ${resolvedUrl.pathname}`,
+            pathKey: `${method} ${resolvedUrl.pathname}`,
             url: resolvedUrl.toString(),
-            method
+            method,
+            pathname: resolvedUrl.pathname
         };
     }
     catch {
         return null;
     }
 };
+const parseTrackedRequestBody = (value) => {
+    if (!value) {
+        return null;
+    }
+    try {
+        return asRecord(JSON.parse(value));
+    }
+    catch {
+        return null;
+    }
+};
+const resolveTrackedRequestScopeKey = (input) => {
+    if (input.pathname === "/api/sns/web/v1/search/notes") {
+        return asString(parseTrackedRequestBody(input.body)?.keyword);
+    }
+    if (input.pathname === "/api/sns/web/v1/feed") {
+        return asString(parseTrackedRequestBody(input.body)?.source_note_id);
+    }
+    if (input.pathname === "/api/sns/web/v1/user/otherinfo") {
+        try {
+            return asString(new URL(input.url).searchParams.get("user_id"));
+        }
+        catch {
+            return null;
+        }
+    }
+    return null;
+};
+const buildTrackedRequestKey = (pathKey, scopeKey) => scopeKey ? `${pathKey} ${scopeKey}` : pathKey;
 const normalizeHeaderEntries = (headers) => {
     const normalized = {};
     for (const [key, value] of headers) {
@@ -120,13 +150,22 @@ const rememberCapturedXhsRequestContext = (input) => {
     if (!tracked) {
         return;
     }
-    capturedXhsRequestContexts.set(tracked.key, {
+    const scopeKey = resolveTrackedRequestScopeKey({
+        pathname: tracked.pathname,
+        url: tracked.url,
+        body: input.body
+    });
+    if (!scopeKey) {
+        return;
+    }
+    capturedXhsRequestContexts.set(buildTrackedRequestKey(tracked.pathKey, scopeKey), {
         url: tracked.url,
         method: tracked.method,
         headers: { ...input.headers },
         body: input.body,
         referrer: input.referrer,
-        captured_at: Date.now()
+        captured_at: Date.now(),
+        scope_key: scopeKey
     });
 };
 const installXhsRequestCapture = () => {
@@ -509,7 +548,8 @@ const handlePageStateReadRequest = async (request) => {
 const handleXhsRequestContextReadRequest = async (request) => {
     const requestUrl = asString(request.payload.url);
     const requestMethod = asString(request.payload.method);
-    if (!requestUrl || !requestMethod) {
+    const scopeKey = asString(request.payload.scope_key);
+    if (!requestUrl || !requestMethod || !scopeKey) {
         await emitMainWorldResult({
             id: request.id,
             ok: true,
@@ -521,7 +561,9 @@ const handleXhsRequestContextReadRequest = async (request) => {
     await emitMainWorldResult({
         id: request.id,
         ok: true,
-        result: tracked ? capturedXhsRequestContexts.get(tracked.key) ?? null : null
+        result: tracked
+            ? capturedXhsRequestContexts.get(buildTrackedRequestKey(tracked.pathKey, scopeKey)) ?? null
+            : null
     });
 };
 const handleFingerprintInstallRequest = async (request) => {

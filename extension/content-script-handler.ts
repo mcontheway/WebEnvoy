@@ -226,7 +226,8 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
   readCapturedRequestContext: async (input) =>
     await readCapturedXhsRequestContextViaMainWorld({
       url: input.url,
-      method: input.method
+      method: input.method,
+      ...(typeof input.scopeKey === "string" ? { scopeKey: input.scopeKey } : {})
     }).catch(() => null),
   callSignature: async (
     uri: Parameters<XhsSearchEnvironment["callSignature"]>[0],

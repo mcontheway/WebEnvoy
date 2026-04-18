@@ -5047,11 +5047,13 @@ const executeXhsSearch = async (input, env) => {
     const capturedRequestContext = env.readCapturedRequestContext
         ? await env.readCapturedRequestContext({
             url: SEARCH_ENDPOINT,
-            method: "POST"
+            method: "POST",
+            scopeKey: input.params.query
         }).catch(() => null)
         : null;
     const capturedPayload = parseCapturedJsonBody(capturedRequestContext?.body ?? null);
-    if (capturedPayload) {
+    const capturedKeyword = asString(capturedPayload?.keyword);
+    if (capturedPayload && capturedKeyword === input.params.query) {
         payload.page = input.params.page ?? capturedPayload.page ?? payload.page;
         payload.page_size = input.params.limit ?? capturedPayload.page_size ?? payload.page_size;
         payload.search_id =
@@ -5812,7 +5814,10 @@ const executeXhsRead = async (input, spec, env) => {
     const capturedRequestContext = env.readCapturedRequestContext
         ? await env.readCapturedRequestContext({
             url: spec.buildUrl(input.params),
-            method: spec.method
+            method: spec.method,
+            scopeKey: spec.command === "xhs.detail"
+                ? input.params.note_id
+                : input.params.user_id
         }).catch(() => null)
         : null;
     const capturedHeaders = resolveCapturedRequestHeaders(capturedRequestContext?.headers);
@@ -6805,7 +6810,8 @@ const readCapturedXhsRequestContextViaMainWorld = async (input) => {
         type: "xhs-request-context-read",
         payload: {
             url: input.url,
-            method: input.method
+            method: input.method,
+            ...(typeof input.scopeKey === "string" ? { scope_key: input.scopeKey } : {})
         }
     });
     if (typeof result !== "object" || result === null || Array.isArray(result)) {
@@ -7281,7 +7287,8 @@ const createBrowserEnvironment = () => ({
     readPageStateRoot: async () => await readPageStateViaMainWorld(),
     readCapturedRequestContext: async (input) => await readCapturedXhsRequestContextViaMainWorld({
         url: input.url,
-        method: input.method
+        method: input.method,
+        ...(typeof input.scopeKey === "string" ? { scopeKey: input.scopeKey } : {})
     }).catch(() => null),
     callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
     fetchJson: async (input) => {
