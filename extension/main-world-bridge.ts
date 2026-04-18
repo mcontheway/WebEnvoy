@@ -230,6 +230,9 @@ const resolveRequestBodyString = (value: unknown): string | null => {
   return null;
 };
 
+const shouldSkipCapturedXhsRequestContext = (init: unknown): boolean =>
+  asRecord(init)?.__webenvoySkipCapture === true;
+
 const rememberCapturedXhsRequestContext = (input: {
   url: string;
   method: "POST" | "GET";
@@ -273,6 +276,7 @@ const installXhsRequestCapture = (): void => {
       let method = "GET";
       let headers: Record<string, string> = {};
       let body: string | null = null;
+      const skipCapture = shouldSkipCapturedXhsRequestContext(init);
 
       if (typeof Request === "function" && input instanceof Request) {
         requestUrl = input.url;
@@ -289,13 +293,15 @@ const installXhsRequestCapture = (): void => {
         body = resolveRequestBodyString(init?.body);
       }
 
-      rememberCapturedXhsRequestContext({
-        url: requestUrl,
-        method: method.toUpperCase() === "GET" ? "GET" : "POST",
-        headers,
-        body,
-        referrer: typeof mainWindow.location?.href === "string" ? mainWindow.location.href : null
-      });
+      if (!skipCapture) {
+        rememberCapturedXhsRequestContext({
+          url: requestUrl,
+          method: method.toUpperCase() === "GET" ? "GET" : "POST",
+          headers,
+          body,
+          referrer: typeof mainWindow.location?.href === "string" ? mainWindow.location.href : null
+        });
+      }
 
       return await originalFetch(input, init);
     };

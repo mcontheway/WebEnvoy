@@ -254,6 +254,19 @@ describe("main-world bridge contract", () => {
       }
     );
 
+    await (mockWindow as typeof mockWindow & { fetch: typeof fetch }).fetch(
+      "/api/sns/web/v1/search/notes",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json;charset=utf-8",
+          "X-S-Common": "{\"page\":\"synthetic\"}"
+        },
+        body: "{\"keyword\":\"AI\",\"search_id\":\"search-ctx-synthetic\"}",
+        __webenvoySkipCapture: true
+      } as RequestInit & { __webenvoySkipCapture: true }
+    );
+
     const requestListener = added.find((entry) => entry.type === secretChannel.requestEvent)?.listener;
     requestListener?.({
       type: secretChannel.requestEvent,

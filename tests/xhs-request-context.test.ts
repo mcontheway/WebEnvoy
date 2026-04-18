@@ -235,6 +235,52 @@ describe("xhs request-context hydration", () => {
     });
   });
 
+  it("keeps canonical search defaults even when captured page state is on a later page", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
+
+    await executeXhsSearch(
+      {
+        abilityId: "xhs.note.search.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          query: "AI"
+        },
+        options: createLiveReadOptions({
+          runId: "run-search-context-stale-page-001",
+          targetPage: "search_result_tab"
+        }),
+        executionContext: createExecutionContext(
+          "run-search-context-stale-page-001",
+          "search_result_tab"
+        )
+      },
+      createEnvironment({
+        fetchJson,
+        readCapturedRequestContext: async () => ({
+          url: "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
+          method: "POST",
+          headers: {
+            "X-S-Common": "{\"searchId\":\"captured-search-id\"}"
+          },
+          body: "{\"keyword\":\"AI\",\"search_id\":\"captured-search-id\",\"page\":7,\"page_size\":50,\"sort\":\"time_desc\",\"note_type\":2}",
+          referrer: "https://www.xiaohongshu.com/search_result/?keyword=AI&type=51",
+          captured_at: 1_710_000_000_000
+        })
+      })
+    );
+
+    const searchFetchInput = fetchJson.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(JSON.parse(String(searchFetchInput.body))).toEqual({
+      keyword: "AI",
+      page: 1,
+      page_size: 20,
+      search_id: "captured-search-id",
+      sort: "general",
+      note_type: 0
+    });
+  });
+
   it("hydrates xhs.detail live requests from captured feed context and keeps page-context fetch", async () => {
     const fetchJson = vi.fn(async () => ({
       status: 200,

@@ -289,14 +289,10 @@ export const executeXhsSearch = async (input, env) => {
     const capturedPayload = parseCapturedJsonBody(capturedRequestContext?.body ?? null);
     const capturedKeyword = asString(capturedPayload?.keyword);
     if (capturedPayload && capturedKeyword === input.params.query) {
-        payload.page = input.params.page ?? capturedPayload.page ?? payload.page;
-        payload.page_size = input.params.limit ?? capturedPayload.page_size ?? payload.page_size;
         payload.search_id =
             input.params.search_id ??
                 asString(capturedPayload.search_id) ??
                 (typeof payload.search_id === "string" ? payload.search_id : env.randomId());
-        payload.sort = input.params.sort ?? capturedPayload.sort ?? payload.sort;
-        payload.note_type = input.params.note_type ?? capturedPayload.note_type ?? payload.note_type;
     }
     let signature;
     try {

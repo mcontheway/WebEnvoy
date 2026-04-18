@@ -3694,6 +3694,7 @@ class ChromeBackgroundBridge {
                         ...(typeof requestReferrerPolicy === "string"
                             ? { referrerPolicy: requestReferrerPolicy }
                             : {}),
+                        __webenvoySkipCapture: true,
                         signal: controller.signal
                     });
                     const text = await response.text();
