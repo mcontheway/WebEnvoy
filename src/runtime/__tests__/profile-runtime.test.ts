@@ -1903,7 +1903,11 @@ describe("profile-runtime identity preflight", () => {
         mode: "ready_attach",
         attachableReadyRuntime: true,
         orphanRecoverable: false,
-        observedRunId: "run-runtime-status-owner-001"
+        observedRunId: "run-runtime-status-owner-001",
+        runtimeContextId: buildRuntimeBootstrapContextId(
+          "status_non_owner_profile",
+          "run-runtime-status-owner-001"
+        )
       })
     });
   });
