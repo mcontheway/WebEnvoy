@@ -30,8 +30,8 @@
 补充观测：
 
 - `tests/xhs-read-execution.fallback.test.ts` 已验证 `/api/sns/web/v1/feed` POST body 使用 `source_note_id`
-- current observed route 上，已经足够把 `source_note_id` 收窄为 `/api/sns/web/v1/feed` request artifact 到 canonical `note_id` 的 alias 归一化规则
-- 但当前仓库仍缺少 page-native / broader captured detail traffic 证据去把它扩写成 verified request transport truth、其他 placement 或其他路由的一般化规则
+- current observed route 上，只能确认 `source_note_id` 已出现在 `/api/sns/web/v1/feed` detail request artifact 中
+- 但当前仓库仍缺少 page-native / broader captured detail traffic 证据去把它冻结成 verified request transport truth、frozen alias mapping、standalone identity source、其他 placement 或其他路由的一般化规则
 - formal 也不应把未验证的其他字段或未验证路由写成 identity derivation truth
 
 ### 3. 仓库内缺少 image_scenes admission-ready 证据
@@ -62,7 +62,7 @@
 
 当前仓库内还只能支持一个更窄的 artifact-side 结论：
 
-- 在当前已观测到的 `/api/sns/web/v1/feed` request artifact 上，`source_note_id` 可以被收窄 formalize 为 canonical `note_id` 的 transport alias
-- 但它仍不足以被扩写为更广的 verified transport truth、第二个 identity 字段或其他 route 的通用 normalization 规则
+- 在当前已观测到的 `/api/sns/web/v1/feed` request artifact 上，`source_note_id` 只被确认“已出现于 artifact”
+- 但它仍不足以被扩写为 verified transport truth、frozen alias mapping、standalone identity source、第二个 identity 字段或其他 route 的通用 normalization 规则
 
-因此，本 FR 应冻结“当前不纳入 identity”，而不是继续悬空。
+因此，本 FR 应冻结“当前不纳入 identity，且不能单独导出 identity”，而不是继续悬空。

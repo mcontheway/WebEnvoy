@@ -3,7 +3,7 @@
 - [x] 建立 `FR-0026-xhs-detail-canonical-identity` 正式套件
 - [x] 建立 canonical issue 绑定 `#505`
 - [ ] reviewer 确认 current v1 `xhs.detail` canonical identity 只包含 `note_id`
-- [ ] reviewer 确认 `/api/sns/web/v1/feed` request-body `source_note_id` 已被收窄 formalize 为 canonical `note_id` 的 alias mapping，且未被扩写为更广 transport truth 或第二个 identity 字段
+- [ ] reviewer 确认 `source_note_id` 已被收敛为 observed artifact field only，且未被提升为 frozen alias mapping、standalone identity source 或第二个 identity 字段
 - [ ] reviewer 确认 `image_scenes` 当前不进入 identity
 - [ ] reviewer 确认本 FR 未把 `image_scenes` 的 placement 写成 current v1 formal truth
 - [ ] reviewer 确认本 FR 未把 compatibility、rejected-source matching、template reuse 等 identity 之外的 detail matching 语义预先冻结为 formal truth
@@ -18,6 +18,6 @@
 - 当前阶段只冻结 current v1 detail identity，不承诺实现代码。
 - 后续实现应优先消费本 FR 冻结的：
   - `note_id` only identity
-  - current observed `/api/sns/web/v1/feed` `source_note_id -> note_id` alias mapping
+  - `source_note_id` observed-only / not-a-standalone-identity-source
   - `image_scenes` not-in-identity 结论
   - future revision 准入条件

@@ -36,7 +36,7 @@
   - 后续实现 PR 把 `source_note_id` 或 `image_scenes` 直接写成 current v1 formal truth
 - 影响：
   - detail canonical identity 被错误扩张
-  - `#505` 再次偏离“note_id only + current observed source_note_id alias mapping + image_scenes not-in-identity”的主结论
+  - `#505` 再次偏离“note_id only + source_note_id observed-only + image_scenes not-in-identity”的主结论
 - 缓解：
-  - 当前 FR 只冻结 `note_id` only identity、当前 observed `source_note_id -> note_id` alias mapping，以及 `image_scenes` not-in-identity
-  - 明确更广的 `source_note_id` transport truth、placement 与 request-context 行为仍待未来证据和新 spec 修订
+  - 当前 FR 只冻结 `note_id` only identity、`source_note_id` observed-only / not-a-standalone-identity-source，以及 `image_scenes` not-in-identity
+  - 明确更广的 `source_note_id` transport truth、placement、request-context 行为与 artifact-side derivation 仍待未来证据和新 spec 修订
