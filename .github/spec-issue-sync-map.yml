@@ -45,3 +45,5 @@ mappings:
     canonical_issue_number: 238
   - spec_path: docs/dev/specs/FR-0023-upstream-authorization-request-admission-contract/spec.md
     canonical_issue_number: 472
+  - spec_path: docs/dev/specs/FR-0024-xhs-request-shape-truth/spec.md
+    canonical_issue_number: 502
