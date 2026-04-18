@@ -24,7 +24,7 @@ type XhsUserHomeCommand = {
 - 两条命令都 `requiresProfile=true`。
 - `note_id` / `user_id` 都必须为必填、trim 后非空的字符串。
 - canonical `upstream_authorization_request` path 与 current runtime / contract output metadata 继续分别对齐 `xhs.note.detail.v1` / `xhs.user.home.v1`。
-- legacy public CLI path 当前不因 ability id 偏离上述 canonical 值而单独形成 formal rejection；本契约不预先冻结更严格的 ability-mismatch 阻断。
+- legacy public CLI path 的非 canonical `ability.id` 行为不属于本契约冻结范围；本契约不把这类输入申报为受支持的公共 CLI 契约。
 
 ## 2. Target baseline
 

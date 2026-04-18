@@ -5,7 +5,7 @@
 - [ ] reviewer 确认 `xhs.detail` / `xhs.user_home` 已冻结为 current public CLI command surface
 - [ ] reviewer 确认 `FR-0005` 中“缺失公开命令面”只保留为 dated historical fact
 - [ ] reviewer 确认 `note_id` / `user_id` 是唯一 required canonical command input
-- [ ] reviewer 确认 canonical shared-path ability 只冻结为 current canonical metadata 对齐边界，而不是被误写成 legacy public CLI path 的新 rejection 规则
+- [ ] reviewer 确认 canonical shared-path ability 只冻结为 current canonical metadata 对齐边界，且 non-canonical `ability.id` 未被 formal 误报为受支持公共契约
 - [ ] reviewer 确认 `explore_detail_tab` / `profile_tab` 是唯一 target-page baseline
 - [ ] reviewer 确认 legacy public CLI request-context 仍要求显式 `target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode`
 - [ ] reviewer 确认 `requested_execution_mode` 只冻结 parser 接受面与后续 rejection chain，而未被 formal 误收窄为 read-only allowlist

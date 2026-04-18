@@ -62,7 +62,7 @@ Canonical Issue: #504
 - `note_id` 与 `user_id` 都必须是必填、非空、去首尾空白后的字符串。
 - 这两个命令不消费 `query`、`limit`、`search_id`、`sort`、`note_type` 这一类 search-only 输入。
 - canonical `upstream_authorization_request` path 与 current bundled runtime / contract outputs 继续把两条命令分别对齐到 canonical ability metadata：`xhs.detail -> xhs.note.detail.v1`、`xhs.user_home -> xhs.user.home.v1`。
-- legacy public CLI path 当前仍按 command + input 进入 shared parser；只要 `ability.id` 非空且未进入 canonical action-name 对齐校验，current main 不会仅因 ability id 不是上述 canonical 值就直接拒绝输入；本 FR 不把 legacy path 预先收紧为更严格的 rejection 规则。
+- legacy public CLI path 当前仍按 command + input 进入 shared parser；但非 canonical `ability.id` 的 legacy 行为不属于 current public CLI formal guarantee，本 FR 不把该类输入申报为受支持契约。
 - 本 FR 只冻结 command input，不冻结 detail request identity 的附加字段。
 
 ### 3. target-page 与 public CLI request-context baseline
@@ -220,12 +220,12 @@ Then `target_domain`、`target_tab_id`、`target_page` 必须继续由 `runtime_
 And `requested_execution_mode` 必须继续由 current parser 行为推导
 And 本 FR 不得要求调用方再额外提供一套 legacy gate fields
 
-### 场景 11：legacy path 不得被 formal 预先收紧为“必须匹配 canonical ability id”
+### 场景 11：legacy path 不得把非 canonical ability 输入误报为公共契约
 
 Given 调用方通过 legacy public CLI path 发起 `xhs.detail` 或 `xhs.user_home`
 And 输入已满足当前 command input 与 shared gate fields 基线
 When `ability.id` 不是 canonical shared-path ability id 但仍为非空字符串
-Then 本 FR 不得把该情况预先冻结为 current main 必然拒绝
+Then 本 FR 不得把该输入申报为 current public CLI 的受支持契约
 And 只能把 canonical ability 对齐冻结为 canonical upstream path 与 current shared runtime 输出 metadata
 
 ### 场景 12：canonical upstream objects 被命令面消费后保留请求级结果

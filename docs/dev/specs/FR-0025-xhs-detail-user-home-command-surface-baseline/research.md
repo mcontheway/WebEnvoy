@@ -45,7 +45,7 @@
 - 当前 formal freeze 只能冻结两条现有入口的真实边界：
   - legacy public CLI path：`target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode` 仍需显式提供
   - canonical upstream path：shared gate fields 继续从 `runtime_target` 与 current parser 行为派生，不另起第二套输入
-- canonical shared-path ability 映射当前存在，但 formal 只能把它冻结为 canonical upstream path 与 current runtime / contract output 的对齐边界，不能提前把 legacy path 写成更严格的 ability-mismatch rejection
+- canonical shared-path ability 映射当前存在，但 formal 只能把它冻结为 canonical upstream path 与 current runtime / contract output 的对齐边界；legacy path 上观察到的非 canonical `ability.id` 行为只能保留为实现观测，不能被 formal 申报为受支持公共契约
 
 ### 4. current implementation 已消费 FR-0023 四对象输入
 
