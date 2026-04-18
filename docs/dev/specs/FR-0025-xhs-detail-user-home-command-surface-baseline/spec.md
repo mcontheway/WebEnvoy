@@ -17,8 +17,8 @@ Canonical Issue: #504
 ## 目标
 
 1. 冻结 `xhs.detail` 与 `xhs.user_home` 已属于 current main 公共 CLI command surface 的正式结论。
-2. 冻结两个命令的 canonical command input、canonical shared-path ability metadata 对齐边界、target-page baseline 与 public CLI request-context baseline。
-3. 冻结两个命令如何消费 `FR-0023` 的 `action_request/resource_binding/authorization_grant/runtime_target` 四对象。
+2. 冻结两个命令的 caller-facing `ability` envelope、canonical command input、canonical shared-path ability metadata 对齐边界、target-page baseline 与 public CLI request-context baseline。
+3. 冻结两个命令如何消费 `FR-0023` 的 `action_request/resource_binding/authorization_grant/runtime_target` 四个顶层对象。
 4. 冻结 `request_admission_result` 与 `execution_audit` 在这两个命令上的 command-level ownership，并与 current implementation 对齐。
 5. 显式声明 detail identity 不在本 FR 冻结，`image_scenes` 继续转交 `#505`。
 
@@ -46,9 +46,9 @@ Canonical Issue: #504
 - `FR-0005` 中“detail/user_home 尚无公开 CLI 命令入口”的旧口径与 current main 存在 formal mismatch。
 - 本 FR 只为 `#504` 冻结 current command surface / request-context baseline，不单独改判 `FR-0005`、`#445` 或其 blocker 语义。
 
-### 2. canonical command input
+### 2. caller-facing ability envelope 与 canonical command input
 
-系统必须冻结以下 canonical command input 与 current canonical shared-path ability metadata 对齐边界：
+系统必须冻结以下 caller-facing `ability` envelope、canonical command input 与 current canonical shared-path ability metadata 对齐边界：
 
 - `xhs.detail`
   - command: `xhs.detail`
@@ -59,9 +59,11 @@ Canonical Issue: #504
 
 约束：
 
+- current public CLI request 仍必须显式携带 `ability.id`、`ability.layer`、`ability.action` 组成的 `ability` envelope。
+- `xhs.detail` / `xhs.user_home` 当前 caller-facing ability baseline 都要求 `ability.layer = "L3"` 且 `ability.action = "read"`。
 - `note_id` 与 `user_id` 都必须是必填、非空、去首尾空白后的字符串。
 - 这两个命令不消费 `query`、`limit`、`search_id`、`sort`、`note_type` 这一类 search-only 输入。
-- canonical `upstream_authorization_request` path 与 current bundled runtime / contract outputs 继续把两条命令分别对齐到 canonical ability metadata：`xhs.detail -> xhs.note.detail.v1`、`xhs.user_home -> xhs.user.home.v1`。
+- current top-level `FR-0023` object path 与 current bundled runtime / contract outputs 继续把两条命令分别对齐到 canonical ability metadata：`xhs.detail -> xhs.note.detail.v1`、`xhs.user_home -> xhs.user.home.v1`。
 - legacy public CLI path 当前仍按 command + input 进入 shared parser；但非 canonical `ability.id` 的 legacy 行为不属于 current public CLI formal guarantee，本 FR 不把该类输入申报为受支持契约。
 - 本 FR 只冻结 command input，不冻结 detail request identity 的附加字段。
 
@@ -73,7 +75,7 @@ Canonical Issue: #504
   - `xhs.detail` 的 current target-page baseline 是 `explore_detail_tab`
   - `xhs.user_home` 的 current target-page baseline 是 `profile_tab`
   - shared gate fields `target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode` 都必须显式提供
-- canonical `upstream_authorization_request` path
+- canonical top-level `FR-0023` object path
   - `xhs.detail` 的 current target-page baseline 继续由 `runtime_target.page = "explore_detail_tab"` 承载
   - `xhs.user_home` 的 current target-page baseline 继续由 `runtime_target.page = "profile_tab"` 承载
   - `target_domain`、`target_tab_id`、`target_page` 继续从 `runtime_target` 派生，`requested_execution_mode` 继续由 current parser 行为推导
@@ -81,7 +83,8 @@ Canonical Issue: #504
 约束：
 
 - 在 legacy public CLI path 中，上述 shared gate fields 缺失时必须按 invalid args 处理。
-- 在 canonical `upstream_authorization_request` path 中，`target_domain`、`target_tab_id`、`target_page` 必须继续由 `runtime_target` 派生，`requested_execution_mode` 必须继续由 current parser 行为推导；本 FR 不得把这些派生字段重新外显为第二套必填输入。
+- 在 canonical top-level `FR-0023` object path 中，`target_domain`、`target_tab_id`、`target_page` 必须继续由 `runtime_target` 派生，`requested_execution_mode` 必须继续由 current parser 行为推导；本 FR 不得把这些派生字段重新外显为第二套必填输入。
+- current parser 只把 `action_request`、`resource_binding`、`authorization_grant`、`runtime_target` 这四个顶层对象识别为 canonical caller-facing 输入；归一化后的 `options.upstream_authorization_request` 只是内部下游表示，不是 current public CLI caller-facing baseline。
 - `target_domain` 仍是 legacy public CLI path 的必填 shared gate field；当前 parser 只要求其为非空字符串，本 FR 不把它额外收紧为新的固定域常量。
 - `xhs.detail` 在 target-page 不为 `explore_detail_tab` 时，必须按 invalid-args / blocked 输入处理。
 - `xhs.user_home` 在 target-page 不为 `profile_tab` 时，必须按 invalid-args / blocked 输入处理。
@@ -102,9 +105,9 @@ Canonical Issue: #504
 - detail/user_home 的 request-context baseline 允许后续实现复用 `FR-0024` 的 shared model，但不得在本 FR 中隐含冻结 detail identity。
 - 本 FR 只冻结“这两个命令进入同一 read family”的 command-level ownership，identity 和 shape 仍以后续 FR 为准。
 
-### 5. FR-0023 四对象输入 ownership
+### 5. FR-0023 四个顶层对象输入 ownership
 
-系统必须冻结：当 canonical `upstream_authorization_request` 存在时，`xhs.detail` 与 `xhs.user_home` 的 command-level ownership 继续消费 `FR-0023` 已冻结的四个外部对象：
+系统必须冻结：当 canonical top-level `FR-0023` object path 存在时，`xhs.detail` 与 `xhs.user_home` 的 command-level ownership 继续消费 `FR-0023` 已冻结的四个外部对象：
 
 1. `action_request`
 2. `resource_binding`
@@ -113,12 +116,13 @@ Canonical Issue: #504
 
 约束：
 
-- 这两个命令在 canonical upstream path 下不得新增第二套上游授权输入。
+- 这两个命令在 canonical top-level path 下不得新增第二套上游授权输入。
+- 这四个对象在 current caller-facing CLI baseline 中必须保持顶层输入形态；不得把仅包含嵌套 `options.upstream_authorization_request` 的 payload 误写成与 current CLI 等价的 caller-facing 输入模型。
 - `action_request.action_name` 必须分别与 `xhs.read_note_detail`、`xhs.read_user_home` 对齐。
 - `runtime_target.page` 必须分别与 `explore_detail_tab`、`profile_tab` 对齐。
 - `resource_binding` 与 `authorization_grant` 的校验继续复用 `FR-0023` 已冻结的匿名 / profile-session 边界。
 - legacy public CLI path 仍是 current command-level input model 的一部分；本 FR 不把四对象 path 误写成唯一输入模型。
-- 本 FR 只冻结 canonical upstream path 的 command-level ownership，不改写 `FR-0023` 对四对象的 schema 定义。
+- 本 FR 只冻结 canonical top-level path 的 command-level ownership，不改写 `FR-0023` 对四对象的 schema 定义。
 
 ### 6. request-level results ownership
 
@@ -128,9 +132,9 @@ Canonical Issue: #504
 - 当 current implementation 产出 `request_admission_result` 或 `execution_audit` 时：
   - 它们必须进入 summary 或 error details
   - `execution_audit` 不得泄露到 `observability`
-- 当 canonical `upstream_authorization_request` 缺失时：
+- 当 canonical top-level `FR-0023` object path 缺失时：
   - current implementation 允许 legacy path 下的 `request_admission_result` / `execution_audit` 为 `null`
-- 当 canonical `upstream_authorization_request` 存在时：
+- 当 canonical top-level `FR-0023` object path 存在时：
   - current implementation 仍可能让 `request_admission_result` 或 `execution_audit` 保持 `null` 或缺席；本 FR 不把“必然产出 request_admission_result / execution_audit”写成 formal truth
 - 上述兼容性都不改变两个命令已经属于公共 command surface 的正式结论
 
@@ -214,7 +218,7 @@ And 本 FR 不得把缺失 shared gate fields 的输入冻结为合法 request-c
 
 ### 场景 10：canonical upstream path 继续从 runtime_target 派生 gate fields
 
-Given 调用方提供 canonical `upstream_authorization_request`
+Given 调用方提供 canonical top-level `FR-0023` 四个对象
 When 系统处理 `xhs.detail` 或 `xhs.user_home`
 Then `target_domain`、`target_tab_id`、`target_page` 必须继续由 `runtime_target` 派生
 And `requested_execution_mode` 必须继续由 current parser 行为推导
@@ -226,17 +230,25 @@ Given 调用方通过 legacy public CLI path 发起 `xhs.detail` 或 `xhs.user_h
 And 输入已满足当前 command input 与 shared gate fields 基线
 When `ability.id` 不是 canonical shared-path ability id 但仍为非空字符串
 Then 本 FR 不得把该输入申报为 current public CLI 的受支持契约
-And 只能把 canonical ability 对齐冻结为 canonical upstream path 与 current shared runtime 输出 metadata
+And 只能把 canonical ability 对齐冻结为 canonical top-level path 与 current shared runtime 输出 metadata
 
 ### 场景 12：canonical upstream objects 被命令面消费后保留请求级结果
 
-Given 调用方为 `xhs.detail` 或 `xhs.user_home` 提供 canonical `upstream_authorization_request`
+Given 调用方为 `xhs.detail` 或 `xhs.user_home` 提供 canonical top-level `FR-0023` 四个对象
 When 命令完成 summary 或 error details 映射
 Then 若 current implementation 产出了 `request_admission_result` 或 `execution_audit`，它们必须按 current implementation 保留在 canonical slot
 And `execution_audit` 不得出现在 `observability`
 And 本 FR 不把 `execution_audit` 的必然产出写成 formal truth
 
-### 场景 12：#505 之前不得把 image_scenes 写成 detail identity
+### 场景 13：仅嵌套 upstream_authorization_request 不能替代 current canonical caller-facing 输入
+
+Given 调用方为 `xhs.detail` 或 `xhs.user_home` 只提供嵌套 `options.upstream_authorization_request`
+And 未提供顶层 `action_request`、`resource_binding`、`authorization_grant`、`runtime_target`
+When current public CLI parser 处理该请求
+Then 本 FR 不得把该输入写成与 current caller-facing canonical 输入等价
+And canonical caller-facing baseline 仍必须以四个顶层对象为准
+
+### 场景 14：#505 之前不得把 image_scenes 写成 detail identity
 
 Given `#504` 只冻结 command surface 与 request-context baseline
 When 后续实现 PR 消费本 FR
@@ -248,18 +260,19 @@ And 必须等待 `#505` 的正式结论
 - `xhs.detail` 缺失 `note_id` 时，必须在命令入口层失败，不得发出空 detail 请求。
 - `xhs.user_home` 缺失 `user_id` 时，必须在命令入口层失败，不得发出空 profile 请求。
 - legacy public CLI path 下，`target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode` 这组 shared gate fields 任一缺失时，都必须返回结构化 invalid-args 结果。
-- canonical upstream path 下，shared gate fields 必须继续从 `runtime_target` 和 current parser 行为派生，而不是重新要求一套 legacy 外显输入。
+- canonical top-level `FR-0023` object path 下，shared gate fields 必须继续从 `runtime_target` 和 current parser 行为派生，而不是重新要求一套 legacy 外显输入。
+- 仅嵌套 `options.upstream_authorization_request` 的 payload 当前不是与四个顶层对象等价的 caller-facing canonical 输入模型。
 - background/extension direct path 若存在内部 auto target-tab resolution，不得被本 FR 误写为 current public CLI contract。
 - legacy path 下允许 `request_admission_result` 与 `execution_audit` 为 `null`，但不得把 `null` 误解释为“命令面不存在”。
-- canonical upstream path 下 `request_admission_result` 与 `execution_audit` 都仍可能为 `null`；这代表当前实现尚未为该场景产出对应结果，不代表 command surface 缺失。
+- canonical top-level `FR-0023` object path 下 `request_admission_result` 与 `execution_audit` 都仍可能为 `null`；这代表当前实现尚未为该场景产出对应结果，不代表 command surface 缺失。
 - `FR-0005` 的相关 formal mismatch 仍待后续专门回写；本 FR 不在这里提前收口其 blocker 语义。
 
 ## 验收标准
 
 1. `xhs.detail` / `xhs.user_home` 已被正式冻结为 current public CLI command surface。
-2. 两个命令的 canonical command input 已冻结为 `note_id` / `user_id`。
+2. 两个命令的 caller-facing `ability` envelope 与 canonical command input 已冻结为 current public CLI baseline。
 3. 两个命令的 target-page baseline 已冻结为 `explore_detail_tab` / `profile_tab`，且 public CLI request-context 仍要求显式 shared gate fields。
-4. 两个命令消费 `FR-0023` 四对象输入的 command-level ownership 已冻结，且不新增第二套授权输入。
+4. 两个命令消费 `FR-0023` 四个顶层对象输入的 command-level ownership 已冻结，且不新增第二套授权输入，也未把仅嵌套 `options.upstream_authorization_request` 误写成 caller-facing canonical 输入。
 5. `request_admission_result` 与 `execution_audit` 的 canonical output slot / 位置约束已与 current implementation 对齐，而非强制每次都产出。
 6. 本 FR 已显式把 detail identity 与 `image_scenes` 转交 `#505`。
 7. formal 套件足以作为 `#504` 的上游基线，但不在本 PR 内提前收口 `FR-0005` / `#445` 的 formal mismatch。

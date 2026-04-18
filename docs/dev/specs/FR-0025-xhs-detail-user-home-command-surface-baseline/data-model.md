@@ -17,10 +17,25 @@
 
 | 字段 | 命令 | 角色 |
 | --- | --- | --- |
+| `ability.id` / `ability.layer` / `ability.action` | `xhs.detail` / `xhs.user_home` | caller-facing public CLI ability envelope |
 | `note_id` | `xhs.detail` | 唯一 required canonical command input |
 | `user_id` | `xhs.user_home` | 唯一 required canonical command input |
 
-### 3. request-level result view
+### 3. canonical top-level FR-0023 object set
+
+| 对象 | 角色 | 持久化要求 |
+| --- | --- | --- |
+| `action_request` | canonical caller-facing upstream action object | 不持久化 |
+| `resource_binding` | canonical caller-facing upstream binding object | 不持久化 |
+| `authorization_grant` | canonical caller-facing upstream grant object | 不持久化 |
+| `runtime_target` | canonical caller-facing runtime target object | 不持久化 |
+
+约束：
+
+- 四个对象在 current caller-facing CLI baseline 中保持顶层输入形态
+- `options.upstream_authorization_request` 只是解析后的内部下游表示，不构成新的 caller-facing 真相源
+
+### 4. request-level result view
 
 | 对象 | 角色 | 持久化要求 |
 | --- | --- | --- |

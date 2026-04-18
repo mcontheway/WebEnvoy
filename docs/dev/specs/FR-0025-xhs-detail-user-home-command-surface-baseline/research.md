@@ -5,7 +5,7 @@
 `#504` 要解决的不是 search request-shape，而是：
 
 1. current main 上 `xhs.detail` / `xhs.user_home` 是否已经属于公共命令面
-2. 它们当前如何消费 `FR-0023` 四对象输入
+2. 它们当前如何消费 `FR-0023` 四个顶层对象输入
 3. 为什么 `FR-0005` 里“缺失公开命令面”的表述不能继续作为 current blocker
 
 ## 当前仓库证据
@@ -21,12 +21,13 @@
 - `src/commands/xhs-input.ts`
   - `parseDetailInputForContract()` 要求 `note_id`
   - `parseUserHomeInputForContract()` 要求 `user_id`
+  - `parseAbilityEnvelopeForContract()` 当前仍要求 caller-facing `ability.id/layer/action` envelope
   - `parseXhsCommandInputForContract()` 当前按 `command` 分派到 detail / user_home shared parser，而不是在 legacy path 先强制校验 canonical ability id
   - `xhs.note.detail.v1` 只允许 `explore_detail_tab`
   - `xhs.user.home.v1` 只允许 `profile_tab`
   - `normalizeGateOptionsForContract()` 在 legacy public CLI contract 下要求显式 `target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode`
-  - `normalizeGateOptionsForContract()` 在 canonical `upstream_authorization_request` path 下继续从 `runtime_target` 派生 `target_domain`、`target_tab_id`、`target_page`，并推导 `requested_execution_mode`
-  - `ACTION_NAME_COMMAND_MISMATCH` 只在 canonical `upstream_authorization_request` path 下执行 command-to-action 对齐，不构成 legacy path 的通用 ability-mismatch 阻断
+  - `normalizeGateOptionsForContract()` 在 canonical top-level `FR-0023` path 下继续从 `runtime_target` 派生 `target_domain`、`target_tab_id`、`target_page`，并推导 `requested_execution_mode`
+  - `ACTION_NAME_COMMAND_MISMATCH` 只在 canonical top-level `FR-0023` path 下执行 command-to-action 对齐，不构成 legacy path 的通用 ability-mismatch 阻断
 
 ### 3. current tests 已证明 command surface 与 unified read path 存在
 
@@ -44,23 +45,25 @@
 - 上述 background/extension direct path 行为不能直接提升为 public CLI 输入契约。
 - 当前 formal freeze 只能冻结两条现有入口的真实边界：
   - legacy public CLI path：`target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode` 仍需显式提供
-  - canonical upstream path：shared gate fields 继续从 `runtime_target` 与 current parser 行为派生，不另起第二套输入
-- canonical shared-path ability 映射当前存在，但 formal 只能把它冻结为 canonical upstream path 与 current runtime / contract output 的对齐边界；legacy path 上观察到的非 canonical `ability.id` 行为只能保留为实现观测，不能被 formal 申报为受支持公共契约
+  - canonical top-level path：shared gate fields 继续从 `runtime_target` 与 current parser 行为派生，不另起第二套输入
+- canonical shared-path ability 映射当前存在，但 formal 只能把它冻结为 canonical top-level path 与 current runtime / contract output 的对齐边界；legacy path 上观察到的非 canonical `ability.id` 行为只能保留为实现观测，不能被 formal 申报为受支持公共契约
 
-### 4. current implementation 已消费 FR-0023 四对象输入
+### 4. current implementation 已消费 FR-0023 四个顶层对象输入
 
 - `src/commands/xhs-input.ts`
-  - detail/user_home 通过同一套 envelope 消费 canonical `upstream_authorization_request`
+  - detail/user_home 通过同一套 caller-facing envelope 消费 canonical top-level `FR-0023` 四个对象
+  - current parser 会把这四个顶层对象归一化到 `options.upstream_authorization_request` 供下游消费，但 caller-facing 输入仍是四个顶层对象
   - command-level action mapping 已对齐 `xhs.read_note_detail` / `xhs.read_user_home`
 - `src/commands/xhs-runtime.ts`
   - 若 bridge payload 已产出 `request_admission_result` / `execution_audit`，summary / error details 会按 current implementation 透传到 canonical slot
 - `tests/content-script-handler.xhs-read.contract.test.ts`
-  - canonical upstream path 下已存在 `request_admission_result` 为 allowed 但 `execution_audit` 仍为 `null` 的 current behavior
+  - canonical top-level path 下已存在 `request_admission_result` 为 allowed 但 `execution_audit` 仍为 `null` 的 current behavior
 
 结论补充：
 
-- canonical upstream path 的四对象 ownership 已存在，但它不是 detail/user_home 唯一的 command-level input model
-- legacy public CLI path 在 current main 上仍然存在，formal 只能把四对象 ownership 限定为“当 canonical upstream request 存在时”的规则
+- canonical top-level path 的四对象 ownership 已存在，但它不是 detail/user_home 唯一的 command-level input model
+- legacy public CLI path 在 current main 上仍然存在，formal 只能把四对象 ownership 限定为“当 canonical top-level path 存在时”的规则
+- 当前仓库没有证据支持把仅嵌套 `options.upstream_authorization_request` 写成与四个顶层对象等价的 caller-facing canonical 输入
 
 ### 5. 与 FR-0005 的 formal 冲突
 

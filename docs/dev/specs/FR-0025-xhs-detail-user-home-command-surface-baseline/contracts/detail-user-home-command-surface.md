@@ -3,6 +3,14 @@
 ## 1. Public commands
 
 ```ts
+type CallerFacingReadAbilityEnvelope = {
+  ability: {
+    id: string;
+    layer: "L3";
+    action: "read";
+  };
+};
+
 type XhsDetailCommand = {
   command: "xhs.detail";
   input: {
@@ -22,8 +30,10 @@ type XhsUserHomeCommand = {
 
 - 两条命令都属于 current public CLI command surface。
 - 两条命令都 `requiresProfile=true`。
+- current public CLI request 仍必须显式携带 `ability.id`、`ability.layer`、`ability.action`。
+- `xhs.detail` / `xhs.user_home` 当前 caller-facing ability baseline 都要求 `ability.layer = "L3"` 且 `ability.action = "read"`。
 - `note_id` / `user_id` 都必须为必填、trim 后非空的字符串。
-- canonical `upstream_authorization_request` path 与 current runtime / contract output metadata 继续分别对齐 `xhs.note.detail.v1` / `xhs.user.home.v1`。
+- current top-level `FR-0023` object path 与 current runtime / contract output metadata 继续分别对齐 `xhs.note.detail.v1` / `xhs.user.home.v1`。
 - legacy public CLI path 的非 canonical `ability.id` 行为不属于本契约冻结范围；本契约不把这类输入申报为受支持的公共 CLI 契约。
 
 ## 2. Target baseline
@@ -43,20 +53,14 @@ type LegacyXhsUserHomeTargetBaseline = {
   requested_execution_mode: string;
 };
 
-type CanonicalXhsDetailTargetBaseline = {
+type CanonicalTopLevelFr0023TargetBaseline = {
+  action_request: unknown;
+  resource_binding: unknown;
+  authorization_grant: unknown;
   runtime_target: {
     domain: string;
     tab_id: number;
-    page: "explore_detail_tab";
-  };
-  derived_requested_execution_mode: string;
-};
-
-type CanonicalXhsUserHomeTargetBaseline = {
-  runtime_target: {
-    domain: string;
-    tab_id: number;
-    page: "profile_tab";
+    page: "explore_detail_tab" | "profile_tab";
   };
   derived_requested_execution_mode: string;
 };
@@ -69,12 +73,13 @@ type CanonicalXhsUserHomeTargetBaseline = {
 - legacy public CLI contract 下，`target_domain`、`target_tab_id`、`target_page`、`requested_execution_mode` 这组 shared gate fields 都必须显式提供
 - `target_domain` 在 current parser truth 下仍只要求非空字符串
 - `requested_execution_mode` 继续对齐 current CLI parser 接受面；若当前命令组合在后续 gate/runtime 校验中被拒绝，本契约按 existing rejection chain 处理，而不提前收窄为 read-only allowlist
-- canonical `upstream_authorization_request` path 下，`target_domain`、`target_tab_id`、`target_page` 继续从 `runtime_target` 派生，`requested_execution_mode` 继续由 current parser 行为推导
+- canonical top-level `FR-0023` object path 下，`target_domain`、`target_tab_id`、`target_page` 继续从 `runtime_target` 派生，`requested_execution_mode` 继续由 current parser 行为推导
+- 归一化后的 `options.upstream_authorization_request` 只是 current parser 的内部下游表示，不是 caller-facing canonical 输入
 - background/extension direct path 的内部 target-tab resolution 不属于本契约冻结范围
 
-## 3. FR-0023 ownership
+## 3. FR-0023 top-level ownership
 
-当 canonical `upstream_authorization_request` 存在时，两条命令继续消费以下 canonical upstream input：
+当 canonical top-level `FR-0023` object path 存在时，两条命令继续消费以下 canonical upstream input：
 
 ```ts
 type CanonicalUpstreamAuthorizationRequest = {
@@ -87,10 +92,12 @@ type CanonicalUpstreamAuthorizationRequest = {
 
 约束：
 
+- 四个对象在 current caller-facing CLI baseline 中必须保持顶层输入形态
+- 仅嵌套 `options.upstream_authorization_request` 的 payload 不属于本契约冻结的 caller-facing canonical 输入
 - `xhs.detail` 对应 `action_request.action_name = "xhs.read_note_detail"`
 - `xhs.user_home` 对应 `action_request.action_name = "xhs.read_user_home"`
 - `runtime_target.page` 必须分别与 `explore_detail_tab` / `profile_tab` 对齐
-- canonical upstream path 不允许新增第二套授权输入
+- canonical top-level path 不允许新增第二套授权输入
 - legacy public CLI path 仍是 current command-level input model 的一部分，不因本契约而被废弃
 
 ## 4. Request-level result ownership
@@ -108,7 +115,7 @@ type CommandLevelSummary = {
 - 当 current implementation 产出这两个字段时，它们必须保留在 summary 或 error details
 - `execution_audit` 不得进入 `observability`
 - legacy path 下允许二者为 `null`
-- canonical upstream path 下，`request_admission_result` 与 `execution_audit` 都仍允许保持 `null` 或缺席
+- canonical top-level path 下，`request_admission_result` 与 `execution_audit` 都仍允许保持 `null` 或缺席
 
 ## 5. Deferred scope
 
