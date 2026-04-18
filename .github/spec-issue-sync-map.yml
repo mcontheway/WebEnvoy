@@ -47,3 +47,5 @@ mappings:
     canonical_issue_number: 472
   - spec_path: docs/dev/specs/FR-0024-xhs-request-shape-truth/spec.md
     canonical_issue_number: 502
+  - spec_path: docs/dev/specs/FR-0025-xhs-detail-user-home-command-surface-baseline/spec.md
+    canonical_issue_number: 504
