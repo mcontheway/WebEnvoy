@@ -850,9 +850,10 @@ describe("native messaging legacy loopback runtime", () => {
         }),
         request_admission_result: expect.objectContaining({
           admission_decision: "blocked",
+          grant_match: false,
           derived_from: expect.objectContaining({
-            approval_admission_ref: "approval_admission_external_blocked_loopback_001",
-            audit_admission_ref: "audit_admission_external_blocked_loopback_001"
+            approval_admission_ref: null,
+            audit_admission_ref: null
           })
         }),
         execution_audit: expect.objectContaining({
