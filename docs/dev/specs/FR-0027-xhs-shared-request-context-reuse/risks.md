@@ -18,7 +18,7 @@
   - guardian 会持续把 formal 缺口重新打回实现链
 - 缓解：
   - 当前 FR 明确 replacement implementation 必须等待 `#508`
-  - `page_context_namespace + shape_key`、bucket state、exact-match / fail-closed 在 formal 中先冻结
+  - page-local namespace、route bucket、shape slot、bucket state、detail `note_id` derivation 与 exact-match / fail-closed 在 formal 中先冻结
 
 ## 风险 3：detail/user_home shape 被误写成多主键
 
@@ -29,3 +29,4 @@
 - 缓解：
   - 当前 FR 只冻结 `note_id` / `user_id` only reuse-shape
   - 非 canonical 字段只允许作为归一来源或命中后的上下文，不进入 `shape_key`
+  - detail capture admission 只允许使用 canonical `note_id` 或当前 detail 页 referrer 恢复出的 `note_id`

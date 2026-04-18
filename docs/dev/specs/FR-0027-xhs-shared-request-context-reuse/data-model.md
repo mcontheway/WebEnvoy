@@ -6,34 +6,48 @@
 
 ## 共享对象
 
-### 1. request-context slot
+### 1. request-context namespace 与 route bucket
 
 | 对象 | 角色 | 持久化要求 |
 | --- | --- | --- |
-| `RequestContextSlotIdV1` | page-local slotting identity | 不持久化 |
+| `page_context_namespace` | page-local / document-local namespace token | 不持久化 |
+| `route bucket` | namespace 内同 route family 的候选容器 | 不持久化 |
 
 字段：
 
 | 字段 | 角色 |
 | --- | --- |
-| `page_context_namespace` | 命令族隔离命名空间 |
+| `page_context_namespace` | 页面现场隔离键，不得退化成 command-family 枚举 |
+| `route_scope` | `command + method + pathname` 组成的 route family |
+
+### 2. request-context shape slot
+
+| 对象 | 角色 | 持久化要求 |
+| --- | --- | --- |
+| `shape slot` | route bucket 内的 exact-shape 容器 | 不持久化 |
+
+字段：
+
+| 字段 | 角色 |
+| --- | --- |
 | `shape_key` | canonical shape 的稳定 key |
 
-### 2. bucket state
+### 3. bucket state
 
 | 对象 | 角色 |
 | --- | --- |
-| `admitted_template` | 可复用 page-local admitted template |
-| `rejected_observation` | 最近 rejected source observation |
-| `incompatible_observation` | 最近 incompatible observation |
+| shape slot `admitted_template` | 可复用 page-local admitted template |
+| shape slot `rejected_observation` | 最近 rejected source observation |
+| route bucket `incompatible_observation` | 最近 incompatible observation |
 
 约束：
 
-- 三类状态都只存在于同一 `RequestContextSlotIdV1` 下。
+- `admitted_template` 与 `rejected_observation` 只存在于同一 namespace / route bucket / shape slot 下。
+- `incompatible_observation` 只存在于同一 namespace / route bucket 下。
 - synthetic / failed source 不得进入 `admitted_template`。
 - `available_shape_keys` 只反映当前 namespace 内可诊断 shape，不构成跨 namespace 共享键。
 
-### 3. read-family canonical shape
+### 4. read-family canonical shape
 
 | 对象 | 当前 formal 状态 |
 | --- | --- |
@@ -43,4 +57,4 @@
 约束：
 
 - search-only canonical shape 继续由 `FR-0024` 承载。
-- detail identity 继续由 `#505` 承载；本 FR 只冻结其 reuse-shape 和 slotting 语义。
+- detail identity 继续由 `#505` 承载；本 FR 只冻结其 reuse-shape、artifact-side derivation source 和 slotting 语义。

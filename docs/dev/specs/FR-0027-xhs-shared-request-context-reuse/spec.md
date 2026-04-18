@@ -20,7 +20,7 @@ Canonical Issue: #508
 ## 目标
 
 1. 冻结 XHS read family 的 shared request-context reuse model。
-2. 冻结 `page_context_namespace + shape_key` 的 slotting 身份与 lookup 行为。
+2. 冻结 page-local/document-local `page_context_namespace`、route bucket 与 `shape_key` 的 slotting 身份与 lookup 行为。
 3. 冻结 admitted / rejected / incompatible 三类 observation 的共享边界。
 4. 冻结 `xhs.detail` 与 `xhs.user_home` 在 reuse 模型里的 canonical shape。
 5. 冻结 replacement implementation 的 formal gate：必须等待 `#503/#504/#505/#508` 全部完成。
@@ -47,7 +47,7 @@ Canonical Issue: #508
 - `shape_key` 只能由 canonical shape 的稳定序列化生成，不得混入 raw body、header 顺序、trace 或 referrer。
 - 不允许在 capture、lookup 或 eligibility 阶段各自定义第二套“同一请求”规则。
 
-### 2. canonical read-family shapes
+### 2. canonical read-family shapes 与 derivation source
 
 系统必须冻结以下 read-family canonical shape：
 
@@ -65,28 +65,44 @@ Canonical Issue: #508
 补充约束：
 
 - `xhs.detail` 的 `note_id` 继续与 `#505` 的 identity-only formal freeze 对齐。
+- detail capture admission 在导出 canonical shape 前，必须先冻结 artifact-side `note_id` derivation source；current v1 只允许使用已经 canonical 的 `note_id`，或当前 detail 页 referrer `/explore/<note_id>` 恢复出的 page-local `note_id`。
+- `source_note_id` 当前不得作为 detail capture admission 的 admitted canonical derivation input。
 - `source_note_id`、`image_scenes`、headers、trace、referrer 不进入 `xhs.detail` `shape_key`。
 - `xhs.user_home` 最终只保留 canonical `user_id`；`userId` 或 query `user_id` 只允许作为归一来源，不得并列进入 `shape_key`。
 - `xhs.search` 的 `keyword/page/page_size/sort/note_type` 继续由 `FR-0024` 负责，不在本 FR 重新列举为新 truth。
 
-### 3. slotting identity
+### 3. page-local namespace 与 route bucket
+
+系统必须冻结：`page_context_namespace` 是 page-local / document-local namespace token，而不是命令族枚举。
+
+约束：
+
+- `page_context_namespace` 必须至少隔离当前文档生命周期或等价页面现场。
+- `page_context_namespace` 不得退化成仅有 `xhs.search` / `xhs.detail` / `xhs.user_home` 三个常量的 command-family 复用键。
+- command family 与 route family 继续由 canonical shape 内的 `command/method/pathname` 表达，不由 `page_context_namespace` 代替。
+- replacement implementation 必须先在当前 namespace 内选定 route bucket，再在 route bucket 内做 shape 级 lookup。
+
+### 4. slotting identity
 
 系统必须冻结：实际 request-context slotting identity 是 `page_context_namespace + shape_key`。
 
 约束：
 
-- 不同 namespace 即使 `shape_key` 相同，也不得共享同一 slot。
-- 同 namespace 内只有 canonical `shape_key` 相同的候选才允许进入同一 slot。
-- `page_context_namespace` 至少必须区分 `xhs.search`、`xhs.detail`、`xhs.user_home`。
+- 不同 namespace 即使 `shape_key` 相同，也不得共享同一 shape slot。
+- 同一 namespace 内必须先按 route family 分桶，再在 route bucket 内按 canonical `shape_key` 分 shape slot。
+- shape slot 只允许承载 `admitted_template` 与 `rejected_observation`。
+- `incompatible_observation` 必须挂在当前 namespace 的 route bucket 层，用来记录 sibling-shape lookup 产生的最近不兼容候选；不得错误放入 shape-keyed slot。
 - replacement implementation 不得回退到裸 `path`、裸 `shape_key` 或 command-only slotting。
 
-### 4. bucket state model
+### 5. bucket state model
 
-系统必须冻结每个 slot 允许承载以下状态：
+系统必须冻结 route bucket / shape slot 允许承载以下状态：
 
-- `admitted_template`
-- `rejected_observation`
-- `incompatible_observation`
+- shape slot
+  - `admitted_template`
+  - `rejected_observation`
+- route bucket
+  - `incompatible_observation`
 
 约束：
 
@@ -95,7 +111,7 @@ Canonical Issue: #508
 - `incompatible_observation` 只代表同 namespace、同 route family 但 canonical shape 不一致的最近候选。
 - 任何 synthetic / failed source 都不得进入 `admitted_template`。
 
-### 5. capture admission
+### 6. capture admission
 
 系统必须冻结 admitted template 的共享准入规则：
 
@@ -110,13 +126,15 @@ Canonical Issue: #508
 - synthetic request 只能进入 `rejected_observation`
 - failed / non-2xx request 只能进入 `rejected_observation`
 - capture admission 拒绝不得被等价成 template hit
-- rejected observation 也必须按 `page_context_namespace + shape_key` 分槽
+- rejected observation 也必须按当前 namespace 的 route bucket + `shape_key` 分槽
+- detail capture admission 在 shape 可导出前，不得跳过第 2 节冻结的 `note_id` derivation source
 
-### 6. lookup / eligibility / fail-closed
+### 7. lookup / eligibility / fail-closed
 
 系统必须冻结以下共享 lookup 与 eligibility 规则：
 
 - lookup 只允许在当前 namespace 内进行
+- lookup 必须先定位当前 namespace 的 route bucket，再在 bucket 内执行 shape 级 exact-match
 - eligibility 只允许 exact shape match
 - exact match 后仍必须通过 freshness gate
 - miss、mismatch、stale、rejected_source 都必须 fail closed
@@ -143,7 +161,7 @@ Canonical Issue: #508
 - 不允许“部分字段命中后局部复用、其余字段重算”的混合路径。
 - `request_context_missing` / `request_context_incompatible` 的结构化诊断必须继续保留 machine-readable reason。
 
-### 7. replacement implementation formal gate
+### 8. replacement implementation formal gate
 
 系统必须冻结：replacement `#501` successor 在进入 implementation-ready 状态前，必须同时满足以下 formal 输入已经冻结：
 
@@ -164,7 +182,8 @@ Canonical Issue: #508
 
 Given 当前系统同时支持 `xhs.search`、`xhs.detail`、`xhs.user_home`
 When request-context reuse 发生
-Then 三条命令都必须通过 `page_context_namespace + shape_key` 进行 slotting
+Then 三条命令都必须先进入 page-local/document-local `page_context_namespace`
+And 再通过当前 namespace 内的 route bucket + `shape_key` 进行 slotting
 And `xhs.detail` / `xhs.user_home` 不得回退到 command-only 或 path-only slotting
 
 ### 场景 2：detail canonical shape 只保留 note_id
@@ -173,6 +192,7 @@ Given 当前请求是 `xhs.detail`
 When 系统生成 canonical shape
 Then shape 必须只包含 `command/method/pathname/note_id`
 And `source_note_id` 与 `image_scenes` 不得进入 `shape_key`
+And detail capture admission 只允许使用 canonical `note_id` 或当前 detail 页 referrer 恢复出的 `note_id`
 
 ### 场景 3：user_home canonical shape 只保留 user_id
 
@@ -195,6 +215,7 @@ When 系统执行 lookup / eligibility
 Then 结果必须是 `incompatible`
 And `request_context_miss_reason` 必须保留 `shape_mismatch`
 And 不得继续进入 synthetic fallback
+And 最近不兼容候选必须记录在 route bucket 层，而不是当前 shape slot
 
 ### 场景 6：replacement implementation 不能跳过 #508
 
@@ -207,17 +228,18 @@ And 不得宣称 formal 输入已经齐备
 ## 异常与边界场景
 
 - `xhs.search` 的 search-only shape 仍以后 `FR-0024` 为准；本 FR 不得与其冲突。
-- `xhs.detail` canonical identity 仍以 `#505` 为准；本 FR 只冻结其 reuse-shape 与 slotting 语义。
+- `xhs.detail` canonical identity 仍以 `#505` 为准；本 FR 只冻结其 reuse-shape、artifact-side derivation source 与 slotting 语义。
 - `xhs.user_home` canonical shape 不得被误写成 `body.userId` 与 `query user_id` 并列双主键。
 - shape 命中但模板过旧时，结果必须是 `stale`，而不是 `hit`。
 - rejected observation 允许保留最近一次可诊断 candidate，但不得升级为 admitted template。
+- `incompatible_observation` 必须停留在 route bucket 层，不得被错误塞回 shape-keyed slot。
 
 ## 验收标准
 
 1. `xhs.detail` / `xhs.user_home` 已进入与 `xhs.search` 同构的 shared request-context reuse model。
-2. `page_context_namespace + shape_key` 已冻结为 slotting identity。
-3. admitted / rejected / incompatible 三类 bucket 状态已冻结，且 synthetic / failed source 不进入 admitted template。
-4. detail/user_home 的 canonical shape 已冻结为 `note_id` / `user_id` only。
+2. page-local/document-local `page_context_namespace`、route bucket 与 `shape_key` 的层级关系已冻结。
+3. admitted / rejected / incompatible 三类 bucket 状态已冻结，且 incompatible observation 位于 route bucket 层，synthetic / failed source 不进入 admitted template。
+4. detail/user_home 的 canonical shape 已冻结为 `note_id` / `user_id` only，且 detail capture-side `note_id` derivation source 已先冻结。
 5. exact-match / freshness / fail-closed 的共享 reuse 规则已冻结。
 6. replacement implementation 的 formal gate 已明确包含 `#508`，不再误写成只等 `#504/#505`。
 
