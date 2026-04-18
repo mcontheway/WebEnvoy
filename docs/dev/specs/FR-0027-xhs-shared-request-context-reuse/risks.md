@@ -18,7 +18,7 @@
   - guardian 会持续把 formal 缺口重新打回实现链
 - 缓解：
   - 当前 FR 明确 replacement implementation 必须等待 `#508`
-  - page-local namespace、route bucket、shape slot、bucket state、detail `note_id` derivation 与 exact-match / fail-closed 在 formal 中先冻结
+  - page-local namespace、route bucket、shape slot、bucket state 的最小结构字段、detail `note_id` derivation 与 exact-match / fail-closed 在 formal 中先冻结
 
 ## 风险 3：detail/user_home shape 被误写成多主键
 

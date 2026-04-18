@@ -23,7 +23,7 @@ Canonical Issue: #508
 2. 冻结 page-local/document-local `page_context_namespace`、route bucket 与 `shape_key` 的 slotting 身份与 lookup 行为。
 3. 冻结 admitted / rejected / incompatible 三类 observation 的共享边界。
 4. 冻结 `xhs.detail` 与 `xhs.user_home` 在 reuse 模型里的 canonical shape。
-5. 冻结 replacement implementation 的 formal gate：必须等待 `#503/#504/#505/#508` 全部完成。
+5. 冻结 replacement implementation 的 formal gate：必须等待 `#502/#504/#505/#508` 全部完成。
 
 ## 非目标
 
@@ -96,7 +96,7 @@ Canonical Issue: #508
 
 ### 5. bucket state model
 
-系统必须冻结 route bucket / shape slot 允许承载以下状态：
+系统必须冻结 route bucket / shape slot 允许承载以下状态与最小结构字段：
 
 - shape slot
   - `admitted_template`
@@ -110,6 +110,9 @@ Canonical Issue: #508
 - `rejected_observation` 只代表最近一次被 capture admission 拒绝、但 shape 已可识别的 candidate。
 - `incompatible_observation` 只代表同 namespace、同 route family 但 canonical shape 不一致的最近候选。
 - 任何 synthetic / failed source 都不得进入 `admitted_template`。
+- `admitted_template`、`rejected_observation` 与 `incompatible_observation` 至少都必须携带 `captured_at`。
+- `rejected_observation` 与 `incompatible_observation` 至少都必须携带 `source_kind`、`rejection_reason` 与 `request_status`，以支持 rejected-source 语义与 freshness 判定。
+- route bucket 必须保留 `available_shape_keys`，以支持 sibling-shape incompatibility 诊断。
 
 ### 6. capture admission
 
@@ -165,7 +168,7 @@ Canonical Issue: #508
 
 系统必须冻结：replacement `#501` successor 在进入 implementation-ready 状态前，必须同时满足以下 formal 输入已经冻结：
 
-1. `#503 / FR-0024`
+1. `#502 / FR-0024`
 2. `#504 / FR-0025`
 3. `#505 / FR-0026`
 4. `#508 / FR-0027`
@@ -219,7 +222,7 @@ And 最近不兼容候选必须记录在 route bucket 层，而不是当前 shap
 
 ### 场景 6：replacement implementation 不能跳过 #508
 
-Given `#503/#504/#505` 已完成 formal freeze
+Given `#502/#504/#505` 已完成 formal freeze
 And `#508` 尚未完成 formal freeze
 When reviewer 检查 replacement implementation PR 是否可进入实现
 Then 该 PR 仍不得被视为 implementation-ready
@@ -238,7 +241,7 @@ And 不得宣称 formal 输入已经齐备
 
 1. `xhs.detail` / `xhs.user_home` 已进入与 `xhs.search` 同构的 shared request-context reuse model。
 2. page-local/document-local `page_context_namespace`、route bucket 与 `shape_key` 的层级关系已冻结。
-3. admitted / rejected / incompatible 三类 bucket 状态已冻结，且 incompatible observation 位于 route bucket 层，synthetic / failed source 不进入 admitted template。
+3. admitted / rejected / incompatible 三类 bucket 状态及其 freshness / rejected-source 所需最小结构字段已冻结，且 incompatible observation 位于 route bucket 层，synthetic / failed source 不进入 admitted template。
 4. detail/user_home 的 canonical shape 已冻结为 `note_id` / `user_id` only，且 detail capture-side `note_id` derivation source 已先冻结。
 5. exact-match / freshness / fail-closed 的共享 reuse 规则已冻结。
 6. replacement implementation 的 formal gate 已明确包含 `#508`，不再误写成只等 `#504/#505`。
@@ -252,7 +255,7 @@ And 不得宣称 formal 输入已经齐备
 - `docs/dev/specs/FR-0024-xhs-request-shape-truth/spec.md`
 - `docs/dev/specs/FR-0025-xhs-detail-user-home-command-surface-baseline/spec.md`
 - `docs/dev/specs/FR-0026-xhs-detail-canonical-identity/spec.md`
-- GitHub issue `#503`
+- GitHub issue `#502`
 - GitHub issue `#504`
 - GitHub issue `#505`
 - GitHub issue `#508`

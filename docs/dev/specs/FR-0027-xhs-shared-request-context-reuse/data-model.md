@@ -39,13 +39,16 @@
 | shape slot `admitted_template` | 可复用 page-local admitted template |
 | shape slot `rejected_observation` | 最近 rejected source observation |
 | route bucket `incompatible_observation` | 最近 incompatible observation |
+| `available_shape_keys` | 当前 route bucket 下可诊断 sibling shapes |
 
 约束：
 
 - `admitted_template` 与 `rejected_observation` 只存在于同一 namespace / route bucket / shape slot 下。
 - `incompatible_observation` 只存在于同一 namespace / route bucket 下。
 - synthetic / failed source 不得进入 `admitted_template`。
-- `available_shape_keys` 只反映当前 namespace 内可诊断 shape，不构成跨 namespace 共享键。
+- `captured_at` 是三类 observation 的最小 freshness 字段。
+- `source_kind`、`rejection_reason` 与 `request_status` 是 `rejected_observation` / `incompatible_observation` 的最小 rejected-source 诊断字段。
+- `available_shape_keys` 只反映当前 namespace / route bucket 内可诊断 shape，不构成跨 namespace 共享键。
 
 ### 4. read-family canonical shape
 

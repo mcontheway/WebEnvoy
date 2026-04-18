@@ -2,7 +2,7 @@
 
 ## 实施目标
 
-冻结 XHS read family 的 shared request-context reuse semantics，补齐 replacement implementation 在 `#503/#504/#505` 之外仍缺失的 formal gate，让后续实现不再自行决定 page-local namespace、route bucket、`shape_key`、bucket state、detail `note_id` derivation 与 fail-closed 规则。
+冻结 XHS read family 的 shared request-context reuse semantics，补齐 replacement implementation 在 `#502/#504/#505` 之外仍缺失的 formal gate，让后续实现不再自行决定 page-local namespace、route bucket、`shape_key`、bucket state、detail `note_id` derivation 与 fail-closed 规则。
 
 ## 分阶段拆分
 
@@ -40,7 +40,7 @@
   - 对照 `FR-0024`，确认 search-only shape 与 search fail-closed 规则不被重开
   - 对照 `FR-0025`，确认 command surface / request-context baseline 继续由 `#504` 承载
   - 对照 `#505` 当前 issue truth，确认 detail identity 继续独立于 shared reuse semantics
-  - 对照 replacement implementation 与相关测试，确认 shared slotting / bucket state / exact-match / rejected-source / detail `note_id` derivation 语义已成为必须 formalize 的输入
+  - 对照 replacement implementation 与相关测试，确认 shared slotting / bucket state / freshness 字段 / rejected-source / detail `note_id` derivation 语义已成为必须 formalize 的输入
 - 文档门禁：
   - `bash scripts/docs-guard.sh`
   - `bash scripts/spec-guard.sh`
@@ -56,7 +56,7 @@
 - 当前 formal suite 不进入实现代码 TDD。
 - 后续 replacement implementation 至少应补齐以下测试矩阵：
   - detail/user_home 的 page-local namespace、route bucket 与 shape slotting
-  - admitted / rejected / incompatible bucket state 分层
+  - admitted / rejected / incompatible bucket state 分层与最小结构字段
   - synthetic / failed source 不进入 admitted template
   - detail capture-side `note_id` derivation 不回退到 `source_note_id`
   - exact-match / freshness / fail-closed diagnostics
@@ -68,13 +68,13 @@
   - `#505 / FR-0026` 的 formal review
   - 不触碰 shared reuse semantics 的其他 formal / implementation 事项
 - 串行 / 依赖：
-  - replacement implementation PR 必须等待 `#503/#504/#505/#508` formal freeze 全部完成
+- replacement implementation PR 必须等待 `#502/#504/#505/#508` formal freeze 全部完成
   - `#445` closeout 必须等待 replacement implementation merge 与 latest-main rerun
 
 ## 进入实现前条件
 
 - FR-0027 spec review 通过。
-- reviewer 确认 `#503/#504/#505/#508` 的 formal owner 已无重叠或缺口。
+- reviewer 确认 `#502/#504/#505/#508` 的 formal owner 已无重叠或缺口。
 - reviewer 确认 page-local namespace、route bucket、shape slot、bucket state、exact-match / freshness / fail-closed 已冻结为 shared reuse truth。
 - reviewer 确认 detail/user_home canonical reuse-shape 已冻结为 `note_id` / `user_id` only，且 detail capture-side `note_id` derivation 已先冻结，并与 `#505` 不冲突。
 - reviewer 确认 replacement implementation formal gate 已更新为必须等待 `#508`。

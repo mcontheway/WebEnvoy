@@ -47,15 +47,28 @@ type XhsUserHomeReuseShapeV1 = {
 ## 3. Bucket state
 
 ```ts
+type SharedRequestStatusV1 = {
+  completion: "completed" | "failed";
+  http_status: number | null;
+};
+
+type SharedCapturedArtifactStateV1 = {
+  captured_at: number;
+  source_kind: "page_request" | "synthetic_request";
+  template_ready: boolean | null;
+  rejection_reason: "synthetic_request_rejected" | "failed_request_rejected" | null;
+  request_status: SharedRequestStatusV1;
+};
+
 type CapturedRequestContextShapeSlotV1 = {
-  admitted_template: Record<string, unknown> | null;
-  rejected_observation: Record<string, unknown> | null;
+  admitted_template: (SharedCapturedArtifactStateV1 & Record<string, unknown>) | null;
+  rejected_observation: (SharedCapturedArtifactStateV1 & Record<string, unknown>) | null;
 };
 
 type CapturedRequestContextRouteBucketV1 = {
   page_context_namespace: RequestContextSlotIdV1["page_context_namespace"];
   route_scope: RequestContextSlotIdV1["route_scope"];
-  incompatible_observation: Record<string, unknown> | null;
+  incompatible_observation: (SharedCapturedArtifactStateV1 & Record<string, unknown>) | null;
   available_shape_keys: string[];
 };
 ```
@@ -66,7 +79,9 @@ type CapturedRequestContextRouteBucketV1 = {
 - `rejected_observation` 只承载 synthetic / failed / rejected candidate。
 - `incompatible_observation` 只承载同 namespace / 同 route bucket 下最近一次 sibling-shape mismatch candidate。
 - `incompatible_observation` 不得进入 shape-keyed slot。
+- `captured_at` 是 freshness gate 的必需字段。
+- `source_kind`、`rejection_reason` 与 `request_status` 是 rejected-source 语义的必需字段。
 
 ## 4. Gate rule
 
-replacement implementation 只有在 `#503/#504/#505/#508` formal freeze 全部完成后，才允许进入 implementation-ready 状态。
+replacement implementation 只有在 `#502/#504/#505/#508` formal freeze 全部完成后，才允许进入 implementation-ready 状态。
