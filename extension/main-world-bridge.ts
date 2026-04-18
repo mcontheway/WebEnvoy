@@ -233,6 +233,9 @@ const resolveRequestBodyString = (value: unknown): string | null => {
 const shouldSkipCapturedXhsRequestContext = (init: unknown): boolean =>
   asRecord(init)?.__webenvoySkipCapture === true;
 
+const isSuccessfulXhsResponseStatus = (value: unknown): boolean =>
+  typeof value === "number" && Number.isFinite(value) && value >= 200 && value < 300;
+
 const rememberCapturedXhsRequestContext = (input: {
   url: string;
   method: "POST" | "GET";
@@ -293,7 +296,9 @@ const installXhsRequestCapture = (): void => {
         body = resolveRequestBodyString(init?.body);
       }
 
-      if (!skipCapture) {
+      const response = await originalFetch(input, init);
+
+      if (!skipCapture && isSuccessfulXhsResponseStatus((response as Response | undefined)?.status)) {
         rememberCapturedXhsRequestContext({
           url: requestUrl,
           method: method.toUpperCase() === "GET" ? "GET" : "POST",
@@ -303,7 +308,7 @@ const installXhsRequestCapture = (): void => {
         });
       }
 
-      return await originalFetch(input, init);
+      return response;
     };
   }
 
@@ -341,13 +346,25 @@ const installXhsRequestCapture = (): void => {
   xhrPrototype.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null): void {
     const metadata = xhrRequestMetadata.get(this);
     if (metadata) {
-      rememberCapturedXhsRequestContext({
-        url: metadata.url,
-        method: metadata.method,
-        headers: metadata.headers,
-        body: resolveRequestBodyString(body),
-        referrer: typeof mainWindow.location?.href === "string" ? mainWindow.location.href : null
-      });
+      const capturedBody = resolveRequestBodyString(body);
+      const capturedReferrer =
+        typeof mainWindow.location?.href === "string" ? mainWindow.location.href : null;
+      this.addEventListener(
+        "load",
+        () => {
+          if (!isSuccessfulXhsResponseStatus(this.status)) {
+            return;
+          }
+          rememberCapturedXhsRequestContext({
+            url: metadata.url,
+            method: metadata.method,
+            headers: metadata.headers,
+            body: capturedBody,
+            referrer: capturedReferrer
+          });
+        },
+        { once: true }
+      );
     }
     originalSend.call(this, body);
   };

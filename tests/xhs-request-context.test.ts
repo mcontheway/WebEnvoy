@@ -257,6 +257,7 @@ describe("xhs request-context hydration", () => {
       },
       createEnvironment({
         fetchJson,
+        randomId: () => "generated-search-id-002",
         readCapturedRequestContext: async () => ({
           url: "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
           method: "POST",
@@ -271,11 +272,17 @@ describe("xhs request-context hydration", () => {
     );
 
     const searchFetchInput = fetchJson.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(searchFetchInput.referrer).toBe(
+      "https://www.xiaohongshu.com/search_result/?keyword=AI&type=51"
+    );
+    expect((searchFetchInput.headers as Record<string, unknown>)["X-S-Common"]).not.toBe(
+      "{\"searchId\":\"captured-search-id\"}"
+    );
     expect(JSON.parse(String(searchFetchInput.body))).toEqual({
       keyword: "AI",
       page: 1,
       page_size: 20,
-      search_id: "captured-search-id",
+      search_id: "generated-search-id-002",
       sort: "general",
       note_type: 0
     });

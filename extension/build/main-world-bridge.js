@@ -146,6 +146,7 @@ const resolveRequestBodyString = (value) => {
     return null;
 };
 const shouldSkipCapturedXhsRequestContext = (init) => asRecord(init)?.__webenvoySkipCapture === true;
+const isSuccessfulXhsResponseStatus = (value) => typeof value === "number" && Number.isFinite(value) && value >= 200 && value < 300;
 const rememberCapturedXhsRequestContext = (input) => {
     const tracked = normalizeTrackedXhsRequest(input.url, input.method);
     if (!tracked) {
@@ -197,7 +198,8 @@ const installXhsRequestCapture = () => {
                 headers = resolveFetchHeaders(init?.headers);
                 body = resolveRequestBodyString(init?.body);
             }
-            if (!skipCapture) {
+            const response = await originalFetch(input, init);
+            if (!skipCapture && isSuccessfulXhsResponseStatus(response?.status)) {
                 rememberCapturedXhsRequestContext({
                     url: requestUrl,
                     method: method.toUpperCase() === "GET" ? "GET" : "POST",
@@ -206,7 +208,7 @@ const installXhsRequestCapture = () => {
                     referrer: typeof mainWindow.location?.href === "string" ? mainWindow.location.href : null
                 });
             }
-            return await originalFetch(input, init);
+            return response;
         };
     }
     const xhrPrototype = mainWindow.XMLHttpRequest?.prototype;
@@ -234,13 +236,20 @@ const installXhsRequestCapture = () => {
     xhrPrototype.send = function (body) {
         const metadata = xhrRequestMetadata.get(this);
         if (metadata) {
-            rememberCapturedXhsRequestContext({
-                url: metadata.url,
-                method: metadata.method,
-                headers: metadata.headers,
-                body: resolveRequestBodyString(body),
-                referrer: typeof mainWindow.location?.href === "string" ? mainWindow.location.href : null
-            });
+            const capturedBody = resolveRequestBodyString(body);
+            const capturedReferrer = typeof mainWindow.location?.href === "string" ? mainWindow.location.href : null;
+            this.addEventListener("load", () => {
+                if (!isSuccessfulXhsResponseStatus(this.status)) {
+                    return;
+                }
+                rememberCapturedXhsRequestContext({
+                    url: metadata.url,
+                    method: metadata.method,
+                    headers: metadata.headers,
+                    body: capturedBody,
+                    referrer: capturedReferrer
+                });
+            }, { once: true });
         }
         originalSend.call(this, body);
     };

@@ -210,9 +210,10 @@ describe("main-world bridge contract", () => {
       href: "https://www.xiaohongshu.com/search_result/?keyword=AI&type=51"
     };
     (mockWindow as typeof mockWindow & { fetch?: typeof fetch }).fetch = vi.fn(
-      async () =>
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
         new Response(JSON.stringify({ code: 0, data: { items: [] } }), {
-          status: 200,
+          status:
+            typeof init?.body === "string" && init.body.includes("search-ctx-failed") ? 500 : 200,
           headers: { "content-type": "application/json" }
         })
     );
@@ -265,6 +266,18 @@ describe("main-world bridge contract", () => {
         body: "{\"keyword\":\"AI\",\"search_id\":\"search-ctx-synthetic\"}",
         __webenvoySkipCapture: true
       } as RequestInit & { __webenvoySkipCapture: true }
+    );
+
+    await (mockWindow as typeof mockWindow & { fetch: typeof fetch }).fetch(
+      "/api/sns/web/v1/search/notes",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json;charset=utf-8",
+          "X-S-Common": "{\"page\":\"failed\"}"
+        },
+        body: "{\"keyword\":\"AI\",\"search_id\":\"search-ctx-failed\"}"
+      }
     );
 
     const requestListener = added.find((entry) => entry.type === secretChannel.requestEvent)?.listener;

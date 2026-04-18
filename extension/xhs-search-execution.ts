@@ -32,6 +32,9 @@ const asRecord = (value: unknown): JsonRecord | null =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const asInteger = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : null;
+
 const resolveCapturedRequestHeaders = (
   value: Record<string, string> | null | undefined
 ): Record<string, string> => {
@@ -63,6 +66,23 @@ const parseCapturedJsonBody = (value: string | null): JsonRecord | null => {
     return null;
   }
 };
+
+const isCompatibleCapturedSearchPayload = (
+  capturedPayload: JsonRecord | null,
+  expectedPayload: {
+    keyword: string;
+    page: number;
+    page_size: number;
+    sort: string;
+    note_type: number;
+  }
+): boolean =>
+  !!capturedPayload &&
+  asString(capturedPayload.keyword) === expectedPayload.keyword &&
+  asInteger(capturedPayload.page) === expectedPayload.page &&
+  asInteger(capturedPayload.page_size) === expectedPayload.page_size &&
+  asString(capturedPayload.sort) === expectedPayload.sort &&
+  asInteger(capturedPayload.note_type) === expectedPayload.note_type;
 
 const withExecutionAuditInFailurePayload = (
   result: SearchExecutionResult,
@@ -379,13 +399,17 @@ export const executeXhsSearch = async (
     );
   }
 
+  const requestedPage = input.params.page ?? 1;
+  const requestedPageSize = input.params.limit ?? 20;
+  const requestedSort = input.params.sort ?? "general";
+  const requestedNoteType = asInteger(input.params.note_type) ?? 0;
   const payload: JsonRecord = {
     keyword: input.params.query,
-    page: input.params.page ?? 1,
-    page_size: input.params.limit ?? 20,
+    page: requestedPage,
+    page_size: requestedPageSize,
     search_id: input.params.search_id ?? env.randomId(),
-    sort: input.params.sort ?? "general",
-    note_type: input.params.note_type ?? 0
+    sort: requestedSort,
+    note_type: requestedNoteType
   };
   const capturedRequestContext = env.readCapturedRequestContext
     ? await env.readCapturedRequestContext({
@@ -395,8 +419,17 @@ export const executeXhsSearch = async (
       }).catch(() => null)
     : null;
   const capturedPayload = parseCapturedJsonBody(capturedRequestContext?.body ?? null);
-  const capturedKeyword = asString(capturedPayload?.keyword);
-  if (capturedPayload && capturedKeyword === input.params.query) {
+  const compatibleCapturedSearchPayload = isCompatibleCapturedSearchPayload(capturedPayload, {
+    keyword: input.params.query,
+    page: requestedPage,
+    page_size: requestedPageSize,
+    sort: requestedSort,
+    note_type: requestedNoteType
+  });
+  const reusableCapturedRequestContext = compatibleCapturedSearchPayload
+    ? capturedRequestContext
+    : null;
+  if (compatibleCapturedSearchPayload && capturedPayload) {
     payload.search_id =
       input.params.search_id ??
       asString(capturedPayload.search_id) ??
@@ -443,7 +476,7 @@ export const executeXhsSearch = async (
     );
   }
 
-  const capturedHeaders = resolveCapturedRequestHeaders(capturedRequestContext?.headers);
+  const capturedHeaders = resolveCapturedRequestHeaders(reusableCapturedRequestContext?.headers);
   const headers: Record<string, string> = {
     Accept:
       getCapturedHeader(capturedHeaders, "Accept") ?? "application/json, text/plain, */*",
@@ -469,7 +502,7 @@ export const executeXhsSearch = async (
       headers,
       body: JSON.stringify(payload),
       pageContextRequest: true,
-      referrer: capturedRequestContext?.referrer ?? env.getLocationHref(),
+      referrer: reusableCapturedRequestContext?.referrer ?? env.getLocationHref(),
       referrerPolicy: "strict-origin-when-cross-origin",
       timeoutMs:
         typeof input.options.timeout_ms === "number" && Number.isFinite(input.options.timeout_ms)
