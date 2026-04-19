@@ -65,3 +65,4 @@
 - reviewer 确认 `source_note_id`、referrer、metadata-only note field 没有被提升为 admitted canonical truth。
 - reviewer 确认本 FR 未越权冻结 shared reuse semantics。
 - reviewer 确认 replacement implementation 的 detail formal gate 已明确消费本 FR。
+- 只有在 spec review 通过后，replacement implementation 才允许把 detail admitted template path 标记为 implementation-ready，并在实现 PR 中消费本 FR。
