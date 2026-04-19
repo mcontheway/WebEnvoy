@@ -698,6 +698,62 @@ describe("xhs read execution fallback", () => {
     });
   });
 
+  it("uses detail page-state fallback when request context is missing but note state is still present", async () => {
+    const callSignature = vi.fn(async () => ({
+      "X-s": "sig",
+      "X-t": "1710000000"
+    }));
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0
+      }
+    }));
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-fallback-context-miss-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-fallback-context-miss-001",
+          targetPage: "explore_detail_tab"
+        }),
+        executionContext: createFallbackExecutionContext("run-detail-fallback-context-miss-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-fallback-context-miss-001",
+        readCapturedRequestContext: async () => null,
+        readPageStateRoot: async () => ({
+          note: {
+            noteDetailMap: {
+              "note-fallback-context-miss-001": {
+                noteId: "note-fallback-context-miss-001"
+              }
+            }
+          }
+        }),
+        callSignature,
+        fetchJson
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected detail context-miss fallback failure envelope");
+    }
+    expect(result.payload.observability).toMatchObject({
+      page_state: {
+        fallback_used: true
+      }
+    });
+    expect(result.error.message).toBe("当前页面现场缺少可复用的 xhs.detail 请求上下文");
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
   it("does not treat metadata user id as user_home success evidence", async () => {
     const result = await executeXhsUserHome(
       {
@@ -790,6 +846,61 @@ describe("xhs read execution fallback", () => {
         target: "/api/sns/web/v1/user/otherinfo"
       }
     });
+  });
+
+  it("uses user_home page-state fallback when request context is missing but page state remains readable", async () => {
+    const callSignature = vi.fn(async () => ({
+      "X-s": "sig",
+      "X-t": "1710000000"
+    }));
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0
+      }
+    }));
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-fallback-context-miss-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-user-fallback-context-miss-001",
+          targetPage: "profile_tab"
+        }),
+        executionContext: createFallbackExecutionContext("run-user-fallback-context-miss-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-fallback-context-miss-001",
+        readCapturedRequestContext: async () => null,
+        readPageStateRoot: async () => ({
+          user: {
+            userId: "user-fallback-context-miss-001"
+          },
+          board: {
+            notes: []
+          }
+        }),
+        callSignature,
+        fetchJson
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected user_home context-miss fallback failure envelope");
+    }
+    expect(result.payload.observability).toMatchObject({
+      page_state: {
+        fallback_used: true
+      }
+    });
+    expect(result.error.message).toBe("当前页面现场缺少可复用的 xhs.user_home 请求上下文");
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
   });
 
   it("uses detail page-state fallback when feed api is blocked but note state is still present", async () => {

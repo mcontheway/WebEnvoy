@@ -3678,23 +3678,7 @@ class ChromeBackgroundBridge {
                     : null;
                 const headersRecord = asRecord(requestHeaders) ?? {};
                 const headers = Object.fromEntries(Object.entries(headersRecord).filter((entry) => typeof entry[1] === "string"));
-                const syntheticQueueSymbol = Symbol.for("webenvoy.main_world.synthetic_request_queue.v1");
-                const syntheticRequestId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-                    ? crypto.randomUUID()
-                    : `synthetic-${Date.now()}`;
-                const globalRecord = window;
-                const currentQueue = Array.isArray(globalRecord[syntheticQueueSymbol])
-                    ? [...globalRecord[syntheticQueueSymbol]]
-                    : [];
-                let parsedRequestBody = null;
-                if (typeof requestBody === "string" && requestBody.length > 0) {
-                    try {
-                        parsedRequestBody = JSON.parse(requestBody);
-                    }
-                    catch {
-                        parsedRequestBody = requestBody;
-                    }
-                }
+                const syntheticRequestSymbol = Symbol.for("webenvoy.main_world.synthetic_request.v1");
                 const timeoutMs = typeof requestTimeoutMs === "number" && Number.isFinite(requestTimeoutMs)
                     ? Math.max(1, Math.trunc(requestTimeoutMs))
                     : 5_000;
@@ -3702,16 +3686,8 @@ class ChromeBackgroundBridge {
                 const timer = setTimeout(() => {
                     controller.abort();
                 }, timeoutMs);
-                currentQueue.push({
-                    id: syntheticRequestId,
-                    method: requestMethod === "GET" ? "GET" : "POST",
-                    url: String(requestUrl),
-                    body: parsedRequestBody,
-                    expires_at: Date.now() + timeoutMs
-                });
-                globalRecord[syntheticQueueSymbol] = currentQueue;
                 try {
-                    const response = await fetch(String(requestUrl), {
+                    const request = new Request(String(requestUrl), {
                         method: requestMethod === "GET" ? "GET" : "POST",
                         headers,
                         credentials: "include",
@@ -3722,6 +3698,12 @@ class ChromeBackgroundBridge {
                             : {}),
                         signal: controller.signal
                     });
+                    Object.defineProperty(request, syntheticRequestSymbol, {
+                        configurable: true,
+                        enumerable: false,
+                        value: true
+                    });
+                    const response = await fetch(request);
                     const text = await response.text();
                     let body = null;
                     if (text.length > 0) {
@@ -3738,15 +3720,6 @@ class ChromeBackgroundBridge {
                     };
                 }
                 finally {
-                    const remainingQueue = Array.isArray(globalRecord[syntheticQueueSymbol])
-                        ? globalRecord[syntheticQueueSymbol].filter((entry) => entry?.id !== syntheticRequestId)
-                        : [];
-                    if (remainingQueue.length === 0) {
-                        delete globalRecord[syntheticQueueSymbol];
-                    }
-                    else {
-                        globalRecord[syntheticQueueSymbol] = remainingQueue;
-                    }
                     clearTimeout(timer);
                 }
             },

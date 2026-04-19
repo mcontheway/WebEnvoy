@@ -6490,6 +6490,17 @@ const executeXhsRead = async (input, spec, env) => {
         : null;
     const requestContextResult = resolveReadRequestContext(spec, capturedRequestContext, expectedShape, env.now());
     if (requestContextResult.state !== "hit") {
+        const pageStateRoot = await resolvePageStateRoot();
+        if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
+            const isIncompatible = requestContextResult.state === "incompatible";
+            return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, payload, startedAt, {
+                reason: isIncompatible ? "REQUEST_CONTEXT_INCOMPATIBLE" : "REQUEST_CONTEXT_MISSING",
+                message: isIncompatible
+                    ? `当前页面现场不存在与 ${spec.command} 完全一致的请求上下文`
+                    : `当前页面现场缺少可复用的 ${spec.command} 请求上下文`,
+                detail: requestContextResult.reason
+            });
+        }
         return failClosedForRequestContext({
             abilityId: input.abilityId,
             spec,

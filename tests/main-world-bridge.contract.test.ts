@@ -449,7 +449,7 @@ describe("main-world bridge contract", () => {
     });
   });
 
-  it("stores queued WebEnvoy main-world requests as rejected observations without leaking a network header", async () => {
+  it("stores symbol-marked WebEnvoy main-world requests as rejected observations without leaking a network header", async () => {
     const env = createMockMainWorldEnvironment();
     installMockDomGlobals({
       mockWindow: env.mockWindow as Window & Record<string, unknown>,
@@ -465,28 +465,22 @@ describe("main-world bridge contract", () => {
       });
     });
 
-    const syntheticQueueSymbol = Symbol.for("webenvoy.main_world.synthetic_request_queue.v1");
-    (globalThis as Record<string | symbol, unknown>)[syntheticQueueSymbol] = [
-      {
-        id: "queued-main-world-request",
-        method: "POST",
-        url: "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
-        body: { keyword: "露营" },
-        expires_at: Date.now() + 1_000
-      }
-    ];
-
     const channel = await bootstrapMainWorldBridge(env.added);
-    await (env.mockWindow.fetch as typeof fetch)(
-      "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: "{\"keyword\":\"露营\"}"
-      }
-    );
+    const syntheticRequestSymbol = Symbol.for("webenvoy.main_world.synthetic_request.v1");
+    const request = new Request("https://www.xiaohongshu.com/api/sns/web/v1/search/notes", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: "{\"keyword\":\"露营\"}"
+    }) as Request & Record<string | symbol, unknown>;
+    Object.defineProperty(request, syntheticRequestSymbol, {
+      configurable: true,
+      enumerable: false,
+      value: true
+    });
+
+    await (env.mockWindow.fetch as typeof fetch)(request);
 
     const result = await readCapturedContext({
       dispatched: env.dispatched,
