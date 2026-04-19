@@ -61,7 +61,7 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
     | "data.item"
     | "data.items[*]"
     | "data.notes[*]"
-    | "detail_shaped_data_record";
+    | "data";
   response_candidate_path:
     | "self"
     | "note"
@@ -86,7 +86,7 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
   - `data.item`
   - `data.items[*]`
   - `data.notes[*]`
-  - 当前实现直接接受的 `data` record 本身
+  - `data`
 - `response_candidate_path` 用于记录 admitted detail note record 相对其 scope root 的命中路径；current v1 允许：
   - `self`
   - `note`
@@ -94,6 +94,7 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
   - `current_note`
   - `item`
 - 因此，current v1 admitted source 明确覆盖 `data.items[*].note_card` 这类嵌套命中路径；只要最终命中的仍是 detail note candidate record，就属于本 FR 的 admitted truth。
+- 当 `response_candidate_scope="data"` 且 `response_candidate_path="self"` 时，它只表示 `data` 本身就是 detail note record；wrapper-shaped `data` 容器仍必须通过其嵌套 note record path 判定，不能把 wrapper 自身的 id 升格为 admitted source。
 - metadata-only note id、route string、referrer、request-side body 字段都不能替代这条 admitted derivation source。
 - 当同一 response 中出现多个 note-id-bearing candidate record 时，只有与 command-side canonical `note_id` 一致的 response note record 才能进入 admitted path；candidate-only source 不得参与覆盖或纠偏这条判断。
 
@@ -190,6 +191,7 @@ type XhsDetailCandidateOnlyDerivationSourceV1 =
   - `#505 / FR-0026` 的 identity-only freeze
   - `#508` 的 shared reuse semantics 与 replacement gate
   - 本 FR 的 capture-side canonical `note_id` derivation freeze
+- 当前仓库内与同一路径相关的 formal gate 必须按同一 prerequisite tree 解释；不得再把 detail replacement path 写成只等待 `#504/#505/#508`。
 
 补充约束：
 

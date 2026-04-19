@@ -58,6 +58,7 @@
 - 当前实现不接受 metadata-only note id 作为 detail success evidence。
 - 只有当 response payload 中出现 detail note candidate record，且其 `note_id` / `noteId` / `id` 命中目标 `note_id` 时，才认定成功。
 - 本 FR 可以把 response-side detail note candidate record 上的 `note_id` / `noteId` / `id` 冻结为 current v1 唯一 admitted derivation source。
+- 对 `data` 自身的 admitted source，formal 需要继续收紧为“只有当 `data` 本身就是 detail note record 时才允许 `self` admitted”；wrapper-shaped `data` 容器仍必须走嵌套 path。
 
 未解决问题 / 失效条件 / 后续动作：
 
@@ -124,6 +125,7 @@
 - replacement implementation 要想进入 admitted template path，必须知道 detail canonical `note_id` 在 capture 侧怎么被正式导出。
 - 如果没有本 FR，formal suite 会出现“identity-only 已冻结，但 capture-side admitted derivation 未冻结”的断层。
 - 本 FR 必须加入 detail replacement path 的 formal prerequisite 组合，同时不越权替代 `#508` 的 shared reuse semantics owner。
+- 已 merge 的 detail formal suites 也必须与这棵 prerequisite tree 保持一致，否则 reviewer 无法判断 detail path 是否已经 implementation-ready。
 
 未解决问题 / 失效条件 / 后续动作：
 

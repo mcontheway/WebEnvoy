@@ -30,7 +30,7 @@ type XhsDetailCaptureDerivationInputV1 = {
     | "data.item"
     | "data.items[*]"
     | "data.notes[*]"
-    | "detail_shaped_data_record";
+    | "data";
   response_candidate_path?: "self" | "note" | "note_card" | "current_note" | "item";
   response_note_candidate?: Record<string, unknown> | null;
   request_candidate?: {
@@ -87,7 +87,7 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
     | "data.item"
     | "data.items[*]"
     | "data.notes[*]"
-    | "detail_shaped_data_record";
+    | "data";
   response_candidate_path: "self" | "note" | "note_card" | "current_note" | "item";
   identifier_field: "note_id" | "noteId" | "id";
   derived_note_id: string;
@@ -99,6 +99,7 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
 - current v1 admitted template 只能消费这类 source。
 - `derived_note_id` 必须为 trim 后非空字符串。
 - admitted truth 只在 identifier field 出现在 detail note candidate record 上时成立。
+- `response_candidate_scope="data"` 且 `response_candidate_path="self"` 时，只允许用于 `data` 本身已经是 detail note record 的情形；wrapper-shaped `data` 容器必须保持 candidate-only。
 - `response_candidate_path` 明确保留嵌套命中路径，因此 `data.items[*].note_card`、`data.notes[*].note_card` 等 current 行为已接受的 nested note-record source 仍属于 admitted truth。
 - 当同一 response 中存在多个候选 source 时，只有命中 command-side canonical `note_id` 的 response note record 可以成为 admitted source；candidate-only source 不得覆盖该裁决。
 

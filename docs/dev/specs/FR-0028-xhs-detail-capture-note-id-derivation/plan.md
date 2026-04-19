@@ -10,6 +10,7 @@
 
 - 产出：`research.md`
 - 重点：确认 `FR-0025`、`FR-0026`、`#508`、`#510` 的边界；确认 `FR-0005` 与 in-tree tests 对 `source_note_id`、response-side note fields、metadata-only failure 的现有证据等级
+  - 同时把 detail replacement path 的 prerequisite tree 与已 merge 的 detail formal suites 对齐，避免仓库内出现两套 implementation-ready gate
 
 ### 阶段 2：capture-side derivation contract 冻结
 
@@ -56,8 +57,8 @@
 - 可并行：
   - 其他不触碰 `FR-0028` 套件的 spec / impl 工作
 - 串行 / 依赖：
-  - replacement implementation 的 detail admitted template 路径必须在本 FR formal freeze 后才能宣告 implementation-ready
-  - 本 FR 必须与 `FR-0025`、`FR-0026`、`#508` 一起构成 detail replacement path 的 formal prerequisite 组合
+- replacement implementation 的 detail admitted template 路径必须在本 FR formal freeze 后才能宣告 implementation-ready
+- 本 FR 必须与 `FR-0025`、`FR-0026`、`#508` 一起构成 detail replacement path 的 formal prerequisite 组合
 
 ## 进入实现前条件
 
