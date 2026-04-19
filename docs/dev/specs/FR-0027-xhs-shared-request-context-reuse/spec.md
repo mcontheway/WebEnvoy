@@ -47,7 +47,7 @@ Canonical Issue: #508
 - `shape_key` 只能由 canonical shape 的稳定序列化生成，不得混入 raw body、header 顺序、trace 或 referrer。
 - 不允许在 capture、lookup 或 eligibility 阶段各自定义第二套“同一请求”规则。
 
-### 2. canonical read-family shapes 与 derivation source
+### 2. canonical read-family shapes
 
 系统必须冻结以下 read-family canonical shape：
 
@@ -65,12 +65,11 @@ Canonical Issue: #508
 补充约束：
 
 - `xhs.detail` 的 `note_id` 继续与 `#505` 的 identity-only formal freeze 对齐。
-- detail capture admission 在导出 canonical shape 前，必须先冻结 artifact-side `note_id` derivation source；当前 formal v1 只允许承认已经 canonical 的 `note_id`。
-- `source_note_id` 当前不得作为 detail capture admission 的 admitted canonical derivation input。
 - `source_note_id`、`image_scenes`、headers、trace、referrer 不进入 `xhs.detail` `shape_key`。
+- detail capture-side canonical `note_id` derivation 当前不在本 FR 冻结；该 formal owner 已转交 `#510 / FR-0028`。
 - `xhs.user_home` 最终只保留 canonical `user_id`；`userId` 或 query `user_id` 只允许作为归一来源，不得并列进入 `shape_key`。
 - `xhs.search` 的 `keyword/page/page_size/sort/note_type` 继续由 `FR-0024` 负责，不在本 FR 重新列举为新 truth。
-- `research.md` 只记录当前仓库为什么还不能把 detail referrer / transport 推断升格为 formal truth；相关规则需等待后续证据充分后另行修订。
+- `research.md` 只记录当前仓库为什么还不能把 detail referrer / transport 推断升格为 formal truth；相关规则已转交 `#510` 并等待后续证据充分后另行修订。
 
 ### 3. page-local namespace 与 route bucket
 
@@ -117,8 +116,9 @@ Canonical Issue: #508
 - 任何 synthetic / failed source 都不得进入 `admitted_template`。
 - `admitted_template` 至少必须携带 `captured_at`，作为 freshness gate 的时间输入。
 - `admitted_template` 至少必须携带 `request_status.completion="completed"` 与非空 2xx `request_status.http_status`，不得把 failed / non-2xx candidate 误记为 admitted template。
-- `rejected_observation` 与 `incompatible_observation` 至少必须携带 `observed_at`，以对齐 `FR-0024` 已冻结的 rejected-source observation 时间语义。
-- `rejected_observation` 与 `incompatible_observation` 至少都必须携带 `source_kind`、非空 machine-readable `rejection_reason` 与 `request_status`，以支持 rejected-source 语义与最近一次 sibling-shape 诊断。
+- `rejected_observation` 与 `incompatible_observation` 至少必须携带 `observed_at`，并与 `FR-0024` 回写后的 shared observation schema 保持兼容。
+- shape-slot `rejected_observation` 至少必须携带 `source_kind`、非空 machine-readable `rejection_reason` 与 `request_status`，以支持 rejected-source 语义。
+- route-bucket `incompatible_observation` 至少必须携带 `source_kind`、`incompatibility_reason="shape_mismatch"` 与 `request_status`，以支持 sibling-shape 诊断。
 - route bucket 必须保留 `available_shape_keys`，以支持 sibling-shape incompatibility 诊断。
 
 ### 6. capture admission
@@ -137,9 +137,9 @@ Canonical Issue: #508
 - failed / non-2xx request 只能进入 `rejected_observation`
 - capture admission 拒绝不得被等价成 template hit
 - rejected observation 也必须按当前 namespace 的 route bucket + `shape_key` 分槽
-- detail capture admission 在 shape 可导出前，不得把 `source_note_id`、referrer 或其他 transport alias 升格成 admitted canonical derivation input
+- detail capture-side canonical `note_id` derivation 当前不在本 FR 冻结；admitted detail capture path 必须等待 `#510`
 - shape-slot `rejected_observation` 必须携带非空 `rejection_reason`；当前 v1 仅允许 `synthetic_request_rejected` 或 `failed_request_rejected`
-- route-bucket `incompatible_observation` 必须携带非空 `rejection_reason=shape_mismatch`
+- route-bucket `incompatible_observation` 必须携带 `incompatibility_reason=shape_mismatch`
 
 ### 7. lookup / eligibility / fail-closed
 
@@ -245,8 +245,8 @@ And `#508` 只能被解释为“shared reuse semantics 已冻结，但 gate 仍 
 ## 异常与边界场景
 
 - `xhs.search` 的 search-only shape 仍以后 `FR-0024` 为准；本 FR 不得与其冲突。
-- `xhs.detail` canonical identity 仍以 `#505` 为准；本 FR 只冻结其 reuse-shape、artifact-side derivation source 与 slotting 语义。
-- detail referrer / transport 推断当前仍证据不足；在另有 formal 修订前，不得被写成 admitted canonical derivation truth。
+- `xhs.detail` canonical identity 仍以 `#505` 为准；本 FR 只冻结其 reuse-shape 与 slotting 语义，不冻结 capture-side derivation source。
+- detail referrer / transport 推断当前仍证据不足；capture-side canonical `note_id` derivation 已转交 `#510`，在其 formal freeze 完成前不得被写成 admitted canonical derivation truth。
 - `xhs.user_home` canonical shape 不得被误写成 `body.userId` 与 `query user_id` 并列双主键。
 - shape 命中但模板过旧时，结果必须是 `stale`，而不是 `hit`。
 - rejected observation 允许保留最近一次可诊断 candidate，但不得升级为 admitted template。
@@ -258,7 +258,7 @@ And `#508` 只能被解释为“shared reuse semantics 已冻结，但 gate 仍 
 1. `xhs.detail` / `xhs.user_home` 已进入与 `xhs.search` 同构的 shared request-context reuse model。
 2. page-local/document-local `page_context_namespace`、route bucket 与 `shape_key` 的层级关系已冻结。
 3. admitted / rejected / incompatible 三类 bucket 状态及其 freshness / rejected-source 所需最小结构字段已冻结，且 incompatible observation 位于 route bucket 层，synthetic / failed source 不进入 admitted template，admitted template 仅承载 completed 2xx 成功态。
-4. detail/user_home 的 canonical shape 已冻结为 `note_id` / `user_id` only，且 detail capture-side additional derivation rule 继续保持 deferred。
+4. detail/user_home 的 canonical shape 已冻结为 `note_id` / `user_id` only，且 detail capture-side canonical `note_id` derivation 继续由 `#510` 保持 deferred。
 5. exact-match / freshness / fail-closed 的共享 reuse 规则已冻结。
 6. replacement implementation 的 formal gate 已明确包含 `#508` 且继续 blocked，直到 detail capture-side derivation formal owner（当前为 `#510`）完成。
 

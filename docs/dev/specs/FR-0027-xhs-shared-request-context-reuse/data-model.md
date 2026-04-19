@@ -55,7 +55,8 @@
 - `captured_at` 是 `admitted_template` 的最小 freshness 字段。
 - `admitted_template.request_status` 必须固定为 `completion="completed"` 且 `http_status` 为非空 2xx。
 - `observed_at` 是 `rejected_observation` / `incompatible_observation` 的最小 observation 时间字段，需与 `FR-0024` 对齐。
-- `source_kind`、非空 machine-readable `rejection_reason` 与 `request_status` 是 `rejected_observation` / `incompatible_observation` 的最小 rejected-source 诊断字段。
+- shape-slot `rejected_observation` 的最小字段是 `source_kind`、非空 machine-readable `rejection_reason` 与 `request_status`。
+- route-bucket `incompatible_observation` 的最小字段是 `source_kind`、`incompatibility_reason="shape_mismatch"` 与 `request_status`。
 - `available_shape_keys` 只反映当前 namespace / route bucket 内可诊断 shape，不构成跨 namespace 共享键。
 
 ### 4. read-family canonical shape
@@ -68,5 +69,5 @@
 约束：
 
 - search-only canonical shape 继续由 `FR-0024` 承载。
-- detail identity 继续由 `#505` 承载；本 FR 只冻结其 reuse-shape、artifact-side derivation source 和 slotting 语义。
-- detail referrer / transport 派生 `note_id` 当前仍保持 deferred；`research.md` 只承接“为什么现在还不能 formalize”。
+- detail identity 继续由 `#505` 承载；本 FR 只冻结其 reuse-shape 和 slotting 语义。
+- detail capture-side canonical `note_id` derivation 当前仍保持 deferred，并已转交 `#510`；`research.md` 只承接“为什么现在还不能 formalize”。
