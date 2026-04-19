@@ -324,7 +324,14 @@ export const createPageContextNamespace = (href: string): PageContextNamespace =
   try {
     const parsed = new URL(normalized, "https://www.xiaohongshu.com/");
     const pathname = parsed.pathname.length > 0 ? parsed.pathname : "/";
-    return `${parsed.origin}${pathname}`;
+    const documentTimeOrigin =
+      typeof globalThis.performance?.timeOrigin === "number" &&
+      Number.isFinite(globalThis.performance.timeOrigin)
+        ? Math.trunc(globalThis.performance.timeOrigin)
+        : null;
+    return documentTimeOrigin === null
+      ? `${parsed.origin}${pathname}`
+      : `${parsed.origin}${pathname}#doc=${documentTimeOrigin}`;
   } catch {
     return normalized;
   }

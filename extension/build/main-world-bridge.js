@@ -894,7 +894,7 @@ const resolveIncompatibleObservation = (routeBucket, requestedShapeKey) => {
         if (shapeKey === requestedShapeKey) {
             continue;
         }
-        const candidate = resolveLatestBucketArtifact(bucket);
+        const candidate = bucket.admittedTemplate;
         if (!candidate) {
             continue;
         }

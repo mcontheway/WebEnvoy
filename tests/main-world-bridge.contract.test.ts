@@ -1,3 +1,4 @@
+import { createPageContextNamespace } from "../extension/xhs-search-types.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 type MockEventListener = (event: Event) => void;
@@ -18,7 +19,7 @@ const flushMicrotasks = async (): Promise<void> => {
 };
 
 const SEARCH_PAGE_HREF = "https://www.xiaohongshu.com/search_result?keyword=contract";
-const SEARCH_PAGE_NAMESPACE = "https://www.xiaohongshu.com/search_result";
+const SEARCH_PAGE_NAMESPACE = createPageContextNamespace(SEARCH_PAGE_HREF);
 
 const createMockMainWorldEnvironment = () => {
   const listeners = new Map<string, MockEventListener[]>();
@@ -294,7 +295,7 @@ describe("main-world bridge contract", () => {
     {
       label: "detail feed",
       method: "POST" as const,
-      pageContextNamespace: "https://www.xiaohongshu.com/explore/note-001",
+      pageContextNamespace: createPageContextNamespace("https://www.xiaohongshu.com/explore/note-001"),
       shapeKey:
         '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}',
       path: "/api/sns/web/v1/feed",
@@ -306,7 +307,9 @@ describe("main-world bridge contract", () => {
     {
       label: "user home",
       method: "GET" as const,
-      pageContextNamespace: "https://www.xiaohongshu.com/user/profile/user-001",
+      pageContextNamespace: createPageContextNamespace(
+        "https://www.xiaohongshu.com/user/profile/user-001"
+      ),
       shapeKey:
         '{"command":"xhs.user_home","method":"GET","pathname":"/api/sns/web/v1/user/otherinfo","user_id":"user-001"}',
       path: "/api/sns/web/v1/user/otherinfo",
@@ -541,7 +544,7 @@ describe("main-world bridge contract", () => {
       requestListener: channel.requestListener,
       method: "POST",
       path: "/api/sns/web/v1/feed",
-      pageContextNamespace: "https://www.xiaohongshu.com/explore/note-001",
+      pageContextNamespace: createPageContextNamespace("https://www.xiaohongshu.com/explore/note-001"),
       shapeKey:
         '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}'
     });

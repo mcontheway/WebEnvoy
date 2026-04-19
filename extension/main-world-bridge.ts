@@ -1231,7 +1231,7 @@ const resolveIncompatibleObservation = (
     if (shapeKey === requestedShapeKey) {
       continue;
     }
-    const candidate = resolveLatestBucketArtifact(bucket);
+    const candidate = bucket.admittedTemplate;
     if (!candidate) {
       continue;
     }
