@@ -16,7 +16,7 @@ type RequestContextRouteBucketIdV1 = {
 
 type RequestContextShapeSlotIdV1 = {
   page_context_namespace: string;
-  shape_key: string;
+  shape_key: SharedReuseCanonicalShapeKeyV1;
 };
 ```
 
@@ -44,13 +44,23 @@ type XhsUserHomeReuseShapeV1 = {
   pathname: "/api/sns/web/v1/user/otherinfo";
   user_id: string;
 };
+
+type SharedReuseCanonicalShapeV1 =
+  | RequestShape
+  | XhsDetailReuseShapeV1
+  | XhsUserHomeReuseShapeV1;
+
+type SharedReuseCanonicalShapeKeyV1 = string;
 ```
 
 约束：
 
+- `RequestShape` 在此仅表示 `FR-0024` 已冻结的 `xhs.search` canonical shape 引用；search-only canonical shape 的 formal owner 仍是 `FR-0024`。
 - `xhs.detail` reuse-shape 不包含 `source_note_id` 或 `image_scenes`。
 - 当前 formal contract 只承认 canonical `note_id`；detail referrer / transport derivation 继续保持 deferred。
 - `xhs.user_home` reuse-shape 最终只保留 canonical `user_id`。
+- route-bucket / shape-slot observation 中的 `shape` 只能实例化为上述 canonical request-shape variants 之一。
+- observation 中的 `shape_key` 只能实例化为对应 canonical request-shape variant 的稳定序列化结果；其中 search variant 继续绑定 `FR-0024` 的 `RequestShapeKey`。
 
 ## 3. Bucket state
 
@@ -72,8 +82,8 @@ type SharedAdmittedTemplateStateV1 = {
 };
 
 type SharedShapeSlotRejectedObservationStateV1 = {
-  shape: Record<string, unknown>;
-  shape_key: string;
+  shape: SharedReuseCanonicalShapeV1;
+  shape_key: SharedReuseCanonicalShapeKeyV1;
   observed_at: number;
   source_kind: "page_request" | "synthetic_request";
   rejection_reason:
@@ -83,8 +93,8 @@ type SharedShapeSlotRejectedObservationStateV1 = {
 };
 
 type SharedRouteBucketIncompatibleObservationStateV1 = {
-  shape: Record<string, unknown>;
-  shape_key: string;
+  shape: SharedReuseCanonicalShapeV1;
+  shape_key: SharedReuseCanonicalShapeKeyV1;
   observed_at: number;
   source_kind: "page_request";
   incompatibility_reason: "shape_mismatch";
@@ -102,7 +112,7 @@ type CapturedRequestContextRouteBucketV1 = {
   incompatible_observation:
     | (SharedRouteBucketIncompatibleObservationStateV1 & Record<string, unknown>)
     | null;
-  available_shape_keys: string[];
+  available_shape_keys: SharedReuseCanonicalShapeKeyV1[];
 };
 ```
 
@@ -117,6 +127,7 @@ type CapturedRequestContextRouteBucketV1 = {
 - `rejected_observation` 与 `incompatible_observation` 都必须携带 `observed_at`。
 - shape-slot `rejected_observation` 必须显式携带 `shape`、`shape_key`、`source_kind`、非空 machine-readable `rejection_reason` 与 `request_status`；其 `rejection_reason` 只允许 `synthetic_request_rejected` / `failed_request_rejected`。
 - route-bucket `incompatible_observation` 必须显式携带 `shape`、`shape_key`、`source_kind="page_request"`、`incompatibility_reason="shape_mismatch"` 与 success-only `request_status`；synthetic / failed / non-2xx candidate 不得进入 incompatible bucket。
+- 以上 observation 中的 `shape` / `shape_key` 必须始终绑定到单一 canonical request-shape variant，不得退化成未约束的自由结构。
 - route bucket 的 `available_shape_keys` 仍必须覆盖 rejected-only sibling shape；即使当前没有 success-only `incompatible_observation`，lookup 也必须能继续得出 `shape_mismatch` 的 fail-closed 结论。
 
 ## 4. Gate rule

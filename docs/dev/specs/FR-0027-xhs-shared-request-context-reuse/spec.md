@@ -4,7 +4,7 @@ Canonical Issue: #508
 
 ## 背景
 
-`#503 / FR-0024` 已冻结 `xhs.search` request-shape truth；`#504 / FR-0025` 已冻结 `xhs.detail / xhs.user_home` command surface 与 request-context baseline；`#505 / FR-0026` 负责把 `xhs.detail` canonical identity 收窄为 identity-only formal freeze。
+`#502 / FR-0024` 已冻结 `xhs.search` request-shape truth；`#504 / FR-0025` 已冻结 `xhs.detail / xhs.user_home` command surface 与 request-context baseline；`#505 / FR-0026` 负责把 `xhs.detail` canonical identity 收窄为 identity-only formal freeze。
 
 但 replacement implementation 仍缺少一条独立 formal owner，去回答当前已经被代码、测试与 guardian 同时锁定的 shared reuse 语义：
 
@@ -15,7 +15,7 @@ Canonical Issue: #508
 - exact-match / freshness / fail-closed 的复用门禁
 - replacement implementation 在进入实现前还必须等待哪些 formal freeze
 
-如果这些规则继续留给 implementation PR 自行决定，`#503/#504/#505` 的 formal truth、GitHub issue truth 与 replacement implementation gate 会再次分离。
+如果这些规则继续留给 implementation PR 自行决定，`#502/#504/#505` 的 formal truth、GitHub issue truth 与 replacement implementation gate 会再次分离。
 
 ## 目标
 
@@ -45,6 +45,7 @@ Canonical Issue: #508
 - `xhs.search` 的 canonical shape 继续完全遵循 `FR-0024`，本 FR 不得重写 search-only 规则。
 - `xhs.detail` 与 `xhs.user_home` 必须进入与 `xhs.search` 同构的 shared reuse model，而不是各自走独立启发式。
 - `shape_key` 只能由 canonical shape 的稳定序列化生成，不得混入 raw body、header 顺序、trace 或 referrer。
+- shared bucket state 中出现的 `shape` 只能实例化为 `FR-0024` 的 search `RequestShape`、本 FR 的 `XhsDetailReuseShapeV1` 或 `XhsUserHomeReuseShapeV1` 之一；`shape_key` 只能是对应 variant 的稳定序列化结果。
 - 不允许在 capture、lookup 或 eligibility 阶段各自定义第二套“同一请求”规则。
 
 ### 2. canonical read-family shapes
@@ -116,9 +117,10 @@ Canonical Issue: #508
 - 任何 synthetic / failed source 都不得进入 `admitted_template`。
 - `admitted_template` 至少必须携带 `captured_at`，作为 freshness gate 的时间输入。
 - `admitted_template` 至少必须携带 `request_status.completion="completed"` 与非空 2xx `request_status.http_status`，不得把 failed / non-2xx candidate 误记为 admitted template。
-- `rejected_observation` 与 `incompatible_observation` 至少必须携带 `observed_at`，并与 `FR-0024` 回写后的 shared observation schema 保持兼容。
+- `rejected_observation` 与 `incompatible_observation` 至少必须携带 `observed_at`，且其 `shape` / `shape_key` 必须绑定到本 FR 允许的 canonical request-shape variants。
 - shape-slot `rejected_observation` 至少必须携带 `shape`、`shape_key`、`source_kind`、非空 machine-readable `rejection_reason` 与 `request_status`，以支持 rejected-source 语义。
 - route-bucket `incompatible_observation` 至少必须携带 `shape`、`shape_key`、`source_kind="page_request"`、`incompatibility_reason="shape_mismatch"` 与 success-only `request_status`，以支持 sibling-shape 诊断。
+- `shape` 与 `shape_key` 不得写成未约束的自由结构；它们必须始终绑定到单一 canonical request-shape variant 及其稳定序列化结果。
 - route bucket 必须保留 `available_shape_keys`，以支持 sibling-shape incompatibility 诊断。
 
 ### 6. capture admission

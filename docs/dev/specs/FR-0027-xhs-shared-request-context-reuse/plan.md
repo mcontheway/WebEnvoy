@@ -24,12 +24,12 @@
 ### 阶段 4：spec review PR 准备
 
 - 产出：spec-only Draft PR、纯度门禁记录、PR 结构化元数据
-- 重点：确保 PR 以 `FR-0027` formal suite 为主，并且只在 review 明确允许的范围内回写 `FR-0024` search-only machine contract / data-model 兼容项；不混实现代码
+- 重点：确保 PR 收敛为纯 `FR-0027` formal owner 的 spec-only lane，不混入 `FR-0024` backwrite 或任何实现代码
 
 ## 实现约束
 
 - 不修改 runtime、extension、CLI 或测试实现代码。
-- 不重写 `FR-0024` search-only formal truth的 owner；如需回写，只允许最小兼容性 backwrite，且不得把 `FR-0024` 扩写成跨命令 owner。
+- 不重写 `FR-0024` search-only formal truth 的 owner；当前 PR 只允许 by-reference 使用其 canonical search shape，不允许回写 `FR-0024` formal 文件。
 - 不重写 `FR-0025` command surface / request-context baseline。
 - 不重写 `#505` 的 detail identity-only formal freeze。
 - 不在本 PR 中混入 `#489/#500` 实现修复、`#445` closeout 或 latest-main rerun。
@@ -41,6 +41,7 @@
   - 对照 `FR-0025`，确认 command surface / request-context baseline 继续由 `#504` 承载
   - 对照 `#505` 当前 issue truth，确认 detail identity 继续独立于 shared reuse semantics
   - 对照 replacement implementation 与相关测试，确认 shared slotting / bucket state / freshness 字段 / rejected-source 已成为必须 formalize 的输入，且 detail capture-side canonical `note_id` derivation 仍需要独立 formal owner
+  - 对照 guardian latest findings，确认当前分支不再混入 `FR-0024` formal backwrite，且 shared observation `shape` / `shape_key` 已收窄到 canonical request-shape variants
   - 对照 guardian latest findings，确认 admitted template 已被收紧为 completed 2xx success-only，且 shape-slot rejected observation 强制携带非空 machine-readable `rejection_reason`
   - 对照 `research.md`，确认 detail referrer / transport derivation 仍保持 deferred，不被误写成 current formal truth
 - 文档门禁：

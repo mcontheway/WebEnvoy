@@ -66,9 +66,12 @@
 | --- | --- |
 | `xhs.detail` reuse-shape | `note_id` only |
 | `xhs.user_home` reuse-shape | `user_id` only |
+| shared observation `shape` | 只允许 `RequestShape` / `XhsDetailReuseShapeV1` / `XhsUserHomeReuseShapeV1` |
+| shared observation `shape_key` | 只允许对应 canonical variant 的稳定序列化结果 |
 
 约束：
 
 - search-only canonical shape 继续由 `FR-0024` 承载。
 - detail identity 继续由 `#505` 承载；本 FR 只冻结其 reuse-shape 和 slotting 语义。
 - detail capture-side canonical `note_id` derivation 当前仍保持 deferred，并已转交 `#510`；`research.md` 只承接“为什么现在还不能 formalize”。
+- shared bucket state 中的 `shape` / `shape_key` 不得退化成未约束的 `Record<string, unknown>` / 任意字符串组合。

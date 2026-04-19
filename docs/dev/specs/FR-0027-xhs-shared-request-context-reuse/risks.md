@@ -3,12 +3,12 @@
 ## 风险 1：formal owner 再次重叠
 
 - 表现：
-  - `#503/#504/#505/#508/#510` 同时声明相同语义
+  - `#502/#504/#505/#508/#510` 同时声明相同语义
 - 影响：
   - GitHub issue truth 与 formal suite truth 再次分离
 - 缓解：
   - 当前 FR 只冻结 shared reuse semantics 与 replacement implementation formal gate
-  - search-only、command surface、detail identity 分别继续由 `#503/#504/#505` 承载
+  - search-only、command surface、detail identity 分别继续由 `#502/#504/#505` 承载
 
 ## 风险 2：实现 PR 越权定义 shared reuse semantics
 
