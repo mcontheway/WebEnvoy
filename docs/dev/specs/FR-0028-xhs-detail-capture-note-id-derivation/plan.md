@@ -36,8 +36,8 @@
   - 对照 `docs/dev/specs/FR-0025-xhs-detail-user-home-command-surface-baseline/spec.md`，确认 detail command-side input 仍是 `note_id` only
   - 对照 `docs/dev/specs/FR-0026-xhs-detail-canonical-identity/spec.md`，确认本 FR 不把 `source_note_id` 或 `image_scenes` 写回 identity truth
   - 对照 `docs/dev/specs/FR-0005-xhs-read-spike/research.md`，确认 `/api/sns/web/v1/feed` 目前只有 `source_note_id` candidate / failed 级证据
-  - 对照 `extension/xhs-read-execution.ts` 与 `tests/xhs-read-execution.fallback.test.ts`，确认 response-side matcher 固定先取 `body.data ?? body`；仅在顶层 `body.data` 缺失时才回看 `body`，若 `body.data` 已存在但不是对象则不会再次退回 `body`；并只沿 detail-shaped self root、`note`、`note_card`、`note_card_list`、`current_note`、`item`、`items`、`notes` 与递归 `note` / `note_card` / `current_note` / `item` 收集 detail candidate record
-  - 对照 `extension/xhs-read-execution.ts` 与 `tests/xhs-read-execution.fallback.test.ts`，确认 response-side admitted evidence 只认可上述 matcher boundary 内 detail note candidate record 上的 `note_id` / `noteId` / `id`，metadata-only note id 不构成 success evidence，`body.data.items[*].note_card` 已属于 admitted wrapped payload
+  - 对照 `tests/xhs-read-execution.fallback.test.ts`，确认 `body.data.note` 命中目标 `note_id` 时成功，`body.data.items[*].note_card` 命中目标 `note_id` 时成功，metadata-only `current_note_id` 单独出现时失败
+  - 对照 `extension/xhs-read-execution.ts`，确认 current matcher 的其余 bare-body / self root / recursive path 分支虽然存在于实现中，但在当前证据下不应被本 FR 冻结为 admitted boundary
 - 文档门禁：
   - `git diff --check`
   - `git status --short`
@@ -49,7 +49,7 @@
 
 - 当前 formal suite 不进入实现代码 TDD。
 - replacement implementation 在消费本 FR 后，至少应补齐以下测试矩阵：
-  - admitted matcher boundary 固定为“先取 `body.data ?? body`，仅在顶层 `body.data` 缺失时才回看 `body`”、detail-shaped self root、`note`、`note_card`、`note_card_list`、`current_note`、`item`、`items`、`notes` 与递归 `note` / `note_card` / `current_note` / `item`
+  - admitted matcher boundary 固定为 `body.data.note` 与 `body.data.items[*].note_card`
   - admitted template 只接受 response-side detail response candidate record 的 canonical `note_id` derivation
   - metadata-only note id 不得构成 admitted success evidence
   - `source_note_id` / referrer 只能停留在 candidate-only observation
