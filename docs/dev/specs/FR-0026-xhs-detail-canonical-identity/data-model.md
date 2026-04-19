@@ -49,6 +49,7 @@
 - 四对象输入 ownership
 - detail/user_home request-context baseline
 - `source_note_id` 的 canonical mapping、transport alias、placement、route admission / normalization 规则
+- detail capture-side canonical `note_id` derivation / admitted-derivation truth
 - compatibility、rejected-source matching、template reuse 等 request-context 行为
 
-其中前四项已由 `#504` / FR-0025 冻结；后两项必须先通过 `#508` 对应的 formal spec review 在消费 `#504 + #505` 的前提下继续回答，不在本 FR 重新定义；单独实现 PR 不得越权定义这些共享规则。
+其中前四项已由 `#504` / FR-0025 冻结；`source_note_id` 的 canonical mapping、transport alias、placement、route admission / normalization 规则以及 compatibility / reuse 等 shared request-context 语义，必须先通过 `#508` 对应的 formal spec review 在消费 `#504 + #505` 的前提下继续回答；detail capture-side canonical `note_id` derivation / admitted-derivation truth 则由 `#510` 承接。successor detail implementation path 必须继续等待 `#508 + #510`，单独实现 PR 不得越权定义这些共享规则。

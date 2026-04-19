@@ -132,5 +132,7 @@ type CommandLevelSummary = {
 - `image_scenes`
 - `CRD_PRV_WEBP`
 - detail/user_home request-shape truth
+- successor detail implementation path 的 shared request-context minimal invariants
+- successor detail implementation path 的 detail capture-side canonical `note_id` derivation / admitted-derivation truth
 
-这些内容全部转交 `#505` 或后续实现 FR。
+其中 `xhs.detail` canonical identity baseline 由 `#505` 冻结；shared request-context minimal invariants 与 successor implementation shared gate 由 `#508` 承接；detail capture-side canonical `note_id` derivation / admitted-derivation truth 由 `#510` 承接。successor detail implementation path 必须先消费 `#504 + #505` merged baselines，再继续等待 `#508 + #510` 两条 open formal gate。
