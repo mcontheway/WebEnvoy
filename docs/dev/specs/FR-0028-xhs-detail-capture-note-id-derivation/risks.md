@@ -49,16 +49,16 @@
 
 - 表现：
   - 因为当前实现会扫描多个 response scope，就把完整 response shape 写成 rigid schema
-  - 或反过来把当前已有 tests 直接支撑的最小 admitted path 也继续留成 implementation detail，导致 admitted matcher boundary 继续失焦
+  - 或反过来把 current main 已接受的 matcher 分支收窄到只剩少数 tests 直接覆盖的 path，导致 formal truth 与 observable behavior 失配
 - 触发条件：
   - 把实现扫描路径直接复制成 formal payload schema
 - 后果：
   - formal 契约超出当前证据
   - 后续实现被不必要地锁死
 - 缓解：
-  - 只冻结 note-id derivation 所需、且已有 tests 直接支撑的最小 admitted path 与 identifier field
-  - 显式把 `body.data.note` 与 `body.data.items[*].note_card` 收入口径
-  - 明确其他 bare-body / self root / recursive path 继续停留在 implementation observation
+  - 只冻结 note-id derivation 所需的最小 response root / candidate entry / nested key 边界与 identifier field
+  - 显式把 `body.data.note`、`body.data.items[*].note_card`、`body.data.items[*]` target-missing 检查，以及 `getDetailResponseCandidates()` 的 current-main matcher 家族一起写入口径
+  - 明确 formal freeze 依赖 current main observable matcher truth，而不是假装这些分支都已有完整 tests 矩阵
   - 不冻结额外 payload 字段
 - 观察信号：
   - contract / spec 出现大量 detail response payload 字段枚举
