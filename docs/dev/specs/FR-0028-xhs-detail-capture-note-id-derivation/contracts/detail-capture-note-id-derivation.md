@@ -22,18 +22,7 @@
 ```ts
 type XhsDetailCaptureDerivationInputV1 = {
   command_note_id: string;
-  response_candidate_scope?:
-    | "body"
-    | "data.note"
-    | "data.note_card"
-    | "data.note_card_list[*]"
-    | "data.current_note"
-    | "data.item"
-    | "data.items[*]"
-    | "data.notes[*]"
-    | "data";
-  response_candidate_path?: string;
-  response_note_candidate?: Record<string, unknown> | null;
+  response_candidate?: Record<string, unknown> | null;
   request_candidate?: {
     source_note_id?: string | null;
     referrer?: string | null;
@@ -45,11 +34,8 @@ type XhsDetailCaptureDerivationInputV1 = {
 字段约束：
 
 - `command_note_id` 必填，且必须为 trim 后非空字符串；空值输入不能进入 admitted derivation。
-- `response_candidate_scope` 仅在 `response_note_candidate` 存在时有效；空值表示当前没有 admitted-grade response candidate。
-- `response_candidate_path` 记录 admitted response candidate record 相对 scope root 的完整命中路径；例如 `data.items[*].note_card` 对应 `response_candidate_scope="data.items[*]"` 且 `response_candidate_path="note_card"`，而 `data.note_card.note` 对应 `response_candidate_scope="data.note_card"` 且 `response_candidate_path="note"`。
-- `response_candidate_path` 在存在时必须为 trim 后非空字符串；当 scope root 本身就是 current main 已接受的 admitted detail candidate root 时，使用 `self`。
-- current v1 `response_candidate_path` 的 path segment 仍只允许来自当前实现已接受的 detail nested traversal key：`note`、`note_card`、`current_note`、`item`；但这些 segment 可以多跳组合，不能被 formal 收窄为单跳枚举。
-- `response_note_candidate` 为空时，当前输入最多只能导出 candidate-only evidence。
+- `response_candidate` 为空时，当前输入最多只能导出 candidate-only evidence。
+- `response_candidate` 若存在，必须表示 current matcher 已接受的 detail response candidate record。
 - `request_candidate` 与 `response_metadata_candidate` 都是可选的说明性输入；它们不能单独生成 admitted truth。
 
 未冻结边界：
@@ -63,17 +49,6 @@ type XhsDetailCaptureDerivationInputV1 = {
 ```ts
 type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
   source_kind: "response_candidate_record";
-  response_candidate_scope:
-    | "body"
-    | "data.note"
-    | "data.note_card"
-    | "data.note_card_list[*]"
-    | "data.current_note"
-    | "data.item"
-    | "data.items[*]"
-    | "data.notes[*]"
-    | "data";
-  response_candidate_path: string;
   identifier_field: "note_id" | "noteId" | "id";
   derived_note_id: string;
 };
@@ -84,11 +59,7 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
 - current v1 admitted template 只能消费这类 source。
 - `derived_note_id` 必须为 trim 后非空字符串。
 - admitted truth 只在 identifier field 出现在 current matcher 已接受的 detail response candidate record 上时成立。
-- `response_candidate_scope="body"` 且 `response_candidate_path="self"` 时，表示顶层 `body` 自身已经被 current matcher 接受为 detail response candidate record。
-- `response_candidate_scope="data"` 且 `response_candidate_path="self"` 时，只允许用于 `body.data` 自身已经被 current matcher 接受为 detail response candidate record 的情形；仅有匹配 `note_id` / `noteId` / `id` 但未被 current matcher 接受的 wrapper-shaped `data` 仍必须停留在 candidate-only。
-- `response_candidate_path` 必须保留相对 scope root 的完整命中路径，不能把 multi-hop nested path 压缩成末级字段名。
-- current v1 `response_candidate_path` 的 path segment 仍只允许来自当前实现已接受的 detail nested traversal key：`note`、`note_card`、`current_note`、`item`；但这些 segment 可以多跳组合。
-- 因此，`data.items[*].note_card`、`data.notes[*].note_card`、`data.note_card.note` 等 current 行为已接受的 nested note-record source 仍属于 admitted truth。
+- 顶层 `body`、`body.data` 或其他嵌套 root 只要已经被 current matcher 接受为 detail response candidate record，均可进入这条 admitted truth；这些 root / path 的结构化表示当前仍属于实现细节，不在 current v1 正式契约中冻结。
 - 当同一 response 中存在多个候选 source 时，只有命中 command-side canonical `note_id` 的 response candidate record 可以成为 admitted source；candidate-only source 不得覆盖该裁决。
 
 ## 4. Candidate-only derivation source
@@ -138,8 +109,6 @@ type XhsDetailResponseFieldStatusV1 =
 ```json
 {
   "source_kind": "response_candidate_record",
-  "response_candidate_scope": "data.items[*]",
-  "response_candidate_path": "note_card",
   "identifier_field": "note_id",
   "derived_note_id": "66f0c8ab000000001d012345"
 }

@@ -17,8 +17,6 @@
 | 字段 | 角色 |
 | --- | --- |
 | `source_kind` | 固定为 `response_candidate_record` |
-| `response_candidate_scope` | 标识 admitted response candidate 所在 scope |
-| `response_candidate_path` | 标识 admitted response candidate 相对 scope root 的完整命中路径 |
 | `identifier_field` | 当前只允许 `note_id` / `noteId` / `id` |
 | `derived_note_id` | trim 后非空 canonical `note_id` |
 
