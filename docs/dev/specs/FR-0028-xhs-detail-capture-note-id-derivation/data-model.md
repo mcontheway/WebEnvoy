@@ -22,7 +22,7 @@
 
 matcher boundary：
 
-- response root 只允许 `body.data` 或 `body`，且 root 选择固定为先取 `body.data ?? body`；仅在顶层 `body.data` 缺失时才允许回看 `body`，若 `body.data` 已存在但不是对象则不得再次退回 `body`。
+- response root 只允许 `body.data` 或 `body`，且 root 选择固定为先取 `body.data ?? body`；当顶层 `body.data` 为 nullish 时回退到顶层 `body`。
 - `self_when_detail_shape_present` 只允许在选中的 response root 至少具备 `title`、`desc`、`user`、`interact_info`、`image_list`、`video_info`、`note_card`、`note_card_list` 之一时把该 root 本身纳入 admitted candidate self root。
 - direct roots 只允许 `.note`、`.note_card`、`.note_card_list[*]`、`.current_note`、`.item`、`.items[*]`、`.notes[*]`。
 - 只允许从这些已接受 candidate record 继续递归进入 `.note`、`.note_card`、`.current_note`、`.item`。

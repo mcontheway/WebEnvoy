@@ -73,7 +73,7 @@ type XhsDetailResponseCandidateRecordBoundaryV1 = {
 - current v1 admitted template 只能消费这类 source。
 - `derived_note_id` 必须为 trim 后非空字符串。
 - admitted truth 只在 identifier field 出现在 current matcher 已接受的 detail response candidate record 上时成立。
-- current v1 formal contract 必须显式冻结 response candidate matcher 边界：response root 只允许 `body.data` 或 `body`，且 root 选择固定为先取 `body.data ?? body`，仅在顶层 `body.data` 缺失时才允许回看 `body`，若 `body.data` 已存在但不是对象则不得再次退回 `body`；self root 只允许 `self_when_detail_shape_present`，其 marker 只允许 `title`、`desc`、`user`、`interact_info`、`image_list`、`video_info`、`note_card`、`note_card_list`；direct entry 只允许 `.note`、`.note_card`、`.note_card_list[*]`、`.current_note`、`.item`、`.items[*]`、`.notes[*]`；并且只允许从这些已接受 candidate record 继续递归进入 `.note`、`.note_card`、`.current_note`、`.item`。
+- current v1 formal contract 必须显式冻结 response candidate matcher 边界：response root 只允许 `body.data` 或 `body`，且 root 选择固定为先取 `body.data ?? body`，当顶层 `body.data` 为 nullish 时回退到顶层 `body`；self root 只允许 `self_when_detail_shape_present`，其 marker 只允许 `title`、`desc`、`user`、`interact_info`、`image_list`、`video_info`、`note_card`、`note_card_list`；direct entry 只允许 `.note`、`.note_card`、`.note_card_list[*]`、`.current_note`、`.item`、`.items[*]`、`.notes[*]`；并且只允许从这些已接受 candidate record 继续递归进入 `.note`、`.note_card`、`.current_note`、`.item`。
 - 当前 tests 已直接覆盖 `body.data.note` 成功与 `body.data.items[*].note_card` 成功；`.items[*]` candidate inspection、metadata exclusion与其余分支主要由 current main 实现代码提供 observable truth，仍属于本契约冻结范围。
 - 当同一 response 中存在多个候选 source 时，只有命中 command-side canonical `note_id` 的 response candidate record 可以成为 admitted source；candidate-only source 不得覆盖该裁决。
 
@@ -115,7 +115,7 @@ type XhsDetailResponseFieldStatusV1 =
 约束：
 
 - response-side `note_id` / `noteId` / `id` 只有在 current matcher 已接受的 detail response candidate record 上才是 admitted derivation source。
-- 这里的 “current matcher 已接受” 固定指向本节已冻结的“先取 `body.data ?? body`，仅在顶层 `body.data` 缺失时才回看 `body`”、`self_when_detail_shape_present`、direct entry 与 recursive nested key 边界。
+- 这里的 “current matcher 已接受” 固定指向本节已冻结的“先取 `body.data ?? body`，当顶层 `body.data` 为 nullish 时回退到顶层 `body`”、`self_when_detail_shape_present`、direct entry 与 recursive nested key 边界。
 - metadata field、echo field，以及 current matcher 未接受的 wrapper / record 上的 note-id-like 值当前只属于 candidate-only。
 - matcher 已接受的 wrapper-shaped response candidate record 不因“wrapper”身份被自动降级；只有 matcher 未接受的 wrapper / record 才落入 candidate-only。
 

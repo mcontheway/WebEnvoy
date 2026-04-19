@@ -4,7 +4,7 @@
 
 ### admission_ready
 
-- `extension/xhs-read-execution.ts` 当前 detail matcher 会先取 `body.data ?? body` 作为 response root；因此只有在顶层 `body.data` 缺失时才会回看 `body`，若 `body.data` 已存在但不是对象则不会再次退回 `body`。
+- `extension/xhs-read-execution.ts` 当前 detail matcher 会先取 `body.data ?? body` 作为 response root；当顶层 `body.data` 为 nullish 时会回退到顶层 `body`。
 - current matcher 只从 detail-shaped self root、`note`、`note_card`、`note_card_list`、`current_note`、`item`、`items`、`notes` 进入 candidate scope，并且只沿 `note`、`note_card`、`current_note`、`item` 递归展开 nested candidate record。
 - `extension/xhs-read-execution.ts` 当前成功判定 detail 响应时，只认可 current matcher 已接受的 detail response candidate record 上的 `note_id` / `noteId` / `id`。
 - `tests/xhs-read-execution.fallback.test.ts` 已覆盖：
@@ -61,7 +61,7 @@
 - 当前实现不接受 metadata-only note id 作为 detail success evidence；这一点以 current main 实现为直接来源，现有 tests 只提供辅助 rejection 场景。
 - 只有当 response payload 中出现 current matcher 已接受的 detail response candidate record，且其 `note_id` / `noteId` / `id` 命中目标 `note_id` 时，才认定成功。
 - 本 FR 可以把 response-side detail response candidate record 上的 `note_id` / `noteId` / `id` 冻结为 current v1 唯一 admitted derivation source。
-- 对 response root 与 self root 的 admitted source，formal 必须与 current matcher 一致：先取 `body.data ?? body` 作为 response root，仅在顶层 `body.data` 缺失时才允许回看 `body`；若 `body.data` 已存在但不是对象，则本轮不会再次退回 `body`；只有当选中的 root 本身满足 detail-shaped self root marker 时，`self` 才允许 admitted。
+- 对 response root 与 self root 的 admitted source，formal 必须与 current matcher 一致：先取 `body.data ?? body` 作为 response root；当顶层 `body.data` 为 nullish 时回退到顶层 `body`；只有当选中的 root 本身满足 detail-shaped self root marker 时，`self` 才允许 admitted。
 - current matcher 的 admitted candidate 边界不是抽象的“任意 nested root”，而是可枚举的 response root / path family：先取 `body.data ?? body`、detail-shaped self root、`.note`、`.note_card`、`.note_card_list[*]`、`.current_note`、`.item`、`.items[*]`、`.notes[*]`，以及它们继续递归进入 `.note` / `.note_card` / `.current_note` / `.item` 的嵌套 record。
 - 因此，current main 仍接受的 bare-body detail roots，例如 `body.note`、`body.note_card`、`body.items[*]`，也必须进入 formal matcher boundary，而不能只因为 tests 直覆盖较少就被排除。
 - 因此，wrapper exclusion 的正确边界只能是“current matcher 未接受的 wrapper / record”；若 wrapper-shaped root 已被 matcher 接受，它仍属于 admitted source scope。

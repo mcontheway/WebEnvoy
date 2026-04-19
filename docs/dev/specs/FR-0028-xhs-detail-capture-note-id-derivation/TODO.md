@@ -2,7 +2,7 @@
 
 - [ ] reviewer 确认 current v1 `xhs.detail` capture-side canonical `note_id` derivation` 已被独立 formal freeze
 - [ ] reviewer 确认 admitted derivation source 只允许 response-side detail note candidate record 上的 `note_id` / `noteId` / `id`
-- [ ] reviewer 确认 current matcher 已接受的 detail response candidate root / path family 已冻结到“先取 `body.data ?? body`，仅在顶层 `body.data` 缺失时才回看 `body`”、detail-shaped self root、`.note`、`.note_card`、`.note_card_list[*]`、`.current_note`、`.item`、`.items[*]`、`.notes[*]` 及其递归 `.note` / `.note_card` / `.current_note` / `.item`
+- [ ] reviewer 确认 current matcher 已接受的 detail response candidate root / path family 已冻结到“先取 `body.data ?? body`，当顶层 `body.data` 为 nullish 时回退到顶层 `body`”、detail-shaped self root、`.note`、`.note_card`、`.note_card_list[*]`、`.current_note`、`.item`、`.items[*]`、`.notes[*]` 及其递归 `.note` / `.note_card` / `.current_note` / `.item`
 - [ ] reviewer 确认 bare-body detail roots、self root、其他 direct entry 与递归 nested path 已作为 current main observable matcher truth 正确进入 formal freeze，而不是被本 FR 误收窄
 - [ ] reviewer 确认 metadata-only note id 不构成 admitted success evidence
 - [ ] reviewer 确认 `body.data.note`、`body.data.items[*].note_card` 与 `body.data.items[*]` target-missing 检查已作为仓库内直接证据写入 formal rationale
