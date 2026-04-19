@@ -103,8 +103,13 @@ type RejectedRequestContextObservation = {
   page_context_namespace: string;
   shape: RequestShape;
   shape_key: RequestShapeKey;
+  source_kind: "page_request" | "synthetic_request";
   rejection_reason: "synthetic_request_rejected" | "failed_request_rejected";
   observed_at: number;
+  request_status: {
+    completion: "completed" | "failed";
+    http_status: number | null;
+  };
 };
 ```
 
@@ -116,8 +121,40 @@ type RejectedRequestContextObservation = {
 - observation 的有效保留键必须是 `page_context_namespace + shape_key`；不同 shape 的 rejection 不得互相覆盖
 - `rejected_source` 只能对当前请求的同 namespace、同 `shape_key` observation 成立，不允许仅按 route-level 误归因
 - `synthetic_request_rejected` 的 `shape` 与 `shape_key` 可以通过同一套 `deriveRequestShape()` 从被拒绝的 synthetic request artifact 本身导出；不得生成无 shape 的 synthetic reject 记录
+- `source_kind` 与 `request_status` 只是 search-side compatibility backwrite 所需的最小结构字段，不表示本 FR 开始拥有跨命令 shared observation owner
 
-## 5. `TemplateLookupResult`
+## 5. `RouteBucketIncompatibleObservation`
+
+`RouteBucketIncompatibleObservation` 表达“当前页面现场某个 search route bucket 最近一次 success-only sibling-shape mismatch 候选”。它停留在 route-bucket 层，不进入 `page_context_namespace + shape_key` slot。
+
+```ts
+type RouteBucketIncompatibleObservation = {
+  page_context_namespace: string;
+  route_scope: {
+    command: "xhs.search";
+    method: "POST";
+    pathname: "/api/sns/web/v1/search/notes";
+  };
+  shape: RequestShape;
+  shape_key: RequestShapeKey;
+  observed_at: number;
+  source_kind: "page_request";
+  incompatibility_reason: "shape_mismatch";
+  request_status: {
+    completion: "completed";
+    http_status: 200 | 201 | 202 | 203 | 204 | 205 | 206 | 207 | 208 | 226;
+  };
+};
+```
+
+约束：
+
+- `RouteBucketIncompatibleObservation` 只允许记录 success-only `page_request` sibling-shape mismatch 候选
+- 它必须挂在 search route bucket 层，不得写回 `page_context_namespace + shape_key` 槽位
+- failed / synthetic / non-2xx candidate 不得被伪造为 `RouteBucketIncompatibleObservation`
+- 它是 search-side compatibility/backwrite truth，不表示本 FR 开始拥有跨命令 shared observation contract
+
+## 6. `TemplateLookupResult`
 
 ```ts
 type TemplateLookupResult =
@@ -127,12 +164,12 @@ type TemplateLookupResult =
     }
   | {
       state: "miss";
-      reason: "template_missing";
+      reason: "template_missing" | "shape_mismatch";
     }
   | {
       state: "incompatible";
       reason: "shape_mismatch";
-      record: CapturedRequestTemplateRecord;
+      observation: RouteBucketIncompatibleObservation;
     }
   | {
       state: "stale";
@@ -149,12 +186,13 @@ type TemplateLookupResult =
 约束：
 
 - `hit` 只允许在 exact shape match、来源合法且 freshness 通过时返回
-- `miss` 只表示当前 page-local namespace 内不存在任何同路由候选，也不存在可消费的 rejected observation
-- `incompatible` 表示当前 page-local namespace 内存在同 command + method + pathname 的候选记录，但没有任何记录与当前 `RequestShape` 完全一致
+- `miss(reason="template_missing")` 只表示当前 page-local namespace 内不存在任何同路由候选，也不存在可消费的 rejected observation
+- `miss(reason="shape_mismatch")` 表示当前 namespace 的同路由 bucket 内只存在 failed / synthetic / non-2xx sibling shape，或只有 route-level mismatch 但没有 success-only `RouteBucketIncompatibleObservation`
+- `incompatible` 只表示当前 page-local namespace 内存在 success-only `RouteBucketIncompatibleObservation`，但没有任何记录与当前 `RequestShape` 完全一致
 - `stale` 表示 shape 命中，但 freshness gate 失败
 - `rejected_source` 表示当前页面现场存在当前 `page_context_namespace + shape_key` 槽位最近一次被 capture admission 拒绝的候选观察，且当前没有可复用模板
 
-## 6. `RequestContextMissReason`
+## 7. `RequestContextMissReason`
 
 ```ts
 type RequestContextMissReason =
@@ -192,7 +230,9 @@ lookup 必须按两个阶段执行：
 
 - 不允许绕过 `page_context_namespace`
 - 不允许在跨页面或跨文档生命周期范围内共享 bucket
-- `incompatible` 只能来自“同 namespace、同 command + method + pathname 下存在其他 shape 候选”
+- `incompatible` 只能来自 route-bucket 层的 success-only `RouteBucketIncompatibleObservation`
+- 当同路由 bucket 只存在 failed / synthetic / non-2xx sibling shape 时，lookup 必须返回 `miss(reason="shape_mismatch")`，并继续映射到 fail-closed 的 `request_context_incompatible`
+- 不得为了返回 `incompatible` 而伪造 success-only route-bucket observation
 - `rejected_source` 只能来自同 namespace、同 `shape_key` 槽位下最近一次 capture admission 被拒绝的 observation
 - 不允许按 `method + pathname`、只按 keyword 或其他局部字段跨 namespace 模糊查找
 
@@ -208,6 +248,7 @@ lookup 必须按两个阶段执行：
 
 - 本 contract 不改变现有 `xhs.search` 的公开输入面
 - `RequestShape` 是 internal derivation object，不要求用户直接传入
+- `RouteBucketIncompatibleObservation` 与扩充后的 `RejectedRequestContextObservation` 只是 search-side compatibility/backwrite truth，不替代 `#508 / FR-0027` 的 shared owner 归属
 
 ### deferred scope
 

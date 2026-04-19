@@ -40,6 +40,7 @@
 | --- | --- | --- |
 | `CapturedRequestTemplateRecord` | 当前页面现场可复用的 request template | 不得提升为新的持久化真相源 |
 | `RejectedRequestContextObservation` | 当前页面现场某个 `page_context_namespace + shape_key` 槽位最近一次被 capture admission 拒绝的候选观察 | 不得提升为可复用 template 或长期真相源 |
+| `RouteBucketIncompatibleObservation` | 当前页面现场某个 search route bucket 最近一次 success-only sibling-shape mismatch 观察 | 不得提升为 shape-slot 状态或长期真相源 |
 
 字段职责：
 
@@ -62,8 +63,23 @@
 | `page_context_namespace` | 页面现场命名空间 | 只在当前页面现场有效 |
 | `shape` | shape-level 诊断锚点 | 记录 capture admission 拒绝时已导出的 canonical shape |
 | `shape_key` | shape-level 诊断键 | 同时也是 rejected observation 的分槽键；只允许与当前请求同 `shape_key` 的 observation 命中 |
+| `source_kind` | 候选来源 | 兼容 shared contract 的最小 backwrite 字段；只允许 `page_request` / `synthetic_request` |
 | `rejection_reason` | 结构化拒绝原因 | 只允许 `synthetic_request_rejected` / `failed_request_rejected` |
 | `observed_at` | 最近观测时间 | 用于返回同一 shape slot 最近一次 rejected-source 解释 |
+| `request_status` | 候选完成态 | 兼容 shared contract 的最小 backwrite 字段；不得替代 shape-slot 分槽规则 |
+
+`RouteBucketIncompatibleObservation` 字段职责：
+
+| 字段 | 角色 | 说明 |
+| --- | --- | --- |
+| `page_context_namespace` | 页面现场命名空间 | 只在当前页面现场有效 |
+| `route_scope` | route-bucket 锚点 | 固定为 search route family，不与 shape slot identity 并列 |
+| `shape` | sibling-shape 锚点 | 记录 success-only mismatch 候选的 canonical shape |
+| `shape_key` | sibling-shape 键 | 记录 success-only mismatch 候选的 canonical key |
+| `observed_at` | 最近观测时间 | 用于 route-bucket 层不兼容诊断 |
+| `source_kind` | 来源判定 | 只允许 `page_request` |
+| `incompatibility_reason` | 结构化不兼容原因 | 当前只允许 `shape_mismatch` |
+| `request_status` | 完成态 | 只允许 success-only 2xx；failed / synthetic / non-2xx 不得进入该对象 |
 
 ### 3. lookup result 视图
 
@@ -76,6 +92,8 @@
 1. `TemplateLookupResult` 只表达当前请求的 request-context 命中结果。
 2. 它不应被提升为长期健康视图或 replay eligibility 视图。
 3. 若实现需要写日志或诊断记录，必须明确它只是 run-scoped result，而不是长期状态表。
+4. `incompatible` 只允许消费 route-bucket 层的 success-only `RouteBucketIncompatibleObservation`。
+5. 当同路由 bucket 只存在 failed / synthetic / non-2xx sibling shape 时，结果必须是 `miss(reason="shape_mismatch")`，不得压扁回 `template_missing`。
 
 ### 4. page-local namespace
 
@@ -85,10 +103,11 @@ request-context cache 的有效存储身份必须是 `page_context_namespace + s
 
 1. `shape_key` 不是跨页面全局主键。
 2. 不同页面现场即使形状完全相同，也只能在各自 namespace 内覆盖和命中。
-3. `incompatible` 只能发生在“同 namespace、同 command + method + pathname、不同 shape”的候选集合里。
+3. `incompatible` 只能来自同 namespace、同 route bucket 下的 success-only `RouteBucketIncompatibleObservation`。
 4. `rejected_source` 只能来自同 namespace、同 `shape_key` 槽位内的 `RejectedRequestContextObservation`。
-5. `synthetic_request_rejected` observation 只允许在同一套 `deriveRequestShape()` 已对该 synthetic request artifact 成功导出 full shape 后产生；否则必须在更早阶段以 `miss` / `incompatible` 终止。
-6. synthetic request 自身永远不得作为 `CapturedRequestTemplateRecord.source_kind` 进入 admitted template 类型。
+5. 当同路由 bucket 只存在 failed / synthetic / non-2xx sibling shape 时，lookup 仍必须保留 `miss(reason="shape_mismatch")`，并继续映射到 fail-closed 的 `request_context_incompatible`。
+6. `synthetic_request_rejected` observation 只允许在同一套 `deriveRequestShape()` 已对该 synthetic request artifact 成功导出 full shape 后产生；否则必须在更早阶段以 `miss` / `incompatible` 终止。
+7. synthetic request 自身永远不得作为 `CapturedRequestTemplateRecord.source_kind` 进入 admitted template 类型。
 
 ## 生命周期
 
@@ -98,6 +117,7 @@ request-context cache 的有效存储身份必须是 `page_context_namespace + s
 - 创建时必须同步写入 `page_context_namespace`、`shape` 与 `shape_key`
 - 只在 capture admission 明确拒绝时创建 `RejectedRequestContextObservation`
 - 创建 rejected observation 前，必须先从候选 request artifact 构造 capture-side derivation source，并进入共享 `deriveRequestShape()`
+- 只在同 namespace、同 route bucket 下观测到 success-only sibling-shape mismatch 时创建 `RouteBucketIncompatibleObservation`
 
 ### 覆盖
 
@@ -105,6 +125,7 @@ request-context cache 的有效存储身份必须是 `page_context_namespace + s
 - 不同 namespace 不得共享同一个 cache slot
 - 同一 namespace 下、不同 shape 的候选必须并存于同路由 bucket，而不是互相覆盖成 path-only slot
 - rejected observation 也只允许同一 `page_context_namespace` 下、相同 `shape_key` 的更新覆盖旧记录；不同 `shape_key` 的拒绝诊断必须并存
+- `RouteBucketIncompatibleObservation` 只允许在同一 `page_context_namespace + route_scope` 下覆盖最近一次 success-only mismatch；不得写回 shape slot
 
 ### 失效
 
@@ -120,6 +141,7 @@ request-context cache 的有效存储身份必须是 `page_context_namespace + s
 
 - `CapturedRequestTemplateRecord` 不能写入 SQLite 作为长期真相源
 - `RejectedRequestContextObservation` 也不能写入 SQLite 作为长期真相源
+- `RouteBucketIncompatibleObservation` 也不能写入 SQLite 作为长期真相源
 - 它不能被直接映射为 `FR-0018` 的 replay snapshot
 - 它们只能属于当前页面现场的 runtime cache / diagnostics；即使实现暂时把它跨模块传递，也不能改变其 page-local ownership
 
@@ -130,6 +152,7 @@ request-context cache 的有效存储身份必须是 `page_context_namespace + s
 - 若实现允许 `note_type` 以字符串和数字两种形态进入 `shape_key`，会重新引入 false miss。
 - 若实现不冻结 `limit -> page_size` 映射，会重新引入 `page_size` 来源歧义。
 - 若实现保留 `rejected_source` 枚举但 observation 不携带 shape-level 身份，该结果会重新退化为 route-level 误归因。
+- 若实现把 success-only route-bucket incompatible 与 rejected-only sibling shape 混成同一结果，会重新制造 FR-0024 与 shared reuse contract 的 schema 冲突。
 - 若实现允许 admitted template 类型继续保留 synthetic source kind，会重新打开 synthetic 污染模板池的路径。
 - 若实现把 page-local template 持久化为 replay truth，会越过 `FR-0018` 的 formal ownership。
 

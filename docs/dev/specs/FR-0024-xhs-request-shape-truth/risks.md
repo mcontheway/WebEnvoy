@@ -41,3 +41,9 @@
 - 表现：`#503` 合并后，后续执行把 `xhs.detail` / `xhs.user_home` / `xhs.detail.image_scenes` 误当成已在 `FR-0024` 冻结完成
 - 缓解：在 `spec.md`、`plan.md`、`TODO.md`、PR 描述与 `#502` 中显式回链 `#504` / `#505`
 - 回滚：一旦出现 scope 漂移，直接阻断实现 PR，要求先回到 `#504/#505` 收口上游 formal baseline
+
+## 风险 8：search-side schema 继续与 shared reuse contract 冲突
+
+- 表现：`FR-0024` 仍只保留旧的 rejected observation 形态，或把 rejected-only sibling shape 与 success-only incompatible candidate 混成一类结果，导致 reviewer 在 `#509` 继续看到两套 formal schema
+- 缓解：通过 `#512` maintenance 把 search-side `RejectedRequestContextObservation`、`RouteBucketIncompatibleObservation` 与 `TemplateLookupResult` 回写成单一兼容口径
+- 回滚：若本轮 backwrite 引发 owner 漂移，则回退到 search-only wording，并把 shared contract 所需 schema 留在独立 maintenance 修订里重新收口
