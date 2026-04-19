@@ -23,7 +23,7 @@ Canonical Issue: #508
 2. 冻结 page-local/document-local `page_context_namespace`、route bucket 与 `shape_key` 的 slotting 身份与 lookup 行为。
 3. 冻结 admitted / rejected / incompatible 三类 observation 的共享边界。
 4. 冻结 `xhs.detail` 与 `xhs.user_home` 在 reuse 模型里的 canonical shape。
-5. 冻结 replacement implementation 的 formal gate：必须等待 `#502/#504/#505/#508` 全部完成。
+5. 冻结 replacement implementation 的 formal gate：`#508` 只能冻结 shared reuse semantics，本身不会解除 implementation block；detail capture-side canonical `note_id` derivation 仍需等待独立 formal owner 冻结。
 
 ## 非目标
 
@@ -175,17 +175,21 @@ Canonical Issue: #508
 
 ### 8. replacement implementation formal gate
 
-系统必须冻结：replacement `#501` successor 在进入 implementation-ready 状态前，必须同时满足以下 formal 输入已经冻结：
+系统必须冻结：`#508 / FR-0027` 只负责把 successor implementation gate 标记为“仍 blocked”，而不是直接宣告 implementation-ready。
+
+replacement `#501` successor 只有在以下 formal 输入全部冻结后，才可能进入 implementation-ready 状态：
 
 1. `#502 / FR-0024`
 2. `#504 / FR-0025`
 3. `#505 / FR-0026`
 4. `#508 / FR-0027`
+5. `#510 / FR-0028` 或其后续受控替代 formal owner，用于冻结 detail capture-side canonical `note_id` derivation
 
-在这些 formal freeze 完成前：
+在上述 formal freeze 完成前：
 
-- 不得把 replacement implementation PR 申报为 implementation-ready
-- 不得以“formal 未明确禁止”为由在实现 PR 中自定 shared reuse 语义
+- replacement implementation PR 不得被视为 implementation-ready
+- 不得以“`#508` 已完成 formal freeze”为由跳过 detail capture-side derivation formal 缺口
+- 不得以“formal 未明确禁止”为由在实现 PR 中自定 admitted detail capture path
 - `#501` 不得继续作为当前收口主线
 
 ## GWT 验收场景
@@ -229,13 +233,14 @@ And `request_context_miss_reason` 必须保留 `shape_mismatch`
 And 不得继续进入 synthetic fallback
 And 最近不兼容候选必须记录在 route bucket 层，而不是当前 shape slot
 
-### 场景 6：replacement implementation 不能跳过 #508
+### 场景 6：replacement implementation 不能只靠 #508 进入实现
 
-Given `#502/#504/#505` 已完成 formal freeze
-And `#508` 尚未完成 formal freeze
+Given `#502/#504/#505/#508` 已完成 formal freeze
+And detail capture-side canonical `note_id` derivation 仍未由 `#510` 或其受控替代 formal owner 冻结
 When reviewer 检查 replacement implementation PR 是否可进入实现
 Then 该 PR 仍不得被视为 implementation-ready
 And 不得宣称 formal 输入已经齐备
+And `#508` 只能被解释为“shared reuse semantics 已冻结，但 gate 仍 blocked”
 
 ## 异常与边界场景
 
@@ -255,7 +260,7 @@ And 不得宣称 formal 输入已经齐备
 3. admitted / rejected / incompatible 三类 bucket 状态及其 freshness / rejected-source 所需最小结构字段已冻结，且 incompatible observation 位于 route bucket 层，synthetic / failed source 不进入 admitted template，admitted template 仅承载 completed 2xx 成功态。
 4. detail/user_home 的 canonical shape 已冻结为 `note_id` / `user_id` only，且 detail capture-side additional derivation rule 继续保持 deferred。
 5. exact-match / freshness / fail-closed 的共享 reuse 规则已冻结。
-6. replacement implementation 的 formal gate 已明确包含 `#508`，不再误写成只等 `#504/#505`。
+6. replacement implementation 的 formal gate 已明确包含 `#508` 且继续 blocked，直到 detail capture-side derivation formal owner（当前为 `#510`）完成。
 
 ## 依赖与前置条件
 

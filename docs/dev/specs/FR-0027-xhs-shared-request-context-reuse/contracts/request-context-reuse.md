@@ -107,4 +107,6 @@ type CapturedRequestContextRouteBucketV1 = {
 
 ## 4. Gate rule
 
-replacement implementation 只有在 `#502/#504/#505/#508` formal freeze 全部完成后，才允许进入 implementation-ready 状态。
+`#508 / FR-0027` 只把 replacement implementation gate 冻结为“仍 blocked”。
+
+replacement implementation 只有在 `#502/#504/#505/#508` formal freeze 全部完成，且 detail capture-side canonical `note_id` derivation 已由 `#510` 或其受控替代 formal owner 冻结后，才允许进入 implementation-ready 状态。

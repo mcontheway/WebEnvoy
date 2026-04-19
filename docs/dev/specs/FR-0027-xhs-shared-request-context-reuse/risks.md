@@ -3,7 +3,7 @@
 ## 风险 1：formal owner 再次重叠
 
 - 表现：
-  - `#503/#504/#505/#508` 同时声明相同语义
+  - `#503/#504/#505/#508/#510` 同时声明相同语义
 - 影响：
   - GitHub issue truth 与 formal suite truth 再次分离
 - 缓解：
@@ -17,8 +17,8 @@
 - 影响：
   - guardian 会持续把 formal 缺口重新打回实现链
 - 缓解：
-  - 当前 FR 明确 replacement implementation 必须等待 `#508`
-  - page-local namespace、route bucket、shape slot、bucket state 的最小结构字段、detail `note_id` derivation 与 exact-match / fail-closed 在 formal 中先冻结
+  - 当前 FR 明确 `#508` 只冻结 shared reuse semantics，replacement implementation 仍需等待 `#510`
+  - page-local namespace、route bucket、shape slot、bucket state 的最小结构字段与 exact-match / fail-closed 先在 formal 中冻结；detail capture-side canonical `note_id` derivation 则交由 `#510`
 
 ## 风险 3：detail/user_home shape 被误写成多主键
 

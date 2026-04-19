@@ -2,7 +2,7 @@
 
 ## 实施目标
 
-冻结 XHS read family 的 shared request-context reuse semantics，补齐 replacement implementation 在 `#502/#504/#505` 之外仍缺失的 formal gate，让后续实现不再自行决定 page-local namespace、route bucket、`shape_key`、bucket state、detail `note_id` derivation 与 fail-closed 规则。
+冻结 XHS read family 的 shared request-context reuse semantics，并把 replacement implementation gate 收敛为“shared reuse formal 已齐备但 detail capture-side canonical `note_id` derivation 仍缺 formal owner、因此继续 blocked”的状态，让后续实现不再自行决定 page-local namespace、route bucket、`shape_key`、bucket state 与 fail-closed 规则。
 
 ## 分阶段拆分
 
@@ -19,7 +19,7 @@
 ### 阶段 3：风险与 gate 收口
 
 - 产出：`risks.md`、`TODO.md`
-- 重点：明确 replacement implementation 进入实现前必须等待 `#508`，并防止实现 PR 越权定规则
+- 重点：明确 `#508` 只冻结 shared reuse semantics，本身不会解除 implementation block；detail capture-side canonical `note_id` derivation 仍需等待 `#510`
 
 ### 阶段 4：spec review PR 准备
 
@@ -40,7 +40,7 @@
   - 对照 `FR-0024`，确认 search-only shape 与 search fail-closed 规则不被重开
   - 对照 `FR-0025`，确认 command surface / request-context baseline 继续由 `#504` 承载
   - 对照 `#505` 当前 issue truth，确认 detail identity 继续独立于 shared reuse semantics
-  - 对照 replacement implementation 与相关测试，确认 shared slotting / bucket state / freshness 字段 / rejected-source / detail `note_id` derivation 语义已成为必须 formalize 的输入
+  - 对照 replacement implementation 与相关测试，确认 shared slotting / bucket state / freshness 字段 / rejected-source 已成为必须 formalize 的输入，且 detail capture-side canonical `note_id` derivation 仍需要独立 formal owner
   - 对照 guardian latest findings，确认 admitted template 已被收紧为 completed 2xx success-only，且 shape-slot rejected observation 强制携带非空 machine-readable `rejection_reason`
   - 对照 `research.md`，确认 detail referrer / transport derivation 仍保持 deferred，不被误写成 current formal truth
 - 文档门禁：
@@ -63,7 +63,7 @@
   - synthetic / failed source 不进入 admitted template
   - detail capture-side `note_id` derivation 不回退到 `source_note_id`
   - exact-match / freshness / fail-closed diagnostics
-  - replacement implementation 不绕开 `#508` formal truth
+  - replacement implementation 不绕开 `#508` formal truth，也不越过 `#510` detail derivation formal gate
 
 ## 并行 / 串行关系
 
@@ -71,13 +71,13 @@
   - `#505 / FR-0026` 的 formal review
   - 不触碰 shared reuse semantics 的其他 formal / implementation 事项
 - 串行 / 依赖：
-- replacement implementation PR 必须等待 `#502/#504/#505/#508` formal freeze 全部完成
+- replacement implementation PR 必须等待 `#502/#504/#505/#508` formal freeze 全部完成，并继续等待 `#510`（或其受控替代 formal owner）冻结 detail capture-side canonical `note_id` derivation
   - `#445` closeout 必须等待 replacement implementation merge 与 latest-main rerun
 
 ## 进入实现前条件
 
 - FR-0027 spec review 通过。
-- reviewer 确认 `#502/#504/#505/#508` 的 formal owner 已无重叠或缺口。
+- reviewer 确认 `#502/#504/#505/#508/#510` 的 formal owner 已无重叠或缺口。
 - reviewer 确认 page-local namespace、route bucket identity、shape slot identity、bucket state、exact-match / freshness / fail-closed 已冻结为 shared reuse truth。
 - reviewer 确认 detail/user_home canonical reuse-shape 已冻结为 `note_id` / `user_id` only，且 detail additional derivation 仍保持 deferred，并与 `#505` 不冲突。
-- reviewer 确认 replacement implementation formal gate 已更新为必须等待 `#508`。
+- reviewer 确认 replacement implementation formal gate 已更新为：`#508` 只能冻结 shared reuse semantics，detail capture-side canonical `note_id` derivation 仍需等待 `#510`。
