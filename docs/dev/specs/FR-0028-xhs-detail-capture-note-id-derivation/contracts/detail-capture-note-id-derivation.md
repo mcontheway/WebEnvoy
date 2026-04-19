@@ -82,7 +82,7 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
 - current v1 admitted template 只能消费这类 source。
 - `derived_note_id` 必须为 trim 后非空字符串。
 - admitted truth 只在 identifier field 出现在 detail note candidate record 上时成立。
-- `response_candidate_scope="data"` 且 `response_candidate_path="self"` 时，表示 `body.data` 自身就是 current main 已接受的 admitted detail candidate root；这既可以是 detail note record，也可以是当前 detail matcher 已接纳的 wrapper-shaped detail payload，只要该 root 自身携带命中的 `note_id` / `noteId` / `id`。
+- `response_candidate_scope="data"` 且 `response_candidate_path="self"` 时，只允许用于 `body.data` 自身已经通过 current detail matcher 的 data-shape gate、并且本身就是 admitted detail candidate root 的情形；仅有匹配 `note_id` / `noteId` / `id` 但未通过这条 gate 的 wrapper-shaped `data` 仍必须停留在 candidate-only。
 - `response_candidate_path` 必须保留相对 scope root 的完整命中路径，不能把 multi-hop nested path 压缩成末级字段名。
 - current v1 `response_candidate_path` 的 path segment 仍只允许来自当前实现已接受的 detail nested traversal key：`note`、`note_card`、`current_note`、`item`；但这些 segment 可以多跳组合。
 - 因此，`data.items[*].note_card`、`data.notes[*].note_card`、`data.note_card.note` 等 current 行为已接受的 nested note-record source 仍属于 admitted truth。
