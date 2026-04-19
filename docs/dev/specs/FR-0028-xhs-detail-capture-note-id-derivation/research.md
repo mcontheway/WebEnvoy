@@ -52,7 +52,6 @@
 
 - `extension/xhs-read-execution.ts`
 - `tests/xhs-read-execution.fallback.test.ts`
-- `tests/xhs-request-context.test.ts`
 
 结论与影响：
 

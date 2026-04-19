@@ -4,10 +4,10 @@
 
 - 边界名称：`XhsDetailCaptureCanonicalNoteIdDerivationV1`
 - 生产者：
-  - `extension/main-world-bridge.ts` 的 detail capture admission path
+  - `extension/xhs-read-execution.ts` 的 current detail admitted-derivation path
   - 后续任何负责把 detail response candidate 提升为 admitted template 的 capture-side implementation
 - 消费者：
-  - `extension/xhs-read-execution.ts` 的 detail admitted-template lookup / eligibility path
+  - `extension/xhs-read-execution.ts` 的 detail admitted-template result path
   - `tests/xhs-read-execution.fallback.test.ts` 与后续 detail request-context contract tests
   - replacement implementation PR 的 formal gate 审查
 - 版本 / 兼容策略：

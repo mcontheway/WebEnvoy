@@ -77,7 +77,7 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
 
 - admitted template 只能从 response-side detail note candidate record 导出 canonical `note_id`。
 - `derived_note_id` 必须是 trim 后非空字符串。
-- 只有当该 response candidate record 同时满足“看起来是 detail note record”与“其 `note_id` / `noteId` / `id` 命中目标 `note_id`”时，才允许进入 admitted template path。
+- 只有当该 response candidate record 的 `note_id` / `noteId` / `id` 命中目标 `note_id` 时，才允许进入 admitted template path。
 - response candidate scope 允许来自：
   - `data.note`
   - `data.note_card`
@@ -86,7 +86,7 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
   - `data.item`
   - `data.items[*]`
   - `data.notes[*]`
-  - 已满足 detail-shaped 特征的 `data` record 本身
+  - 当前实现直接接受的 `data` record 本身
 - `response_candidate_path` 用于记录 admitted detail note record 相对其 scope root 的命中路径；current v1 允许：
   - `self`
   - `note`
@@ -94,7 +94,6 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
   - `current_note`
   - `item`
 - 因此，current v1 admitted source 明确覆盖 `data.items[*].note_card` 这类嵌套命中路径；只要最终命中的仍是 detail note candidate record，就属于本 FR 的 admitted truth。
-- detail-shaped record 的最小识别仍只允许依赖当前仓库内已出现的 detail 内容字段簇，例如 `title`、`desc`、`user`、`interact_info`、`image_list`、`video_info`、`note_card`、`note_card_list`；本 FR 不把更多未验证字段扩写成 admitted 条件。
 - metadata-only note id、route string、referrer、request-side body 字段都不能替代这条 admitted derivation source。
 - 当同一 response 中出现多个 note-id-bearing candidate record 时，只有与 command-side canonical `note_id` 一致的 response note record 才能进入 admitted path；candidate-only source 不得参与覆盖或纠偏这条判断。
 
@@ -252,7 +251,7 @@ And 不得把 detail capture-side canonical `note_id` derivation 留给实现侧
 ## 异常与边界场景
 
 - response payload 缺少任何 detail note candidate record 时，detail admitted canonical derivation 失败；这不等于 identity 变化，只代表当前 artifact 不可进入 admitted template。
-- response payload 存在 detail-shaped record，但其中 `note_id` / `noteId` / `id` 与目标 `note_id` 不一致时，该 artifact 不能进入 admitted template；它最多只构成 incompatible observation。
+- response payload 存在当前实现已接受的 detail response candidate record，但其中 `note_id` / `noteId` / `id` 与目标 `note_id` 不一致时，该 artifact 不能进入 admitted template；它最多只构成 incompatible observation。
 - `source_note_id`、referrer 或 metadata-only note field 即使与目标 `note_id` 一致，也不能在 current v1 单独把 artifact 提升为 admitted template。
 - 本 FR 不冻结 candidate-only observation 的持久化 shape、slotting 与 miss-state 命名；这些继续由 `#508` 处理。
 - 本 FR 不阻止未来把额外 source 升格为 admitted derivation source，但前提必须是新的 admission-ready 仓库证据与新的 spec 修订。
