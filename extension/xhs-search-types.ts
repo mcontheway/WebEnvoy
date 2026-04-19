@@ -77,6 +77,7 @@ export interface CapturedRequestContextArtifact {
   url: string;
   status: number;
   captured_at: number;
+  observed_at?: number;
   page_context_namespace: PageContextNamespace;
   shape_key: string;
   shape: JsonRecord;

@@ -508,7 +508,12 @@ const resolveLatestBucketArtifact = (bucket: CapturedContextBucket): CapturedReq
   if (candidates.length === 0) {
     return null;
   }
-  return candidates.sort((left, right) => right.captured_at - left.captured_at)[0] ?? null;
+  return (
+    candidates.sort(
+      (left, right) =>
+        (right.observed_at ?? right.captured_at) - (left.observed_at ?? left.captured_at)
+    )[0] ?? null
+  );
 };
 
 const resolveRouteScopeKeyFromLookup = (
@@ -559,6 +564,7 @@ const storeCapturedRequestContext = (
     url: candidate.url,
     status: input.status,
     captured_at: Date.now(),
+    observed_at: Date.now(),
     page_context_namespace: pageContextNamespace,
     shape_key: contextShape.shapeKey,
     shape: contextShape.shape,
@@ -1204,7 +1210,13 @@ const resolveIncompatibleObservation = (
     if (!candidate) {
       continue;
     }
-    if (!latest || candidate.captured_at > latest.captured_at) {
+    const candidateObservedAt = candidate.observed_at ?? candidate.captured_at;
+    if (!latest) {
+      latest = candidate;
+      continue;
+    }
+    const latestObservedAt = latest.observed_at ?? latest.captured_at;
+    if (candidateObservedAt > latestObservedAt) {
       latest = candidate;
     }
   }
