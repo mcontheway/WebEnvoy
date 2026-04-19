@@ -21,7 +21,7 @@
 - [ ] reviewer 确认 `request_admission_result` / `execution_audit` 的对象 / 显式 `null` / 缺失兼容形态未被 formal 误收窄
 - [ ] reviewer 确认 `execution_audit` 不进入 `observability`
 - [ ] reviewer 确认 detail identity 与 `image_scenes` 已显式转交 `#505`
-- [ ] reviewer 确认 successor detail implementation path 必须先消费 `#504 + #505` merged baselines，再继续等待 `#508 + #510` 两条 open formal gate；其中 `#508` 只承接 shared request-context minimal invariants，`#510` 只承接 detail path 的 capture-side canonical `note_id` derivation / admitted-derivation truth
+- [ ] reviewer 确认 successor detail implementation path 必须先消费 `#504 + #505` merged baselines，再继续等待 `#508 + #510` 两条 open formal gate；其中 `#508` 只承接 shared request-context minimal invariants，`#510` 只承接 detail capture-side canonical `note_id` derivation / admitted-derivation truth（含 `source_note_id` canonical mapping、transport alias、placement、route admission / normalization 等 detail-path gate）
 - [ ] reviewer 确认 PR 描述已显式填写 integration-gated 元数据：`integration_applicable=yes`、`integration_touchpoint=active`、`integration_ref=#464`
 - [ ] reviewer 确认 PR 描述已显式填写 `shared_contract_changed=yes`、`merge_gate=integration_check_required`、`joint_acceptance_needed=yes`
 - [ ] reviewer 确认 PR 描述已完整填写 formal spec review PR 所需 `gate_applicability` 字段：`review_lane`、`governance_context_issue_ref`、`governance_scope_targets`、`in_scope`、`trigger_reasons`、`n_a_allowed`
@@ -43,5 +43,5 @@
 - deferred scope：
   - `#505`：`xhs.detail` canonical identity 与 `image_scenes`
   - `#508`：shared request-context minimal invariants 与 successor implementation shared gate
-  - `#510`：detail capture-side canonical `note_id` derivation / admitted-derivation truth，以及 `source_note_id` canonical mapping / route admission / normalization 相关的 detail-path gate
+  - `#510`：detail capture-side canonical `note_id` derivation / admitted-derivation truth（含 `source_note_id` canonical mapping、transport alias、placement、route admission / normalization 等 detail-path gate）
   - successor detail implementation path 必须先消费 `#504 + #505` merged baselines，再继续等待 `#508 + #510`

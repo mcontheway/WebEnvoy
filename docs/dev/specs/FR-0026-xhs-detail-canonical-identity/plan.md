@@ -19,7 +19,7 @@
 ### 阶段 3：风险与准入条件收口
 
 - 产出：`risks.md`、`TODO.md`
-- 重点：防止后续实现 PR 擅自把 `image_scenes` 写入 identity，并明确 future spec revision 与 deferred reuse 语义都必须先经过 formal spec review；其中 shared reuse semantics 由 `#508` 接管，successor detail implementation path 的 detail capture-side canonical `note_id` derivation / admitted-derivation gate 由 `#510` 接管
+- 重点：防止后续实现 PR 擅自把 `image_scenes` 写入 identity，并明确 future spec revision 与 deferred reuse 语义都必须先经过 formal spec review；其中 shared reuse semantics 由 `#508` 接管，successor detail implementation path 的 detail capture-side canonical `note_id` derivation / admitted-derivation truth（含 `source_note_id` canonical mapping、transport alias、placement、route admission / normalization 等 detail-path gate）由 `#510` 接管
 
 ### 阶段 4：spec review PR 准备
 
@@ -79,4 +79,4 @@
 - reviewer 确认本 FR 未把 compatibility、rejected-source matching、template reuse 等 identity 之外的 detail matching 语义预先冻结为 formal truth，也未把它们错误回指给 `#504`。
 - reviewer 确认 future identity expansion 或 request/artifact canonical mapping / alias freeze 必须等待新的仓库内证据和新的 spec 修订。
 - reviewer 确认 detail request-shape truth、shape_key、lookup slotting、route eligibility 与 reuse 语义如需冻结，必须先经过 `#508` 对应的 formal spec review，而不是留给单独实现 PR 自行决定。
-- reviewer 确认 successor detail implementation path 必须在消费 `#504 + #505` merged baselines 的前提下继续等待 `#508 + #510` 两条 open formal gate；其中 `#510` 只约束 detail path 的 capture-side canonical `note_id` derivation / admitted-derivation truth。
+- reviewer 确认 successor detail implementation path 必须在消费 `#504 + #505` merged baselines 的前提下继续等待 `#508 + #510` 两条 open formal gate；其中 `#510` 只约束 detail capture-side canonical `note_id` derivation / admitted-derivation truth（含 `source_note_id` canonical mapping、transport alias、placement、route admission / normalization 等 detail-path gate）。

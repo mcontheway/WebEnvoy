@@ -52,4 +52,4 @@
 - detail capture-side canonical `note_id` derivation / admitted-derivation truth
 - compatibility、rejected-source matching、template reuse 等 request-context 行为
 
-其中前四项已由 `#504` / FR-0025 冻结；compatibility、rejected-source matching、template reuse 等 shared request-context 语义必须先通过 `#508` 对应的 formal spec review 在消费 `#504 + #505` 的前提下继续回答；`source_note_id` 的 canonical mapping、transport alias、placement、route admission / normalization 规则以及 detail capture-side canonical `note_id` derivation / admitted-derivation truth 则统一由 `#510` 承接。successor detail implementation path 必须继续等待 `#508 + #510`，单独实现 PR 不得越权定义这些共享规则。
+其中前四项已由 `#504` / FR-0025 冻结；compatibility、rejected-source matching、template reuse 等 shared request-context 语义必须先通过 `#508` 对应的 formal spec review 在消费 `#504 + #505` 的前提下继续回答；`source_note_id` 的 canonical mapping、transport alias、placement、route admission / normalization 规则以及 detail capture-side canonical `note_id` derivation / admitted-derivation truth，则统一作为 `#510` 的 detail-path gate。successor detail implementation path 必须继续等待 `#508 + #510`，单独实现 PR 不得越权定义这些共享规则。

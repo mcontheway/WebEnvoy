@@ -92,7 +92,7 @@
   - 其他不触碰 `FR-0025` 套件的 formal / implementation 事项
 - 串行 / 依赖：
   - successor detail implementation path 必须先消费已合并的 `#504 / FR-0025` 与 `#505 / FR-0026` baseline，再继续等待 `#508` 与 `#510` 两条 open formal gate 都完成后才能建立新实现 PR
-  - `#510` 的 mandatory 范围只限 successor detail implementation path，不扩写成所有 shared reuse 语义的统一前置
+  - `#510` 的 mandatory 范围只限 successor detail implementation path 的 detail capture-side canonical `note_id` derivation / admitted-derivation truth（含 `source_note_id` canonical mapping、transport alias、placement、route admission / normalization 等 detail-path gate），不扩写成所有 shared reuse 语义的统一前置
   - `#445` closeout 不能在本 FR 合并后立即重开，仍需等待新实现 PR merge 与 latest-main rerun
   - `#501` 的 superseded 状态只能在新实现 PR 建立后收口
 
