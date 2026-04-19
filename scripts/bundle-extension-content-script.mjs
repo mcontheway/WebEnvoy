@@ -222,7 +222,14 @@ const buildContentScriptBundle = async () => {
   const xhsSearchTypesModule = renderClassicModule({
     moduleVar: "__webenvoy_module_xhs_search_types",
     sourceBody: xhsSearchTypesSource,
-    exports: ["SEARCH_ENDPOINT"]
+    exports: [
+      "CAPTURED_REQUEST_CONTEXT_PATHS",
+      "DETAIL_ENDPOINT",
+      "SEARCH_ENDPOINT",
+      "USER_HOME_ENDPOINT",
+      "WEBENVOY_SYNTHETIC_REQUEST_HEADER",
+      "createPageContextNamespace"
+    ]
   });
 
   const xhsSearchTelemetryModule = renderClassicModule({
@@ -275,7 +282,7 @@ const buildContentScriptBundle = async () => {
   const xhsSearchExecutionModule = renderClassicModule({
     moduleVar: "__webenvoy_module_xhs_search_execution",
     prelude: [
-      "const { SEARCH_ENDPOINT } = __webenvoy_module_xhs_search_types;",
+      "const { createPageContextNamespace, SEARCH_ENDPOINT } = __webenvoy_module_xhs_search_types;",
       "const {",
       "  createAuditRecord,",
       "  createGateOnlySuccess,",
@@ -310,6 +317,11 @@ const buildContentScriptBundle = async () => {
   const xhsReadExecutionModule = renderClassicModule({
     moduleVar: "__webenvoy_module_xhs_read_execution",
     prelude: [
+      "const {",
+      "  createPageContextNamespace,",
+      "  DETAIL_ENDPOINT,",
+      "  USER_HOME_ENDPOINT",
+      "} = __webenvoy_module_xhs_search_types;",
       "const { createAuditRecord, resolveGate } = __webenvoy_module_xhs_search_gate;",
       "const {",
       "  containsCookie,",

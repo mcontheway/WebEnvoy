@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { BackgroundRelay } from "../extension/background.js";
 import { ContentScriptHandler } from "../extension/content-script-handler.js";
+import { createPageContextNamespace, SEARCH_ENDPOINT } from "../extension/xhs-search-types.js";
 
 export type BridgeResponse = {
   id: string;
@@ -132,6 +133,81 @@ export const createApprovedReadAdmissionContext = (input?: {
 
 export const createIssue209GateInvocationId = (runId: string, suffix = "default") =>
   `issue209-gate-${runId}-${suffix}`;
+
+export const createCapturedSearchContextHit = (input?: {
+  href?: string;
+  keyword?: string;
+  page?: number;
+  page_size?: number;
+  sort?: string;
+  note_type?: number;
+  search_id?: string;
+  captured_at?: number;
+}) => {
+  const href = input?.href ?? "https://www.xiaohongshu.com/search_result";
+  const keyword = input?.keyword ?? "露营装备";
+  const page = input?.page ?? 1;
+  const pageSize = input?.page_size ?? 20;
+  const sort = input?.sort ?? "general";
+  const noteType = input?.note_type ?? 0;
+  const searchId = input?.search_id ?? "captured-search-id";
+  const capturedAt = input?.captured_at ?? 1_000;
+  const shape = {
+    command: "xhs.search",
+    method: "POST",
+    pathname: SEARCH_ENDPOINT,
+    keyword,
+    page,
+    page_size: pageSize,
+    sort,
+    note_type: noteType
+  } as const;
+
+  return {
+    source_kind: "page_request",
+    transport: "fetch",
+    method: "POST",
+    path: SEARCH_ENDPOINT,
+    url: `https://www.xiaohongshu.com${SEARCH_ENDPOINT}`,
+    status: 200,
+    captured_at: capturedAt,
+    observed_at: capturedAt,
+    page_context_namespace: createPageContextNamespace(href),
+    shape_key: JSON.stringify(shape),
+    shape,
+    referrer: href,
+    request_status: {
+      completion: "completed",
+      http_status: 200
+    },
+    request: {
+      headers: {
+        Accept: "application/json, text/plain, */*",
+        "Content-Type": "application/json;charset=utf-8",
+        "X-S-Common": `{\"searchId\":\"${searchId}\"}`,
+        "x-b3-traceid": "trace-b3-captured",
+        "x-xray-traceid": "trace-xray-captured"
+      },
+      body: {
+        keyword,
+        page,
+        page_size: pageSize,
+        search_id: searchId,
+        sort,
+        note_type: noteType
+      }
+    },
+    response: {
+      headers: {},
+      body: {
+        code: 0,
+        data: {
+          items: []
+        }
+      }
+    }
+  } as const;
+};
 
 export const approvedLiveOptions = {
   target_domain: "www.xiaohongshu.com",

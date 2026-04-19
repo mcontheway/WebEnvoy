@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, createApprovedReadAdmissionContext, createIssue209GateInvocationId, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
+import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, createApprovedReadAdmissionContext, createCapturedSearchContextHit, createIssue209GateInvocationId, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
 
 describe("extension background relay contract / forward and timeout", () => {
   const createApprovedLiveOptions = (input: {
@@ -162,6 +162,7 @@ describe("extension background relay contract / forward and timeout", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: async () => createCapturedSearchContextHit(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
@@ -248,7 +249,7 @@ describe("extension background relay contract / forward and timeout", () => {
         }
       }
     });
-    expect(capturedHeaders?.["X-S-Common"]).toBe("{}");
+    expect(capturedHeaders?.["X-S-Common"]).toBe("{\"searchId\":\"captured-search-id\"}");
   });
 
   it.each([
@@ -399,6 +400,7 @@ describe("extension background relay contract / forward and timeout", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: async () => createCapturedSearchContextHit(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
@@ -488,6 +490,7 @@ describe("extension background relay contract / forward and timeout", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: async () => createCapturedSearchContextHit(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
@@ -588,6 +591,7 @@ describe("extension background relay contract / forward and timeout", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: async () => createCapturedSearchContextHit(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
@@ -665,6 +669,7 @@ describe("extension background relay contract / forward and timeout", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: async () => createCapturedSearchContextHit(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
@@ -773,6 +778,7 @@ describe("extension background relay contract / forward and timeout", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: async () => createCapturedSearchContextHit(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
@@ -847,6 +853,7 @@ describe("extension background relay contract / forward and timeout", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: async () => createCapturedSearchContextHit(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
@@ -915,6 +922,7 @@ describe("extension background relay contract / forward and timeout", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: async () => createCapturedSearchContextHit(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
@@ -1133,6 +1141,7 @@ describe("extension background relay contract / forward and timeout", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: async () => createCapturedSearchContextHit(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
@@ -2102,6 +2111,7 @@ describe("extension background relay contract / forward and timeout", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: async () => createCapturedSearchContextHit(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
@@ -2238,6 +2248,7 @@ describe("extension background relay contract / forward and timeout", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: async () => createCapturedSearchContextHit(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"

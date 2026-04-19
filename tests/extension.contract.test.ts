@@ -4,6 +4,7 @@ import { runInNewContext } from "node:vm";
 
 import { describe, expect, it } from "vitest";
 import { executeXhsSearch } from "../extension/xhs-search.js";
+import { createCapturedSearchContextHit } from "./extension.relay.shared.js";
 
 const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
 const extensionRoot = path.join(repoRoot, "extension");
@@ -42,6 +43,7 @@ type BundledContentScriptHandlerModule = {
     onResult(listener: (message: unknown) => void): () => void;
     onBackgroundMessage(message: Record<string, unknown>): boolean;
   };
+  installMainWorldEventChannelSecret: (secret: string | null) => boolean;
 };
 
 const loadBundleExports = (bundlePath: string, moduleVar: BundledXhsModuleVar) => {
@@ -70,12 +72,129 @@ const loadBundledContentScriptHandlerModule = (
   context.globalThis = context;
   context.structuredClone = structuredClone;
   runInNewContext(
-    `${bundleSource}\n;globalThis.__bundle_handler_exports = __webenvoy_module_content_script_handler;`,
+    `${bundleSource}\n;globalThis.__bundle_handler_exports = { ...__webenvoy_module_content_script_handler, ...__webenvoy_module_content_script_main_world };`,
     context,
     { filename: bundlePath }
   );
   return context.__bundle_handler_exports as BundledContentScriptHandlerModule;
 };
+
+const createBundledMainWorldWindow = (input: { href: string; keyword: string }) => {
+  const listeners = new Map<string, Set<(event: { type: string; detail?: unknown }) => void>>();
+  let resultEventName: string | null = null;
+
+  return {
+    location: {
+      href: input.href
+    },
+    addEventListener: (type: string, listener: (event: { type: string; detail?: unknown }) => void) => {
+      const bucket = listeners.get(type) ?? new Set();
+      bucket.add(listener);
+      listeners.set(type, bucket);
+    },
+    removeEventListener: (
+      type: string,
+      listener: (event: { type: string; detail?: unknown }) => void
+    ) => {
+      listeners.get(type)?.delete(listener);
+    },
+    dispatchEvent: (event: { type: string; detail?: unknown }) => {
+      const detail =
+        typeof event.detail === "object" && event.detail !== null
+          ? (event.detail as Record<string, unknown>)
+          : null;
+      if (event.type === "__mw_bootstrap__") {
+        resultEventName =
+          detail && typeof detail.result_event === "string" ? detail.result_event : null;
+        return true;
+      }
+      if (!resultEventName || !detail || typeof detail.id !== "string" || typeof detail.type !== "string") {
+        return true;
+      }
+
+      let result: unknown = null;
+      if (detail.type === "captured-request-context-read") {
+        result = createCapturedSearchContextHit({
+          href: input.href,
+          keyword: input.keyword
+        });
+      }
+
+      listeners.get(resultEventName)?.forEach((listener) => {
+        listener({
+          type: resultEventName as string,
+          detail: {
+            id: detail.id,
+            ok: true,
+            result
+          }
+        });
+      });
+      return true;
+    }
+  };
+};
+
+const createBundledLiveSearchEnv = (input: {
+  href: string;
+  keyword: string;
+  runtimeMessages: Array<Record<string, unknown>>;
+}) => ({
+  now: () => 1_710_000_000_000,
+  randomId: () => "bundle-live-env-id",
+  getLocationHref: () => input.href,
+  getDocumentTitle: () => "Search Result",
+  getReadyState: () => "complete",
+  getCookie: () => "a1=session-cookie",
+  readCapturedRequestContext: async () =>
+    createCapturedSearchContextHit({
+      href: input.href,
+      keyword: input.keyword,
+      captured_at: 1_710_000_000_000
+    }),
+  callSignature: async (uri: string, body: Record<string, unknown>) => {
+    input.runtimeMessages.push({
+      kind: "xhs-sign-request",
+      uri,
+      body
+    });
+    return {
+      "X-s": "signature",
+      "X-t": "timestamp"
+    };
+  },
+  fetchJson: async (request: {
+    url: string;
+    method: "POST" | "GET";
+    headers: Record<string, string>;
+    body?: string;
+    timeoutMs: number;
+    referrer?: string;
+    referrerPolicy?: string;
+  }) => {
+    input.runtimeMessages.push({
+      kind: "xhs-main-world-request",
+      url: request.url,
+      method: request.method,
+      headers: request.headers,
+      ...(typeof request.body === "string" ? { body: request.body } : {}),
+      timeout_ms: request.timeoutMs,
+      ...(typeof request.referrer === "string" ? { referrer: request.referrer } : {}),
+      ...(typeof request.referrerPolicy === "string"
+        ? { referrerPolicy: request.referrerPolicy }
+        : {})
+    });
+    return {
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          items: []
+        }
+      }
+    };
+  }
+});
 
 const executeBundledXhsCommand = async (
   bundlePath: string,
@@ -406,7 +525,11 @@ describe("extension build contract", () => {
     });
     const runtimeMessages: Array<Record<string, unknown>> = [];
     const searchHref = "https://www.xiaohongshu.com/search_result/?keyword=%E9%9C%B2%E8%90%A5";
-    const { ContentScriptHandler } = loadBundledContentScriptHandlerModule(contentScriptBuildPath, {
+    const mockWindow = createBundledMainWorldWindow({
+      href: searchHref,
+      keyword: "露营装备"
+    });
+    const { ContentScriptHandler, installMainWorldEventChannelSecret } = loadBundledContentScriptHandlerModule(contentScriptBuildPath, {
       chrome: {
         runtime: {
           sendMessage: (
@@ -454,17 +577,8 @@ describe("extension build contract", () => {
         randomUUID: () => "bundle-live-uuid-001"
       },
       URL,
-      location: {
-        href: searchHref
-      },
-      window: {
-        location: {
-          href: searchHref
-        },
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        dispatchEvent: () => true
-      },
+      location: mockWindow.location,
+      window: mockWindow,
       document: {
         title: "Search Result",
         readyState: "complete",
@@ -480,7 +594,14 @@ describe("extension build contract", () => {
         }
       }
     });
-    const handler = new ContentScriptHandler();
+    expect(installMainWorldEventChannelSecret("bundle-main-world-secret-001")).toBe(true);
+    const handler = new ContentScriptHandler({
+      xhsEnv: createBundledLiveSearchEnv({
+        href: searchHref,
+        keyword: "露营装备",
+        runtimeMessages
+      })
+    });
 
     const resultPromise = new Promise<Record<string, unknown>>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -579,7 +700,11 @@ describe("extension build contract", () => {
   it("executes bundled content-script handler xhs.search live-read with canonical grant only", async () => {
     const runtimeMessages: Array<Record<string, unknown>> = [];
     const searchHref = "https://www.xiaohongshu.com/search_result/?keyword=AI&type=51";
-    const { ContentScriptHandler } = loadBundledContentScriptHandlerModule(contentScriptBuildPath, {
+    const mockWindow = createBundledMainWorldWindow({
+      href: searchHref,
+      keyword: "AI"
+    });
+    const { ContentScriptHandler, installMainWorldEventChannelSecret } = loadBundledContentScriptHandlerModule(contentScriptBuildPath, {
       chrome: {
         runtime: {
           sendMessage: (
@@ -625,17 +750,8 @@ describe("extension build contract", () => {
         randomUUID: () => "bundle-live-uuid-002"
       },
       URL,
-      location: {
-        href: searchHref
-      },
-      window: {
-        location: {
-          href: searchHref
-        },
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        dispatchEvent: () => true
-      },
+      location: mockWindow.location,
+      window: mockWindow,
       document: {
         title: "Search Result",
         readyState: "complete",
@@ -651,7 +767,14 @@ describe("extension build contract", () => {
         }
       }
     });
-    const handler = new ContentScriptHandler();
+    expect(installMainWorldEventChannelSecret("bundle-main-world-secret-002")).toBe(true);
+    const handler = new ContentScriptHandler({
+      xhsEnv: createBundledLiveSearchEnv({
+        href: searchHref,
+        keyword: "AI",
+        runtimeMessages
+      })
+    });
 
     const resultPromise = new Promise<Record<string, unknown>>((resolve, reject) => {
       const timeout = setTimeout(() => {

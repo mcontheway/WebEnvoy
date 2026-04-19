@@ -4153,7 +4153,7 @@ const createPageContextNamespace = (href) => {
     const normalized = href.trim();
     return normalized.length > 0 ? normalized : "about:blank";
 };
-return { SEARCH_ENDPOINT };
+return { CAPTURED_REQUEST_CONTEXT_PATHS, DETAIL_ENDPOINT, SEARCH_ENDPOINT, USER_HOME_ENDPOINT, WEBENVOY_SYNTHETIC_REQUEST_HEADER, createPageContextNamespace };
 })();
 const __webenvoy_module_xhs_search_telemetry = (() => {
 const { SEARCH_ENDPOINT } = __webenvoy_module_xhs_search_types;
@@ -4758,7 +4758,7 @@ const createGateOnlySuccess = (input, gate, auditRecord, env) => ({
 return { createAuditRecord, createGateOnlySuccess, resolveGate };
 })();
 const __webenvoy_module_xhs_search_execution = (() => {
-const { SEARCH_ENDPOINT } = __webenvoy_module_xhs_search_types;
+const { createPageContextNamespace, SEARCH_ENDPOINT } = __webenvoy_module_xhs_search_types;
 const {
   createAuditRecord,
   createGateOnlySuccess,
@@ -5475,6 +5475,11 @@ function executeXhsSearch(...args) {
 return { executeXhsSearch };
 })();
 const __webenvoy_module_xhs_read_execution = (() => {
+const {
+  createPageContextNamespace,
+  DETAIL_ENDPOINT,
+  USER_HOME_ENDPOINT
+} = __webenvoy_module_xhs_search_types;
 const { createAuditRecord, resolveGate } = __webenvoy_module_xhs_search_gate;
 const {
   containsCookie,
