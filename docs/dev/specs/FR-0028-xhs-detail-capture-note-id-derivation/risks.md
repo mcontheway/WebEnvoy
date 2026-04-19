@@ -57,7 +57,7 @@
   - 后续实现被不必要地锁死
 - 缓解：
   - 只冻结 note-id derivation 所需的最小 response root / candidate entry / nested key 边界与 identifier field
-  - 显式把 `body.data.note`、`body.data.items[*].note_card`、`body.data.items[*]` target-missing 检查，以及 `getDetailResponseCandidates()` 的 current-main matcher 家族一起写入口径
+  - 显式把 `body.data.note`、`body.data.items[*].note_card` 与 `getDetailResponseCandidates()` 的 current-main matcher 家族一起写入口径，同时把 target-missing / metadata-only rejection 保持为辅助校验
   - 明确 formal freeze 依赖 current main observable matcher truth，而不是假装这些分支都已有完整 tests 矩阵
   - 不冻结额外 payload 字段
 - 观察信号：

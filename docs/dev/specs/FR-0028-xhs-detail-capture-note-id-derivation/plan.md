@@ -36,7 +36,7 @@
   - 对照 `docs/dev/specs/FR-0025-xhs-detail-user-home-command-surface-baseline/spec.md`，确认 detail command-side input 仍是 `note_id` only
   - 对照 `docs/dev/specs/FR-0026-xhs-detail-canonical-identity/spec.md`，确认本 FR 不把 `source_note_id` 或 `image_scenes` 写回 identity truth
   - 对照 `docs/dev/specs/FR-0005-xhs-read-spike/research.md`，确认 `/api/sns/web/v1/feed` 目前只有 `source_note_id` candidate / failed 级证据
-  - 对照 `tests/xhs-read-execution.fallback.test.ts`，确认 `body.data.note` 命中目标 `note_id` 时成功，`body.data.items[*].note_card` 命中目标 `note_id` 时成功，`body.data.items[*]` target-missing failure 会命中 direct-item candidate inspection，且 metadata-only `current_note_id` 单独出现时失败
+  - 对照 `tests/xhs-read-execution.fallback.test.ts`，确认 `body.data.note` 命中目标 `note_id` 时成功，`body.data.items[*].note_card` 命中目标 `note_id` 时成功，且存在 target-missing / metadata-only rejection 场景作为辅助校验
   - 对照 `extension/xhs-read-execution.ts`，确认 current matcher 固定先取 `body.data ?? body`；仅在顶层 `body.data` 缺失时才回看 `body`，若 `body.data` 已存在但不是对象则不会再次退回 `body`；并只沿 detail-shaped self root、`note`、`note_card`、`note_card_list`、`current_note`、`item`、`items`、`notes` 与递归 `note` / `note_card` / `current_note` / `item` 收集 detail candidate record
 - 文档门禁：
   - `git diff --check`

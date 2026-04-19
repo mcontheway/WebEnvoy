@@ -12,7 +12,7 @@ Canonical Issue: #510
 
 - current implementation 与 in-tree tests 的 command-side canonical truth 仍只围绕 `note_id` 运转。
 - detail API candidate route 目前可见的 request-side 参数形态是 `source_note_id`，但 `FR-0005` 与 `FR-0026` 已明确这仍只是 candidate / failed / synthetic 层级事实，不足以单独冻结成 admitted canonical mapping。
-- current implementation 已经存在一条可观察、且必须由本 FR 承接 owner 的 response-side truth：`getDetailResponseCandidates()` 会先取 `body.data ?? body` 作为 response root，再从 detail-shaped self root、`note`、`note_card`、`note_card_list`、`current_note`、`item`、`items`、`notes` 进入 candidate scope，并只沿 `note`、`note_card`、`current_note`、`item` 递归展开 nested candidate record。现有 tests 已直接覆盖 `body.data.note` 成功、`body.data.items[*].note_card` 成功、`body.data.items[*]` target-missing failure，以及 metadata-only rejection；剩余分支虽然测试覆盖较弱，但仍属于 current main observable matcher truth，不能被本 FR 收窄掉。
+- current implementation 已经存在一条可观察、且必须由本 FR 承接 owner 的 response-side truth：`getDetailResponseCandidates()` 会先取 `body.data ?? body` 作为 response root，再从 detail-shaped self root、`note`、`note_card`、`note_card_list`、`current_note`、`item`、`items`、`notes` 进入 candidate scope，并只沿 `note`、`note_card`、`current_note`、`item` 递归展开 nested candidate record。现有 tests 已直接覆盖 `body.data.note` 成功与 `body.data.items[*].note_card` 成功；target-missing / metadata-only rejection 场景只作为辅助校验。`.items[*]` candidate inspection、metadata exclusion 与其余分支仍以 current main implementation 作为直接 observable truth 来源，不能被本 FR 收窄掉。
 
 因此，本 FR 的职责不是重写 `#505` 的 identity-only 结论，也不是提前冻结 `#508` 负责的 shared reuse semantics，而是补齐这条缺失的 formal owner：冻结 current v1 `xhs.detail` capture-side canonical `note_id` derivation 规则，明确 admitted template 可接受的 derivation source，明确 rejected / incompatible observation 可保留的 candidate 边界，并把 replacement implementation 的 detail formal gate 收口到可执行状态。
 
@@ -82,7 +82,7 @@ type XhsDetailResponseCandidateRecordBoundaryV1 = {
   - 选中的 response root 自身仅在满足 `self_when_detail_shape_present` 时可作为 admitted self root；其 marker 只允许 `title`、`desc`、`user`、`interact_info`、`image_list`、`video_info`、`note_card`、`note_card_list`
   - direct entry 只允许 `.note`、`.note_card`、`.note_card_list[*]`、`.current_note`、`.item`、`.items[*]`、`.notes[*]`
   - 仅允许从上述已接受 candidate record 继续递归进入 `.note`、`.note_card`、`.current_note`、`.item`
-- 因此，当前已被 tests 直接覆盖的 `body.data.note`、`body.data.items[*]` target-missing 检查与 wrapped detail payload `body.data.items[*].note_card`，再加上 current main implementation 已接受的 bare-body roots、self root、其他 direct entry 与递归路径，共同构成 admitted response candidate record 的 formal scope。
+- 因此，当前已被 tests 直接覆盖的 `body.data.note` 与 wrapped detail payload `body.data.items[*].note_card`，再加上 current main implementation 已接受的 `items[*]` candidate inspection、bare-body roots、self root、其他 direct entry 与递归路径，共同构成 admitted response candidate record 的 formal scope。
 - 本 FR 冻结的是 current main observable matcher truth，而不是“仅限当前 tests 直接成功覆盖的最小子集”；直接测试覆盖不足的分支应被视为后续实现与回归测试需要补强的 gap，而不是 formal 收窄的理由。
 - metadata-only note id、route string、referrer、request-side body 字段都不能替代这条 admitted derivation source。
 - 当同一 response 中出现多个 note-id-bearing candidate record 时，只有与 command-side canonical `note_id` 一致的 response candidate record 才能进入 admitted path；candidate-only source 不得参与覆盖或纠偏这条判断。
