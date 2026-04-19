@@ -56,6 +56,7 @@
 - `admitted_template.request_status` 必须固定为 `completion="completed"` 且 `http_status` 为非空 2xx。
 - `observed_at` 是 `rejected_observation` / `incompatible_observation` 的最小 observation 时间字段，需与 `FR-0024` 对齐。
 - shape-slot `rejected_observation` 的最小字段是显式 `shape` / `shape_key` 锚点、`source_kind`、非空 machine-readable `rejection_reason` 与 `request_status`。
+- shape-slot `rejected_observation` 的合法配对必须固定为：`synthetic_request_rejected <-> source_kind=\"synthetic_request\"`，`failed_request_rejected <-> source_kind=\"page_request\"`。
 - route-bucket `incompatible_observation` 的最小字段是显式 `shape` / `shape_key` 锚点、`source_kind="page_request"`、`incompatibility_reason="shape_mismatch"` 与 success-only `request_status`。
 - `available_shape_keys` 只反映当前 namespace / route bucket 内可诊断 shape，不构成跨 namespace 共享键。
 - rejected-only sibling shape 也必须继续出现在 `available_shape_keys` 中；即使没有 success-only `incompatible_observation`，lookup 仍要保留 `shape_mismatch` 的 fail-closed 诊断面。

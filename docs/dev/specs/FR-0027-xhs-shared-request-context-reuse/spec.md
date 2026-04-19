@@ -141,6 +141,9 @@ Canonical Issue: #508
 - rejected observation 也必须按当前 `page_context_namespace + shape_key` 分槽
 - detail capture-side canonical `note_id` derivation 当前不在本 FR 冻结；admitted detail capture path 必须等待 `#510`
 - shape-slot `rejected_observation` 必须携带非空 `rejection_reason`；当前 v1 仅允许 `synthetic_request_rejected` 或 `failed_request_rejected`
+- shape-slot `rejected_observation` 的合法配对必须固定为：
+  - `source_kind="synthetic_request"` 只允许 `rejection_reason="synthetic_request_rejected"`
+  - `source_kind="page_request"` 只允许 `rejection_reason="failed_request_rejected"`
 - route-bucket `incompatible_observation` 必须携带 `incompatibility_reason=shape_mismatch`
 - synthetic / failed / non-2xx candidate 不得写入 route-bucket `incompatible_observation`
 - route bucket 的 `available_shape_keys` 仍必须保留 rejected-only sibling shape；即使当前没有 success-only `incompatible_observation`，lookup 也必须继续得出 `shape_mismatch` 的 fail-closed 结果
