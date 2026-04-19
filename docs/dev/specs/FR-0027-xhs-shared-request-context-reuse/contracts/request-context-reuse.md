@@ -72,6 +72,8 @@ type SharedAdmittedTemplateStateV1 = {
 };
 
 type SharedShapeSlotRejectedObservationStateV1 = {
+  shape: Record<string, unknown>;
+  shape_key: string;
   observed_at: number;
   source_kind: "page_request" | "synthetic_request";
   rejection_reason:
@@ -81,10 +83,12 @@ type SharedShapeSlotRejectedObservationStateV1 = {
 };
 
 type SharedRouteBucketIncompatibleObservationStateV1 = {
+  shape: Record<string, unknown>;
+  shape_key: string;
   observed_at: number;
-  source_kind: "page_request" | "synthetic_request";
+  source_kind: "page_request";
   incompatibility_reason: "shape_mismatch";
-  request_status: SharedObservedRequestStatusV1;
+  request_status: SharedCompleted2xxRequestStatusV1;
 };
 
 type CapturedRequestContextShapeSlotV1 = {
@@ -111,8 +115,8 @@ type CapturedRequestContextRouteBucketV1 = {
 - `captured_at` 是 admitted template freshness gate 的必需字段。
 - `admitted_template.request_status` 必须固定为 `completion="completed"` 且 `http_status` 为非空 2xx。
 - `rejected_observation` 与 `incompatible_observation` 都必须携带 `observed_at`。
-- shape-slot `rejected_observation` 必须携带 `source_kind`、非空 machine-readable `rejection_reason` 与 `request_status`；其 `rejection_reason` 只允许 `synthetic_request_rejected` / `failed_request_rejected`。
-- route-bucket `incompatible_observation` 必须携带 `source_kind`、`incompatibility_reason="shape_mismatch"` 与 `request_status`；不得复用 shape-slot rejected schema。
+- shape-slot `rejected_observation` 必须显式携带 `shape`、`shape_key`、`source_kind`、非空 machine-readable `rejection_reason` 与 `request_status`；其 `rejection_reason` 只允许 `synthetic_request_rejected` / `failed_request_rejected`。
+- route-bucket `incompatible_observation` 必须显式携带 `shape`、`shape_key`、`source_kind="page_request"`、`incompatibility_reason="shape_mismatch"` 与 success-only `request_status`；synthetic / failed / non-2xx candidate 不得进入 incompatible bucket。
 
 ## 4. Gate rule
 

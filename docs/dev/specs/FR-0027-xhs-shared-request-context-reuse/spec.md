@@ -117,8 +117,8 @@ Canonical Issue: #508
 - `admitted_template` 至少必须携带 `captured_at`，作为 freshness gate 的时间输入。
 - `admitted_template` 至少必须携带 `request_status.completion="completed"` 与非空 2xx `request_status.http_status`，不得把 failed / non-2xx candidate 误记为 admitted template。
 - `rejected_observation` 与 `incompatible_observation` 至少必须携带 `observed_at`，并与 `FR-0024` 回写后的 shared observation schema 保持兼容。
-- shape-slot `rejected_observation` 至少必须携带 `source_kind`、非空 machine-readable `rejection_reason` 与 `request_status`，以支持 rejected-source 语义。
-- route-bucket `incompatible_observation` 至少必须携带 `source_kind`、`incompatibility_reason="shape_mismatch"` 与 `request_status`，以支持 sibling-shape 诊断。
+- shape-slot `rejected_observation` 至少必须携带 `shape`、`shape_key`、`source_kind`、非空 machine-readable `rejection_reason` 与 `request_status`，以支持 rejected-source 语义。
+- route-bucket `incompatible_observation` 至少必须携带 `shape`、`shape_key`、`source_kind="page_request"`、`incompatibility_reason="shape_mismatch"` 与 success-only `request_status`，以支持 sibling-shape 诊断。
 - route bucket 必须保留 `available_shape_keys`，以支持 sibling-shape incompatibility 诊断。
 
 ### 6. capture admission
@@ -140,6 +140,7 @@ Canonical Issue: #508
 - detail capture-side canonical `note_id` derivation 当前不在本 FR 冻结；admitted detail capture path 必须等待 `#510`
 - shape-slot `rejected_observation` 必须携带非空 `rejection_reason`；当前 v1 仅允许 `synthetic_request_rejected` 或 `failed_request_rejected`
 - route-bucket `incompatible_observation` 必须携带 `incompatibility_reason=shape_mismatch`
+- synthetic / failed / non-2xx candidate 不得写入 route-bucket `incompatible_observation`
 
 ### 7. lookup / eligibility / fail-closed
 
@@ -252,6 +253,7 @@ And `#508` 只能被解释为“shared reuse semantics 已冻结，但 gate 仍 
 - rejected observation 允许保留最近一次可诊断 candidate，但不得升级为 admitted template。
 - `incompatible_observation` 必须停留在 route bucket 层，不得被错误塞回 shape-keyed slot。
 - shape-slot `rejected_observation` 的 `rejection_reason` 不得为 `null` 或缺失。
+- `rejected_observation` 与 `incompatible_observation` 都必须显式保留各自候选的 `shape` 与 `shape_key` 锚点。
 
 ## 验收标准
 
