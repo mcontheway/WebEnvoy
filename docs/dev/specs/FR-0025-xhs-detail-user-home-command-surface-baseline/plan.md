@@ -91,7 +91,8 @@
   - `#505` 的 formal 准备工作
   - 其他不触碰 `FR-0025` 套件的 formal / implementation 事项
 - 串行 / 依赖：
-  - 后续实现 PR 必须等待 `FR-0025` 与 `#505` 都完成 formal freeze 后再创建
+  - successor detail implementation path 必须先消费已合并的 `#504 / FR-0025` 与 `#505 / FR-0026` baseline，再继续等待 `#508` 与 `#510` 两条 open formal gate 都完成后才能建立新实现 PR
+  - `#510` 只作为 successor detail implementation path 的 required detail-path gate 引用，不扩写成所有 shared reuse 语义的统一前置，也不在本 FR 内重述其 owning suite scope
   - `#445` closeout 不能在本 FR 合并后立即重开，仍需等待新实现 PR merge 与 latest-main rerun
   - `#501` 的 superseded 状态只能在新实现 PR 建立后收口
 

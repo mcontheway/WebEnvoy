@@ -19,7 +19,7 @@
 ### 阶段 3：风险与准入条件收口
 
 - 产出：`risks.md`、`TODO.md`
-- 重点：防止后续实现 PR 擅自把 `image_scenes` 写入 identity，并明确 future spec revision 与 deferred reuse 语义都必须先经过 formal spec review；其中 shared reuse semantics 由 `#508` 接管
+- 重点：防止后续实现 PR 擅自把 `image_scenes` 写入 identity，并明确 future spec revision 与 deferred reuse 语义都必须先经过 formal spec review；其中 shared reuse semantics 由 `#508` 接管，successor detail implementation path 继续额外等待 `#510` 这条 required detail-path gate
 
 ### 阶段 4：spec review PR 准备
 
@@ -54,7 +54,7 @@
 ## TDD 范围
 
 - 当前 formal suite 不进入实现代码 TDD。
-- 在 `#508` formal freeze 冻结相关共享规则后，后续实现 PR 至少应补齐以下测试矩阵：
+- 在 `#508` 与 `#510` 两条 formal gate 都冻结后，后续实现 PR 至少应补齐以下测试矩阵：
   - `note_id` only identity 不回退
   - `source_note_id` 继续不进入 frozen identity baseline，也不得在缺少 admission-ready 证据时被实现侧擅自提升为 admitted canonical mapping
   - `image_scenes` 不进入 canonical identity anchor，也不成为额外 identity discriminator
@@ -66,7 +66,7 @@
   - `#504` 的 formal review
   - 其他不触碰 `FR-0026` 套件的 formal / implementation 事项
 - 串行 / 依赖：
-- 替代 `#501` 的新实现 PR 必须等待 `#504` / `#505` / `#508` 的 formal freeze 都完成
+  - 替代 `#501` 的新实现 PR 必须先消费已合并的 `#504 / #505` baseline，并继续等待 `#508 + #510` 两条 open formal gate 都完成
   - `#445` closeout 必须等待新实现 PR merge 与 latest-main rerun
 
 ## 进入实现前条件
@@ -79,3 +79,4 @@
 - reviewer 确认本 FR 未把 compatibility、rejected-source matching、template reuse 等 identity 之外的 detail matching 语义预先冻结为 formal truth，也未把它们错误回指给 `#504`。
 - reviewer 确认 future identity expansion 或 request/artifact canonical mapping / alias freeze 必须等待新的仓库内证据和新的 spec 修订。
 - reviewer 确认 detail request-shape truth、shape_key、lookup slotting、route eligibility 与 reuse 语义如需冻结，必须先经过 `#508` 对应的 formal spec review，而不是留给单独实现 PR 自行决定。
+- reviewer 确认 successor detail implementation path 必须在消费 `#504 + #505` merged baselines 的前提下继续等待 `#508 + #510` 两条 open formal gate；其中 `#510` 只作为 required detail-path gate 引用，不在本 FR 内重述其 owning suite scope。

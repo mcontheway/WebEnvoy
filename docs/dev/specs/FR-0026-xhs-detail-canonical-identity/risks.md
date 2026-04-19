@@ -41,3 +41,4 @@
   - 当前 FR 只冻结 `note_id` only identity 与 `image_scenes` not-in-identity
   - 明确 `source_note_id` 的 canonical mapping、transport truth、alias、artifact-side derivation、placement、request-context 行为与其他 mapping relation 仍待 future admission-ready 证据和新 spec 修订
   - 明确 detail request-shape truth、shape_key、lookup slotting、route eligibility 与 reuse 语义也必须先经过 `#508` 对应的 formal spec review，不能由单独实现 PR 越权冻结
+  - 明确 successor detail implementation path 还必须继续等待 `#510` 这条 required detail-path gate；该 gate 不扩写成所有 shared reuse 语义的统一前置，也不在本 FR 内重述其 owning suite scope

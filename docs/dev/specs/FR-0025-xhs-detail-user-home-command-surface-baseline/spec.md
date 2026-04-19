@@ -159,6 +159,7 @@ Canonical Issue: #504
 - `xhs.detail` 的 canonical identity 不在本 FR 冻结。
 - `image_scenes` / `CRD_PRV_WEBP` / media-scene 类字段是否进入 identity，全部转交 `#505`。
 - 后续实现 PR 不得以“`#504` 已经冻结 request-context baseline”为由，擅自把 `image_scenes` 写入 detail identity。
+- successor detail implementation path 必须先消费 `#504 + #505` merged baselines，再继续等待 `#508 + #510` 两条 open formal gate；其中 `#508` 继续承接 shared request-context minimal invariants，`#510` 只作为 required detail-path gate 引用，不在本 FR 内重述其 owning suite scope。
 
 ## GWT 验收场景
 
@@ -286,7 +287,8 @@ And canonical ownership truth 仍必须以四个顶层对象为准
 Given `#504` 只冻结 command surface 与 request-context baseline
 When 后续实现 PR 消费本 FR
 Then 不得据此把 `image_scenes`、`CRD_PRV_WEBP` 或 media-scene 字段写成 detail identity
-And 必须等待 `#505` 的正式结论
+And 必须先消费 `#505` 的正式结论
+And 对 successor detail implementation path 仍必须继续等待 `#508 + #510` 两条 open formal gate
 
 ## 异常与边界场景
 
@@ -323,4 +325,4 @@ And 必须等待 `#505` 的正式结论
 - `docs/dev/specs/FR-0005-xhs-read-spike/TODO.md`
 - `docs/dev/specs/FR-0023-upstream-authorization-request-admission-contract/spec.md`
 - `docs/dev/specs/FR-0024-xhs-request-shape-truth/spec.md`
-- GitHub issues `#445`、`#500`、`#502`、`#504`、`#505`
+- GitHub issues `#445`、`#500`、`#502`、`#504`、`#505`、`#508`、`#510`

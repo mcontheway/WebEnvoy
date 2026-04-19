@@ -57,5 +57,7 @@
 - `image_scenes`
 - `CRD_PRV_WEBP`
 - detail/user_home request-shape truth
+- successor detail implementation path 的 shared request-context minimal invariants
+- successor detail implementation path 的 detail capture-side canonical `note_id` derivation / admitted-derivation truth
 
-这些对象全部属于 `#505` 或后续实现 FR，而不是本 FR。
+其中 `xhs.detail` canonical identity baseline 由 `#505` 冻结；shared request-context minimal invariants 与 successor implementation shared gate 由 `#508` 承接；`#510` 继续只作为 successor detail implementation path 的 required detail-path gate 引用，本 FR 不在此重述其 owning suite scope。后续实现 PR 必须在消费 `#504 + #505` merged baselines 的前提下继续等待 `#508 + #510`，而不是由单独实现 PR 越权定义这些内容。

@@ -10,6 +10,7 @@
 - [ ] reviewer 确认仓库内不存在 admission-ready `image_scenes` 证据，不能据此扩 identity
 - [ ] reviewer 确认 future identity expansion 或 `source_note_id` canonical mapping / alias / derivation freeze 必须等待新的 spec 修订
 - [ ] reviewer 确认 detail request-shape truth、shape_key、lookup slotting、route eligibility 与 reuse 语义如需冻结，必须先经过 `#508` 对应的 formal spec review，不能由单独实现 PR 越权定义
+- [ ] reviewer 确认 successor detail implementation path 必须在消费 `#504 + #505` merged baselines 的前提下继续等待 `#508 + #510` 两条 open formal gate；其中 `#510` 只作为 required detail-path gate 引用，不在本 FR 内重述其 owning suite scope
 - [ ] reviewer 确认 `Closing=Refs #505`、`review_lane=formal_spec_review_pr`、`live_evidence_record=N/A`
 - [ ] reviewer 确认 `bash scripts/check-pr-purity.sh docs/FR-0026-xhs-detail-canonical-identity main` 与单分支职责一致
 - [ ] spec review 通过并形成可进入实现的新冻结输入

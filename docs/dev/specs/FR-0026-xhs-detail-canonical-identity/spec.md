@@ -63,6 +63,7 @@ type XhsDetailCanonicalIdentityAnchorV1 = {
 - 当前仓库未验证稳定的 diagnostics / compatibility field shape；本 FR 不冻结其 placement 或输出位置
 - `image_scenes` 不得作为 canonical identity anchor 的组成部分或额外 identity discriminator
 - 本 FR 不定义 detail compatibility、rejected-source matching、template reuse 或其他 request-context 语义；这些行为不属于已 merge 的 `#504` formal freeze，也不得由单独实现 PR 自行决定；若未来需要冻结，必须先通过 `#508` 对应的 formal spec review 在消费 `#504 + #505` 的前提下收口
+- 对 successor detail implementation path 而言，`#508` 之外还必须额外等待 `#510` 这条 required detail-path gate；`#510` 的 mandatory 范围不扩写成所有 shared reuse 语义的统一前置，本 FR 也不在此重述其 owning suite scope
 
 ### 3. observed request/artifact non-freeze boundary
 
@@ -107,6 +108,7 @@ type XhsDetailCanonicalIdentityAnchorV1 = {
 - compatibility、rejected-source matching、template reuse 等 reuse 语义
 
 在 `#508` formal freeze 合并前，任何实现 PR 都不得擅自定义或冻结上述语义。
+对 successor detail implementation path 而言，除 `#508` 外还必须继续等待 `#510` 这条 required detail-path gate；该 gate 只约束 detail path，不替代 `#508` 对 shared request-context 语义的 ownership，本 FR 不在此重述其 owning suite scope。
 
 本 FR 只回答 detail identity 问题；它不能被解读为完整 request-shape / reuse 语义的独立 formal owner，也不冻结 `source_note_id` 的 admitted canonical mapping。
 
@@ -122,6 +124,7 @@ type XhsDetailCanonicalIdentityAnchorV1 = {
 
 - 后续实现 PR 不得自行把 `image_scenes` 写入 identity
 - 后续实现 PR 不得在 `#508` formal freeze 前自行冻结 detail request-shape truth、shape_key、lookup slotting、route eligibility 或 reuse 语义
+- 后续实现 PR 不得在 `#510` formal freeze 前绕过这条 required detail-path gate
 - guardian finding 不能被“以后可能需要”替代当前 formal 结论
 
 ## GWT 验收场景
@@ -188,6 +191,7 @@ And 必须等待新的 spec 修订
 5. 后续实现 PR 不得以“当前 formal 未明确禁止”为由擅自把这些字段写入 identity，或把 `source_note_id` 的 canonical mapping / alias / derivation 关系倒推出为 formal truth。
 6. future identity expansion 或 request/artifact canonical mapping / alias freeze 的准入条件已明确为“仓库内 admission-ready evidence + 新 spec 修订”。
 7. detail request-shape truth、shape_key、lookup slotting、route eligibility 与 reuse 语义如需冻结，必须先经过 `#508` 对应的 formal spec review，不能由单独实现 PR 越权决定。
+8. successor detail implementation path 必须在消费 `#504 + #505` merged baselines 的前提下继续等待 `#508 + #510` 两条 open formal gate；其中 `#510` 只作为 required detail-path gate 引用，不在本 FR 内重述其 owning suite scope。
 
 ## 依赖与前置条件
 
@@ -199,6 +203,7 @@ And 必须等待新的 spec 修订
 - `docs/dev/specs/FR-0024-xhs-request-shape-truth/research.md`
 - GitHub issue `#504`（detail/user_home command surface 与 request-context baseline formal freeze）
 - GitHub issue `#508`（shared request-context reuse semantics 与 replacement implementation formal gate）
+- GitHub issue `#510`（successor detail implementation path 所需的 required detail-path gate；owning suite 继续以 `FR-0028` 为准）
 - `src/commands/xhs-input.ts`
 - `src/commands/xhs-runtime.ts`
 - `tests/content-script-handler.xhs-read.contract.test.ts`
