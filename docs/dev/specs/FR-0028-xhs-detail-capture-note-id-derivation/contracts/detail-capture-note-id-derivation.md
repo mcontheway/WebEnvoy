@@ -60,6 +60,7 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
 - `derived_note_id` 必须为 trim 后非空字符串。
 - admitted truth 只在 identifier field 出现在 current matcher 已接受的 detail response candidate record 上时成立。
 - 顶层 `body`、`body.data` 或其他嵌套 root 只要已经被 current matcher 接受为 detail response candidate record，均可进入这条 admitted truth；这些 root / path 的结构化表示当前仍属于实现细节，不在 current v1 正式契约中冻结。
+- wrapper-shaped root / record 只有在未被 current matcher 接受为 detail response candidate record 时，才落入 candidate-only；formal 不把所有 wrapper 一刀切排除出 admitted scope。
 - 当同一 response 中存在多个候选 source 时，只有命中 command-side canonical `note_id` 的 response candidate record 可以成为 admitted source；candidate-only source 不得覆盖该裁决。
 
 ## 4. Candidate-only derivation source
@@ -100,7 +101,8 @@ type XhsDetailResponseFieldStatusV1 =
 约束：
 
 - response-side `note_id` / `noteId` / `id` 只有在 current matcher 已接受的 detail response candidate record 上才是 admitted derivation source。
-- metadata / wrapper / echo field 上的 note-id-like 值当前只属于 candidate-only。
+- metadata field、echo field，以及 current matcher 未接受的 wrapper / record 上的 note-id-like 值当前只属于 candidate-only。
+- matcher 已接受的 wrapper-shaped response candidate record 不因“wrapper”身份被自动降级；只有 matcher 未接受的 wrapper / record 才落入 candidate-only。
 
 ## 6. 最小示例
 

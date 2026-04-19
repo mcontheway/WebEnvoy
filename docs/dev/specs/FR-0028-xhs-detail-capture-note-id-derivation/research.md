@@ -13,7 +13,7 @@
 
 - detail route request body 中的 `source_note_id`
 - referrer URL path / query 中的 note-id-like 片段
-- response metadata / wrapper 上的 note-id-like field
+- response metadata，以及 current matcher 未接受的 wrapper / record 上的 note-id-like field
 
 ### fallback
 
@@ -59,6 +59,7 @@
 - 只有当 response payload 中出现 current matcher 已接受的 detail response candidate record，且其 `note_id` / `noteId` / `id` 命中目标 `note_id` 时，才认定成功。
 - 本 FR 可以把 response-side detail response candidate record 上的 `note_id` / `noteId` / `id` 冻结为 current v1 唯一 admitted derivation source。
 - 对 `body` / `data` 自身的 admitted source，formal 必须与 current matcher 一致：只有当顶层 root 本身已被 `getDetailResponseCandidates()` 接受为 detail response candidate record 时，`self` 才允许 admitted。
+- 因此，wrapper exclusion 的正确边界只能是“current matcher 未接受的 wrapper / record”；若 wrapper-shaped root 已被 matcher 接受，它仍属于 admitted source scope。
 
 未解决问题 / 失效条件 / 后续动作：
 

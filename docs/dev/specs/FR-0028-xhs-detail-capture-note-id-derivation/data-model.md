@@ -26,12 +26,13 @@
 | --- | --- |
 | request-side `source_note_id` | candidate-only |
 | `referrer` | candidate-only |
-| response metadata / wrapper 上的 note-id-like field | candidate-only |
+| response metadata，以及 current matcher 未接受的 wrapper / record 上的 note-id-like field | candidate-only |
 
 约束：
 
 - 它们可以保留为 rejected / incompatible observation 的说明性证据。
 - 它们不构成 admitted canonical `note_id` truth。
+- matcher 已接受的 wrapper-shaped response candidate record 不落入这条 candidate-only 行；它们是否 admitted 仍只由“是否为 current matcher 已接受的 detail response candidate record”决定。
 - 它们与 slotting、miss-state、reuse 的正式关系不在本 FR 冻结。
 
 ## 不属于本 FR 的对象

@@ -12,7 +12,7 @@ Canonical Issue: #510
 
 - current implementation 与 in-tree tests 的 command-side canonical truth 仍只围绕 `note_id` 运转。
 - detail API candidate route 目前可见的 request-side 参数形态是 `source_note_id`，但 `FR-0005` 与 `FR-0026` 已明确这仍只是 candidate / failed / synthetic 层级事实，不足以单独冻结成 admitted canonical mapping。
-- current implementation 已经存在一条更窄、但可被 tests 支撑的 response-side truth：detail 请求返回成功时，只有当 response payload 中出现 current matcher 已接受的 detail response candidate record，且该 record 的 `note_id` / `noteId` / `id` 与目标 `note_id` 对齐，才会被认定为“包含目标 detail 数据”；metadata-only note id 不构成 success evidence。
+- current implementation 已经存在一条更窄、但可被 tests 支撑的 response-side truth：detail 请求返回成功时，只有当 response payload 中出现 current matcher 已接受的 detail response candidate record，且该 record 的 `note_id` / `noteId` / `id` 与目标 `note_id` 对齐，才会被认定为“包含目标 detail 数据”；metadata-only note id 不构成 success evidence，而 wrapper-shaped response root / record 只要仍被 current matcher 接受，就不能因“wrapper”身份被自动排除。
 
 因此，本 FR 的职责不是重写 `#505` 的 identity-only 结论，也不是提前冻结 `#508` 负责的 shared reuse semantics，而是补齐这条缺失的 formal owner：冻结 current v1 `xhs.detail` capture-side canonical `note_id` derivation 规则，明确 admitted template 可接受的 derivation source，明确 rejected / incompatible observation 可保留的 candidate 边界，并把 replacement implementation 的 detail formal gate 收口到可执行状态。
 
@@ -64,6 +64,7 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
 - `derived_note_id` 必须是 trim 后非空字符串。
 - 只有当该 response candidate record 的 `note_id` / `noteId` / `id` 命中目标 `note_id` 时，才允许进入 admitted template path。
 - 顶层 `body`、`body.data` 与 matcher 已接受的其他嵌套 root 都可以产生 admitted response candidate record；但这些 root / path 的结构化表示当前仍属于实现细节，不在 current v1 正式契约中冻结。
+- wrapper-shaped root / record 不因“wrapper”身份被一刀切排除；只有当该 wrapper / record 未被 current matcher 接受为 detail response candidate record 时，其 note-id-like field 才只能停留在 candidate-only。
 - metadata-only note id、route string、referrer、request-side body 字段都不能替代这条 admitted derivation source。
 - 当同一 response 中出现多个 note-id-bearing candidate record 时，只有与 command-side canonical `note_id` 一致的 response candidate record 才能进入 admitted path；candidate-only source 不得参与覆盖或纠偏这条判断。
 
@@ -144,6 +145,7 @@ type XhsDetailCandidateOnlyDerivationSourceV1 =
 - response-side detail response candidate record 上的 `note_id` / `noteId` / `id`，是 current v1 admitted canonical `note_id` derivation 的唯一 formal 来源。
 - 该 admitted truth 只在“这些字段出现在 current matcher 已接受的 detail response candidate record 上”时成立。
 - 如果相同字段只出现在 metadata、route echo，或出现在 current matcher 未接受的 wrapper / record 上，则当前只能视为 candidate-only observation，不得直接进入 admitted template。
+- 因此，wrapper note-id-like field 的排除边界是“matcher-unaccepted wrapper / record”，而不是所有 wrapper-shaped response root。
 
 补充约束：
 
@@ -182,7 +184,7 @@ And admitted template 可以基于这条 derivation source 建立 canonical `not
 ### 场景 2：metadata-only note id 不能构成 admitted derivation
 
 Given detail route 返回 `HTTP 200`
-And response 只在 metadata 或 wrapper 字段中出现 note-id-like 值
+And response 只在 metadata 或 current matcher 未接受的 wrapper 字段中出现 note-id-like 值
 And response 中不存在命中目标的 detail response candidate record
 When 系统执行 current v1 capture-side canonical `note_id` derivation
 Then 该 response 不得进入 admitted template
