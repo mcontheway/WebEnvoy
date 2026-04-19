@@ -46,7 +46,7 @@ type XhsDetailCaptureDerivationInputV1 = {
 - `command_note_id` 必填，且必须为 trim 后非空字符串；空值输入不能进入 admitted derivation。
 - `response_candidate_scope` 仅在 `response_note_candidate` 存在时有效；空值表示当前没有 admitted-grade response candidate。
 - `response_candidate_path` 记录 admitted note record 相对 scope root 的完整命中路径；例如 `data.items[*].note_card` 对应 `response_candidate_scope="data.items[*]"` 且 `response_candidate_path="note_card"`，而 `data.note_card.note` 对应 `response_candidate_scope="data.note_card"` 且 `response_candidate_path="note"`。
-- `response_candidate_path` 在存在时必须为 trim 后非空字符串；当 scope root 本身就是 admitted note record 时，使用 `self`。
+- `response_candidate_path` 在存在时必须为 trim 后非空字符串；当 scope root 本身就是 current main 已接受的 admitted detail candidate root 时，使用 `self`。
 - current v1 `response_candidate_path` 的 path segment 仍只允许来自当前实现已接受的 detail nested traversal key：`note`、`note_card`、`current_note`、`item`；但这些 segment 可以多跳组合，不能被 formal 收窄为单跳枚举。
 - `response_note_candidate` 为空时，当前输入最多只能导出 candidate-only evidence。
 - `request_candidate` 与 `response_metadata_candidate` 都是可选的说明性输入；它们不能单独生成 admitted truth。
@@ -82,7 +82,7 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
 - current v1 admitted template 只能消费这类 source。
 - `derived_note_id` 必须为 trim 后非空字符串。
 - admitted truth 只在 identifier field 出现在 detail note candidate record 上时成立。
-- `response_candidate_scope="data"` 且 `response_candidate_path="self"` 时，只允许用于 `data` 本身已经是 detail note record 的情形；wrapper-shaped `data` 容器必须保持 candidate-only。
+- `response_candidate_scope="data"` 且 `response_candidate_path="self"` 时，表示 `body.data` 自身就是 current main 已接受的 admitted detail candidate root；这既可以是 detail note record，也可以是当前 detail matcher 已接纳的 wrapper-shaped detail payload，只要该 root 自身携带命中的 `note_id` / `noteId` / `id`。
 - `response_candidate_path` 必须保留相对 scope root 的完整命中路径，不能把 multi-hop nested path 压缩成末级字段名。
 - current v1 `response_candidate_path` 的 path segment 仍只允许来自当前实现已接受的 detail nested traversal key：`note`、`note_card`、`current_note`、`item`；但这些 segment 可以多跳组合。
 - 因此，`data.items[*].note_card`、`data.notes[*].note_card`、`data.note_card.note` 等 current 行为已接受的 nested note-record source 仍属于 admitted truth。
