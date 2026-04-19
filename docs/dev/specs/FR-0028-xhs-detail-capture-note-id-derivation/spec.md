@@ -62,6 +62,12 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
     | "data.items[*]"
     | "data.notes[*]"
     | "detail_shaped_data_record";
+  response_candidate_path:
+    | "self"
+    | "note"
+    | "note_card"
+    | "current_note"
+    | "item";
   identifier_field: "note_id" | "noteId" | "id";
   derived_note_id: string;
 };
@@ -81,6 +87,13 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
   - `data.items[*]`
   - `data.notes[*]`
   - 已满足 detail-shaped 特征的 `data` record 本身
+- `response_candidate_path` 用于记录 admitted detail note record 相对其 scope root 的命中路径；current v1 允许：
+  - `self`
+  - `note`
+  - `note_card`
+  - `current_note`
+  - `item`
+- 因此，current v1 admitted source 明确覆盖 `data.items[*].note_card` 这类嵌套命中路径；只要最终命中的仍是 detail note candidate record，就属于本 FR 的 admitted truth。
 - detail-shaped record 的最小识别仍只允许依赖当前仓库内已出现的 detail 内容字段簇，例如 `title`、`desc`、`user`、`interact_info`、`image_list`、`video_info`、`note_card`、`note_card_list`；本 FR 不把更多未验证字段扩写成 admitted 条件。
 - metadata-only note id、route string、referrer、request-side body 字段都不能替代这条 admitted derivation source。
 - 当同一 response 中出现多个 note-id-bearing candidate record 时，只有与 command-side canonical `note_id` 一致的 response note record 才能进入 admitted path；candidate-only source 不得参与覆盖或纠偏这条判断。
