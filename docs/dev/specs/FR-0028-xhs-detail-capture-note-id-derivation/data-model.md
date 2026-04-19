@@ -20,6 +20,12 @@
 | `identifier_field` | 当前只允许 `note_id` / `noteId` / `id` |
 | `derived_note_id` | trim 后非空 canonical `note_id` |
 
+matcher boundary：
+
+- `body.data` 自身仅在 detail-shaped 时可作为 admitted candidate self root。
+- direct roots 只允许 `body.data.note`、`body.data.note_card`、`body.data.note_card_list[*]`、`body.data.current_note`、`body.data.item`、`body.data.items[*]`、`body.data.notes[*]`。
+- 只允许从这些已接受 candidate record 继续递归进入 `.note`、`.note_card`、`.current_note`、`.item`。
+
 ### 2. candidate-only observation
 
 | 对象 | 当前 formal 状态 |

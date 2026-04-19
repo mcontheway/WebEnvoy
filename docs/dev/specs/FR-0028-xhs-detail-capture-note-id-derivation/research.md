@@ -58,7 +58,8 @@
 - 当前实现不接受 metadata-only note id 作为 detail success evidence。
 - 只有当 response payload 中出现 current matcher 已接受的 detail response candidate record，且其 `note_id` / `noteId` / `id` 命中目标 `note_id` 时，才认定成功。
 - 本 FR 可以把 response-side detail response candidate record 上的 `note_id` / `noteId` / `id` 冻结为 current v1 唯一 admitted derivation source。
-- 对 `body` / `data` 自身的 admitted source，formal 必须与 current matcher 一致：只有当顶层 root 本身已被 `getDetailResponseCandidates()` 接受为 detail response candidate record 时，`self` 才允许 admitted。
+- 对 `body` / `data` 自身的 admitted source，formal 必须与 current matcher 一致：只有当顶层 `body.data` 本身已被 `getDetailResponseCandidates()` 作为 detail-shaped self root 接受时，`self` 才允许 admitted。
+- current matcher 的 admitted candidate 边界不是抽象的“任意 nested root”，而是可枚举的 root / path family：`body.data.note`、`body.data.note_card`、`body.data.note_card_list[*]`、`body.data.current_note`、`body.data.item`、`body.data.items[*]`、`body.data.notes[*]`，以及它们继续递归进入 `.note` / `.note_card` / `.current_note` / `.item` 的嵌套 record。
 - 因此，wrapper exclusion 的正确边界只能是“current matcher 未接受的 wrapper / record”；若 wrapper-shaped root 已被 matcher 接受，它仍属于 admitted source scope。
 
 未解决问题 / 失效条件 / 后续动作：

@@ -52,6 +52,19 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
   identifier_field: "note_id" | "noteId" | "id";
   derived_note_id: string;
 };
+
+type XhsDetailResponseCandidateRecordBoundaryV1 = {
+  self_root: "body.data(detail-shaped only)";
+  direct_roots:
+    | "body.data.note"
+    | "body.data.note_card"
+    | "body.data.note_card_list[*]"
+    | "body.data.current_note"
+    | "body.data.item"
+    | "body.data.items[*]"
+    | "body.data.notes[*]";
+  recursive_nested_keys: "note" | "note_card" | "current_note" | "item";
+};
 ```
 
 约束：
@@ -59,7 +72,8 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
 - current v1 admitted template 只能消费这类 source。
 - `derived_note_id` 必须为 trim 后非空字符串。
 - admitted truth 只在 identifier field 出现在 current matcher 已接受的 detail response candidate record 上时成立。
-- 顶层 `body`、`body.data` 或其他嵌套 root 只要已经被 current matcher 接受为 detail response candidate record，均可进入这条 admitted truth；这些 root / path 的结构化表示当前仍属于实现细节，不在 current v1 正式契约中冻结。
+- current v1 formal contract 必须显式冻结 response candidate matcher 边界：`body.data` 自身仅在 detail-shaped 时可作为 self root；direct roots 只允许 `body.data.note`、`body.data.note_card`、`body.data.note_card_list[*]`、`body.data.current_note`、`body.data.item`、`body.data.items[*]`、`body.data.notes[*]`；并且只允许从这些已接受 candidate record 继续递归进入 `.note`、`.note_card`、`.current_note`、`.item`。
+- 因此，当前 tests 已接纳的 wrapped detail payload，例如 `body.data.items[*].note_card`，属于 admitted response candidate scope；formal 不再把这类 wrapped root / path 留作 implementation detail。
 - wrapper-shaped root / record 只有在未被 current matcher 接受为 detail response candidate record 时，才落入 candidate-only；formal 不把所有 wrapper 一刀切排除出 admitted scope。
 - 当同一 response 中存在多个候选 source 时，只有命中 command-side canonical `note_id` 的 response candidate record 可以成为 admitted source；candidate-only source 不得覆盖该裁决。
 

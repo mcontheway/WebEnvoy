@@ -63,7 +63,17 @@ type XhsDetailAdmittedCanonicalNoteIdSourceV1 = {
 - admitted template 只能从 response-side detail response candidate record 导出 canonical `note_id`。
 - `derived_note_id` 必须是 trim 后非空字符串。
 - 只有当该 response candidate record 的 `note_id` / `noteId` / `id` 命中目标 `note_id` 时，才允许进入 admitted template path。
-- 顶层 `body`、`body.data` 与 matcher 已接受的其他嵌套 root 都可以产生 admitted response candidate record；但这些 root / path 的结构化表示当前仍属于实现细节，不在 current v1 正式契约中冻结。
+- current v1 admitted response candidate record 的 matcher 边界必须冻结到以下 root / path family：
+  - `body.data` 自身，但仅限它本身已经呈现 current detail data shape 时
+  - `body.data.note`
+  - `body.data.note_card`
+  - `body.data.note_card_list[*]`
+  - `body.data.current_note`
+  - `body.data.item`
+  - `body.data.items[*]`
+  - `body.data.notes[*]`
+  - 从上述任一已接受 candidate record 继续递归进入 `.note`、`.note_card`、`.current_note`、`.item` 的嵌套 record
+- 因此，当前已被 tests 接纳的 wrapped detail payload，例如 `body.data.items[*].note_card`，属于 admitted response candidate record 的 formal scope，而不再停留在 implementation detail。
 - wrapper-shaped root / record 不因“wrapper”身份被一刀切排除；只有当该 wrapper / record 未被 current matcher 接受为 detail response candidate record 时，其 note-id-like field 才只能停留在 candidate-only。
 - metadata-only note id、route string、referrer、request-side body 字段都不能替代这条 admitted derivation source。
 - 当同一 response 中出现多个 note-id-bearing candidate record 时，只有与 command-side canonical `note_id` 一致的 response candidate record 才能进入 admitted path；candidate-only source 不得参与覆盖或纠偏这条判断。
@@ -145,6 +155,7 @@ type XhsDetailCandidateOnlyDerivationSourceV1 =
 - response-side detail response candidate record 上的 `note_id` / `noteId` / `id`，是 current v1 admitted canonical `note_id` derivation 的唯一 formal 来源。
 - 该 admitted truth 只在“这些字段出现在 current matcher 已接受的 detail response candidate record 上”时成立。
 - 如果相同字段只出现在 metadata、route echo，或出现在 current matcher 未接受的 wrapper / record 上，则当前只能视为 candidate-only observation，不得直接进入 admitted template。
+- current matcher 已接受的 detail response candidate record 边界，必须至少覆盖 `body.data` 的 detail-shaped self root、`body.data.note`、`body.data.note_card`、`body.data.note_card_list[*]`、`body.data.current_note`、`body.data.item`、`body.data.items[*]`、`body.data.notes[*]`，以及它们继续递归进入 `.note` / `.note_card` / `.current_note` / `.item` 的嵌套 record。
 - 因此，wrapper note-id-like field 的排除边界是“matcher-unaccepted wrapper / record”，而不是所有 wrapper-shaped response root。
 
 补充约束：
