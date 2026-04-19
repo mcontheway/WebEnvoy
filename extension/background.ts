@@ -53,8 +53,7 @@ import type { EditorInputFocusAttestation } from "./xhs-editor-input.js";
 import {
   DETAIL_ENDPOINT,
   SEARCH_ENDPOINT,
-  USER_HOME_ENDPOINT,
-  WEBENVOY_SYNTHETIC_REQUEST_HEADER
+  USER_HOME_ENDPOINT
 } from "./xhs-search-types.js";
 
 type BridgeRequest = {
@@ -121,13 +120,6 @@ const readTimeoutMs = (value: unknown): number | null => {
   }
   return Math.floor(value);
 };
-
-const withSyntheticMainWorldRequestHeader = (
-  headers: Record<string, string>
-): Record<string, string> => ({
-  ...headers,
-  [WEBENVOY_SYNTHETIC_REQUEST_HEADER]: "1"
-});
 
 const hashMainWorldBridgeProbeSecret = (value: string): string => {
   let hash = 0x811c9dc5;
@@ -4720,6 +4712,23 @@ class ChromeBackgroundBridge {
             (entry): entry is [string, string] => typeof entry[1] === "string"
           )
         );
+        const syntheticQueueSymbol = Symbol.for("webenvoy.main_world.synthetic_request_queue.v1");
+        const syntheticRequestId =
+          typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : `synthetic-${Date.now()}`;
+        const globalRecord = window as unknown as Window & Record<string | symbol, unknown>;
+        const currentQueue = Array.isArray(globalRecord[syntheticQueueSymbol])
+          ? ([...globalRecord[syntheticQueueSymbol]] as Array<Record<string, unknown>>)
+          : [];
+        let parsedRequestBody: unknown = null;
+        if (typeof requestBody === "string" && requestBody.length > 0) {
+          try {
+            parsedRequestBody = JSON.parse(requestBody);
+          } catch {
+            parsedRequestBody = requestBody;
+          }
+        }
         const timeoutMs =
           typeof requestTimeoutMs === "number" && Number.isFinite(requestTimeoutMs)
             ? Math.max(1, Math.trunc(requestTimeoutMs))
@@ -4728,6 +4737,14 @@ class ChromeBackgroundBridge {
         const timer = setTimeout(() => {
           controller.abort();
         }, timeoutMs);
+        currentQueue.push({
+          id: syntheticRequestId,
+          method: requestMethod === "GET" ? "GET" : "POST",
+          url: String(requestUrl),
+          body: parsedRequestBody,
+          expires_at: Date.now() + timeoutMs
+        });
+        globalRecord[syntheticQueueSymbol] = currentQueue;
         try {
           const response = await fetch(String(requestUrl), {
             method: requestMethod === "GET" ? "GET" : "POST",
@@ -4754,6 +4771,16 @@ class ChromeBackgroundBridge {
             body
           };
         } finally {
+          const remainingQueue = Array.isArray(globalRecord[syntheticQueueSymbol])
+            ? (globalRecord[syntheticQueueSymbol] as Array<Record<string, unknown>>).filter(
+                (entry) => entry?.id !== syntheticRequestId
+              )
+            : [];
+          if (remainingQueue.length === 0) {
+            delete globalRecord[syntheticQueueSymbol];
+          } else {
+            globalRecord[syntheticQueueSymbol] = remainingQueue;
+          }
           clearTimeout(timer);
         }
       },
@@ -4846,7 +4873,7 @@ class ChromeBackgroundBridge {
       const result = await this.#executeXhsRequestInMainWorld(tabId, {
         url: parsedRequestUrl.toString(),
         method: message.method,
-        headers: withSyntheticMainWorldRequestHeader(message.headers),
+        headers: message.headers,
         ...(typeof message.body === "string" ? { body: message.body } : {}),
         timeoutMs: readTimeoutMs(message.timeout_ms) ?? 5_000,
         ...(typeof message.referrer === "string" ? { referrer: message.referrer } : {}),

@@ -366,8 +366,7 @@ describe("extension service worker / signature and editor input", () => {
           {
             "Content-Type": "application/json;charset=utf-8",
             "X-s": "signed",
-            "X-t": "1700000000",
-            "x-webenvoy-synthetic-request": "1"
+            "X-t": "1700000000"
           },
           "{\"keyword\":\"露营\"}",
           7_000,
@@ -489,8 +488,7 @@ describe("extension service worker / signature and editor input", () => {
           {
             "Content-Type": "application/json;charset=utf-8",
             "X-s": "signed",
-            "X-t": "1700000000",
-            "x-webenvoy-synthetic-request": "1"
+            "X-t": "1700000000"
           },
           "{\"source_note_id\":\"note-001\"}",
           7_000,
@@ -509,8 +507,7 @@ describe("extension service worker / signature and editor input", () => {
           "GET",
           {
             "X-s": "signed",
-            "X-t": "1700000001",
-            "x-webenvoy-synthetic-request": "1"
+            "X-t": "1700000001"
           },
           undefined,
           7_000,

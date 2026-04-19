@@ -7,7 +7,7 @@ import { WRITE_INTERACTION_TIER, APPROVAL_CHECK_KEYS, EXECUTION_MODES, buildRisk
 import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 import { buildXhsGatePolicyState, buildIssue209PostGateArtifacts, collectXhsCommandGateReasons, evaluateXhsGate, collectXhsMatrixGateReasons, finalizeXhsGateOutcome, resolveXhsGateApprovalId, resolveXhsGateDecisionId, resolveXhsActionType, resolveXhsExecutionMode, normalizeXhsApprovalRecord } from "../shared/xhs-gate.js";
 import { ExtensionContractError, validateXhsCommandInputForExtension } from "./xhs-command-contract.js";
-import { DETAIL_ENDPOINT, SEARCH_ENDPOINT, USER_HOME_ENDPOINT, WEBENVOY_SYNTHETIC_REQUEST_HEADER } from "./xhs-search-types.js";
+import { DETAIL_ENDPOINT, SEARCH_ENDPOINT, USER_HOME_ENDPOINT } from "./xhs-search-types.js";
 const defaultForwardTimeoutMs = 3_000;
 const defaultHandshakeTimeoutMs = 30_000;
 const defaultNativeHostName = "com.webenvoy.host";
@@ -36,10 +36,6 @@ const readTimeoutMs = (value) => {
     }
     return Math.floor(value);
 };
-const withSyntheticMainWorldRequestHeader = (headers) => ({
-    ...headers,
-    [WEBENVOY_SYNTHETIC_REQUEST_HEADER]: "1"
-});
 const hashMainWorldBridgeProbeSecret = (value) => {
     let hash = 0x811c9dc5;
     for (let index = 0; index < value.length; index += 1) {
@@ -3682,6 +3678,23 @@ class ChromeBackgroundBridge {
                     : null;
                 const headersRecord = asRecord(requestHeaders) ?? {};
                 const headers = Object.fromEntries(Object.entries(headersRecord).filter((entry) => typeof entry[1] === "string"));
+                const syntheticQueueSymbol = Symbol.for("webenvoy.main_world.synthetic_request_queue.v1");
+                const syntheticRequestId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                    ? crypto.randomUUID()
+                    : `synthetic-${Date.now()}`;
+                const globalRecord = window;
+                const currentQueue = Array.isArray(globalRecord[syntheticQueueSymbol])
+                    ? [...globalRecord[syntheticQueueSymbol]]
+                    : [];
+                let parsedRequestBody = null;
+                if (typeof requestBody === "string" && requestBody.length > 0) {
+                    try {
+                        parsedRequestBody = JSON.parse(requestBody);
+                    }
+                    catch {
+                        parsedRequestBody = requestBody;
+                    }
+                }
                 const timeoutMs = typeof requestTimeoutMs === "number" && Number.isFinite(requestTimeoutMs)
                     ? Math.max(1, Math.trunc(requestTimeoutMs))
                     : 5_000;
@@ -3689,6 +3702,14 @@ class ChromeBackgroundBridge {
                 const timer = setTimeout(() => {
                     controller.abort();
                 }, timeoutMs);
+                currentQueue.push({
+                    id: syntheticRequestId,
+                    method: requestMethod === "GET" ? "GET" : "POST",
+                    url: String(requestUrl),
+                    body: parsedRequestBody,
+                    expires_at: Date.now() + timeoutMs
+                });
+                globalRecord[syntheticQueueSymbol] = currentQueue;
                 try {
                     const response = await fetch(String(requestUrl), {
                         method: requestMethod === "GET" ? "GET" : "POST",
@@ -3717,6 +3738,15 @@ class ChromeBackgroundBridge {
                     };
                 }
                 finally {
+                    const remainingQueue = Array.isArray(globalRecord[syntheticQueueSymbol])
+                        ? globalRecord[syntheticQueueSymbol].filter((entry) => entry?.id !== syntheticRequestId)
+                        : [];
+                    if (remainingQueue.length === 0) {
+                        delete globalRecord[syntheticQueueSymbol];
+                    }
+                    else {
+                        globalRecord[syntheticQueueSymbol] = remainingQueue;
+                    }
                     clearTimeout(timer);
                 }
             },
@@ -3796,7 +3826,7 @@ class ChromeBackgroundBridge {
             const result = await this.#executeXhsRequestInMainWorld(tabId, {
                 url: parsedRequestUrl.toString(),
                 method: message.method,
-                headers: withSyntheticMainWorldRequestHeader(message.headers),
+                headers: message.headers,
                 ...(typeof message.body === "string" ? { body: message.body } : {}),
                 timeoutMs: readTimeoutMs(message.timeout_ms) ?? 5_000,
                 ...(typeof message.referrer === "string" ? { referrer: message.referrer } : {}),

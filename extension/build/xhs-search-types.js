@@ -9,5 +9,15 @@ export const CAPTURED_REQUEST_CONTEXT_PATHS = [
 export const WEBENVOY_SYNTHETIC_REQUEST_HEADER = "x-webenvoy-synthetic-request";
 export const createPageContextNamespace = (href) => {
     const normalized = href.trim();
-    return normalized.length > 0 ? normalized : "about:blank";
+    if (normalized.length === 0) {
+        return "about:blank";
+    }
+    try {
+        const parsed = new URL(normalized, "https://www.xiaohongshu.com/");
+        const pathname = parsed.pathname.length > 0 ? parsed.pathname : "/";
+        return `${parsed.origin}${pathname}`;
+    }
+    catch {
+        return normalized;
+    }
 };

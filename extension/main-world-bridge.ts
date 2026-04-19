@@ -99,6 +99,17 @@ const capturedRequestContextPathSet = new Set<string>(CAPTURED_REQUEST_CONTEXT_P
 const FETCH_CAPTURE_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.capture.fetch.v1");
 const XHR_CAPTURE_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.capture.xhr.v1");
 const XHR_CAPTURE_STATE_SYMBOL = Symbol.for("webenvoy.main_world.capture.xhr_state.v1");
+const SYNTHETIC_REQUEST_QUEUE_SYMBOL = Symbol.for(
+  "webenvoy.main_world.synthetic_request_queue.v1"
+);
+
+type SyntheticRequestQueueEntry = {
+  id: string;
+  method: CapturedRequestContextMethod;
+  url: string;
+  body: unknown;
+  expires_at: number;
+};
 
 const DEFAULT_PLUGIN_DESCRIPTORS = [
   {
@@ -514,6 +525,68 @@ const isSyntheticRequest = (headers: Record<string, string>): boolean => {
   return normalized === "1" || normalized === "true" || normalized === "yes";
 };
 
+const getSyntheticRequestQueue = (): SyntheticRequestQueueEntry[] => {
+  const globalRecord = globalThis as typeof globalThis & {
+    [SYNTHETIC_REQUEST_QUEUE_SYMBOL]?: unknown;
+  };
+  const queue = globalRecord[SYNTHETIC_REQUEST_QUEUE_SYMBOL];
+  if (!Array.isArray(queue)) {
+    return [];
+  }
+  return queue.filter((entry): entry is SyntheticRequestQueueEntry => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      return false;
+    }
+    const record = entry as Record<string, unknown>;
+    return (
+      typeof record.id === "string" &&
+      (record.method === "POST" || record.method === "GET") &&
+      typeof record.url === "string" &&
+      typeof record.expires_at === "number"
+    );
+  });
+};
+
+const setSyntheticRequestQueue = (queue: SyntheticRequestQueueEntry[]): void => {
+  const globalRecord = globalThis as typeof globalThis & {
+    [SYNTHETIC_REQUEST_QUEUE_SYMBOL]?: unknown;
+  };
+  if (queue.length === 0) {
+    delete globalRecord[SYNTHETIC_REQUEST_QUEUE_SYMBOL];
+    return;
+  }
+  globalRecord[SYNTHETIC_REQUEST_QUEUE_SYMBOL] = queue;
+};
+
+const consumePendingSyntheticRequest = (input: {
+  method: CapturedRequestContextMethod;
+  url: string;
+  body: unknown;
+}): boolean => {
+  const now = Date.now();
+  const queue = getSyntheticRequestQueue();
+  if (queue.length === 0) {
+    return false;
+  }
+
+  const serializedBody = JSON.stringify(input.body ?? null);
+  let matched = false;
+  const remaining = queue.filter((entry) => {
+    if (entry.expires_at <= now) {
+      return false;
+    }
+    if (!matched && entry.method === input.method && entry.url === input.url) {
+      if (JSON.stringify(entry.body ?? null) === serializedBody) {
+        matched = true;
+        return false;
+      }
+    }
+    return true;
+  });
+  setSyntheticRequestQueue(remaining);
+  return matched;
+};
+
 const shouldCaptureRequest = (path: string): boolean => capturedRequestContextPathSet.has(path);
 
 const resolveLatestBucketArtifact = (bucket: CapturedContextBucket): CapturedRequestContextArtifact | null => {
@@ -654,14 +727,21 @@ const resolveFetchCandidate = async (
       : isRequestLike(input) && typeof input.clone === "function"
         ? await input.clone().text().catch(() => null)
         : null;
+  const body = await readArtifactPayload(bodySource);
   return {
     transport: "fetch",
     method,
     path,
     url,
     headers,
-    body: await readArtifactPayload(bodySource),
-    synthetic: isSyntheticRequest(headers)
+    body,
+    synthetic:
+      isSyntheticRequest(headers) ||
+      consumePendingSyntheticRequest({
+        method,
+        url,
+        body
+      })
   };
 };
 
