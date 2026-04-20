@@ -4090,7 +4090,21 @@ class ChromeBackgroundBridge {
     }
     async #hasContentScriptReceiver(tabId) {
         try {
-            await this.chromeApi.tabs.sendMessage(tabId, { kind: "__webenvoy_content_script_probe__" });
+            await this.chromeApi.tabs.sendMessage(tabId, {
+                kind: "forward",
+                id: "__webenvoy_content_script_probe__",
+                runId: "__webenvoy_content_script_probe__",
+                tabId,
+                profile: null,
+                cwd: "",
+                timeoutMs: 50,
+                command: "runtime.ping",
+                params: {},
+                commandParams: {
+                    simulate_no_response: true
+                },
+                fingerprintContext: null
+            });
             return true;
         }
         catch {

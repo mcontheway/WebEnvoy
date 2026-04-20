@@ -8699,6 +8699,7 @@ const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payl
 const EXTENSION_BOOTSTRAP_FILENAME = "__webenvoy_fingerprint_bootstrap.json";
 const STARTUP_TRUST_SOURCE = "extension_bootstrap_context";
 const MAIN_WORLD_SECRET_NAMESPACE = "webenvoy.main_world.secret.v1";
+const CONTENT_SCRIPT_BOOTSTRAP_STATE_KEY = "__webenvoy_content_script_bootstrap_state__";
 const STAGED_STARTUP_TRUST_RUN_ID = undefined;
 const STAGED_STARTUP_TRUST_SESSION_ID = undefined;
 const STAGED_STARTUP_TRUST_FINGERPRINT_RUNTIME = undefined;
@@ -9034,6 +9035,13 @@ const bootstrapContentScript = (runtime) => {
     if (!runtime.onMessage?.addListener || !runtime.sendMessage) {
         return false;
     }
+    const bootstrapStateHost = globalThis;
+    if (bootstrapStateHost[CONTENT_SCRIPT_BOOTSTRAP_STATE_KEY]?.bootstrapped) {
+        return true;
+    }
+    bootstrapStateHost[CONTENT_SCRIPT_BOOTSTRAP_STATE_KEY] = {
+        bootstrapped: true
+    };
     const handler = new ContentScriptHandler();
     const bootstrapPayload = readBootstrapFingerprintContext();
     const bootstrapInput = resolveBootstrapFingerprintContext(bootstrapPayload);
