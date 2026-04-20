@@ -458,6 +458,34 @@ describe("content-script bootstrap contract", () => {
     expect(activationSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("activates request-context capture when the bootstrap channel installs through a staged fallback secret", async () => {
+    const context = createFingerprintContext();
+    (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = {
+      run_id: "run-bootstrap-fallback-capture-001",
+      runtime_context_id: "ctx-bootstrap-fallback-capture-001",
+      session_id: "nm-session-001",
+      fingerprint_runtime: context
+    };
+    const sessionStorage = createSessionStorage();
+    const { window } = createStartupInstallProbeWindow(sessionStorage);
+    (globalThis as { window?: unknown }).window = window;
+
+    const installChannelSpy = vi
+      .spyOn(contentScriptHandlerModule, "installMainWorldEventChannelSecret")
+      .mockReturnValue(true);
+    const activationSpy = vi
+      .spyOn(contentScriptHandlerModule, "activateCapturedRequestContextCaptureViaMainWorld")
+      .mockResolvedValue(true);
+    const { runtime } = createRuntime();
+
+    expect(bootstrapContentScript(runtime)).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(installChannelSpy).toHaveBeenCalledWith(expect.any(String));
+    expect(activationSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("does not install fingerprint patch during bootstrap when startup payload is missing", async () => {
     const sessionStorage = createSessionStorage();
     const { window, startupInstallRequests } = createStartupInstallProbeWindow(sessionStorage);

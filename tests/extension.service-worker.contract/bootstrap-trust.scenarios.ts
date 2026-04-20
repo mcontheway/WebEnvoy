@@ -751,6 +751,86 @@ describe("extension service worker recovery contract / bootstrap and trust", () 
 
   });
 
+  it("prepares xhs read-tab capture before returning a ready runtime.bootstrap ack", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.sendMessage = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Could not establish connection. Receiving end does not exist."));
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-bootstrap-ready-read-prep-001",
+      runtimeContextId: "ctx-bootstrap-ready-read-prep-001",
+      profile: "profile-a",
+      sessionId: "nm-session-001",
+      fingerprintContext,
+      tabId: 11,
+      tabUrl: "https://www.xiaohongshu.com/search_result?keyword=AI"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-ready-read-prep-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-ready-read-prep-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-ready-read-prep-001",
+          runtime_context_id: "ctx-bootstrap-ready-read-prep-001",
+          profile: "profile-a",
+          target_tab_id: 11,
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-ready-read-prep-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-ready-read-prep-001",
+      status: "success",
+      payload: expect.objectContaining({
+        method: "runtime.bootstrap.ack",
+        result: expect.objectContaining({
+          status: "ready"
+        })
+      })
+    });
+
+    expect(executeScript).toHaveBeenCalledWith({
+      target: { tabId: 11 },
+      world: "MAIN",
+      files: ["build/main-world-bridge.js"]
+    });
+    expect(executeScript).toHaveBeenCalledWith({
+      target: { tabId: 11 },
+      world: "ISOLATED",
+      files: ["build/content-script.js"]
+    });
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalledWith(
+      11,
+      expect.objectContaining({
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
   it("keeps issue_208 xhs.search blocked after bootstrap trust when editor attestation is still missing", async () => {
     const firstPort = createMockPort();
     const { chromeApi, executeScript, runtimeMessageListeners } = createChromeApi([firstPort]);
