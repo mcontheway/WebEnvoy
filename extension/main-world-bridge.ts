@@ -356,9 +356,21 @@ const parseDetailShape = (
   templateReady: boolean
 ): CapturedContextShape | null => {
   const record = asRecord(requestBody);
-  const noteId =
+  const requestedNoteId =
     (record ? toTrimmedString(record.note_id) : null) ??
-    resolveDetailResponseNoteId(responseBody) ??
+    (record ? toTrimmedString(record.source_note_id) : null);
+  const responseNoteId = resolveDetailResponseNoteId(responseBody);
+  if (
+    templateReady &&
+    requestedNoteId &&
+    responseNoteId &&
+    requestedNoteId !== responseNoteId
+  ) {
+    return null;
+  }
+  const noteId =
+    requestedNoteId ??
+    responseNoteId ??
     (!templateReady && record ? toTrimmedString(record.source_note_id) : null);
   if (!noteId) {
     return null;
@@ -697,7 +709,7 @@ const storeCapturedRequestContext = (
         : {}),
     request_status: {
       completion: templateReady ? "completed" : "failed",
-      http_status: input.status
+      http_status: input.status > 0 ? input.status : null
     },
     request: {
       headers: candidate.headers,
@@ -727,7 +739,9 @@ const resolveFetchCandidate = async (
   const baseHeaders = isRequestLike(input) ? headersToRecord(input.headers) : {};
   const initHeaders = headersToRecord(init?.headers);
   const headers = mergeHeaders(baseHeaders, initHeaders);
-  const method = normalizeCapturedRequestMethod(init?.method ?? (isRequestLike(input) ? input.method : null));
+  const method = normalizeCapturedRequestMethod(
+    init?.method ?? (isRequestLike(input) ? input.method : "GET")
+  );
   if (!method) {
     return null;
   }
@@ -781,6 +795,27 @@ const captureFetchResponse = async (
   });
 };
 
+const captureFetchFailure = (
+  candidate: CapturedRequestCandidate,
+  error: unknown
+): void => {
+  storeCapturedRequestContext(candidate, {
+    status: 0,
+    responseHeaders: {},
+    responseBody: {
+      error:
+        error instanceof Error
+          ? {
+              name: error.name,
+              message: error.message
+            }
+          : {
+              message: String(error)
+            }
+    }
+  });
+};
+
 const installFetchCapture = (): void => {
   const originalFetch = window.fetch;
   if (typeof originalFetch !== "function") {
@@ -795,11 +830,18 @@ const installFetchCapture = (): void => {
 
   const patchedFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const candidate = await resolveFetchCandidate(input, init);
-    const response = await originalFetch.call(window, input, init);
-    if (candidate) {
-      await captureFetchResponse(candidate, response);
+    try {
+      const response = await originalFetch.call(window, input, init);
+      if (candidate) {
+        await captureFetchResponse(candidate, response);
+      }
+      return response;
+    } catch (error) {
+      if (candidate) {
+        captureFetchFailure(candidate, error);
+      }
+      throw error;
     }
-    return response;
   };
   Object.defineProperty(patchedFetch, FETCH_CAPTURE_PATCH_SYMBOL, {
     configurable: false,
