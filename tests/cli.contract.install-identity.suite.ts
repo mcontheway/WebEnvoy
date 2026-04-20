@@ -2251,6 +2251,7 @@ describe("webenvoy cli contract / install and identity", () => {
 
   it("supports runtime.start and runtime.status with profile lock and meta state", async () => {
     const runtimeCwd = await createRuntimeCwd();
+    const runtimeEnv = { WEBENVOY_BROWSER_MOCK_TTL: "10" };
     const start = runCli(
       [
         "runtime.start",
@@ -2261,7 +2262,8 @@ describe("webenvoy cli contract / install and identity", () => {
         "--params",
         '{"proxyUrl":"http://127.0.0.1:8080"}'
       ],
-      runtimeCwd
+      runtimeCwd,
+      runtimeEnv
     );
     expect(start.status).toBe(0);
     const startBody = parseSingleJsonLine(start.stdout);
@@ -2277,7 +2279,11 @@ describe("webenvoy cli contract / install and identity", () => {
       }
     });
 
-    const status = runCli(["runtime.status", "--profile", "default", "--run-id", "run-contract-100"], runtimeCwd);
+    const status = runCli(
+      ["runtime.status", "--profile", "default", "--run-id", "run-contract-100"],
+      runtimeCwd,
+      runtimeEnv
+    );
     expect(status.status).toBe(0);
     const statusBody = parseSingleJsonLine(status.stdout);
     expect(statusBody).toMatchObject({
