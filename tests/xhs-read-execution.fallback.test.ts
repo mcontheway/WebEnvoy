@@ -750,6 +750,11 @@ describe("xhs read execution fallback", () => {
       }
     });
     expect(result.error.message).toBe("当前页面现场缺少可复用的 xhs.detail 请求上下文");
+    expect(result.payload.details).toMatchObject({
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "miss",
+      request_context_miss_reason: "template_missing"
+    });
     expect(callSignature).not.toHaveBeenCalled();
     expect(fetchJson).not.toHaveBeenCalled();
   });
@@ -899,6 +904,11 @@ describe("xhs read execution fallback", () => {
       }
     });
     expect(result.error.message).toBe("当前页面现场缺少可复用的 xhs.user_home 请求上下文");
+    expect(result.payload.details).toMatchObject({
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "miss",
+      request_context_miss_reason: "template_missing"
+    });
     expect(callSignature).not.toHaveBeenCalled();
     expect(fetchJson).not.toHaveBeenCalled();
   });

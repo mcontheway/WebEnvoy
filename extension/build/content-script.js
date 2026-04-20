@@ -5642,7 +5642,7 @@ const resolveDetailResponseNoteId = (value) => {
         return null;
     }
     for (const candidate of getDetailResponseCandidates(record)) {
-        const candidateNoteId = asString(candidate.note_id) ?? asString(candidate.id);
+        const candidateNoteId = asString(candidate.note_id) ?? asString(candidate.noteId) ?? asString(candidate.id);
         if (candidateNoteId) {
             return candidateNoteId;
         }
@@ -6151,7 +6151,8 @@ const createPageStateFallbackFailure = (input, spec, gate, auditRecord, env, pay
     return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", requestFailure.message, {
         ability_id: input.abilityId,
         stage: "execution",
-        reason: requestFailure.reason
+        reason: requestFailure.reason,
+        ...(requestFailure.requestContextDetails ?? {})
     }, {
         page_state: {
             page_kind: classifyPageKind(env.getLocationHref(), spec.pageKind),
@@ -6519,7 +6520,19 @@ const executeXhsRead = async (input, spec, env) => {
                 message: isIncompatible
                     ? `当前页面现场不存在与 ${spec.command} 完全一致的请求上下文`
                     : `当前页面现场缺少可复用的 ${spec.command} 请求上下文`,
-                detail: requestContextResult.reason
+                detail: requestContextResult.reason,
+                requestContextDetails: {
+                    request_context_result: isIncompatible
+                        ? "request_context_incompatible"
+                        : "request_context_missing",
+                    request_context_lookup_state: requestContextResult.state,
+                    request_context_miss_reason: requestContextResult.reason,
+                    request_context_shape: expectedShape,
+                    request_context_shape_key: serializeReadShape(expectedShape),
+                    ...("shape" in requestContextResult && requestContextResult.shape
+                        ? { captured_request_shape: requestContextResult.shape }
+                        : {})
+                }
             });
         }
         return failClosedForRequestContext({

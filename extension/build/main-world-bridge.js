@@ -209,7 +209,9 @@ const resolveDetailResponseNoteId = (value) => {
         return null;
     }
     for (const candidate of getAcceptedDetailResponseCandidates(record)) {
-        const candidateNoteId = toTrimmedString(candidate.note_id) ?? toTrimmedString(candidate.id);
+        const candidateNoteId = toTrimmedString(candidate.note_id) ??
+            toTrimmedString(candidate.noteId) ??
+            toTrimmedString(candidate.id);
         if (candidateNoteId) {
             return candidateNoteId;
         }
