@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS } from "../extension/request-context-wait-policy.js";
 import { executeXhsDetail } from "../extension/xhs-detail.js";
 import { executeXhsUserHome } from "../extension/xhs-user-home.js";
 import type {
@@ -357,6 +358,51 @@ describe("xhs read request-context exact-shape reuse", () => {
     expect(result.ok).toBe(true);
     expect(readCapturedRequestContext).toHaveBeenCalledTimes(3);
     expect(sleep).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps polling detail context until the last shared wait attempt before failing closed", async () => {
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          note: {
+            note_id: "note-001"
+          }
+        }
+      }
+    }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+    let lookupCount = 0;
+    const sleep = vi.fn(async () => {});
+    const readCapturedRequestContext = vi.fn(async () => {
+      lookupCount += 1;
+      return lookupCount < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS ? null : createDetailArtifact();
+    });
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-context-last-attempt-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-context-last-attempt-001")
+      },
+      createEnvironment({
+        sleep,
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(readCapturedRequestContext).toHaveBeenCalledTimes(REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS);
+    expect(sleep).toHaveBeenCalledTimes(REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS - 1);
   });
 
   it("fails closed for detail when captured note_id shape mismatches", async () => {
@@ -722,6 +768,82 @@ describe("xhs read request-context exact-shape reuse", () => {
       request_context_result: "request_context_missing",
       request_context_lookup_state: "rejected_source",
       request_context_miss_reason: "failed_request_rejected"
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for detail when newer mismatch evidence invalidates an older admitted template", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+    const admittedTemplate = createDetailArtifact({
+      captured_at: 1_710_000_000_000,
+      observed_at: 1_710_000_000_000
+    });
+    const incompatibleObservation = createDetailArtifact({
+      captured_at: 1_710_000_050_000,
+      observed_at: 1_710_000_050_000,
+      template_ready: false,
+      rejection_reason: "shape_mismatch",
+      shape_key:
+        '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-999"}',
+      shape: {
+        command: "xhs.detail",
+        method: "POST",
+        pathname: "/api/sns/web/v1/feed",
+        note_id: "note-999"
+      },
+      response: {
+        headers: {},
+        body: {
+          code: 0,
+          data: {
+            items: [
+              {
+                note_card: {
+                  note_id: "note-999"
+                }
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-context-newer-mismatch-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-context-newer-mismatch-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => ({
+          page_context_namespace: "detail-page",
+          shape_key:
+            '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}',
+          admitted_template: admittedTemplate,
+          rejected_observation: null,
+          incompatible_observation: incompatibleObservation,
+          available_shape_keys: [
+            '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-999"}'
+          ]
+        })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.payload.details).toMatchObject({
+      request_context_result: "request_context_incompatible",
+      request_context_lookup_state: "incompatible",
+      request_context_miss_reason: "shape_mismatch"
     });
     expect(callSignature).not.toHaveBeenCalled();
     expect(fetchJson).not.toHaveBeenCalled();

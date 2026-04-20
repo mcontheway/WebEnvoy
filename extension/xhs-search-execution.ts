@@ -26,6 +26,10 @@ import {
   resolveXsCommon
 } from "./xhs-search-telemetry.js";
 import type { EditorInputValidationResult } from "./xhs-editor-input.js";
+import {
+  REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS,
+  REQUEST_CONTEXT_WAIT_RETRY_MS
+} from "./request-context-wait-policy.js";
 
 const asRecord = (value: unknown): JsonRecord | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -81,8 +85,6 @@ type RequestContextLookupResult =
     };
 
 const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60_000;
-const REQUEST_CONTEXT_WAIT_RETRY_MS = 120;
-const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 3;
 
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;

@@ -56,6 +56,9 @@ const buildContentScriptBundle = async () => {
   const xhsSearchTypesSource = await readSource(join(buildRoot, "xhs-search-types.js"));
   const xhsSearchTelemetrySource = await readSource(join(buildRoot, "xhs-search-telemetry.js"));
   const xhsSearchGateSource = await readSource(join(buildRoot, "xhs-search-gate.js"));
+  const requestContextWaitPolicySource = await readSource(
+    join(buildRoot, "request-context-wait-policy.js")
+  );
   const xhsSearchExecutionSource = await readSource(join(buildRoot, "xhs-search-execution.js"));
   const xhsSearchSource = await readSource(join(buildRoot, "xhs-search.js"));
   const xhsReadExecutionSource = await readSource(join(buildRoot, "xhs-read-execution.js"));
@@ -279,10 +282,20 @@ const buildContentScriptBundle = async () => {
     exports: ["createAuditRecord", "createGateOnlySuccess", "resolveGate"]
   });
 
+  const requestContextWaitPolicyModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_request_context_wait_policy",
+    sourceBody: requestContextWaitPolicySource,
+    exports: ["REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS", "REQUEST_CONTEXT_WAIT_RETRY_MS"]
+  });
+
   const xhsSearchExecutionModule = renderClassicModule({
     moduleVar: "__webenvoy_module_xhs_search_execution",
     prelude: [
       "const { createPageContextNamespace, SEARCH_ENDPOINT } = __webenvoy_module_xhs_search_types;",
+      "const {",
+      "  REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS,",
+      "  REQUEST_CONTEXT_WAIT_RETRY_MS",
+      "} = __webenvoy_module_request_context_wait_policy;",
       "const {",
       "  createAuditRecord,",
       "  createGateOnlySuccess,",
@@ -322,6 +335,10 @@ const buildContentScriptBundle = async () => {
       "  DETAIL_ENDPOINT,",
       "  USER_HOME_ENDPOINT",
       "} = __webenvoy_module_xhs_search_types;",
+      "const {",
+      "  REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS,",
+      "  REQUEST_CONTEXT_WAIT_RETRY_MS",
+      "} = __webenvoy_module_request_context_wait_policy;",
       "const { createAuditRecord, resolveGate } = __webenvoy_module_xhs_search_gate;",
       "const {",
       "  containsCookie,",
@@ -475,6 +492,7 @@ const buildContentScriptBundle = async () => {
     xhsSearchTypesModule,
     xhsSearchTelemetryModule,
     xhsSearchGateModule,
+    requestContextWaitPolicyModule,
     xhsSearchExecutionModule,
     xhsSearchModule,
     xhsReadExecutionModule,

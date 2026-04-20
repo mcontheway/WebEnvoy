@@ -1,9 +1,8 @@
 import { createPageContextNamespace, DETAIL_ENDPOINT, USER_HOME_ENDPOINT } from "./xhs-search-types.js";
 import { createAuditRecord, resolveGate } from "./xhs-search-gate.js";
 import { containsCookie, createDiagnosis, createFailure, resolveRiskStateOutput, resolveXsCommon } from "./xhs-search-telemetry.js";
+import { REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS, REQUEST_CONTEXT_WAIT_RETRY_MS } from "./request-context-wait-policy.js";
 const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60_000;
-const REQUEST_CONTEXT_WAIT_RETRY_MS = 120;
-const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 3;
 const XHS_DETAIL_SPEC = {
     command: "xhs.detail",
     endpoint: DETAIL_ENDPOINT,
@@ -288,6 +287,22 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
             "rejected_observation" in lookupRecord ||
             "incompatible_observation" in lookupRecord)) {
         const { admittedTemplate, rejectedObservation } = resolveExactShapeLookupArtifacts(lookupRecord);
+        const incompatibleObservation = asRecord(lookupRecord.incompatible_observation);
+        if (spec.command === "xhs.detail" && admittedTemplate && incompatibleObservation) {
+            const admittedObservedAt = resolveCapturedArtifactObservedAt(admittedTemplate);
+            const incompatibleObservedAt = resolveCapturedArtifactObservedAt(incompatibleObservation);
+            if (incompatibleObservedAt !== null &&
+                (admittedObservedAt === null || incompatibleObservedAt > admittedObservedAt)) {
+                return {
+                    state: "incompatible",
+                    reason: "shape_mismatch",
+                    shape: deriveReadShapeFromArtifact(spec, incompatibleObservation, {
+                        preferredDetailNoteId: spec.command === "xhs.detail" ? expectedShape.note_id : null,
+                        allowDetailRequestFallback: true
+                    })
+                };
+            }
+        }
         if (admittedTemplate) {
             return resolveReadRequestContext(spec, admittedTemplate, expectedShape, now, {
                 allowDetailRequestFallback: false
@@ -305,7 +320,6 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
                 shape: derivedShape ?? expectedShape
             };
         }
-        const incompatibleObservation = asRecord(lookupRecord.incompatible_observation);
         if (incompatibleObservation) {
             return {
                 state: "incompatible",

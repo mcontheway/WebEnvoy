@@ -18,6 +18,10 @@ import {
   resolveRiskStateOutput,
   resolveXsCommon
 } from "./xhs-search-telemetry.js";
+import {
+  REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS,
+  REQUEST_CONTEXT_WAIT_RETRY_MS
+} from "./request-context-wait-policy.js";
 
 type XhsReadCommandName = "xhs.detail" | "xhs.user_home";
 
@@ -112,8 +116,6 @@ type ReadRequestContextLookupResult =
     };
 
 const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60_000;
-const REQUEST_CONTEXT_WAIT_RETRY_MS = 120;
-const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 3;
 
 const XHS_DETAIL_SPEC: XhsReadCommandSpec = {
   command: "xhs.detail",
@@ -473,6 +475,25 @@ const resolveReadRequestContext = (
       "incompatible_observation" in lookupRecord)
   ) {
     const { admittedTemplate, rejectedObservation } = resolveExactShapeLookupArtifacts(lookupRecord);
+    const incompatibleObservation = asRecord(lookupRecord.incompatible_observation);
+    if (spec.command === "xhs.detail" && admittedTemplate && incompatibleObservation) {
+      const admittedObservedAt = resolveCapturedArtifactObservedAt(admittedTemplate);
+      const incompatibleObservedAt = resolveCapturedArtifactObservedAt(incompatibleObservation);
+      if (
+        incompatibleObservedAt !== null &&
+        (admittedObservedAt === null || incompatibleObservedAt > admittedObservedAt)
+      ) {
+        return {
+          state: "incompatible",
+          reason: "shape_mismatch",
+          shape: deriveReadShapeFromArtifact(spec, incompatibleObservation, {
+            preferredDetailNoteId:
+              spec.command === "xhs.detail" ? (expectedShape as DetailRequestShape).note_id : null,
+            allowDetailRequestFallback: true
+          })
+        };
+      }
+    }
     if (admittedTemplate) {
       return resolveReadRequestContext(
         spec,
@@ -497,7 +518,6 @@ const resolveReadRequestContext = (
         shape: derivedShape ?? expectedShape
       };
     }
-    const incompatibleObservation = asRecord(lookupRecord.incompatible_observation);
     if (incompatibleObservation) {
       return {
         state: "incompatible",

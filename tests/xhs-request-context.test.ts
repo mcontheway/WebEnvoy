@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS } from "../extension/request-context-wait-policy.js";
 import { executeXhsSearch } from "../extension/xhs-search.js";
 import { createPageContextNamespace } from "../extension/xhs-search-types.js";
 import type {
@@ -364,6 +365,85 @@ describe("xhs search request-context exact-shape reuse", () => {
     expect(result.ok).toBe(true);
     expect(readCapturedRequestContext).toHaveBeenCalledTimes(3);
     expect(sleep).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps polling search context until the last shared wait attempt before failing closed", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+    let lookupCount = 0;
+    const sleep = vi.fn(async () => {});
+    const readCapturedRequestContext = vi.fn(async () => {
+      lookupCount += 1;
+      return lookupCount < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS ? null : createCapturedArtifact();
+    });
+
+    const result = await executeXhsSearch(
+      {
+        abilityId: "xhs.note.search.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          query: "AI",
+          page: 2,
+          limit: 30,
+          sort: "time_desc",
+          note_type: 1
+        },
+        options: createLiveReadOptions("run-search-context-last-attempt-001"),
+        executionContext: createExecutionContext("run-search-context-last-attempt-001")
+      },
+      createEnvironment({
+        sleep,
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(readCapturedRequestContext).toHaveBeenCalledTimes(REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS);
+    expect(sleep).toHaveBeenCalledTimes(REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS - 1);
+  });
+
+  it("fails closed after exhausting the shared search wait budget without a captured template", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+    const sleep = vi.fn(async () => {});
+    const readCapturedRequestContext = vi.fn(async () => null);
+
+    const result = await executeXhsSearch(
+      {
+        abilityId: "xhs.note.search.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          query: "AI",
+          page: 2,
+          limit: 30,
+          sort: "time_desc",
+          note_type: 1
+        },
+        options: createLiveReadOptions("run-search-context-budget-miss-001"),
+        executionContext: createExecutionContext("run-search-context-budget-miss-001")
+      },
+      createEnvironment({
+        sleep,
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.payload.details).toMatchObject({
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "miss",
+      request_context_miss_reason: "template_missing"
+    });
+    expect(readCapturedRequestContext).toHaveBeenCalledTimes(REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS);
+    expect(sleep).toHaveBeenCalledTimes(REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS - 1);
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
   });
 
   it("fails closed on shape mismatch instead of falling back to synthetic page-context dispatch", async () => {

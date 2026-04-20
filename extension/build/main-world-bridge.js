@@ -8,6 +8,7 @@ let activeMainWorldBootstrapListener = null;
 const patchedAudioContextPrototypes = new WeakSet();
 const audioNoiseSeedByPrototype = new WeakMap();
 const capturedRequestContextBucketsByNamespace = new Map();
+const capturedRequestContextIncompatibleByNamespace = new Map();
 const capturedRequestContextPathSet = new Set(CAPTURED_REQUEST_CONTEXT_PATHS);
 const FETCH_CAPTURE_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.capture.fetch.v1");
 const XHR_CAPTURE_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.capture.xhr.v1");
@@ -250,6 +251,26 @@ const parseDetailShape = (requestBody, responseBody, templateReady) => {
         shapeKey: JSON.stringify(shape)
     };
 };
+const parseRequestedDetailShape = (requestBody) => {
+    const record = asRecord(requestBody);
+    const requestedNoteId = (record ? toTrimmedString(record.note_id) : null) ??
+        (record ? toTrimmedString(record.source_note_id) : null);
+    if (!requestedNoteId) {
+        return null;
+    }
+    const shape = {
+        command: "xhs.detail",
+        method: "POST",
+        pathname: DETAIL_ENDPOINT,
+        note_id: requestedNoteId
+    };
+    return {
+        routeScope: createCapturedContextRouteScope("xhs.detail", "POST", DETAIL_ENDPOINT),
+        routeScopeKey: serializeCapturedContextRouteScope(createCapturedContextRouteScope("xhs.detail", "POST", DETAIL_ENDPOINT)),
+        shape,
+        shapeKey: JSON.stringify(shape)
+    };
+};
 const hasSuccessfulDetailResponseMismatch = (requestBody, responseBody) => {
     const record = asRecord(requestBody);
     const requestedNoteId = (record ? toTrimmedString(record.note_id) : null) ??
@@ -306,6 +327,40 @@ const getCapturedContextNamespaceBuckets = (namespace) => {
         capturedRequestContextBucketsByNamespace.set(namespace, namespaceBuckets);
     }
     return namespaceBuckets;
+};
+const getCapturedContextNamespaceIncompatibleBuckets = (namespace) => {
+    let namespaceBuckets = capturedRequestContextIncompatibleByNamespace.get(namespace);
+    if (!namespaceBuckets) {
+        namespaceBuckets = new Map();
+        capturedRequestContextIncompatibleByNamespace.set(namespace, namespaceBuckets);
+    }
+    return namespaceBuckets;
+};
+const setRouteBucketIncompatibleObservation = (namespace, routeScopeKey, artifact) => {
+    const namespaceBuckets = getCapturedContextNamespaceIncompatibleBuckets(namespace);
+    if (artifact) {
+        namespaceBuckets.set(routeScopeKey, artifact);
+        return;
+    }
+    namespaceBuckets.delete(routeScopeKey);
+    if (namespaceBuckets.size === 0) {
+        capturedRequestContextIncompatibleByNamespace.delete(namespace);
+    }
+};
+const getRouteBucketIncompatibleObservation = (namespace, routeScopeKey) => capturedRequestContextIncompatibleByNamespace.get(namespace)?.get(routeScopeKey) ?? null;
+const pruneCapturedContextBucket = (namespace, routeScopeKey, shapeKey) => {
+    const namespaceBuckets = capturedRequestContextBucketsByNamespace.get(namespace);
+    const routeBucket = namespaceBuckets?.get(routeScopeKey);
+    const bucket = routeBucket?.get(shapeKey) ?? null;
+    if (bucket && bucket.admittedTemplate === null && bucket.rejectedObservation === null) {
+        routeBucket?.delete(shapeKey);
+    }
+    if (routeBucket && routeBucket.size === 0) {
+        namespaceBuckets?.delete(routeScopeKey);
+    }
+    if (namespaceBuckets && namespaceBuckets.size === 0) {
+        capturedRequestContextBucketsByNamespace.delete(namespace);
+    }
 };
 const getCapturedContextRouteBucket = (namespace, routeScopeKey) => {
     const namespaceBuckets = getCapturedContextNamespaceBuckets(namespace);
@@ -506,6 +561,9 @@ const storeCapturedRequestContext = (candidate, input) => {
         candidate.method === "POST" &&
         templateReady &&
         hasSuccessfulDetailResponseMismatch(candidate.body, input.responseBody);
+    const requestedDetailShape = candidate.path === DETAIL_ENDPOINT && candidate.method === "POST"
+        ? parseRequestedDetailShape(candidate.body)
+        : null;
     const contextShape = deriveCapturedContextShape(candidate, {
         responseBody: input.responseBody,
         templateReady
@@ -550,11 +608,18 @@ const storeCapturedRequestContext = (candidate, input) => {
     };
     const bucket = getCapturedContextBucket(candidate.pageContextNamespace, contextShape.routeScopeKey, contextShape.shapeKey);
     if (admittedTemplateReady) {
+        setRouteBucketIncompatibleObservation(candidate.pageContextNamespace, contextShape.routeScopeKey, null);
         if (isSyntheticRejectedArtifact(bucket.rejectedObservation)) {
             bucket.rejectedObservation = null;
         }
         bucket.admittedTemplate = artifact;
         return;
+    }
+    if (detailResponseMismatch && requestedDetailShape) {
+        const requestedBucket = getCapturedContextBucket(candidate.pageContextNamespace, requestedDetailShape.routeScopeKey, requestedDetailShape.shapeKey);
+        requestedBucket.admittedTemplate = null;
+        pruneCapturedContextBucket(candidate.pageContextNamespace, requestedDetailShape.routeScopeKey, requestedDetailShape.shapeKey);
+        setRouteBucketIncompatibleObservation(candidate.pageContextNamespace, requestedDetailShape.routeScopeKey, artifact);
     }
     bucket.rejectedObservation = artifact;
 };
@@ -1103,14 +1168,14 @@ const handleCapturedRequestContextReadRequest = async (request) => {
                 exactBucket.rejectedObservation.path === path
                 ? exactBucket.rejectedObservation
                 : null;
+            const routeLevelIncompatible = getRouteBucketIncompatibleObservation(namespace, routeScopeKey);
             return {
                 page_context_namespace: namespace,
                 shape_key: shapeKey,
                 admitted_template: admittedTemplate,
                 rejected_observation: rejectedObservation,
-                incompatible_observation: routeBucket
-                    ? resolveIncompatibleObservation(routeBucket, shapeKey)
-                    : null,
+                incompatible_observation: routeLevelIncompatible ??
+                    (routeBucket ? resolveIncompatibleObservation(routeBucket, shapeKey) : null),
                 available_shape_keys: availableShapeKeys
             };
         })()

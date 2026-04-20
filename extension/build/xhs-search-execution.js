@@ -1,12 +1,11 @@
 import { createPageContextNamespace, SEARCH_ENDPOINT } from "./xhs-search-types.js";
 import { createAuditRecord, createGateOnlySuccess, resolveGate } from "./xhs-search-gate.js";
 import { buildEditorInputEvidence, containsCookie, createDiagnosis, createFailure, createObservability, inferFailure, inferRequestException, isTrustedEditorInputValidation, parseCount, resolveSimulatedResult, resolveRiskStateOutput, resolveXsCommon } from "./xhs-search-telemetry.js";
+import { REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS, REQUEST_CONTEXT_WAIT_RETRY_MS } from "./request-context-wait-policy.js";
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
 const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60_000;
-const REQUEST_CONTEXT_WAIT_RETRY_MS = 120;
-const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 3;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => {
     if (typeof value === "number" && Number.isFinite(value)) {

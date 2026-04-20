@@ -1220,7 +1220,10 @@ describe("main-world bridge contract", () => {
       result: {
         admitted_template: null,
         rejected_observation: null,
-        incompatible_observation: null,
+        incompatible_observation: {
+          source_kind: "page_request",
+          rejection_reason: "shape_mismatch"
+        },
         available_shape_keys: [
           '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-999"}'
         ]
@@ -1234,7 +1237,129 @@ describe("main-world bridge contract", () => {
           source_kind: "page_request",
           rejection_reason: "shape_mismatch"
         },
-        incompatible_observation: null,
+        incompatible_observation: {
+          source_kind: "page_request",
+          rejection_reason: "shape_mismatch"
+        },
+        available_shape_keys: [
+          '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-999"}'
+        ]
+      }
+    });
+  });
+
+  it("invalidates an older admitted detail template when newer page evidence shifts to another note_id", async () => {
+    const env = createMockMainWorldEnvironment();
+    env.mockWindow.location.href = "https://www.xiaohongshu.com/explore/note-001";
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+    let requestCount = 0;
+    env.setFetchHandler(async () => {
+      requestCount += 1;
+      return new Response(
+        JSON.stringify(
+          requestCount === 1
+            ? {
+                code: 0,
+                data: {
+                  items: [
+                    {
+                      note_card: {
+                        note_id: "note-001"
+                      }
+                    }
+                  ]
+                }
+              }
+            : {
+                code: 0,
+                data: {
+                  items: [
+                    {
+                      note_card: {
+                        note_id: "note-999"
+                      }
+                    }
+                  ]
+                }
+              }
+        ),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    await (env.mockWindow.fetch as typeof fetch)("https://www.xiaohongshu.com/api/sns/web/v1/feed", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: "{\"source_note_id\":\"note-001\"}"
+    });
+    await (env.mockWindow.fetch as typeof fetch)("https://www.xiaohongshu.com/api/sns/web/v1/feed", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: "{\"source_note_id\":\"note-001\"}"
+    });
+
+    const originalSlotResult = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      method: "POST",
+      path: "/api/sns/web/v1/feed",
+      pageContextNamespace: createPageContextNamespace("https://www.xiaohongshu.com/explore/note-001"),
+      shapeKey:
+        '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}'
+    });
+    const shiftedSlotResult = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      method: "POST",
+      path: "/api/sns/web/v1/feed",
+      pageContextNamespace: createPageContextNamespace("https://www.xiaohongshu.com/explore/note-001"),
+      shapeKey:
+        '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-999"}'
+    });
+
+    expect(originalSlotResult).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: null,
+        rejected_observation: null,
+        incompatible_observation: {
+          source_kind: "page_request",
+          rejection_reason: "shape_mismatch"
+        },
+        available_shape_keys: [
+          '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-999"}'
+        ]
+      }
+    });
+    expect(shiftedSlotResult).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: null,
+        rejected_observation: {
+          source_kind: "page_request",
+          rejection_reason: "shape_mismatch"
+        },
+        incompatible_observation: {
+          source_kind: "page_request",
+          rejection_reason: "shape_mismatch"
+        },
         available_shape_keys: [
           '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-999"}'
         ]
