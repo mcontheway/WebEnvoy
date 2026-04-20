@@ -332,8 +332,8 @@ describe("xhs search request-context exact-shape reuse", () => {
 
     expect(result.ok).toBe(false);
     expect(result.payload.details).toMatchObject({
-      request_context_result: "request_context_incompatible",
-      request_context_lookup_state: "incompatible",
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "miss",
       request_context_miss_reason: "shape_mismatch"
     });
     expect(callSignature).not.toHaveBeenCalled();

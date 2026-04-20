@@ -85,6 +85,7 @@ export interface CapturedRequestContextArtifact {
   referrer?: string | null;
   template_ready?: boolean;
   rejection_reason?: CapturedRequestContextRejectionReason | null;
+  incompatibility_reason?: "shape_mismatch" | null;
   request_status?: {
     completion: "completed" | "failed";
     http_status: number | null;

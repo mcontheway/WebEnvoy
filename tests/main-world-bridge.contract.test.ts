@@ -127,6 +127,9 @@ const readCapturedContext = async (input: {
   pageContextNamespace: string;
   shapeKey: string;
 }): Promise<Record<string, unknown>> => {
+  await flushMicrotasks();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await flushMicrotasks();
   input.requestListener({
     type: input.requestEvent,
     detail: {
@@ -760,6 +763,84 @@ describe("main-world bridge contract", () => {
     });
   });
 
+  it("returns fetch responses to page code before asynchronous capture parsing finishes", async () => {
+    const env = createMockMainWorldEnvironment();
+    env.mockWindow.location.href = "https://www.xiaohongshu.com/user/profile/user-001";
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+    let resolveBodyText: ((value: string) => void) | null = null;
+    const response = {
+      status: 200,
+      headers: new Headers({
+        "content-type": "application/json"
+      }),
+      clone: () => ({
+        headers: new Headers({
+          "content-type": "application/json"
+        }),
+        text: async () =>
+          await new Promise<string>((resolve) => {
+            resolveBodyText = resolve;
+          })
+      })
+    } as unknown as Response;
+    env.setFetchHandler(async () => response);
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    const fetchPromise = (env.mockWindow.fetch as typeof fetch)(
+      "https://www.xiaohongshu.com/api/sns/web/v1/user/otherinfo?user_id=user-001"
+    );
+
+    await expect(fetchPromise).resolves.toBe(response);
+
+    const beforeCaptureResult = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      method: "GET",
+      path: "/api/sns/web/v1/user/otherinfo",
+      pageContextNamespace: createPageContextNamespace(
+        "https://www.xiaohongshu.com/user/profile/user-001"
+      ),
+      shapeKey:
+        '{"command":"xhs.user_home","method":"GET","pathname":"/api/sns/web/v1/user/otherinfo","user_id":"user-001"}'
+    });
+    expect(beforeCaptureResult).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: null
+      }
+    });
+
+    resolveBodyText?.('{"code":0,"data":{"user_id":"user-001"}}');
+    await flushMicrotasks();
+
+    const afterCaptureResult = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      method: "GET",
+      path: "/api/sns/web/v1/user/otherinfo",
+      pageContextNamespace: createPageContextNamespace(
+        "https://www.xiaohongshu.com/user/profile/user-001"
+      ),
+      shapeKey:
+        '{"command":"xhs.user_home","method":"GET","pathname":"/api/sns/web/v1/user/otherinfo","user_id":"user-001"}'
+    });
+    expect(afterCaptureResult).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          source_kind: "page_request"
+        }
+      }
+    });
+  });
+
   it("admits wrapped detail success candidates when the accepted note_id is nested under note_card", async () => {
     const env = createMockMainWorldEnvironment();
     env.mockWindow.location.href = "https://www.xiaohongshu.com/explore/note-001";
@@ -1032,6 +1113,11 @@ describe("main-world bridge contract", () => {
     ).toMatchObject({
       keyword: "露营"
     });
+    expect(
+      ((campingResult.result as Record<string, unknown>)?.incompatible_observation as
+        | Record<string, unknown>
+        | undefined)?.incompatibility_reason
+    ).toBe("shape_mismatch");
     expect(
       ((cyclingResult.result as Record<string, unknown>)?.admitted_template as Record<string, unknown>)?.shape
     ).toMatchObject({

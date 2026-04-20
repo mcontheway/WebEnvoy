@@ -93,7 +93,7 @@ type ReadRequestContextLookupResult =
     }
   | {
       state: "miss";
-      reason: "template_missing";
+      reason: "template_missing" | "shape_mismatch";
     }
   | {
       state: "incompatible";
@@ -470,9 +470,8 @@ const resolveReadRequestContext = (
       : [];
     if (availableShapeKeys.some((candidateShapeKey) => candidateShapeKey !== lookupRecord.shape_key)) {
       return {
-        state: "incompatible",
+        state: "miss",
         reason: "shape_mismatch",
-        shape: null
       };
     }
     return {

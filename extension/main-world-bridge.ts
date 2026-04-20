@@ -850,7 +850,7 @@ const installFetchCapture = (): void => {
     try {
       const response = await originalFetch.call(window, input, init);
       if (candidate) {
-        await captureFetchResponse(candidate, response);
+        void captureFetchResponse(candidate, response).catch(() => {});
       }
       return response;
     } catch (error) {
@@ -1406,7 +1406,7 @@ const resolveIncompatibleObservation = (
   return latest
     ? {
         ...latest,
-        rejection_reason: "shape_mismatch"
+        incompatibility_reason: "shape_mismatch"
       }
     : null;
 };

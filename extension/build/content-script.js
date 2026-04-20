@@ -4986,9 +4986,8 @@ const resolveSearchRequestContext = (artifact, expectedShape, now) => {
             : [];
         if (availableShapeKeys.some((candidateShapeKey) => candidateShapeKey !== lookupRecord.shape_key)) {
             return {
-                state: "incompatible",
+                state: "miss",
                 reason: "shape_mismatch",
-                shape: null
             };
         }
         return {
@@ -5798,9 +5797,8 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
             : [];
         if (availableShapeKeys.some((candidateShapeKey) => candidateShapeKey !== lookupRecord.shape_key)) {
             return {
-                state: "incompatible",
+                state: "miss",
                 reason: "shape_mismatch",
-                shape: null
             };
         }
         return {
