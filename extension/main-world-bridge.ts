@@ -18,6 +18,7 @@ type MainWorldRequestType =
   | "fingerprint-install"
   | "fingerprint-verify"
   | "page-state-read"
+  | "captured-request-context-activate"
   | "captured-request-context-read";
 
 type MainWorldRequest = {
@@ -102,6 +103,7 @@ const FETCH_CAPTURE_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.capture.fetch
 const XHR_CAPTURE_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.capture.xhr.v1");
 const XHR_CAPTURE_STATE_SYMBOL = Symbol.for("webenvoy.main_world.capture.xhr_state.v1");
 const SYNTHETIC_REQUEST_SYMBOL = Symbol.for("webenvoy.main_world.synthetic_request.v1");
+let capturedRequestContextCaptureInstalled = false;
 
 const DEFAULT_PLUGIN_DESCRIPTORS = [
   {
@@ -684,6 +686,12 @@ const resolveRouteScopeKeyFromLookup = (
   }
 };
 
+const hasCapturedRequestBusinessFailure = (body: unknown): boolean => {
+  const record = asRecord(body);
+  const code = record?.code;
+  return typeof code === "number" && Number.isFinite(code) && code !== 0;
+};
+
 const storeCapturedRequestContext = (
   candidate: CapturedRequestCandidate,
   input: {
@@ -692,7 +700,11 @@ const storeCapturedRequestContext = (
     responseBody: unknown;
   }
 ): void => {
-  const templateReady = !candidate.synthetic && input.status >= 200 && input.status < 300;
+  const templateReady =
+    !candidate.synthetic &&
+    input.status >= 200 &&
+    input.status < 300 &&
+    !hasCapturedRequestBusinessFailure(input.responseBody);
   const contextShape = deriveCapturedContextShape(candidate, {
     responseBody: input.responseBody,
     templateReady
@@ -991,8 +1003,12 @@ const installXhrCapture = (): void => {
 };
 
 const installCapturedRequestContextCapture = (): void => {
+  if (capturedRequestContextCaptureInstalled) {
+    return;
+  }
   installFetchCapture();
   installXhrCapture();
+  capturedRequestContextCaptureInstalled = true;
 };
 
 const createWindowEvent = (type: string, detail: unknown): Event => {
@@ -1331,6 +1347,7 @@ const parseMainWorldRequest = (event: Event): MainWorldRequest | null => {
     (type !== "fingerprint-install" &&
       type !== "fingerprint-verify" &&
       type !== "page-state-read" &&
+      type !== "captured-request-context-activate" &&
       type !== "captured-request-context-read")
   ) {
     return null;
@@ -1453,6 +1470,17 @@ const handleCapturedRequestContextReadRequest = async (request: MainWorldRequest
   });
 };
 
+const handleCapturedRequestContextActivateRequest = async (
+  request: MainWorldRequest
+): Promise<void> => {
+  installCapturedRequestContextCapture();
+  await emitMainWorldResult({
+    id: request.id,
+    ok: true,
+    result: true
+  });
+};
+
 const handleFingerprintInstallRequest = async (request: MainWorldRequest): Promise<void> => {
   const runtime = asRecord(request.payload.fingerprint_runtime ?? null);
   const result = installFingerprintRuntime(runtime);
@@ -1470,6 +1498,10 @@ const handleRequest = async (request: MainWorldRequest): Promise<void> => {
   }
   if (request.type === "page-state-read") {
     await handlePageStateReadRequest(request);
+    return;
+  }
+  if (request.type === "captured-request-context-activate") {
+    await handleCapturedRequestContextActivateRequest(request);
     return;
   }
   if (request.type === "captured-request-context-read") {
@@ -1543,7 +1575,6 @@ const resolveBootstrappedMainWorldEventChannel = (event: Event): MainWorldEventC
 };
 
 const attachMainWorldEventChannel = (channel: MainWorldEventChannel): void => {
-  installCapturedRequestContextCapture();
   if (activeMainWorldEventChannel) {
     if (
       activeMainWorldEventChannel.requestEvent === channel.requestEvent &&

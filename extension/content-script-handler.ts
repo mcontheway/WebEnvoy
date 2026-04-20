@@ -16,6 +16,7 @@ import {
   summarizeFingerprintRuntimeContext
 } from "./content-script-fingerprint.js";
 import {
+  activateCapturedRequestContextCaptureViaMainWorld,
   encodeMainWorldPayload,
   installMainWorldEventChannelSecret,
   installFingerprintRuntimeViaMainWorld,
@@ -33,6 +34,7 @@ import {
 import { containsCookie } from "./xhs-search-telemetry.js";
 
 export {
+  activateCapturedRequestContextCaptureViaMainWorld,
   encodeMainWorldPayload,
   installFingerprintRuntimeViaMainWorld,
   installMainWorldEventChannelSecret,
@@ -482,14 +484,19 @@ export class ContentScriptHandler {
     }
 
     const channelInstalled = installMainWorldEventChannelSecret(mainWorldSecret);
-    const runtimeWithInjection = channelInstalled
+    const captureActivated = channelInstalled
+      ? await activateCapturedRequestContextCaptureViaMainWorld().catch(() => false)
+      : false;
+    const runtimeWithInjection = channelInstalled && captureActivated
       ? await this.#installFingerprintIfPresent({
           ...message,
           fingerprintContext: fingerprintRuntime
         })
       : buildFailedFingerprintInjectionContext(
           fingerprintRuntime,
-          "main world event channel unavailable"
+          channelInstalled
+            ? "main world request-context capture unavailable"
+            : "main world event channel unavailable"
         );
     const injection = asRecord(runtimeWithInjection?.injection);
     const attested = injection?.installed === true;

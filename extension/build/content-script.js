@@ -7488,6 +7488,7 @@ const asCapturedRequestContextLookupResult = (value) => {
     };
 };
 const readCapturedRequestContextViaMainWorld = async (input) => {
+    await activateCapturedRequestContextCaptureViaMainWorld();
     const result = await mainWorldCall({
         type: "captured-request-context-read",
         payload: {
@@ -7498,6 +7499,13 @@ const readCapturedRequestContextViaMainWorld = async (input) => {
         }
     });
     return asCapturedRequestContextLookupResult(result) ?? asCapturedRequestContextArtifact(result);
+};
+const activateCapturedRequestContextCaptureViaMainWorld = async () => {
+    const result = await mainWorldCall({
+        type: "captured-request-context-activate",
+        payload: {}
+    });
+    return result === true;
 };
 const resolveMainWorldRequestUrl = (value) => {
     const baseHref = typeof globalThis.location?.href === "string" && globalThis.location.href.length > 0
@@ -8167,12 +8175,17 @@ class ContentScriptHandler {
             return;
         }
         const channelInstalled = installMainWorldEventChannelSecret(mainWorldSecret);
-        const runtimeWithInjection = channelInstalled
+        const captureActivated = channelInstalled
+            ? await activateCapturedRequestContextCaptureViaMainWorld().catch(() => false)
+            : false;
+        const runtimeWithInjection = channelInstalled && captureActivated
             ? await this.#installFingerprintIfPresent({
                 ...message,
                 fingerprintContext: fingerprintRuntime
             })
-            : buildFailedFingerprintInjectionContext(fingerprintRuntime, "main world event channel unavailable");
+            : buildFailedFingerprintInjectionContext(fingerprintRuntime, channelInstalled
+                ? "main world request-context capture unavailable"
+                : "main world event channel unavailable");
         const injection = asRecord(runtimeWithInjection?.injection);
         const attested = injection?.installed === true;
         const ackPayload = buildRuntimeBootstrapAckPayload({

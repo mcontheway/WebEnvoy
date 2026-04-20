@@ -91,7 +91,25 @@ const installMockDomGlobals = (input: {
   (globalThis as { CustomEvent?: unknown }).CustomEvent = MockCustomEvent;
 };
 
-const bootstrapMainWorldBridge = async (added: Array<{ type: string; listener: MockEventListener }>) => {
+const activateCapturedContextCapture = async (input: {
+  requestEvent: string;
+  requestListener: MockEventListener;
+}): Promise<void> => {
+  input.requestListener({
+    type: input.requestEvent,
+    detail: {
+      id: `activate-${Date.now()}`,
+      type: "captured-request-context-activate",
+      payload: {}
+    }
+  } as unknown as Event);
+  await flushMicrotasks();
+};
+
+const bootstrapMainWorldBridge = async (
+  added: Array<{ type: string; listener: MockEventListener }>,
+  options?: { activateCapture?: boolean }
+) => {
   const { resolveMainWorldEventNamesForSecret } = await import("../extension/content-script-handler.js");
   await import("../extension/main-world-bridge.js");
 
@@ -108,6 +126,13 @@ const bootstrapMainWorldBridge = async (added: Array<{ type: string; listener: M
   const requestListener = added.find((entry) => entry.type === secretChannel.requestEvent)?.listener;
   if (!requestListener) {
     throw new Error("secret request listener was not installed");
+  }
+
+  if (options?.activateCapture !== false) {
+    await activateCapturedContextCapture({
+      requestEvent: secretChannel.requestEvent,
+      requestListener
+    });
   }
 
   return {
@@ -195,6 +220,27 @@ describe("main-world bridge contract", () => {
     } as unknown as Event);
 
     expect(added.map((entry) => entry.type)).toContain(secretChannel.requestEvent);
+  });
+
+  it("keeps fetch unpatched after bootstrap until capture is explicitly activated", async () => {
+    const { added, mockWindow, mockDocument } = createMockMainWorldEnvironment();
+    const originalFetch = mockWindow.fetch;
+
+    installMockDomGlobals({
+      mockWindow: mockWindow as Window & Record<string, unknown>,
+      mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(added, { activateCapture: false });
+
+    expect(mockWindow.fetch).toBe(originalFetch);
+
+    await activateCapturedContextCapture({
+      requestEvent: channel.requestEvent,
+      requestListener: channel.requestListener
+    });
+
+    expect(mockWindow.fetch).not.toBe(originalFetch);
   });
 
   it("does not publish a page-visible install marker when reinjected into the same page", async () => {
@@ -576,6 +622,74 @@ describe("main-world bridge contract", () => {
       method: "POST",
       pathname: "/api/sns/web/v1/feed",
       note_id: "note-001"
+    });
+  });
+
+  it("stores 2xx detail business failures as rejected observations", async () => {
+    const env = createMockMainWorldEnvironment();
+    env.mockWindow.location.href = "https://www.xiaohongshu.com/explore/note-001";
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+    env.setFetchHandler(async () => {
+      return new Response(
+        JSON.stringify({
+          code: 500100,
+          msg: "gateway failed",
+          data: {
+            note: {
+              note_id: "note-001"
+            }
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    await (env.mockWindow.fetch as typeof fetch)(
+      "https://www.xiaohongshu.com/api/sns/web/v1/feed",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: "{\"source_note_id\":\"note-001\"}"
+      }
+    );
+
+    const result = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      method: "POST",
+      path: "/api/sns/web/v1/feed",
+      pageContextNamespace: createPageContextNamespace("https://www.xiaohongshu.com/explore/note-001"),
+      shapeKey:
+        '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}'
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: null,
+        rejected_observation: {
+          source_kind: "page_request",
+          rejection_reason: "failed_request_rejected",
+          template_ready: false,
+          request_status: {
+            completion: "failed",
+            http_status: 200
+          }
+        }
+      }
     });
   });
 

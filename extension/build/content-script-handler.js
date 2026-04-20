@@ -4,10 +4,10 @@ import { executeXhsUserHome } from "./xhs-user-home.js";
 import { performEditorInputValidation } from "./xhs-editor-input.js";
 import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 import { buildFailedFingerprintInjectionContext, hasInstalledFingerprintInjection, installFingerprintRuntimeWithVerification, resolveFingerprintContextForContract, resolveFingerprintContextFromMessage, resolveMissingRequiredFingerprintPatches, summarizeFingerprintRuntimeContext } from "./content-script-fingerprint.js";
-import { encodeMainWorldPayload, installMainWorldEventChannelSecret, installFingerprintRuntimeViaMainWorld, MAIN_WORLD_EVENT_BOOTSTRAP, readCapturedRequestContextViaMainWorld, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret } from "./content-script-main-world.js";
+import { activateCapturedRequestContextCaptureViaMainWorld, encodeMainWorldPayload, installMainWorldEventChannelSecret, installFingerprintRuntimeViaMainWorld, MAIN_WORLD_EVENT_BOOTSTRAP, readCapturedRequestContextViaMainWorld, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret } from "./content-script-main-world.js";
 import { ExtensionContractError, validateXhsCommandInputForExtension } from "./xhs-command-contract.js";
 import { containsCookie } from "./xhs-search-telemetry.js";
-export { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readCapturedRequestContextViaMainWorld, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret };
+export { activateCapturedRequestContextCaptureViaMainWorld, encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readCapturedRequestContextViaMainWorld, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret };
 export { resolveFingerprintContextForContract };
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
@@ -333,12 +333,17 @@ export class ContentScriptHandler {
             return;
         }
         const channelInstalled = installMainWorldEventChannelSecret(mainWorldSecret);
-        const runtimeWithInjection = channelInstalled
+        const captureActivated = channelInstalled
+            ? await activateCapturedRequestContextCaptureViaMainWorld().catch(() => false)
+            : false;
+        const runtimeWithInjection = channelInstalled && captureActivated
             ? await this.#installFingerprintIfPresent({
                 ...message,
                 fingerprintContext: fingerprintRuntime
             })
-            : buildFailedFingerprintInjectionContext(fingerprintRuntime, "main world event channel unavailable");
+            : buildFailedFingerprintInjectionContext(fingerprintRuntime, channelInstalled
+                ? "main world request-context capture unavailable"
+                : "main world event channel unavailable");
         const injection = asRecord(runtimeWithInjection?.injection);
         const attested = injection?.installed === true;
         const ackPayload = buildRuntimeBootstrapAckPayload({

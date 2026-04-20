@@ -482,6 +482,11 @@ const withMockMainWorld = async (
         return;
       }
 
+      if (requestType === "captured-request-context-activate") {
+        emitResult({ id: requestId, ok: true, result: true });
+        return;
+      }
+
       if (requestType === "fingerprint-verify") {
         emitResult({
           id: requestId,

@@ -13,6 +13,7 @@ const FETCH_CAPTURE_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.capture.fetch
 const XHR_CAPTURE_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.capture.xhr.v1");
 const XHR_CAPTURE_STATE_SYMBOL = Symbol.for("webenvoy.main_world.capture.xhr_state.v1");
 const SYNTHETIC_REQUEST_SYMBOL = Symbol.for("webenvoy.main_world.synthetic_request.v1");
+let capturedRequestContextCaptureInstalled = false;
 const DEFAULT_PLUGIN_DESCRIPTORS = [
     {
         name: "Chrome PDF Viewer",
@@ -479,8 +480,16 @@ const resolveRouteScopeKeyFromLookup = (method, path, shapeKey) => {
         return null;
     }
 };
+const hasCapturedRequestBusinessFailure = (body) => {
+    const record = asRecord(body);
+    const code = record?.code;
+    return typeof code === "number" && Number.isFinite(code) && code !== 0;
+};
 const storeCapturedRequestContext = (candidate, input) => {
-    const templateReady = !candidate.synthetic && input.status >= 200 && input.status < 300;
+    const templateReady = !candidate.synthetic &&
+        input.status >= 200 &&
+        input.status < 300 &&
+        !hasCapturedRequestBusinessFailure(input.responseBody);
     const contextShape = deriveCapturedContextShape(candidate, {
         responseBody: input.responseBody,
         templateReady
@@ -711,8 +720,12 @@ const installXhrCapture = () => {
     });
 };
 const installCapturedRequestContextCapture = () => {
+    if (capturedRequestContextCaptureInstalled) {
+        return;
+    }
     installFetchCapture();
     installXhrCapture();
+    capturedRequestContextCaptureInstalled = true;
 };
 const createWindowEvent = (type, detail) => {
     if (typeof CustomEvent === "function") {
@@ -980,6 +993,7 @@ const parseMainWorldRequest = (event) => {
         (type !== "fingerprint-install" &&
             type !== "fingerprint-verify" &&
             type !== "page-state-read" &&
+            type !== "captured-request-context-activate" &&
             type !== "captured-request-context-read")) {
         return null;
     }
@@ -1085,6 +1099,14 @@ const handleCapturedRequestContextReadRequest = async (request) => {
         result
     });
 };
+const handleCapturedRequestContextActivateRequest = async (request) => {
+    installCapturedRequestContextCapture();
+    await emitMainWorldResult({
+        id: request.id,
+        ok: true,
+        result: true
+    });
+};
 const handleFingerprintInstallRequest = async (request) => {
     const runtime = asRecord(request.payload.fingerprint_runtime ?? null);
     const result = installFingerprintRuntime(runtime);
@@ -1101,6 +1123,10 @@ const handleRequest = async (request) => {
     }
     if (request.type === "page-state-read") {
         await handlePageStateReadRequest(request);
+        return;
+    }
+    if (request.type === "captured-request-context-activate") {
+        await handleCapturedRequestContextActivateRequest(request);
         return;
     }
     if (request.type === "captured-request-context-read") {
@@ -1166,7 +1192,6 @@ const resolveBootstrappedMainWorldEventChannel = (event) => {
     };
 };
 const attachMainWorldEventChannel = (channel) => {
-    installCapturedRequestContextCapture();
     if (activeMainWorldEventChannel) {
         if (activeMainWorldEventChannel.requestEvent === channel.requestEvent &&
             activeMainWorldEventChannel.resultEvent === channel.resultEvent) {

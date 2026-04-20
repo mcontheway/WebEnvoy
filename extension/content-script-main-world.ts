@@ -15,6 +15,7 @@ type MainWorldRequestType =
   | "fingerprint-install"
   | "fingerprint-verify"
   | "page-state-read"
+  | "captured-request-context-activate"
   | "captured-request-context-read";
 
 type MainWorldFetchResult = {
@@ -350,6 +351,7 @@ const asCapturedRequestContextLookupResult = (
 export const readCapturedRequestContextViaMainWorld = async (
   input: CapturedRequestContextLookup
 ): Promise<CapturedRequestContextLookupResponse | null> => {
+  await activateCapturedRequestContextCaptureViaMainWorld();
   const result = await mainWorldCall<unknown>({
     type: "captured-request-context-read",
     payload: {
@@ -360,6 +362,14 @@ export const readCapturedRequestContextViaMainWorld = async (
     }
   });
   return asCapturedRequestContextLookupResult(result) ?? asCapturedRequestContextArtifact(result);
+};
+
+export const activateCapturedRequestContextCaptureViaMainWorld = async (): Promise<boolean> => {
+  const result = await mainWorldCall<unknown>({
+    type: "captured-request-context-activate",
+    payload: {}
+  });
+  return result === true;
 };
 
 const resolveMainWorldRequestUrl = (value: string): string => {

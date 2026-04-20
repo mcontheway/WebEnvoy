@@ -113,7 +113,9 @@ const createBundledMainWorldWindow = (input: { href: string; keyword: string }) 
       }
 
       let result: unknown = null;
-      if (detail.type === "captured-request-context-read") {
+      if (detail.type === "captured-request-context-activate") {
+        result = true;
+      } else if (detail.type === "captured-request-context-read") {
         result = createCapturedSearchContextHit({
           href: input.href,
           keyword: input.keyword

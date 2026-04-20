@@ -236,6 +236,7 @@ const asCapturedRequestContextLookupResult = (value) => {
     };
 };
 export const readCapturedRequestContextViaMainWorld = async (input) => {
+    await activateCapturedRequestContextCaptureViaMainWorld();
     const result = await mainWorldCall({
         type: "captured-request-context-read",
         payload: {
@@ -246,6 +247,13 @@ export const readCapturedRequestContextViaMainWorld = async (input) => {
         }
     });
     return asCapturedRequestContextLookupResult(result) ?? asCapturedRequestContextArtifact(result);
+};
+export const activateCapturedRequestContextCaptureViaMainWorld = async () => {
+    const result = await mainWorldCall({
+        type: "captured-request-context-activate",
+        payload: {}
+    });
+    return result === true;
 };
 const resolveMainWorldRequestUrl = (value) => {
     const baseHref = typeof globalThis.location?.href === "string" && globalThis.location.href.length > 0

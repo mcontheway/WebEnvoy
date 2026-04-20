@@ -467,6 +467,55 @@ describe("xhs read request-context exact-shape reuse", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
+  it("treats failed detail artifacts as rejected_source", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const failedArtifact = {
+      ...createDetailArtifact(),
+      template_ready: false,
+      rejection_reason: "failed_request_rejected",
+      request_status: {
+        completion: "failed",
+        http_status: 200
+      },
+      response: {
+        headers: {},
+        body: {
+          code: 500100,
+          msg: "gateway failed"
+        }
+      }
+    } as unknown as CapturedRequestContextArtifact;
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-context-failed-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-context-failed-001")
+      },
+      createEnvironment({
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => failedArtifact
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.payload.details).toMatchObject({
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "rejected_source",
+      request_context_miss_reason: "failed_request_rejected"
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
   it("keeps shape_mismatch when only sibling rejected detail shapes exist in the route bucket", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
