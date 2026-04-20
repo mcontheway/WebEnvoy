@@ -264,19 +264,26 @@ const parseUserIdFromUrl = (value: string | null): string | null => {
   }
 };
 
-const resolveDetailResponseNoteId = (value: unknown): string | null => {
+const resolveDetailResponseNoteId = (
+  value: unknown,
+  preferredNoteId?: string | null
+): string | null => {
   const record = asRecord(value);
   if (!record) {
     return null;
   }
+  let fallbackNoteId: string | null = null;
   for (const candidate of getDetailResponseCandidates(record)) {
     const candidateNoteId =
       asString(candidate.note_id) ?? asString(candidate.noteId) ?? asString(candidate.id);
     if (candidateNoteId) {
-      return candidateNoteId;
+      if (preferredNoteId && candidateNoteId === preferredNoteId) {
+        return candidateNoteId;
+      }
+      fallbackNoteId ??= candidateNoteId;
     }
   }
-  return null;
+  return preferredNoteId ? null : fallbackNoteId;
 };
 
 const createDetailShape = (noteId: string): DetailRequestShape => ({
@@ -335,7 +342,11 @@ const deriveUserHomeShapeFromSource = (value: unknown): UserHomeRequestShape | n
 
 const deriveReadShapeFromArtifact = (
   spec: XhsReadCommandSpec,
-  artifact: CapturedRequestContextArtifact | Record<string, unknown> | null
+  artifact: CapturedRequestContextArtifact | Record<string, unknown> | null,
+  options?: {
+    preferredDetailNoteId?: string | null;
+    allowDetailRequestFallback?: boolean;
+  }
 ): ReadRequestShape | null => {
   if (!artifact) {
     return null;
@@ -346,19 +357,30 @@ const deriveReadShapeFromArtifact = (
   }
   const explicitShape = parseJsonRecord(record.shape);
   if (explicitShape) {
-    return spec.command === "xhs.detail"
-      ? deriveDetailShapeFromSource(explicitShape)
-      : deriveUserHomeShapeFromSource(explicitShape);
+    if (spec.command === "xhs.detail") {
+      const explicitDetailShape = deriveDetailShapeFromSource(explicitShape);
+      if (options?.allowDetailRequestFallback === false) {
+        const response = asRecord(record.response);
+        const preferredNoteId = options?.preferredDetailNoteId ?? explicitDetailShape?.note_id ?? null;
+        const noteIdFromResponse = resolveDetailResponseNoteId(response?.body, preferredNoteId);
+        return noteIdFromResponse ? createDetailShape(noteIdFromResponse) : null;
+      }
+      return explicitDetailShape;
+    }
+    return deriveUserHomeShapeFromSource(explicitShape);
   }
   if (spec.command === "xhs.detail") {
     const response = asRecord(record.response);
-    const noteIdFromResponse = resolveDetailResponseNoteId(response?.body);
+    const noteIdFromResponse = resolveDetailResponseNoteId(
+      response?.body,
+      options?.preferredDetailNoteId
+    );
     if (noteIdFromResponse) {
       return createDetailShape(noteIdFromResponse);
     }
   }
   const request = asRecord(record.request);
-  if (spec.command === "xhs.detail") {
+  if (spec.command === "xhs.detail" && options?.allowDetailRequestFallback !== false) {
     return deriveDetailShapeFromSource(request?.body);
   }
   const urlShape = deriveUserHomeShapeFromSource({ url: asString(record.url) });
@@ -387,7 +409,10 @@ const resolveReadRequestContext = (
   spec: XhsReadCommandSpec,
   artifact: CapturedRequestContextLookupResponse | Record<string, unknown> | null,
   expectedShape: ReadRequestShape,
-  now: number
+  now: number,
+  options?: {
+    allowDetailRequestFallback?: boolean;
+  }
 ): ReadRequestContextLookupResult => {
   if (!artifact) {
     return {
@@ -408,12 +433,19 @@ const resolveReadRequestContext = (
         spec,
         admittedTemplate as CapturedRequestContextArtifact | Record<string, unknown>,
         expectedShape,
-        now
+        now,
+        {
+          allowDetailRequestFallback: false
+        }
       );
     }
     const rejectedObservation = asRecord(lookupRecord.rejected_observation);
     if (rejectedObservation) {
-      const derivedShape = deriveReadShapeFromArtifact(spec, rejectedObservation);
+      const derivedShape = deriveReadShapeFromArtifact(spec, rejectedObservation, {
+        preferredDetailNoteId:
+          spec.command === "xhs.detail" ? (expectedShape as DetailRequestShape).note_id : null,
+        allowDetailRequestFallback: true
+      });
       const status = resolveCapturedArtifactStatus(rejectedObservation);
       return {
         state: "rejected_source",
@@ -426,7 +458,11 @@ const resolveReadRequestContext = (
       return {
         state: "incompatible",
         reason: "shape_mismatch",
-        shape: deriveReadShapeFromArtifact(spec, incompatibleObservation)
+        shape: deriveReadShapeFromArtifact(spec, incompatibleObservation, {
+          preferredDetailNoteId:
+            spec.command === "xhs.detail" ? (expectedShape as DetailRequestShape).note_id : null,
+          allowDetailRequestFallback: true
+        })
       };
     }
     const availableShapeKeys = Array.isArray(lookupRecord.available_shape_keys)
@@ -446,7 +482,12 @@ const resolveReadRequestContext = (
   }
   const derivedShape = deriveReadShapeFromArtifact(
     spec,
-    artifact as CapturedRequestContextArtifact | Record<string, unknown> | null
+    artifact as CapturedRequestContextArtifact | Record<string, unknown> | null,
+    {
+      preferredDetailNoteId:
+        spec.command === "xhs.detail" ? (expectedShape as DetailRequestShape).note_id : null,
+      allowDetailRequestFallback: options?.allowDetailRequestFallback ?? true
+    }
   );
   if (!derivedShape) {
     return {

@@ -123,18 +123,22 @@ const parseUserIdFromUrl = (value) => {
         return null;
     }
 };
-const resolveDetailResponseNoteId = (value) => {
+const resolveDetailResponseNoteId = (value, preferredNoteId) => {
     const record = asRecord(value);
     if (!record) {
         return null;
     }
+    let fallbackNoteId = null;
     for (const candidate of getDetailResponseCandidates(record)) {
         const candidateNoteId = asString(candidate.note_id) ?? asString(candidate.noteId) ?? asString(candidate.id);
         if (candidateNoteId) {
-            return candidateNoteId;
+            if (preferredNoteId && candidateNoteId === preferredNoteId) {
+                return candidateNoteId;
+            }
+            fallbackNoteId ??= candidateNoteId;
         }
     }
-    return null;
+    return preferredNoteId ? null : fallbackNoteId;
 };
 const createDetailShape = (noteId) => ({
     command: "xhs.detail",
@@ -182,7 +186,7 @@ const deriveUserHomeShapeFromSource = (value) => {
         user_id: userId
     };
 };
-const deriveReadShapeFromArtifact = (spec, artifact) => {
+const deriveReadShapeFromArtifact = (spec, artifact, options) => {
     if (!artifact) {
         return null;
     }
@@ -192,19 +196,27 @@ const deriveReadShapeFromArtifact = (spec, artifact) => {
     }
     const explicitShape = parseJsonRecord(record.shape);
     if (explicitShape) {
-        return spec.command === "xhs.detail"
-            ? deriveDetailShapeFromSource(explicitShape)
-            : deriveUserHomeShapeFromSource(explicitShape);
+        if (spec.command === "xhs.detail") {
+            const explicitDetailShape = deriveDetailShapeFromSource(explicitShape);
+            if (options?.allowDetailRequestFallback === false) {
+                const response = asRecord(record.response);
+                const preferredNoteId = options?.preferredDetailNoteId ?? explicitDetailShape?.note_id ?? null;
+                const noteIdFromResponse = resolveDetailResponseNoteId(response?.body, preferredNoteId);
+                return noteIdFromResponse ? createDetailShape(noteIdFromResponse) : null;
+            }
+            return explicitDetailShape;
+        }
+        return deriveUserHomeShapeFromSource(explicitShape);
     }
     if (spec.command === "xhs.detail") {
         const response = asRecord(record.response);
-        const noteIdFromResponse = resolveDetailResponseNoteId(response?.body);
+        const noteIdFromResponse = resolveDetailResponseNoteId(response?.body, options?.preferredDetailNoteId);
         if (noteIdFromResponse) {
             return createDetailShape(noteIdFromResponse);
         }
     }
     const request = asRecord(record.request);
-    if (spec.command === "xhs.detail") {
+    if (spec.command === "xhs.detail" && options?.allowDetailRequestFallback !== false) {
         return deriveDetailShapeFromSource(request?.body);
     }
     const urlShape = deriveUserHomeShapeFromSource({ url: asString(record.url) });
@@ -226,7 +238,7 @@ const serializeReadShape = (shape) => shape.command === "xhs.detail"
         pathname: shape.pathname,
         user_id: shape.user_id
     });
-const resolveReadRequestContext = (spec, artifact, expectedShape, now) => {
+const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) => {
     if (!artifact) {
         return {
             state: "miss",
@@ -240,11 +252,16 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now) => {
             "incompatible_observation" in lookupRecord)) {
         const admittedTemplate = asRecord(lookupRecord.admitted_template);
         if (admittedTemplate) {
-            return resolveReadRequestContext(spec, admittedTemplate, expectedShape, now);
+            return resolveReadRequestContext(spec, admittedTemplate, expectedShape, now, {
+                allowDetailRequestFallback: false
+            });
         }
         const rejectedObservation = asRecord(lookupRecord.rejected_observation);
         if (rejectedObservation) {
-            const derivedShape = deriveReadShapeFromArtifact(spec, rejectedObservation);
+            const derivedShape = deriveReadShapeFromArtifact(spec, rejectedObservation, {
+                preferredDetailNoteId: spec.command === "xhs.detail" ? expectedShape.note_id : null,
+                allowDetailRequestFallback: true
+            });
             const status = resolveCapturedArtifactStatus(rejectedObservation);
             return {
                 state: "rejected_source",
@@ -257,7 +274,10 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now) => {
             return {
                 state: "incompatible",
                 reason: "shape_mismatch",
-                shape: deriveReadShapeFromArtifact(spec, incompatibleObservation)
+                shape: deriveReadShapeFromArtifact(spec, incompatibleObservation, {
+                    preferredDetailNoteId: spec.command === "xhs.detail" ? expectedShape.note_id : null,
+                    allowDetailRequestFallback: true
+                })
             };
         }
         const availableShapeKeys = Array.isArray(lookupRecord.available_shape_keys)
@@ -275,7 +295,10 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now) => {
             reason: "template_missing"
         };
     }
-    const derivedShape = deriveReadShapeFromArtifact(spec, artifact);
+    const derivedShape = deriveReadShapeFromArtifact(spec, artifact, {
+        preferredDetailNoteId: spec.command === "xhs.detail" ? expectedShape.note_id : null,
+        allowDetailRequestFallback: options?.allowDetailRequestFallback ?? true
+    });
     if (!derivedShape) {
         return {
             state: "miss",

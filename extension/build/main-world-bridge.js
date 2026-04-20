@@ -203,33 +203,35 @@ const getAcceptedDetailResponseCandidates = (body) => {
         ...(hasDetailArtifactDataShape(dataRecord) ? [dataRecord] : [])
     ];
 };
-const resolveDetailResponseNoteId = (value) => {
+const resolveDetailResponseNoteId = (value, preferredNoteId) => {
     const record = asRecord(value);
     if (!record) {
         return null;
     }
+    let fallbackNoteId = null;
     for (const candidate of getAcceptedDetailResponseCandidates(record)) {
         const candidateNoteId = toTrimmedString(candidate.note_id) ??
             toTrimmedString(candidate.noteId) ??
             toTrimmedString(candidate.id);
         if (candidateNoteId) {
-            return candidateNoteId;
+            if (preferredNoteId && candidateNoteId === preferredNoteId) {
+                return candidateNoteId;
+            }
+            fallbackNoteId ??= candidateNoteId;
         }
     }
-    return null;
+    return preferredNoteId ? null : fallbackNoteId;
 };
 const parseDetailShape = (requestBody, responseBody, templateReady) => {
     const record = asRecord(requestBody);
     const requestedNoteId = (record ? toTrimmedString(record.note_id) : null) ??
         (record ? toTrimmedString(record.source_note_id) : null);
-    const responseNoteId = resolveDetailResponseNoteId(responseBody);
-    if (templateReady &&
-        requestedNoteId &&
-        responseNoteId &&
-        requestedNoteId !== responseNoteId) {
+    const responseNoteId = resolveDetailResponseNoteId(responseBody, requestedNoteId);
+    if (templateReady && !responseNoteId) {
         return null;
     }
-    const noteId = requestedNoteId ??
+    const noteId = (templateReady ? responseNoteId : null) ??
+        requestedNoteId ??
         responseNoteId ??
         (!templateReady && record ? toTrimmedString(record.source_note_id) : null);
     if (!noteId) {
@@ -433,6 +435,13 @@ const resolvePathname = (value) => {
         return null;
     }
 };
+const resolveCurrentPageCaptureContext = () => {
+    const referrer = typeof window.location?.href === "string" ? window.location.href : null;
+    return {
+        pageContextNamespace: createPageContextNamespace(referrer ?? "about:blank"),
+        referrer
+    };
+};
 const isSyntheticRequest = (headers) => {
     const marker = headers[WEBENVOY_SYNTHETIC_REQUEST_HEADER];
     if (typeof marker !== "string") {
@@ -472,8 +481,6 @@ const resolveRouteScopeKeyFromLookup = (method, path, shapeKey) => {
     }
 };
 const storeCapturedRequestContext = (candidate, input) => {
-    const referrer = typeof window.location?.href === "string" ? window.location.href : null;
-    const pageContextNamespace = createPageContextNamespace(referrer ?? "about:blank");
     const templateReady = !candidate.synthetic && input.status >= 200 && input.status < 300;
     const contextShape = deriveCapturedContextShape(candidate, {
         responseBody: input.responseBody,
@@ -491,10 +498,10 @@ const storeCapturedRequestContext = (candidate, input) => {
         status: input.status,
         captured_at: Date.now(),
         observed_at: Date.now(),
-        page_context_namespace: pageContextNamespace,
+        page_context_namespace: candidate.pageContextNamespace,
         shape_key: contextShape.shapeKey,
         shape: contextShape.shape,
-        referrer,
+        referrer: candidate.referrer,
         template_ready: templateReady,
         ...(candidate.synthetic
             ? { rejection_reason: "synthetic_request_rejected" }
@@ -514,7 +521,7 @@ const storeCapturedRequestContext = (candidate, input) => {
             body: input.responseBody
         }
     };
-    const bucket = getCapturedContextBucket(pageContextNamespace, contextShape.routeScopeKey, contextShape.shapeKey);
+    const bucket = getCapturedContextBucket(candidate.pageContextNamespace, contextShape.routeScopeKey, contextShape.shapeKey);
     if (templateReady) {
         bucket.admittedTemplate = artifact;
         return;
@@ -553,6 +560,7 @@ const resolveFetchCandidate = async (input, init) => {
             ? await input.clone().text().catch(() => null)
             : null;
     const body = await readArtifactPayload(bodySource);
+    const pageCaptureContext = resolveCurrentPageCaptureContext();
     return {
         transport: "fetch",
         method,
@@ -560,7 +568,9 @@ const resolveFetchCandidate = async (input, init) => {
         url,
         headers,
         body,
-        synthetic: isSyntheticRequest(headers) || isSyntheticRequestInput(input)
+        synthetic: isSyntheticRequest(headers) || isSyntheticRequestInput(input),
+        pageContextNamespace: pageCaptureContext.pageContextNamespace,
+        referrer: pageCaptureContext.referrer
     };
 };
 const captureFetchResponse = async (candidate, response) => {
@@ -651,6 +661,7 @@ const installXhrCapture = () => {
         const normalizedMethod = normalizeCapturedRequestMethod(method);
         const resolvedUrl = resolveAbsoluteUrl(String(url));
         const resolvedPath = resolvedUrl ? resolvePathname(resolvedUrl) : null;
+        const pageCaptureContext = resolveCurrentPageCaptureContext();
         setXhrCaptureState(this, normalizedMethod && resolvedUrl && resolvedPath
             ? {
                 transport: "xhr",
@@ -659,7 +670,9 @@ const installXhrCapture = () => {
                 url: resolvedUrl,
                 headers: {},
                 body: null,
-                synthetic: false
+                synthetic: false,
+                pageContextNamespace: pageCaptureContext.pageContextNamespace,
+                referrer: pageCaptureContext.referrer
             }
             : null);
         originalOpen.call(this, method, url, async ?? true, username ?? null, password ?? null);

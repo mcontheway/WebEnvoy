@@ -682,6 +682,84 @@ describe("main-world bridge contract", () => {
     });
   });
 
+  it("binds captured request context to the page that started the request even if location changes before response", async () => {
+    const env = createMockMainWorldEnvironment();
+    env.mockWindow.location.href = "https://www.xiaohongshu.com/user/profile/user-001";
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+    let resolveResponse: ((response: Response) => void) | null = null;
+    env.setFetchHandler(
+      async () =>
+        await new Promise<Response>((resolve) => {
+          resolveResponse = resolve;
+        })
+    );
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    const fetchPromise = (env.mockWindow.fetch as typeof fetch)(
+      "https://www.xiaohongshu.com/api/sns/web/v1/user/otherinfo?user_id=user-001"
+    );
+
+    await flushMicrotasks();
+    env.mockWindow.location.href = "https://www.xiaohongshu.com/user/profile/user-999";
+    resolveResponse?.(
+      new Response(JSON.stringify({ code: 0, data: { user_id: "user-001" } }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      })
+    );
+    await fetchPromise;
+
+    const originalPageResult = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      method: "GET",
+      path: "/api/sns/web/v1/user/otherinfo",
+      pageContextNamespace: createPageContextNamespace(
+        "https://www.xiaohongshu.com/user/profile/user-001"
+      ),
+      shapeKey:
+        '{"command":"xhs.user_home","method":"GET","pathname":"/api/sns/web/v1/user/otherinfo","user_id":"user-001"}'
+    });
+    const changedPageResult = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      method: "GET",
+      path: "/api/sns/web/v1/user/otherinfo",
+      pageContextNamespace: createPageContextNamespace(
+        "https://www.xiaohongshu.com/user/profile/user-999"
+      ),
+      shapeKey:
+        '{"command":"xhs.user_home","method":"GET","pathname":"/api/sns/web/v1/user/otherinfo","user_id":"user-001"}'
+    });
+
+    expect(originalPageResult).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          referrer: "https://www.xiaohongshu.com/user/profile/user-001"
+        }
+      }
+    });
+    expect(changedPageResult).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: null,
+        rejected_observation: null,
+        incompatible_observation: null,
+        available_shape_keys: []
+      }
+    });
+  });
+
   it("admits wrapped detail success candidates when the accepted note_id is nested under note_card", async () => {
     const env = createMockMainWorldEnvironment();
     env.mockWindow.location.href = "https://www.xiaohongshu.com/explore/note-001";

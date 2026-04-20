@@ -309,6 +309,125 @@ describe("xhs read request-context exact-shape reuse", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
+  it("fails closed for admitted detail artifacts when the response lacks a canonical note_id", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-response-note-missing-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-response-note-missing-001")
+      },
+      createEnvironment({
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () =>
+          createDetailArtifact({
+            shape: undefined,
+            response: {
+              headers: {},
+              body: {
+                code: 0,
+                data: {
+                  items: [
+                    {
+                      note_card: {
+                        title: "missing-id"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.payload.details).toMatchObject({
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "miss",
+      request_context_miss_reason: "template_missing"
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("accepts a later detail response candidate when it is the first one matching the requested note_id", async () => {
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          note: {
+            note_id: "note-001"
+          }
+        }
+      }
+    }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-response-late-match-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-response-late-match-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () =>
+          createDetailArtifact({
+            shape: undefined,
+            response: {
+              headers: {},
+              body: {
+                code: 0,
+                data: {
+                  items: [
+                    {
+                      note_card: {
+                        note_id: "note-999"
+                      }
+                    },
+                    {
+                      note_card: {
+                        note_id: "note-001"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          })
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(callSignature).toHaveBeenCalledWith("/api/sns/web/v1/feed", {
+      source_note_id: "note-001"
+    });
+    expect(fetchJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "/api/sns/web/v1/feed",
+        method: "POST",
+        pageContextRequest: true
+      })
+    );
+  });
+
   it("treats synthetic detail artifacts as rejected_source", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
