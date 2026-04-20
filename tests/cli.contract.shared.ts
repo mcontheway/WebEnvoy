@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -93,8 +93,8 @@ const seedInstalledPersistentExtension = async (input: {
   const extensionId = input.extensionId ?? "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   const profileDir = path.join(input.cwd, ".webenvoy", "profiles", input.profile, "Default");
   const extensionDir = path.join(profileDir, "Extensions", extensionId, "1.0.0");
-  await mkdir(extensionDir, { recursive: true });
-  await writeFile(path.join(extensionDir, "manifest.json"), "{\n  \"manifest_version\": 3\n}\n");
+  await cp(path.join(repoRoot, "extension"), extensionDir, { recursive: true });
+  await mkdir(profileDir, { recursive: true });
   await writeFile(
     path.join(profileDir, "Preferences"),
     `${JSON.stringify(

@@ -612,6 +612,7 @@ export class ProfileRuntimeService {
       );
       if (
         identityPreflight.mode === "official_chrome_persistent_extension" &&
+        identityPreflight.identityBindingState === "bound" &&
         identityPreflight.binding?.extensionId
       ) {
         await writeInstalledExtensionBootstrapForRun({
@@ -619,7 +620,7 @@ export class ProfileRuntimeService {
           extensionId: identityPreflight.binding.extensionId,
           runId: input.runId,
           extensionBootstrap
-        }).catch(() => undefined);
+        });
       }
       session = beginStartSession(session, {
         runId: input.runId,
@@ -824,6 +825,7 @@ export class ProfileRuntimeService {
       );
       if (
         identityPreflight.mode === "official_chrome_persistent_extension" &&
+        identityPreflight.identityBindingState === "bound" &&
         identityPreflight.binding?.extensionId
       ) {
         await writeInstalledExtensionBootstrapForRun({
@@ -831,7 +833,7 @@ export class ProfileRuntimeService {
           extensionId: identityPreflight.binding.extensionId,
           runId: input.runId,
           extensionBootstrap
-        }).catch(() => undefined);
+        });
       }
       session = beginLoginSession(session, {
         runId: input.runId,

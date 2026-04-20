@@ -353,13 +353,14 @@ export class ProfileRuntimeService {
             ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
             const extensionBootstrap = buildExtensionBootstrapInput(input.profile, input.runId, readSessionId(input.params), fingerprintRuntime, typeof input.params.target_page === "string" ? input.params.target_page : null);
             if (identityPreflight.mode === "official_chrome_persistent_extension" &&
+                identityPreflight.identityBindingState === "bound" &&
                 identityPreflight.binding?.extensionId) {
                 await writeInstalledExtensionBootstrapForRun({
                     profileDir,
                     extensionId: identityPreflight.binding.extensionId,
                     runId: input.runId,
                     extensionBootstrap
-                }).catch(() => undefined);
+                });
             }
             session = beginStartSession(session, {
                 runId: input.runId,
@@ -528,13 +529,14 @@ export class ProfileRuntimeService {
             ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
             const extensionBootstrap = buildExtensionBootstrapInput(input.profile, input.runId, readSessionId(input.params), fingerprintRuntime, typeof input.params.target_page === "string" ? input.params.target_page : null);
             if (identityPreflight.mode === "official_chrome_persistent_extension" &&
+                identityPreflight.identityBindingState === "bound" &&
                 identityPreflight.binding?.extensionId) {
                 await writeInstalledExtensionBootstrapForRun({
                     profileDir,
                     extensionId: identityPreflight.binding.extensionId,
                     runId: input.runId,
                     extensionBootstrap
-                }).catch(() => undefined);
+                });
             }
             session = beginLoginSession(session, {
                 runId: input.runId,
