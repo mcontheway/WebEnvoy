@@ -159,6 +159,7 @@ describe("main-world bridge contract", () => {
 
   it("does not expose a page-observable control listener when no staged event channel is present", async () => {
     const { added, mockWindow, mockDocument } = createMockMainWorldEnvironment();
+    const originalFetch = mockWindow.fetch;
 
     installMockDomGlobals({
       mockWindow: mockWindow as Window & Record<string, unknown>,
@@ -169,6 +170,7 @@ describe("main-world bridge contract", () => {
 
     expect(added).toHaveLength(1);
     expect(added[0]?.type).toBe("__mw_bootstrap__");
+    expect(mockWindow.fetch).toBe(originalFetch);
   });
 
   it("attaches a secret-derived request listener after receiving bootstrap event", async () => {

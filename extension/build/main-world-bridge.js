@@ -1167,6 +1167,7 @@ const resolveBootstrappedMainWorldEventChannel = (event) => {
     };
 };
 const attachMainWorldEventChannel = (channel) => {
+    installCapturedRequestContextCapture();
     if (activeMainWorldEventChannel) {
         if (activeMainWorldEventChannel.requestEvent === channel.requestEvent &&
             activeMainWorldEventChannel.resultEvent === channel.resultEvent) {
@@ -1219,7 +1220,6 @@ const ensureBootstrapListener = () => {
     window.addEventListener(MAIN_WORLD_EVENT_BOOTSTRAP, activeMainWorldBootstrapListener);
 };
 const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
-installCapturedRequestContextCapture();
 if (expectedMainWorldEventChannel) {
     attachMainWorldEventChannel(expectedMainWorldEventChannel);
 }

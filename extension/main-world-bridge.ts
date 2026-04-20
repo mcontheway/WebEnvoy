@@ -1545,6 +1545,7 @@ const resolveBootstrappedMainWorldEventChannel = (event: Event): MainWorldEventC
 };
 
 const attachMainWorldEventChannel = (channel: MainWorldEventChannel): void => {
+  installCapturedRequestContextCapture();
   if (activeMainWorldEventChannel) {
     if (
       activeMainWorldEventChannel.requestEvent === channel.requestEvent &&
@@ -1609,7 +1610,6 @@ const ensureBootstrapListener = (): void => {
 };
 
 const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
-installCapturedRequestContextCapture();
 if (expectedMainWorldEventChannel) {
   attachMainWorldEventChannel(expectedMainWorldEventChannel);
 } else {
