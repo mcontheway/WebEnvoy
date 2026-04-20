@@ -749,7 +749,7 @@ describe("xhs search request-context exact-shape reuse", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
-  it("ignores synthetic captured requests for exact-shape lookup even when they look template-ready", async () => {
+  it("returns rejected_source for exact-shape synthetic search observations", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
 
@@ -785,8 +785,8 @@ describe("xhs search request-context exact-shape reuse", () => {
     expect(result.ok).toBe(false);
     expect(result.payload.details).toMatchObject({
       request_context_result: "request_context_missing",
-      request_context_lookup_state: "miss",
-      request_context_miss_reason: "template_missing"
+      request_context_lookup_state: "rejected_source",
+      request_context_miss_reason: "synthetic_request_rejected"
     });
     expect(callSignature).not.toHaveBeenCalled();
     expect(fetchJson).not.toHaveBeenCalled();

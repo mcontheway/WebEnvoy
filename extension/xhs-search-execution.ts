@@ -76,7 +76,7 @@ type RequestContextLookupResult =
     }
   | {
       state: "rejected_source";
-      reason: "synthetic_request_rejected" | "failed_request_rejected";
+      reason: "synthetic_request_rejected" | "failed_request_rejected" | "shape_mismatch";
       shape: SearchRequestShape;
     };
 
@@ -234,6 +234,7 @@ const resolveCapturedArtifactStatus = (value: unknown): {
   rejectionReason:
     | "synthetic_request_rejected"
     | "failed_request_rejected"
+    | "shape_mismatch"
     | null;
 } => {
   const record = asRecord(value);
@@ -245,7 +246,9 @@ const resolveCapturedArtifactStatus = (value: unknown): {
     typeof record?.template_ready === "boolean" ? (record.template_ready as boolean) : null;
   const explicitReason = asString(record?.rejection_reason);
   const rejectionReason =
-    explicitReason === "synthetic_request_rejected" || explicitReason === "failed_request_rejected"
+    explicitReason === "synthetic_request_rejected" ||
+    explicitReason === "failed_request_rejected" ||
+    explicitReason === "shape_mismatch"
       ? explicitReason
       : sourceKind !== null && sourceKind !== "page_request"
         ? "synthetic_request_rejected"
@@ -368,12 +371,6 @@ const resolveSearchRequestContext = (
     };
   }
   const status = resolveCapturedArtifactStatus(artifact);
-  if (status.rejectionReason === "synthetic_request_rejected") {
-    return {
-      state: "miss",
-      reason: "template_missing"
-    };
-  }
   if (serializeSearchShape(derivedShape) !== serializeSearchShape(expectedShape)) {
     return {
       state: "incompatible",

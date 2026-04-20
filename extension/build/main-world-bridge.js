@@ -250,6 +250,16 @@ const parseDetailShape = (requestBody, responseBody, templateReady) => {
         shapeKey: JSON.stringify(shape)
     };
 };
+const hasSuccessfulDetailResponseMismatch = (requestBody, responseBody) => {
+    const record = asRecord(requestBody);
+    const requestedNoteId = (record ? toTrimmedString(record.note_id) : null) ??
+        (record ? toTrimmedString(record.source_note_id) : null);
+    if (!requestedNoteId) {
+        return false;
+    }
+    return (resolveDetailResponseNoteId(responseBody, requestedNoteId) === null &&
+        resolveDetailResponseNoteId(responseBody) !== null);
+};
 const parseUserHomeShape = (url, value) => {
     const record = asRecord(value);
     let userId = record ? toTrimmedString(record.user_id) ?? toTrimmedString(record.userId) : null;
@@ -492,6 +502,10 @@ const storeCapturedRequestContext = (candidate, input) => {
         input.status >= 200 &&
         input.status < 300 &&
         !hasCapturedRequestBusinessFailure(input.responseBody);
+    const detailResponseMismatch = candidate.path === DETAIL_ENDPOINT &&
+        candidate.method === "POST" &&
+        templateReady &&
+        hasSuccessfulDetailResponseMismatch(candidate.body, input.responseBody);
     const contextShape = deriveCapturedContextShape(candidate, {
         responseBody: input.responseBody,
         templateReady
@@ -499,6 +513,7 @@ const storeCapturedRequestContext = (candidate, input) => {
     if (!contextShape) {
         return;
     }
+    const admittedTemplateReady = templateReady && !detailResponseMismatch;
     const artifact = {
         source_kind: candidate.synthetic ? "synthetic_request" : "page_request",
         transport: candidate.transport,
@@ -512,12 +527,14 @@ const storeCapturedRequestContext = (candidate, input) => {
         shape_key: contextShape.shapeKey,
         shape: contextShape.shape,
         referrer: candidate.referrer,
-        template_ready: templateReady,
+        template_ready: admittedTemplateReady,
         ...(candidate.synthetic
             ? { rejection_reason: "synthetic_request_rejected" }
-            : !templateReady
-                ? { rejection_reason: "failed_request_rejected" }
-                : {}),
+            : detailResponseMismatch
+                ? { rejection_reason: "shape_mismatch" }
+                : !templateReady
+                    ? { rejection_reason: "failed_request_rejected" }
+                    : {}),
         request_status: {
             completion: templateReady ? "completed" : "failed",
             http_status: input.status > 0 ? input.status : null
@@ -532,14 +549,11 @@ const storeCapturedRequestContext = (candidate, input) => {
         }
     };
     const bucket = getCapturedContextBucket(candidate.pageContextNamespace, contextShape.routeScopeKey, contextShape.shapeKey);
-    if (templateReady) {
+    if (admittedTemplateReady) {
         if (isSyntheticRejectedArtifact(bucket.rejectedObservation)) {
             bucket.rejectedObservation = null;
         }
         bucket.admittedTemplate = artifact;
-        return;
-    }
-    if (candidate.synthetic) {
         return;
     }
     bucket.rejectedObservation = artifact;

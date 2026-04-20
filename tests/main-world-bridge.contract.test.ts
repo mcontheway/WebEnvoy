@@ -495,7 +495,10 @@ describe("main-world bridge contract", () => {
       ok: true,
       result: {
         admitted_template: null,
-        rejected_observation: null
+        rejected_observation: {
+          source_kind: "synthetic_request",
+          rejection_reason: "synthetic_request_rejected"
+        }
       }
     });
   });
@@ -549,7 +552,10 @@ describe("main-world bridge contract", () => {
       ok: true,
       result: {
         admitted_template: null,
-        rejected_observation: null
+        rejected_observation: {
+          source_kind: "synthetic_request",
+          rejection_reason: "synthetic_request_rejected"
+        }
       }
     });
   });
@@ -617,7 +623,10 @@ describe("main-world bridge contract", () => {
           source_kind: "page_request",
           template_ready: true
         },
-        rejected_observation: null
+        rejected_observation: {
+          source_kind: "synthetic_request",
+          rejection_reason: "synthetic_request_rejected"
+        }
       }
     });
   });
@@ -1211,9 +1220,7 @@ describe("main-world bridge contract", () => {
       result: {
         admitted_template: null,
         rejected_observation: null,
-        incompatible_observation: {
-          incompatibility_reason: "shape_mismatch"
-        },
+        incompatible_observation: null,
         available_shape_keys: [
           '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-999"}'
         ]
@@ -1222,10 +1229,11 @@ describe("main-world bridge contract", () => {
     expect(mismatchedSlotResult).toMatchObject({
       ok: true,
       result: {
-        admitted_template: {
-          source_kind: "page_request"
+        admitted_template: null,
+        rejected_observation: {
+          source_kind: "page_request",
+          rejection_reason: "shape_mismatch"
         },
-        rejected_observation: null,
         incompatible_observation: null,
         available_shape_keys: [
           '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-999"}'

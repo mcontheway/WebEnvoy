@@ -478,7 +478,7 @@ describe("xhs read request-context exact-shape reuse", () => {
     );
   });
 
-  it("ignores synthetic detail artifacts for exact-shape lookup", async () => {
+  it("returns rejected_source for exact-shape synthetic detail observations", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
 
@@ -510,8 +510,58 @@ describe("xhs read request-context exact-shape reuse", () => {
     expect(result.ok).toBe(false);
     expect(result.payload.details).toMatchObject({
       request_context_result: "request_context_missing",
-      request_context_lookup_state: "miss",
-      request_context_miss_reason: "template_missing"
+      request_context_lookup_state: "rejected_source",
+      request_context_miss_reason: "synthetic_request_rejected"
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("returns rejected_source for exact-shape synthetic user_home observations", async () => {
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          user: {
+            user_id: "user-001"
+          }
+        }
+      }
+    }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const syntheticArtifact = {
+      ...createUserHomeArtifact(),
+      source_kind: "synthetic_request",
+      template_ready: true,
+      rejection_reason: "synthetic_request_rejected"
+    } as unknown as CapturedRequestContextArtifact;
+
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-001"
+        },
+        options: createLiveReadOptions("run-user-home-context-rejected-001", "profile_tab"),
+        executionContext: createExecutionContext("run-user-home-context-rejected-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => syntheticArtifact
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.payload.details).toMatchObject({
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "rejected_source",
+      request_context_miss_reason: "synthetic_request_rejected"
     });
     expect(callSignature).not.toHaveBeenCalled();
     expect(fetchJson).not.toHaveBeenCalled();

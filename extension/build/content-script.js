@@ -4933,7 +4933,9 @@ const resolveCapturedArtifactStatus = (value) => {
     const completion = asString(requestStatus?.completion);
     const templateReady = typeof record?.template_ready === "boolean" ? record.template_ready : null;
     const explicitReason = asString(record?.rejection_reason);
-    const rejectionReason = explicitReason === "synthetic_request_rejected" || explicitReason === "failed_request_rejected"
+    const rejectionReason = explicitReason === "synthetic_request_rejected" ||
+        explicitReason === "failed_request_rejected" ||
+        explicitReason === "shape_mismatch"
         ? explicitReason
         : sourceKind !== null && sourceKind !== "page_request"
             ? "synthetic_request_rejected"
@@ -5038,12 +5040,6 @@ const resolveSearchRequestContext = (artifact, expectedShape, now) => {
         };
     }
     const status = resolveCapturedArtifactStatus(artifact);
-    if (status.rejectionReason === "synthetic_request_rejected") {
-        return {
-            state: "miss",
-            reason: "template_missing"
-        };
-    }
     if (serializeSearchShape(derivedShape) !== serializeSearchShape(expectedShape)) {
         return {
             state: "incompatible",
@@ -5690,7 +5686,9 @@ const resolveCapturedArtifactStatus = (value) => {
     const completion = asString(requestStatus?.completion);
     const templateReady = typeof record?.template_ready === "boolean" ? record.template_ready : null;
     const explicitReason = asString(record?.rejection_reason);
-    const rejectionReason = explicitReason === "synthetic_request_rejected" || explicitReason === "failed_request_rejected"
+    const rejectionReason = explicitReason === "synthetic_request_rejected" ||
+        explicitReason === "failed_request_rejected" ||
+        explicitReason === "shape_mismatch"
         ? explicitReason
         : sourceKind !== null && sourceKind !== "page_request"
             ? "synthetic_request_rejected"
@@ -5933,12 +5931,6 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
         };
     }
     const status = resolveCapturedArtifactStatus(artifact);
-    if (status.rejectionReason === "synthetic_request_rejected") {
-        return {
-            state: "miss",
-            reason: "template_missing"
-        };
-    }
     if (serializeReadShape(derivedShape) !== serializeReadShape(expectedShape)) {
         return {
             state: "incompatible",
