@@ -516,6 +516,68 @@ describe("xhs read request-context exact-shape reuse", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
+  it("prefers a newer exact-shape rejected detail observation over an older admitted template", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const admittedTemplate = createDetailArtifact({
+      captured_at: 1_710_000_000_000,
+      observed_at: 1_710_000_000_000
+    });
+    const rejectedObservation = createDetailArtifact({
+      captured_at: 1_710_000_050_000,
+      observed_at: 1_710_000_050_000,
+      template_ready: false,
+      rejection_reason: "failed_request_rejected",
+      request_status: {
+        completion: "failed",
+        http_status: 200
+      },
+      response: {
+        headers: {},
+        body: {
+          code: 500100,
+          msg: "gateway failed"
+        }
+      }
+    });
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-newer-rejected-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-newer-rejected-001")
+      },
+      createEnvironment({
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => ({
+          page_context_namespace: "detail-page",
+          shape_key:
+            '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}',
+          admitted_template: admittedTemplate,
+          rejected_observation: rejectedObservation,
+          incompatible_observation: null,
+          available_shape_keys: []
+        })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.payload.details).toMatchObject({
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "rejected_source",
+      request_context_miss_reason: "failed_request_rejected"
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
   it("keeps shape_mismatch when only sibling rejected detail shapes exist in the route bucket", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
@@ -640,6 +702,69 @@ describe("xhs read request-context exact-shape reuse", () => {
       request_context_result: "request_context_missing",
       request_context_lookup_state: "stale",
       request_context_miss_reason: "template_stale"
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("prefers a newer exact-shape rejected user_home observation over an older admitted template", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const admittedTemplate = createUserHomeArtifact({
+      captured_at: 1_710_000_000_000,
+      observed_at: 1_710_000_000_000
+    });
+    const rejectedObservation = createUserHomeArtifact({
+      captured_at: 1_710_000_050_000,
+      observed_at: 1_710_000_050_000,
+      template_ready: false,
+      rejection_reason: "failed_request_rejected",
+      request_status: {
+        completion: "failed",
+        http_status: 200
+      },
+      response: {
+        headers: {},
+        body: {
+          code: 500100,
+          msg: "gateway failed"
+        }
+      }
+    });
+
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-001"
+        },
+        options: createLiveReadOptions("run-user-home-newer-rejected-001", "profile_tab"),
+        executionContext: createExecutionContext("run-user-home-newer-rejected-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => ({
+          page_context_namespace: "profile-page",
+          shape_key:
+            '{"command":"xhs.user_home","method":"GET","pathname":"/api/sns/web/v1/user/otherinfo","user_id":"user-001"}',
+          admitted_template: admittedTemplate,
+          rejected_observation: rejectedObservation,
+          incompatible_observation: null,
+          available_shape_keys: []
+        })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.payload.details).toMatchObject({
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "rejected_source",
+      request_context_miss_reason: "failed_request_rejected"
     });
     expect(callSignature).not.toHaveBeenCalled();
     expect(fetchJson).not.toHaveBeenCalled();

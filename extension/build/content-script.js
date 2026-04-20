@@ -4947,6 +4947,33 @@ const resolveCapturedArtifactStatus = (value) => {
         rejectionReason
     };
 };
+const resolveCapturedArtifactObservedAt = (value) => {
+    const record = asRecord(value);
+    return asInteger(record?.observed_at) ?? asInteger(record?.captured_at);
+};
+const resolveExactShapeLookupArtifacts = (lookupRecord) => {
+    const admittedTemplate = asRecord(lookupRecord.admitted_template);
+    const rejectedObservation = asRecord(lookupRecord.rejected_observation);
+    if (!admittedTemplate || !rejectedObservation) {
+        return {
+            admittedTemplate,
+            rejectedObservation
+        };
+    }
+    const admittedObservedAt = resolveCapturedArtifactObservedAt(admittedTemplate);
+    const rejectedObservedAt = resolveCapturedArtifactObservedAt(rejectedObservation);
+    if (rejectedObservedAt !== null &&
+        (admittedObservedAt === null || rejectedObservedAt > admittedObservedAt)) {
+        return {
+            admittedTemplate: null,
+            rejectedObservation
+        };
+    }
+    return {
+        admittedTemplate,
+        rejectedObservation: null
+    };
+};
 const resolveSearchRequestContext = (artifact, expectedShape, now) => {
     if (!artifact) {
         return {
@@ -4959,11 +4986,10 @@ const resolveSearchRequestContext = (artifact, expectedShape, now) => {
         ("admitted_template" in lookupRecord ||
             "rejected_observation" in lookupRecord ||
             "incompatible_observation" in lookupRecord)) {
-        const admittedTemplate = asRecord(lookupRecord.admitted_template);
+        const { admittedTemplate, rejectedObservation } = resolveExactShapeLookupArtifacts(lookupRecord);
         if (admittedTemplate) {
             return resolveSearchRequestContext(admittedTemplate, expectedShape, now);
         }
-        const rejectedObservation = asRecord(lookupRecord.rejected_observation);
         if (rejectedObservation) {
             const shape = deriveSearchShapeFromArtifact(rejectedObservation);
             const status = resolveCapturedArtifactStatus(rejectedObservation);
@@ -5623,6 +5649,33 @@ const resolveCapturedArtifactStatus = (value) => {
         rejectionReason
     };
 };
+const resolveCapturedArtifactObservedAt = (value) => {
+    const record = asRecord(value);
+    return asInteger(record?.observed_at) ?? asInteger(record?.captured_at);
+};
+const resolveExactShapeLookupArtifacts = (lookupRecord) => {
+    const admittedTemplate = asRecord(lookupRecord.admitted_template);
+    const rejectedObservation = asRecord(lookupRecord.rejected_observation);
+    if (!admittedTemplate || !rejectedObservation) {
+        return {
+            admittedTemplate,
+            rejectedObservation
+        };
+    }
+    const admittedObservedAt = resolveCapturedArtifactObservedAt(admittedTemplate);
+    const rejectedObservedAt = resolveCapturedArtifactObservedAt(rejectedObservation);
+    if (rejectedObservedAt !== null &&
+        (admittedObservedAt === null || rejectedObservedAt > admittedObservedAt)) {
+        return {
+            admittedTemplate: null,
+            rejectedObservation
+        };
+    }
+    return {
+        admittedTemplate,
+        rejectedObservation: null
+    };
+};
 const parseUserIdFromUrl = (value) => {
     if (!value) {
         return null;
@@ -5762,13 +5815,12 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
         ("admitted_template" in lookupRecord ||
             "rejected_observation" in lookupRecord ||
             "incompatible_observation" in lookupRecord)) {
-        const admittedTemplate = asRecord(lookupRecord.admitted_template);
+        const { admittedTemplate, rejectedObservation } = resolveExactShapeLookupArtifacts(lookupRecord);
         if (admittedTemplate) {
             return resolveReadRequestContext(spec, admittedTemplate, expectedShape, now, {
                 allowDetailRequestFallback: false
             });
         }
-        const rejectedObservation = asRecord(lookupRecord.rejected_observation);
         if (rejectedObservation) {
             const derivedShape = deriveReadShapeFromArtifact(spec, rejectedObservation, {
                 preferredDetailNoteId: spec.command === "xhs.detail" ? expectedShape.note_id : null,

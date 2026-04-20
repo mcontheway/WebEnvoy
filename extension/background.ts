@@ -401,6 +401,11 @@ const resolvePreferredXhsReadPage = (
   return null;
 };
 
+const isXhsReadTargetPage = (
+  value: unknown
+): value is "search_result_tab" | "explore_detail_tab" | "profile_tab" =>
+  value === "search_result_tab" || value === "explore_detail_tab" || value === "profile_tab";
+
 const resolveRequestedXhsResourceId = (
   command: string,
   commandParams: Record<string, unknown>
@@ -2795,6 +2800,26 @@ class ChromeBackgroundBridge {
       return;
     }
 
+    try {
+      await this.#prepareRuntimeBootstrapRequestContextCapture(request, commandParams);
+    } catch (error) {
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {
+          relay_path: "host>background>main-world"
+        },
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "runtime bootstrap request-context capture preparation failed"
+        }
+      });
+      return;
+    }
+
     this.#runtimeTrustState.setBootstrap(profile, {
       version,
       runId,
@@ -5144,6 +5169,36 @@ class ChromeBackgroundBridge {
       world: "ISOLATED",
       files: ["build/content-script.js"]
     });
+  }
+
+  async #hasContentScriptReceiver(tabId: number): Promise<boolean> {
+    try {
+      await this.chromeApi.tabs.sendMessage(
+        tabId,
+        { kind: "__webenvoy_content_script_probe__" } as unknown as BackgroundToContentMessage
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async #prepareRuntimeBootstrapRequestContextCapture(
+    request: BridgeRequest,
+    commandParams: Record<string, unknown>
+  ): Promise<void> {
+    if (!isXhsReadTargetPage(commandParams.target_page)) {
+      return;
+    }
+    const targetTabId = await this.#resolveTargetTabId(request);
+    if (targetTabId === null) {
+      return;
+    }
+    const hasContentScriptReceiver = await this.#hasContentScriptReceiver(targetTabId);
+    await this.#ensureMainWorldBridgeInjected(request, targetTabId);
+    if (!hasContentScriptReceiver) {
+      await this.#ensureContentScriptInjected(targetTabId);
+    }
   }
 
   async #ensureMainWorldBridgeInjected(request: BridgeRequest, tabId: number): Promise<void> {

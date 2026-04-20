@@ -329,9 +329,13 @@ describe("extension service worker / bootstrap and trust", () => {
     );
   });
 
-  it("does not rely on a background main-world control channel before runtime.bootstrap forward", async () => {
+  it("prepares the request-context capture surface before runtime.bootstrap on xhs read tabs", async () => {
     const firstPort = createMockPort();
     const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.sendMessage = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Could not establish connection. Receiving end does not exist."))
+      .mockResolvedValueOnce(undefined);
     const fingerprintContext = createFingerprintRuntimeContext();
 
     startChromeBackgroundBridge(chromeApi);
@@ -351,6 +355,9 @@ describe("extension service worker / bootstrap and trust", () => {
           run_id: "run-bootstrap-main-world-recover-001",
           runtime_context_id: "ctx-bootstrap-main-world-recover-001",
           profile: "profile-a",
+          target_tab_id: 11,
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
           fingerprint_runtime: fingerprintContext,
           fingerprint_patch_manifest: {
             required_patches: ["audio_context"]
@@ -364,7 +371,16 @@ describe("extension service worker / bootstrap and trust", () => {
 
     await waitForBridgeTurn();
 
-    expect(executeScript).not.toHaveBeenCalled();
+    expect(executeScript).toHaveBeenCalledWith({
+      target: { tabId: 11 },
+      world: "MAIN",
+      files: ["build/main-world-bridge.js"]
+    });
+    expect(executeScript).toHaveBeenCalledWith({
+      target: { tabId: 11 },
+      world: "ISOLATED",
+      files: ["build/content-script.js"]
+    });
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       11,
       expect.objectContaining({

@@ -116,6 +116,7 @@ const resolvePreferredXhsReadPage = (command, targetPage) => {
     }
     return null;
 };
+const isXhsReadTargetPage = (value) => value === "search_result_tab" || value === "explore_detail_tab" || value === "profile_tab";
 const resolveRequestedXhsResourceId = (command, commandParams) => {
     const input = asRecord(commandParams.input);
     if (command === "xhs.detail") {
@@ -1992,6 +1993,25 @@ class ChromeBackgroundBridge {
                         : {})
                 },
                 error: null
+            });
+            return;
+        }
+        try {
+            await this.#prepareRuntimeBootstrapRequestContextCapture(request, commandParams);
+        }
+        catch (error) {
+            this.#emit({
+                id: request.id,
+                status: "error",
+                summary: {
+                    relay_path: "host>background>main-world"
+                },
+                error: {
+                    code: "ERR_TRANSPORT_FORWARD_FAILED",
+                    message: error instanceof Error
+                        ? error.message
+                        : "runtime bootstrap request-context capture preparation failed"
+                }
             });
             return;
         }
@@ -4080,6 +4100,29 @@ class ChromeBackgroundBridge {
             world: "ISOLATED",
             files: ["build/content-script.js"]
         });
+    }
+    async #hasContentScriptReceiver(tabId) {
+        try {
+            await this.chromeApi.tabs.sendMessage(tabId, { kind: "__webenvoy_content_script_probe__" });
+            return true;
+        }
+        catch {
+            return false;
+        }
+    }
+    async #prepareRuntimeBootstrapRequestContextCapture(request, commandParams) {
+        if (!isXhsReadTargetPage(commandParams.target_page)) {
+            return;
+        }
+        const targetTabId = await this.#resolveTargetTabId(request);
+        if (targetTabId === null) {
+            return;
+        }
+        const hasContentScriptReceiver = await this.#hasContentScriptReceiver(targetTabId);
+        await this.#ensureMainWorldBridgeInjected(request, targetTabId);
+        if (!hasContentScriptReceiver) {
+            await this.#ensureContentScriptInjected(targetTabId);
+        }
     }
     async #ensureMainWorldBridgeInjected(request, tabId) {
         const existingEnsure = this.#pendingMainWorldBridgeEnsures.get(tabId);

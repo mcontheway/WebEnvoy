@@ -252,6 +252,40 @@ const resolveCapturedArtifactStatus = (value: unknown): {
   };
 };
 
+const resolveCapturedArtifactObservedAt = (value: unknown): number | null => {
+  const record = asRecord(value);
+  return asInteger(record?.observed_at) ?? asInteger(record?.captured_at);
+};
+
+const resolveExactShapeLookupArtifacts = (lookupRecord: Record<string, unknown>): {
+  admittedTemplate: Record<string, unknown> | null;
+  rejectedObservation: Record<string, unknown> | null;
+} => {
+  const admittedTemplate = asRecord(lookupRecord.admitted_template);
+  const rejectedObservation = asRecord(lookupRecord.rejected_observation);
+  if (!admittedTemplate || !rejectedObservation) {
+    return {
+      admittedTemplate,
+      rejectedObservation
+    };
+  }
+  const admittedObservedAt = resolveCapturedArtifactObservedAt(admittedTemplate);
+  const rejectedObservedAt = resolveCapturedArtifactObservedAt(rejectedObservation);
+  if (
+    rejectedObservedAt !== null &&
+    (admittedObservedAt === null || rejectedObservedAt > admittedObservedAt)
+  ) {
+    return {
+      admittedTemplate: null,
+      rejectedObservation
+    };
+  }
+  return {
+    admittedTemplate,
+    rejectedObservation: null
+  };
+};
+
 const parseUserIdFromUrl = (value: string | null): string | null => {
   if (!value) {
     return null;
@@ -427,7 +461,7 @@ const resolveReadRequestContext = (
       "rejected_observation" in lookupRecord ||
       "incompatible_observation" in lookupRecord)
   ) {
-    const admittedTemplate = asRecord(lookupRecord.admitted_template);
+    const { admittedTemplate, rejectedObservation } = resolveExactShapeLookupArtifacts(lookupRecord);
     if (admittedTemplate) {
       return resolveReadRequestContext(
         spec,
@@ -439,7 +473,6 @@ const resolveReadRequestContext = (
         }
       );
     }
-    const rejectedObservation = asRecord(lookupRecord.rejected_observation);
     if (rejectedObservation) {
       const derivedShape = deriveReadShapeFromArtifact(spec, rejectedObservation, {
         preferredDetailNoteId:
