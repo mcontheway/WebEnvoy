@@ -1035,17 +1035,25 @@ describe("main-world bridge contract", () => {
       result: {
         admitted_template: null,
         rejected_observation: null,
-        incompatible_observation: null,
-        available_shape_keys: []
+        incompatible_observation: {
+          incompatibility_reason: "shape_mismatch"
+        },
+        available_shape_keys: [
+          '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-999"}'
+        ]
       }
     });
     expect(mismatchedSlotResult).toMatchObject({
       ok: true,
       result: {
-        admitted_template: null,
+        admitted_template: {
+          source_kind: "page_request"
+        },
         rejected_observation: null,
         incompatible_observation: null,
-        available_shape_keys: []
+        available_shape_keys: [
+          '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-999"}'
+        ]
       }
     });
   });

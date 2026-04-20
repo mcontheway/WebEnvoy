@@ -368,15 +368,13 @@ const parseDetailShape = (
   const requestedNoteId =
     (record ? toTrimmedString(record.note_id) : null) ??
     (record ? toTrimmedString(record.source_note_id) : null);
-  const responseNoteId = resolveDetailResponseNoteId(responseBody, requestedNoteId);
-  if (templateReady && !responseNoteId) {
-    return null;
-  }
-  const noteId =
-    (templateReady ? responseNoteId : null) ??
-    requestedNoteId ??
-    responseNoteId ??
-    (!templateReady && record ? toTrimmedString(record.source_note_id) : null);
+  const matchedResponseNoteId = resolveDetailResponseNoteId(responseBody, requestedNoteId);
+  const responseNoteId = resolveDetailResponseNoteId(responseBody);
+  const noteId = templateReady
+    ? matchedResponseNoteId ?? responseNoteId
+    : requestedNoteId ??
+      responseNoteId ??
+      (!templateReady && record ? toTrimmedString(record.source_note_id) : null);
   if (!noteId) {
     return null;
   }
