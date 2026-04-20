@@ -227,6 +227,56 @@ describe("xhs search request-context exact-shape reuse", () => {
     );
   });
 
+  it("allows an explicit search_id only when it matches the captured value", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsSearch(
+      {
+        abilityId: "xhs.note.search.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          query: "AI",
+          page: 2,
+          limit: 30,
+          sort: "time_desc",
+          note_type: 1,
+          search_id: "captured-search-id"
+        },
+        options: createLiveReadOptions("run-search-context-explicit-match-001"),
+        executionContext: createExecutionContext("run-search-context-explicit-match-001")
+      },
+      createEnvironment({
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => createCapturedArtifact()
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(callSignature).toHaveBeenCalledWith("/api/sns/web/v1/search/notes", {
+      keyword: "AI",
+      page: 2,
+      page_size: 30,
+      search_id: "captured-search-id",
+      sort: "time_desc",
+      note_type: 1
+    });
+    expect(fetchJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: JSON.stringify({
+          keyword: "AI",
+          page: 2,
+          page_size: 30,
+          search_id: "captured-search-id",
+          sort: "time_desc",
+          note_type: 1
+        })
+      })
+    );
+  });
+
   it("waits for the first captured search template before failing closed on a fresh page load", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
@@ -606,6 +656,94 @@ describe("xhs search request-context exact-shape reuse", () => {
       request_context_result: "request_context_missing",
       request_context_lookup_state: "stale",
       request_context_miss_reason: "template_stale"
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the captured exact-shape context does not include search_id", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsSearch(
+      {
+        abilityId: "xhs.note.search.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          query: "AI",
+          page: 2,
+          limit: 30,
+          sort: "time_desc",
+          note_type: 1
+        },
+        options: createLiveReadOptions("run-search-context-missing-search-id-001"),
+        executionContext: createExecutionContext("run-search-context-missing-search-id-001")
+      },
+      createEnvironment({
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () =>
+          createCapturedArtifact({
+            request: {
+              headers: {
+                Accept: "application/json, text/plain, */*",
+                "Content-Type": "application/json;charset=utf-8"
+              },
+              body: {
+                keyword: "AI",
+                page: 2,
+                page_size: 30,
+                sort: "time_desc",
+                note_type: 1
+              }
+            }
+          })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.payload.details).toMatchObject({
+      request_context_result: "request_context_missing",
+      request_context_lookup_state: "miss",
+      request_context_miss_reason: "captured_search_id_missing"
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when an explicit search_id conflicts with the captured exact-shape context", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsSearch(
+      {
+        abilityId: "xhs.note.search.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          query: "AI",
+          page: 2,
+          limit: 30,
+          sort: "time_desc",
+          note_type: 1,
+          search_id: "caller-search-id"
+        },
+        options: createLiveReadOptions("run-search-context-search-id-mismatch-001"),
+        executionContext: createExecutionContext("run-search-context-search-id-mismatch-001")
+      },
+      createEnvironment({
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => createCapturedArtifact()
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.payload.details).toMatchObject({
+      request_context_result: "request_context_incompatible",
+      request_context_lookup_state: "incompatible",
+      request_context_miss_reason: "captured_search_id_mismatch"
     });
     expect(callSignature).not.toHaveBeenCalled();
     expect(fetchJson).not.toHaveBeenCalled();

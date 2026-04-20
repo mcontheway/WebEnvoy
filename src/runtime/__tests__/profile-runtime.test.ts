@@ -4401,6 +4401,42 @@ describe("profile-runtime fingerprint runtime contract", () => {
     ).toEqual(loginStart.fingerprint_runtime);
   });
 
+  it("includes target_page in extensionBootstrap when runtime entry params provide canonical target_page", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-target-page-"));
+    tempDirs.push(baseDir);
+    const launchInputs: BrowserLaunchInput[] = [];
+    const service = createTestService({
+      isProcessAlive: () => true,
+      browserLauncher: {
+        launch: async (input) => {
+          launchInputs.push(input);
+          return {
+            browserPath: "/mock/chrome",
+            browserPid: 999999,
+            controllerPid: 999998,
+            launchArgs: ["about:blank"],
+            launchedAt: new Date().toISOString()
+          };
+        },
+        shutdown: async () => undefined
+      }
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "fingerprint_bootstrap_target_page_profile",
+      runId: "run-runtime-test-fingerprint-bootstrap-target-page-001",
+      params: {
+        target_page: "search_result_tab"
+      }
+    });
+
+    const startLaunch = launchInputs[0];
+    expect(startLaunch.extensionBootstrap).toMatchObject({
+      target_page: "search_result_tab"
+    });
+  });
+
   it("returns fingerprint_runtime on start/status/stop/login", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-fingerprint-runtime-"));
     tempDirs.push(baseDir);

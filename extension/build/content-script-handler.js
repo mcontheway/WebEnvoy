@@ -189,7 +189,7 @@ const resolveTargetPageFromHref = (href, command) => {
         return null;
     }
 };
-const isXhsReadBootstrapTargetPage = (value) => value === "search_result_tab" || value === "explore_detail_tab" || value === "profile_tab";
+export const isXhsReadBootstrapTargetPage = (value) => value === "search_result_tab" || value === "explore_detail_tab" || value === "profile_tab";
 export class ContentScriptHandler {
     #listeners = new Set();
     #reachable = true;

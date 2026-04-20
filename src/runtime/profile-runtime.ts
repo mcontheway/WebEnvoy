@@ -330,6 +330,7 @@ type ExtensionBootstrapInput = {
   run_id: string;
   session_id: string;
   fingerprint_runtime: ReturnType<typeof buildFingerprintContextForMeta>;
+  target_page?: string;
 };
 
 type RuntimeBootstrapEnvelope = {
@@ -345,11 +346,13 @@ type RuntimeBootstrapEnvelope = {
 const buildExtensionBootstrapInput = (
   runId: string,
   sessionId: string,
-  fingerprintRuntime: ReturnType<typeof buildFingerprintContextForMeta>
+  fingerprintRuntime: ReturnType<typeof buildFingerprintContextForMeta>,
+  targetPage?: string | null
 ): ExtensionBootstrapInput => ({
   run_id: runId,
   session_id: sessionId,
-  fingerprint_runtime: fingerprintRuntime
+  fingerprint_runtime: fingerprintRuntime,
+  ...(typeof targetPage === "string" && targetPage.length > 0 ? { target_page: targetPage } : {})
 });
 
 const buildRuntimeBootstrapEnvelope = (input: {
@@ -612,7 +615,8 @@ export class ProfileRuntimeService {
             ? buildExtensionBootstrapInput(
                 input.runId,
                 readSessionId(input.params),
-                fingerprintRuntime
+                fingerprintRuntime,
+                typeof input.params.target_page === "string" ? input.params.target_page : null
               )
             : null
       });
@@ -812,7 +816,8 @@ export class ProfileRuntimeService {
               ? buildExtensionBootstrapInput(
                   input.runId,
                   readSessionId(input.params),
-                  fingerprintRuntime
+                  fingerprintRuntime,
+                  typeof input.params.target_page === "string" ? input.params.target_page : null
                 )
               : null
         });

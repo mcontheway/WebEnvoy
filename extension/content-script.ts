@@ -1,6 +1,7 @@
 import {
   activateCapturedRequestContextCaptureViaMainWorld,
   ContentScriptHandler,
+  isXhsReadBootstrapTargetPage,
   installFingerprintRuntimeViaMainWorld,
   installMainWorldEventChannelSecret,
   type BackgroundToContentMessage,
@@ -64,6 +65,7 @@ type BootstrapFingerprintContext = {
   runtimeContextId: string | null;
   sessionId: string | null;
   mainWorldSecret: string | null;
+  targetPage: string | null;
 };
 
 const normalizeForwardMessage = (
@@ -191,6 +193,7 @@ const resolveBootstrapFingerprintContext = (value: unknown): BootstrapFingerprin
   const runId = asNonEmptyString(record?.run_id ?? record?.runId) ?? stagedRunId;
   const runtimeContextId = asNonEmptyString(record?.runtime_context_id ?? record?.runtimeContextId);
   const sessionId = asNonEmptyString(record?.session_id ?? record?.sessionId) ?? stagedSessionId;
+  const targetPage = asNonEmptyString(record?.target_page ?? record?.targetPage);
   const direct = ensureFingerprintRuntimeContext(value);
   if (direct) {
     return {
@@ -198,7 +201,8 @@ const resolveBootstrapFingerprintContext = (value: unknown): BootstrapFingerprin
       runId,
       runtimeContextId,
       sessionId,
-      mainWorldSecret
+      mainWorldSecret,
+      targetPage
     };
   }
   if (!record) {
@@ -207,7 +211,8 @@ const resolveBootstrapFingerprintContext = (value: unknown): BootstrapFingerprin
       runId,
       runtimeContextId,
       sessionId,
-      mainWorldSecret: null
+      mainWorldSecret: null,
+      targetPage: null
     };
   }
   return {
@@ -216,9 +221,15 @@ const resolveBootstrapFingerprintContext = (value: unknown): BootstrapFingerprin
     runId,
     runtimeContextId,
     sessionId,
-    mainWorldSecret
+    mainWorldSecret,
+    targetPage
   };
 };
+
+const shouldActivateStartupRequestContextCapture = (
+  bootstrapContext: BootstrapFingerprintContext
+): boolean =>
+  bootstrapContext.mainWorldSecret !== null && isXhsReadBootstrapTargetPage(bootstrapContext.targetPage);
 
 const sanitizeScopePart = (value: string): string =>
   value.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -319,7 +330,8 @@ const loadBootstrapFingerprintContextFromExtension = async (
       runId: null,
       runtimeContextId: null,
       sessionId: null,
-      mainWorldSecret: null
+      mainWorldSecret: null,
+      targetPage: null
     };
   }
 
@@ -331,7 +343,8 @@ const loadBootstrapFingerprintContextFromExtension = async (
         runId: null,
         runtimeContextId: null,
         sessionId: null,
-        mainWorldSecret: null
+        mainWorldSecret: null,
+        targetPage: null
       };
     }
     const envelope = asRecord(await response.json());
@@ -343,7 +356,10 @@ const loadBootstrapFingerprintContextFromExtension = async (
         resolved.runtimeContextId ??
         asNonEmptyString(envelope?.runtime_context_id ?? envelope?.runtimeContextId),
       sessionId: resolved.sessionId ?? asNonEmptyString(envelope?.session_id ?? envelope?.sessionId),
-      mainWorldSecret: resolved.mainWorldSecret
+      mainWorldSecret: resolved.mainWorldSecret,
+      targetPage:
+        resolved.targetPage ??
+        asNonEmptyString(envelope?.target_page ?? envelope?.targetPage)
     };
   } catch {
     return {
@@ -351,7 +367,8 @@ const loadBootstrapFingerprintContextFromExtension = async (
       runId: null,
       runtimeContextId: null,
       sessionId: null,
-      mainWorldSecret: null
+      mainWorldSecret: null,
+      targetPage: null
     };
   }
 };
@@ -467,7 +484,7 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
   const bootstrapPayload = readBootstrapFingerprintContext();
   const bootstrapInput = resolveBootstrapFingerprintContext(bootstrapPayload);
   const bootstrapChannelInstalled = installMainWorldEventChannelSecret(bootstrapInput.mainWorldSecret);
-  if (bootstrapChannelInstalled) {
+  if (bootstrapChannelInstalled && shouldActivateStartupRequestContextCapture(bootstrapInput)) {
     void activateCapturedRequestContextCaptureViaMainWorld().catch(() => {});
   }
   const bootstrapContext = bootstrapInput.fingerprintRuntime;
@@ -502,7 +519,10 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
       const resolvedBootstrapChannelInstalled = installMainWorldEventChannelSecret(
         resolvedBootstrap.mainWorldSecret
       );
-      if (resolvedBootstrapChannelInstalled) {
+      if (
+        resolvedBootstrapChannelInstalled &&
+        shouldActivateStartupRequestContextCapture(resolvedBootstrap)
+      ) {
         void activateCapturedRequestContextCaptureViaMainWorld().catch(() => {});
       }
       if (!resolvedBootstrap.fingerprintRuntime) {

@@ -146,10 +146,11 @@ const ensureFingerprintExecutionAllowed = (requestedExecutionMode, fingerprintRu
         }
     });
 };
-const buildExtensionBootstrapInput = (runId, sessionId, fingerprintRuntime) => ({
+const buildExtensionBootstrapInput = (runId, sessionId, fingerprintRuntime, targetPage) => ({
     run_id: runId,
     session_id: sessionId,
-    fingerprint_runtime: fingerprintRuntime
+    fingerprint_runtime: fingerprintRuntime,
+    ...(typeof targetPage === "string" && targetPage.length > 0 ? { target_page: targetPage } : {})
 });
 const buildRuntimeBootstrapEnvelope = (input) => ({
     version: "v1",
@@ -360,7 +361,7 @@ export class ProfileRuntimeService {
                 params: input.params,
                 launchMode: identityPreflight.mode,
                 extensionBootstrap: identityPreflight.mode === "load_extension"
-                    ? buildExtensionBootstrapInput(input.runId, readSessionId(input.params), fingerprintRuntime)
+                    ? buildExtensionBootstrapInput(input.runId, readSessionId(input.params), fingerprintRuntime, typeof input.params.target_page === "string" ? input.params.target_page : null)
                     : null
             });
             launchedControllerPid = browserLaunch.controllerPid;
@@ -526,7 +527,7 @@ export class ProfileRuntimeService {
                     params: input.params,
                     launchMode: identityPreflight.mode,
                     extensionBootstrap: identityPreflight.mode === "load_extension"
-                        ? buildExtensionBootstrapInput(input.runId, readSessionId(input.params), fingerprintRuntime)
+                        ? buildExtensionBootstrapInput(input.runId, readSessionId(input.params), fingerprintRuntime, typeof input.params.target_page === "string" ? input.params.target_page : null)
                         : null
                 });
                 launchedControllerPid = browserLaunch.controllerPid;

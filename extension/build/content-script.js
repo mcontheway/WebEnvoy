@@ -5393,11 +5393,38 @@ const executeXhsSearch = async (input, env) => {
             auditRecord
         }, env);
     }
+    if (!requestContextResult.searchId) {
+        return failClosedForRequestContext({
+            abilityId: input.abilityId,
+            expectedShape,
+            lookupResult: {
+                state: "miss",
+                reason: "captured_search_id_missing"
+            },
+            gate,
+            auditRecord
+        }, env);
+    }
+    if (typeof input.params.search_id === "string" &&
+        input.params.search_id.trim().length > 0 &&
+        input.params.search_id.trim() !== requestContextResult.searchId) {
+        return failClosedForRequestContext({
+            abilityId: input.abilityId,
+            expectedShape,
+            lookupResult: {
+                state: "incompatible",
+                reason: "captured_search_id_mismatch",
+                shape: requestContextResult.shape
+            },
+            gate,
+            auditRecord
+        }, env);
+    }
     const payload = {
         keyword: expectedShape.keyword,
         page: expectedShape.page,
         page_size: expectedShape.page_size,
-        search_id: input.params.search_id ?? requestContextResult.searchId ?? env.randomId(),
+        search_id: requestContextResult.searchId,
         sort: expectedShape.sort,
         note_type: expectedShape.note_type
     };
@@ -8717,6 +8744,7 @@ const resolveBootstrapFingerprintContext = (value) => {
     const runId = asNonEmptyString(record?.run_id ?? record?.runId) ?? stagedRunId;
     const runtimeContextId = asNonEmptyString(record?.runtime_context_id ?? record?.runtimeContextId);
     const sessionId = asNonEmptyString(record?.session_id ?? record?.sessionId) ?? stagedSessionId;
+    const targetPage = asNonEmptyString(record?.target_page ?? record?.targetPage);
     const direct = ensureFingerprintRuntimeContext(value);
     if (direct) {
         return {
@@ -8724,7 +8752,8 @@ const resolveBootstrapFingerprintContext = (value) => {
             runId,
             runtimeContextId,
             sessionId,
-            mainWorldSecret
+            mainWorldSecret,
+            targetPage
         };
     }
     if (!record) {
@@ -8733,7 +8762,8 @@ const resolveBootstrapFingerprintContext = (value) => {
             runId,
             runtimeContextId,
             sessionId,
-            mainWorldSecret: null
+            mainWorldSecret: null,
+            targetPage: null
         };
     }
     return {
@@ -8741,9 +8771,11 @@ const resolveBootstrapFingerprintContext = (value) => {
         runId,
         runtimeContextId,
         sessionId,
-        mainWorldSecret
+        mainWorldSecret,
+        targetPage
     };
 };
+const shouldActivateStartupRequestContextCapture = (bootstrapContext) => bootstrapContext.mainWorldSecret !== null && isXhsReadBootstrapTargetPage(bootstrapContext.targetPage);
 const sanitizeScopePart = (value) => value.replace(/[^a-zA-Z0-9._-]/g, "_");
 const resolveRunToken = (normalized, runId) => {
     if (typeof runId === "string" && runId.trim().length > 0) {
@@ -8823,7 +8855,8 @@ const loadBootstrapFingerprintContextFromExtension = async (runtime) => {
             runId: null,
             runtimeContextId: null,
             sessionId: null,
-            mainWorldSecret: null
+            mainWorldSecret: null,
+            targetPage: null
         };
     }
     try {
@@ -8834,7 +8867,8 @@ const loadBootstrapFingerprintContextFromExtension = async (runtime) => {
                 runId: null,
                 runtimeContextId: null,
                 sessionId: null,
-                mainWorldSecret: null
+                mainWorldSecret: null,
+                targetPage: null
             };
         }
         const envelope = asRecord(await response.json());
@@ -8845,7 +8879,9 @@ const loadBootstrapFingerprintContextFromExtension = async (runtime) => {
             runtimeContextId: resolved.runtimeContextId ??
                 asNonEmptyString(envelope?.runtime_context_id ?? envelope?.runtimeContextId),
             sessionId: resolved.sessionId ?? asNonEmptyString(envelope?.session_id ?? envelope?.sessionId),
-            mainWorldSecret: resolved.mainWorldSecret
+            mainWorldSecret: resolved.mainWorldSecret,
+            targetPage: resolved.targetPage ??
+                asNonEmptyString(envelope?.target_page ?? envelope?.targetPage)
         };
     }
     catch {
@@ -8854,7 +8890,8 @@ const loadBootstrapFingerprintContextFromExtension = async (runtime) => {
             runId: null,
             runtimeContextId: null,
             sessionId: null,
-            mainWorldSecret: null
+            mainWorldSecret: null,
+            targetPage: null
         };
     }
 };
@@ -8942,7 +8979,7 @@ const bootstrapContentScript = (runtime) => {
     const bootstrapPayload = readBootstrapFingerprintContext();
     const bootstrapInput = resolveBootstrapFingerprintContext(bootstrapPayload);
     const bootstrapChannelInstalled = installMainWorldEventChannelSecret(bootstrapInput.mainWorldSecret);
-    if (bootstrapChannelInstalled) {
+    if (bootstrapChannelInstalled && shouldActivateStartupRequestContextCapture(bootstrapInput)) {
         void activateCapturedRequestContextCaptureViaMainWorld().catch(() => { });
     }
     const bootstrapContext = bootstrapInput.fingerprintRuntime;
@@ -8974,7 +9011,8 @@ const bootstrapContentScript = (runtime) => {
     else {
         void loadBootstrapFingerprintContextFromExtension(runtime).then((resolvedBootstrap) => {
             const resolvedBootstrapChannelInstalled = installMainWorldEventChannelSecret(resolvedBootstrap.mainWorldSecret);
-            if (resolvedBootstrapChannelInstalled) {
+            if (resolvedBootstrapChannelInstalled &&
+                shouldActivateStartupRequestContextCapture(resolvedBootstrap)) {
                 void activateCapturedRequestContextCaptureViaMainWorld().catch(() => { });
             }
             if (!resolvedBootstrap.fingerprintRuntime) {

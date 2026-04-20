@@ -47,6 +47,8 @@ type RequestContextMissReason =
   | "template_missing"
   | "shape_mismatch"
   | "template_stale"
+  | "captured_search_id_missing"
+  | "captured_search_id_mismatch"
   | "synthetic_request_rejected"
   | "failed_request_rejected";
 
@@ -60,11 +62,11 @@ type RequestContextLookupResult =
     }
   | {
       state: "miss";
-      reason: "template_missing" | "shape_mismatch";
+      reason: "template_missing" | "shape_mismatch" | "captured_search_id_missing";
     }
   | {
       state: "incompatible";
-      reason: "shape_mismatch";
+      reason: "shape_mismatch" | "captured_search_id_mismatch";
       shape: SearchRequestShape | null;
     }
   | {
@@ -839,12 +841,47 @@ export const executeXhsSearch = async (
       env
     );
   }
+  if (!requestContextResult.searchId) {
+    return failClosedForRequestContext(
+      {
+        abilityId: input.abilityId,
+        expectedShape,
+        lookupResult: {
+          state: "miss",
+          reason: "captured_search_id_missing"
+        },
+        gate,
+        auditRecord
+      },
+      env
+    );
+  }
+  if (
+    typeof input.params.search_id === "string" &&
+    input.params.search_id.trim().length > 0 &&
+    input.params.search_id.trim() !== requestContextResult.searchId
+  ) {
+    return failClosedForRequestContext(
+      {
+        abilityId: input.abilityId,
+        expectedShape,
+        lookupResult: {
+          state: "incompatible",
+          reason: "captured_search_id_mismatch",
+          shape: requestContextResult.shape
+        },
+        gate,
+        auditRecord
+      },
+      env
+    );
+  }
 
   const payload: JsonRecord = {
     keyword: expectedShape.keyword,
     page: expectedShape.page,
     page_size: expectedShape.page_size,
-    search_id: input.params.search_id ?? requestContextResult.searchId ?? env.randomId(),
+    search_id: requestContextResult.searchId,
     sort: expectedShape.sort,
     note_type: expectedShape.note_type
   };

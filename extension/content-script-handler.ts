@@ -314,7 +314,7 @@ const resolveTargetPageFromHref = (href: string, command: string): string | null
   }
 };
 
-const isXhsReadBootstrapTargetPage = (value: unknown): boolean =>
+export const isXhsReadBootstrapTargetPage = (value: unknown): boolean =>
   value === "search_result_tab" || value === "explore_detail_tab" || value === "profile_tab";
 
 export class ContentScriptHandler {
