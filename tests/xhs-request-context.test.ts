@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { executeXhsSearch } from "../extension/xhs-search.js";
+import { createPageContextNamespace } from "../extension/xhs-search-types.js";
 import type {
   CapturedRequestContextArtifact,
   XhsSearchEnvironment,
@@ -148,6 +149,7 @@ const createCapturedArtifact = (
 const createEnvironment = (overrides?: Partial<XhsSearchEnvironment>): XhsSearchEnvironment => ({
   now: () => 1_710_000_100_000,
   randomId: () => "generated-search-id-001",
+  sleep: async () => {},
   getLocationHref: () => "https://www.xiaohongshu.com/search_result/?keyword=AI&type=51&page=2",
   getDocumentTitle: () => "XHS Search",
   getReadyState: () => "complete",
@@ -161,6 +163,14 @@ const createEnvironment = (overrides?: Partial<XhsSearchEnvironment>): XhsSearch
 });
 
 describe("xhs search request-context exact-shape reuse", () => {
+  it("keeps search page namespaces distinct across query-level navigations", () => {
+    expect(
+      createPageContextNamespace("https://www.xiaohongshu.com/search_result/?keyword=AI&type=51&page=2")
+    ).not.toBe(
+      createPageContextNamespace("https://www.xiaohongshu.com/search_result/?keyword=露营&type=51&page=2")
+    );
+  });
+
   it("reuses headers, referrer, and search_id only on exact shape hit", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
@@ -213,6 +223,53 @@ describe("xhs search request-context exact-shape reuse", () => {
           sort: "time_desc",
           note_type: 1
         })
+      })
+    );
+  });
+
+  it("waits for the first captured search template before failing closed on a fresh page load", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+    let readyState = "interactive";
+    let lookupCount = 0;
+    const sleep = vi.fn(async () => {
+      readyState = "complete";
+    });
+    const readCapturedRequestContext = vi.fn(async () => {
+      lookupCount += 1;
+      return lookupCount === 1 ? null : createCapturedArtifact();
+    });
+
+    const result = await executeXhsSearch(
+      {
+        abilityId: "xhs.note.search.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          query: "AI",
+          page: 2,
+          limit: 30,
+          sort: "time_desc",
+          note_type: 1
+        },
+        options: createLiveReadOptions("run-search-context-wait-001"),
+        executionContext: createExecutionContext("run-search-context-wait-001")
+      },
+      createEnvironment({
+        sleep,
+        getReadyState: () => readyState,
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(readCapturedRequestContext).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(fetchJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pageContextRequest: true
       })
     );
   });

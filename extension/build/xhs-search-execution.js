@@ -5,6 +5,8 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60_000;
+const REQUEST_CONTEXT_WAIT_RETRY_MS = 120;
+const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 3;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => {
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -317,6 +319,30 @@ const failClosedForRequestContext = (input, env) => {
         category: "page_changed"
     }), input.gate, input.auditRecord), input.gate.execution_audit);
 };
+const readCapturedSearchContextWithRetry = async (expectedShape, env) => {
+    const readCapturedRequestContext = env.readCapturedRequestContext;
+    if (!readCapturedRequestContext) {
+        return resolveSearchRequestContext(null, expectedShape, env.now());
+    }
+    let lastResult = resolveSearchRequestContext(await readCapturedRequestContext({
+        method: "POST",
+        path: SEARCH_ENDPOINT,
+        page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+        shape_key: serializeSearchShape(expectedShape)
+    }).catch(() => null), expectedShape, env.now());
+    for (let attempt = 1; attempt < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS &&
+        lastResult.state !== "hit" &&
+        env.getReadyState() !== "complete"; attempt += 1) {
+        await env.sleep?.(REQUEST_CONTEXT_WAIT_RETRY_MS);
+        lastResult = resolveSearchRequestContext(await readCapturedRequestContext({
+            method: "POST",
+            path: SEARCH_ENDPOINT,
+            page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+            shape_key: serializeSearchShape(expectedShape)
+        }).catch(() => null), expectedShape, env.now());
+    }
+    return lastResult;
+};
 const withExecutionAuditInFailurePayload = (result, executionAudit) => {
     if (result.ok) {
         return result;
@@ -563,17 +589,7 @@ export const executeXhsSearch = async (input, env) => {
         }), gate, auditRecord), gate.execution_audit);
     }
     const expectedShape = deriveSearchShapeFromCommand(input.params);
-    const capturedRequestContext = env.readCapturedRequestContext
-        ? await env
-            .readCapturedRequestContext({
-            method: "POST",
-            path: SEARCH_ENDPOINT,
-            page_context_namespace: createPageContextNamespace(env.getLocationHref()),
-            shape_key: serializeSearchShape(expectedShape)
-        })
-            .catch(() => null)
-        : null;
-    const requestContextResult = resolveSearchRequestContext(capturedRequestContext, expectedShape, env.now());
+    const requestContextResult = await readCapturedSearchContextWithRetry(expectedShape, env);
     if (requestContextResult.state !== "hit") {
         return failClosedForRequestContext({
             abilityId: input.abilityId,

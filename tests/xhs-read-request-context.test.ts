@@ -192,6 +192,7 @@ const createUserHomeArtifact = (
 const createEnvironment = (overrides?: Partial<XhsSearchEnvironment>): XhsSearchEnvironment => ({
   now: () => 1_710_000_100_000,
   randomId: () => "generated-id-001",
+  sleep: async () => {},
   getLocationHref: () => "https://www.xiaohongshu.com/",
   getDocumentTitle: () => "XHS",
   getReadyState: () => "complete",
@@ -258,6 +259,55 @@ describe("xhs read request-context exact-shape reuse", () => {
         })
       })
     );
+  });
+
+  it("waits for captured detail context before failing closed on a fresh navigation", async () => {
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          note: {
+            note_id: "note-001"
+          }
+        }
+      }
+    }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+    let readyState = "interactive";
+    let lookupCount = 0;
+    const sleep = vi.fn(async () => {
+      readyState = "complete";
+    });
+    const readCapturedRequestContext = vi.fn(async () => {
+      lookupCount += 1;
+      return lookupCount === 1 ? null : createDetailArtifact();
+    });
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-context-wait-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-context-wait-001")
+      },
+      createEnvironment({
+        sleep,
+        getReadyState: () => readyState,
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(readCapturedRequestContext).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
   });
 
   it("fails closed for detail when captured note_id shape mismatches", async () => {
@@ -730,6 +780,56 @@ describe("xhs read request-context exact-shape reuse", () => {
         })
       })
     );
+  });
+
+  it("waits for captured user_home context before failing closed on a fresh navigation", async () => {
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          user: {
+            user_id: "user-001",
+            nickname: "captured-user"
+          }
+        }
+      }
+    }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+    let readyState = "interactive";
+    let lookupCount = 0;
+    const sleep = vi.fn(async () => {
+      readyState = "complete";
+    });
+    const readCapturedRequestContext = vi.fn(async () => {
+      lookupCount += 1;
+      return lookupCount === 1 ? null : createUserHomeArtifact();
+    });
+
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-001"
+        },
+        options: createLiveReadOptions("run-user-home-context-wait-001", "profile_tab"),
+        executionContext: createExecutionContext("run-user-home-context-wait-001")
+      },
+      createEnvironment({
+        sleep,
+        getReadyState: () => readyState,
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(readCapturedRequestContext).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
   });
 
   it("fails closed on stale user_home request context", async () => {

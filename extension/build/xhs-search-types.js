@@ -15,13 +15,14 @@ export const createPageContextNamespace = (href) => {
     try {
         const parsed = new URL(normalized, "https://www.xiaohongshu.com/");
         const pathname = parsed.pathname.length > 0 ? parsed.pathname : "/";
+        const queryIdentity = parsed.search.length > 0 ? `${pathname}${parsed.search}` : pathname;
         const documentTimeOrigin = typeof globalThis.performance?.timeOrigin === "number" &&
             Number.isFinite(globalThis.performance.timeOrigin)
             ? Math.trunc(globalThis.performance.timeOrigin)
             : null;
         return documentTimeOrigin === null
-            ? `${parsed.origin}${pathname}`
-            : `${parsed.origin}${pathname}#doc=${documentTimeOrigin}`;
+            ? `${parsed.origin}${queryIdentity}`
+            : `${parsed.origin}${queryIdentity}#doc=${documentTimeOrigin}`;
     }
     catch {
         return normalized;

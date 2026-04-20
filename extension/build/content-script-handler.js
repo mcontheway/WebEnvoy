@@ -106,6 +106,9 @@ const createBrowserEnvironment = () => ({
     randomId: () => typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
         : `id-${Date.now()}`,
+    sleep: async (ms) => await new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    }),
     getLocationHref: () => window.location.href,
     getDocumentTitle: () => document.title,
     getReadyState: () => document.readyState,

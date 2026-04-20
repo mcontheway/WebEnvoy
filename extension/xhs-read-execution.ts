@@ -112,6 +112,8 @@ type ReadRequestContextLookupResult =
     };
 
 const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60_000;
+const REQUEST_CONTEXT_WAIT_RETRY_MS = 120;
+const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 3;
 
 const XHS_DETAIL_SPEC: XhsReadCommandSpec = {
   command: "xhs.detail",
@@ -634,6 +636,52 @@ const failClosedForRequestContext = (
     ),
     input.gate.execution_audit as JsonRecord | null
   );
+};
+
+const readCapturedReadContextWithRetry = async (
+  spec: XhsReadCommandSpec,
+  expectedShape: ReadRequestShape,
+  env: XhsSearchEnvironment
+): Promise<ReadRequestContextLookupResult> => {
+  const readCapturedRequestContext = env.readCapturedRequestContext;
+  if (!readCapturedRequestContext) {
+    return resolveReadRequestContext(spec, null, expectedShape, env.now());
+  }
+
+  let lastResult = resolveReadRequestContext(
+    spec,
+    await readCapturedRequestContext({
+      method: spec.method,
+      path: spec.endpoint,
+      page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+      shape_key: serializeReadShape(expectedShape)
+    }).catch(() => null),
+    expectedShape,
+    env.now()
+  );
+
+  for (
+    let attempt = 1;
+    attempt < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS &&
+    lastResult.state !== "hit" &&
+    env.getReadyState() !== "complete";
+    attempt += 1
+  ) {
+    await env.sleep?.(REQUEST_CONTEXT_WAIT_RETRY_MS);
+    lastResult = resolveReadRequestContext(
+      spec,
+      await readCapturedRequestContext({
+        method: spec.method,
+        path: spec.endpoint,
+        page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+        shape_key: serializeReadShape(expectedShape)
+      }).catch(() => null),
+      expectedShape,
+      env.now()
+    );
+  }
+
+  return lastResult;
 };
 
 const withExecutionAuditInFailurePayload = (
@@ -1470,22 +1518,7 @@ const executeXhsRead = async (
   }
 
   const expectedShape = deriveReadShapeFromCommand(spec, input.params);
-  const capturedRequestContext = env.readCapturedRequestContext
-    ? await env
-        .readCapturedRequestContext({
-          method: spec.method,
-          path: spec.endpoint,
-          page_context_namespace: createPageContextNamespace(env.getLocationHref()),
-          shape_key: serializeReadShape(expectedShape)
-        })
-        .catch(() => null)
-    : null;
-  const requestContextResult = resolveReadRequestContext(
-    spec,
-    capturedRequestContext as CapturedRequestContextLookupResponse | Record<string, unknown> | null,
-    expectedShape,
-    env.now()
-  );
+  const requestContextResult = await readCapturedReadContextWithRetry(spec, expectedShape, env);
   if (requestContextResult.state !== "hit") {
     const pageStateRoot = await resolvePageStateRoot();
     if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {

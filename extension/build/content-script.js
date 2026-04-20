@@ -4157,13 +4157,14 @@ const createPageContextNamespace = (href) => {
     try {
         const parsed = new URL(normalized, "https://www.xiaohongshu.com/");
         const pathname = parsed.pathname.length > 0 ? parsed.pathname : "/";
+        const queryIdentity = parsed.search.length > 0 ? `${pathname}${parsed.search}` : pathname;
         const documentTimeOrigin = typeof globalThis.performance?.timeOrigin === "number" &&
             Number.isFinite(globalThis.performance.timeOrigin)
             ? Math.trunc(globalThis.performance.timeOrigin)
             : null;
         return documentTimeOrigin === null
-            ? `${parsed.origin}${pathname}`
-            : `${parsed.origin}${pathname}#doc=${documentTimeOrigin}`;
+            ? `${parsed.origin}${queryIdentity}`
+            : `${parsed.origin}${queryIdentity}#doc=${documentTimeOrigin}`;
     }
     catch {
         return normalized;
@@ -4798,6 +4799,8 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60_000;
+const REQUEST_CONTEXT_WAIT_RETRY_MS = 120;
+const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 3;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => {
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -5110,6 +5113,30 @@ const failClosedForRequestContext = (input, env) => {
         category: "page_changed"
     }), input.gate, input.auditRecord), input.gate.execution_audit);
 };
+const readCapturedSearchContextWithRetry = async (expectedShape, env) => {
+    const readCapturedRequestContext = env.readCapturedRequestContext;
+    if (!readCapturedRequestContext) {
+        return resolveSearchRequestContext(null, expectedShape, env.now());
+    }
+    let lastResult = resolveSearchRequestContext(await readCapturedRequestContext({
+        method: "POST",
+        path: SEARCH_ENDPOINT,
+        page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+        shape_key: serializeSearchShape(expectedShape)
+    }).catch(() => null), expectedShape, env.now());
+    for (let attempt = 1; attempt < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS &&
+        lastResult.state !== "hit" &&
+        env.getReadyState() !== "complete"; attempt += 1) {
+        await env.sleep?.(REQUEST_CONTEXT_WAIT_RETRY_MS);
+        lastResult = resolveSearchRequestContext(await readCapturedRequestContext({
+            method: "POST",
+            path: SEARCH_ENDPOINT,
+            page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+            shape_key: serializeSearchShape(expectedShape)
+        }).catch(() => null), expectedShape, env.now());
+    }
+    return lastResult;
+};
 const withExecutionAuditInFailurePayload = (result, executionAudit) => {
     if (result.ok) {
         return result;
@@ -5356,17 +5383,7 @@ const executeXhsSearch = async (input, env) => {
         }), gate, auditRecord), gate.execution_audit);
     }
     const expectedShape = deriveSearchShapeFromCommand(input.params);
-    const capturedRequestContext = env.readCapturedRequestContext
-        ? await env
-            .readCapturedRequestContext({
-            method: "POST",
-            path: SEARCH_ENDPOINT,
-            page_context_namespace: createPageContextNamespace(env.getLocationHref()),
-            shape_key: serializeSearchShape(expectedShape)
-        })
-            .catch(() => null)
-        : null;
-    const requestContextResult = resolveSearchRequestContext(capturedRequestContext, expectedShape, env.now());
+    const requestContextResult = await readCapturedSearchContextWithRetry(expectedShape, env);
     if (requestContextResult.state !== "hit") {
         return failClosedForRequestContext({
             abilityId: input.abilityId,
@@ -5552,6 +5569,8 @@ const {
   resolveXsCommon
 } = __webenvoy_module_xhs_search_telemetry;
 const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60_000;
+const REQUEST_CONTEXT_WAIT_RETRY_MS = 120;
+const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 3;
 const XHS_DETAIL_SPEC = {
     command: "xhs.detail",
     endpoint: DETAIL_ENDPOINT,
@@ -5961,6 +5980,30 @@ const failClosedForRequestContext = (input, env) => {
         summary: message,
         category: "page_changed"
     }), input.gate, input.auditRecord), input.gate.execution_audit);
+};
+const readCapturedReadContextWithRetry = async (spec, expectedShape, env) => {
+    const readCapturedRequestContext = env.readCapturedRequestContext;
+    if (!readCapturedRequestContext) {
+        return resolveReadRequestContext(spec, null, expectedShape, env.now());
+    }
+    let lastResult = resolveReadRequestContext(spec, await readCapturedRequestContext({
+        method: spec.method,
+        path: spec.endpoint,
+        page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+        shape_key: serializeReadShape(expectedShape)
+    }).catch(() => null), expectedShape, env.now());
+    for (let attempt = 1; attempt < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS &&
+        lastResult.state !== "hit" &&
+        env.getReadyState() !== "complete"; attempt += 1) {
+        await env.sleep?.(REQUEST_CONTEXT_WAIT_RETRY_MS);
+        lastResult = resolveReadRequestContext(spec, await readCapturedRequestContext({
+            method: spec.method,
+            path: spec.endpoint,
+            page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+            shape_key: serializeReadShape(expectedShape)
+        }).catch(() => null), expectedShape, env.now());
+    }
+    return lastResult;
 };
 const withExecutionAuditInFailurePayload = (result, executionAudit) => {
     if (result.ok) {
@@ -6597,17 +6640,7 @@ const executeXhsRead = async (input, spec, env) => {
         }), gate, auditRecord), gate.execution_audit);
     }
     const expectedShape = deriveReadShapeFromCommand(spec, input.params);
-    const capturedRequestContext = env.readCapturedRequestContext
-        ? await env
-            .readCapturedRequestContext({
-            method: spec.method,
-            path: spec.endpoint,
-            page_context_namespace: createPageContextNamespace(env.getLocationHref()),
-            shape_key: serializeReadShape(expectedShape)
-        })
-            .catch(() => null)
-        : null;
-    const requestContextResult = resolveReadRequestContext(spec, capturedRequestContext, expectedShape, env.now());
+    const requestContextResult = await readCapturedReadContextWithRetry(spec, expectedShape, env);
     if (requestContextResult.state !== "hit") {
         const pageStateRoot = await resolvePageStateRoot();
         if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
@@ -8024,6 +8057,9 @@ const createBrowserEnvironment = () => ({
     randomId: () => typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
         : `id-${Date.now()}`,
+    sleep: async (ms) => await new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    }),
     getLocationHref: () => window.location.href,
     getDocumentTitle: () => document.title,
     getReadyState: () => document.readyState,

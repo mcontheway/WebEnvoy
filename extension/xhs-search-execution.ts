@@ -79,6 +79,8 @@ type RequestContextLookupResult =
     };
 
 const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60_000;
+const REQUEST_CONTEXT_WAIT_RETRY_MS = 120;
+const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 3;
 
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -465,6 +467,49 @@ const failClosedForRequestContext = (
   );
 };
 
+const readCapturedSearchContextWithRetry = async (
+  expectedShape: SearchRequestShape,
+  env: XhsSearchEnvironment
+): Promise<RequestContextLookupResult> => {
+  const readCapturedRequestContext = env.readCapturedRequestContext;
+  if (!readCapturedRequestContext) {
+    return resolveSearchRequestContext(null, expectedShape, env.now());
+  }
+
+  let lastResult = resolveSearchRequestContext(
+    await readCapturedRequestContext({
+      method: "POST",
+      path: SEARCH_ENDPOINT,
+      page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+      shape_key: serializeSearchShape(expectedShape)
+    }).catch(() => null),
+    expectedShape,
+    env.now()
+  );
+
+  for (
+    let attempt = 1;
+    attempt < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS &&
+    lastResult.state !== "hit" &&
+    env.getReadyState() !== "complete";
+    attempt += 1
+  ) {
+    await env.sleep?.(REQUEST_CONTEXT_WAIT_RETRY_MS);
+    lastResult = resolveSearchRequestContext(
+      await readCapturedRequestContext({
+        method: "POST",
+        path: SEARCH_ENDPOINT,
+        page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+        shape_key: serializeSearchShape(expectedShape)
+      }).catch(() => null),
+      expectedShape,
+      env.now()
+    );
+  }
+
+  return lastResult;
+};
+
 const withExecutionAuditInFailurePayload = (
   result: SearchExecutionResult,
   executionAudit: JsonRecord | null
@@ -781,21 +826,7 @@ export const executeXhsSearch = async (
   }
 
   const expectedShape = deriveSearchShapeFromCommand(input.params);
-  const capturedRequestContext = env.readCapturedRequestContext
-    ? await env
-        .readCapturedRequestContext({
-          method: "POST",
-          path: SEARCH_ENDPOINT,
-          page_context_namespace: createPageContextNamespace(env.getLocationHref()),
-          shape_key: serializeSearchShape(expectedShape)
-        })
-        .catch(() => null)
-    : null;
-  const requestContextResult = resolveSearchRequestContext(
-    capturedRequestContext as CapturedRequestContextLookupResponse | Record<string, unknown> | null,
-    expectedShape,
-    env.now()
-  );
+  const requestContextResult = await readCapturedSearchContextWithRetry(expectedShape, env);
   if (requestContextResult.state !== "hit") {
     return failClosedForRequestContext(
       {

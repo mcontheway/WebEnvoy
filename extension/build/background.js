@@ -4216,9 +4216,8 @@ class ChromeBackgroundBridge {
         return probe[0]?.result === true;
     }
     #shouldEnsureMainWorldBridge(command, requestedExecutionMode) {
-        void command;
         void requestedExecutionMode;
-        return false;
+        return command === "runtime.bootstrap";
     }
     async #sendMessageWithContentScriptRecovery(tabId, forward) {
         try {

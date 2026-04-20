@@ -258,7 +258,11 @@ describe("extension service worker recovery contract / bootstrap and trust", () 
         command: "runtime.bootstrap"
       })
     );
-    expect(executeScript).not.toHaveBeenCalled();
+    expect(executeScript).toHaveBeenCalledWith({
+      target: { tabId: 11 },
+      world: "MAIN",
+      files: ["build/main-world-bridge.js"]
+    });
 
     await promoteBootstrapReadinessThroughPing({
       runtimeMessageListeners,
@@ -338,7 +342,11 @@ describe("extension service worker recovery contract / bootstrap and trust", () 
 
     await waitForBridgeTurn();
 
-    expect(executeScript).not.toHaveBeenCalled();
+    expect(executeScript).toHaveBeenCalledWith({
+      target: { tabId: 52 },
+      world: "MAIN",
+      files: ["build/main-world-bridge.js"]
+    });
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       52,
       expect.objectContaining({

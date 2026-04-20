@@ -5307,9 +5307,8 @@ class ChromeBackgroundBridge {
     command: string,
     requestedExecutionMode: ExecutionMode | null
   ): boolean {
-    void command;
     void requestedExecutionMode;
-    return false;
+    return command === "runtime.bootstrap";
   }
 
   async #sendMessageWithContentScriptRecovery(
