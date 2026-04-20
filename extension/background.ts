@@ -519,6 +519,50 @@ const scoreXhsRuntimeSurfaceTab = (tab: ExtensionTab): number => {
   return 3;
 };
 
+const resolveRuntimeBootstrapReadTargetTabId = async (
+  chromeApi: ExtensionChromeApi,
+  preferredPage: ReturnType<typeof resolvePreferredXhsReadPage>
+): Promise<number | null> => {
+  const xhsUrlPatterns = [
+    "*://www.xiaohongshu.com/*",
+    "*://edith.xiaohongshu.com/*",
+    "*://*.xiaohongshu.com/*"
+  ];
+  let currentWindowTabs: ExtensionTab[] = [];
+  try {
+    currentWindowTabs = await chromeApi.tabs.query({
+      currentWindow: true,
+      url: xhsUrlPatterns
+    });
+  } catch {
+    currentWindowTabs = [];
+  }
+  let xhsTabs: ExtensionTab[] = currentWindowTabs;
+  if (currentWindowTabs.length === 0) {
+    try {
+      xhsTabs = await chromeApi.tabs.query({
+        url: xhsUrlPatterns
+      });
+    } catch {
+      xhsTabs = [];
+    }
+  }
+  const ranked = xhsTabs
+    .filter((tab) => typeof tab.id === "number")
+    .sort((left, right) => {
+      const scoreDiff = scoreXhsTab(left, preferredPage) - scoreXhsTab(right, preferredPage);
+      if (scoreDiff !== 0) {
+        return scoreDiff;
+      }
+      if (left.active === right.active) {
+        return 0;
+      }
+      return left.active ? -1 : 1;
+    });
+  const candidate = ranked[0];
+  return typeof candidate?.id === "number" ? candidate.id : null;
+};
+
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -5027,6 +5071,24 @@ class ChromeBackgroundBridge {
 
     const command = String(request.params.command ?? "");
     if (command === "runtime.ping" || command === "runtime.bootstrap") {
+      const runtimeBootstrapTargetPage = asNonEmptyString(commandParams.target_page);
+      const preferredRuntimeBootstrapReadPage = resolvePreferredXhsReadPage(
+        command,
+        runtimeBootstrapTargetPage
+      );
+      if (
+        command === "runtime.bootstrap" &&
+        isXhsReadTargetPage(runtimeBootstrapTargetPage) &&
+        preferredRuntimeBootstrapReadPage
+      ) {
+        const runtimeBootstrapReadTabId = await resolveRuntimeBootstrapReadTargetTabId(
+          this.chromeApi,
+          preferredRuntimeBootstrapReadPage
+        );
+        if (runtimeBootstrapReadTabId !== null) {
+          return runtimeBootstrapReadTabId;
+        }
+      }
       let runtimeSurfaceTabs: ExtensionTab[] = [];
       try {
         runtimeSurfaceTabs = await this.chromeApi.tabs.query({

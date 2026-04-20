@@ -337,6 +337,70 @@ describe("extension service worker / bootstrap and trust", () => {
     );
   });
 
+  it("pins runtime.bootstrap to the requested read target_page instead of a generic runtime surface tab", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.query = vi.fn(async (filter: { currentWindow?: boolean; url?: string | string[] }) => {
+      if (filter.url) {
+        return [
+          {
+            id: 52,
+            active: true,
+            url: "https://creator.xiaohongshu.com/publish/publish?from=menu&target=image"
+          },
+          { id: 32, active: false, url: "https://www.xiaohongshu.com/search_result?keyword=AI" },
+          { id: 31, active: false, url: "https://www.xiaohongshu.com/explore/abc" }
+        ];
+      }
+      return [{ id: 11 }];
+    });
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-read-tab-pick-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-read-tab-pick-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-read-tab-pick-001",
+          runtime_context_id: "ctx-bootstrap-read-tab-pick-001",
+          profile: "profile-a",
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-read-tab-pick-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(executeScript).toHaveBeenCalledWith({
+      target: { tabId: 32 },
+      world: "MAIN",
+      files: ["build/main-world-bridge.js"]
+    });
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "run-bootstrap-read-tab-pick-001",
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
   it("prepares the request-context capture surface before runtime.bootstrap on xhs read tabs", async () => {
     const firstPort = createMockPort();
     const { chromeApi, executeScript } = createChromeApi([firstPort]);

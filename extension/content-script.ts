@@ -1,11 +1,13 @@
 import {
   ContentScriptHandler,
+  activateCapturedRequestContextCaptureViaMainWorld,
   installFingerprintRuntimeViaMainWorld,
   installMainWorldEventChannelSecret,
   type BackgroundToContentMessage,
   type ContentToBackgroundMessage
 } from "./content-script-handler.js";
 import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
+import { isXhsReadBootstrapTargetPage } from "./xhs-read-pages.js";
 
 export {
   ContentScriptHandler,
@@ -379,6 +381,16 @@ const installStartupFingerprintPatch = (fingerprintRuntime: FingerprintRuntimeCo
   });
 };
 
+const activateStartupReadCaptureIfNeeded = (
+  channelInstalled: boolean,
+  targetPage: string | null
+): void => {
+  if (!channelInstalled || !isXhsReadBootstrapTargetPage(targetPage)) {
+    return;
+  }
+  void activateCapturedRequestContextCaptureViaMainWorld().catch(() => false);
+};
+
 const emitStartupFingerprintTrust = (
   runtime: ContentScriptRuntime,
   input: {
@@ -494,7 +506,7 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
   const bootstrapChannelInstalled = installMainWorldEventChannelSecret(
     bootstrapInput.mainWorldSecret
   );
-  void bootstrapChannelInstalled;
+  activateStartupReadCaptureIfNeeded(bootstrapChannelInstalled, bootstrapInput.targetPage);
   const bootstrapContext = bootstrapInput.fingerprintRuntime;
   if (bootstrapContext) {
     persistExtensionFingerprintContext(bootstrapContext, bootstrapInput.runId);
@@ -527,7 +539,10 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
       const resolvedBootstrapChannelInstalled = installMainWorldEventChannelSecret(
         resolvedBootstrap.mainWorldSecret
       );
-      void resolvedBootstrapChannelInstalled;
+      activateStartupReadCaptureIfNeeded(
+        resolvedBootstrapChannelInstalled,
+        resolvedBootstrap.targetPage
+      );
       if (!resolvedBootstrap.fingerprintRuntime) {
         runtime.sendMessage?.({
           kind: "result",

@@ -435,7 +435,7 @@ describe("extension build contract", () => {
     );
   });
 
-  it("boots bundled content-script on read targets without triggering legacy capture activation", async () => {
+  it("boots bundled content-script on read targets and arms request-context capture during bootstrap", async () => {
     const mainWorldRequests: Array<Record<string, unknown>> = [];
     const mockWindow = createBundledMainWorldWindow({
       href: "https://www.xiaohongshu.com/search_result/?keyword=AI&type=51",
@@ -476,7 +476,7 @@ describe("extension build contract", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(mainWorldRequests.map((request) => request.type)).not.toContain(
+    expect(mainWorldRequests.map((request) => request.type)).toContain(
       "captured-request-context-activate"
     );
     expect(sendMessage).toHaveBeenCalledWith(

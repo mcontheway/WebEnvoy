@@ -9009,6 +9009,12 @@ const installStartupFingerprintPatch = (fingerprintRuntime) => {
         // ignore install failures; startup trust must not rely on main-world response
     });
 };
+const activateStartupReadCaptureIfNeeded = (channelInstalled, targetPage) => {
+    if (!channelInstalled || !isXhsReadBootstrapTargetPage(targetPage)) {
+        return;
+    }
+    void activateCapturedRequestContextCaptureViaMainWorld().catch(() => false);
+};
 const emitStartupFingerprintTrust = (runtime, input) => {
     if (!input.runId || !input.runtimeContextId || !input.sessionId) {
         return;
@@ -9095,7 +9101,7 @@ const bootstrapContentScript = (runtime) => {
     const bootstrapPayload = readBootstrapFingerprintContext();
     const bootstrapInput = resolveBootstrapFingerprintContext(bootstrapPayload);
     const bootstrapChannelInstalled = installMainWorldEventChannelSecret(bootstrapInput.mainWorldSecret);
-    void bootstrapChannelInstalled;
+    activateStartupReadCaptureIfNeeded(bootstrapChannelInstalled, bootstrapInput.targetPage);
     const bootstrapContext = bootstrapInput.fingerprintRuntime;
     if (bootstrapContext) {
         persistExtensionFingerprintContext(bootstrapContext, bootstrapInput.runId);
@@ -9125,7 +9131,7 @@ const bootstrapContentScript = (runtime) => {
     else {
         void loadBootstrapFingerprintContextFromExtension(runtime).then((resolvedBootstrap) => {
             const resolvedBootstrapChannelInstalled = installMainWorldEventChannelSecret(resolvedBootstrap.mainWorldSecret);
-            void resolvedBootstrapChannelInstalled;
+            activateStartupReadCaptureIfNeeded(resolvedBootstrapChannelInstalled, resolvedBootstrap.targetPage);
             if (!resolvedBootstrap.fingerprintRuntime) {
                 runtime.sendMessage?.({
                     kind: "result",

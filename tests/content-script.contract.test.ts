@@ -560,7 +560,7 @@ describe("content-script bootstrap contract", () => {
     expect(startupTrust?.install_state).toBeUndefined();
   });
 
-  it("does not activate request-context capture during bootstrap when startup bootstrap payload is present", async () => {
+  it("activates request-context capture during bootstrap when startup bootstrap payload targets a read page", async () => {
     const context = createFingerprintContext();
     (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = {
       run_id: "run-bootstrap-capture-001",
@@ -582,10 +582,10 @@ describe("content-script bootstrap contract", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(activationSpy).not.toHaveBeenCalled();
+    expect(activationSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("does not activate request-context capture when the bootstrap channel installs through a staged fallback secret", async () => {
+  it("activates request-context capture when the bootstrap channel installs through a staged fallback secret for a read page", async () => {
     const sessionStorage = createSessionStorage();
     const { window } = createStartupInstallProbeWindow(sessionStorage);
     (globalThis as { window?: unknown }).window = window;
@@ -614,7 +614,7 @@ describe("content-script bootstrap contract", () => {
       setTimeout(resolve, 0);
     });
 
-    expect(activationSpy).not.toHaveBeenCalled();
+    expect(activationSpy).toHaveBeenCalledTimes(1);
   });
 
   it("does not activate request-context capture when the staged fallback bootstrap target_page is non-read", async () => {
@@ -633,6 +633,37 @@ describe("content-script bootstrap contract", () => {
         extension_bootstrap: {
           fingerprint_runtime: context,
           target_page: "creator_publish_tab"
+        }
+      })
+    }));
+    (globalThis as { fetch?: unknown }).fetch = fetchMock;
+    const { runtime } = createRuntime();
+
+    expect(bootstrapContentScript(runtime)).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    expect(activationSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not activate request-context capture when the staged fallback bootstrap target_page is missing", async () => {
+    const sessionStorage = createSessionStorage();
+    const { window } = createStartupInstallProbeWindow(sessionStorage);
+    (globalThis as { window?: unknown }).window = window;
+
+    const activationSpy = vi
+      .spyOn(contentScriptHandlerModule, "activateCapturedRequestContextCaptureViaMainWorld")
+      .mockResolvedValue(true);
+    const context = createFingerprintContext();
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        run_id: "run-bootstrap-fallback-capture-missing-target-001",
+        extension_bootstrap: {
+          fingerprint_runtime: context
         }
       })
     }));
