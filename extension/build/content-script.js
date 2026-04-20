@@ -7397,6 +7397,32 @@ const validateXhsCommandInputForExtension = (input) => {
 };
 return { ExtensionContractError, validateXhsCommandInputForExtension };
 })();
+const __webenvoy_module_xhs_read_pages = (() => {
+const isXhsReadBootstrapTargetPage = (value) => value === "search_result_tab" || value === "explore_detail_tab" || value === "profile_tab";
+const resolveXhsReadTargetPageFromHref = (href) => {
+    try {
+        const url = new URL(href, "https://www.xiaohongshu.com/");
+        if (url.hostname !== "www.xiaohongshu.com") {
+            return null;
+        }
+        if (url.pathname.startsWith("/search_result")) {
+            return "search_result_tab";
+        }
+        if (url.pathname.startsWith("/explore/")) {
+            return "explore_detail_tab";
+        }
+        if (url.pathname.startsWith("/user/profile/")) {
+            return "profile_tab";
+        }
+        return null;
+    }
+    catch {
+        return null;
+    }
+};
+const shouldAutoInstallXhsReadRequestContextCapture = (href) => resolveXhsReadTargetPageFromHref(href) !== null;
+return { isXhsReadBootstrapTargetPage, resolveXhsReadTargetPageFromHref, shouldAutoInstallXhsReadRequestContextCapture };
+})();
 const __webenvoy_module_content_script_main_world = (() => {
 const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
@@ -7988,6 +8014,10 @@ const {
   ExtensionContractError,
   validateXhsCommandInputForExtension
 } = __webenvoy_module_xhs_command_contract;
+const {
+  isXhsReadBootstrapTargetPage,
+  resolveXhsReadTargetPageFromHref
+} = __webenvoy_module_xhs_read_pages;
 const { containsCookie } = __webenvoy_module_xhs_search_telemetry;
 const {
   activateCapturedRequestContextCaptureViaMainWorld,
@@ -8159,19 +8189,18 @@ const resolveTargetDomainFromHref = (href) => {
     }
 };
 const resolveTargetPageFromHref = (href, command) => {
+    const readTargetPage = resolveXhsReadTargetPageFromHref(href);
+    if (readTargetPage === "search_result_tab") {
+        return readTargetPage;
+    }
+    if (command === "xhs.detail" && readTargetPage === "explore_detail_tab") {
+        return readTargetPage;
+    }
+    if (command === "xhs.user_home" && readTargetPage === "profile_tab") {
+        return readTargetPage;
+    }
     try {
         const url = new URL(href);
-        if (url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/search_result")) {
-            return "search_result_tab";
-        }
-        if (command === "xhs.detail" && url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/explore/")) {
-            return "explore_detail_tab";
-        }
-        if (command === "xhs.user_home" &&
-            url.hostname === "www.xiaohongshu.com" &&
-            url.pathname.startsWith("/user/profile/")) {
-            return "profile_tab";
-        }
         if (url.hostname === "creator.xiaohongshu.com" && url.pathname.startsWith("/publish")) {
             return "creator_publish_tab";
         }
@@ -8181,7 +8210,7 @@ const resolveTargetPageFromHref = (href, command) => {
         return null;
     }
 };
-const isXhsReadBootstrapTargetPage = (value) => value === "search_result_tab" || value === "explore_detail_tab" || value === "profile_tab";
+
 class ContentScriptHandler {
     #listeners = new Set();
     #reachable = true;
@@ -8791,7 +8820,6 @@ const resolveBootstrapFingerprintContext = (value) => {
         targetPage
     };
 };
-const shouldActivateStartupRequestContextCapture = (bootstrapContext) => bootstrapContext.mainWorldSecret !== null && isXhsReadBootstrapTargetPage(bootstrapContext.targetPage);
 const sanitizeScopePart = (value) => value.replace(/[^a-zA-Z0-9._-]/g, "_");
 const resolveRunToken = (normalized, runId) => {
     if (typeof runId === "string" && runId.trim().length > 0) {
@@ -8995,9 +9023,7 @@ const bootstrapContentScript = (runtime) => {
     const bootstrapPayload = readBootstrapFingerprintContext();
     const bootstrapInput = resolveBootstrapFingerprintContext(bootstrapPayload);
     const bootstrapChannelInstalled = installMainWorldEventChannelSecret(bootstrapInput.mainWorldSecret);
-    if (bootstrapChannelInstalled && shouldActivateStartupRequestContextCapture(bootstrapInput)) {
-        void activateCapturedRequestContextCaptureViaMainWorld().catch(() => { });
-    }
+    void bootstrapChannelInstalled;
     const bootstrapContext = bootstrapInput.fingerprintRuntime;
     if (bootstrapContext) {
         persistExtensionFingerprintContext(bootstrapContext, bootstrapInput.runId);
@@ -9027,10 +9053,7 @@ const bootstrapContentScript = (runtime) => {
     else {
         void loadBootstrapFingerprintContextFromExtension(runtime).then((resolvedBootstrap) => {
             const resolvedBootstrapChannelInstalled = installMainWorldEventChannelSecret(resolvedBootstrap.mainWorldSecret);
-            if (resolvedBootstrapChannelInstalled &&
-                shouldActivateStartupRequestContextCapture(resolvedBootstrap)) {
-                void activateCapturedRequestContextCaptureViaMainWorld().catch(() => { });
-            }
+            void resolvedBootstrapChannelInstalled;
             if (!resolvedBootstrap.fingerprintRuntime) {
                 runtime.sendMessage?.({
                     kind: "result",

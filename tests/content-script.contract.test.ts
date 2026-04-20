@@ -434,7 +434,7 @@ describe("content-script bootstrap contract", () => {
     expect(startupTrust?.install_state).toBeUndefined();
   });
 
-  it("activates request-context capture during bootstrap when startup bootstrap payload is present", async () => {
+  it("does not activate request-context capture during bootstrap when startup bootstrap payload is present", async () => {
     const context = createFingerprintContext();
     (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = {
       run_id: "run-bootstrap-capture-001",
@@ -456,10 +456,10 @@ describe("content-script bootstrap contract", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(activationSpy).toHaveBeenCalledTimes(1);
+    expect(activationSpy).not.toHaveBeenCalled();
   });
 
-  it("activates request-context capture when the bootstrap channel installs through a staged fallback secret", async () => {
+  it("does not activate request-context capture when the bootstrap channel installs through a staged fallback secret", async () => {
     const sessionStorage = createSessionStorage();
     const { window } = createStartupInstallProbeWindow(sessionStorage);
     (globalThis as { window?: unknown }).window = window;
@@ -488,7 +488,7 @@ describe("content-script bootstrap contract", () => {
       setTimeout(resolve, 0);
     });
 
-    expect(activationSpy).toHaveBeenCalledTimes(1);
+    expect(activationSpy).not.toHaveBeenCalled();
   });
 
   it("does not activate request-context capture when the staged fallback bootstrap target_page is non-read", async () => {

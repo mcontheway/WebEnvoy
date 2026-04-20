@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { access, cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CliError } from "../core/errors.js";
 import type { JsonObject } from "../core/types.js";
 
 import { BrowserLaunchError } from "./browser-launcher-shared.js";
@@ -43,55 +42,6 @@ const pathExists = async (path: string): Promise<boolean> => {
   } catch {
     return false;
   }
-};
-
-const resolveInstalledExtensionBootstrapTargets = async (
-  profileDir: string,
-  extensionId: string
-): Promise<{ profileScopedDirs: string[]; sharedUnpackedPath: string | null }> => {
-  const dirs = new Set<string>();
-  let sharedUnpackedPath: string | null = null;
-  const preferenceCandidates = [
-    join(profileDir, "Default", "Preferences"),
-    join(profileDir, "Default", "Secure Preferences"),
-    join(profileDir, "Secure Preferences")
-  ];
-
-  for (const preferencePath of preferenceCandidates) {
-    try {
-      const parsed = JSON.parse(await readFile(preferencePath, "utf8")) as Record<string, unknown>;
-      const settings = asRecord(asRecord(asRecord(parsed.extensions)?.settings)?.[extensionId]);
-      const unpackedPath =
-        settings?.location === 4 || settings?.location === "4"
-          ? typeof settings.path === "string" && settings.path.trim().length > 0
-            ? settings.path.trim()
-            : null
-          : null;
-      if (unpackedPath && (await pathExists(unpackedPath))) {
-        sharedUnpackedPath = unpackedPath;
-      }
-    } catch {
-      // ignore preference file failures and continue probing installed locations
-    }
-  }
-
-  const versionRoot = join(profileDir, "Default", "Extensions", extensionId);
-  try {
-    const entries = await readdir(versionRoot, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) {
-        continue;
-      }
-      dirs.add(join(versionRoot, entry.name));
-    }
-  } catch {
-    // ignore missing installed-version roots
-  }
-
-  return {
-    profileScopedDirs: [...dirs],
-    sharedUnpackedPath
-  };
 };
 
 const hashMainWorldEventChannel = (value: string): string => {
@@ -189,14 +139,6 @@ const buildBridgeBootstrapPayload = (input: {
   }
   return payload;
 };
-
-const buildInstalledExtensionBootstrapScriptPayload = (input: {
-  bridgeSecret: string;
-  extensionBootstrap: Record<string, unknown> | null;
-}): Record<string, unknown> => ({
-  ...(input.extensionBootstrap ? { ...input.extensionBootstrap } : {}),
-  main_world_secret: input.bridgeSecret
-});
 
 const buildBootstrapScriptSource = (input: {
   payload: Record<string, unknown>;
@@ -544,96 +486,6 @@ export const stageExtensionForRun = async (input: {
   });
 
   return { stagedExtensionDir, bootstrapPath, bootstrapScriptPath };
-};
-
-export const writeInstalledExtensionBootstrapForRun = async (input: {
-  profileDir: string;
-  extensionId: string;
-  runId: string;
-  extensionBootstrap: Record<string, unknown> | null;
-}): Promise<number> => {
-  const { profileScopedDirs, sharedUnpackedPath } = await resolveInstalledExtensionBootstrapTargets(
-    input.profileDir,
-    input.extensionId
-  );
-  if (sharedUnpackedPath) {
-    throw new CliError(
-      "ERR_RUNTIME_UNAVAILABLE",
-      "official Chrome persistent extension 使用共享 unpacked 目录，无法安全写入启动 bootstrap",
-      {
-        retryable: false,
-        details: {
-          ability_id: "runtime.profile",
-          stage: "execution",
-          reason: "PERSISTENT_EXTENSION_SHARED_UNPACKED_DIR",
-          extension_id: input.extensionId,
-          unpacked_path: sharedUnpackedPath
-        }
-      }
-    );
-  }
-  if (profileScopedDirs.length === 0) {
-    throw new CliError(
-      "ERR_RUNTIME_UNAVAILABLE",
-      "official Chrome persistent extension 缺少 profile-local 扩展目录，无法写入启动 bootstrap",
-      {
-        retryable: false,
-        details: {
-          ability_id: "runtime.profile",
-          stage: "execution",
-          reason: "PERSISTENT_EXTENSION_PROFILE_LOCAL_DIR_MISSING",
-          extension_id: input.extensionId
-        }
-      }
-    );
-  }
-  const envelope = buildExtensionBootstrapEnvelope({
-    runId: input.runId,
-    extensionBootstrap: input.extensionBootstrap
-  });
-
-  await Promise.all(
-    profileScopedDirs.map(async (dir) => {
-      try {
-        const bridgeSecret = randomUUID();
-        await writeFile(
-          join(dir, EXTENSION_BOOTSTRAP_FILENAME),
-          `${JSON.stringify(envelope, null, 2)}\n`,
-          "utf8"
-        );
-        await mkdir(join(dir, "build"), { recursive: true });
-        await writeFile(
-          join(dir, EXTENSION_BOOTSTRAP_SCRIPT_PATH),
-          buildBootstrapScriptSource({
-            payload: buildInstalledExtensionBootstrapScriptPayload({
-              bridgeSecret,
-              extensionBootstrap: input.extensionBootstrap
-            })
-          }),
-          "utf8"
-        );
-        await injectBootstrapScriptIntoManifest(join(dir, "manifest.json"));
-      } catch (error) {
-        throw new CliError(
-          "ERR_RUNTIME_UNAVAILABLE",
-          "official Chrome persistent extension 启动 bootstrap 写入失败",
-          {
-            retryable: false,
-            cause: error,
-            details: {
-              ability_id: "runtime.profile",
-              stage: "execution",
-              reason: "PERSISTENT_EXTENSION_BOOTSTRAP_WRITE_FAILED",
-              extension_id: input.extensionId,
-              bootstrap_dir: dir
-            }
-          }
-        );
-      }
-    })
-  );
-
-  return profileScopedDirs.length;
 };
 
 export const cleanupStagedExtensions = async (profileDir: string): Promise<void> => {

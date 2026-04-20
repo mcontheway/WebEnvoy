@@ -3,7 +3,6 @@ import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CliError } from "../core/errors.js";
 import { BROWSER_CONTROL_FILENAME, BROWSER_STATE_FILENAME, BrowserLaunchError, launchBrowser, shutdownBrowserSession } from "./browser-launcher.js";
-import { writeInstalledExtensionBootstrapForRun } from "./browser-extension-staging.js";
 import { createProfileLock } from "./profile-lock.js";
 import { ProfileStore } from "./profile-store.js";
 import { inspectProfileLock, isLoginableProfileState, isRuntimeActiveProfileState, isStartableProfileState, resolveProfileAccessState, shouldRecoverAsDisconnected } from "./profile-access.js";
@@ -352,16 +351,6 @@ export class ProfileRuntimeService {
             });
             ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
             const extensionBootstrap = buildExtensionBootstrapInput(input.profile, input.runId, readSessionId(input.params), fingerprintRuntime, typeof input.params.target_page === "string" ? input.params.target_page : null);
-            if (identityPreflight.mode === "official_chrome_persistent_extension" &&
-                identityPreflight.identityBindingState === "bound" &&
-                identityPreflight.binding?.extensionId) {
-                await writeInstalledExtensionBootstrapForRun({
-                    profileDir,
-                    extensionId: identityPreflight.binding.extensionId,
-                    runId: input.runId,
-                    extensionBootstrap
-                });
-            }
             session = beginStartSession(session, {
                 runId: input.runId,
                 nowIso
@@ -528,16 +517,6 @@ export class ProfileRuntimeService {
             });
             ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
             const extensionBootstrap = buildExtensionBootstrapInput(input.profile, input.runId, readSessionId(input.params), fingerprintRuntime, typeof input.params.target_page === "string" ? input.params.target_page : null);
-            if (identityPreflight.mode === "official_chrome_persistent_extension" &&
-                identityPreflight.identityBindingState === "bound" &&
-                identityPreflight.binding?.extensionId) {
-                await writeInstalledExtensionBootstrapForRun({
-                    profileDir,
-                    extensionId: identityPreflight.binding.extensionId,
-                    runId: input.runId,
-                    extensionBootstrap
-                });
-            }
             session = beginLoginSession(session, {
                 runId: input.runId,
                 nowIso

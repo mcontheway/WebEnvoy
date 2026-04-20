@@ -1,7 +1,5 @@
 import {
-  activateCapturedRequestContextCaptureViaMainWorld,
   ContentScriptHandler,
-  isXhsReadBootstrapTargetPage,
   installFingerprintRuntimeViaMainWorld,
   installMainWorldEventChannelSecret,
   type BackgroundToContentMessage,
@@ -225,11 +223,6 @@ const resolveBootstrapFingerprintContext = (value: unknown): BootstrapFingerprin
     targetPage
   };
 };
-
-const shouldActivateStartupRequestContextCapture = (
-  bootstrapContext: BootstrapFingerprintContext
-): boolean =>
-  bootstrapContext.mainWorldSecret !== null && isXhsReadBootstrapTargetPage(bootstrapContext.targetPage);
 
 const sanitizeScopePart = (value: string): string =>
   value.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -483,10 +476,10 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
   const handler = new ContentScriptHandler();
   const bootstrapPayload = readBootstrapFingerprintContext();
   const bootstrapInput = resolveBootstrapFingerprintContext(bootstrapPayload);
-  const bootstrapChannelInstalled = installMainWorldEventChannelSecret(bootstrapInput.mainWorldSecret);
-  if (bootstrapChannelInstalled && shouldActivateStartupRequestContextCapture(bootstrapInput)) {
-    void activateCapturedRequestContextCaptureViaMainWorld().catch(() => {});
-  }
+  const bootstrapChannelInstalled = installMainWorldEventChannelSecret(
+    bootstrapInput.mainWorldSecret
+  );
+  void bootstrapChannelInstalled;
   const bootstrapContext = bootstrapInput.fingerprintRuntime;
   if (bootstrapContext) {
     persistExtensionFingerprintContext(bootstrapContext, bootstrapInput.runId);
@@ -519,12 +512,7 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
       const resolvedBootstrapChannelInstalled = installMainWorldEventChannelSecret(
         resolvedBootstrap.mainWorldSecret
       );
-      if (
-        resolvedBootstrapChannelInstalled &&
-        shouldActivateStartupRequestContextCapture(resolvedBootstrap)
-      ) {
-        void activateCapturedRequestContextCaptureViaMainWorld().catch(() => {});
-      }
+      void resolvedBootstrapChannelInstalled;
       if (!resolvedBootstrap.fingerprintRuntime) {
         runtime.sendMessage?.({
           kind: "result",

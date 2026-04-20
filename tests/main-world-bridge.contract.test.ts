@@ -128,7 +128,7 @@ const bootstrapMainWorldBridge = async (
     throw new Error("secret request listener was not installed");
   }
 
-  if (options?.activateCapture !== false) {
+  if (options?.activateCapture === true) {
     await activateCapturedContextCapture({
       requestEvent: secretChannel.requestEvent,
       requestListener
@@ -184,7 +184,6 @@ describe("main-world bridge contract", () => {
 
   it("does not expose a page-observable control listener when no staged event channel is present", async () => {
     const { added, mockWindow, mockDocument } = createMockMainWorldEnvironment();
-    const originalFetch = mockWindow.fetch;
 
     installMockDomGlobals({
       mockWindow: mockWindow as Window & Record<string, unknown>,
@@ -195,7 +194,6 @@ describe("main-world bridge contract", () => {
 
     expect(added).toHaveLength(1);
     expect(added[0]?.type).toBe("__mw_bootstrap__");
-    expect(mockWindow.fetch).toBe(originalFetch);
   });
 
   it("attaches a secret-derived request listener after receiving bootstrap event", async () => {
@@ -222,9 +220,26 @@ describe("main-world bridge contract", () => {
     expect(added.map((entry) => entry.type)).toContain(secretChannel.requestEvent);
   });
 
-  it("keeps fetch unpatched after bootstrap until capture is explicitly activated", async () => {
+  it("auto-installs request-context capture at document_start on read pages", async () => {
     const { added, mockWindow, mockDocument } = createMockMainWorldEnvironment();
     const originalFetch = mockWindow.fetch;
+
+    installMockDomGlobals({
+      mockWindow: mockWindow as Window & Record<string, unknown>,
+      mockDocument
+    });
+
+    await import("../extension/main-world-bridge.js");
+
+    expect(added).toHaveLength(1);
+    expect(added[0]?.type).toBe("__mw_bootstrap__");
+    expect(mockWindow.fetch).not.toBe(originalFetch);
+  });
+
+  it("does not auto-install request-context capture at document_start on non-read pages", async () => {
+    const { added, mockWindow, mockDocument } = createMockMainWorldEnvironment();
+    const originalFetch = mockWindow.fetch;
+    mockWindow.location.href = "https://www.xiaohongshu.com/explore";
 
     installMockDomGlobals({
       mockWindow: mockWindow as Window & Record<string, unknown>,
@@ -234,7 +249,6 @@ describe("main-world bridge contract", () => {
     const channel = await bootstrapMainWorldBridge(added, { activateCapture: false });
 
     expect(mockWindow.fetch).toBe(originalFetch);
-
     await activateCapturedContextCapture({
       requestEvent: channel.requestEvent,
       requestListener: channel.requestListener

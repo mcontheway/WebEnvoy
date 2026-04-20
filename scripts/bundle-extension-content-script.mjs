@@ -66,6 +66,7 @@ const buildContentScriptBundle = async () => {
   const xhsUserHomeSource = await readSource(join(buildRoot, "xhs-user-home.js"));
   const xhsEditorInputSource = await readSource(join(buildRoot, "xhs-editor-input.js"));
   const xhsCommandContractSource = await readSource(join(buildRoot, "xhs-command-contract.js"));
+  const xhsReadPagesSource = await readSource(join(buildRoot, "xhs-read-pages.js"));
   const contentScriptMainWorldSource = await readSource(
     join(buildRoot, "content-script-main-world.js")
   );
@@ -379,6 +380,16 @@ const buildContentScriptBundle = async () => {
     exports: ["ExtensionContractError", "validateXhsCommandInputForExtension"]
   });
 
+  const xhsReadPagesModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_xhs_read_pages",
+    sourceBody: xhsReadPagesSource,
+    exports: [
+      "isXhsReadBootstrapTargetPage",
+      "resolveXhsReadTargetPageFromHref",
+      "shouldAutoInstallXhsReadRequestContextCapture"
+    ]
+  });
+
   const contentScriptMainWorldModule = renderClassicModule({
     moduleVar: "__webenvoy_module_content_script_main_world",
     sourceBody: contentScriptMainWorldSource,
@@ -439,6 +450,10 @@ const buildContentScriptBundle = async () => {
       "  ExtensionContractError,",
       "  validateXhsCommandInputForExtension",
       "} = __webenvoy_module_xhs_command_contract;",
+      "const {",
+      "  isXhsReadBootstrapTargetPage,",
+      "  resolveXhsReadTargetPageFromHref",
+      "} = __webenvoy_module_xhs_read_pages;",
       "const { containsCookie } = __webenvoy_module_xhs_search_telemetry;",
       "const {",
       "  activateCapturedRequestContextCaptureViaMainWorld,",
@@ -509,6 +524,7 @@ const buildContentScriptBundle = async () => {
     xhsUserHomeModule,
     xhsEditorInputModule,
     xhsCommandContractModule,
+    xhsReadPagesModule,
     contentScriptMainWorldModule,
     contentScriptFingerprintModule,
     handlerModule,

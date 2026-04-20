@@ -1,4 +1,5 @@
 import { CAPTURED_REQUEST_CONTEXT_PATHS, DETAIL_ENDPOINT, SEARCH_ENDPOINT, USER_HOME_ENDPOINT, WEBENVOY_SYNTHETIC_REQUEST_HEADER, createPageContextNamespace } from "./xhs-search-types.js";
+import { shouldAutoInstallXhsReadRequestContextCapture } from "./xhs-read-pages.js";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
@@ -814,6 +815,13 @@ const installCapturedRequestContextCapture = () => {
     installXhrCapture();
     capturedRequestContextCaptureInstalled = true;
 };
+const installDocumentStartReadCaptureIfNeeded = () => {
+    const href = typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "";
+    if (!shouldAutoInstallXhsReadRequestContextCapture(href)) {
+        return;
+    }
+    installCapturedRequestContextCapture();
+};
 const createWindowEvent = (type, detail) => {
     if (typeof CustomEvent === "function") {
         return new CustomEvent(type, { detail });
@@ -1331,6 +1339,7 @@ const ensureBootstrapListener = () => {
     window.addEventListener(MAIN_WORLD_EVENT_BOOTSTRAP, activeMainWorldBootstrapListener);
 };
 const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
+installDocumentStartReadCaptureIfNeeded();
 if (expectedMainWorldEventChannel) {
     attachMainWorldEventChannel(expectedMainWorldEventChannel);
 }

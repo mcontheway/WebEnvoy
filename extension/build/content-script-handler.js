@@ -6,6 +6,7 @@ import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.j
 import { buildFailedFingerprintInjectionContext, hasInstalledFingerprintInjection, installFingerprintRuntimeWithVerification, resolveFingerprintContextForContract, resolveFingerprintContextFromMessage, resolveMissingRequiredFingerprintPatches, summarizeFingerprintRuntimeContext } from "./content-script-fingerprint.js";
 import { activateCapturedRequestContextCaptureViaMainWorld, encodeMainWorldPayload, installMainWorldEventChannelSecret, installFingerprintRuntimeViaMainWorld, MAIN_WORLD_EVENT_BOOTSTRAP, readCapturedRequestContextViaMainWorld, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret } from "./content-script-main-world.js";
 import { ExtensionContractError, validateXhsCommandInputForExtension } from "./xhs-command-contract.js";
+import { isXhsReadBootstrapTargetPage, resolveXhsReadTargetPageFromHref } from "./xhs-read-pages.js";
 import { containsCookie } from "./xhs-search-telemetry.js";
 export { activateCapturedRequestContextCaptureViaMainWorld, encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readCapturedRequestContextViaMainWorld, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret };
 export { resolveFingerprintContextForContract };
@@ -167,19 +168,18 @@ const resolveTargetDomainFromHref = (href) => {
     }
 };
 const resolveTargetPageFromHref = (href, command) => {
+    const readTargetPage = resolveXhsReadTargetPageFromHref(href);
+    if (readTargetPage === "search_result_tab") {
+        return readTargetPage;
+    }
+    if (command === "xhs.detail" && readTargetPage === "explore_detail_tab") {
+        return readTargetPage;
+    }
+    if (command === "xhs.user_home" && readTargetPage === "profile_tab") {
+        return readTargetPage;
+    }
     try {
         const url = new URL(href);
-        if (url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/search_result")) {
-            return "search_result_tab";
-        }
-        if (command === "xhs.detail" && url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/explore/")) {
-            return "explore_detail_tab";
-        }
-        if (command === "xhs.user_home" &&
-            url.hostname === "www.xiaohongshu.com" &&
-            url.pathname.startsWith("/user/profile/")) {
-            return "profile_tab";
-        }
         if (url.hostname === "creator.xiaohongshu.com" && url.pathname.startsWith("/publish")) {
             return "creator_publish_tab";
         }
@@ -189,7 +189,7 @@ const resolveTargetPageFromHref = (href, command) => {
         return null;
     }
 };
-export const isXhsReadBootstrapTargetPage = (value) => value === "search_result_tab" || value === "explore_detail_tab" || value === "profile_tab";
+export { isXhsReadBootstrapTargetPage };
 export class ContentScriptHandler {
     #listeners = new Set();
     #reachable = true;

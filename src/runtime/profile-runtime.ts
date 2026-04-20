@@ -13,7 +13,6 @@ import {
   type BrowserLaunchMode,
   type BrowserLaunchResult
 } from "./browser-launcher.js";
-import { writeInstalledExtensionBootstrapForRun } from "./browser-extension-staging.js";
 import {
   createProfileLock,
   type ProfileLock
@@ -610,18 +609,6 @@ export class ProfileRuntimeService {
         fingerprintRuntime,
         typeof input.params.target_page === "string" ? input.params.target_page : null
       );
-      if (
-        identityPreflight.mode === "official_chrome_persistent_extension" &&
-        identityPreflight.identityBindingState === "bound" &&
-        identityPreflight.binding?.extensionId
-      ) {
-        await writeInstalledExtensionBootstrapForRun({
-          profileDir,
-          extensionId: identityPreflight.binding.extensionId,
-          runId: input.runId,
-          extensionBootstrap
-        });
-      }
       session = beginStartSession(session, {
         runId: input.runId,
         nowIso
@@ -823,18 +810,6 @@ export class ProfileRuntimeService {
         fingerprintRuntime,
         typeof input.params.target_page === "string" ? input.params.target_page : null
       );
-      if (
-        identityPreflight.mode === "official_chrome_persistent_extension" &&
-        identityPreflight.identityBindingState === "bound" &&
-        identityPreflight.binding?.extensionId
-      ) {
-        await writeInstalledExtensionBootstrapForRun({
-          profileDir,
-          extensionId: identityPreflight.binding.extensionId,
-          runId: input.runId,
-          extensionBootstrap
-        });
-      }
       session = beginLoginSession(session, {
         runId: input.runId,
         nowIso

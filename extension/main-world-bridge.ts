@@ -11,6 +11,7 @@ import {
   type CapturedRequestContextMethod,
   type PageContextNamespace
 } from "./xhs-search-types.js";
+import { shouldAutoInstallXhsReadRequestContextCapture } from "./xhs-read-pages.js";
 
 type RecordValue = Record<string, unknown>;
 
@@ -1153,6 +1154,14 @@ const installCapturedRequestContextCapture = (): void => {
   capturedRequestContextCaptureInstalled = true;
 };
 
+const installDocumentStartReadCaptureIfNeeded = (): void => {
+  const href = typeof mainWindow.location?.href === "string" ? mainWindow.location.href : "";
+  if (!shouldAutoInstallXhsReadRequestContextCapture(href)) {
+    return;
+  }
+  installCapturedRequestContextCapture();
+};
+
 const createWindowEvent = (type: string, detail: unknown): Event => {
   if (typeof CustomEvent === "function") {
     return new CustomEvent(type, { detail });
@@ -1785,6 +1794,7 @@ const ensureBootstrapListener = (): void => {
 };
 
 const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
+installDocumentStartReadCaptureIfNeeded();
 if (expectedMainWorldEventChannel) {
   attachMainWorldEventChannel(expectedMainWorldEventChannel);
 } else {

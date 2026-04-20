@@ -31,6 +31,10 @@ import {
   ExtensionContractError,
   validateXhsCommandInputForExtension
 } from "./xhs-command-contract.js";
+import {
+  isXhsReadBootstrapTargetPage,
+  resolveXhsReadTargetPageFromHref
+} from "./xhs-read-pages.js";
 import { containsCookie } from "./xhs-search-telemetry.js";
 
 export {
@@ -290,21 +294,18 @@ const resolveTargetDomainFromHref = (href: string): string | null => {
 };
 
 const resolveTargetPageFromHref = (href: string, command: string): string | null => {
+  const readTargetPage = resolveXhsReadTargetPageFromHref(href);
+  if (readTargetPage === "search_result_tab") {
+    return readTargetPage;
+  }
+  if (command === "xhs.detail" && readTargetPage === "explore_detail_tab") {
+    return readTargetPage;
+  }
+  if (command === "xhs.user_home" && readTargetPage === "profile_tab") {
+    return readTargetPage;
+  }
   try {
     const url = new URL(href);
-    if (url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/search_result")) {
-      return "search_result_tab";
-    }
-    if (command === "xhs.detail" && url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/explore/")) {
-      return "explore_detail_tab";
-    }
-    if (
-      command === "xhs.user_home" &&
-      url.hostname === "www.xiaohongshu.com" &&
-      url.pathname.startsWith("/user/profile/")
-    ) {
-      return "profile_tab";
-    }
     if (url.hostname === "creator.xiaohongshu.com" && url.pathname.startsWith("/publish")) {
       return "creator_publish_tab";
     }
@@ -314,8 +315,7 @@ const resolveTargetPageFromHref = (href: string, command: string): string | null
   }
 };
 
-export const isXhsReadBootstrapTargetPage = (value: unknown): boolean =>
-  value === "search_result_tab" || value === "explore_detail_tab" || value === "profile_tab";
+export { isXhsReadBootstrapTargetPage };
 
 export class ContentScriptHandler {
   #listeners = new Set<ContentMessageListener>();
