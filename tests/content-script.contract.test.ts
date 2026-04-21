@@ -764,7 +764,7 @@ describe("content-script bootstrap contract", () => {
     expect(activationSpy).not.toHaveBeenCalled();
   });
 
-  it("uses the latest main-world page-context namespace for request-context reads after a revisit", async () => {
+  it("honors the requested page-context namespace for request-context reads after a revisit", async () => {
     const { window, readRequests } = createCapturedRequestContextProbeWindow();
     (globalThis as { window?: unknown }).window = window;
 
@@ -794,11 +794,11 @@ describe("content-script bootstrap contract", () => {
 
     expect(readRequests).toHaveLength(1);
     expect(asRecord(readRequests[0]?.payload)).toMatchObject({
-      page_context_namespace: createVisitedPageContextNamespace(window.location.href, 1)
+      page_context_namespace: createPageContextNamespace(window.location.href)
     });
   });
 
-  it("falls back to the main-world visited namespace before any namespace event arrives", async () => {
+  it("keeps the requested namespace before any main-world namespace event arrives", async () => {
     const { window, readRequests } = createCapturedRequestContextProbeWindow();
     (globalThis as { window?: unknown }).window = window;
 
@@ -815,9 +815,11 @@ describe("content-script bootstrap contract", () => {
     });
 
     expect(readRequests).toHaveLength(1);
-    expect(asRecord(readRequests[0]?.payload)).not.toHaveProperty("page_context_namespace");
+    expect(asRecord(readRequests[0]?.payload)).toMatchObject({
+      page_context_namespace: createPageContextNamespace(window.location.href)
+    });
     expect(result).toMatchObject({
-      page_context_namespace: createVisitedPageContextNamespace(window.location.href, 1)
+      page_context_namespace: createPageContextNamespace(window.location.href)
     });
   });
 

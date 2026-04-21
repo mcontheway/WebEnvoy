@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS } from "../extension/request-context-wait-policy.js";
 import { executeXhsDetail } from "../extension/xhs-detail.js";
 import { executeXhsUserHome } from "../extension/xhs-user-home.js";
+import { createPageContextNamespace } from "../extension/xhs-search-types.js";
 import type {
   CapturedRequestContextArtifact,
   XhsSearchEnvironment,
@@ -403,6 +404,67 @@ describe("xhs read request-context exact-shape reuse", () => {
     expect(result.ok).toBe(true);
     expect(readCapturedRequestContext).toHaveBeenCalledTimes(3);
     expect(sleep).toHaveBeenCalledTimes(2);
+  });
+
+  it("pins later detail retries to the returned page_context_namespace", async () => {
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          note: {
+            note_id: "note-001"
+          }
+        }
+      }
+    }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+    const readCapturedRequestContext = vi
+      .fn()
+      .mockImplementationOnce(async () => ({
+        page_context_namespace: "visited-detail-namespace-001",
+        shape_key:
+          '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}',
+        admitted_template: null,
+        rejected_observation: null,
+        incompatible_observation: null,
+        available_shape_keys: []
+      }))
+      .mockImplementationOnce(async () => createDetailArtifact());
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-context-namespace-retry-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-context-namespace-retry-001")
+      },
+      createEnvironment({
+        sleep: vi.fn(async () => {}),
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(readCapturedRequestContext).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        page_context_namespace: createPageContextNamespace("https://www.xiaohongshu.com/explore/note-001")
+      })
+    );
+    expect(readCapturedRequestContext).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        page_context_namespace: "visited-detail-namespace-001"
+      })
+    );
   });
 
   it("keeps polling detail context until the last shared wait attempt before failing closed", async () => {

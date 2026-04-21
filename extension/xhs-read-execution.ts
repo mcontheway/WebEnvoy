@@ -647,14 +647,25 @@ const readCapturedReadContextWithRetry = async (
     return resolveReadRequestContext(spec, null, expectedShape, env.now());
   }
 
+  let pageContextNamespace = createPageContextNamespace(env.getLocationHref());
   let lastResult = resolveReadRequestContext(
     spec,
     await readCapturedRequestContext({
       method: spec.method,
       path: spec.endpoint,
-      page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+      page_context_namespace: pageContextNamespace,
       shape_key: serializeReadShape(expectedShape)
-    }).catch(() => null),
+    })
+      .then((result) => {
+        const nextNamespace = asString(
+          asRecord(result)?.page_context_namespace
+        );
+        if (nextNamespace) {
+          pageContextNamespace = nextNamespace;
+        }
+        return result;
+      })
+      .catch(() => null),
     expectedShape,
     env.now()
   );
@@ -670,9 +681,19 @@ const readCapturedReadContextWithRetry = async (
       await readCapturedRequestContext({
         method: spec.method,
         path: spec.endpoint,
-        page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+        page_context_namespace: pageContextNamespace,
         shape_key: serializeReadShape(expectedShape)
-      }).catch(() => null),
+      })
+        .then((result) => {
+          const nextNamespace = asString(
+            asRecord(result)?.page_context_namespace
+          );
+          if (nextNamespace) {
+            pageContextNamespace = nextNamespace;
+          }
+          return result;
+        })
+        .catch(() => null),
       expectedShape,
       env.now()
     );

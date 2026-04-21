@@ -1851,7 +1851,7 @@ class ChromeBackgroundBridge {
             (!requestTargetBinding ||
                 requestTargetBinding.tabId !== trustedEntry.sourceTabId ||
                 requestTargetBinding.domain !== trustedEntry.sourceDomain)) {
-            return readyBootstrapFingerprintContext;
+            return null;
         }
         return { ...trusted };
     }

@@ -477,13 +477,24 @@ const readCapturedSearchContextWithRetry = async (
     return resolveSearchRequestContext(null, expectedShape, env.now());
   }
 
+  let pageContextNamespace = createPageContextNamespace(env.getLocationHref());
   let lastResult = resolveSearchRequestContext(
     await readCapturedRequestContext({
       method: "POST",
       path: SEARCH_ENDPOINT,
-      page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+      page_context_namespace: pageContextNamespace,
       shape_key: serializeSearchShape(expectedShape)
-    }).catch(() => null),
+    })
+      .then((result) => {
+        const nextNamespace = asString(
+          asRecord(result)?.page_context_namespace
+        );
+        if (nextNamespace) {
+          pageContextNamespace = nextNamespace;
+        }
+        return result;
+      })
+      .catch(() => null),
     expectedShape,
     env.now()
   );
@@ -498,9 +509,19 @@ const readCapturedSearchContextWithRetry = async (
       await readCapturedRequestContext({
         method: "POST",
         path: SEARCH_ENDPOINT,
-        page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+        page_context_namespace: pageContextNamespace,
         shape_key: serializeSearchShape(expectedShape)
-      }).catch(() => null),
+      })
+        .then((result) => {
+          const nextNamespace = asString(
+            asRecord(result)?.page_context_namespace
+          );
+          if (nextNamespace) {
+            pageContextNamespace = nextNamespace;
+          }
+          return result;
+        })
+        .catch(() => null),
       expectedShape,
       env.now()
     );

@@ -405,6 +405,62 @@ describe("xhs search request-context exact-shape reuse", () => {
     expect(sleep).toHaveBeenCalledTimes(2);
   });
 
+  it("pins later search retries to the returned page_context_namespace", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+    const readCapturedRequestContext = vi
+      .fn()
+      .mockImplementationOnce(async () => ({
+        page_context_namespace: "visited-search-namespace-001",
+        shape_key:
+          '{"command":"xhs.search","method":"POST","pathname":"/api/sns/web/v1/search/notes","keyword":"AI","note_type":1,"page":2,"page_size":30,"sort":"time_desc"}',
+        admitted_template: null,
+        rejected_observation: null,
+        incompatible_observation: null,
+        available_shape_keys: []
+      }))
+      .mockImplementationOnce(async () => createCapturedArtifact());
+
+    const result = await executeXhsSearch(
+      {
+        abilityId: "xhs.note.search.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          query: "AI",
+          page: 2,
+          limit: 30,
+          sort: "time_desc",
+          note_type: 1
+        },
+        options: createLiveReadOptions("run-search-context-namespace-retry-001"),
+        executionContext: createExecutionContext("run-search-context-namespace-retry-001")
+      },
+      createEnvironment({
+        sleep: vi.fn(async () => {}),
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(readCapturedRequestContext).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        page_context_namespace: createPageContextNamespace(
+          "https://www.xiaohongshu.com/search_result/?keyword=AI&type=51&page=2"
+        )
+      })
+    );
+    expect(readCapturedRequestContext).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        page_context_namespace: "visited-search-namespace-001"
+      })
+    );
+  });
+
   it("keeps polling search context until the last shared wait attempt before failing closed", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: { items: [] } } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));

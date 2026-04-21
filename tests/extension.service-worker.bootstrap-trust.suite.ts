@@ -2912,9 +2912,8 @@ describe("extension service worker / bootstrap and trust", () => {
         command_params: createRequestBoundXhsCommandParams({
           runId: "run-xhs-detail-main-world-cross-tab-001",
           requestId: liveRequestId,
-          requested_execution_mode: "live_read_high_risk",
-          risk_state: "allowed",
-          approval_record: createApprovedReadApprovalRecord(),
+          requested_execution_mode: "dry_run",
+          risk_state: "paused",
           fingerprint_context: fingerprintContext,
           target_tab_id: 42,
           target_page: "explore_detail_tab",
@@ -2939,13 +2938,13 @@ describe("extension service worker / bootstrap and trust", () => {
         42,
         expect.objectContaining({
           id: liveRequestId,
-          command: "xhs.detail",
-          commandParams: expect.objectContaining({
-            main_world_secret: "secret-xhs-detail-main-world-cross-tab-001"
-          })
+        command: "xhs.detail",
+        commandParams: expect.objectContaining({
+          main_world_secret: "secret-xhs-detail-main-world-cross-tab-001"
         })
-      );
-    });
+      })
+    );
+  });
   });
 
   it("allows explicit target tab in another window", async () => {

@@ -5137,20 +5137,37 @@ const readCapturedSearchContextWithRetry = async (expectedShape, env) => {
     if (!readCapturedRequestContext) {
         return resolveSearchRequestContext(null, expectedShape, env.now());
     }
+    let pageContextNamespace = createPageContextNamespace(env.getLocationHref());
     let lastResult = resolveSearchRequestContext(await readCapturedRequestContext({
         method: "POST",
         path: SEARCH_ENDPOINT,
-        page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+        page_context_namespace: pageContextNamespace,
         shape_key: serializeSearchShape(expectedShape)
-    }).catch(() => null), expectedShape, env.now());
+    })
+        .then((result) => {
+        const nextNamespace = asString(asRecord(result)?.page_context_namespace);
+        if (nextNamespace) {
+            pageContextNamespace = nextNamespace;
+        }
+        return result;
+    })
+        .catch(() => null), expectedShape, env.now());
     for (let attempt = 1; attempt < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS && lastResult.state !== "hit"; attempt += 1) {
         await env.sleep?.(REQUEST_CONTEXT_WAIT_RETRY_MS);
         lastResult = resolveSearchRequestContext(await readCapturedRequestContext({
             method: "POST",
             path: SEARCH_ENDPOINT,
-            page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+            page_context_namespace: pageContextNamespace,
             shape_key: serializeSearchShape(expectedShape)
-        }).catch(() => null), expectedShape, env.now());
+        })
+            .then((result) => {
+            const nextNamespace = asString(asRecord(result)?.page_context_namespace);
+            if (nextNamespace) {
+                pageContextNamespace = nextNamespace;
+            }
+            return result;
+        })
+            .catch(() => null), expectedShape, env.now());
     }
     return lastResult;
 };
@@ -6028,20 +6045,37 @@ const readCapturedReadContextWithRetry = async (spec, expectedShape, env) => {
     if (!readCapturedRequestContext) {
         return resolveReadRequestContext(spec, null, expectedShape, env.now());
     }
+    let pageContextNamespace = createPageContextNamespace(env.getLocationHref());
     let lastResult = resolveReadRequestContext(spec, await readCapturedRequestContext({
         method: spec.method,
         path: spec.endpoint,
-        page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+        page_context_namespace: pageContextNamespace,
         shape_key: serializeReadShape(expectedShape)
-    }).catch(() => null), expectedShape, env.now());
+    })
+        .then((result) => {
+        const nextNamespace = asString(asRecord(result)?.page_context_namespace);
+        if (nextNamespace) {
+            pageContextNamespace = nextNamespace;
+        }
+        return result;
+    })
+        .catch(() => null), expectedShape, env.now());
     for (let attempt = 1; attempt < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS && lastResult.state !== "hit"; attempt += 1) {
         await env.sleep?.(REQUEST_CONTEXT_WAIT_RETRY_MS);
         lastResult = resolveReadRequestContext(spec, await readCapturedRequestContext({
             method: spec.method,
             path: spec.endpoint,
-            page_context_namespace: createPageContextNamespace(env.getLocationHref()),
+            page_context_namespace: pageContextNamespace,
             shape_key: serializeReadShape(expectedShape)
-        }).catch(() => null), expectedShape, env.now());
+        })
+            .then((result) => {
+            const nextNamespace = asString(asRecord(result)?.page_context_namespace);
+            if (nextNamespace) {
+                pageContextNamespace = nextNamespace;
+            }
+            return result;
+        })
+            .catch(() => null), expectedShape, env.now());
     }
     return lastResult;
 };
@@ -7717,10 +7751,12 @@ const readCapturedRequestContextViaMainWorld = async (input) => {
         installMainWorldPageContextNamespaceListener(mainWorldEventChannel.namespaceEvent);
     }
     await activateCapturedRequestContextCaptureViaMainWorld();
-    const pageContextNamespace = typeof latestMainWorldPageContextNamespace === "string" &&
-        latestMainWorldPageContextNamespace.length > 0
-        ? latestMainWorldPageContextNamespace
-        : null;
+    const pageContextNamespace = typeof input.page_context_namespace === "string" && input.page_context_namespace.length > 0
+        ? input.page_context_namespace
+        : typeof latestMainWorldPageContextNamespace === "string" &&
+            latestMainWorldPageContextNamespace.length > 0
+            ? latestMainWorldPageContextNamespace
+            : null;
     const result = await mainWorldCall({
         type: "captured-request-context-read",
         payload: {

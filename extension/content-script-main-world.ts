@@ -420,10 +420,12 @@ export const readCapturedRequestContextViaMainWorld = async (
   }
   await activateCapturedRequestContextCaptureViaMainWorld();
   const pageContextNamespace =
-    typeof latestMainWorldPageContextNamespace === "string" &&
-    latestMainWorldPageContextNamespace.length > 0
-      ? latestMainWorldPageContextNamespace
-      : null;
+    typeof input.page_context_namespace === "string" && input.page_context_namespace.length > 0
+      ? input.page_context_namespace
+      : typeof latestMainWorldPageContextNamespace === "string" &&
+          latestMainWorldPageContextNamespace.length > 0
+        ? latestMainWorldPageContextNamespace
+        : null;
   const result = await mainWorldCall<unknown>({
     type: "captured-request-context-read",
     payload: {
