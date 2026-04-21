@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, createApprovedReadAdmissionContext, createIssue209GateInvocationId, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
+import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, createApprovedReadAdmissionContext, createCapturedSearchRequestContextReader, createIssue209GateInvocationId, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
 
 describe("extension background relay contract / forward and timeout", () => {
   const createApprovedLiveOptions = (input: {
@@ -162,6 +162,7 @@ describe("extension background relay contract / forward and timeout", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: createCapturedSearchRequestContextReader(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
@@ -399,6 +400,7 @@ describe("extension background relay contract / forward and timeout", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: createCapturedSearchRequestContextReader(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
@@ -488,6 +490,7 @@ describe("extension background relay contract / forward and timeout", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: createCapturedSearchRequestContextReader(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
@@ -665,6 +668,7 @@ describe("extension background relay contract / forward and timeout", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: createCapturedSearchRequestContextReader(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
@@ -2238,6 +2242,7 @@ describe("extension background relay contract / forward and timeout", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: createCapturedSearchRequestContextReader(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"

@@ -1509,6 +1509,9 @@ describe("content-script handler contract", () => {
           expect.objectContaining({
             method: "POST",
             credentials: "include",
+            headers: expect.objectContaining({
+              "x-webenvoy-synthetic-request": "1"
+            }),
             referrer: "https://www.xiaohongshu.com/search_result?keyword=test",
             referrerPolicy: "strict-origin-when-cross-origin"
           })

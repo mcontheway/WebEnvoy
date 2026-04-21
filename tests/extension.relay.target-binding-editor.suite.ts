@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, createApprovedReadAdmissionContext, createIssue209GateInvocationId, approvedLiveOptions, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
+import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, createApprovedReadAdmissionContext, createCapturedSearchRequestContextReader, createIssue209GateInvocationId, approvedLiveOptions, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
 
 describe("extension background relay contract / target binding and editor input", () => {
   it("blocks issue_208 write action in paused state and returns reversible write tier", async () => {
@@ -1013,6 +1013,7 @@ describe("extension background relay contract / target binding and editor input"
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: createCapturedSearchRequestContextReader(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
@@ -1176,6 +1177,7 @@ describe("extension background relay contract / target binding and editor input"
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: createCapturedSearchRequestContextReader(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
@@ -1263,6 +1265,7 @@ describe("extension background relay contract / target binding and editor input"
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: createCapturedSearchRequestContextReader(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
@@ -1534,6 +1537,7 @@ describe("extension background relay contract / target binding and editor input"
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: createCapturedSearchRequestContextReader(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"

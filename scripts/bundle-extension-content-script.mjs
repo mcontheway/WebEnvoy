@@ -224,6 +224,7 @@ const buildContentScriptBundle = async () => {
     sourceBody: xhsSearchTypesSource,
     exports: [
       "SEARCH_ENDPOINT",
+      "WEBENVOY_SYNTHETIC_REQUEST_HEADER",
       "createPageContextNamespace",
       "createSearchRequestShape",
       "createVisitedPageContextNamespace",
@@ -367,6 +368,7 @@ const buildContentScriptBundle = async () => {
     moduleVar: "__webenvoy_module_content_script_main_world",
     prelude: [
       "const {",
+      "  WEBENVOY_SYNTHETIC_REQUEST_HEADER,",
       "  resolveActiveVisitedPageContextNamespace,",
       "  resolveMainWorldPageContextNamespaceEventName",
       "} = __webenvoy_module_xhs_search_types;"

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, createApprovedReadAdmissionContext, approvedHighRiskLimitedOptions, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
+import { waitForResponse, asRecord, resolveWriteInteractionTier, completeIssue208ApprovalRecord, createAttestedEditorInputValidationResult, createApprovedReadAdmissionContext, createCapturedSearchRequestContextReader, approvedHighRiskLimitedOptions, BackgroundRelay, ContentScriptHandler, type BridgeResponse } from "./extension.relay.shared.js";
 
 describe("extension background relay contract / gate and approval", () => {
   const limitedRunId = "run-xhs-live-limited-allowed-001";
@@ -55,6 +55,7 @@ describe("extension background relay contract / gate and approval", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: createCapturedSearchRequestContextReader(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"
@@ -357,6 +358,7 @@ describe("extension background relay contract / gate and approval", () => {
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=valid;",
+        readCapturedRequestContext: createCapturedSearchRequestContextReader(),
         callSignature: async () => ({
           "X-s": "signed",
           "X-t": "1"

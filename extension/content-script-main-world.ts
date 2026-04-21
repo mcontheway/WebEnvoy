@@ -4,6 +4,7 @@ import type {
   CapturedRequestContextLookupResult
 } from "./xhs-search-types.js";
 import {
+  WEBENVOY_SYNTHETIC_REQUEST_HEADER,
   resolveActiveVisitedPageContextNamespace,
   resolveMainWorldPageContextNamespaceEventName
 } from "./xhs-search-types.js";
@@ -398,7 +399,16 @@ export const readCapturedRequestContextViaMainWorld = async (
   });
   const normalized = asCapturedRequestContextLookupResult(result);
   if (
-    normalized &&
+    !normalized ||
+    resolveActiveVisitedPageContextNamespace(
+      input.page_context_namespace,
+      normalized.page_context_namespace
+    ) !== normalized.page_context_namespace ||
+    normalized.shape_key !== input.shape_key
+  ) {
+    return null;
+  }
+  if (
     typeof normalized.page_context_namespace === "string" &&
     normalized.page_context_namespace.length > 0
   ) {
@@ -443,7 +453,10 @@ export const requestXhsSearchJsonViaMainWorld = async (input: {
     kind: "xhs-main-world-request",
     url: resolveMainWorldRequestUrl(input.url),
     method: input.method,
-    headers: input.headers,
+    headers: {
+      ...input.headers,
+      [WEBENVOY_SYNTHETIC_REQUEST_HEADER]: "1"
+    },
     ...(typeof input.body === "string" ? { body: input.body } : {}),
     timeout_ms: input.timeoutMs,
     ...(typeof input.referrer === "string" ? { referrer: input.referrer } : {}),

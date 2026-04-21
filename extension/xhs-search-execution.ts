@@ -92,6 +92,104 @@ const withExecutionAuditInFailurePayload = (
   };
 };
 
+const serializeCanonicalShape = (value: unknown): string | null => {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  const shape = createSearchRequestShape({
+    keyword: record.keyword,
+    page: record.page,
+    page_size: record.page_size,
+    sort: record.sort,
+    note_type: record.note_type
+  });
+  return shape ? serializeSearchRequestShape(shape) : null;
+};
+
+const isTrustedCapturedTemplate = (
+  template: unknown,
+  expected: { pageContextNamespace: string; shapeKey: string }
+): boolean => {
+  const templateRecord = asRecord(template);
+  if (!templateRecord) {
+    return false;
+  }
+  if (
+    templateRecord.method !== "POST" ||
+    templateRecord.path !== SEARCH_ENDPOINT ||
+    templateRecord.page_context_namespace !== expected.pageContextNamespace ||
+    templateRecord.shape_key !== expected.shapeKey
+  ) {
+    return false;
+  }
+  const templateShape = asRecord(templateRecord.shape);
+  if (
+    templateShape?.command !== "xhs.search" ||
+    templateShape?.method !== "POST" ||
+    templateShape?.pathname !== SEARCH_ENDPOINT ||
+    serializeCanonicalShape(templateShape) !== expected.shapeKey
+  ) {
+    return false;
+  }
+  const request = asRecord(templateRecord.request);
+  if (!request || !asRecord(request.headers)) {
+    return false;
+  }
+  return serializeCanonicalShape(request.body) === expected.shapeKey;
+};
+
+const isTrustedRejectedObservation = (
+  observation: unknown,
+  expected: { pageContextNamespace: string; shapeKey: string }
+): boolean => {
+  const observationRecord = asRecord(observation);
+  if (!observationRecord) {
+    return false;
+  }
+  if (
+    observationRecord.method !== "POST" ||
+    observationRecord.path !== SEARCH_ENDPOINT ||
+    observationRecord.page_context_namespace !== expected.pageContextNamespace ||
+    observationRecord.shape_key !== expected.shapeKey
+  ) {
+    return false;
+  }
+  const reason = observationRecord.rejection_reason;
+  if (
+    reason !== "synthetic_request_rejected" &&
+    reason !== "failed_request_rejected"
+  ) {
+    return false;
+  }
+  return serializeCanonicalShape(
+    asRecord(observationRecord.shape) ?? asRecord(asRecord(observationRecord.request)?.body)
+  ) ===
+    expected.shapeKey;
+};
+
+const isTrustedIncompatibleObservation = (
+  observation: unknown,
+  expected: { pageContextNamespace: string; shapeKey: string }
+): boolean => {
+  const observationRecord = asRecord(observation);
+  if (!observationRecord) {
+    return false;
+  }
+  if (
+    observationRecord.method !== "POST" ||
+    observationRecord.path !== SEARCH_ENDPOINT ||
+    observationRecord.page_context_namespace !== expected.pageContextNamespace ||
+    observationRecord.shape_key === expected.shapeKey
+  ) {
+    return false;
+  }
+  const inferredShapeKey = serializeCanonicalShape(
+    asRecord(observationRecord.shape) ?? asRecord(asRecord(observationRecord.request)?.body)
+  );
+  return inferredShapeKey !== null && inferredShapeKey === observationRecord.shape_key;
+};
+
 const resolveRequestContextState = async (
   input: {
     params: XhsSearchParams;
@@ -127,9 +225,28 @@ const resolveRequestContextState = async (
 
   const pageContextNamespace = lookup?.page_context_namespace ?? fallbackNamespace;
   const availableShapeKeys = lookup?.available_shape_keys ?? [];
-  const admittedTemplate = lookup?.admitted_template ?? null;
-  const rejectedObservation = lookup?.rejected_observation ?? null;
-  const incompatibleObservation = lookup?.incompatible_observation ?? null;
+  const siblingShapeKeys = availableShapeKeys.filter((candidate) => candidate !== shapeKey);
+  const admittedTemplate = isTrustedCapturedTemplate(lookup?.admitted_template ?? null, {
+    pageContextNamespace,
+    shapeKey
+  })
+    ? lookup?.admitted_template ?? null
+    : null;
+  const rejectedObservation = isTrustedRejectedObservation(lookup?.rejected_observation ?? null, {
+    pageContextNamespace,
+    shapeKey
+  })
+    ? lookup?.rejected_observation ?? null
+    : null;
+  const incompatibleObservation = isTrustedIncompatibleObservation(
+    lookup?.incompatible_observation ?? null,
+    {
+      pageContextNamespace,
+      shapeKey
+    }
+  )
+    ? lookup?.incompatible_observation ?? null
+    : null;
 
   if (admittedTemplate && admittedTemplate.template_ready !== false) {
     const observedAt = admittedTemplate.observed_at ?? admittedTemplate.captured_at;
@@ -175,13 +292,13 @@ const resolveRequestContextState = async (
     };
   }
 
-  if (incompatibleObservation || availableShapeKeys.length > 0) {
+  if (incompatibleObservation || siblingShapeKeys.length > 0) {
     return {
       status: "miss",
       failureReason: "shape_mismatch",
       pageContextNamespace,
       shapeKey,
-      availableShapeKeys,
+      availableShapeKeys: siblingShapeKeys,
       observedAt:
         incompatibleObservation?.observed_at ?? incompatibleObservation?.captured_at ?? undefined
     };
