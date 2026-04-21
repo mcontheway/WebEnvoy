@@ -150,7 +150,7 @@ const toTransportCliError = (error, ability) => new CliError("ERR_RUNTIME_UNAVAI
         reason: error.code
     }
 });
-export const ensureOfficialChromeRuntimeReady = async (context, ability, requestedExecutionMode, bridge, fingerprintContext, gate, readStatus) => {
+export const ensureOfficialChromeRuntimeReady = async (context, ability, requestedExecutionMode, bridge, fingerprintContext, gate, readStatus, bootstrapTargetResourceId) => {
     await prepareOfficialChromeRuntime({
         context,
         consumerId: ability.id,
@@ -160,8 +160,16 @@ export const ensureOfficialChromeRuntimeReady = async (context, ability, request
         bootstrapTargetTabId: gate.targetTabId,
         bootstrapTargetDomain: gate.targetDomain,
         bootstrapTargetPage: gate.targetPage,
+        bootstrapTargetResourceId,
         readStatus
     });
+};
+const resolveReadBootstrapTargetResourceId = (fixtureDataRefKey, parsedInput) => {
+    if (fixtureDataRefKey !== "note_id" && fixtureDataRefKey !== "user_id") {
+        return null;
+    }
+    const value = parsedInput[fixtureDataRefKey];
+    return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 };
 const xhsSearch = async (context) => {
     return xhsReadCommand(context, {
@@ -216,13 +224,14 @@ const xhsReadCommand = async (context, inputConfig) => {
     const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
         requestedExecutionMode: gate.requestedExecutionMode
     });
+    const bootstrapTargetResourceId = resolveReadBootstrapTargetResourceId(inputConfig.fixtureDataRefKey, parsedInput);
     try {
         const preparedIssue209LiveRead = prepareIssue209LiveReadEnvelopeForContract({
             options: gate.options,
             requestId: envelope.requestId,
             runId: context.run_id
         });
-        await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, gate);
+        await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, gate, undefined, bootstrapTargetResourceId);
         const bridgeSessionId = await bridge.ensureSession({
             profile: context.profile
         });

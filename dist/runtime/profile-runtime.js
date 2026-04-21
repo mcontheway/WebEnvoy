@@ -131,6 +131,14 @@ const readRequestedExecutionMode = (params) => {
     const mode = params.requested_execution_mode;
     return typeof mode === "string" && mode.length > 0 ? mode : null;
 };
+const readOptionalNonEmptyStringParam = (params, key) => {
+    const value = params[key];
+    return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+};
+const readOptionalIntegerParam = (params, key) => {
+    const value = params[key];
+    return typeof value === "number" && Number.isInteger(value) ? value : null;
+};
 const ensureFingerprintExecutionAllowed = (requestedExecutionMode, fingerprintRuntime) => {
     if (!requestedExecutionMode || !LIVE_EXECUTION_MODES.has(requestedExecutionMode)) {
         return;
@@ -146,20 +154,38 @@ const ensureFingerprintExecutionAllowed = (requestedExecutionMode, fingerprintRu
         }
     });
 };
-const buildExtensionBootstrapInput = (profile, runId, sessionId, fingerprintRuntime, targetPage) => ({
+const buildExtensionBootstrapInput = (profile, runId, sessionId, fingerprintRuntime, targetTabId, targetDomain, targetPage, targetResourceId) => ({
     run_id: runId,
     runtime_context_id: buildRuntimeBootstrapContextId(profile, runId),
     session_id: sessionId,
     fingerprint_runtime: fingerprintRuntime,
-    ...(typeof targetPage === "string" && targetPage.length > 0 ? { target_page: targetPage } : {})
+    ...(typeof targetTabId === "number" && Number.isInteger(targetTabId)
+        ? { target_tab_id: targetTabId }
+        : {}),
+    ...(typeof targetDomain === "string" && targetDomain.length > 0
+        ? { target_domain: targetDomain }
+        : {}),
+    ...(typeof targetPage === "string" && targetPage.length > 0 ? { target_page: targetPage } : {}),
+    ...(typeof targetResourceId === "string" && targetResourceId.length > 0
+        ? { target_resource_id: targetResourceId }
+        : {})
 });
 const buildRuntimeBootstrapEnvelope = (input) => ({
     version: "v1",
     run_id: input.runId,
     runtime_context_id: input.runtimeContextId,
     profile: input.profile,
+    ...(typeof input.targetTabId === "number" && Number.isInteger(input.targetTabId)
+        ? { target_tab_id: input.targetTabId }
+        : {}),
+    ...(typeof input.targetDomain === "string" && input.targetDomain.length > 0
+        ? { target_domain: input.targetDomain }
+        : {}),
     ...(typeof input.targetPage === "string" && input.targetPage.length > 0
         ? { target_page: input.targetPage }
+        : {}),
+    ...(typeof input.targetResourceId === "string" && input.targetResourceId.length > 0
+        ? { target_resource_id: input.targetResourceId }
         : {}),
     fingerprint_runtime: input.fingerprintRuntime,
     fingerprint_patch_manifest: input.fingerprintRuntime.fingerprint_patch_manifest
@@ -353,7 +379,7 @@ export class ProfileRuntimeService {
                 requestedExecutionMode
             });
             ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
-            const extensionBootstrap = buildExtensionBootstrapInput(input.profile, input.runId, readSessionId(input.params), fingerprintRuntime, typeof input.params.target_page === "string" ? input.params.target_page : null);
+            const extensionBootstrap = buildExtensionBootstrapInput(input.profile, input.runId, readSessionId(input.params), fingerprintRuntime, readOptionalIntegerParam(input.params, "target_tab_id"), readOptionalNonEmptyStringParam(input.params, "target_domain"), readOptionalNonEmptyStringParam(input.params, "target_page"), readOptionalNonEmptyStringParam(input.params, "target_resource_id"));
             session = beginStartSession(session, {
                 runId: input.runId,
                 nowIso
@@ -519,7 +545,7 @@ export class ProfileRuntimeService {
                 requestedExecutionMode
             });
             ensureFingerprintExecutionAllowed(requestedExecutionMode, fingerprintRuntime);
-            const extensionBootstrap = buildExtensionBootstrapInput(input.profile, input.runId, readSessionId(input.params), fingerprintRuntime, typeof input.params.target_page === "string" ? input.params.target_page : null);
+            const extensionBootstrap = buildExtensionBootstrapInput(input.profile, input.runId, readSessionId(input.params), fingerprintRuntime, readOptionalIntegerParam(input.params, "target_tab_id"), readOptionalNonEmptyStringParam(input.params, "target_domain"), readOptionalNonEmptyStringParam(input.params, "target_page"), readOptionalNonEmptyStringParam(input.params, "target_resource_id"));
             session = beginLoginSession(session, {
                 runId: input.runId,
                 nowIso
@@ -1397,9 +1423,10 @@ export class ProfileRuntimeService {
             runtimeContextId: buildRuntimeBootstrapContextId(input.profile, input.runtimeInput.runId),
             fingerprintRuntime: input.fingerprintRuntime,
             mainWorldSecret: randomUUID(),
-            targetPage: typeof input.runtimeInput.params.target_page === "string"
-                ? input.runtimeInput.params.target_page
-                : null
+            targetTabId: readOptionalIntegerParam(input.runtimeInput.params, "target_tab_id"),
+            targetDomain: readOptionalNonEmptyStringParam(input.runtimeInput.params, "target_domain"),
+            targetPage: readOptionalNonEmptyStringParam(input.runtimeInput.params, "target_page"),
+            targetResourceId: readOptionalNonEmptyStringParam(input.runtimeInput.params, "target_resource_id")
         });
         try {
             const result = await bridge.runCommand({

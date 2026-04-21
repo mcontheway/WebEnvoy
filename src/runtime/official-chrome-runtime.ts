@@ -89,6 +89,7 @@ const buildRuntimeBootstrapEnvelope = (input: {
   targetTabId?: number | null;
   targetDomain?: string | null;
   targetPage?: string | null;
+  targetResourceId?: string | null;
 }): JsonObject & {
   version: "v1";
   run_id: string;
@@ -108,6 +109,9 @@ const buildRuntimeBootstrapEnvelope = (input: {
     : {}),
   ...(typeof input.targetPage === "string" && input.targetPage.length > 0
     ? { target_page: input.targetPage }
+    : {}),
+  ...(typeof input.targetResourceId === "string" && input.targetResourceId.length > 0
+    ? { target_resource_id: input.targetResourceId }
     : {}),
   fingerprint_runtime: input.fingerprintRuntime,
   fingerprint_patch_manifest: asObject(input.fingerprintRuntime.fingerprint_patch_manifest) ?? {},
@@ -290,6 +294,7 @@ export const prepareOfficialChromeRuntime = async (input: {
   bootstrapTargetTabId?: number | null;
   bootstrapTargetDomain?: string | null;
   bootstrapTargetPage?: string | null;
+  bootstrapTargetResourceId?: string | null;
   readStatus?: RuntimeStatusReader;
   attachRuntime?: RuntimeAttachReader;
 }): Promise<JsonObject> => {
@@ -388,7 +393,8 @@ export const prepareOfficialChromeRuntime = async (input: {
       fingerprintRuntime: input.fingerprintContext,
       targetTabId: input.bootstrapTargetTabId,
       targetDomain: input.bootstrapTargetDomain ?? null,
-      targetPage: input.bootstrapTargetPage ?? null
+      targetPage: input.bootstrapTargetPage ?? null,
+      targetResourceId: input.bootstrapTargetResourceId ?? null
     });
     const bootstrapResult = await input.bridge.runCommand({
       runId: input.context.run_id,

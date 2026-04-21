@@ -119,7 +119,7 @@ describe("prepareOfficialChromeRuntime", () => {
     );
   });
 
-  it("forwards explicit target_tab_id into hidden runtime.bootstrap when provided", async () => {
+  it("forwards explicit read target binding into hidden runtime.bootstrap when provided", async () => {
     const readStatus = vi
       .fn()
       .mockResolvedValueOnce({
@@ -176,6 +176,9 @@ describe("prepareOfficialChromeRuntime", () => {
           fingerprint_profile_bundle: null
         } as never,
         bootstrapTargetTabId: 44,
+        bootstrapTargetDomain: "www.xiaohongshu.com",
+        bootstrapTargetPage: "explore_detail_tab",
+        bootstrapTargetResourceId: "note-bootstrap-001",
         readStatus
       })
     ).resolves.toMatchObject({
@@ -189,7 +192,10 @@ describe("prepareOfficialChromeRuntime", () => {
       expect.objectContaining({
         command: "runtime.bootstrap",
         params: expect.objectContaining({
-          target_tab_id: 44
+          target_tab_id: 44,
+          target_domain: "www.xiaohongshu.com",
+          target_page: "explore_detail_tab",
+          target_resource_id: "note-bootstrap-001"
         })
       })
     );

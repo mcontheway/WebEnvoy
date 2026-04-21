@@ -60,6 +60,9 @@ const buildRuntimeBootstrapEnvelope = (input) => ({
     ...(typeof input.targetPage === "string" && input.targetPage.length > 0
         ? { target_page: input.targetPage }
         : {}),
+    ...(typeof input.targetResourceId === "string" && input.targetResourceId.length > 0
+        ? { target_resource_id: input.targetResourceId }
+        : {}),
     fingerprint_runtime: input.fingerprintRuntime,
     fingerprint_patch_manifest: asObject(input.fingerprintRuntime.fingerprint_patch_manifest) ?? {},
     main_world_secret: randomUUID()
@@ -245,7 +248,8 @@ export const prepareOfficialChromeRuntime = async (input) => {
             fingerprintRuntime: input.fingerprintContext,
             targetTabId: input.bootstrapTargetTabId,
             targetDomain: input.bootstrapTargetDomain ?? null,
-            targetPage: input.bootstrapTargetPage ?? null
+            targetPage: input.bootstrapTargetPage ?? null,
+            targetResourceId: input.bootstrapTargetResourceId ?? null
         });
         const bootstrapResult = await input.bridge.runCommand({
             runId: input.context.run_id,

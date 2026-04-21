@@ -420,6 +420,17 @@ const resolveRequestedXhsResourceId = (
   return null;
 };
 
+const resolveRuntimeBootstrapRequestedXhsResourceId = (
+  commandParams: Record<string, unknown>,
+  preferredPage: ReturnType<typeof resolvePreferredXhsReadPage>
+): string | null => {
+  if (preferredPage !== "explore_detail_tab" && preferredPage !== "profile_tab") {
+    return null;
+  }
+  const options = asRecord(commandParams.options);
+  return asNonEmptyString(commandParams.target_resource_id ?? options?.target_resource_id);
+};
+
 const isAllowedTargetPageForXhsReadCommand = (command: string, targetPage: string | null): boolean => {
   if (!targetPage) {
     return true;
@@ -521,7 +532,8 @@ const scoreXhsRuntimeSurfaceTab = (tab: ExtensionTab): number => {
 
 const resolveRuntimeBootstrapReadTargetTabId = async (
   chromeApi: ExtensionChromeApi,
-  preferredPage: ReturnType<typeof resolvePreferredXhsReadPage>
+  preferredPage: ReturnType<typeof resolvePreferredXhsReadPage>,
+  requestedResourceId: string | null
 ): Promise<number | null> => {
   const xhsUrlPatterns = [
     "*://www.xiaohongshu.com/*",
@@ -546,6 +558,16 @@ const resolveRuntimeBootstrapReadTargetTabId = async (
     } catch {
       xhsTabs = [];
     }
+  }
+  const resourceBoundTabs =
+    requestedResourceId && preferredPage
+      ? xhsTabs.filter((tab) => tabMatchesRequestedXhsResource(tab, preferredPage, requestedResourceId))
+      : [];
+  if (resourceBoundTabs.length === 1) {
+    return typeof resourceBoundTabs[0]?.id === "number" ? resourceBoundTabs[0].id : null;
+  }
+  if (requestedResourceId && preferredPage) {
+    return null;
   }
   const ranked = xhsTabs
     .filter((tab) => typeof tab.id === "number")
@@ -5076,6 +5098,13 @@ class ChromeBackgroundBridge {
         command,
         runtimeBootstrapTargetPage
       );
+      const runtimeBootstrapRequestedResourceId =
+        command === "runtime.bootstrap"
+          ? resolveRuntimeBootstrapRequestedXhsResourceId(
+              commandParams,
+              preferredRuntimeBootstrapReadPage
+            )
+          : null;
       if (
         command === "runtime.bootstrap" &&
         isXhsReadTargetPage(runtimeBootstrapTargetPage) &&
@@ -5083,10 +5112,14 @@ class ChromeBackgroundBridge {
       ) {
         const runtimeBootstrapReadTabId = await resolveRuntimeBootstrapReadTargetTabId(
           this.chromeApi,
-          preferredRuntimeBootstrapReadPage
+          preferredRuntimeBootstrapReadPage,
+          runtimeBootstrapRequestedResourceId
         );
         if (runtimeBootstrapReadTabId !== null) {
           return runtimeBootstrapReadTabId;
+        }
+        if (runtimeBootstrapRequestedResourceId) {
+          return null;
         }
       }
       let runtimeSurfaceTabs: ExtensionTab[] = [];

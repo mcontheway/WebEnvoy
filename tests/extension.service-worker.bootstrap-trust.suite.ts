@@ -401,6 +401,181 @@ describe("extension service worker / bootstrap and trust", () => {
     );
   });
 
+  it("pins runtime.bootstrap to the requested detail resource when multiple detail tabs are open", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.query = vi.fn(async (filter: { currentWindow?: boolean; url?: string | string[] }) => {
+      if (filter.url) {
+        return [
+          { id: 31, active: true, url: "https://www.xiaohongshu.com/explore/note-other-001" },
+          { id: 32, active: false, url: "https://www.xiaohongshu.com/explore/note-target-001" }
+        ];
+      }
+      return [{ id: 11 }];
+    });
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-detail-resource-pick-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-detail-resource-pick-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-detail-resource-pick-001",
+          runtime_context_id: "ctx-bootstrap-detail-resource-pick-001",
+          profile: "profile-a",
+          target_page: "explore_detail_tab",
+          target_resource_id: "note-target-001",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-detail-resource-pick-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(executeScript).toHaveBeenCalledWith({
+      target: { tabId: 32 },
+      world: "MAIN",
+      files: ["build/main-world-bridge.js"]
+    });
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "run-bootstrap-detail-resource-pick-001",
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
+  it("pins runtime.bootstrap to the requested profile resource when multiple profile tabs are open", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.query = vi.fn(async (filter: { currentWindow?: boolean; url?: string | string[] }) => {
+      if (filter.url) {
+        return [
+          { id: 41, active: true, url: "https://www.xiaohongshu.com/user/profile/user-other-001" },
+          { id: 42, active: false, url: "https://www.xiaohongshu.com/user/profile/user-target-001" }
+        ];
+      }
+      return [{ id: 11 }];
+    });
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-profile-resource-pick-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-profile-resource-pick-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-profile-resource-pick-001",
+          runtime_context_id: "ctx-bootstrap-profile-resource-pick-001",
+          profile: "profile-a",
+          target_page: "profile_tab",
+          target_resource_id: "user-target-001",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-profile-resource-pick-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(executeScript).toHaveBeenCalledWith({
+      target: { tabId: 42 },
+      world: "MAIN",
+      files: ["build/main-world-bridge.js"]
+    });
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({
+        id: "run-bootstrap-profile-resource-pick-001",
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
+  it("keeps explicit target_tab_id authoritative over conflicting runtime.bootstrap resource hints", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.query = vi.fn(async () => [
+      { id: 32, active: true, url: "https://www.xiaohongshu.com/explore/note-target-001" }
+    ]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-explicit-tab-wins-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-explicit-tab-wins-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-explicit-tab-wins-001",
+          runtime_context_id: "ctx-bootstrap-explicit-tab-wins-001",
+          profile: "profile-a",
+          target_tab_id: 91,
+          target_page: "explore_detail_tab",
+          target_resource_id: "note-target-001",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-explicit-tab-wins-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(executeScript).toHaveBeenCalledWith({
+      target: { tabId: 91 },
+      world: "MAIN",
+      files: ["build/main-world-bridge.js"]
+    });
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      91,
+      expect.objectContaining({
+        id: "run-bootstrap-explicit-tab-wins-001",
+        command: "runtime.bootstrap"
+      })
+    );
+  });
+
   it("prepares the request-context capture surface before runtime.bootstrap on xhs read tabs", async () => {
     const firstPort = createMockPort();
     const { chromeApi, executeScript } = createChromeApi([firstPort]);

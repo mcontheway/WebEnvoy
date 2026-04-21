@@ -303,6 +303,16 @@ const readRequestedExecutionMode = (params: JsonObject): string | null => {
   return typeof mode === "string" && mode.length > 0 ? mode : null;
 };
 
+const readOptionalNonEmptyStringParam = (params: JsonObject, key: string): string | null => {
+  const value = params[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+};
+
+const readOptionalIntegerParam = (params: JsonObject, key: string): number | null => {
+  const value = params[key];
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+};
+
 const ensureFingerprintExecutionAllowed = (
   requestedExecutionMode: string | null,
   fingerprintRuntime: ReturnType<typeof buildFingerprintContextForMeta>
@@ -331,7 +341,10 @@ type ExtensionBootstrapInput = {
   runtime_context_id: string;
   session_id: string;
   fingerprint_runtime: ReturnType<typeof buildFingerprintContextForMeta>;
+  target_tab_id?: number;
+  target_domain?: string;
   target_page?: string;
+  target_resource_id?: string;
 };
 
 type RuntimeBootstrapEnvelope = {
@@ -339,7 +352,10 @@ type RuntimeBootstrapEnvelope = {
   run_id: string;
   runtime_context_id: string;
   profile: string;
+  target_tab_id?: number;
+  target_domain?: string;
   target_page?: string;
+  target_resource_id?: string;
   fingerprint_runtime: ReturnType<typeof buildFingerprintContextForMeta>;
   fingerprint_patch_manifest: Record<string, unknown>;
   main_world_secret: string;
@@ -350,13 +366,25 @@ const buildExtensionBootstrapInput = (
   runId: string,
   sessionId: string,
   fingerprintRuntime: ReturnType<typeof buildFingerprintContextForMeta>,
-  targetPage?: string | null
+  targetTabId?: number | null,
+  targetDomain?: string | null,
+  targetPage?: string | null,
+  targetResourceId?: string | null
 ): ExtensionBootstrapInput => ({
   run_id: runId,
   runtime_context_id: buildRuntimeBootstrapContextId(profile, runId),
   session_id: sessionId,
   fingerprint_runtime: fingerprintRuntime,
-  ...(typeof targetPage === "string" && targetPage.length > 0 ? { target_page: targetPage } : {})
+  ...(typeof targetTabId === "number" && Number.isInteger(targetTabId)
+    ? { target_tab_id: targetTabId }
+    : {}),
+  ...(typeof targetDomain === "string" && targetDomain.length > 0
+    ? { target_domain: targetDomain }
+    : {}),
+  ...(typeof targetPage === "string" && targetPage.length > 0 ? { target_page: targetPage } : {}),
+  ...(typeof targetResourceId === "string" && targetResourceId.length > 0
+    ? { target_resource_id: targetResourceId }
+    : {})
 });
 
 const buildRuntimeBootstrapEnvelope = (input: {
@@ -365,14 +393,26 @@ const buildRuntimeBootstrapEnvelope = (input: {
   runtimeContextId: string;
   fingerprintRuntime: ReturnType<typeof buildFingerprintContextForMeta>;
   mainWorldSecret: string;
+  targetTabId?: number | null;
+  targetDomain?: string | null;
   targetPage?: string | null;
+  targetResourceId?: string | null;
 }): RuntimeBootstrapEnvelope => ({
   version: "v1",
   run_id: input.runId,
   runtime_context_id: input.runtimeContextId,
   profile: input.profile,
+  ...(typeof input.targetTabId === "number" && Number.isInteger(input.targetTabId)
+    ? { target_tab_id: input.targetTabId }
+    : {}),
+  ...(typeof input.targetDomain === "string" && input.targetDomain.length > 0
+    ? { target_domain: input.targetDomain }
+    : {}),
   ...(typeof input.targetPage === "string" && input.targetPage.length > 0
     ? { target_page: input.targetPage }
+    : {}),
+  ...(typeof input.targetResourceId === "string" && input.targetResourceId.length > 0
+    ? { target_resource_id: input.targetResourceId }
     : {}),
   fingerprint_runtime: input.fingerprintRuntime,
   fingerprint_patch_manifest: input.fingerprintRuntime.fingerprint_patch_manifest
@@ -612,7 +652,10 @@ export class ProfileRuntimeService {
         input.runId,
         readSessionId(input.params),
         fingerprintRuntime,
-        typeof input.params.target_page === "string" ? input.params.target_page : null
+        readOptionalIntegerParam(input.params, "target_tab_id"),
+        readOptionalNonEmptyStringParam(input.params, "target_domain"),
+        readOptionalNonEmptyStringParam(input.params, "target_page"),
+        readOptionalNonEmptyStringParam(input.params, "target_resource_id")
       );
       session = beginStartSession(session, {
         runId: input.runId,
@@ -813,7 +856,10 @@ export class ProfileRuntimeService {
         input.runId,
         readSessionId(input.params),
         fingerprintRuntime,
-        typeof input.params.target_page === "string" ? input.params.target_page : null
+        readOptionalIntegerParam(input.params, "target_tab_id"),
+        readOptionalNonEmptyStringParam(input.params, "target_domain"),
+        readOptionalNonEmptyStringParam(input.params, "target_page"),
+        readOptionalNonEmptyStringParam(input.params, "target_resource_id")
       );
       session = beginLoginSession(session, {
         runId: input.runId,
@@ -1853,10 +1899,13 @@ export class ProfileRuntimeService {
       runtimeContextId: buildRuntimeBootstrapContextId(input.profile, input.runtimeInput.runId),
       fingerprintRuntime: input.fingerprintRuntime,
       mainWorldSecret: randomUUID(),
-      targetPage:
-        typeof input.runtimeInput.params.target_page === "string"
-          ? input.runtimeInput.params.target_page
-          : null
+      targetTabId: readOptionalIntegerParam(input.runtimeInput.params, "target_tab_id"),
+      targetDomain: readOptionalNonEmptyStringParam(input.runtimeInput.params, "target_domain"),
+      targetPage: readOptionalNonEmptyStringParam(input.runtimeInput.params, "target_page"),
+      targetResourceId: readOptionalNonEmptyStringParam(
+        input.runtimeInput.params,
+        "target_resource_id"
+      )
     });
 
     try {

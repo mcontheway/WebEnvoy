@@ -209,7 +209,8 @@ export const ensureOfficialChromeRuntimeReady = async (
   bridge: NativeMessagingBridge,
   fingerprintContext: ReturnType<typeof buildFingerprintContextForMeta>,
   gate: ReturnType<typeof normalizeGateOptionsForContract>,
-  readStatus?: () => Promise<JsonObject>
+  readStatus?: () => Promise<JsonObject>,
+  bootstrapTargetResourceId?: string | null
 ): Promise<void> => {
   await prepareOfficialChromeRuntime({
     context,
@@ -220,8 +221,20 @@ export const ensureOfficialChromeRuntimeReady = async (
     bootstrapTargetTabId: gate.targetTabId,
     bootstrapTargetDomain: gate.targetDomain,
     bootstrapTargetPage: gate.targetPage,
+    bootstrapTargetResourceId,
     readStatus
   });
+};
+
+const resolveReadBootstrapTargetResourceId = (
+  fixtureDataRefKey: "query" | "note_id" | "user_id",
+  parsedInput: JsonObject
+): string | null => {
+  if (fixtureDataRefKey !== "note_id" && fixtureDataRefKey !== "user_id") {
+    return null;
+  }
+  const value = parsedInput[fixtureDataRefKey];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 };
 
 const xhsSearch = async (context: RuntimeContext): Promise<CommandExecutionResult> => {
@@ -304,6 +317,10 @@ const xhsReadCommand = async (
   const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
     requestedExecutionMode: gate.requestedExecutionMode
   });
+  const bootstrapTargetResourceId = resolveReadBootstrapTargetResourceId(
+    inputConfig.fixtureDataRefKey,
+    parsedInput
+  );
   try {
     const preparedIssue209LiveRead = prepareIssue209LiveReadEnvelopeForContract({
       options: gate.options,
@@ -316,7 +333,9 @@ const xhsReadCommand = async (
       gate.requestedExecutionMode,
       bridge,
       fingerprintContext,
-      gate
+      gate,
+      undefined,
+      bootstrapTargetResourceId
     );
     const bridgeSessionId = await bridge.ensureSession({
       profile: context.profile

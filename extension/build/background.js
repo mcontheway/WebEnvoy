@@ -127,6 +127,13 @@ const resolveRequestedXhsResourceId = (command, commandParams) => {
     }
     return null;
 };
+const resolveRuntimeBootstrapRequestedXhsResourceId = (commandParams, preferredPage) => {
+    if (preferredPage !== "explore_detail_tab" && preferredPage !== "profile_tab") {
+        return null;
+    }
+    const options = asRecord(commandParams.options);
+    return asNonEmptyString(commandParams.target_resource_id ?? options?.target_resource_id);
+};
 const isAllowedTargetPageForXhsReadCommand = (command, targetPage) => {
     if (!targetPage) {
         return true;
@@ -208,7 +215,7 @@ const scoreXhsRuntimeSurfaceTab = (tab) => {
     }
     return 3;
 };
-const resolveRuntimeBootstrapReadTargetTabId = async (chromeApi, preferredPage) => {
+const resolveRuntimeBootstrapReadTargetTabId = async (chromeApi, preferredPage, requestedResourceId) => {
     const xhsUrlPatterns = [
         "*://www.xiaohongshu.com/*",
         "*://edith.xiaohongshu.com/*",
@@ -234,6 +241,15 @@ const resolveRuntimeBootstrapReadTargetTabId = async (chromeApi, preferredPage) 
         catch {
             xhsTabs = [];
         }
+    }
+    const resourceBoundTabs = requestedResourceId && preferredPage
+        ? xhsTabs.filter((tab) => tabMatchesRequestedXhsResource(tab, preferredPage, requestedResourceId))
+        : [];
+    if (resourceBoundTabs.length === 1) {
+        return typeof resourceBoundTabs[0]?.id === "number" ? resourceBoundTabs[0].id : null;
+    }
+    if (requestedResourceId && preferredPage) {
+        return null;
     }
     const ranked = xhsTabs
         .filter((tab) => typeof tab.id === "number")
@@ -4007,12 +4023,18 @@ class ChromeBackgroundBridge {
         if (command === "runtime.ping" || command === "runtime.bootstrap") {
             const runtimeBootstrapTargetPage = asNonEmptyString(commandParams.target_page);
             const preferredRuntimeBootstrapReadPage = resolvePreferredXhsReadPage(command, runtimeBootstrapTargetPage);
+            const runtimeBootstrapRequestedResourceId = command === "runtime.bootstrap"
+                ? resolveRuntimeBootstrapRequestedXhsResourceId(commandParams, preferredRuntimeBootstrapReadPage)
+                : null;
             if (command === "runtime.bootstrap" &&
                 isXhsReadTargetPage(runtimeBootstrapTargetPage) &&
                 preferredRuntimeBootstrapReadPage) {
-                const runtimeBootstrapReadTabId = await resolveRuntimeBootstrapReadTargetTabId(this.chromeApi, preferredRuntimeBootstrapReadPage);
+                const runtimeBootstrapReadTabId = await resolveRuntimeBootstrapReadTargetTabId(this.chromeApi, preferredRuntimeBootstrapReadPage, runtimeBootstrapRequestedResourceId);
                 if (runtimeBootstrapReadTabId !== null) {
                     return runtimeBootstrapReadTabId;
+                }
+                if (runtimeBootstrapRequestedResourceId) {
+                    return null;
                 }
             }
             let runtimeSurfaceTabs = [];

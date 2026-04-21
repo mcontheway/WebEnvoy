@@ -4443,7 +4443,7 @@ describe("profile-runtime fingerprint runtime contract", () => {
     ).toEqual(loginStart.fingerprint_runtime);
   });
 
-  it("includes target_page in extensionBootstrap when runtime entry params provide canonical target_page", async () => {
+  it("includes read target binding in extensionBootstrap when runtime entry params provide it", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-target-page-"));
     tempDirs.push(baseDir);
     const launchInputs: BrowserLaunchInput[] = [];
@@ -4469,14 +4469,96 @@ describe("profile-runtime fingerprint runtime contract", () => {
       profile: "fingerprint_bootstrap_target_page_profile",
       runId: "run-runtime-test-fingerprint-bootstrap-target-page-001",
       params: {
-        target_page: "search_result_tab"
+        target_tab_id: 32,
+        target_domain: "www.xiaohongshu.com",
+        target_page: "explore_detail_tab",
+        target_resource_id: "note-target-001"
       }
     });
 
     const startLaunch = launchInputs[0];
     expect(startLaunch.extensionBootstrap).toMatchObject({
-      target_page: "search_result_tab"
+      target_tab_id: 32,
+      target_domain: "www.xiaohongshu.com",
+      target_page: "explore_detail_tab",
+      target_resource_id: "note-target-001"
     });
+  });
+
+  it("forwards read target binding into hidden runtime.bootstrap when runtime.start triggers bootstrap delivery", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-bootstrap-target-binding-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "identity_bound_target_binding_profile"
+    });
+    const bridgeRunCommand = vi.fn(async ({ command, params, profile, runId }) => {
+      if (command === "runtime.bootstrap") {
+        return {
+          ok: true as const,
+          payload: {
+            result: {
+              version: "v1",
+              run_id: runId,
+              runtime_context_id: String(params.runtime_context_id),
+              profile,
+              status: "ready"
+            }
+          },
+          relay_path: "host>background"
+        };
+      }
+      if (command === "runtime.readiness") {
+        return {
+          ok: true as const,
+          payload: {
+            bootstrap_state: "ready",
+            transport_state: "ready"
+          },
+          relay_path: "host>background"
+        };
+      }
+      throw new Error(`unexpected bridge command: ${command}`);
+    });
+    const service = createTestService({
+      browserLauncher: createMockBrowserLauncher(),
+      bridgeFactory: () => ({
+        runCommand: bridgeRunCommand
+      })
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "identity_bound_target_binding_profile",
+      runId: "run-runtime-bootstrap-target-binding-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        },
+        target_tab_id: 64,
+        target_domain: "www.xiaohongshu.com",
+        target_page: "profile_tab",
+        target_resource_id: "user-target-001"
+      }
+    });
+
+    expect(bridgeRunCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "runtime.bootstrap",
+        profile: "identity_bound_target_binding_profile",
+        params: expect.objectContaining({
+          target_tab_id: 64,
+          target_domain: "www.xiaohongshu.com",
+          target_page: "profile_tab",
+          target_resource_id: "user-target-001"
+        })
+      })
+    );
   });
 
   it("does not create persistent bootstrap injection files before launch", async () => {
