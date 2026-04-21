@@ -372,6 +372,7 @@ const xhsReadCommand = async (
         target_domain: gate.targetDomain,
         target_tab_id: gate.targetTabId,
         target_page: gate.targetPage,
+        ...(bootstrapTargetResourceId ? { target_resource_id: bootstrapTargetResourceId } : {}),
         requested_execution_mode: gate.requestedExecutionMode,
         ability: envelope.ability,
         input: parsedInput,

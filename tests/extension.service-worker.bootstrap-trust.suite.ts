@@ -579,10 +579,6 @@ describe("extension service worker / bootstrap and trust", () => {
   it("prepares the request-context capture surface before runtime.bootstrap on xhs read tabs", async () => {
     const firstPort = createMockPort();
     const { chromeApi, executeScript } = createChromeApi([firstPort]);
-    chromeApi.tabs.sendMessage = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("Could not establish connection. Receiving end does not exist."))
-      .mockResolvedValueOnce(undefined);
     const fingerprintContext = createFingerprintRuntimeContext();
 
     startChromeBackgroundBridge(chromeApi);
@@ -618,17 +614,6 @@ describe("extension service worker / bootstrap and trust", () => {
 
     await waitForBridgeTurn();
 
-    expect(chromeApi.tabs.sendMessage).toHaveBeenNthCalledWith(
-      1,
-      11,
-      expect.objectContaining({
-        id: "__webenvoy_content_script_probe__",
-        command: "runtime.ping",
-        commandParams: {
-          simulate_no_response: true
-        }
-      })
-    );
     expect(executeScript).toHaveBeenCalledWith({
       target: { tabId: 11 },
       world: "MAIN",
@@ -648,10 +633,9 @@ describe("extension service worker / bootstrap and trust", () => {
     );
   });
 
-  it("skips classic content-script reinjection when a read-tab receiver answers the compatible probe", async () => {
+  it("reinjects the updated content-script on read tabs even when a receiver already exists", async () => {
     const firstPort = createMockPort();
     const { chromeApi, executeScript } = createChromeApi([firstPort]);
-    chromeApi.tabs.sendMessage = vi.fn().mockResolvedValue(undefined);
     const fingerprintContext = createFingerprintRuntimeContext();
 
     startChromeBackgroundBridge(chromeApi);
@@ -687,29 +671,17 @@ describe("extension service worker / bootstrap and trust", () => {
 
     await waitForBridgeTurn();
 
-    expect(chromeApi.tabs.sendMessage).toHaveBeenNthCalledWith(
-      1,
-      11,
-      expect.objectContaining({
-        id: "__webenvoy_content_script_probe__",
-        command: "runtime.ping",
-        commandParams: {
-          simulate_no_response: true
-        }
-      })
-    );
     expect(executeScript).toHaveBeenCalledWith({
       target: { tabId: 11 },
       world: "MAIN",
       files: ["build/main-world-bridge.js"]
     });
-    expect(executeScript).not.toHaveBeenCalledWith({
+    expect(executeScript).toHaveBeenCalledWith({
       target: { tabId: 11 },
       world: "ISOLATED",
       files: ["build/content-script.js"]
     });
-    expect(chromeApi.tabs.sendMessage).toHaveBeenNthCalledWith(
-      2,
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       11,
       expect.objectContaining({
         id: "run-bootstrap-main-world-probe-hit-001",
@@ -2739,6 +2711,116 @@ describe("extension service worker / bootstrap and trust", () => {
       expect.objectContaining({
         id: "run-xhs-options-shape-001",
         command: "xhs.search"
+      })
+    );
+  });
+
+  it("routes real xhs.detail through target_resource_id when target_tab_id is absent", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(
+      async (filter: { currentWindow?: boolean; url?: string | string[] }) => {
+        if (filter.url) {
+          return [
+            { id: 31, url: "https://www.xiaohongshu.com/explore/note-other-001", active: true },
+            { id: 32, url: "https://www.xiaohongshu.com/explore/note-target-001", active: false }
+          ];
+        }
+        return [{ id: 11 }];
+      }
+    );
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-detail-resource-route-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-detail-resource-route-001",
+        command: "xhs.detail",
+        command_params: {
+          ability: { id: "xhs.note.detail.v1", layer: "L3", action: "read" },
+          input: { note_id: "note-target-001" },
+          target_resource_id: "note-target-001",
+          options: {
+            target_domain: "www.xiaohongshu.com",
+            target_page: "explore_detail_tab",
+            action_type: "read",
+            requested_execution_mode: "dry_run"
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "run-xhs-detail-resource-route-001",
+        command: "xhs.detail"
+      })
+    );
+  });
+
+  it("routes real xhs.user_home through target_resource_id when target_tab_id is absent", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(
+      async (filter: { currentWindow?: boolean; url?: string | string[] }) => {
+        if (filter.url) {
+          return [
+            { id: 41, url: "https://www.xiaohongshu.com/user/profile/user-other-001", active: true },
+            { id: 42, url: "https://www.xiaohongshu.com/user/profile/user-target-001", active: false }
+          ];
+        }
+        return [{ id: 11 }];
+      }
+    );
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-user-home-resource-route-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-user-home-resource-route-001",
+        command: "xhs.user_home",
+        command_params: {
+          ability: { id: "xhs.user.home.v1", layer: "L3", action: "read" },
+          input: { user_id: "user-target-001" },
+          target_resource_id: "user-target-001",
+          options: {
+            target_domain: "www.xiaohongshu.com",
+            target_page: "profile_tab",
+            action_type: "read",
+            requested_execution_mode: "dry_run"
+          }
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({
+        id: "run-xhs-user-home-resource-route-001",
+        command: "xhs.user_home"
       })
     );
   });

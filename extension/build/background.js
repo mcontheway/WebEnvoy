@@ -118,6 +118,10 @@ const resolvePreferredXhsReadPage = (command, targetPage) => {
 };
 const isXhsReadTargetPage = (value) => value === "search_result_tab" || value === "explore_detail_tab" || value === "profile_tab";
 const resolveRequestedXhsResourceId = (command, commandParams) => {
+    const explicitTargetResourceId = resolveRuntimeBootstrapRequestedXhsResourceId(commandParams, resolvePreferredXhsReadPage(command, asNonEmptyString(commandParams.target_page)));
+    if (explicitTargetResourceId) {
+        return explicitTargetResourceId;
+    }
     const input = asRecord(commandParams.input);
     if (command === "xhs.detail") {
         return asNonEmptyString(input?.note_id);
@@ -4162,29 +4166,6 @@ class ChromeBackgroundBridge {
             files: ["build/content-script.js"]
         });
     }
-    async #hasContentScriptReceiver(tabId) {
-        try {
-            await this.chromeApi.tabs.sendMessage(tabId, {
-                kind: "forward",
-                id: "__webenvoy_content_script_probe__",
-                runId: "__webenvoy_content_script_probe__",
-                tabId,
-                profile: null,
-                cwd: "",
-                timeoutMs: 50,
-                command: "runtime.ping",
-                params: {},
-                commandParams: {
-                    simulate_no_response: true
-                },
-                fingerprintContext: null
-            });
-            return true;
-        }
-        catch {
-            return false;
-        }
-    }
     async #prepareRuntimeBootstrapRequestContextCapture(request, commandParams) {
         if (!isXhsReadTargetPage(commandParams.target_page)) {
             return;
@@ -4193,11 +4174,8 @@ class ChromeBackgroundBridge {
         if (targetTabId === null) {
             return;
         }
-        const hasContentScriptReceiver = await this.#hasContentScriptReceiver(targetTabId);
         await this.#ensureMainWorldBridgeInjected(request, targetTabId);
-        if (!hasContentScriptReceiver) {
-            await this.#ensureContentScriptInjected(targetTabId);
-        }
+        await this.#ensureContentScriptInjected(targetTabId);
     }
     async #ensureMainWorldBridgeInjected(request, tabId) {
         const existingEnsure = this.#pendingMainWorldBridgeEnsures.get(tabId);
