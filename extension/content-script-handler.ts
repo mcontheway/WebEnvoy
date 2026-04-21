@@ -20,6 +20,7 @@ import {
   installMainWorldEventChannelSecret,
   installFingerprintRuntimeViaMainWorld,
   MAIN_WORLD_EVENT_BOOTSTRAP,
+  readCapturedRequestContextViaMainWorld,
   readPageStateViaMainWorld,
   requestXhsSearchJsonViaMainWorld,
   resetMainWorldEventChannelForContract,
@@ -36,6 +37,7 @@ export {
   installFingerprintRuntimeViaMainWorld,
   installMainWorldEventChannelSecret,
   MAIN_WORLD_EVENT_BOOTSTRAP,
+  readCapturedRequestContextViaMainWorld,
   readPageStateViaMainWorld,
   requestXhsSearchJsonViaMainWorld,
   resetMainWorldEventChannelForContract,
@@ -222,6 +224,7 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
   getCookie: () => document.cookie,
   getPageStateRoot: () => (window as typeof window & { __INITIAL_STATE__?: unknown }).__INITIAL_STATE__,
   readPageStateRoot: async () => await readPageStateViaMainWorld(),
+  readCapturedRequestContext: async (input) => await readCapturedRequestContextViaMainWorld(input),
   callSignature: async (
     uri: Parameters<XhsSearchEnvironment["callSignature"]>[0],
     payload: Parameters<XhsSearchEnvironment["callSignature"]>[1]
@@ -558,6 +561,13 @@ export class ContentScriptHandler {
   }
 
   async #handleXhsReadCommand(message: BackgroundToContentMessage): Promise<void> {
+    const commandParams = asRecord(message.commandParams) ?? {};
+    if (message.command === "xhs.search") {
+      const mainWorldSecret = asString(commandParams.main_world_secret);
+      if (mainWorldSecret) {
+        installMainWorldEventChannelSecret(mainWorldSecret);
+      }
+    }
     const messageFingerprintContext = resolveFingerprintContextFromMessage(message);
     const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
     const requestedExecutionMode = resolveRequestedExecutionMode(message);
@@ -595,9 +605,9 @@ export class ContentScriptHandler {
       });
       return;
     }
-    const ability = asRecord(message.commandParams.ability);
-    const input = asRecord(message.commandParams.input);
-    const options = asRecord(message.commandParams.options) ?? {};
+    const ability = asRecord(commandParams.ability);
+    const input = asRecord(commandParams.input);
+    const options = asRecord(commandParams.options) ?? {};
     const locationHref = this.#xhsEnv.getLocationHref();
     const actualTargetDomain = resolveTargetDomainFromHref(locationHref);
     const actualTargetPage = resolveTargetPageFromHref(locationHref, message.command);
@@ -713,9 +723,8 @@ export class ContentScriptHandler {
           sessionId: String(message.params.session_id ?? "nm-session-001"),
           profile: message.profile ?? "unknown",
           requestId: message.id,
-          commandRequestId: asString(asRecord(message.commandParams)?.request_id) ?? undefined,
-          gateInvocationId:
-            asString(asRecord(message.commandParams)?.gate_invocation_id) ?? undefined
+          commandRequestId: asString(commandParams.request_id) ?? undefined,
+          gateInvocationId: asString(commandParams.gate_invocation_id) ?? undefined
         }
       };
       let result: SearchExecutionResult;

@@ -4141,7 +4141,103 @@ return { XHS_ALLOWED_DOMAINS, XHS_READ_DOMAIN, XHS_WRITE_DOMAIN, buildIssue209Po
 })();
 const __webenvoy_module_xhs_search_types = (() => {
 const SEARCH_ENDPOINT = "/api/sns/web/v1/search/notes";
-return { SEARCH_ENDPOINT };
+const WEBENVOY_SYNTHETIC_REQUEST_HEADER = "x-webenvoy-synthetic-request";
+const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
+const MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT_PREFIX = "__mw_ns__";
+const hashMainWorldEventChannel = (value) => {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(36);
+};
+const asInteger = (value) => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return Math.trunc(value);
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+    }
+    return null;
+};
+const toTrimmedString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const normalizeSearchRequestShapeInput = (input) => {
+    const keyword = toTrimmedString(input.keyword);
+    const page = input.page === undefined ? 1 : asInteger(input.page);
+    const pageSize = input.page_size === undefined ? 20 : asInteger(input.page_size);
+    const sort = input.sort === undefined ? "general" : toTrimmedString(input.sort);
+    const noteType = input.note_type === undefined ? 0 : asInteger(input.note_type);
+    if (!keyword || page === null || pageSize === null || sort === null || noteType === null) {
+        return null;
+    }
+    return {
+        keyword,
+        page,
+        page_size: pageSize,
+        sort,
+        note_type: noteType
+    };
+};
+const createSearchRequestShape = (input) => {
+    const normalized = normalizeSearchRequestShapeInput(input);
+    if (!normalized) {
+        return null;
+    }
+    return {
+        command: "xhs.search",
+        method: "POST",
+        pathname: SEARCH_ENDPOINT,
+        ...normalized
+    };
+};
+const serializeSearchRequestShape = (shape) => JSON.stringify(shape);
+const resolveMainWorldPageContextNamespaceEventName = (secret) => `${MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT_PREFIX}${hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|namespace|${secret.trim()}`)}`;
+const createPageContextNamespace = (href) => {
+    const normalized = href.trim();
+    if (normalized.length === 0) {
+        return "about:blank";
+    }
+    try {
+        const parsed = new URL(normalized, "https://www.xiaohongshu.com/");
+        const pathname = parsed.pathname.length > 0 ? parsed.pathname : "/";
+        const queryIdentity = parsed.search.length > 0 ? `${pathname}${parsed.search}` : pathname;
+        const documentTimeOrigin = typeof globalThis.performance?.timeOrigin === "number" &&
+            Number.isFinite(globalThis.performance.timeOrigin)
+            ? Math.trunc(globalThis.performance.timeOrigin)
+            : null;
+        return documentTimeOrigin === null
+            ? `${parsed.origin}${queryIdentity}`
+            : `${parsed.origin}${queryIdentity}#doc=${documentTimeOrigin}`;
+    }
+    catch {
+        return normalized;
+    }
+};
+const createVisitedPageContextNamespace = (href, visitSequence) => {
+    const baseNamespace = createPageContextNamespace(href);
+    return visitSequence > 0 ? `${baseNamespace}|visit=${visitSequence}` : baseNamespace;
+};
+const stripVisitedPageContextNamespace = (namespace) => {
+    const visitSuffixIndex = namespace.indexOf("|visit=");
+    return visitSuffixIndex >= 0 ? namespace.slice(0, visitSuffixIndex) : namespace;
+};
+const resolveActiveVisitedPageContextNamespace = (requestedNamespace, currentVisitedNamespace) => {
+    const normalizedRequested = typeof requestedNamespace === "string" && requestedNamespace.length > 0
+        ? requestedNamespace
+        : null;
+    const normalizedCurrentVisited = typeof currentVisitedNamespace === "string" && currentVisitedNamespace.length > 0
+        ? currentVisitedNamespace
+        : null;
+    if (normalizedRequested &&
+        normalizedCurrentVisited &&
+        normalizedRequested === stripVisitedPageContextNamespace(normalizedCurrentVisited)) {
+        return normalizedCurrentVisited;
+    }
+    return normalizedRequested ?? normalizedCurrentVisited;
+};
+return { SEARCH_ENDPOINT, createPageContextNamespace, createSearchRequestShape, createVisitedPageContextNamespace, resolveActiveVisitedPageContextNamespace, resolveMainWorldPageContextNamespaceEventName, serializeSearchRequestShape };
 })();
 const __webenvoy_module_xhs_search_telemetry = (() => {
 const { SEARCH_ENDPOINT } = __webenvoy_module_xhs_search_types;
@@ -4160,6 +4256,20 @@ const SEARCH_FAILURE_SEMANTICS = {
         stage: "action",
         component: "page",
         target: "window._webmsxyw",
+        includeKeyRequest: false
+    },
+    REQUEST_CONTEXT_MISSING: {
+        category: "page_changed",
+        stage: "action",
+        component: "page",
+        target: "captured_request_context",
+        includeKeyRequest: false
+    },
+    REQUEST_CONTEXT_INCOMPATIBLE: {
+        category: "page_changed",
+        stage: "action",
+        component: "page",
+        target: "captured_request_context",
         includeKeyRequest: false
     },
     SESSION_EXPIRED: {
@@ -4746,7 +4856,12 @@ const createGateOnlySuccess = (input, gate, auditRecord, env) => ({
 return { createAuditRecord, createGateOnlySuccess, resolveGate };
 })();
 const __webenvoy_module_xhs_search_execution = (() => {
-const { SEARCH_ENDPOINT } = __webenvoy_module_xhs_search_types;
+const {
+  SEARCH_ENDPOINT,
+  createPageContextNamespace,
+  createSearchRequestShape,
+  serializeSearchRequestShape
+} = __webenvoy_module_xhs_search_types;
 const {
   createAuditRecord,
   createGateOnlySuccess,
@@ -4769,6 +4884,16 @@ const {
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
+const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60 * 1000;
+const serializeRequestBody = (value) => {
+    if (value === undefined || value === null) {
+        return undefined;
+    }
+    if (typeof value === "string") {
+        return value;
+    }
+    return JSON.stringify(value);
+};
 const withExecutionAuditInFailurePayload = (result, executionAudit) => {
     if (result.ok) {
         return result;
@@ -4779,6 +4904,94 @@ const withExecutionAuditInFailurePayload = (result, executionAudit) => {
             ...result.payload,
             execution_audit: executionAudit
         }
+    };
+};
+const resolveRequestContextState = async (input, env) => {
+    const shape = createSearchRequestShape({
+        keyword: input.params.query,
+        page: input.params.page ?? 1,
+        page_size: input.params.limit ?? 20,
+        sort: input.params.sort ?? "general",
+        note_type: input.params.note_type ?? 0
+    });
+    const fallbackNamespace = createPageContextNamespace(env.getLocationHref());
+    if (!shape || !env.readCapturedRequestContext) {
+        return {
+            status: "miss",
+            failureReason: "template_missing",
+            pageContextNamespace: fallbackNamespace,
+            shapeKey: shape ? serializeSearchRequestShape(shape) : "",
+            availableShapeKeys: []
+        };
+    }
+    const shapeKey = serializeSearchRequestShape(shape);
+    const lookup = await env.readCapturedRequestContext({
+        method: "POST",
+        path: SEARCH_ENDPOINT,
+        page_context_namespace: fallbackNamespace,
+        shape_key: shapeKey
+    });
+    const pageContextNamespace = lookup?.page_context_namespace ?? fallbackNamespace;
+    const availableShapeKeys = lookup?.available_shape_keys ?? [];
+    const admittedTemplate = lookup?.admitted_template ?? null;
+    const rejectedObservation = lookup?.rejected_observation ?? null;
+    const incompatibleObservation = lookup?.incompatible_observation ?? null;
+    if (admittedTemplate && admittedTemplate.template_ready !== false) {
+        const observedAt = admittedTemplate.observed_at ?? admittedTemplate.captured_at;
+        if (env.now() - observedAt > REQUEST_CONTEXT_FRESHNESS_WINDOW_MS) {
+            return {
+                status: "miss",
+                failureReason: "template_stale",
+                pageContextNamespace,
+                shapeKey,
+                availableShapeKeys,
+                observedAt
+            };
+        }
+        return {
+            status: "hit",
+            template: {
+                request: {
+                    headers: admittedTemplate.request.headers,
+                    body: admittedTemplate.request.body
+                },
+                referrer: typeof admittedTemplate.referrer === "string" ? admittedTemplate.referrer : null,
+                capturedAt: admittedTemplate.captured_at,
+                pageContextNamespace
+            },
+            pageContextNamespace,
+            shapeKey
+        };
+    }
+    if (rejectedObservation) {
+        return {
+            status: "miss",
+            failureReason: "rejected_source",
+            detailReason: rejectedObservation.rejection_reason === "failed_request_rejected"
+                ? "failed_request_rejected"
+                : "synthetic_request_rejected",
+            pageContextNamespace,
+            shapeKey,
+            availableShapeKeys,
+            observedAt: rejectedObservation.observed_at ?? rejectedObservation.captured_at
+        };
+    }
+    if (incompatibleObservation || availableShapeKeys.length > 0) {
+        return {
+            status: "miss",
+            failureReason: "shape_mismatch",
+            pageContextNamespace,
+            shapeKey,
+            availableShapeKeys,
+            observedAt: incompatibleObservation?.observed_at ?? incompatibleObservation?.captured_at ?? undefined
+        };
+    }
+    return {
+        status: "miss",
+        failureReason: "template_missing",
+        pageContextNamespace,
+        shapeKey,
+        availableShapeKeys
     };
 };
 const executeXhsSearch = async (input, env) => {
@@ -5022,53 +5235,95 @@ const executeXhsSearch = async (input, env) => {
         sort: input.params.sort ?? "general",
         note_type: input.params.note_type ?? 0
     };
-    let signature;
-    try {
-        signature = await env.callSignature(SEARCH_ENDPOINT, payload);
-    }
-    catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "页面签名入口不可用", {
+    const requestContextState = await resolveRequestContextState({
+        params: input.params,
+        options: input.options
+    }, env);
+    if (requestContextState.status !== "hit") {
+        const reason = requestContextState.failureReason === "shape_mismatch" ||
+            requestContextState.failureReason === "rejected_source"
+            ? "REQUEST_CONTEXT_INCOMPATIBLE"
+            : "REQUEST_CONTEXT_MISSING";
+        const summaryMap = {
+            template_missing: "当前页面现场缺少可复用的搜索请求模板",
+            template_stale: "当前页面现场的搜索请求模板已过期",
+            shape_mismatch: "当前页面现场存在不同 shape 的搜索请求模板",
+            rejected_source: "当前页面现场的搜索请求来源已被拒绝"
+        };
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", summaryMap[requestContextState.failureReason], {
             ability_id: input.abilityId,
             stage: "execution",
-            reason: "SIGNATURE_ENTRY_MISSING"
+            reason,
+            request_context_reason: requestContextState.failureReason,
+            page_context_namespace: requestContextState.pageContextNamespace,
+            shape_key: requestContextState.shapeKey,
+            available_shape_keys: requestContextState.availableShapeKeys,
+            ...(requestContextState.detailReason
+                ? { rejected_source_reason: requestContextState.detailReason }
+                : {}),
+            ...(typeof requestContextState.observedAt === "number"
+                ? { request_context_observed_at: requestContextState.observedAt }
+                : {})
         }, createObservability({
             href: env.getLocationHref(),
             title: env.getDocumentTitle(),
             readyState: env.getReadyState(),
             requestId: `req-${env.randomId()}`,
             outcome: "failed",
-            failureReason: message,
+            failureReason: reason,
             includeKeyRequest: false,
             failureSite: {
                 stage: "action",
                 component: "page",
-                target: "window._webmsxyw",
-                summary: "页面签名入口不可用"
+                target: "captured_request_context",
+                summary: summaryMap[requestContextState.failureReason]
             }
         }), createDiagnosis({
-            reason: "SIGNATURE_ENTRY_MISSING",
-            summary: "页面签名入口不可用"
+            reason,
+            summary: summaryMap[requestContextState.failureReason]
         }), gate, auditRecord), gate.execution_audit);
     }
     const headers = {
-        Accept: "application/json, text/plain, */*",
-        "Content-Type": "application/json;charset=utf-8",
-        "X-s": String(signature["X-s"]),
-        "X-t": String(signature["X-t"]),
-        "X-S-Common": resolveXsCommon(input.options.x_s_common),
-        "x-b3-traceid": env.randomId().replace(/-/g, ""),
-        "x-xray-traceid": env.randomId().replace(/-/g, "")
+        ...requestContextState.template.request.headers
     };
+    const requestBody = serializeRequestBody(requestContextState.template.request.body);
+    if (typeof requestBody !== "string") {
+        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "当前页面现场缺少可复用的搜索请求模板", {
+            ability_id: input.abilityId,
+            stage: "execution",
+            reason: "REQUEST_CONTEXT_MISSING",
+            request_context_reason: "template_missing",
+            page_context_namespace: requestContextState.pageContextNamespace,
+            shape_key: requestContextState.shapeKey,
+            available_shape_keys: []
+        }, createObservability({
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: "REQUEST_CONTEXT_MISSING",
+            includeKeyRequest: false,
+            failureSite: {
+                stage: "action",
+                component: "page",
+                target: "captured_request_context",
+                summary: "当前页面现场缺少可复用的搜索请求模板"
+            }
+        }), createDiagnosis({
+            reason: "REQUEST_CONTEXT_MISSING",
+            summary: "当前页面现场缺少可复用的搜索请求模板"
+        }), gate, auditRecord), gate.execution_audit);
+    }
     let response;
     try {
         response = await env.fetchJson({
             url: SEARCH_ENDPOINT,
             method: "POST",
             headers,
-            body: JSON.stringify(payload),
+            body: requestBody,
             pageContextRequest: true,
-            referrer: env.getLocationHref(),
+            referrer: requestContextState.template.referrer ?? env.getLocationHref(),
             referrerPolicy: "strict-origin-when-cross-origin",
             timeoutMs: typeof input.options.timeout_ms === "number" && Number.isFinite(input.options.timeout_ms)
                 ? Math.max(1, Math.floor(input.options.timeout_ms))
@@ -5115,6 +5370,7 @@ const executeXhsSearch = async (input, env) => {
         }), gate, auditRecord), gate.execution_audit);
     }
     const count = parseCount(response.body);
+    const requestBodyRecord = asRecord(requestContextState.template.request.body);
     return {
         ok: true,
         payload: {
@@ -5126,7 +5382,9 @@ const executeXhsSearch = async (input, env) => {
                     outcome: "success",
                     data_ref: {
                         query: input.params.query,
-                        search_id: payload.search_id
+                        search_id: typeof requestBodyRecord?.search_id === "string"
+                            ? requestBodyRecord.search_id
+                            : payload.search_id
                     },
                     metrics: {
                         count,
@@ -5148,7 +5406,13 @@ const executeXhsSearch = async (input, env) => {
                 execution_audit: gate.execution_audit,
                 approval_record: gate.approval_record,
                 risk_state_output: resolveRiskStateOutput(gate, auditRecord),
-                audit_record: auditRecord
+                audit_record: auditRecord,
+                request_context: {
+                    status: "exact_hit",
+                    page_context_namespace: requestContextState.pageContextNamespace,
+                    shape_key: requestContextState.shapeKey,
+                    captured_at: requestContextState.template.capturedAt
+                }
             },
             observability: createObservability({
                 href: env.getLocationHref(),
@@ -6525,6 +6789,10 @@ const validateXhsCommandInputForExtension = (input) => {
 return { ExtensionContractError, validateXhsCommandInputForExtension };
 })();
 const __webenvoy_module_content_script_main_world = (() => {
+const {
+  resolveActiveVisitedPageContextNamespace,
+  resolveMainWorldPageContextNamespaceEventName
+} = __webenvoy_module_xhs_search_types;
 const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
@@ -6533,6 +6801,9 @@ const DEFAULT_MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
 let mainWorldEventChannel = null;
 let mainWorldResultListener = null;
 let mainWorldResultListenerEventName = null;
+let latestMainWorldPageContextNamespace = null;
+let mainWorldPageContextNamespaceListener = null;
+let mainWorldPageContextNamespaceListenerEventName = null;
 const pendingMainWorldRequests = new Map();
 const encodeUtf8Base64 = (value) => {
     if (typeof btoa === "function") {
@@ -6558,7 +6829,8 @@ const createMainWorldBootstrapDetail = (secret) => {
     const names = resolveMainWorldEventNamesForSecret(secret);
     return {
         request_event: names.requestEvent,
-        result_event: names.resultEvent
+        result_event: names.resultEvent,
+        namespace_event: names.namespaceEvent
     };
 };
 const emitMainWorldBootstrap = (secret) => {
@@ -6571,7 +6843,8 @@ const resolveMainWorldEventNamesForSecret = (secret) => {
     const hashed = hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|${secret}`);
     return {
         requestEvent: `${MAIN_WORLD_EVENT_REQUEST_PREFIX}${hashed}`,
-        resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${hashed}`
+        resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${hashed}`,
+        namespaceEvent: resolveMainWorldPageContextNamespaceEventName(secret)
     };
 };
 const createWindowEvent = (type, detail) => {
@@ -6580,6 +6853,35 @@ const createWindowEvent = (type, detail) => {
         return new CustomEventCtor(type, { detail });
     }
     return { type, detail };
+};
+const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value
+    : null;
+const installMainWorldPageContextNamespaceListener = (eventName) => {
+    if (typeof window === "undefined" || typeof window.addEventListener !== "function") {
+        return;
+    }
+    if (mainWorldPageContextNamespaceListener &&
+        mainWorldPageContextNamespaceListenerEventName === eventName) {
+        return;
+    }
+    if (mainWorldPageContextNamespaceListener && mainWorldPageContextNamespaceListenerEventName) {
+        try {
+            window.removeEventListener(mainWorldPageContextNamespaceListenerEventName, mainWorldPageContextNamespaceListener);
+        }
+        catch {
+            // noop in contract environments
+        }
+    }
+    mainWorldPageContextNamespaceListener = ((event) => {
+        const detail = asRecord(event.detail);
+        const namespace = detail?.page_context_namespace;
+        if (typeof namespace === "string" && namespace.length > 0) {
+            latestMainWorldPageContextNamespace = namespace;
+        }
+    });
+    mainWorldPageContextNamespaceListenerEventName = eventName;
+    window.addEventListener(eventName, mainWorldPageContextNamespaceListener);
 };
 const onMainWorldResultEvent = (event) => {
     const detail = (event.detail ?? null);
@@ -6634,6 +6936,7 @@ const installMainWorldEventChannelSecret = (secret) => {
         return false;
     }
     const names = resolveMainWorldEventNamesForSecret(normalizedSecret);
+    installMainWorldPageContextNamespaceListener(names.namespaceEvent);
     if (mainWorldEventChannel?.secret === normalizedSecret &&
         mainWorldResultListenerEventName === names.resultEvent) {
         return true;
@@ -6643,7 +6946,8 @@ const installMainWorldEventChannelSecret = (secret) => {
     mainWorldEventChannel = {
         secret: normalizedSecret,
         requestEvent: names.requestEvent,
-        resultEvent: names.resultEvent
+        resultEvent: names.resultEvent,
+        namespaceEvent: names.namespaceEvent
     };
     mainWorldResultListener = onMainWorldResultEvent;
     mainWorldResultListenerEventName = names.resultEvent;
@@ -6656,6 +6960,20 @@ const resetMainWorldEventChannelForContract = () => {
         pending.reject(new Error("main world request reset"));
     }
     pendingMainWorldRequests.clear();
+    latestMainWorldPageContextNamespace = null;
+    if (mainWorldPageContextNamespaceListener &&
+        mainWorldPageContextNamespaceListenerEventName &&
+        typeof window !== "undefined" &&
+        typeof window.removeEventListener === "function") {
+        try {
+            window.removeEventListener(mainWorldPageContextNamespaceListenerEventName, mainWorldPageContextNamespaceListener);
+        }
+        catch {
+            // noop in contract environments
+        }
+    }
+    mainWorldPageContextNamespaceListener = null;
+    mainWorldPageContextNamespaceListenerEventName = null;
     detachMainWorldResultListener();
     mainWorldEventChannel = null;
 };
@@ -6714,6 +7032,45 @@ const readPageStateViaMainWorld = async () => {
         ? result
         : null;
 };
+const asCapturedRequestContextLookupResult = (value) => {
+    const record = asRecord(value);
+    if (!record ||
+        typeof record.page_context_namespace !== "string" ||
+        typeof record.shape_key !== "string" ||
+        !Array.isArray(record.available_shape_keys)) {
+        return null;
+    }
+    return {
+        page_context_namespace: record.page_context_namespace,
+        shape_key: record.shape_key,
+        admitted_template: asRecord(record.admitted_template),
+        rejected_observation: asRecord(record.rejected_observation),
+        incompatible_observation: asRecord(record.incompatible_observation),
+        available_shape_keys: record.available_shape_keys.filter((item) => typeof item === "string")
+    };
+};
+const readCapturedRequestContextViaMainWorld = async (input) => {
+    if (mainWorldEventChannel?.namespaceEvent) {
+        installMainWorldPageContextNamespaceListener(mainWorldEventChannel.namespaceEvent);
+    }
+    const pageContextNamespace = resolveActiveVisitedPageContextNamespace(input.page_context_namespace, latestMainWorldPageContextNamespace);
+    const result = await mainWorldCall({
+        type: "captured-request-context-read",
+        payload: {
+            method: input.method,
+            path: input.path,
+            ...(pageContextNamespace ? { page_context_namespace: pageContextNamespace } : {}),
+            shape_key: input.shape_key
+        }
+    });
+    const normalized = asCapturedRequestContextLookupResult(result);
+    if (normalized &&
+        typeof normalized.page_context_namespace === "string" &&
+        normalized.page_context_namespace.length > 0) {
+        latestMainWorldPageContextNamespace = normalized.page_context_namespace;
+    }
+    return normalized;
+};
 const resolveMainWorldRequestUrl = (value) => {
     const baseHref = typeof globalThis.location?.href === "string" && globalThis.location.href.length > 0
         ? globalThis.location.href
@@ -6770,7 +7127,7 @@ const requestXhsSearchJsonViaMainWorld = async (input) => {
     }
     return response.result;
 };
-return { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret, verifyFingerprintRuntimeViaMainWorld };
+return { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readCapturedRequestContextViaMainWorld, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret, verifyFingerprintRuntimeViaMainWorld };
 })();
 const __webenvoy_module_content_script_fingerprint = (() => {
 const { ensureFingerprintRuntimeContext } = __webenvoy_module_fingerprint_profile;
@@ -7053,6 +7410,7 @@ const {
   installFingerprintRuntimeViaMainWorld,
   installMainWorldEventChannelSecret,
   MAIN_WORLD_EVENT_BOOTSTRAP,
+  readCapturedRequestContextViaMainWorld,
   readPageStateViaMainWorld,
   requestXhsSearchJsonViaMainWorld,
   resetMainWorldEventChannelForContract,
@@ -7161,6 +7519,7 @@ const createBrowserEnvironment = () => ({
     getCookie: () => document.cookie,
     getPageStateRoot: () => window.__INITIAL_STATE__,
     readPageStateRoot: async () => await readPageStateViaMainWorld(),
+    readCapturedRequestContext: async (input) => await readCapturedRequestContextViaMainWorld(input),
     callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
     fetchJson: async (input) => {
         if (input.pageContextRequest === true) {
@@ -7452,6 +7811,13 @@ class ContentScriptHandler {
         }
     }
     async #handleXhsReadCommand(message) {
+        const commandParams = asRecord(message.commandParams) ?? {};
+        if (message.command === "xhs.search") {
+            const mainWorldSecret = asString(commandParams.main_world_secret);
+            if (mainWorldSecret) {
+                installMainWorldEventChannelSecret(mainWorldSecret);
+            }
+        }
         const messageFingerprintContext = resolveFingerprintContextFromMessage(message);
         const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
         const requestedExecutionMode = resolveRequestedExecutionMode(message);
@@ -7484,9 +7850,9 @@ class ContentScriptHandler {
             });
             return;
         }
-        const ability = asRecord(message.commandParams.ability);
-        const input = asRecord(message.commandParams.input);
-        const options = asRecord(message.commandParams.options) ?? {};
+        const ability = asRecord(commandParams.ability);
+        const input = asRecord(commandParams.input);
+        const options = asRecord(commandParams.options) ?? {};
         const locationHref = this.#xhsEnv.getLocationHref();
         const actualTargetDomain = resolveTargetDomainFromHref(locationHref);
         const actualTargetPage = resolveTargetPageFromHref(locationHref, message.command);
@@ -7596,8 +7962,8 @@ class ContentScriptHandler {
                     sessionId: String(message.params.session_id ?? "nm-session-001"),
                     profile: message.profile ?? "unknown",
                     requestId: message.id,
-                    commandRequestId: asString(asRecord(message.commandParams)?.request_id) ?? undefined,
-                    gateInvocationId: asString(asRecord(message.commandParams)?.gate_invocation_id) ?? undefined
+                    commandRequestId: asString(commandParams.request_id) ?? undefined,
+                    gateInvocationId: asString(commandParams.gate_invocation_id) ?? undefined
                 }
             };
             let result;
@@ -7688,7 +8054,7 @@ class ContentScriptHandler {
         }
     }
 }
-return { ContentScriptHandler, ExtensionContractError, encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, readPageStateViaMainWorld, resolveFingerprintContextForContract, validateXhsCommandInputForExtension, resolveMainWorldEventNamesForSecret };
+return { ContentScriptHandler, ExtensionContractError, encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, readCapturedRequestContextViaMainWorld, readPageStateViaMainWorld, resolveFingerprintContextForContract, validateXhsCommandInputForExtension, resolveMainWorldEventNamesForSecret };
 })();
 const __webenvoy_module_content_script = (() => {
 const {

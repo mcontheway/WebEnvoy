@@ -13,6 +13,20 @@ const SEARCH_FAILURE_SEMANTICS = {
         target: "window._webmsxyw",
         includeKeyRequest: false
     },
+    REQUEST_CONTEXT_MISSING: {
+        category: "page_changed",
+        stage: "action",
+        component: "page",
+        target: "captured_request_context",
+        includeKeyRequest: false
+    },
+    REQUEST_CONTEXT_INCOMPATIBLE: {
+        category: "page_changed",
+        stage: "action",
+        component: "page",
+        target: "captured_request_context",
+        includeKeyRequest: false
+    },
     SESSION_EXPIRED: {
         category: "request_failed",
         stage: "request",

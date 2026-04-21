@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContentScriptHandler, bootstrapContentScript } from "../extension/content-script.js";
-import { resetMainWorldEventChannelForContract } from "../extension/content-script-handler.js";
+import * as contentScriptHandlerModule from "../extension/content-script-handler.js";
+import {
+  createPageContextNamespace,
+  createSearchRequestShape,
+  createVisitedPageContextNamespace,
+  serializeSearchRequestShape
+} from "../extension/xhs-search-types.js";
+
+const { resetMainWorldEventChannelForContract } = contentScriptHandlerModule;
 
 const FINGERPRINT_CONTEXT_CACHE_KEY = "__webenvoy_fingerprint_context__";
 const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payload__";
@@ -92,6 +100,14 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
     ? (value as Record<string, unknown>)
     : null;
 
+const createShapeKey = (keyword: string): string => {
+  const shape = createSearchRequestShape({ keyword });
+  if (!shape) {
+    throw new Error("shape must be valid in test");
+  }
+  return serializeSearchRequestShape(shape);
+};
+
 const createSessionStorage = (
   initial?: Record<string, string>
 ): Storage & {
@@ -181,6 +197,93 @@ const createRuntime = () => {
     dispatch(message: unknown) {
       listener?.(message);
     }
+  };
+};
+
+const createCapturedRequestContextProbeWindow = (): {
+  window: {
+    addEventListener: (type: string, listener: EventListener) => void;
+    removeEventListener: (type: string, listener: EventListener) => void;
+    dispatchEvent: (event: Event) => boolean;
+    location: {
+      href: string;
+    };
+  };
+  readRequests: Record<string, unknown>[];
+} => {
+  const listeners = new Map<string, Set<EventListener>>();
+  const readRequests: Record<string, unknown>[] = [];
+  let requestEventName: string | null = null;
+  let resultEventName: string | null = null;
+  const locationHref = "https://www.xiaohongshu.com/search_result?keyword=contract";
+
+  const emit = (type: string, detail: unknown): void => {
+    const handlers = listeners.get(type);
+    if (!handlers) {
+      return;
+    }
+    const event = {
+      type,
+      detail
+    } as unknown as Event;
+    for (const listener of handlers) {
+      listener(event);
+    }
+  };
+
+  return {
+    window: {
+      addEventListener(type, listener) {
+        const handlers = listeners.get(type) ?? new Set<EventListener>();
+        handlers.add(listener);
+        listeners.set(type, handlers);
+      },
+      removeEventListener(type, listener) {
+        listeners.get(type)?.delete(listener);
+      },
+      dispatchEvent(event: Event) {
+        const customEvent = event as CustomEvent<unknown>;
+        const detail = asRecord(customEvent.detail);
+        if (
+          typeof customEvent.type === "string" &&
+          customEvent.type.startsWith("__mw_req__") &&
+          typeof detail?.id === "string"
+        ) {
+          requestEventName ??= customEvent.type;
+          resultEventName ??= customEvent.type.replace("__mw_req__", "__mw_res__");
+          if (detail.type === "captured-request-context-read") {
+            readRequests.push(detail);
+            const requestedNamespace =
+              typeof detail.payload?.page_context_namespace === "string"
+                ? detail.payload.page_context_namespace
+                : null;
+            const activeNamespace = createVisitedPageContextNamespace(locationHref, 1);
+            emit(resultEventName, {
+              id: detail.id,
+              ok: true,
+              result: {
+                page_context_namespace:
+                  requestedNamespace === createPageContextNamespace(locationHref)
+                    ? activeNamespace
+                    : requestedNamespace,
+                shape_key: detail.payload?.shape_key,
+                admitted_template: null,
+                rejected_observation: null,
+                incompatible_observation: null,
+                available_shape_keys: []
+              }
+            });
+            return true;
+          }
+        }
+        emit(customEvent.type, customEvent.detail);
+        return true;
+      },
+      location: {
+        href: locationHref
+      }
+    },
+    readRequests
   };
 };
 
@@ -644,5 +747,95 @@ describe("content-script bootstrap contract", () => {
     expect(onBackgroundMessage).toHaveBeenCalledTimes(0);
     expect(startupInstallRequests).toHaveLength(1);
     expect(runtime.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("prefers the latest visited page-context namespace when the caller only has the base namespace", async () => {
+    const { window, readRequests } = createCapturedRequestContextProbeWindow();
+    (globalThis as { window?: unknown }).window = window;
+
+    expect(contentScriptHandlerModule.installMainWorldEventChannelSecret("namespace-secret-001")).toBe(
+      true
+    );
+    const { namespaceEvent } = contentScriptHandlerModule.resolveMainWorldEventNamesForSecret(
+      "namespace-secret-001"
+    );
+
+    window.dispatchEvent({
+      type: namespaceEvent,
+      detail: {
+        page_context_namespace: createVisitedPageContextNamespace(window.location.href, 1),
+        href: window.location.href,
+        visit_sequence: 1
+      }
+    } as unknown as Event);
+
+    await contentScriptHandlerModule.readCapturedRequestContextViaMainWorld({
+      method: "POST",
+      path: "/api/sns/web/v1/search/notes",
+      page_context_namespace: createPageContextNamespace(window.location.href),
+      shape_key: createShapeKey("contract")
+    });
+
+    expect(readRequests).toHaveLength(1);
+    expect(asRecord(readRequests[0]?.payload)).toMatchObject({
+      page_context_namespace: createVisitedPageContextNamespace(window.location.href, 1)
+    });
+  });
+
+  it("keeps an explicitly requested visited page-context namespace during request-context reads", async () => {
+    const { window, readRequests } = createCapturedRequestContextProbeWindow();
+    (globalThis as { window?: unknown }).window = window;
+
+    expect(contentScriptHandlerModule.installMainWorldEventChannelSecret("namespace-secret-001b")).toBe(
+      true
+    );
+    const { namespaceEvent } = contentScriptHandlerModule.resolveMainWorldEventNamesForSecret(
+      "namespace-secret-001b"
+    );
+
+    window.dispatchEvent({
+      type: namespaceEvent,
+      detail: {
+        page_context_namespace: createVisitedPageContextNamespace(window.location.href, 2),
+        href: window.location.href,
+        visit_sequence: 2
+      }
+    } as unknown as Event);
+
+    await contentScriptHandlerModule.readCapturedRequestContextViaMainWorld({
+      method: "POST",
+      path: "/api/sns/web/v1/search/notes",
+      page_context_namespace: createVisitedPageContextNamespace(window.location.href, 1),
+      shape_key: createShapeKey("contract")
+    });
+
+    expect(readRequests).toHaveLength(1);
+    expect(asRecord(readRequests[0]?.payload)).toMatchObject({
+      page_context_namespace: createVisitedPageContextNamespace(window.location.href, 1)
+    });
+  });
+
+  it("adopts the remapped active visited namespace returned by main-world before any namespace event arrives", async () => {
+    const { window, readRequests } = createCapturedRequestContextProbeWindow();
+    (globalThis as { window?: unknown }).window = window;
+
+    expect(contentScriptHandlerModule.installMainWorldEventChannelSecret("namespace-secret-002")).toBe(
+      true
+    );
+
+    const result = await contentScriptHandlerModule.readCapturedRequestContextViaMainWorld({
+      method: "POST",
+      path: "/api/sns/web/v1/search/notes",
+      page_context_namespace: createPageContextNamespace(window.location.href),
+      shape_key: createShapeKey("contract")
+    });
+
+    expect(readRequests).toHaveLength(1);
+    expect(asRecord(readRequests[0]?.payload)).toMatchObject({
+      page_context_namespace: createPageContextNamespace(window.location.href)
+    });
+    expect(result).toMatchObject({
+      page_context_namespace: createVisitedPageContextNamespace(window.location.href, 1)
+    });
   });
 });

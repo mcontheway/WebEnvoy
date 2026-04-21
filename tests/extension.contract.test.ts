@@ -4,6 +4,14 @@ import { runInNewContext } from "node:vm";
 
 import { describe, expect, it } from "vitest";
 import { executeXhsSearch } from "../extension/xhs-search.js";
+import {
+  SEARCH_ENDPOINT,
+  createPageContextNamespace,
+  createSearchRequestShape,
+  createVisitedPageContextNamespace,
+  resolveActiveVisitedPageContextNamespace,
+  serializeSearchRequestShape
+} from "../extension/xhs-search-types.js";
 
 const repoRoot = path.resolve(path.join(import.meta.dirname, ".."));
 const extensionRoot = path.join(repoRoot, "extension");
@@ -101,6 +109,218 @@ const executeBundledXhsCommand = async (
       ...input.envOverrides
     }
   );
+};
+
+const createCapturedSearchContextArtifact = (input: {
+  href: string;
+  keyword: string;
+  page?: number;
+  page_size?: number;
+  sort?: string;
+  note_type?: number;
+  captured_at: number;
+  source_kind?: "page_request" | "synthetic_request";
+  template_ready?: boolean;
+  rejection_reason?: "synthetic_request_rejected" | "failed_request_rejected";
+  responseBody?: Record<string, unknown>;
+}) => {
+  const shape = createSearchRequestShape({
+    keyword: input.keyword,
+    page: input.page ?? 1,
+    page_size: input.page_size ?? 20,
+    sort: input.sort ?? "general",
+    note_type: input.note_type ?? 0
+  });
+  if (!shape) {
+    throw new Error("shape must be valid in test");
+  }
+  const shapeKey = serializeSearchRequestShape(shape);
+  const namespace = createVisitedPageContextNamespace(input.href, 1);
+  return {
+    page_context_namespace: namespace,
+    shape_key: shapeKey,
+    admitted_template:
+      input.template_ready === false || input.rejection_reason
+        ? null
+        : {
+            source_kind: input.source_kind ?? "page_request",
+            transport: "fetch",
+            method: "POST",
+            path: SEARCH_ENDPOINT,
+            url: `https://www.xiaohongshu.com${SEARCH_ENDPOINT}`,
+            status: 200,
+            captured_at: input.captured_at,
+            observed_at: input.captured_at,
+            page_context_namespace: namespace,
+            shape_key: shapeKey,
+            shape,
+            referrer: input.href,
+            template_ready: true,
+            request_status: {
+              completion: "completed",
+              http_status: 200
+            },
+            request: {
+              headers: {
+                accept: "application/json, text/plain, */*",
+                "content-type": "application/json;charset=utf-8",
+                "x-s": "signed-template",
+                "x-t": "1700000000"
+              },
+              body: {
+                keyword: input.keyword,
+                page: input.page ?? 1,
+                page_size: input.page_size ?? 20,
+                search_id: "captured-search-id",
+                sort: input.sort ?? "general",
+                note_type: input.note_type ?? 0
+              }
+            },
+            response: {
+              headers: {
+                "content-type": "application/json"
+              },
+              body: input.responseBody ?? { code: 0, data: { items: [] } }
+            }
+          },
+    rejected_observation:
+      input.rejection_reason
+        ? {
+            source_kind: input.source_kind ?? "page_request",
+            transport: "fetch",
+            method: "POST",
+            path: SEARCH_ENDPOINT,
+            url: `https://www.xiaohongshu.com${SEARCH_ENDPOINT}`,
+            status: input.rejection_reason === "failed_request_rejected" ? 500 : 200,
+            captured_at: input.captured_at,
+            observed_at: input.captured_at,
+            page_context_namespace: namespace,
+            shape_key: shapeKey,
+            shape,
+            referrer: input.href,
+            template_ready: false,
+            rejection_reason: input.rejection_reason,
+            request_status: {
+              completion: "failed",
+              http_status: input.rejection_reason === "failed_request_rejected" ? 500 : null
+            },
+            request: {
+              headers: {
+                "content-type": "application/json;charset=utf-8"
+              },
+              body: {
+                keyword: input.keyword,
+                page: input.page ?? 1,
+                page_size: input.page_size ?? 20,
+                sort: input.sort ?? "general",
+                note_type: input.note_type ?? 0
+              }
+            },
+            response: {
+              headers: {
+                "content-type": "application/json"
+              },
+              body:
+                input.responseBody ??
+                (input.rejection_reason === "failed_request_rejected"
+                  ? { code: 500, msg: "failed" }
+                  : { code: 0, data: { items: [] } })
+            }
+          }
+        : null,
+    incompatible_observation: null,
+    available_shape_keys: [shapeKey]
+  };
+};
+
+const createBundledMainWorldWindow = (input: {
+  href: string;
+  resolveLookup: (payload: Record<string, unknown>, activeNamespace: string) => Record<string, unknown>;
+  mainWorldRequests?: Array<Record<string, unknown>>;
+}) => {
+  const listeners = new Map<string, Set<(event: { type: string; detail?: unknown }) => void>>();
+  let resultEventName: string | null = null;
+  let namespaceEventName: string | null = null;
+  const activeNamespace = createVisitedPageContextNamespace(input.href, 1);
+
+  const emit = (type: string, detail: unknown): void => {
+    listeners.get(type)?.forEach((listener) => {
+      listener({
+        type,
+        detail
+      });
+    });
+  };
+
+  return {
+    location: {
+      href: input.href
+    },
+    addEventListener: (type: string, listener: (event: { type: string; detail?: unknown }) => void) => {
+      const bucket = listeners.get(type) ?? new Set();
+      bucket.add(listener);
+      listeners.set(type, bucket);
+    },
+    removeEventListener: (
+      type: string,
+      listener: (event: { type: string; detail?: unknown }) => void
+    ) => {
+      listeners.get(type)?.delete(listener);
+    },
+    dispatchEvent: (event: { type: string; detail?: unknown }) => {
+      const detail =
+        typeof event.detail === "object" && event.detail !== null
+          ? (event.detail as Record<string, unknown>)
+          : null;
+      if (event.type === "__mw_bootstrap__") {
+        resultEventName =
+          detail && typeof detail.result_event === "string" ? detail.result_event : null;
+        namespaceEventName =
+          detail && typeof detail.namespace_event === "string" ? detail.namespace_event : null;
+        if (namespaceEventName) {
+          emit(namespaceEventName, {
+            page_context_namespace: activeNamespace,
+            href: input.href,
+            visit_sequence: 1
+          });
+        }
+        return true;
+      }
+      if (!resultEventName || !detail || typeof detail.id !== "string" || typeof detail.type !== "string") {
+        return true;
+      }
+      input.mainWorldRequests?.push({
+        type: detail.type,
+        payload:
+          typeof detail.payload === "object" && detail.payload !== null
+            ? { ...(detail.payload as Record<string, unknown>) }
+            : detail.payload
+      });
+
+      let result: unknown = null;
+      if (detail.type === "captured-request-context-read") {
+        const payload =
+          typeof detail.payload === "object" && detail.payload !== null
+            ? (detail.payload as Record<string, unknown>)
+            : {};
+        result = input.resolveLookup(payload, activeNamespace);
+      } else if (detail.type === "fingerprint-install") {
+        result = {
+          installed: true,
+          required_patches: [],
+          applied_patches: [],
+          missing_required_patches: []
+        };
+      }
+
+      emit(resultEventName, {
+        id: detail.id,
+        ok: true,
+        result
+      });
+      return true;
+    }
+  };
 };
 
 const buildLiveReadAdmissionContext = (input: {
@@ -404,8 +624,30 @@ describe("extension build contract", () => {
       targetTabId: 21,
       targetPage: "search_result_tab"
     });
-    const runtimeMessages: Array<Record<string, unknown>> = [];
     const searchHref = "https://www.xiaohongshu.com/search_result/?keyword=%E9%9C%B2%E8%90%A5";
+    const bridgeRequests: Array<Record<string, unknown>> = [];
+    const runtimeMessages: Array<Record<string, unknown>> = [];
+    const bundledWindow = createBundledMainWorldWindow({
+      href: searchHref,
+      mainWorldRequests: bridgeRequests,
+      resolveLookup: (payload, activeNamespace) => {
+        const requestedNamespace =
+          typeof payload.page_context_namespace === "string"
+            ? payload.page_context_namespace
+            : null;
+        const lookup = createCapturedSearchContextArtifact({
+          href: searchHref,
+          keyword: "露营装备",
+          captured_at: Date.now()
+        });
+        return {
+          ...lookup,
+          page_context_namespace:
+            resolveActiveVisitedPageContextNamespace(requestedNamespace, activeNamespace) ??
+            activeNamespace
+        };
+      }
+    });
     const { ContentScriptHandler } = loadBundledContentScriptHandlerModule(contentScriptBuildPath, {
       chrome: {
         runtime: {
@@ -415,15 +657,7 @@ describe("extension build contract", () => {
           ) => {
             runtimeMessages.push(message);
             let response: Record<string, unknown>;
-            if (message.kind === "xhs-sign-request") {
-              response = {
-                ok: true,
-                result: {
-                  "X-s": "signature",
-                  "X-t": "timestamp"
-                }
-              };
-            } else if (message.kind === "xhs-main-world-request") {
+            if (message.kind === "xhs-main-world-request") {
               response = {
                 ok: true,
                 result: {
@@ -457,19 +691,14 @@ describe("extension build contract", () => {
       location: {
         href: searchHref
       },
-      window: {
-        location: {
-          href: searchHref
-        },
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        dispatchEvent: () => true
-      },
+      window: bundledWindow,
       document: {
         title: "Search Result",
         readyState: "complete",
         cookie: "a1=session-cookie"
       },
+      setTimeout,
+      clearTimeout,
       CustomEvent: class CustomEventShim {
         type: string;
         detail: unknown;
@@ -510,6 +739,7 @@ describe("extension build contract", () => {
         commandParams: {
           request_id: "req-bundled-handler-search-live-001",
           gate_invocation_id: "issue209-gate-run-bundled-handler-search-live-001",
+          main_world_secret: "bundled-main-world-secret-001",
           ability: {
             id: "xhs.note.search.v1",
             layer: "L3",
@@ -559,26 +789,61 @@ describe("extension build contract", () => {
             requested_execution_mode: "live_read_high_risk",
             gate_decision: "allowed"
           },
+          request_context: {
+            status: "exact_hit"
+          },
           execution_audit: {
             request_admission_decision: "allowed"
           }
         }
       }
     });
-    expect(runtimeMessages.map((message) => message.kind)).toEqual([
-      "xhs-sign-request",
-      "xhs-main-world-request"
-    ]);
-    expect(runtimeMessages[1]).toMatchObject({
-      kind: "xhs-main-world-request",
-      method: "POST",
-      referrer: searchHref
+    expect(bridgeRequests).toHaveLength(1);
+    expect(bridgeRequests[0]).toMatchObject({
+      type: "captured-request-context-read",
+      payload: {
+        shape_key: serializeSearchRequestShape(
+          createSearchRequestShape({ keyword: "露营装备" })!
+        )
+      }
+    });
+    expect(runtimeMessages.map((message) => message.kind)).toEqual(["xhs-main-world-request"]);
+    expect(runtimeMessages[0]).toMatchObject({
+      kind: "xhs-main-world-request"
     });
   });
 
-  it("executes bundled content-script handler xhs.search live-read with canonical grant only", async () => {
+  it("executes bundled content-script handler xhs.search live-read with default browser env", async () => {
+    const searchHref = "https://www.xiaohongshu.com/search_result/?keyword=camp";
+    const admissionContext = buildLiveReadAdmissionContext({
+      runId: "run-bundled-handler-search-live-default",
+      sessionId: "nm-session-bundled-handler-search-live-default",
+      gateInvocationId: "issue209-gate-run-bundled-handler-search-live-default",
+      targetTabId: 22,
+      targetPage: "search_result_tab"
+    });
     const runtimeMessages: Array<Record<string, unknown>> = [];
-    const searchHref = "https://www.xiaohongshu.com/search_result/?keyword=AI&type=51";
+    const bundledWindow = createBundledMainWorldWindow({
+      href: searchHref,
+      resolveLookup: (payload, activeNamespace) => {
+        const requestedNamespace =
+          typeof payload.page_context_namespace === "string"
+            ? payload.page_context_namespace
+            : null;
+        const lookup = createCapturedSearchContextArtifact({
+          href: searchHref,
+          keyword: "camp",
+          captured_at: Date.now()
+        });
+        return {
+          ...lookup,
+          page_context_namespace:
+            resolveActiveVisitedPageContextNamespace(requestedNamespace, activeNamespace) ??
+            activeNamespace
+        };
+      }
+    });
+
     const { ContentScriptHandler } = loadBundledContentScriptHandlerModule(contentScriptBuildPath, {
       chrome: {
         runtime: {
@@ -588,15 +853,166 @@ describe("extension build contract", () => {
           ) => {
             runtimeMessages.push(message);
             const response =
-              message.kind === "xhs-sign-request"
+              message.kind === "xhs-main-world-request"
                 ? {
                     ok: true,
                     result: {
-                      "X-s": "signature",
-                      "X-t": "timestamp"
+                      status: 200,
+                      body: {
+                        code: 0,
+                        data: {
+                          items: []
+                        }
+                      }
                     }
                   }
-                : message.kind === "xhs-main-world-request"
+                : {
+                    ok: false,
+                    error: {
+                      message: `unexpected message kind: ${String(message.kind)}`
+                    }
+                  };
+            callback?.(response);
+            return Promise.resolve(response);
+          }
+        }
+      },
+      crypto: {
+        randomUUID: () => "bundle-live-uuid-default"
+      },
+      URL,
+      location: {
+        href: searchHref
+      },
+      window: bundledWindow,
+      document: {
+        title: "Search Result",
+        readyState: "complete",
+        cookie: "a1=session-cookie"
+      },
+      setTimeout,
+      clearTimeout,
+      CustomEvent: class CustomEventShim {
+        type: string;
+        detail: unknown;
+
+        constructor(type: string, init?: { detail?: unknown }) {
+          this.type = type;
+          this.detail = init?.detail;
+        }
+      }
+    });
+    const handler = new ContentScriptHandler();
+    const resultPromise = new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("did not receive bundled default-env result")), 1_000);
+      const off = handler.onResult((message) => {
+        clearTimeout(timeout);
+        off();
+        resolve(message as Record<string, unknown>);
+      });
+    });
+
+    expect(
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "msg-bundled-handler-search-live-default",
+        runId: "run-bundled-handler-search-live-default",
+        tabId: 22,
+        profile: "profile-a",
+        cwd: "/tmp/webenvoy",
+        timeoutMs: 3_000,
+        command: "xhs.search",
+        params: {
+          session_id: "nm-session-bundled-handler-search-live-default"
+        },
+        commandParams: {
+          request_id: "req-bundled-handler-search-live-default",
+          gate_invocation_id: "issue209-gate-run-bundled-handler-search-live-default",
+          main_world_secret: "bundled-main-world-secret-default",
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "camp"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 22,
+            target_page: "search_result_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 22,
+            actual_target_page: "search_result_tab",
+            action_type: "read",
+            risk_state: "allowed",
+            requested_execution_mode: "live_read_high_risk",
+            upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+              requestRef: "upstream_bundled_handler_search_live_default",
+              actionName: "xhs.read_search_results",
+              targetPage: "search_result_tab",
+              targetTabId: 22,
+              profileRef: "profile-a",
+              approvalRefs: [
+                String(admissionContext.approval_admission_evidence.approval_admission_ref)
+              ],
+              auditRefs: [String(admissionContext.audit_admission_evidence.audit_admission_ref)]
+            }),
+            admission_context: admissionContext
+          }
+        }
+      })
+    ).toBe(true);
+
+    await expect(resultPromise).resolves.toMatchObject({
+      ok: true,
+      payload: {
+        summary: {
+          request_context: {
+            status: "exact_hit"
+          }
+        }
+      }
+    });
+    expect(runtimeMessages.map((message) => message.kind)).toEqual(["xhs-main-world-request"]);
+  });
+
+  it("executes bundled content-script handler xhs.search live-read with canonical grant only", async () => {
+    const runtimeMessages: Array<Record<string, unknown>> = [];
+    const searchHref = "https://www.xiaohongshu.com/search_result/?keyword=AI&type=51";
+    const bridgeRequests: Array<Record<string, unknown>> = [];
+    const bundledWindow = createBundledMainWorldWindow({
+      href: searchHref,
+      mainWorldRequests: bridgeRequests,
+      resolveLookup: (payload, activeNamespace) => {
+        const requestedNamespace =
+          typeof payload.page_context_namespace === "string"
+            ? payload.page_context_namespace
+            : null;
+        const lookup = createCapturedSearchContextArtifact({
+          href: searchHref,
+          keyword: "AI",
+          captured_at: Date.now()
+        });
+        return {
+          ...lookup,
+          page_context_namespace:
+            resolveActiveVisitedPageContextNamespace(requestedNamespace, activeNamespace) ??
+            activeNamespace
+        };
+      }
+    });
+    const { ContentScriptHandler } = loadBundledContentScriptHandlerModule(contentScriptBuildPath, {
+      chrome: {
+        runtime: {
+          sendMessage: (
+            message: Record<string, unknown>,
+            callback?: (response?: Record<string, unknown>) => void
+          ) => {
+            runtimeMessages.push(message);
+            const response =
+              message.kind === "xhs-main-world-request"
                   ? {
                       ok: true,
                       result: {
@@ -628,19 +1044,14 @@ describe("extension build contract", () => {
       location: {
         href: searchHref
       },
-      window: {
-        location: {
-          href: searchHref
-        },
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        dispatchEvent: () => true
-      },
+      window: bundledWindow,
       document: {
         title: "Search Result",
         readyState: "complete",
         cookie: "a1=session-cookie"
       },
+      setTimeout,
+      clearTimeout,
       CustomEvent: class CustomEventShim {
         type: string;
         detail: unknown;
@@ -681,6 +1092,7 @@ describe("extension build contract", () => {
         commandParams: {
           request_id: "req-bundled-handler-search-live-002",
           gate_invocation_id: "issue209-gate-run-bundled-handler-search-live-002",
+          main_world_secret: "bundled-main-world-secret-002",
           ability: {
             id: "xhs.note.search.v1",
             layer: "L3",
@@ -744,14 +1156,15 @@ describe("extension build contract", () => {
               approval_admission_ref: "approval_admission_issue493_search_live_001",
               audit_admission_ref: "audit_admission_issue493_search_live_001"
             }
+          },
+          request_context: {
+            status: "exact_hit"
           }
         }
       }
     });
-    expect(runtimeMessages.map((message) => message.kind)).toEqual([
-      "xhs-sign-request",
-      "xhs-main-world-request"
-    ]);
+    expect(bridgeRequests).toHaveLength(1);
+    expect(runtimeMessages.map((message) => message.kind)).toEqual(["xhs-main-world-request"]);
   });
 
   it("executes bundled xhs.detail classic module without unresolved implementation references", async () => {
@@ -882,8 +1295,7 @@ describe("extension build contract", () => {
               ],
               auditRefs: [String(admissionContext.audit_admission_evidence.audit_admission_ref)]
             }),
-            admission_context: admissionContext,
-            simulate_result: "success"
+            admission_context: admissionContext
           },
           executionContext: {
             runId: "run-source-search-live-001",
@@ -899,14 +1311,22 @@ describe("extension build contract", () => {
           getDocumentTitle: () => "Search Result",
           getReadyState: () => "complete",
           getCookie: () => "a1=session-cookie",
-          callSignature: async () => ({
-            "X-s": "signature",
-            "X-t": "timestamp"
-          }),
+          readCapturedRequestContext: async () =>
+            createCapturedSearchContextArtifact({
+              href: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
+              keyword: "露营装备",
+              captured_at: 1_710_000_000_000
+            }),
+          callSignature: async () => {
+            throw new Error("signature should not be used on exact hit");
+          },
           fetchJson: async () => ({
             status: 200,
             body: {
-              code: 0
+              code: 0,
+              data: {
+                items: []
+              }
             }
           })
         }
@@ -922,9 +1342,163 @@ describe("extension build contract", () => {
           request_admission_result: {
             admission_decision: "allowed"
           },
+          request_context: {
+            status: "exact_hit"
+          },
           execution_audit: {
             request_admission_decision: "allowed"
           }
+        }
+      }
+    });
+  });
+
+  it.each([
+    {
+      label: "template_missing",
+      lookup: async () => ({
+        page_context_namespace: createPageContextNamespace(
+          "https://www.xiaohongshu.com/search_result?keyword=missing"
+        ),
+        shape_key: serializeSearchRequestShape(createSearchRequestShape({ keyword: "missing" })!),
+        admitted_template: null,
+        rejected_observation: null,
+        incompatible_observation: null,
+        available_shape_keys: []
+      }),
+      reason: "REQUEST_CONTEXT_MISSING",
+      requestContextReason: "template_missing"
+    },
+    {
+      label: "shape_mismatch",
+      lookup: async () => ({
+        ...createCapturedSearchContextArtifact({
+          href: "https://www.xiaohongshu.com/search_result?keyword=camping",
+          keyword: "camping",
+          captured_at: 1_710_000_000_000
+        }),
+        admitted_template: null,
+        available_shape_keys: [
+          serializeSearchRequestShape(createSearchRequestShape({ keyword: "camping" })!)
+        ],
+        incompatible_observation: {
+          ...(createCapturedSearchContextArtifact({
+            href: "https://www.xiaohongshu.com/search_result?keyword=camping",
+            keyword: "camping",
+            captured_at: 1_710_000_000_000
+          }).admitted_template as Record<string, unknown>),
+          incompatibility_reason: "shape_mismatch"
+        }
+      }),
+      reason: "REQUEST_CONTEXT_INCOMPATIBLE",
+      requestContextReason: "shape_mismatch"
+    },
+    {
+      label: "rejected_source",
+      lookup: async () =>
+        createCapturedSearchContextArtifact({
+          href: "https://www.xiaohongshu.com/search_result?keyword=rejected",
+          keyword: "rejected",
+          captured_at: 1_710_000_000_000,
+          template_ready: false,
+          rejection_reason: "failed_request_rejected"
+        }),
+      reason: "REQUEST_CONTEXT_INCOMPATIBLE",
+      requestContextReason: "rejected_source",
+      rejectedSourceReason: "failed_request_rejected"
+    },
+    {
+      label: "template_stale",
+      lookup: async () =>
+        createCapturedSearchContextArtifact({
+          href: "https://www.xiaohongshu.com/search_result?keyword=stale",
+          keyword: "stale",
+          captured_at: 1_710_000_000_000 - 10 * 60 * 1000
+        }),
+      reason: "REQUEST_CONTEXT_MISSING",
+      requestContextReason: "template_stale"
+    }
+  ])("keeps bundled xhs.search fail-closed diagnostics for $label", async (testCase) => {
+    const runId = `run-bundled-${testCase.label}`;
+    const admissionContext = buildLiveReadAdmissionContext({
+      runId,
+      sessionId: `nm-session-bundled-${testCase.label}`,
+      gateInvocationId: `issue209-gate-${testCase.label}`,
+      targetTabId: 21,
+      targetPage: "search_result_tab"
+    });
+    await expect(
+      executeBundledXhsCommand(contentScriptBuildPath, {
+        moduleVar: "__webenvoy_module_xhs_search",
+        exportName: "executeXhsSearch",
+        commandInput: {
+          abilityId: "xhs.note.search.v1",
+          abilityLayer: "L3",
+          abilityAction: "read",
+          params: {
+            query:
+              testCase.label === "template_missing"
+                ? "missing"
+                : testCase.label === "shape_mismatch"
+                  ? "mismatch"
+                  : testCase.label === "rejected_source"
+                    ? "rejected"
+                    : "stale"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 21,
+            target_page: "search_result_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 21,
+            actual_target_page: "search_result_tab",
+            action_type: "read",
+            risk_state: "allowed",
+            requested_execution_mode: "live_read_high_risk",
+            upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+              requestRef: `upstream_${testCase.label}`,
+              actionName: "xhs.read_search_results",
+              targetPage: "search_result_tab",
+              targetTabId: 21,
+              profileRef: "profile-a",
+              approvalRefs: [
+                String(admissionContext.approval_admission_evidence.approval_admission_ref)
+              ],
+              auditRefs: [String(admissionContext.audit_admission_evidence.audit_admission_ref)]
+            }),
+            admission_context: admissionContext
+          },
+          executionContext: {
+            runId,
+            sessionId: `nm-session-bundled-${testCase.label}`,
+            profile: "profile-a",
+            gateInvocationId: `issue209-gate-${testCase.label}`
+          }
+        },
+        envOverrides: {
+          getCookie: () => "a1=session-cookie",
+          readCapturedRequestContext: testCase.lookup,
+          callSignature: async () => {
+            throw new Error("signature should not be used on fail-closed path");
+          },
+          fetchJson: async () => {
+            throw new Error("network request should not be used on fail-closed path");
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "ERR_EXECUTION_FAILED"
+      },
+      payload: {
+        details: {
+          reason: testCase.reason,
+          request_context_reason: testCase.requestContextReason,
+          ...(testCase.rejectedSourceReason
+            ? { rejected_source_reason: testCase.rejectedSourceReason }
+            : {})
         }
       }
     });

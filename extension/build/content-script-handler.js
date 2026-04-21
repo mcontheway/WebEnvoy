@@ -4,10 +4,10 @@ import { executeXhsUserHome } from "./xhs-user-home.js";
 import { performEditorInputValidation } from "./xhs-editor-input.js";
 import { ensureFingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
 import { buildFailedFingerprintInjectionContext, hasInstalledFingerprintInjection, installFingerprintRuntimeWithVerification, resolveFingerprintContextForContract, resolveFingerprintContextFromMessage, resolveMissingRequiredFingerprintPatches, summarizeFingerprintRuntimeContext } from "./content-script-fingerprint.js";
-import { encodeMainWorldPayload, installMainWorldEventChannelSecret, installFingerprintRuntimeViaMainWorld, MAIN_WORLD_EVENT_BOOTSTRAP, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret } from "./content-script-main-world.js";
+import { encodeMainWorldPayload, installMainWorldEventChannelSecret, installFingerprintRuntimeViaMainWorld, MAIN_WORLD_EVENT_BOOTSTRAP, readCapturedRequestContextViaMainWorld, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret } from "./content-script-main-world.js";
 import { ExtensionContractError, validateXhsCommandInputForExtension } from "./xhs-command-contract.js";
 import { containsCookie } from "./xhs-search-telemetry.js";
-export { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret };
+export { encodeMainWorldPayload, installFingerprintRuntimeViaMainWorld, installMainWorldEventChannelSecret, MAIN_WORLD_EVENT_BOOTSTRAP, readCapturedRequestContextViaMainWorld, readPageStateViaMainWorld, requestXhsSearchJsonViaMainWorld, resetMainWorldEventChannelForContract, resolveMainWorldEventNamesForSecret };
 export { resolveFingerprintContextForContract };
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
@@ -112,6 +112,7 @@ const createBrowserEnvironment = () => ({
     getCookie: () => document.cookie,
     getPageStateRoot: () => window.__INITIAL_STATE__,
     readPageStateRoot: async () => await readPageStateViaMainWorld(),
+    readCapturedRequestContext: async (input) => await readCapturedRequestContextViaMainWorld(input),
     callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
     fetchJson: async (input) => {
         if (input.pageContextRequest === true) {
@@ -403,6 +404,13 @@ export class ContentScriptHandler {
         }
     }
     async #handleXhsReadCommand(message) {
+        const commandParams = asRecord(message.commandParams) ?? {};
+        if (message.command === "xhs.search") {
+            const mainWorldSecret = asString(commandParams.main_world_secret);
+            if (mainWorldSecret) {
+                installMainWorldEventChannelSecret(mainWorldSecret);
+            }
+        }
         const messageFingerprintContext = resolveFingerprintContextFromMessage(message);
         const fingerprintRuntime = await this.#installFingerprintIfPresent(message);
         const requestedExecutionMode = resolveRequestedExecutionMode(message);
@@ -435,9 +443,9 @@ export class ContentScriptHandler {
             });
             return;
         }
-        const ability = asRecord(message.commandParams.ability);
-        const input = asRecord(message.commandParams.input);
-        const options = asRecord(message.commandParams.options) ?? {};
+        const ability = asRecord(commandParams.ability);
+        const input = asRecord(commandParams.input);
+        const options = asRecord(commandParams.options) ?? {};
         const locationHref = this.#xhsEnv.getLocationHref();
         const actualTargetDomain = resolveTargetDomainFromHref(locationHref);
         const actualTargetPage = resolveTargetPageFromHref(locationHref, message.command);
@@ -547,8 +555,8 @@ export class ContentScriptHandler {
                     sessionId: String(message.params.session_id ?? "nm-session-001"),
                     profile: message.profile ?? "unknown",
                     requestId: message.id,
-                    commandRequestId: asString(asRecord(message.commandParams)?.request_id) ?? undefined,
-                    gateInvocationId: asString(asRecord(message.commandParams)?.gate_invocation_id) ?? undefined
+                    commandRequestId: asString(commandParams.request_id) ?? undefined,
+                    gateInvocationId: asString(commandParams.gate_invocation_id) ?? undefined
                 }
             };
             let result;

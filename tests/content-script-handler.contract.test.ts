@@ -307,6 +307,101 @@ const withMockMainWorld = async (
         dispatchToListeners(new MockCustomEventImpl(mainWorldResultEvent, { detail: result }));
       };
 
+      if (requestType === "captured-request-context-read") {
+        if (
+          (mockWindow as Window & Record<string, unknown>).__disableMainWorldBridgeRequestContext__ ===
+          true
+        ) {
+          return;
+        }
+        const shapeKey =
+          typeof requestPayload?.shape_key === "string" ? requestPayload.shape_key : "";
+        let parsedShape: Record<string, unknown> | null = null;
+        try {
+          parsedShape =
+            shapeKey.length > 0 ? (JSON.parse(shapeKey) as Record<string, unknown>) : null;
+        } catch {
+          parsedShape = null;
+        }
+        const keyword =
+          typeof parsedShape?.keyword === "string" ? parsedShape.keyword : "露营";
+        const page = typeof parsedShape?.page === "number" ? parsedShape.page : 1;
+        const pageSize = typeof parsedShape?.page_size === "number" ? parsedShape.page_size : 20;
+        const sort = typeof parsedShape?.sort === "string" ? parsedShape.sort : "general";
+        const noteType = typeof parsedShape?.note_type === "number" ? parsedShape.note_type : 0;
+        const namespace =
+          typeof requestPayload?.page_context_namespace === "string"
+            ? requestPayload.page_context_namespace
+            : "https://www.xiaohongshu.com/search_result?keyword=test";
+        emitResult({
+          id: requestId,
+          ok: true,
+          result: {
+            page_context_namespace: namespace,
+            shape_key: shapeKey,
+            admitted_template: {
+              source_kind: "page_request",
+              transport: "fetch",
+              method: "POST",
+              path: "/api/sns/web/v1/search/notes",
+              url: "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
+              status: 200,
+              captured_at: Date.now(),
+              observed_at: Date.now(),
+              page_context_namespace: namespace,
+              shape_key: shapeKey,
+              shape: {
+                command: "xhs.search",
+                method: "POST",
+                pathname: "/api/sns/web/v1/search/notes",
+                keyword,
+                page,
+                page_size: pageSize,
+                sort,
+                note_type: noteType
+              },
+              referrer: "https://www.xiaohongshu.com/search_result?keyword=test",
+              template_ready: true,
+              request_status: {
+                completion: "completed",
+                http_status: 200
+              },
+              request: {
+                headers: {
+                  accept: "application/json, text/plain, */*",
+                  "content-type": "application/json;charset=utf-8",
+                  "x-s": "signed-template",
+                  "x-t": "1700000000"
+                },
+                body: {
+                  keyword,
+                  page,
+                  page_size: pageSize,
+                  search_id: "captured-search-id",
+                  sort,
+                  note_type: noteType
+                }
+              },
+              response: {
+                headers: {
+                  "content-type": "application/json"
+                },
+                body: {
+                  code: 0,
+                  data: {
+                    items: []
+                  }
+                }
+              }
+            },
+            rejected_observation: null,
+            incompatible_observation: null,
+            available_shape_keys: [shapeKey]
+          }
+        });
+        return;
+      }
+
       if (requestType === "xhs-sign") {
         if ((mockWindow as Window & Record<string, unknown>).__disableMainWorldBridgeXhsSign__ === true) {
           return;
@@ -1200,14 +1295,13 @@ describe("content-script handler contract", () => {
     });
   });
 
-  it("does not trust forged main-world xhs-sign success by request id only", async () => {
+  it("ignores forged main-world xhs-sign success when xhs.search uses request-context exact-hit", async () => {
     await withMockMainWorld(async ({ mockWindow, mainWorldResultEvent }) => {
       const previousFetch = (globalThis as { fetch?: typeof fetch }).fetch;
       (mockWindow as Window & Record<string, unknown>).__disableMainWorldBridgeXhsSign__ = true;
       (globalThis as { document?: { cookie?: string } }).document!.cookie = "a1=session-token";
-
-      (globalThis as { fetch?: typeof fetch }).fetch = async () =>
-        new Response(
+      const mainWorldFetch = vi.fn(async () => {
+        return new Response(
           JSON.stringify({
             code: 0,
             data: { items: [] }
@@ -1217,6 +1311,11 @@ describe("content-script handler contract", () => {
             headers: { "content-type": "application/json" }
           }
         );
+      });
+      (mockWindow as Window & Record<string, unknown>).__mainWorldFetchHandler__ = mainWorldFetch;
+      (globalThis as { fetch?: typeof fetch }).fetch = async () => {
+        throw new Error("content script fetch should not be used for exact-hit xhs.search");
+      };
 
       let forgedReplySent = false;
       const emitForgedMainWorldResult = () => {
@@ -1299,15 +1398,14 @@ describe("content-script handler contract", () => {
         await waitForResult(results);
 
         expect(forgedReplySent).toBe(true);
-        expect(results[0]?.ok).toBe(false);
-        expect((results[0]?.error as { code?: string } | undefined)?.code).toBe(
-          "ERR_EXECUTION_FAILED"
-        );
+        expect(results[0]?.ok).toBe(true);
+        expect(mainWorldFetch).toHaveBeenCalledTimes(1);
         const payload = results[0]?.payload as Record<string, unknown>;
-        const details = payload?.details as Record<string, unknown>;
+        const summary = payload?.summary as Record<string, unknown>;
+        const requestContext = summary?.request_context as Record<string, unknown>;
         const fingerprintRuntime = payload?.fingerprint_runtime as Record<string, unknown>;
         const injection = fingerprintRuntime?.injection as Record<string, unknown>;
-        expect(details?.reason).toBe("SIGNATURE_ENTRY_MISSING");
+        expect(requestContext?.status).toBe("exact_hit");
         expect(injection?.installed).toBe(true);
       } finally {
         (globalThis as { fetch?: typeof fetch }).fetch = previousFetch;

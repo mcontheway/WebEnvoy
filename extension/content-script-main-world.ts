@@ -1,4 +1,12 @@
 import type { FingerprintRuntimeContext } from "../shared/fingerprint-profile.js";
+import type {
+  CapturedRequestContextLookup,
+  CapturedRequestContextLookupResult
+} from "./xhs-search-types.js";
+import {
+  resolveActiveVisitedPageContextNamespace,
+  resolveMainWorldPageContextNamespaceEventName
+} from "./xhs-search-types.js";
 
 const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
@@ -8,7 +16,8 @@ const DEFAULT_MAIN_WORLD_CALL_TIMEOUT_MS = 5_000;
 type MainWorldRequestType =
   | "fingerprint-install"
   | "fingerprint-verify"
-  | "page-state-read";
+  | "page-state-read"
+  | "captured-request-context-read";
 
 type MainWorldFetchResult = {
   status: number;
@@ -45,11 +54,15 @@ type MainWorldEventChannel = {
   secret: string;
   requestEvent: string;
   resultEvent: string;
+  namespaceEvent: string;
 };
 
 let mainWorldEventChannel: MainWorldEventChannel | null = null;
 let mainWorldResultListener: ((event: Event) => void) | null = null;
 let mainWorldResultListenerEventName: string | null = null;
+let latestMainWorldPageContextNamespace: string | null = null;
+let mainWorldPageContextNamespaceListener: ((event: Event) => void) | null = null;
+let mainWorldPageContextNamespaceListenerEventName: string | null = null;
 const pendingMainWorldRequests = new Map<
   string,
   {
@@ -89,11 +102,12 @@ const normalizeMainWorldSecret = (value: unknown): string | null =>
 
 const createMainWorldBootstrapDetail = (
   secret: string
-): { request_event: string; result_event: string } => {
+) => {
   const names = resolveMainWorldEventNamesForSecret(secret);
   return {
     request_event: names.requestEvent,
-    result_event: names.resultEvent
+    result_event: names.resultEvent,
+    namespace_event: names.namespaceEvent
   };
 };
 
@@ -108,11 +122,12 @@ const emitMainWorldBootstrap = (secret: string): void => {
 
 export const resolveMainWorldEventNamesForSecret = (
   secret: string
-): { requestEvent: string; resultEvent: string } => {
+): { requestEvent: string; resultEvent: string; namespaceEvent: string } => {
   const hashed = hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|${secret}`);
   return {
     requestEvent: `${MAIN_WORLD_EVENT_REQUEST_PREFIX}${hashed}`,
-    resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${hashed}`
+    resultEvent: `${MAIN_WORLD_EVENT_RESULT_PREFIX}${hashed}`,
+    namespaceEvent: resolveMainWorldPageContextNamespaceEventName(secret)
   };
 };
 
@@ -122,6 +137,42 @@ const createWindowEvent = (type: string, detail: unknown): Event => {
     return new CustomEventCtor(type, { detail });
   }
   return { type, detail } as unknown as Event;
+};
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const installMainWorldPageContextNamespaceListener = (eventName: string): void => {
+  if (typeof window === "undefined" || typeof window.addEventListener !== "function") {
+    return;
+  }
+  if (
+    mainWorldPageContextNamespaceListener &&
+    mainWorldPageContextNamespaceListenerEventName === eventName
+  ) {
+    return;
+  }
+  if (mainWorldPageContextNamespaceListener && mainWorldPageContextNamespaceListenerEventName) {
+    try {
+      window.removeEventListener(
+        mainWorldPageContextNamespaceListenerEventName,
+        mainWorldPageContextNamespaceListener as EventListener
+      );
+    } catch {
+      // noop in contract environments
+    }
+  }
+  mainWorldPageContextNamespaceListener = ((event: Event) => {
+    const detail = asRecord((event as CustomEvent<unknown>).detail);
+    const namespace = detail?.page_context_namespace;
+    if (typeof namespace === "string" && namespace.length > 0) {
+      latestMainWorldPageContextNamespace = namespace;
+    }
+  }) as EventListener;
+  mainWorldPageContextNamespaceListenerEventName = eventName;
+  window.addEventListener(eventName, mainWorldPageContextNamespaceListener as EventListener);
 };
 
 const onMainWorldResultEvent = (event: Event): void => {
@@ -184,6 +235,7 @@ export const installMainWorldEventChannelSecret = (secret: string | null): boole
   }
 
   const names = resolveMainWorldEventNamesForSecret(normalizedSecret);
+  installMainWorldPageContextNamespaceListener(names.namespaceEvent);
   if (
     mainWorldEventChannel?.secret === normalizedSecret &&
     mainWorldResultListenerEventName === names.resultEvent
@@ -196,7 +248,8 @@ export const installMainWorldEventChannelSecret = (secret: string | null): boole
   mainWorldEventChannel = {
     secret: normalizedSecret,
     requestEvent: names.requestEvent,
-    resultEvent: names.resultEvent
+    resultEvent: names.resultEvent,
+    namespaceEvent: names.namespaceEvent
   };
   mainWorldResultListener = onMainWorldResultEvent;
   mainWorldResultListenerEventName = names.resultEvent;
@@ -210,6 +263,24 @@ export const resetMainWorldEventChannelForContract = (): void => {
     pending.reject(new Error("main world request reset"));
   }
   pendingMainWorldRequests.clear();
+  latestMainWorldPageContextNamespace = null;
+  if (
+    mainWorldPageContextNamespaceListener &&
+    mainWorldPageContextNamespaceListenerEventName &&
+    typeof window !== "undefined" &&
+    typeof window.removeEventListener === "function"
+  ) {
+    try {
+      window.removeEventListener(
+        mainWorldPageContextNamespaceListenerEventName,
+        mainWorldPageContextNamespaceListener as EventListener
+      );
+    } catch {
+      // noop in contract environments
+    }
+  }
+  mainWorldPageContextNamespaceListener = null;
+  mainWorldPageContextNamespaceListenerEventName = null;
   detachMainWorldResultListener();
   mainWorldEventChannel = null;
 };
@@ -280,6 +351,60 @@ export const readPageStateViaMainWorld = async (): Promise<Record<string, unknow
   return typeof result === "object" && result !== null && !Array.isArray(result)
     ? (result as Record<string, unknown>)
     : null;
+};
+
+const asCapturedRequestContextLookupResult = (
+  value: unknown
+): CapturedRequestContextLookupResult | null => {
+  const record = asRecord(value);
+  if (
+    !record ||
+    typeof record.page_context_namespace !== "string" ||
+    typeof record.shape_key !== "string" ||
+    !Array.isArray(record.available_shape_keys)
+  ) {
+    return null;
+  }
+  return {
+    page_context_namespace: record.page_context_namespace,
+    shape_key: record.shape_key,
+    admitted_template: asRecord(record.admitted_template) as CapturedRequestContextLookupResult["admitted_template"],
+    rejected_observation: asRecord(record.rejected_observation) as CapturedRequestContextLookupResult["rejected_observation"],
+    incompatible_observation: asRecord(record.incompatible_observation) as CapturedRequestContextLookupResult["incompatible_observation"],
+    available_shape_keys: record.available_shape_keys.filter(
+      (item): item is string => typeof item === "string"
+    )
+  };
+};
+
+export const readCapturedRequestContextViaMainWorld = async (
+  input: CapturedRequestContextLookup
+): Promise<CapturedRequestContextLookupResult | null> => {
+  if (mainWorldEventChannel?.namespaceEvent) {
+    installMainWorldPageContextNamespaceListener(mainWorldEventChannel.namespaceEvent);
+  }
+  const pageContextNamespace = resolveActiveVisitedPageContextNamespace(
+    input.page_context_namespace,
+    latestMainWorldPageContextNamespace
+  );
+  const result = await mainWorldCall<unknown>({
+    type: "captured-request-context-read",
+    payload: {
+      method: input.method,
+      path: input.path,
+      ...(pageContextNamespace ? { page_context_namespace: pageContextNamespace } : {}),
+      shape_key: input.shape_key
+    }
+  });
+  const normalized = asCapturedRequestContextLookupResult(result);
+  if (
+    normalized &&
+    typeof normalized.page_context_namespace === "string" &&
+    normalized.page_context_namespace.length > 0
+  ) {
+    latestMainWorldPageContextNamespace = normalized.page_context_namespace;
+  }
+  return normalized;
 };
 
 const resolveMainWorldRequestUrl = (value: string): string => {

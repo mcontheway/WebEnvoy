@@ -55,6 +55,71 @@ export interface FetchResult {
   body: unknown;
 }
 
+export type CapturedRequestContextMethod = "POST";
+export type CapturedRequestContextCommand = "xhs.search";
+export type PageContextNamespace = string;
+export type CapturedRequestContextRejectionReason =
+  | "synthetic_request_rejected"
+  | "failed_request_rejected"
+  | "shape_mismatch";
+
+export interface SearchRequestShape {
+  command: CapturedRequestContextCommand;
+  method: CapturedRequestContextMethod;
+  pathname: typeof SEARCH_ENDPOINT;
+  keyword: string;
+  page: number;
+  page_size: number;
+  sort: string;
+  note_type: number;
+}
+
+export interface CapturedRequestContextLookup {
+  method: CapturedRequestContextMethod;
+  path: typeof SEARCH_ENDPOINT;
+  page_context_namespace: PageContextNamespace;
+  shape_key: string;
+}
+
+export interface CapturedRequestContextArtifact {
+  source_kind: "page_request" | "synthetic_request";
+  transport: "fetch";
+  method: CapturedRequestContextMethod;
+  path: typeof SEARCH_ENDPOINT;
+  url: string;
+  status: number;
+  captured_at: number;
+  observed_at?: number;
+  page_context_namespace: PageContextNamespace;
+  shape_key: string;
+  shape: SearchRequestShape;
+  referrer?: string | null;
+  template_ready?: boolean;
+  rejection_reason?: CapturedRequestContextRejectionReason | null;
+  incompatibility_reason?: "shape_mismatch" | null;
+  request_status?: {
+    completion: "completed" | "failed";
+    http_status: number | null;
+  };
+  request: {
+    headers: Record<string, string>;
+    body: unknown;
+  };
+  response: {
+    headers: Record<string, string>;
+    body: unknown;
+  };
+}
+
+export interface CapturedRequestContextLookupResult {
+  page_context_namespace: PageContextNamespace;
+  shape_key: string;
+  admitted_template: CapturedRequestContextArtifact | null;
+  rejected_observation: CapturedRequestContextArtifact | null;
+  incompatible_observation: CapturedRequestContextArtifact | null;
+  available_shape_keys: string[];
+}
+
 export interface XhsSearchEnvironment {
   now(): number;
   randomId(): string;
@@ -64,6 +129,9 @@ export interface XhsSearchEnvironment {
   getCookie(): string;
   getPageStateRoot?(): unknown;
   readPageStateRoot?(): Promise<unknown>;
+  readCapturedRequestContext?(
+    input: CapturedRequestContextLookup
+  ): Promise<CapturedRequestContextLookupResult | null>;
   callSignature(uri: string, payload: JsonRecord): Promise<SignatureResult>;
   fetchJson(input: {
     url: string;
@@ -246,3 +314,140 @@ export interface XhsExecutionContext {
 }
 
 export const SEARCH_ENDPOINT = "/api/sns/web/v1/search/notes";
+export const WEBENVOY_SYNTHETIC_REQUEST_HEADER = "x-webenvoy-synthetic-request";
+const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
+const MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT_PREFIX = "__mw_ns__";
+
+const hashMainWorldEventChannel = (value: string): string => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+};
+
+const asInteger = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+  }
+  return null;
+};
+
+const toTrimmedString = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+
+export const normalizeSearchRequestShapeInput = (input: {
+  keyword: unknown;
+  page?: unknown;
+  page_size?: unknown;
+  sort?: unknown;
+  note_type?: unknown;
+}): Omit<SearchRequestShape, "command" | "method" | "pathname"> | null => {
+  const keyword = toTrimmedString(input.keyword);
+  const page = input.page === undefined ? 1 : asInteger(input.page);
+  const pageSize = input.page_size === undefined ? 20 : asInteger(input.page_size);
+  const sort = input.sort === undefined ? "general" : toTrimmedString(input.sort);
+  const noteType = input.note_type === undefined ? 0 : asInteger(input.note_type);
+  if (!keyword || page === null || pageSize === null || sort === null || noteType === null) {
+    return null;
+  }
+  return {
+    keyword,
+    page,
+    page_size: pageSize,
+    sort,
+    note_type: noteType
+  };
+};
+
+export const createSearchRequestShape = (input: {
+  keyword: unknown;
+  page?: unknown;
+  page_size?: unknown;
+  sort?: unknown;
+  note_type?: unknown;
+}): SearchRequestShape | null => {
+  const normalized = normalizeSearchRequestShapeInput(input);
+  if (!normalized) {
+    return null;
+  }
+  return {
+    command: "xhs.search",
+    method: "POST",
+    pathname: SEARCH_ENDPOINT,
+    ...normalized
+  };
+};
+
+export const serializeSearchRequestShape = (shape: SearchRequestShape): string =>
+  JSON.stringify(shape);
+
+export const resolveMainWorldPageContextNamespaceEventName = (secret: string): string =>
+  `${MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT_PREFIX}${hashMainWorldEventChannel(
+    `${MAIN_WORLD_EVENT_NAMESPACE}|namespace|${secret.trim()}`
+  )}`;
+
+export const createPageContextNamespace = (href: string): PageContextNamespace => {
+  const normalized = href.trim();
+  if (normalized.length === 0) {
+    return "about:blank";
+  }
+
+  try {
+    const parsed = new URL(normalized, "https://www.xiaohongshu.com/");
+    const pathname = parsed.pathname.length > 0 ? parsed.pathname : "/";
+    const queryIdentity = parsed.search.length > 0 ? `${pathname}${parsed.search}` : pathname;
+    const documentTimeOrigin =
+      typeof globalThis.performance?.timeOrigin === "number" &&
+      Number.isFinite(globalThis.performance.timeOrigin)
+        ? Math.trunc(globalThis.performance.timeOrigin)
+        : null;
+    return documentTimeOrigin === null
+      ? `${parsed.origin}${queryIdentity}`
+      : `${parsed.origin}${queryIdentity}#doc=${documentTimeOrigin}`;
+  } catch {
+    return normalized;
+  }
+};
+
+export const createVisitedPageContextNamespace = (
+  href: string,
+  visitSequence: number
+): PageContextNamespace => {
+  const baseNamespace = createPageContextNamespace(href);
+  return visitSequence > 0 ? `${baseNamespace}|visit=${visitSequence}` : baseNamespace;
+};
+
+export const stripVisitedPageContextNamespace = (
+  namespace: string
+): PageContextNamespace => {
+  const visitSuffixIndex = namespace.indexOf("|visit=");
+  return visitSuffixIndex >= 0 ? namespace.slice(0, visitSuffixIndex) : namespace;
+};
+
+export const resolveActiveVisitedPageContextNamespace = (
+  requestedNamespace: string | null | undefined,
+  currentVisitedNamespace: string | null | undefined
+): PageContextNamespace | null => {
+  const normalizedRequested =
+    typeof requestedNamespace === "string" && requestedNamespace.length > 0
+      ? (requestedNamespace as PageContextNamespace)
+      : null;
+  const normalizedCurrentVisited =
+    typeof currentVisitedNamespace === "string" && currentVisitedNamespace.length > 0
+      ? (currentVisitedNamespace as PageContextNamespace)
+      : null;
+  if (
+    normalizedRequested &&
+    normalizedCurrentVisited &&
+    normalizedRequested === stripVisitedPageContextNamespace(normalizedCurrentVisited)
+  ) {
+    return normalizedCurrentVisited;
+  }
+  return normalizedRequested ?? normalizedCurrentVisited;
+};

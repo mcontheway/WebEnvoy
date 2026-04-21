@@ -1,11 +1,14 @@
 import {
+  createPageContextNamespace,
+  createSearchRequestShape,
   type JsonRecord,
   type SearchExecutionResult,
   type XhsExecutionContext,
   type XhsSearchEnvironment,
   type XhsSearchOptions,
   type XhsSearchParams,
-  SEARCH_ENDPOINT
+  SEARCH_ENDPOINT,
+  serializeSearchRequestShape
 } from "./xhs-search-types.js";
 import { createAuditRecord, createGateOnlySuccess, resolveGate } from "./xhs-search-gate.js";
 import {
@@ -29,6 +32,49 @@ const asRecord = (value: unknown): JsonRecord | null =>
     ? (value as JsonRecord)
     : null;
 
+const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60 * 1000;
+
+type RequestContextFailureReason =
+  | "template_missing"
+  | "template_stale"
+  | "shape_mismatch"
+  | "rejected_source";
+
+type RequestContextState =
+  | {
+      status: "hit";
+      template: {
+        request: {
+          headers: Record<string, string>;
+          body: unknown;
+        };
+        referrer: string | null;
+        capturedAt: number;
+        pageContextNamespace: string;
+      };
+      pageContextNamespace: string;
+      shapeKey: string;
+    }
+  | {
+      status: "miss";
+      failureReason: RequestContextFailureReason;
+      detailReason?: "synthetic_request_rejected" | "failed_request_rejected";
+      pageContextNamespace: string;
+      shapeKey: string;
+      availableShapeKeys: string[];
+      observedAt?: number;
+    };
+
+const serializeRequestBody = (value: unknown): string | undefined => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  return JSON.stringify(value);
+};
+
 const withExecutionAuditInFailurePayload = (
   result: SearchExecutionResult,
   executionAudit: JsonRecord | null
@@ -43,6 +89,110 @@ const withExecutionAuditInFailurePayload = (
       ...result.payload,
       execution_audit: executionAudit
     }
+  };
+};
+
+const resolveRequestContextState = async (
+  input: {
+    params: XhsSearchParams;
+    options: XhsSearchOptions;
+  },
+  env: XhsSearchEnvironment
+): Promise<RequestContextState> => {
+  const shape = createSearchRequestShape({
+    keyword: input.params.query,
+    page: input.params.page ?? 1,
+    page_size: input.params.limit ?? 20,
+    sort: input.params.sort ?? "general",
+    note_type: input.params.note_type ?? 0
+  });
+  const fallbackNamespace = createPageContextNamespace(env.getLocationHref());
+  if (!shape || !env.readCapturedRequestContext) {
+    return {
+      status: "miss",
+      failureReason: "template_missing",
+      pageContextNamespace: fallbackNamespace,
+      shapeKey: shape ? serializeSearchRequestShape(shape) : "",
+      availableShapeKeys: []
+    };
+  }
+
+  const shapeKey = serializeSearchRequestShape(shape);
+  const lookup = await env.readCapturedRequestContext({
+    method: "POST",
+    path: SEARCH_ENDPOINT,
+    page_context_namespace: fallbackNamespace,
+    shape_key: shapeKey
+  });
+
+  const pageContextNamespace = lookup?.page_context_namespace ?? fallbackNamespace;
+  const availableShapeKeys = lookup?.available_shape_keys ?? [];
+  const admittedTemplate = lookup?.admitted_template ?? null;
+  const rejectedObservation = lookup?.rejected_observation ?? null;
+  const incompatibleObservation = lookup?.incompatible_observation ?? null;
+
+  if (admittedTemplate && admittedTemplate.template_ready !== false) {
+    const observedAt = admittedTemplate.observed_at ?? admittedTemplate.captured_at;
+    if (env.now() - observedAt > REQUEST_CONTEXT_FRESHNESS_WINDOW_MS) {
+      return {
+        status: "miss",
+        failureReason: "template_stale",
+        pageContextNamespace,
+        shapeKey,
+        availableShapeKeys,
+        observedAt
+      };
+    }
+    return {
+      status: "hit",
+      template: {
+        request: {
+          headers: admittedTemplate.request.headers,
+          body: admittedTemplate.request.body
+        },
+        referrer:
+          typeof admittedTemplate.referrer === "string" ? admittedTemplate.referrer : null,
+        capturedAt: admittedTemplate.captured_at,
+        pageContextNamespace
+      },
+      pageContextNamespace,
+      shapeKey
+    };
+  }
+
+  if (rejectedObservation) {
+    return {
+      status: "miss",
+      failureReason: "rejected_source",
+      detailReason:
+        rejectedObservation.rejection_reason === "failed_request_rejected"
+          ? "failed_request_rejected"
+          : "synthetic_request_rejected",
+      pageContextNamespace,
+      shapeKey,
+      availableShapeKeys,
+      observedAt: rejectedObservation.observed_at ?? rejectedObservation.captured_at
+    };
+  }
+
+  if (incompatibleObservation || availableShapeKeys.length > 0) {
+    return {
+      status: "miss",
+      failureReason: "shape_mismatch",
+      pageContextNamespace,
+      shapeKey,
+      availableShapeKeys,
+      observedAt:
+        incompatibleObservation?.observed_at ?? incompatibleObservation?.captured_at ?? undefined
+    };
+  }
+
+  return {
+    status: "miss",
+    failureReason: "template_missing",
+    pageContextNamespace,
+    shapeKey,
+    availableShapeKeys
   };
 };
 
@@ -352,20 +502,43 @@ export const executeXhsSearch = async (
     sort: input.params.sort ?? "general",
     note_type: input.params.note_type ?? 0
   };
-
-  let signature: { "X-s": string; "X-t": string | number };
-  try {
-    signature = await env.callSignature(SEARCH_ENDPOINT, payload);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+  const requestContextState = await resolveRequestContextState(
+    {
+      params: input.params,
+      options: input.options
+    },
+    env
+  );
+  if (requestContextState.status !== "hit") {
+    const reason =
+      requestContextState.failureReason === "shape_mismatch" ||
+      requestContextState.failureReason === "rejected_source"
+        ? "REQUEST_CONTEXT_INCOMPATIBLE"
+        : "REQUEST_CONTEXT_MISSING";
+    const summaryMap: Record<RequestContextFailureReason, string> = {
+      template_missing: "当前页面现场缺少可复用的搜索请求模板",
+      template_stale: "当前页面现场的搜索请求模板已过期",
+      shape_mismatch: "当前页面现场存在不同 shape 的搜索请求模板",
+      rejected_source: "当前页面现场的搜索请求来源已被拒绝"
+    };
     return withExecutionAuditInFailurePayload(
       createFailure(
         "ERR_EXECUTION_FAILED",
-        "页面签名入口不可用",
+        summaryMap[requestContextState.failureReason],
         {
           ability_id: input.abilityId,
           stage: "execution",
-          reason: "SIGNATURE_ENTRY_MISSING"
+          reason,
+          request_context_reason: requestContextState.failureReason,
+          page_context_namespace: requestContextState.pageContextNamespace,
+          shape_key: requestContextState.shapeKey,
+          available_shape_keys: requestContextState.availableShapeKeys,
+          ...(requestContextState.detailReason
+            ? { rejected_source_reason: requestContextState.detailReason }
+            : {}),
+          ...(typeof requestContextState.observedAt === "number"
+            ? { request_context_observed_at: requestContextState.observedAt }
+            : {})
         },
         createObservability({
           href: env.getLocationHref(),
@@ -373,18 +546,18 @@ export const executeXhsSearch = async (
           readyState: env.getReadyState(),
           requestId: `req-${env.randomId()}`,
           outcome: "failed",
-          failureReason: message,
+          failureReason: reason,
           includeKeyRequest: false,
           failureSite: {
             stage: "action",
             component: "page",
-            target: "window._webmsxyw",
-            summary: "页面签名入口不可用"
+            target: "captured_request_context",
+            summary: summaryMap[requestContextState.failureReason]
           }
         }),
         createDiagnosis({
-          reason: "SIGNATURE_ENTRY_MISSING",
-          summary: "页面签名入口不可用"
+          reason,
+          summary: summaryMap[requestContextState.failureReason]
         }),
         gate,
         auditRecord
@@ -394,14 +567,48 @@ export const executeXhsSearch = async (
   }
 
   const headers: Record<string, string> = {
-    Accept: "application/json, text/plain, */*",
-    "Content-Type": "application/json;charset=utf-8",
-    "X-s": String(signature["X-s"]),
-    "X-t": String(signature["X-t"]),
-    "X-S-Common": resolveXsCommon(input.options.x_s_common),
-    "x-b3-traceid": env.randomId().replace(/-/g, ""),
-    "x-xray-traceid": env.randomId().replace(/-/g, "")
+    ...requestContextState.template.request.headers
   };
+  const requestBody = serializeRequestBody(requestContextState.template.request.body);
+  if (typeof requestBody !== "string") {
+    return withExecutionAuditInFailurePayload(
+      createFailure(
+        "ERR_EXECUTION_FAILED",
+        "当前页面现场缺少可复用的搜索请求模板",
+        {
+          ability_id: input.abilityId,
+          stage: "execution",
+          reason: "REQUEST_CONTEXT_MISSING",
+          request_context_reason: "template_missing",
+          page_context_namespace: requestContextState.pageContextNamespace,
+          shape_key: requestContextState.shapeKey,
+          available_shape_keys: []
+        },
+        createObservability({
+          href: env.getLocationHref(),
+          title: env.getDocumentTitle(),
+          readyState: env.getReadyState(),
+          requestId: `req-${env.randomId()}`,
+          outcome: "failed",
+          failureReason: "REQUEST_CONTEXT_MISSING",
+          includeKeyRequest: false,
+          failureSite: {
+            stage: "action",
+            component: "page",
+            target: "captured_request_context",
+            summary: "当前页面现场缺少可复用的搜索请求模板"
+          }
+        }),
+        createDiagnosis({
+          reason: "REQUEST_CONTEXT_MISSING",
+          summary: "当前页面现场缺少可复用的搜索请求模板"
+        }),
+        gate,
+        auditRecord
+      ),
+      gate.execution_audit as JsonRecord | null
+    );
+  }
 
   let response: { status: number; body: unknown };
   try {
@@ -409,9 +616,9 @@ export const executeXhsSearch = async (
       url: SEARCH_ENDPOINT,
       method: "POST",
       headers,
-      body: JSON.stringify(payload),
+      body: requestBody,
       pageContextRequest: true,
-      referrer: env.getLocationHref(),
+      referrer: requestContextState.template.referrer ?? env.getLocationHref(),
       referrerPolicy: "strict-origin-when-cross-origin",
       timeoutMs:
         typeof input.options.timeout_ms === "number" && Number.isFinite(input.options.timeout_ms)
@@ -482,6 +689,7 @@ export const executeXhsSearch = async (
   }
 
   const count = parseCount(response.body);
+  const requestBodyRecord = asRecord(requestContextState.template.request.body);
   return {
     ok: true,
     payload: {
@@ -493,7 +701,10 @@ export const executeXhsSearch = async (
           outcome: "success",
           data_ref: {
             query: input.params.query,
-            search_id: payload.search_id
+            search_id:
+              typeof requestBodyRecord?.search_id === "string"
+                ? requestBodyRecord.search_id
+                : payload.search_id
           },
           metrics: {
             count,
@@ -515,7 +726,13 @@ export const executeXhsSearch = async (
         execution_audit: gate.execution_audit,
         approval_record: gate.approval_record,
         risk_state_output: resolveRiskStateOutput(gate, auditRecord),
-        audit_record: auditRecord
+        audit_record: auditRecord,
+        request_context: {
+          status: "exact_hit",
+          page_context_namespace: requestContextState.pageContextNamespace,
+          shape_key: requestContextState.shapeKey,
+          captured_at: requestContextState.template.capturedAt
+        }
       },
       observability: createObservability({
         href: env.getLocationHref(),

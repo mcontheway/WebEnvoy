@@ -222,7 +222,15 @@ const buildContentScriptBundle = async () => {
   const xhsSearchTypesModule = renderClassicModule({
     moduleVar: "__webenvoy_module_xhs_search_types",
     sourceBody: xhsSearchTypesSource,
-    exports: ["SEARCH_ENDPOINT"]
+    exports: [
+      "SEARCH_ENDPOINT",
+      "createPageContextNamespace",
+      "createSearchRequestShape",
+      "createVisitedPageContextNamespace",
+      "resolveActiveVisitedPageContextNamespace",
+      "resolveMainWorldPageContextNamespaceEventName",
+      "serializeSearchRequestShape"
+    ]
   });
 
   const xhsSearchTelemetryModule = renderClassicModule({
@@ -275,7 +283,12 @@ const buildContentScriptBundle = async () => {
   const xhsSearchExecutionModule = renderClassicModule({
     moduleVar: "__webenvoy_module_xhs_search_execution",
     prelude: [
-      "const { SEARCH_ENDPOINT } = __webenvoy_module_xhs_search_types;",
+      "const {",
+      "  SEARCH_ENDPOINT,",
+      "  createPageContextNamespace,",
+      "  createSearchRequestShape,",
+      "  serializeSearchRequestShape",
+      "} = __webenvoy_module_xhs_search_types;",
       "const {",
       "  createAuditRecord,",
       "  createGateOnlySuccess,",
@@ -352,12 +365,19 @@ const buildContentScriptBundle = async () => {
 
   const contentScriptMainWorldModule = renderClassicModule({
     moduleVar: "__webenvoy_module_content_script_main_world",
+    prelude: [
+      "const {",
+      "  resolveActiveVisitedPageContextNamespace,",
+      "  resolveMainWorldPageContextNamespaceEventName",
+      "} = __webenvoy_module_xhs_search_types;"
+    ].join("\n"),
     sourceBody: contentScriptMainWorldSource,
     exports: [
       "encodeMainWorldPayload",
       "installFingerprintRuntimeViaMainWorld",
       "installMainWorldEventChannelSecret",
       "MAIN_WORLD_EVENT_BOOTSTRAP",
+      "readCapturedRequestContextViaMainWorld",
       "readPageStateViaMainWorld",
       "requestXhsSearchJsonViaMainWorld",
       "resetMainWorldEventChannelForContract",
@@ -414,6 +434,7 @@ const buildContentScriptBundle = async () => {
       "  installFingerprintRuntimeViaMainWorld,",
       "  installMainWorldEventChannelSecret,",
       "  MAIN_WORLD_EVENT_BOOTSTRAP,",
+      "  readCapturedRequestContextViaMainWorld,",
       "  readPageStateViaMainWorld,",
       "  requestXhsSearchJsonViaMainWorld,",
       "  resetMainWorldEventChannelForContract,",
@@ -427,6 +448,7 @@ const buildContentScriptBundle = async () => {
       "encodeMainWorldPayload",
       "installFingerprintRuntimeViaMainWorld",
       "installMainWorldEventChannelSecret",
+      "readCapturedRequestContextViaMainWorld",
       "readPageStateViaMainWorld",
       "resolveFingerprintContextForContract",
       "validateXhsCommandInputForExtension",
