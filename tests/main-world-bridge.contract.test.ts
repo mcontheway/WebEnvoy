@@ -531,6 +531,62 @@ describe("main-world bridge contract", () => {
     });
   });
 
+  it("preserves a previously admitted exact-shape template when a later synthetic replay is rejected", async () => {
+    const env = createMockMainWorldEnvironment();
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+    env.setFetchHandler(async () => {
+      return new Response(JSON.stringify({ code: 0, data: { items: [] } }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    await (env.mockWindow.fetch as typeof fetch)(`https://www.xiaohongshu.com${SEARCH_ENDPOINT}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ keyword: "露营" })
+    });
+
+    await (env.mockWindow.fetch as typeof fetch)(`https://www.xiaohongshu.com${SEARCH_ENDPOINT}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-webenvoy-synthetic-request": "1"
+      },
+      body: JSON.stringify({ keyword: "露营" })
+    });
+
+    const result = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: createPageContextNamespace(SEARCH_PAGE_HREF),
+      shapeKey: createShapeKey({ keyword: "露营" })
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          template_ready: true,
+          source_kind: "page_request"
+        },
+        rejected_observation: {
+          rejection_reason: "synthetic_request_rejected"
+        }
+      }
+    });
+  });
+
   it("stores rejected fetches as rejected observations with failed_request_rejected", async () => {
     const env = createMockMainWorldEnvironment();
     installMockDomGlobals({

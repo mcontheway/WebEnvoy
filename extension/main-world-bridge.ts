@@ -935,7 +935,9 @@ const storeCapturedRequestContext = (
       null
     );
   }
-  bucket.admittedTemplate = null;
+  if (artifact.rejection_reason === "failed_request_rejected") {
+    bucket.admittedTemplate = null;
+  }
   bucket.rejectedObservation = artifact;
 };
 
