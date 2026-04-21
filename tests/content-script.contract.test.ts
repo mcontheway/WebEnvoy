@@ -987,6 +987,74 @@ describe("content-script bootstrap contract", () => {
     expect(sessionStorage.read(FINGERPRINT_CONTEXT_CACHE_KEY)).toBeNull();
   });
 
+  it("installs the forwarded main-world secret before handling xhs read commands", async () => {
+    const { window, readRequests } = createCapturedRequestContextProbeWindow();
+    (globalThis as { window?: unknown }).window = window;
+    const handler = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_700_000_000_000,
+        randomId: () => "rand-001",
+        getLocationHref: () => "https://www.xiaohongshu.com/search_result?keyword=contract",
+        getDocumentTitle: () => "contract",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=present",
+        callSignature: async () => ({ "X-s": "signed", "X-t": "1700000000" }),
+        fetchJson: async () => ({ status: 200, body: { items: [] } })
+      }
+    });
+    const resultListener = vi.fn();
+    handler.onResult(resultListener);
+
+    expect(
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "run-contract-main-world-secret-001",
+        runId: "run-contract-main-world-secret-001",
+        tabId: 32,
+        profile: "profile-a",
+        cwd: "/workspace/WebEnvoy",
+        timeoutMs: 1_000,
+        command: "xhs.search",
+        params: {
+          session_id: "nm-session-001"
+        },
+        commandParams: {
+          main_world_secret: "secret-contract-main-world-001",
+          ability: { id: "xhs.search.notes.v1", layer: "L3", action: "read" },
+          input: { query: "contract" },
+          options: {
+            simulate_result: "success",
+            target_domain: "www.xiaohongshu.com",
+            target_page: "search_result_tab",
+            action_type: "read",
+            requested_execution_mode: "dry_run",
+            risk_state: "paused"
+          }
+        }
+      })
+    ).toBe(true);
+    await Promise.resolve();
+
+    const lookup = await contentScriptHandlerModule.readCapturedRequestContextViaMainWorld({
+      method: "POST",
+      path: "/api/sns/web/v1/search/notes",
+      page_context_namespace: createPageContextNamespace(window.location.href),
+      shape_key:
+        '{"command":"xhs.search","method":"POST","pathname":"/api/sns/web/v1/search/notes","keyword":"contract"}'
+    });
+
+    expect(readRequests).toHaveLength(1);
+    expect(lookup).toMatchObject({
+      shape_key:
+        '{"command":"xhs.search","method":"POST","pathname":"/api/sns/web/v1/search/notes","keyword":"contract"}'
+    });
+    expect(resultListener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "run-contract-main-world-secret-001"
+      })
+    );
+  });
+
   it("auto-installs from startup payload (not scoped cache) during bootstrap across profile/run", async () => {
     const bootstrapContext = createFingerprintContext();
     const foreignContext = {

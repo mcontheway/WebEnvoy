@@ -1337,7 +1337,7 @@ describe("extension service worker / bootstrap and trust", () => {
       timeout_ms: 50
     });
     await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     runtimeMessageListeners[0]?.(
       {
@@ -1367,7 +1367,7 @@ describe("extension service worker / bootstrap and trust", () => {
         }
       }
     );
-    await Promise.resolve();
+    await waitForBridgeTurn();
     await Promise.resolve();
 
     firstPort.onMessageListeners[0]?.({
@@ -2521,8 +2521,7 @@ describe("extension service worker / bootstrap and trust", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     runtimeMessageListeners[0]?.(
       {
@@ -2548,7 +2547,7 @@ describe("extension service worker / bootstrap and trust", () => {
         }
       }
     );
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     const forwardedError = firstPort.postMessage.mock.calls
       .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
@@ -2823,6 +2822,130 @@ describe("extension service worker / bootstrap and trust", () => {
         command: "xhs.user_home"
       })
     );
+  });
+
+  it("binds the ready bootstrap main-world channel to later xhs.detail target tabs", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(
+      async (filter: { currentWindow?: boolean; url?: string | string[] }) => {
+        if (filter.url) {
+          return [
+            { id: 11, url: "https://www.xiaohongshu.com/search_result?keyword=AI", active: true },
+            { id: 42, url: "https://www.xiaohongshu.com/explore/note-target-001", active: false }
+          ];
+        }
+        return [{ id: 11 }];
+      }
+    );
+    const fingerprintContext = createFingerprintRuntimeContext({
+      live_allowed: true,
+      live_decision: "allowed",
+      allowed_execution_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+      reason_codes: []
+    });
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-xhs-detail-main-world-cross-tab-001",
+      runtimeContextId: "ctx-xhs-detail-main-world-cross-tab-001",
+      profile: "profile-a",
+      sessionId: "nm-session-001",
+      fingerprintContext,
+      tabId: 11,
+      tabUrl: "https://www.xiaohongshu.com/search_result?keyword=AI"
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-xhs-detail-main-world-cross-tab-bootstrap-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-detail-main-world-cross-tab-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-xhs-detail-main-world-cross-tab-001",
+          runtime_context_id: "ctx-xhs-detail-main-world-cross-tab-001",
+          profile: "profile-a",
+          target_tab_id: 11,
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-xhs-detail-main-world-cross-tab-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-xhs-detail-main-world-cross-tab-bootstrap-001",
+      status: "success",
+      payload: expect.objectContaining({
+        method: "runtime.bootstrap.ack",
+        result: expect.objectContaining({
+          status: "ready"
+        })
+      })
+    });
+
+    chromeApi.tabs.sendMessage.mockClear();
+    executeScript.mockClear();
+
+    const liveRequestId = "run-xhs-detail-main-world-cross-tab-live-001";
+    firstPort.onMessageListeners[0]?.({
+      id: liveRequestId,
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-xhs-detail-main-world-cross-tab-001",
+        command: "xhs.detail",
+        command_params: createRequestBoundXhsCommandParams({
+          runId: "run-xhs-detail-main-world-cross-tab-001",
+          requestId: liveRequestId,
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          fingerprint_context: fingerprintContext,
+          target_tab_id: 42,
+          target_page: "explore_detail_tab",
+          ability: { id: "xhs.note.detail.v1", layer: "L3", action: "read" },
+          input: { note_id: "note-target-001" }
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    await vi.waitFor(() => {
+      expect(executeScript).toHaveBeenCalledWith({
+        target: { tabId: 42 },
+        world: "MAIN",
+        files: ["build/main-world-bridge.js"]
+      });
+    });
+    await vi.waitFor(() => {
+      expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({
+          id: liveRequestId,
+          command: "xhs.detail",
+          commandParams: expect.objectContaining({
+            main_world_secret: "secret-xhs-detail-main-world-cross-tab-001"
+          })
+        })
+      );
+    });
   });
 
   it("allows explicit target tab in another window", async () => {
@@ -4322,8 +4445,7 @@ describe("extension service worker / bootstrap and trust", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       32,
@@ -6170,8 +6292,7 @@ describe("extension service worker / bootstrap and trust", () => {
       },
       timeout_ms: 100
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForBridgeTurn();
 
     expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
       32,

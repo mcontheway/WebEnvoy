@@ -1803,10 +1803,34 @@ class ChromeBackgroundBridge {
         }
         return trusted;
     }
+    #resolveReadyBootstrapFingerprintContext(request, requestedFingerprintContext) {
+        if (!requestedFingerprintContext) {
+            return null;
+        }
+        const profile = asNonEmptyString(request.profile);
+        const runId = asNonEmptyString(request.params.run_id);
+        const sessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
+        if (!profile || !runId || !sessionId) {
+            return null;
+        }
+        const bootstrap = this.#runtimeTrustState.getBootstrap(profile);
+        if (!bootstrap) {
+            return null;
+        }
+        if (bootstrap.sessionId !== sessionId ||
+            bootstrap.runId !== runId ||
+            bootstrap.status !== "ready" ||
+            bootstrap.serializedFingerprintRuntime !==
+                serializeFingerprintRuntimeContext(requestedFingerprintContext)) {
+            return null;
+        }
+        return { ...requestedFingerprintContext };
+    }
     #resolveValidatedTrustedFingerprintContext(request, requestedFingerprintContext) {
+        const readyBootstrapFingerprintContext = this.#resolveReadyBootstrapFingerprintContext(request, requestedFingerprintContext);
         const trustedEntry = this.#resolveTrustedFingerprintContext(request);
         if (!trustedEntry) {
-            return null;
+            return readyBootstrapFingerprintContext;
         }
         const trusted = trustedEntry.fingerprintRuntime;
         if (requestedFingerprintContext &&
@@ -1827,7 +1851,7 @@ class ChromeBackgroundBridge {
             (!requestTargetBinding ||
                 requestTargetBinding.tabId !== trustedEntry.sourceTabId ||
                 requestTargetBinding.domain !== trustedEntry.sourceDomain)) {
-            return null;
+            return readyBootstrapFingerprintContext;
         }
         return { ...trusted };
     }
@@ -2729,6 +2753,20 @@ class ChromeBackgroundBridge {
                 }
             });
             return;
+        }
+        const readyBootstrapMainWorldSecret = this.#resolveReadyBootstrapMainWorldSecret(dispatchRequest, command);
+        if (readyBootstrapMainWorldSecret) {
+            commandParams = {
+                ...commandParams,
+                main_world_secret: readyBootstrapMainWorldSecret
+            };
+            dispatchRequest = {
+                ...dispatchRequest,
+                params: {
+                    ...dispatchRequest.params,
+                    command_params: commandParams
+                }
+            };
         }
         if (this.#shouldEnsureMainWorldBridge(command, xhsForwardState.requestedExecutionMode)) {
             try {
@@ -4283,7 +4321,28 @@ class ChromeBackgroundBridge {
     }
     #shouldEnsureMainWorldBridge(command, requestedExecutionMode) {
         void requestedExecutionMode;
-        return command === "runtime.bootstrap";
+        return command === "runtime.bootstrap" || XHS_GATE_COMMANDS.has(command);
+    }
+    #resolveReadyBootstrapMainWorldSecret(request, command) {
+        if (!XHS_GATE_COMMANDS.has(command)) {
+            return null;
+        }
+        const profile = asNonEmptyString(request.profile);
+        const runId = asNonEmptyString(request.params.run_id);
+        const sessionId = asNonEmptyString(request.params.session_id) ?? this.#sessionId;
+        if (!profile || !runId || !sessionId) {
+            return null;
+        }
+        const bootstrap = this.#runtimeTrustState.getBootstrap(profile);
+        if (!bootstrap) {
+            return null;
+        }
+        if (bootstrap.sessionId !== sessionId ||
+            bootstrap.runId !== runId ||
+            bootstrap.status !== "ready") {
+            return null;
+        }
+        return asNonEmptyString(bootstrap.mainWorldSecret);
     }
     async #sendMessageWithContentScriptRecovery(tabId, forward) {
         try {
