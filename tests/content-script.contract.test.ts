@@ -183,12 +183,15 @@ const createExtensionStorageArea = (
 };
 
 const createRuntime = () => {
-  const listeners: Array<(message: unknown) => void> = [];
+  const listeners = new Set<(message: unknown) => void>();
   return {
     runtime: {
       onMessage: {
         addListener(callback: (message: unknown) => void) {
-          listeners.push(callback);
+          listeners.add(callback);
+        },
+        removeListener(callback: (message: unknown) => void) {
+          listeners.delete(callback);
         }
       },
       sendMessage: vi.fn(),
@@ -200,7 +203,7 @@ const createRuntime = () => {
       }
     },
     listenerCount() {
-      return listeners.length;
+      return listeners.size;
     }
   };
 };
@@ -542,12 +545,16 @@ describe("content-script bootstrap contract", () => {
 
   it("keeps content-script bootstrap idempotent when the bundle is reinjected into the same tab", () => {
     const { runtime, dispatch, listenerCount } = createRuntime();
+    const onResult = vi.spyOn(ContentScriptHandler.prototype, "onResult");
+    const setReachable = vi.spyOn(ContentScriptHandler.prototype, "setReachable");
     const onBackgroundMessage = vi
       .spyOn(ContentScriptHandler.prototype, "onBackgroundMessage")
       .mockReturnValue(true);
 
     expect(bootstrapContentScript(runtime)).toBe(true);
     expect(bootstrapContentScript(runtime)).toBe(true);
+    expect(onResult).toHaveBeenCalledTimes(2);
+    expect(setReachable).toHaveBeenCalledWith(false);
     expect(listenerCount()).toBe(1);
 
     dispatch({

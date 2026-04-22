@@ -8506,9 +8506,10 @@ const resolveBootstrapState = (runtime) => {
         return existingState;
     }
     const state = {
-        handler: new ContentScriptHandler(),
-        resultRelayInstalled: false,
-        messageListenerInstalled: false
+        generation: 0,
+        handler: null,
+        detachResultRelay: null,
+        messageListener: null
     };
     runtime[CONTENT_SCRIPT_BOOTSTRAP_STATE_KEY] = state;
     return state;
@@ -8518,7 +8519,19 @@ const bootstrapContentScript = (runtime) => {
         return false;
     }
     const state = resolveBootstrapState(runtime);
-    const { handler } = state;
+    state.generation += 1;
+    const generation = state.generation;
+    state.detachResultRelay?.();
+    if (state.handler) {
+        state.handler.setReachable(false);
+    }
+    if (state.messageListener && runtime.onMessage.removeListener) {
+        runtime.onMessage.removeListener(state.messageListener);
+    }
+    const handler = new ContentScriptHandler();
+    state.handler = handler;
+    state.detachResultRelay = null;
+    state.messageListener = null;
     const bootstrapPayload = readBootstrapFingerprintContext();
     const bootstrapInput = resolveBootstrapFingerprintContext(bootstrapPayload);
     installMainWorldEventChannelSecret(bootstrapInput.mainWorldSecret);
@@ -8574,37 +8587,39 @@ const bootstrapContentScript = (runtime) => {
             });
         });
     }
-    if (!state.resultRelayInstalled) {
-        handler.onResult((message) => {
-            relayContentResultToBackground(runtime, message);
-        });
-        state.resultRelayInstalled = true;
-    }
-    if (!state.messageListenerInstalled) {
-        runtime.onMessage.addListener((message) => {
-            const request = message;
-            if (!request || request.kind !== "forward" || typeof request.id !== "string") {
-                return;
-            }
-            const normalized = normalizeForwardMessage(request);
-            if (normalized.fingerprintContext) {
-                persistExtensionFingerprintContext(normalized.fingerprintContext, normalized.runId);
-            }
-            const accepted = handler.onBackgroundMessage(normalized);
-            if (!accepted) {
-                runtime.sendMessage?.({
-                    kind: "result",
-                    id: request.id,
-                    ok: false,
-                    error: {
-                        code: "ERR_TRANSPORT_FORWARD_FAILED",
-                        message: "content script unreachable"
-                    }
-                });
-            }
-        });
-        state.messageListenerInstalled = true;
-    }
+    state.detachResultRelay = handler.onResult((message) => {
+        if (state.generation !== generation || state.handler !== handler) {
+            return;
+        }
+        relayContentResultToBackground(runtime, message);
+    });
+    const messageListener = (message) => {
+        if (state.generation !== generation || state.handler !== handler) {
+            return;
+        }
+        const request = message;
+        if (!request || request.kind !== "forward" || typeof request.id !== "string") {
+            return;
+        }
+        const normalized = normalizeForwardMessage(request);
+        if (normalized.fingerprintContext) {
+            persistExtensionFingerprintContext(normalized.fingerprintContext, normalized.runId);
+        }
+        const accepted = handler.onBackgroundMessage(normalized);
+        if (!accepted) {
+            runtime.sendMessage?.({
+                kind: "result",
+                id: request.id,
+                ok: false,
+                error: {
+                    code: "ERR_TRANSPORT_FORWARD_FAILED",
+                    message: "content script unreachable"
+                }
+            });
+        }
+    };
+    runtime.onMessage.addListener(messageListener);
+    state.messageListener = messageListener;
     return true;
 };
 const globalChrome = globalThis.chrome;

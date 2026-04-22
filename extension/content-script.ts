@@ -38,6 +38,7 @@ type ContentScriptRuntime = {
   [CONTENT_SCRIPT_BOOTSTRAP_STATE_KEY]?: ContentScriptBootstrapState;
   onMessage?: {
     addListener(listener: (message: unknown) => void): void;
+    removeListener?(listener: (message: unknown) => void): void;
   };
   sendMessage?: (message: ContentToBackgroundMessage) => Promise<unknown> | void;
   getURL?: (path: string) => string;
@@ -68,9 +69,10 @@ type BootstrapFingerprintContext = {
 };
 
 type ContentScriptBootstrapState = {
-  handler: ContentScriptHandler;
-  resultRelayInstalled: boolean;
-  messageListenerInstalled: boolean;
+  generation: number;
+  handler: ContentScriptHandler | null;
+  detachResultRelay: (() => void) | null;
+  messageListener: ((message: unknown) => void) | null;
 };
 
 const normalizeForwardMessage = (
@@ -474,9 +476,10 @@ const resolveBootstrapState = (
   }
 
   const state: ContentScriptBootstrapState = {
-    handler: new ContentScriptHandler(),
-    resultRelayInstalled: false,
-    messageListenerInstalled: false
+    generation: 0,
+    handler: null,
+    detachResultRelay: null,
+    messageListener: null
   };
   runtime[CONTENT_SCRIPT_BOOTSTRAP_STATE_KEY] = state;
   return state;
@@ -488,7 +491,20 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
   }
 
   const state = resolveBootstrapState(runtime);
-  const { handler } = state;
+  state.generation += 1;
+  const generation = state.generation;
+  state.detachResultRelay?.();
+  if (state.handler) {
+    state.handler.setReachable(false);
+  }
+  if (state.messageListener && runtime.onMessage.removeListener) {
+    runtime.onMessage.removeListener(state.messageListener);
+  }
+
+  const handler = new ContentScriptHandler();
+  state.handler = handler;
+  state.detachResultRelay = null;
+  state.messageListener = null;
   const bootstrapPayload = readBootstrapFingerprintContext();
   const bootstrapInput = resolveBootstrapFingerprintContext(bootstrapPayload);
   installMainWorldEventChannelSecret(bootstrapInput.mainWorldSecret);
@@ -549,40 +565,42 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
     });
   }
 
-  if (!state.resultRelayInstalled) {
-    handler.onResult((message) => {
-      relayContentResultToBackground(runtime, message);
-    });
-    state.resultRelayInstalled = true;
-  }
+  state.detachResultRelay = handler.onResult((message) => {
+    if (state.generation !== generation || state.handler !== handler) {
+      return;
+    }
+    relayContentResultToBackground(runtime, message);
+  });
 
-  if (!state.messageListenerInstalled) {
-    runtime.onMessage.addListener((message: unknown) => {
-      const request = message as Partial<BackgroundToContentMessage> | null;
-      if (!request || request.kind !== "forward" || typeof request.id !== "string") {
-        return;
-      }
-      const normalized = normalizeForwardMessage(
-        request as Partial<BackgroundToContentMessage> & { id: string }
-      );
-      if (normalized.fingerprintContext) {
-        persistExtensionFingerprintContext(normalized.fingerprintContext, normalized.runId);
-      }
-      const accepted = handler.onBackgroundMessage(normalized);
-      if (!accepted) {
-        runtime.sendMessage?.({
-          kind: "result",
-          id: request.id,
-          ok: false,
-          error: {
-            code: "ERR_TRANSPORT_FORWARD_FAILED",
-            message: "content script unreachable"
-          }
-        });
-      }
-    });
-    state.messageListenerInstalled = true;
-  }
+  const messageListener = (message: unknown) => {
+    if (state.generation !== generation || state.handler !== handler) {
+      return;
+    }
+    const request = message as Partial<BackgroundToContentMessage> | null;
+    if (!request || request.kind !== "forward" || typeof request.id !== "string") {
+      return;
+    }
+    const normalized = normalizeForwardMessage(
+      request as Partial<BackgroundToContentMessage> & { id: string }
+    );
+    if (normalized.fingerprintContext) {
+      persistExtensionFingerprintContext(normalized.fingerprintContext, normalized.runId);
+    }
+    const accepted = handler.onBackgroundMessage(normalized);
+    if (!accepted) {
+      runtime.sendMessage?.({
+        kind: "result",
+        id: request.id,
+        ok: false,
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: "content script unreachable"
+        }
+      });
+    }
+  };
+  runtime.onMessage.addListener(messageListener);
+  state.messageListener = messageListener;
 
   return true;
 };
