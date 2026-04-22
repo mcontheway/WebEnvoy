@@ -520,6 +520,9 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
     });
     if (!bootstrapInput.runId || !bootstrapInput.runtimeContextId || !bootstrapInput.sessionId) {
       void loadBootstrapFingerprintContextFromExtension(runtime).then((resolvedBootstrap) => {
+        if (state.generation !== generation || state.handler !== handler) {
+          return;
+        }
         if (
           !resolvedBootstrap.runId ||
           !resolvedBootstrap.runtimeContextId ||
@@ -537,6 +540,9 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
     }
   } else {
     void loadBootstrapFingerprintContextFromExtension(runtime).then((resolvedBootstrap) => {
+      if (state.generation !== generation || state.handler !== handler) {
+        return;
+      }
       installMainWorldEventChannelSecret(resolvedBootstrap.mainWorldSecret);
       if (!resolvedBootstrap.fingerprintRuntime) {
         runtime.sendMessage?.({

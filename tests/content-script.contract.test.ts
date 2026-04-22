@@ -569,6 +569,64 @@ describe("content-script bootstrap contract", () => {
     expect(onBackgroundMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores stale async bootstrap fallback after a newer reinjection takes ownership", async () => {
+    let resolveBootstrapFetch: ((value: { ok: boolean; json: () => Promise<unknown> }) => void) | null =
+      null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveBootstrapFetch = resolve as typeof resolveBootstrapFetch;
+        })
+    ) as typeof fetch;
+
+    try {
+      const { runtime } = createRuntime();
+      (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = null;
+
+      expect(bootstrapContentScript(runtime)).toBe(true);
+
+      const context = createFingerprintContext();
+      (globalThis as Record<string, unknown>)[FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY] = {
+        run_id: "run-bootstrap-current-002",
+        runtime_context_id: "ctx-bootstrap-current-002",
+        session_id: "nm-session-002",
+        fingerprint_runtime: context
+      };
+      expect(bootstrapContentScript(runtime)).toBe(true);
+
+      expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
+      expect(runtime.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "startup-fingerprint-trust:run-bootstrap-current-002"
+        })
+      );
+
+      resolveBootstrapFetch?.({
+        ok: true,
+        json: async () => ({
+          extension_bootstrap: {
+            run_id: "run-bootstrap-stale-001",
+            runtime_context_id: "ctx-bootstrap-stale-001",
+            session_id: "nm-session-001",
+            fingerprint_runtime: createFingerprintContext()
+          }
+        })
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
+      expect(runtime.sendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "startup-fingerprint-trust:run-bootstrap-stale-001"
+        })
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("does not install fingerprint patch during bootstrap when startup payload is missing", async () => {
     const sessionStorage = createSessionStorage();
     const { window, startupInstallRequests } = createStartupInstallProbeWindow(sessionStorage);

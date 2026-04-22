@@ -414,6 +414,58 @@ describe("extension service worker recovery contract / bootstrap and trust", () 
     );
   });
 
+  it("fails closed when search_result_tab bootstrap cannot find any search_result tab", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, executeScript } = createChromeApi([firstPort]);
+    chromeApi.tabs.query = vi.fn(async () => [
+      { id: 31, active: true, url: "https://www.xiaohongshu.com/explore/abc" },
+      { id: 52, active: false, url: "https://www.xiaohongshu.com/user/profile/user-001" }
+    ]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-search-missing-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-search-missing-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-search-missing-001",
+          runtime_context_id: "ctx-bootstrap-search-missing-001",
+          profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-search-missing-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+
+    await waitForBridgeTurn();
+
+    expect(executeScript).not.toHaveBeenCalled();
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-search-missing-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_TRANSPORT_FORWARD_FAILED",
+        message: "target tab is unavailable"
+      })
+    });
+  });
+
   it("uses target_resource_id to bind detail bootstrap to the matching tab across windows", async () => {
     const firstPort = createMockPort();
     const { chromeApi, executeScript } = createChromeApi([firstPort]);

@@ -275,7 +275,13 @@ const resolvePreferredXhsReadTargetTabId = async (chromeApi, preferredPage, requ
             xhsTabs = globalTabs;
         }
     }
-    const ranked = xhsTabs
+    const preferredTabs = preferredPage !== null
+        ? xhsTabs.filter((tab) => scoreXhsTab(tab, preferredPage) === 0)
+        : xhsTabs;
+    if (preferredPage !== null && preferredTabs.length === 0) {
+        return null;
+    }
+    const ranked = preferredTabs
         .filter((tab) => typeof tab.id === "number")
         .sort((left, right) => {
         const scoreDiff = scoreXhsTab(left, preferredPage) - scoreXhsTab(right, preferredPage);
