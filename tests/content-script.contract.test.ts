@@ -183,19 +183,24 @@ const createExtensionStorageArea = (
 };
 
 const createRuntime = () => {
-  let listener: ((message: unknown) => void) | null = null;
+  const listeners: Array<(message: unknown) => void> = [];
   return {
     runtime: {
       onMessage: {
         addListener(callback: (message: unknown) => void) {
-          listener = callback;
+          listeners.push(callback);
         }
       },
       sendMessage: vi.fn(),
       getURL: vi.fn((path: string) => `chrome-extension://unit-test/${path}`)
     },
     dispatch(message: unknown) {
-      listener?.(message);
+      for (const listener of listeners) {
+        listener(message);
+      }
+    },
+    listenerCount() {
+      return listeners.length;
     }
   };
 };
@@ -533,6 +538,28 @@ describe("content-script bootstrap contract", () => {
     const startupTrust = asRecord(startupTrustPayload?.startup_fingerprint_trust);
     expect(startupTrust?.trusted).toBeUndefined();
     expect(startupTrust?.install_state).toBeUndefined();
+  });
+
+  it("keeps content-script bootstrap idempotent when the bundle is reinjected into the same tab", () => {
+    const { runtime, dispatch, listenerCount } = createRuntime();
+    const onBackgroundMessage = vi
+      .spyOn(ContentScriptHandler.prototype, "onBackgroundMessage")
+      .mockReturnValue(true);
+
+    expect(bootstrapContentScript(runtime)).toBe(true);
+    expect(bootstrapContentScript(runtime)).toBe(true);
+    expect(listenerCount()).toBe(1);
+
+    dispatch({
+      kind: "forward",
+      id: "forward-once-001",
+      runId: "forward-once-001",
+      command: "runtime.ping",
+      params: {},
+      commandParams: {}
+    });
+
+    expect(onBackgroundMessage).toHaveBeenCalledTimes(1);
   });
 
   it("does not install fingerprint patch during bootstrap when startup payload is missing", async () => {

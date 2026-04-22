@@ -18,6 +18,7 @@ const FINGERPRINT_BOOTSTRAP_PAYLOAD_KEY = "__webenvoy_fingerprint_bootstrap_payl
 const EXTENSION_BOOTSTRAP_FILENAME = "__webenvoy_fingerprint_bootstrap.json";
 const STARTUP_TRUST_SOURCE = "extension_bootstrap_context";
 const MAIN_WORLD_SECRET_NAMESPACE = "webenvoy.main_world.secret.v1";
+const CONTENT_SCRIPT_BOOTSTRAP_STATE_KEY = "__webenvoy_content_script_bootstrap_state__";
 const STAGED_STARTUP_TRUST_RUN_ID = undefined;
 const STAGED_STARTUP_TRUST_SESSION_ID = undefined;
 const STAGED_STARTUP_TRUST_FINGERPRINT_RUNTIME = undefined;
@@ -34,6 +35,7 @@ type ContentScriptStorageArea = {
 };
 
 type ContentScriptRuntime = {
+  [CONTENT_SCRIPT_BOOTSTRAP_STATE_KEY]?: ContentScriptBootstrapState;
   onMessage?: {
     addListener(listener: (message: unknown) => void): void;
   };
@@ -63,6 +65,12 @@ type BootstrapFingerprintContext = {
   runtimeContextId: string | null;
   sessionId: string | null;
   mainWorldSecret: string | null;
+};
+
+type ContentScriptBootstrapState = {
+  handler: ContentScriptHandler;
+  resultRelayInstalled: boolean;
+  messageListenerInstalled: boolean;
 };
 
 const normalizeForwardMessage = (
@@ -457,12 +465,30 @@ const relayContentResultToBackground = (
   }
 };
 
+const resolveBootstrapState = (
+  runtime: ContentScriptRuntime
+): ContentScriptBootstrapState => {
+  const existingState = runtime[CONTENT_SCRIPT_BOOTSTRAP_STATE_KEY];
+  if (existingState) {
+    return existingState;
+  }
+
+  const state: ContentScriptBootstrapState = {
+    handler: new ContentScriptHandler(),
+    resultRelayInstalled: false,
+    messageListenerInstalled: false
+  };
+  runtime[CONTENT_SCRIPT_BOOTSTRAP_STATE_KEY] = state;
+  return state;
+};
+
 export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean => {
   if (!runtime.onMessage?.addListener || !runtime.sendMessage) {
     return false;
   }
 
-  const handler = new ContentScriptHandler();
+  const state = resolveBootstrapState(runtime);
+  const { handler } = state;
   const bootstrapPayload = readBootstrapFingerprintContext();
   const bootstrapInput = resolveBootstrapFingerprintContext(bootstrapPayload);
   installMainWorldEventChannelSecret(bootstrapInput.mainWorldSecret);
@@ -523,34 +549,40 @@ export const bootstrapContentScript = (runtime: ContentScriptRuntime): boolean =
     });
   }
 
-  handler.onResult((message) => {
-    relayContentResultToBackground(runtime, message);
-  });
+  if (!state.resultRelayInstalled) {
+    handler.onResult((message) => {
+      relayContentResultToBackground(runtime, message);
+    });
+    state.resultRelayInstalled = true;
+  }
 
-  runtime.onMessage.addListener((message: unknown) => {
-    const request = message as Partial<BackgroundToContentMessage> | null;
-    if (!request || request.kind !== "forward" || typeof request.id !== "string") {
-      return;
-    }
-    const normalized = normalizeForwardMessage(
-      request as Partial<BackgroundToContentMessage> & { id: string }
-    );
-    if (normalized.fingerprintContext) {
-      persistExtensionFingerprintContext(normalized.fingerprintContext, normalized.runId);
-    }
-    const accepted = handler.onBackgroundMessage(normalized);
-    if (!accepted) {
-      runtime.sendMessage?.({
-        kind: "result",
-        id: request.id,
-        ok: false,
-        error: {
-          code: "ERR_TRANSPORT_FORWARD_FAILED",
-          message: "content script unreachable"
-        }
-      });
-    }
-  });
+  if (!state.messageListenerInstalled) {
+    runtime.onMessage.addListener((message: unknown) => {
+      const request = message as Partial<BackgroundToContentMessage> | null;
+      if (!request || request.kind !== "forward" || typeof request.id !== "string") {
+        return;
+      }
+      const normalized = normalizeForwardMessage(
+        request as Partial<BackgroundToContentMessage> & { id: string }
+      );
+      if (normalized.fingerprintContext) {
+        persistExtensionFingerprintContext(normalized.fingerprintContext, normalized.runId);
+      }
+      const accepted = handler.onBackgroundMessage(normalized);
+      if (!accepted) {
+        runtime.sendMessage?.({
+          kind: "result",
+          id: request.id,
+          ok: false,
+          error: {
+            code: "ERR_TRANSPORT_FORWARD_FAILED",
+            message: "content script unreachable"
+          }
+        });
+      }
+    });
+    state.messageListenerInstalled = true;
+  }
 
   return true;
 };
