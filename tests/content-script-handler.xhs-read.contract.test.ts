@@ -134,7 +134,7 @@ const waitForSingleResult = (handler: ContentScriptHandler) =>
     const timeout = setTimeout(() => {
       off();
       reject(new Error("did not receive content-script result"));
-    }, 500);
+    }, 2_000);
     const off = handler.onResult((message) => {
       clearTimeout(timeout);
       off();

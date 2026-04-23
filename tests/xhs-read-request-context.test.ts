@@ -9,7 +9,7 @@ import type {
   XhsSearchOptions
 } from "../extension/xhs-search-types.js";
 
-const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 3;
+const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 10;
 const REQUEST_CONTEXT_WAIT_RETRY_MS = 150;
 
 const createApprovalRecord = () => ({
@@ -254,7 +254,8 @@ describe("xhs read request-context exact-shape reuse", () => {
 
     expect(result.ok).toBe(true);
     expect(callSignature).toHaveBeenCalledWith("/api/sns/web/v1/feed", {
-      source_note_id: "note-001"
+      source_note_id: "note-001",
+      image_scenes: ["WB_PRV", "CRD_PRV_WEBP"]
     });
     expect(fetchJson).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -268,7 +269,8 @@ describe("xhs read request-context exact-shape reuse", () => {
           "x-xray-traceid": "trace-xray-detail"
         }),
         body: JSON.stringify({
-          source_note_id: "note-001"
+          source_note_id: "note-001",
+          image_scenes: ["WB_PRV", "CRD_PRV_WEBP"]
         })
       })
     );
@@ -1180,7 +1182,8 @@ describe("xhs read request-context exact-shape reuse", () => {
 
     expect(result.ok).toBe(true);
     expect(callSignature).toHaveBeenCalledWith("/api/sns/web/v1/feed", {
-      source_note_id: "note-001"
+      source_note_id: "note-001",
+      image_scenes: ["WB_PRV", "CRD_PRV_WEBP"]
     });
     expect(fetchJson).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1773,7 +1776,8 @@ describe("xhs read request-context exact-shape reuse", () => {
 
     expect(result.ok).toBe(true);
     expect(callSignature).toHaveBeenCalledWith("/api/sns/web/v1/feed", {
-      source_note_id: "note-001"
+      source_note_id: "note-001",
+      image_scenes: ["WB_PRV", "CRD_PRV_WEBP"]
     });
     expect(fetchJson).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1916,15 +1920,21 @@ describe("xhs read request-context exact-shape reuse", () => {
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-001",
         callSignature,
         fetchJson,
-        readCapturedRequestContext: async () => createUserHomeArtifact()
+        readCapturedRequestContext: async () =>
+          createUserHomeArtifact({
+            url: "https://www.xiaohongshu.com/api/sns/web/v1/user/otherinfo?user_id=user-001&sec_user_id=sec-001"
+          })
       })
     );
 
     expect(result.ok).toBe(true);
-    expect(callSignature).toHaveBeenCalledWith("/api/sns/web/v1/user/otherinfo?user_id=user-001", {});
+    expect(callSignature).toHaveBeenCalledWith(
+      "/api/sns/web/v1/user/otherinfo?user_id=user-001&sec_user_id=sec-001",
+      {}
+    );
     expect(fetchJson).toHaveBeenCalledWith(
       expect.objectContaining({
-        url: "/api/sns/web/v1/user/otherinfo?user_id=user-001",
+        url: "/api/sns/web/v1/user/otherinfo?user_id=user-001&sec_user_id=sec-001",
         method: "GET",
         pageContextRequest: true,
         referrer: "https://www.xiaohongshu.com/user/profile/user-001",

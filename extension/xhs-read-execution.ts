@@ -143,6 +143,8 @@ type ReadRequestContextLookupResult =
       shape: ReadRequestShape;
       headers: Record<string, string>;
       referrer: string | null;
+      requestUrl: string | null;
+      requestBody: JsonRecord | null;
     }
   | {
       state: "miss";
@@ -170,7 +172,7 @@ type ReadRequestContextLookupResult =
     };
 
 const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60_000;
-const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 3;
+const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 10;
 const REQUEST_CONTEXT_WAIT_RETRY_MS = 150;
 const BACKEND_REJECTED_SOURCE_REASONS = new Set<RequestContextMissReason>([
   "SESSION_EXPIRED",
@@ -282,6 +284,29 @@ const resolveCapturedArtifactReferrer = (value: unknown): string | null => {
     return null;
   }
   return asString(record.referrer);
+};
+
+const resolveCapturedArtifactRequestUrl = (value: unknown): string | null => {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  const rawUrl = asString(record.url);
+  if (rawUrl) {
+    try {
+      const url = new URL(rawUrl, "https://www.xiaohongshu.com");
+      return `${url.pathname}${url.search}`;
+    } catch {
+      return rawUrl;
+    }
+  }
+  return asString(record.path);
+};
+
+const resolveCapturedArtifactRequestBody = (value: unknown): JsonRecord | null => {
+  const record = asRecord(value);
+  const request = asRecord(record?.request);
+  return asRecord(request?.body);
 };
 
 const resolveCapturedArtifactStatus = (value: unknown): {
@@ -831,7 +856,9 @@ const resolveReadRequestContext = (
     state: "hit",
     shape: derivedShape,
     headers: resolveCapturedArtifactHeaders(artifact),
-    referrer: resolveCapturedArtifactReferrer(artifact)
+    referrer: resolveCapturedArtifactReferrer(artifact),
+    requestUrl: resolveCapturedArtifactRequestUrl(artifact),
+    requestBody: resolveCapturedArtifactRequestBody(artifact)
   };
 };
 
@@ -1710,7 +1737,7 @@ const executeXhsRead = async (
   const gate = resolveGate(input.options, input.executionContext, env.getLocationHref());
   const auditRecord = createAuditRecord(input.executionContext, gate, env);
   const startedAt = env.now();
-  const payload = spec.buildPayload(input.params, env);
+  const builtPayload = spec.buildPayload(input.params, env);
   const resolvePageStateRoot = async (): Promise<JsonRecord | null> => {
     const mainWorldState =
       typeof env.readPageStateRoot === "function"
@@ -1763,10 +1790,10 @@ const executeXhsRead = async (
     gate.consumer_gate_result.effective_execution_mode === "dry_run" ||
     gate.consumer_gate_result.effective_execution_mode === "recon"
   ) {
-    return createGateOnlySuccess(input, spec, gate, auditRecord, env, payload);
+    return createGateOnlySuccess(input, spec, gate, auditRecord, env, builtPayload);
   }
 
-  const simulated = resolveSimulatedResult(input, spec, payload, env, gate, auditRecord);
+  const simulated = resolveSimulatedResult(input, spec, builtPayload, env, gate, auditRecord);
   if (simulated) {
     if (simulated.ok) {
       const summary = asRecord(simulated.payload.summary) ?? {};
@@ -1855,7 +1882,7 @@ const executeXhsRead = async (
       canUsePageStateFallback(spec, input.params, pageStateRoot)
     ) {
       const failureSurface = resolveRequestContextFailureSurface(spec, requestContextResult);
-      return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, payload, startedAt, {
+      return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, builtPayload, startedAt, {
         reason: failureSurface.reasonCode,
         message: failureSurface.message,
         detail: requestContextResult.reason,
@@ -1891,13 +1918,17 @@ const executeXhsRead = async (
     );
   }
 
+  const requestPayload = requestContextResult.requestBody ?? builtPayload;
+  const requestUrl = requestContextResult.requestUrl ?? spec.buildUrl(input.params);
+  const signatureUri = requestContextResult.requestUrl ?? spec.buildSignatureUri(input.params);
+
   let signature: { "X-s": string; "X-t": string | number };
   try {
-    signature = await env.callSignature(spec.buildSignatureUri(input.params), payload);
+    signature = await env.callSignature(signatureUri, requestPayload);
   } catch (error) {
     const pageStateRoot = await resolvePageStateRoot();
     if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
-      return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, payload, startedAt, {
+      return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, requestPayload, startedAt, {
         reason: "SIGNATURE_ENTRY_MISSING",
         message: "页面签名入口不可用",
         detail: error instanceof Error ? error.message : String(error),
@@ -1950,10 +1981,10 @@ const executeXhsRead = async (
   let response: { status: number; body: unknown };
   try {
     response = await env.fetchJson({
-      url: spec.buildUrl(input.params),
+      url: requestUrl,
       method: spec.method,
       headers: buildHeaders(env, input.options, signature, requestContextResult.headers),
-      ...(spec.method === "POST" ? { body: JSON.stringify(payload) } : {}),
+      ...(spec.method === "POST" ? { body: JSON.stringify(requestPayload) } : {}),
       pageContextRequest: true,
       referrer: requestContextResult.referrer ?? env.getLocationHref(),
       referrerPolicy: "strict-origin-when-cross-origin",
@@ -1966,7 +1997,7 @@ const executeXhsRead = async (
     const failure = inferReadRequestException(spec, error);
     const pageStateRoot = await resolvePageStateRoot();
     if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
-      return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, payload, startedAt, {
+      return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, requestPayload, startedAt, {
         reason: failure.reason,
         message: failure.message,
         detail: failure.detail
@@ -2007,7 +2038,7 @@ const executeXhsRead = async (
     const failure = inferReadFailure(spec, response.status, response.body);
     const pageStateRoot = await resolvePageStateRoot();
     if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
-      return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, payload, startedAt, {
+      return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, requestPayload, startedAt, {
         reason: failure.reason,
         message: failure.message,
         detail: failure.message,
@@ -2047,7 +2078,7 @@ const executeXhsRead = async (
   if (!responseContainsRequestedTarget(spec, input.params, response.body)) {
     const pageStateRoot = await resolvePageStateRoot();
     if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
-      return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, payload, startedAt, {
+      return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, requestPayload, startedAt, {
         reason: "TARGET_DATA_NOT_FOUND",
         message: `${spec.command} 接口返回成功但未包含目标数据`,
         detail: `${spec.command} response target missing`,
@@ -2093,7 +2124,7 @@ const executeXhsRead = async (
             layer: input.abilityLayer,
             action: gate.consumer_gate_result.action_type ?? input.abilityAction,
           outcome: "success",
-          data_ref: spec.buildDataRef(input.params, payload),
+          data_ref: spec.buildDataRef(input.params, requestPayload),
           metrics: {
             count: 1,
             duration_ms: Math.max(0, env.now() - startedAt)
