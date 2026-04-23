@@ -32,6 +32,25 @@ const renderClassicModule = ({ moduleVar, prelude = "", sourceBody, exports }) =
     .filter((line) => line.length > 0)
     .join("\n");
 
+const wrapClassicBundleWithInstallGuard = ({ bundleSource, installKey }) =>
+  [
+    "(() => {",
+    "const __webenvoy_install_scope = globalThis;",
+    `const __webenvoy_install_key = Symbol.for(${JSON.stringify(installKey)});`,
+    "if (__webenvoy_install_scope[__webenvoy_install_key]) {",
+    "  return;",
+    "}",
+    "Object.defineProperty(__webenvoy_install_scope, __webenvoy_install_key, {",
+    "  value: true,",
+    "  configurable: false,",
+    "  enumerable: false,",
+    "  writable: false",
+    "});",
+    "",
+    bundleSource,
+    "})();"
+  ].join("\n");
+
 const readSource = async (path) =>
   stripEsmSyntaxForClassicScript(await readFile(path, "utf8"));
 
@@ -546,12 +565,17 @@ const buildMainWorldBridgeBundle = async () => {
     exports: []
   });
 
-  return [
+  const bundleSource = [
     "/* WebEnvoy classic main-world bridge bundle for Chrome MV3 content_scripts. */",
     "",
     xhsSearchTypesModule,
     mainWorldBridgeModule
   ].join("\n");
+
+  return wrapClassicBundleWithInstallGuard({
+    bundleSource,
+    installKey: "webenvoy.main_world.bridge.bundle.v1"
+  });
 };
 
 const contentScriptBundle = await buildContentScriptBundle();

@@ -1,3 +1,16 @@
+(() => {
+const __webenvoy_install_scope = globalThis;
+const __webenvoy_install_key = Symbol.for("webenvoy.main_world.bridge.bundle.v1");
+if (__webenvoy_install_scope[__webenvoy_install_key]) {
+  return;
+}
+Object.defineProperty(__webenvoy_install_scope, __webenvoy_install_key, {
+  value: true,
+  configurable: false,
+  enumerable: false,
+  writable: false
+});
+
 /* WebEnvoy classic main-world bridge bundle for Chrome MV3 content_scripts. */
 
 const __webenvoy_module_xhs_search_types = (() => {
@@ -1339,4 +1352,5 @@ else {
     ensureBootstrapListener();
 }
 return {  };
+})();
 })();

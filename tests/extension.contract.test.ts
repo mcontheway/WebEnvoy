@@ -474,6 +474,60 @@ describe("extension build contract", () => {
     expect(mainWorldBridgeSource).not.toMatch(/^\s*export\s/m);
   });
 
+  it("keeps the built main-world bridge bundle safe to reinject into the same page context", () => {
+    const mainWorldBridgeSource = fs.readFileSync(mainWorldBridgeBuildPath, "utf8");
+    const addedEventTypes: string[] = [];
+    const context: Record<string, unknown> = {};
+
+    context.globalThis = context;
+    context.Symbol = Symbol;
+    context.URL = URL;
+    context.performance = performance;
+    context.setTimeout = setTimeout;
+    context.clearTimeout = clearTimeout;
+    context.window = {
+      addEventListener: (type: string) => {
+        addedEventTypes.push(type);
+      },
+      removeEventListener: () => {},
+      dispatchEvent: () => true,
+      fetch: async () => new Response("{}"),
+      location: {
+        href: "https://www.xiaohongshu.com/search_result?keyword=reinject"
+      },
+      history: {
+        pushState: () => {},
+        replaceState: () => {}
+      },
+      navigator: {}
+    };
+    context.document = {
+      createElement: () => ({ textContent: "", remove: () => {} }),
+      documentElement: {
+        appendChild: (node: unknown) => node
+      }
+    };
+    context.CustomEvent = class {
+      type: string;
+      detail: unknown;
+
+      constructor(type: string, init: { detail: unknown }) {
+        this.type = type;
+        this.detail = init.detail;
+      }
+    };
+
+    runInNewContext(mainWorldBridgeSource, context, {
+      filename: mainWorldBridgeBuildPath
+    });
+    expect(() =>
+      runInNewContext(mainWorldBridgeSource, context, {
+        filename: mainWorldBridgeBuildPath
+      })
+    ).not.toThrow();
+    expect(addedEventTypes.filter((type) => type === "__mw_bootstrap__")).toHaveLength(1);
+  });
+
   it("keeps extension build entry imports resolvable in node module loading", async () => {
     await expect(import(backgroundBuildPath)).resolves.toBeDefined();
     await expect(import(contentScriptHandlerBuildPath)).resolves.toBeDefined();
