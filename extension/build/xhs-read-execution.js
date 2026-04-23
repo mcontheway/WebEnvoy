@@ -947,6 +947,7 @@ const hasUserHomePageStateFallback = (params, root) => {
     }
     return (asRecord(root?.board) !== null ||
         asRecord(root?.note) !== null ||
+        hasUserHomeResponseDataShape(user) ||
         asRecord(user.basic_info) !== null ||
         asRecord(user.basicInfo) !== null ||
         asRecord(user.profile) !== null);
@@ -1324,8 +1325,7 @@ const executeXhsRead = async (input, spec, env) => {
     const requestContextResult = await readCapturedReadContextWithRetry(spec, expectedShape, env);
     if (requestContextResult.state !== "hit") {
         const pageStateRoot = await resolvePageStateRoot();
-        if (requestContextResult.state !== "error" &&
-            canUsePageStateFallback(spec, input.params, pageStateRoot)) {
+        if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
             const failureSurface = resolveRequestContextFailureSurface(spec, requestContextResult);
             return createPageStateFallbackFailure(input, spec, gate, auditRecord, env, builtPayload, startedAt, {
                 reason: failureSurface.reasonCode,

@@ -796,7 +796,7 @@ describe("xhs read execution fallback", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
-  it("does not use detail page-state fallback when request-context lookup errors before capture succeeds", async () => {
+  it("uses detail page-state fallback when request-context lookup errors but page state still proves the requested note", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
     const result = await executeXhsDetail(
       {
@@ -835,14 +835,20 @@ describe("xhs read execution fallback", () => {
       throw new Error("expected detail read-error failure");
     }
     expect(result.payload.observability).toMatchObject({
+      page_state: {
+        fallback_used: true
+      },
       failure_site: {
         target: "captured_request_context"
       }
     });
-    expect((result.payload.observability as Record<string, unknown>).page_state).not.toHaveProperty(
-      "fallback_used"
-    );
-    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([]);
+    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([
+      expect.objectContaining({
+        stage: "page_state_fallback",
+        outcome: "completed",
+        fallback_reason: "REQUEST_CONTEXT_READ_FAILED"
+      })
+    ]);
     expect(result.payload.details).toMatchObject({
       reason: "REQUEST_CONTEXT_READ_FAILED",
       request_context_result: "request_context_missing",
@@ -989,10 +995,9 @@ describe("xhs read execution fallback", () => {
         getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-fallback-target-missing-001",
         readPageStateRoot: async () => ({
           user: {
-            userId: "user-fallback-target-missing-001"
-          },
-          board: {},
-          note: {}
+            userId: "user-fallback-target-missing-001",
+            nickname: "target user"
+          }
         }),
         fetchJson
       })
@@ -1070,7 +1075,7 @@ describe("xhs read execution fallback", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
-  it("does not use user_home page-state fallback when request-context lookup errors before capture succeeds", async () => {
+  it("uses user_home page-state fallback when request-context lookup errors but page state still proves the requested user", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
     const result = await executeXhsUserHome(
       {
@@ -1109,14 +1114,20 @@ describe("xhs read execution fallback", () => {
       throw new Error("expected user_home read-error failure");
     }
     expect(result.payload.observability).toMatchObject({
+      page_state: {
+        fallback_used: true
+      },
       failure_site: {
         target: "captured_request_context"
       }
     });
-    expect((result.payload.observability as Record<string, unknown>).page_state).not.toHaveProperty(
-      "fallback_used"
-    );
-    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([]);
+    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([
+      expect.objectContaining({
+        stage: "page_state_fallback",
+        outcome: "completed",
+        fallback_reason: "REQUEST_CONTEXT_READ_FAILED"
+      })
+    ]);
     expect(result.payload.details).toMatchObject({
       reason: "REQUEST_CONTEXT_READ_FAILED",
       request_context_result: "request_context_missing",
