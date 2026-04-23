@@ -1378,6 +1378,8 @@ const buildCanonicalGateAuditArtifacts = (input: {
     ...(input.targetSiteLoggedIn !== null ? { targetSiteLoggedIn: input.targetSiteLoggedIn } : {}),
     runId: String(input.request.params.run_id ?? input.request.id),
     sessionId: String(input.request.params.session_id ?? "nm-session-001"),
+    requestId: input.request.id,
+    commandRequestId: commandParams?.request_id,
     gateInvocationId: input.gateInvocationId,
     approvalRecord: input.approvalRecord,
     auditRecord: input.auditRecord,
