@@ -99,6 +99,53 @@ const createReadyRuntimeBridge = () => ({
   }
 });
 
+const hasExplicitRuntimeTargetBinding = (params: Record<string, unknown>): boolean =>
+  Object.prototype.hasOwnProperty.call(params, "target_domain") ||
+  Object.prototype.hasOwnProperty.call(params, "target_tab_id") ||
+  Object.prototype.hasOwnProperty.call(params, "target_page") ||
+  Object.prototype.hasOwnProperty.call(params, "target_resource_id");
+
+const createTargetAwareTakeoverBridge = () => ({
+  runCommand: async ({
+    command,
+    params,
+    profile,
+    runId
+  }: {
+    command: string;
+    params: Record<string, unknown>;
+    profile: string | null;
+    runId: string;
+  }) => {
+    if (command === "runtime.bootstrap") {
+      return {
+        ok: true as const,
+        payload: {
+          result: {
+            version: "v1",
+            run_id: runId,
+            runtime_context_id: String(params.runtime_context_id),
+            profile,
+            status: "ready"
+          }
+        },
+        relay_path: "host>background"
+      };
+    }
+    if (command === "runtime.readiness") {
+      return {
+        ok: true as const,
+        payload: {
+          bootstrap_state: hasExplicitRuntimeTargetBinding(params) ? "pending" : "ready",
+          transport_state: "ready"
+        },
+        relay_path: "host>background"
+      };
+    }
+    throw new Error(`unexpected bridge command: ${command}`);
+  }
+});
+
 const createNativeHostManifest = async (input: {
   nativeHostName?: string;
   allowedOrigins: string[];
@@ -2052,6 +2099,104 @@ describe("profile-runtime identity preflight", () => {
     expect(browserState.runId).toBe("run-runtime-attach-next-001");
   });
 
+  it("keeps ready runtime takeover attachable even when the next request targets a different XHS page", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-attach-target-mismatch-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "attach_target_mismatch_profile"
+    });
+    const service = createTestService({
+      bridgeFactory: () => createTargetAwareTakeoverBridge()
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "attach_target_mismatch_profile",
+      runId: "run-runtime-attach-target-owner-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    const profileDir = join(baseDir, ".webenvoy", "profiles", "attach_target_mismatch_profile");
+    await writeFile(
+      join(profileDir, BROWSER_STATE_FILENAME),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          launchToken: "attach-target-mismatch-token-001",
+          profileDir,
+          runId: "run-runtime-attach-target-owner-001",
+          browserPath: "/mock/chrome",
+          controllerPid: 999998,
+          browserPid: 999999,
+          launchedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile: "attach_target_mismatch_profile",
+        runId: "run-runtime-attach-target-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          },
+          target_tab_id: 77,
+          target_page: "xhs_detail"
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: false,
+      runtimeReadiness: "blocked",
+      transportState: "ready",
+      bootstrapState: "ready",
+      runtimeTakeoverEvidence: expect.objectContaining({
+        mode: "ready_attach",
+        attachableReadyRuntime: true,
+        orphanRecoverable: false,
+        observedRunId: "run-runtime-attach-target-owner-001"
+      })
+    });
+
+    await expect(
+      service.attach({
+        cwd: baseDir,
+        profile: "attach_target_mismatch_profile",
+        runId: "run-runtime-attach-target-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          },
+          target_tab_id: 77,
+          target_page: "xhs_detail"
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: true,
+      runtimeReadiness: "pending",
+      transportState: "ready",
+      bootstrapState: "pending"
+    });
+  });
+
   it("does not mark a ready runtime attachable when only the owner stays alive but runtime transport is gone", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-ready-transport-gone-"));
     tempDirs.push(baseDir);
@@ -2702,6 +2847,134 @@ describe("profile-runtime identity preflight", () => {
         attachableReadyRuntime: false,
         orphanRecoverable: false
       })
+    });
+  });
+
+  it("keeps recoverable takeover eligible even when the next request target differs from the old runtime", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-attach-recoverable-target-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "attach_recoverable_target_profile"
+    });
+    const alivePids = new Set<number>([999998, 999999, process.pid]);
+    const profileDir = join(baseDir, ".webenvoy", "profiles", "attach_recoverable_target_profile");
+    const browserStatePath = join(profileDir, BROWSER_STATE_FILENAME);
+    const service = createTestService({
+      isProcessAlive: (pid: number) => alivePids.has(pid),
+      bridgeFactory: () => createTargetAwareTakeoverBridge()
+    });
+
+    await service.start({
+      cwd: baseDir,
+      profile: "attach_recoverable_target_profile",
+      runId: "run-runtime-attach-recoverable-target-owner-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    const lockPath = join(profileDir, "__webenvoy_lock.json");
+    const metaPath = join(profileDir, "__webenvoy_meta.json");
+    const lockRaw = await readFile(lockPath, "utf8");
+    const lock = JSON.parse(lockRaw) as ProfileLock;
+    lock.ownerPid = 12345;
+    lock.controllerPid = 12345;
+    lock.ownerRunId = "run-runtime-attach-recoverable-target-legacy-001";
+    await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+
+    const browserPid = 223366;
+    await writeFile(
+      browserStatePath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          launchToken: "attach-recoverable-target-token-001",
+          profileDir,
+          runId: "run-runtime-attach-recoverable-target-legacy-001",
+          browserPath: "/mock/chrome",
+          controllerPid: 12345,
+          browserPid,
+          launchedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    const metaRaw = await readFile(metaPath, "utf8");
+    const meta = JSON.parse(metaRaw) as { profileState?: unknown; lastDisconnectedAt?: unknown };
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          ...meta,
+          profileState: "disconnected",
+          lastDisconnectedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    alivePids.delete(999998);
+    alivePids.delete(999999);
+    alivePids.add(browserPid);
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile: "attach_recoverable_target_profile",
+        runId: "run-runtime-attach-recoverable-target-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          },
+          target_resource_id: "note-999"
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "disconnected",
+      lockHeld: false,
+      runtimeReadiness: "recoverable",
+      transportState: "ready",
+      bootstrapState: "ready",
+      runtimeTakeoverEvidence: expect.objectContaining({
+        mode: "recoverable_rebind",
+        attachableReadyRuntime: false,
+        orphanRecoverable: true,
+        observedRunId: "run-runtime-attach-recoverable-target-legacy-001"
+      })
+    });
+
+    await expect(
+      service.attach({
+        cwd: baseDir,
+        profile: "attach_recoverable_target_profile",
+        runId: "run-runtime-attach-recoverable-target-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          },
+          target_resource_id: "note-999"
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "disconnected",
+      browserState: "disconnected",
+      lockHeld: true,
+      runtimeReadiness: "pending",
+      transportState: "ready",
+      bootstrapState: "pending"
     });
   });
 

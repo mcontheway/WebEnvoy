@@ -1476,6 +1476,7 @@ export class ProfileRuntimeService {
                         ...input.runtimeInput,
                         runId: input.observedRunId
                     },
+                    includeTargetBinding: false,
                     lockHeld: true,
                     observedRunId: undefined
                 });
@@ -1521,6 +1522,7 @@ export class ProfileRuntimeService {
                 ...input.runtimeInput,
                 runId: input.observedRunId
             },
+            includeTargetBinding: false,
             lockHeld: true,
             observedRunId: undefined
         });
@@ -1538,7 +1540,9 @@ export class ProfileRuntimeService {
                 params: {
                     run_id: input.runtimeInput.runId,
                     runtime_context_id: runtimeContextId,
-                    ...buildRuntimeTargetParams(input.runtimeInput.params)
+                    ...(input.includeTargetBinding === false
+                        ? {}
+                        : buildRuntimeTargetParams(input.runtimeInput.params))
                 }
             });
             if (!result.ok) {

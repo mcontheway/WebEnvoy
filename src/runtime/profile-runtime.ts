@@ -1938,6 +1938,7 @@ export class ProfileRuntimeService {
             ...input.runtimeInput,
             runId: input.observedRunId
           },
+          includeTargetBinding: false,
           lockHeld: true,
           observedRunId: undefined
         });
@@ -1995,6 +1996,7 @@ export class ProfileRuntimeService {
         ...input.runtimeInput,
         runId: input.observedRunId
       },
+      includeTargetBinding: false,
       lockHeld: true,
       observedRunId: undefined
     });
@@ -2006,6 +2008,7 @@ export class ProfileRuntimeService {
     observedRunId?: string;
     identityPreflight: IdentityPreflightResult;
     profileState: ProfileState;
+    includeTargetBinding?: boolean;
   }): Promise<RuntimeReadinessSnapshot> {
     const baseIdentity = input.identityPreflight.identityBindingState;
     const bridge = this.#bridgeFactory();
@@ -2022,7 +2025,9 @@ export class ProfileRuntimeService {
           params: {
             run_id: input.runtimeInput.runId,
             runtime_context_id: runtimeContextId,
-            ...buildRuntimeTargetParams(input.runtimeInput.params)
+            ...(input.includeTargetBinding === false
+              ? {}
+              : buildRuntimeTargetParams(input.runtimeInput.params))
           } as JsonObject
         });
       if (!result.ok) {
