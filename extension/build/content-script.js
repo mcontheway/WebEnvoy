@@ -4266,7 +4266,7 @@ const resolveActiveVisitedPageContextNamespace = (requestedNamespace, currentVis
     }
     return normalizedRequested ?? normalizedCurrentVisited;
 };
-return { SEARCH_ENDPOINT, WEBENVOY_SYNTHETIC_REQUEST_HEADER, createPageContextNamespace, createSearchRequestShape, createVisitedPageContextNamespace, resolveActiveVisitedPageContextNamespace, resolveMainWorldPageContextNamespaceEventName, serializeSearchRequestShape };
+return { DETAIL_ENDPOINT, SEARCH_ENDPOINT, USER_HOME_ENDPOINT, WEBENVOY_SYNTHETIC_REQUEST_HEADER, createPageContextNamespace, createDetailRequestShape, createSearchRequestShape, createUserHomeRequestShape, createVisitedPageContextNamespace, resolveActiveVisitedPageContextNamespace, resolveMainWorldPageContextNamespaceEventName, serializeSearchRequestShape };
 })();
 const __webenvoy_module_xhs_search_telemetry = (() => {
 const { SEARCH_ENDPOINT } = __webenvoy_module_xhs_search_types;

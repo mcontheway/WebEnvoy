@@ -1,4 +1,160 @@
-import { DETAIL_ENDPOINT, SEARCH_ENDPOINT, USER_HOME_ENDPOINT, WEBENVOY_SYNTHETIC_REQUEST_HEADER, createDetailRequestShape, createSearchRequestShape, createUserHomeRequestShape, createVisitedPageContextNamespace, resolveActiveVisitedPageContextNamespace } from "./xhs-search-types.js";
+(() => {
+const __webenvoy_install_scope = globalThis;
+const __webenvoy_install_key = Symbol.for("webenvoy.main_world.bridge.bundle.v1");
+if (__webenvoy_install_scope[__webenvoy_install_key]) {
+  return;
+}
+Object.defineProperty(__webenvoy_install_scope, __webenvoy_install_key, {
+  value: true,
+  configurable: false,
+  enumerable: false,
+  writable: false
+});
+
+/* WebEnvoy classic main-world bridge bundle for Chrome MV3 content_scripts. */
+
+const __webenvoy_module_xhs_search_types = (() => {
+const SEARCH_ENDPOINT = "/api/sns/web/v1/search/notes";
+const DETAIL_ENDPOINT = "/api/sns/web/v1/feed";
+const USER_HOME_ENDPOINT = "/api/sns/web/v1/user/otherinfo";
+const WEBENVOY_SYNTHETIC_REQUEST_HEADER = "x-webenvoy-synthetic-request";
+const MAIN_WORLD_EVENT_NAMESPACE = "webenvoy.main_world.bridge.v1";
+const MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT_PREFIX = "__mw_ns__";
+const hashMainWorldEventChannel = (value) => {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(36);
+};
+const asInteger = (value) => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return Math.trunc(value);
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+    }
+    return null;
+};
+const toTrimmedString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const normalizeSearchRequestShapeInput = (input) => {
+    const keyword = toTrimmedString(input.keyword);
+    const page = input.page === undefined ? 1 : asInteger(input.page);
+    const pageSizeInput = input.page_size !== undefined ? input.page_size : input.limit !== undefined ? input.limit : 20;
+    const pageSize = asInteger(pageSizeInput);
+    const sort = input.sort === undefined ? "general" : toTrimmedString(input.sort);
+    const noteType = input.note_type === undefined ? 0 : asInteger(input.note_type);
+    if (!keyword || page === null || pageSize === null || sort === null || noteType === null) {
+        return null;
+    }
+    return {
+        keyword,
+        page,
+        page_size: pageSize,
+        sort,
+        note_type: noteType
+    };
+};
+const createSearchRequestShape = (input) => {
+    const normalized = normalizeSearchRequestShapeInput(input);
+    if (!normalized) {
+        return null;
+    }
+    return {
+        command: "xhs.search",
+        method: "POST",
+        pathname: SEARCH_ENDPOINT,
+        ...normalized
+    };
+};
+const serializeSearchRequestShape = (shape) => JSON.stringify(shape);
+const createDetailRequestShape = (input) => {
+    const noteId = toTrimmedString(input.note_id ?? input.source_note_id);
+    if (!noteId) {
+        return null;
+    }
+    return {
+        command: "xhs.detail",
+        method: "POST",
+        pathname: DETAIL_ENDPOINT,
+        note_id: noteId
+    };
+};
+const serializeDetailRequestShape = (shape) => JSON.stringify(shape);
+const createUserHomeRequestShape = (input) => {
+    const userId = toTrimmedString(input.user_id);
+    if (!userId) {
+        return null;
+    }
+    return {
+        command: "xhs.user_home",
+        method: "GET",
+        pathname: USER_HOME_ENDPOINT,
+        user_id: userId
+    };
+};
+const serializeUserHomeRequestShape = (shape) => JSON.stringify(shape);
+const resolveMainWorldPageContextNamespaceEventName = (secret) => `${MAIN_WORLD_PAGE_CONTEXT_NAMESPACE_EVENT_PREFIX}${hashMainWorldEventChannel(`${MAIN_WORLD_EVENT_NAMESPACE}|namespace|${secret.trim()}`)}`;
+const createPageContextNamespace = (href) => {
+    const normalized = href.trim();
+    if (normalized.length === 0) {
+        return "about:blank";
+    }
+    try {
+        const parsed = new URL(normalized, "https://www.xiaohongshu.com/");
+        const pathname = parsed.pathname.length > 0 ? parsed.pathname : "/";
+        const queryIdentity = parsed.search.length > 0 ? `${pathname}${parsed.search}` : pathname;
+        const documentTimeOrigin = typeof globalThis.performance?.timeOrigin === "number" &&
+            Number.isFinite(globalThis.performance.timeOrigin)
+            ? Math.trunc(globalThis.performance.timeOrigin)
+            : null;
+        return documentTimeOrigin === null
+            ? `${parsed.origin}${queryIdentity}`
+            : `${parsed.origin}${queryIdentity}#doc=${documentTimeOrigin}`;
+    }
+    catch {
+        return normalized;
+    }
+};
+const createVisitedPageContextNamespace = (href, visitSequence) => {
+    const baseNamespace = createPageContextNamespace(href);
+    return visitSequence > 0 ? `${baseNamespace}|visit=${visitSequence}` : baseNamespace;
+};
+const stripVisitedPageContextNamespace = (namespace) => {
+    const visitSuffixIndex = namespace.indexOf("|visit=");
+    return visitSuffixIndex >= 0 ? namespace.slice(0, visitSuffixIndex) : namespace;
+};
+const resolveActiveVisitedPageContextNamespace = (requestedNamespace, currentVisitedNamespace) => {
+    const normalizedRequested = typeof requestedNamespace === "string" && requestedNamespace.length > 0
+        ? requestedNamespace
+        : null;
+    const normalizedCurrentVisited = typeof currentVisitedNamespace === "string" && currentVisitedNamespace.length > 0
+        ? currentVisitedNamespace
+        : null;
+    if (normalizedRequested &&
+        normalizedCurrentVisited &&
+        normalizedRequested === stripVisitedPageContextNamespace(normalizedCurrentVisited)) {
+        return normalizedCurrentVisited;
+    }
+    return normalizedRequested ?? normalizedCurrentVisited;
+};
+return { DETAIL_ENDPOINT, SEARCH_ENDPOINT, USER_HOME_ENDPOINT, WEBENVOY_SYNTHETIC_REQUEST_HEADER, createPageContextNamespace, createDetailRequestShape, createSearchRequestShape, createUserHomeRequestShape, createVisitedPageContextNamespace, resolveActiveVisitedPageContextNamespace };
+})();
+const __webenvoy_module_main_world_bridge = (() => {
+const {
+  DETAIL_ENDPOINT,
+  SEARCH_ENDPOINT,
+  USER_HOME_ENDPOINT,
+  WEBENVOY_SYNTHETIC_REQUEST_HEADER,
+  createPageContextNamespace,
+  createDetailRequestShape,
+  createSearchRequestShape,
+  createUserHomeRequestShape,
+  createVisitedPageContextNamespace,
+  resolveActiveVisitedPageContextNamespace
+} = __webenvoy_module_xhs_search_types;
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
@@ -1195,3 +1351,6 @@ if (expectedMainWorldEventChannel) {
 else {
     ensureBootstrapListener();
 }
+return {  };
+})();
+})();

@@ -32,6 +32,25 @@ const renderClassicModule = ({ moduleVar, prelude = "", sourceBody, exports }) =
     .filter((line) => line.length > 0)
     .join("\n");
 
+const wrapClassicBundleWithInstallGuard = ({ bundleSource, installKey }) =>
+  [
+    "(() => {",
+    "const __webenvoy_install_scope = globalThis;",
+    `const __webenvoy_install_key = Symbol.for(${JSON.stringify(installKey)});`,
+    "if (__webenvoy_install_scope[__webenvoy_install_key]) {",
+    "  return;",
+    "}",
+    "Object.defineProperty(__webenvoy_install_scope, __webenvoy_install_key, {",
+    "  value: true,",
+    "  configurable: false,",
+    "  enumerable: false,",
+    "  writable: false",
+    "});",
+    "",
+    bundleSource,
+    "})();"
+  ].join("\n");
+
 const readSource = async (path) =>
   stripEsmSyntaxForClassicScript(await readFile(path, "utf8"));
 
@@ -223,10 +242,14 @@ const buildContentScriptBundle = async () => {
     moduleVar: "__webenvoy_module_xhs_search_types",
     sourceBody: xhsSearchTypesSource,
     exports: [
+      "DETAIL_ENDPOINT",
       "SEARCH_ENDPOINT",
+      "USER_HOME_ENDPOINT",
       "WEBENVOY_SYNTHETIC_REQUEST_HEADER",
       "createPageContextNamespace",
+      "createDetailRequestShape",
       "createSearchRequestShape",
+      "createUserHomeRequestShape",
       "createVisitedPageContextNamespace",
       "resolveActiveVisitedPageContextNamespace",
       "resolveMainWorldPageContextNamespaceEventName",
@@ -501,5 +524,62 @@ const buildContentScriptBundle = async () => {
   ].join("\n");
 };
 
-const bundle = await buildContentScriptBundle();
-await writeFile(join(buildRoot, "content-script.js"), `${bundle}\n`, "utf8");
+const buildMainWorldBridgeBundle = async () => {
+  const xhsSearchTypesSource = await readSource(join(buildRoot, "xhs-search-types.js"));
+  const mainWorldBridgeSource = await readSource(join(buildRoot, "main-world-bridge.js"));
+
+  const xhsSearchTypesModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_xhs_search_types",
+    sourceBody: xhsSearchTypesSource,
+    exports: [
+      "DETAIL_ENDPOINT",
+      "SEARCH_ENDPOINT",
+      "USER_HOME_ENDPOINT",
+      "WEBENVOY_SYNTHETIC_REQUEST_HEADER",
+      "createPageContextNamespace",
+      "createDetailRequestShape",
+      "createSearchRequestShape",
+      "createUserHomeRequestShape",
+      "createVisitedPageContextNamespace",
+      "resolveActiveVisitedPageContextNamespace"
+    ]
+  });
+
+  const mainWorldBridgeModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_main_world_bridge",
+    prelude: [
+      "const {",
+      "  DETAIL_ENDPOINT,",
+      "  SEARCH_ENDPOINT,",
+      "  USER_HOME_ENDPOINT,",
+      "  WEBENVOY_SYNTHETIC_REQUEST_HEADER,",
+      "  createPageContextNamespace,",
+      "  createDetailRequestShape,",
+      "  createSearchRequestShape,",
+      "  createUserHomeRequestShape,",
+      "  createVisitedPageContextNamespace,",
+      "  resolveActiveVisitedPageContextNamespace",
+      "} = __webenvoy_module_xhs_search_types;"
+    ].join("\n"),
+    sourceBody: mainWorldBridgeSource,
+    exports: []
+  });
+
+  const bundleSource = [
+    "/* WebEnvoy classic main-world bridge bundle for Chrome MV3 content_scripts. */",
+    "",
+    xhsSearchTypesModule,
+    mainWorldBridgeModule
+  ].join("\n");
+
+  return wrapClassicBundleWithInstallGuard({
+    bundleSource,
+    installKey: "webenvoy.main_world.bridge.bundle.v1"
+  });
+};
+
+const contentScriptBundle = await buildContentScriptBundle();
+await writeFile(join(buildRoot, "content-script.js"), `${contentScriptBundle}\n`, "utf8");
+
+const mainWorldBridgeBundle = await buildMainWorldBridgeBundle();
+await writeFile(join(buildRoot, "main-world-bridge.js"), `${mainWorldBridgeBundle}\n`, "utf8");
