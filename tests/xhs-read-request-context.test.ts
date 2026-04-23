@@ -1257,7 +1257,7 @@ describe("xhs read request-context exact-shape reuse", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
-  it("keeps generic failed_request_rejected for exact-hit detail artifacts without a preserved backend reason", async () => {
+  it("preserves TARGET_API_RESPONSE_INVALID for exact-hit detail artifacts without a recognized backend failure class", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
 
@@ -1300,7 +1300,7 @@ describe("xhs read request-context exact-shape reuse", () => {
     expect(result.payload.details).toMatchObject({
       request_context_result: "request_context_missing",
       request_context_lookup_state: "rejected_source",
-      request_context_miss_reason: "failed_request_rejected"
+      request_context_miss_reason: "TARGET_API_RESPONSE_INVALID"
     });
     expect(callSignature).not.toHaveBeenCalled();
     expect(fetchJson).not.toHaveBeenCalled();
@@ -1351,6 +1351,15 @@ describe("xhs read request-context exact-shape reuse", () => {
         msg: "captcha required"
       },
       expectedMessage: "平台要求额外人机验证，无法继续执行"
+    },
+    {
+      label: "TARGET_API_RESPONSE_INVALID",
+      status: 418,
+      body: {
+        code: 418001,
+        msg: "teapot"
+      },
+      expectedMessage: "xhs.detail 接口返回了未识别的失败响应"
     }
   ])("preserves backend failure class $label for rejected exact-hit detail artifacts", async ({
     label,
@@ -1487,6 +1496,15 @@ describe("xhs read request-context exact-shape reuse", () => {
         msg: "captcha required"
       },
       expectedMessage: "平台要求额外人机验证，无法继续执行"
+    },
+    {
+      label: "TARGET_API_RESPONSE_INVALID",
+      status: 418,
+      body: {
+        code: 418001,
+        msg: "teapot"
+      },
+      expectedMessage: "xhs.user_home 接口返回了未识别的失败响应"
     }
   ])("preserves backend failure class $label for rejected exact-hit user_home artifacts", async ({
     label,

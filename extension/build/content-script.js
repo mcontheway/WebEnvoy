@@ -5582,7 +5582,8 @@ const BACKEND_REJECTED_SOURCE_REASONS = new Set([
     "ACCOUNT_ABNORMAL",
     "BROWSER_ENV_ABNORMAL",
     "GATEWAY_INVOKER_FAILED",
-    "CAPTCHA_REQUIRED"
+    "CAPTCHA_REQUIRED",
+    "TARGET_API_RESPONSE_INVALID"
 ]);
 const XHS_DETAIL_SPEC = {
     command: "xhs.detail",
@@ -6427,7 +6428,8 @@ const responseContainsRequestedTarget = (spec, params, body) => {
     if (spec.command === "xhs.detail") {
         return getDetailResponseCandidates(body).some((candidate) => containsTargetIdentifier(candidate, params.note_id, [
             "note_id",
-            "noteId"
+            "noteId",
+            "id"
         ]));
     }
     return getUserHomeResponseCandidates(body).some((candidate) => containsTargetIdentifier(candidate, params.user_id, [

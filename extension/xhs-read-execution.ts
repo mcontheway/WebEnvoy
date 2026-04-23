@@ -177,7 +177,8 @@ const BACKEND_REJECTED_SOURCE_REASONS = new Set<RequestContextMissReason>([
   "ACCOUNT_ABNORMAL",
   "BROWSER_ENV_ABNORMAL",
   "GATEWAY_INVOKER_FAILED",
-  "CAPTCHA_REQUIRED"
+  "CAPTCHA_REQUIRED",
+  "TARGET_API_RESPONSE_INVALID"
 ]);
 
 const XHS_DETAIL_SPEC: XhsReadCommandSpec = {
@@ -1259,7 +1260,8 @@ const responseContainsRequestedTarget = (
     return getDetailResponseCandidates(body).some((candidate) =>
       containsTargetIdentifier(candidate, (params as XhsDetailParams).note_id, [
         "note_id",
-        "noteId"
+        "noteId",
+        "id"
       ])
     );
   }
