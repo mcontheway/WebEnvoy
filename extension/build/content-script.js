@@ -6478,8 +6478,7 @@ const responseContainsRequestedTarget = (spec, params, body) => {
     if (spec.command === "xhs.detail") {
         return getDetailResponseCandidates(body).some((candidate) => containsTargetIdentifier(candidate, params.note_id, [
             "note_id",
-            "noteId",
-            "id"
+            "noteId"
         ]));
     }
     return getUserHomeResponseCandidates(body).some((candidate) => containsTargetIdentifier(candidate, params.user_id, [

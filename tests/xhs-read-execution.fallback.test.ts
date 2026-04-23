@@ -686,7 +686,7 @@ describe("xhs read execution fallback", () => {
     expect(result.error.message).toBe("xhs.detail 接口返回成功但未包含目标数据");
   });
 
-  it("accepts detail success when the api payload exposes the requested bare id on the note candidate", async () => {
+  it("keeps detail execution failed when the api success payload only exposes a bare id", async () => {
     const result = await executeXhsDetail(
       {
         abilityId: "xhs.note.detail.v1",
@@ -719,22 +719,14 @@ describe("xhs read execution fallback", () => {
       })
     );
 
-    expect(result.ok).toBe(true);
-    if (!result.ok) {
-      throw new Error("expected detail bare-id success");
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected detail bare-id failure");
     }
-    expect(result.payload.summary).toMatchObject({
-      capability_result: {
-        outcome: "success",
-        data_ref: {
-          note_id: "note-bare-id-001"
-        }
-      }
+    expect(result.error).toMatchObject({
+      code: "ERR_EXECUTION_FAILED",
+      message: "xhs.detail 接口返回成功但未包含目标数据"
     });
-    expect(result.payload.observability).toMatchObject({
-      failure_site: null
-    });
-    expect(result.payload).not.toHaveProperty("diagnosis");
   });
 
   it("uses detail page-state fallback when request context is missing but page state still proves the requested note", async () => {

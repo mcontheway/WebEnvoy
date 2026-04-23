@@ -1319,8 +1319,7 @@ const responseContainsRequestedTarget = (
     return getDetailResponseCandidates(body).some((candidate) =>
       containsTargetIdentifier(candidate, (params as XhsDetailParams).note_id, [
         "note_id",
-        "noteId",
-        "id"
+        "noteId"
       ])
     );
   }
