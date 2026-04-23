@@ -157,9 +157,7 @@ const {
 const MAIN_WORLD_EVENT_REQUEST_PREFIX = "__mw_req__";
 const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
-let activeMainWorldEventChannel = null;
-let activeMainWorldRequestListener = null;
-let activeMainWorldBootstrapListener = null;
+const MAIN_WORLD_BRIDGE_SHARED_STATE_SYMBOL = Symbol.for("webenvoy.main_world.bridge.state.v1");
 const patchedAudioContextPrototypes = new WeakSet();
 const audioNoiseSeedByPrototype = new WeakMap();
 const capturedRequestContextBucketsByNamespace = new Map();
@@ -207,6 +205,25 @@ const DEFAULT_MIME_TYPE_DESCRIPTORS = [
     }
 ];
 const mainWindow = window;
+const resolveMainWorldBridgeSharedState = () => {
+    const existing = mainWindow[MAIN_WORLD_BRIDGE_SHARED_STATE_SYMBOL];
+    if (typeof existing === "object" && existing !== null) {
+        return existing;
+    }
+    const state = {
+        activeMainWorldEventChannel: null,
+        activeMainWorldRequestListener: null,
+        activeMainWorldBootstrapListener: null
+    };
+    Object.defineProperty(mainWindow, MAIN_WORLD_BRIDGE_SHARED_STATE_SYMBOL, {
+        value: state,
+        configurable: false,
+        enumerable: false,
+        writable: false
+    });
+    return state;
+};
+const mainWorldBridgeSharedState = resolveMainWorldBridgeSharedState();
 const asRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
@@ -528,7 +545,7 @@ const resolveCurrentPageCaptureContext = () => {
     };
 };
 const emitCurrentPageContextNamespace = () => {
-    const namespaceEvent = activeMainWorldEventChannel?.namespaceEvent;
+    const namespaceEvent = mainWorldBridgeSharedState.activeMainWorldEventChannel?.namespaceEvent;
     if (!namespaceEvent || typeof mainWindow.dispatchEvent !== "function") {
         return;
     }
@@ -1114,10 +1131,10 @@ const parseMainWorldRequest = (event) => {
     };
 };
 const emitMainWorldResult = async (result) => {
-    if (!activeMainWorldEventChannel) {
+    if (!mainWorldBridgeSharedState.activeMainWorldEventChannel) {
         return;
     }
-    await emitResult(activeMainWorldEventChannel.resultEvent, result);
+    await emitResult(mainWorldBridgeSharedState.activeMainWorldEventChannel.resultEvent, result);
 };
 const buildMainWorldVerifyResult = () => {
     const hasGetBattery = typeof window.navigator.getBattery === "function";
@@ -1290,26 +1307,26 @@ const resolveBootstrappedMainWorldEventChannel = (event) => {
     };
 };
 const attachMainWorldEventChannel = (channel) => {
-    if (activeMainWorldEventChannel) {
-        if (activeMainWorldEventChannel.requestEvent === channel.requestEvent &&
-            activeMainWorldEventChannel.resultEvent === channel.resultEvent &&
-            activeMainWorldEventChannel.namespaceEvent === channel.namespaceEvent) {
+    if (mainWorldBridgeSharedState.activeMainWorldEventChannel) {
+        if (mainWorldBridgeSharedState.activeMainWorldEventChannel.requestEvent === channel.requestEvent &&
+            mainWorldBridgeSharedState.activeMainWorldEventChannel.resultEvent === channel.resultEvent &&
+            mainWorldBridgeSharedState.activeMainWorldEventChannel.namespaceEvent === channel.namespaceEvent) {
             return;
         }
-        if (activeMainWorldRequestListener) {
-            window.removeEventListener(activeMainWorldEventChannel.requestEvent, activeMainWorldRequestListener);
+        if (mainWorldBridgeSharedState.activeMainWorldRequestListener) {
+            window.removeEventListener(mainWorldBridgeSharedState.activeMainWorldEventChannel.requestEvent, mainWorldBridgeSharedState.activeMainWorldRequestListener);
         }
-        activeMainWorldEventChannel = null;
-        activeMainWorldRequestListener = null;
+        mainWorldBridgeSharedState.activeMainWorldEventChannel = null;
+        mainWorldBridgeSharedState.activeMainWorldRequestListener = null;
     }
-    activeMainWorldEventChannel = channel;
-    activeMainWorldRequestListener = (event) => {
+    mainWorldBridgeSharedState.activeMainWorldEventChannel = channel;
+    mainWorldBridgeSharedState.activeMainWorldRequestListener = (event) => {
         const request = parseMainWorldRequest(event);
         if (!request) {
             return;
         }
         void handleRequest(request).catch(async (error) => {
-            if (!activeMainWorldEventChannel) {
+            if (!mainWorldBridgeSharedState.activeMainWorldEventChannel) {
                 return;
             }
             const errorName = typeof error === "object" && error !== null && "name" in error
@@ -1318,7 +1335,7 @@ const attachMainWorldEventChannel = (channel) => {
             const errorCode = typeof error === "object" && error !== null && "code" in error
                 ? String(error.code)
                 : undefined;
-            await emitResult(activeMainWorldEventChannel.resultEvent, {
+            await emitResult(mainWorldBridgeSharedState.activeMainWorldEventChannel.resultEvent, {
                 id: request.id,
                 ok: false,
                 message: error instanceof Error ? error.message : String(error),
@@ -1327,20 +1344,21 @@ const attachMainWorldEventChannel = (channel) => {
             });
         });
     };
-    window.addEventListener(channel.requestEvent, activeMainWorldRequestListener);
+    window.addEventListener(channel.requestEvent, mainWorldBridgeSharedState.activeMainWorldRequestListener);
 };
 const ensureBootstrapListener = () => {
-    if (activeMainWorldBootstrapListener || typeof window.addEventListener !== "function") {
+    if (mainWorldBridgeSharedState.activeMainWorldBootstrapListener ||
+        typeof window.addEventListener !== "function") {
         return;
     }
-    activeMainWorldBootstrapListener = (event) => {
+    mainWorldBridgeSharedState.activeMainWorldBootstrapListener = (event) => {
         const channel = resolveBootstrappedMainWorldEventChannel(event);
         if (!channel) {
             return;
         }
         attachMainWorldEventChannel(channel);
     };
-    window.addEventListener(MAIN_WORLD_EVENT_BOOTSTRAP, activeMainWorldBootstrapListener);
+    window.addEventListener(MAIN_WORLD_EVENT_BOOTSTRAP, mainWorldBridgeSharedState.activeMainWorldBootstrapListener);
 };
 const expectedMainWorldEventChannel = resolveExpectedMainWorldEventChannel();
 installPageContextNavigationTracking();

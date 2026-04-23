@@ -528,6 +528,87 @@ describe("extension build contract", () => {
     expect(addedEventTypes.filter((type) => type === "__mw_bootstrap__")).toHaveLength(1);
   });
 
+  it("rebinds the staged main-world bridge to the latest secret without accumulating listeners", () => {
+    const baseMainWorldBridgeSource = fs.readFileSync(mainWorldBridgeBuildPath, "utf8");
+    const listenerMap = new Map<string, Set<(...args: unknown[]) => unknown>>();
+    const createStagedMainWorldBridgeSource = (requestEvent: string, resultEvent: string, namespaceEvent: string) =>
+      baseMainWorldBridgeSource
+        .replace(
+          'const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";',
+          [
+            'const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";',
+            `const EXPECTED_MAIN_WORLD_REQUEST_EVENT = ${JSON.stringify(requestEvent)};`,
+            `const EXPECTED_MAIN_WORLD_RESULT_EVENT = ${JSON.stringify(resultEvent)};`,
+            `const EXPECTED_MAIN_WORLD_NAMESPACE_EVENT = ${JSON.stringify(namespaceEvent)};`
+          ].join("\n")
+        )
+        .replace(
+          'const __webenvoy_install_key = Symbol.for("webenvoy.main_world.bridge.bundle.v1");',
+          `const __webenvoy_install_key = Symbol.for(${JSON.stringify(
+            `webenvoy.main_world.bridge.bundle.v1:${requestEvent}`
+          )});`
+        );
+    const context: Record<string, unknown> = {};
+
+    context.globalThis = context;
+    context.Symbol = Symbol;
+    context.URL = URL;
+    context.performance = performance;
+    context.setTimeout = setTimeout;
+    context.clearTimeout = clearTimeout;
+    context.window = {
+      addEventListener: (type: string, listener: (...args: unknown[]) => unknown) => {
+        const listeners = listenerMap.get(type) ?? new Set();
+        listeners.add(listener);
+        listenerMap.set(type, listeners);
+      },
+      removeEventListener: (type: string, listener: (...args: unknown[]) => unknown) => {
+        listenerMap.get(type)?.delete(listener);
+      },
+      dispatchEvent: () => true,
+      fetch: async () => new Response("{}"),
+      location: {
+        href: "https://www.xiaohongshu.com/search_result?keyword=staged-rerun"
+      },
+      history: {
+        pushState: () => {},
+        replaceState: () => {}
+      },
+      navigator: {}
+    };
+    context.document = {
+      createElement: () => ({ textContent: "", remove: () => {} }),
+      documentElement: {
+        appendChild: (node: unknown) => node
+      }
+    };
+    context.CustomEvent = class {
+      type: string;
+      detail: unknown;
+
+      constructor(type: string, init: { detail: unknown }) {
+        this.type = type;
+        this.detail = init.detail;
+      }
+    };
+
+    runInNewContext(
+      createStagedMainWorldBridgeSource("__mw_req__a", "__mw_res__a", "__mw_ns__a"),
+      context,
+      { filename: `${mainWorldBridgeBuildPath}#stage-a` }
+    );
+    expect(listenerMap.get("__mw_req__a")?.size ?? 0).toBe(1);
+
+    runInNewContext(
+      createStagedMainWorldBridgeSource("__mw_req__b", "__mw_res__b", "__mw_ns__b"),
+      context,
+      { filename: `${mainWorldBridgeBuildPath}#stage-b` }
+    );
+
+    expect(listenerMap.get("__mw_req__a")?.size ?? 0).toBe(0);
+    expect(listenerMap.get("__mw_req__b")?.size ?? 0).toBe(1);
+  });
+
   it("keeps extension build entry imports resolvable in node module loading", async () => {
     await expect(import(backgroundBuildPath)).resolves.toBeDefined();
     await expect(import(contentScriptHandlerBuildPath)).resolves.toBeDefined();
