@@ -949,6 +949,60 @@ describe("xhs read request-context exact-shape reuse", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
+  it("treats exact-shape admitted detail artifacts with a conflicting bare id as incompatible", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-response-bare-id-conflict-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-response-bare-id-conflict-001")
+      },
+      createEnvironment({
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => ({
+          page_context_namespace: "detail-page",
+          shape_key:
+            '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}',
+          admitted_template: createDetailArtifact({
+            response: {
+              headers: {},
+              body: {
+                code: 0,
+                data: {
+                  note: {
+                    id: "note-999"
+                  }
+                }
+              }
+            }
+          }),
+          rejected_observation: null,
+          incompatible_observation: null
+        })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.payload.details).toMatchObject({
+      request_context_result: "request_context_incompatible",
+      request_context_lookup_state: "incompatible",
+      request_context_miss_reason: "shape_mismatch",
+      captured_request_shape: {
+        note_id: "note-999"
+      }
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
   it("treats raw detail artifacts with conflicting canonical note_id as incompatible", async () => {
     const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));

@@ -481,10 +481,13 @@ const resolveDetailResponseNoteId = (
     }
     if (
       options?.allowBareIdAlias &&
-      preferredNoteId &&
-      asString(candidate.id) === preferredNoteId
+      asString(candidate.id)
     ) {
-      return preferredNoteId;
+      const bareId = asString(candidate.id) as string;
+      if (!preferredNoteId || bareId === preferredNoteId) {
+        return bareId;
+      }
+      return bareId;
     }
   }
   return preferredNoteId ? null : fallbackNoteId;

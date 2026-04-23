@@ -252,9 +252,12 @@ const resolveDetailResponseNoteId = (value, preferredNoteId, options) => {
             continue;
         }
         if (options?.allowBareIdAlias &&
-            preferredNoteId &&
-            asString(candidate.id) === preferredNoteId) {
-            return preferredNoteId;
+            asString(candidate.id)) {
+            const bareId = asString(candidate.id);
+            if (!preferredNoteId || bareId === preferredNoteId) {
+                return bareId;
+            }
+            return bareId;
         }
     }
     return preferredNoteId ? null : fallbackNoteId;
