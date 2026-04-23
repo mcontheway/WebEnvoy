@@ -1018,10 +1018,7 @@ describe("xhs-search gate helpers", () => {
       request_ref: requestId,
       admission_decision: "blocked"
     });
-    expect(gate.execution_audit).toMatchObject({
-      request_ref: requestId,
-      request_admission_decision: "blocked"
-    });
+    expect(gate.execution_audit).toBeNull();
   });
 
   it("does not publish execution_audit compatibility refs when a canonical grant is blocked", () => {
@@ -1863,7 +1860,7 @@ describe("xhs-search gate helpers", () => {
     });
   });
 
-  it("emits execution_audit on legacy live-read paths without canonical FR-0023 objects", () => {
+  it("keeps execution_audit empty on legacy live-read paths without canonical FR-0023 objects", () => {
     const runId = "run-extension-execution-audit-004";
     const requestId = "req-execution-audit-004";
     const sessionId = "session-extension-execution-audit-004";
@@ -1899,10 +1896,7 @@ describe("xhs-search gate helpers", () => {
     });
 
     expect(gate.gate_outcome.gate_decision).toBe("allowed");
-    expect(gate.execution_audit).toMatchObject({
-      request_ref: requestId,
-      request_admission_decision: "allowed"
-    });
+    expect(gate.execution_audit).toBeNull();
   });
 
   it("preserves request_admission_result on the loopback gate payload", () => {
@@ -2229,10 +2223,7 @@ describe("xhs-search gate helpers", () => {
       request_ref: commandRequestId,
       admission_decision: "allowed"
     });
-    expect(gate.execution_audit).toMatchObject({
-      request_ref: commandRequestId,
-      request_admission_decision: "allowed"
-    });
+    expect(gate.execution_audit).toBeNull();
   });
 
   it("does not require admission evidence to pre-match internal gate ids", () => {
@@ -3150,10 +3141,7 @@ describe("xhs-search gate helpers", () => {
       gate_decision: "allowed",
       audited_checks: defaultAuditChecks
     });
-    expect(artifacts.execution_audit).toMatchObject({
-      request_ref: "req-issued-audit-1",
-      request_admission_decision: "allowed"
-    });
+    expect(artifacts.execution_audit).toBeNull();
 
     const validation = validateIssue209AuditSourceAgainstCurrentLinkage({
       current: {

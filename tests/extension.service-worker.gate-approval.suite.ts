@@ -343,16 +343,11 @@ describe("extension service worker / gate and approval", () => {
         request_admission_result: {
           request_ref: requestId,
           admission_decision: "allowed"
-        },
-        execution_audit: {
-          request_ref: requestId,
-          request_admission_decision: "allowed"
         }
       }
     });
     const forwardedPayload = asRecord(forwardedError?.payload) ?? {};
-    expect(asRecord(forwardedPayload.execution_audit)).not.toBeNull();
-    expect(asRecord(forwardedPayload.observability)?.execution_audit ?? null).toBeNull();
+    expect(forwardedPayload.execution_audit ?? null).toBeNull();
   });
 
   it("keeps background live gate on canonical mode when top-level mode is omitted", async () => {

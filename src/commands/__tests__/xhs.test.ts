@@ -1418,12 +1418,10 @@ describe("normalizeGateOptionsForContract", () => {
           gate_decision: "allowed"
         },
         request_admission_result: {
+          request_ref: requestId,
           admission_decision: "allowed"
         },
-        execution_audit: {
-          request_ref: requestId,
-          request_admission_decision: "allowed"
-        }
+        execution_audit: null
       });
     } finally {
       process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;

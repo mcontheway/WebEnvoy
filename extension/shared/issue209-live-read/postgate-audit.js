@@ -20,8 +20,16 @@ const normalizeChecks = (value) => {
 const ISSUE209_LIVE_READ_MODES = new Set(["live_read_limited", "live_read_high_risk"]);
 const NO_ADDITIONAL_RISK_SIGNALS = "NO_ADDITIONAL_RISK_SIGNALS";
 
-const hasExecutionAuditInputs = (requestAdmissionResult) =>
-  Boolean(asString(requestAdmissionResult?.request_ref));
+const hasExecutionAuditInputs = (requestAdmissionResult) => {
+  const derivedFrom = asRecord(requestAdmissionResult?.derived_from);
+  return (
+    Boolean(asString(requestAdmissionResult?.request_ref)) &&
+    Boolean(asString(derivedFrom?.action_request_ref)) &&
+    Boolean(asString(derivedFrom?.resource_binding_ref)) &&
+    Boolean(asString(derivedFrom?.authorization_grant_ref)) &&
+    Boolean(asString(derivedFrom?.runtime_target_ref))
+  );
+};
 
 const hasApprovalEvidenceValidationIssue = (reasonCodes) =>
   reasonCodes.some(
