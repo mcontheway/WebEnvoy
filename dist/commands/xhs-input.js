@@ -409,6 +409,14 @@ export const parseAbilityEnvelopeForContract = (params) => {
             : (() => {
                 throw invalidAbilityInput("REQUEST_ID_INVALID", abilityId);
             })();
+    const gateInvocationId = params.gate_invocation_id === undefined
+        ? null
+        : typeof params.gate_invocation_id === "string" &&
+            params.gate_invocation_id.trim().length > 0
+            ? params.gate_invocation_id.trim()
+            : (() => {
+                throw invalidAbilityInput("GATE_INVOCATION_ID_INVALID", abilityId);
+            })();
     const upstreamAuthorization = parseUpstreamAuthorizationForContract(params, abilityId);
     return {
         ability: {
@@ -419,6 +427,7 @@ export const parseAbilityEnvelopeForContract = (params) => {
         input,
         options,
         requestId,
+        gateInvocationId,
         upstreamAuthorization
     };
 };

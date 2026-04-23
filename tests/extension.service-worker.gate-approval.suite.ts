@@ -253,6 +253,103 @@ describe("extension service worker / gate and approval", () => {
     });
   });
 
+  it("keeps background canonical request admission linked to the caller request when live admission omits explicit request refs", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    const fingerprintContext = createFingerprintRuntimeContext();
+    const runId = "run-xhs-live-formal-source-sw-001";
+    const requestId = "issue209-live-formal-source-sw-001";
+    const gateInvocationId = "issue209-gate-run-xhs-live-formal-source-sw-001";
+    const admissionContext = createApprovedReadAdmissionContext({
+      run_id: runId,
+      request_id: requestId,
+      session_id: "nm-session-001",
+      requested_execution_mode: "live_read_high_risk",
+      risk_state: "allowed"
+    });
+    delete admissionContext.approval_admission_evidence.request_id;
+    delete admissionContext.audit_admission_evidence.request_id;
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId,
+      profile: "profile-a",
+      fingerprintContext
+    });
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onMessageListeners[0]?.({
+      id: runId,
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: runId,
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          run_id: runId,
+          request_id: requestId,
+          gate_invocation_id: gateInvocationId,
+          requested_execution_mode: "live_read_high_risk",
+          risk_state: "allowed",
+          approval_record: createApprovedReadApprovalRecord(),
+          admission_context: admissionContext,
+          fingerprint_context: fingerprintContext
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: runId,
+        ok: false,
+        error: {
+          code: "ERR_EXECUTION_FAILED",
+          message: "登录态缺失，无法执行 xhs.search"
+        },
+        payload: {
+          details: {
+            stage: "execution",
+            reason: "SESSION_EXPIRED"
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+        }
+      }
+    );
+    await Promise.resolve();
+
+    const forwardedError = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as { id?: string; status?: string; payload?: Record<string, unknown> })
+      .find((message) => message.id === runId);
+    expect(forwardedError).toMatchObject({
+      id: runId,
+      status: "error",
+      payload: {
+        request_admission_result: {
+          request_ref: requestId,
+          admission_decision: "allowed"
+        }
+      }
+    });
+    const forwardedPayload = asRecord(forwardedError?.payload) ?? {};
+    expect(forwardedPayload.execution_audit ?? null).toBeNull();
+  });
+
   it("keeps background live gate on canonical mode when top-level mode is omitted", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);

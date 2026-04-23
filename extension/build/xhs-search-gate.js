@@ -78,6 +78,8 @@ export const resolveGate = (options, context, actualTargetUrl) => {
         ...(targetSiteLoggedIn !== null ? { targetSiteLoggedIn } : {}),
         runId: context.runId,
         sessionId: context.sessionId,
+        requestId: context.requestId,
+        commandRequestId: context.commandRequestId,
         gateInvocationId: context.gateInvocationId,
         approvalRecord: providedApprovalRecord,
         auditRecord: options.audit_record,

@@ -228,6 +228,7 @@ const xhsReadCommand = async (context, inputConfig) => {
         const preparedIssue209LiveRead = prepareIssue209LiveReadEnvelopeForContract({
             options: gate.options,
             requestId: envelope.requestId,
+            gateInvocationId: envelope.gateInvocationId,
             runId: context.run_id
         });
         await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, {

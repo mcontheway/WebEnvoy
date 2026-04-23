@@ -185,6 +185,7 @@ describe("xhs-input", () => {
   it("parses ability envelope and normalizes xhs.search input", () => {
     const envelope = parseAbilityEnvelopeForContract({
       ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+      gate_invocation_id: "issue209-gate-envelope-parse-001",
       input: {
         query: "  露营  ",
         limit: 8,
@@ -206,6 +207,7 @@ describe("xhs-input", () => {
       layer: "L3",
       action: "read"
     });
+    expect(envelope.gateInvocationId).toBe("issue209-gate-envelope-parse-001");
     expect(parseSearchInputForContract(envelope.input, envelope.ability.id, envelope.options, envelope.ability.action)).toEqual({
       query: "露营",
       limit: 8,
@@ -220,6 +222,27 @@ describe("xhs-input", () => {
       targetPage: "search_result",
       requestedExecutionMode: "dry_run"
     });
+  });
+
+  it("rejects invalid top-level gate_invocation_id", () => {
+    try {
+      parseAbilityEnvelopeForContract({
+        ability: { id: "xhs.note.search.v1", layer: "L3", action: "read" },
+        gate_invocation_id: "   ",
+        input: {
+          query: "露营"
+        },
+        options: {}
+      });
+      throw new Error("expected invalid gate_invocation_id to throw");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "GATE_INVOCATION_ID_INVALID"
+        }
+      });
+    }
   });
 
   it("permits issue_208 editor_input validation without query", () => {
@@ -1717,7 +1740,7 @@ describe("xhs-input", () => {
     });
   });
 
-  it("always generates a new gate_invocation_id for issue_209 live reads", () => {
+  it("generates a new gate_invocation_id for issue_209 live reads only when caller omits it", () => {
     const gateInvocationId = resolveIssue209GateInvocationIdForContract({
       options: {
         issue_scope: "issue_209",
@@ -1734,6 +1757,19 @@ describe("xhs-input", () => {
     expect(gateInvocationId).toEqual(
       expect.stringMatching(/^issue209-gate-run-cli-issue209-live-007-/)
     );
+  });
+
+  it("preserves caller-provided gate_invocation_id for issue_209 live reads", () => {
+    expect(
+      resolveIssue209GateInvocationIdForContract({
+        options: {
+          issue_scope: "issue_209",
+          requested_execution_mode: "live_read_high_risk"
+        },
+        runId: "run-cli-issue209-live-007b",
+        gateInvocationId: "issue209-gate-explicit-007b"
+      })
+    ).toBe("issue209-gate-explicit-007b");
   });
 
   it("does not recover request_id from caller admission_context", () => {

@@ -1015,6 +1015,7 @@ describe("xhs-search gate helpers", () => {
       ])
     });
     expect(gate.request_admission_result).toMatchObject({
+      request_ref: requestId,
       admission_decision: "blocked"
     });
     expect(gate.execution_audit).toBeNull();
@@ -2155,6 +2156,74 @@ describe("xhs-search gate helpers", () => {
     expect(gate.gate_outcome.decision_id).toBe(decisionId);
     expect(gate.approval_record.approval_id).toBe(approvalId);
     expect(gate.approval_record.decision_id).toBe(decisionId);
+  });
+
+  it("falls back to the current command request when resolveGate live admission omits explicit request refs", () => {
+    const runId = "run-extension-formal-source-001";
+    const dispatchRequestId = "dispatch-extension-formal-source-001";
+    const commandRequestId = "issue209-live-formal-source-001";
+    const { gateInvocationId, decisionId, approvalId } = createIssue209InvocationLinkage(
+      runId,
+      "formal-source-001"
+    );
+    const admissionContext = createAdmissionContext({
+      run_id: runId,
+      request_id: commandRequestId,
+      session_id: "session-extension-formal-source-001",
+      target_tab_id: 12,
+      target_page: "search_result_tab",
+      requested_execution_mode: "live_read_high_risk",
+      risk_state: "allowed"
+    });
+    delete admissionContext.approval_admission_evidence.request_id;
+    delete admissionContext.audit_admission_evidence.request_id;
+
+    const gate = resolveGate(
+      {
+        issue_scope: "issue_209",
+        risk_state: "allowed",
+        target_domain: "www.xiaohongshu.com",
+        target_tab_id: 12,
+        target_page: "search_result_tab",
+        actual_target_domain: "www.xiaohongshu.com",
+        actual_target_tab_id: 12,
+        actual_target_page: "search_result_tab",
+        action_type: "read",
+        ability_action: "read",
+        requested_execution_mode: "live_read_high_risk",
+        admission_context: admissionContext,
+        approval_record: createApprovalRecord(decisionId, approvalId),
+        audit_record: createAuditRecord({
+          decisionId,
+          approvalId,
+          targetTabId: 12,
+          targetPage: "search_result_tab",
+          requestedExecutionMode: "live_read_high_risk",
+          overrides: {
+            risk_state: "allowed"
+          }
+        })
+      },
+      {
+        runId,
+        requestId: dispatchRequestId,
+        commandRequestId,
+        gateInvocationId,
+        sessionId: "session-extension-formal-source-001",
+        profile: "profile-a"
+      }
+    );
+
+    expect(gate.gate_outcome.decision_id).toBe(decisionId);
+    expect(gate.approval_record).toMatchObject({
+      decision_id: decisionId,
+      approval_id: approvalId
+    });
+    expect(gate.request_admission_result).toMatchObject({
+      request_ref: commandRequestId,
+      admission_decision: "allowed"
+    });
+    expect(gate.execution_audit).toBeNull();
   });
 
   it("does not require admission evidence to pre-match internal gate ids", () => {

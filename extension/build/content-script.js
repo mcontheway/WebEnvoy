@@ -2167,14 +2167,14 @@ const normalizeChecks = (value) => {
 const ISSUE209_LIVE_READ_MODES = new Set(["live_read_limited", "live_read_high_risk"]);
 const NO_ADDITIONAL_RISK_SIGNALS = "NO_ADDITIONAL_RISK_SIGNALS";
 
-const hasCanonicalExecutionAuditInputs = (requestAdmissionResult) => {
+const hasExecutionAuditInputs = (requestAdmissionResult) => {
   const derivedFrom = asRecord(requestAdmissionResult?.derived_from);
-  return Boolean(
-    asString(requestAdmissionResult?.request_ref) &&
-      asString(derivedFrom?.action_request_ref) &&
-      asString(derivedFrom?.resource_binding_ref) &&
-      asString(derivedFrom?.authorization_grant_ref) &&
-      asString(derivedFrom?.runtime_target_ref)
+  return (
+    Boolean(asString(requestAdmissionResult?.request_ref)) &&
+    Boolean(asString(derivedFrom?.action_request_ref)) &&
+    Boolean(asString(derivedFrom?.resource_binding_ref)) &&
+    Boolean(asString(derivedFrom?.authorization_grant_ref)) &&
+    Boolean(asString(derivedFrom?.runtime_target_ref))
   );
 };
 
@@ -2199,7 +2199,7 @@ const buildIssue209ExecutionAudit = (input) => {
     !requestAdmissionResult ||
     !requestedMode ||
     !ISSUE209_LIVE_READ_MODES.has(requestedMode) ||
-    !hasCanonicalExecutionAuditInputs(requestAdmissionResult)
+    !hasExecutionAuditInputs(requestAdmissionResult)
   ) {
     return null;
   }
@@ -4023,6 +4023,8 @@ const evaluateXhsGate = (input) => {
   const requestAdmissionResult = evaluateRequestAdmissionResult({
     state,
     upstream: state.upstreamAuthorizationRequest,
+    requestId: input.requestId,
+    commandRequestId: input.commandRequestId,
     legacyRequestedExecutionMode: state.legacyRequestedExecutionMode,
     anonymousIsolationVerified:
       input.anonymousIsolationVerified === true || input.__anonymous_isolation_verified === true,
@@ -4737,6 +4739,8 @@ const resolveGate = (options, context, actualTargetUrl) => {
         ...(targetSiteLoggedIn !== null ? { targetSiteLoggedIn } : {}),
         runId: context.runId,
         sessionId: context.sessionId,
+        requestId: context.requestId,
+        commandRequestId: context.commandRequestId,
         gateInvocationId: context.gateInvocationId,
         approvalRecord: providedApprovalRecord,
         auditRecord: options.audit_record,

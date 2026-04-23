@@ -87,6 +87,8 @@ export const buildLoopbackGate = (
   abilityAction: string | null,
   linkage?: {
     runId?: string;
+    requestId?: string;
+    commandRequestId?: string;
     sessionId?: string;
     profile?: string;
     gateInvocationId?: string;
@@ -119,6 +121,8 @@ export const buildLoopbackGate = (
     asString(options.validation_action) === "editor_input";
   const evaluatedGate = evaluateXhsGate({
     runId: linkage?.runId ?? asString(options.run_id),
+    requestId: linkage?.requestId,
+    commandRequestId: linkage?.commandRequestId,
     sessionId: linkage?.sessionId ?? asString(options.session_id),
     issueScope: options.issue_scope,
     riskState: options.risk_state,

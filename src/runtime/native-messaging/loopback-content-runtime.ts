@@ -198,7 +198,10 @@ export class InMemoryContentScriptRuntime {
         asString(ability.action),
         {
           runId: message.runId,
+          requestId: message.id,
+          commandRequestId: asString(message.commandParams.request_id) ?? undefined,
           sessionId: message.sessionId,
+          gateInvocationId: asString(message.commandParams.gate_invocation_id) ?? undefined,
           decisionId
         }
       );

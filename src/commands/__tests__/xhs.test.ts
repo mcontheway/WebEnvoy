@@ -10,6 +10,14 @@ import { executeCommand } from "../../core/router.js";
 import { createCommandRegistry } from "../index.js";
 import type { RuntimeContext } from "../../core/types.js";
 
+const ISSUE209_APPROVAL_CHECKS = {
+  target_domain_confirmed: true,
+  target_tab_confirmed: true,
+  target_page_confirmed: true,
+  risk_state_checked: true,
+  action_type_confirmed: true
+};
+
 const createApprovedAnonymousReadAdmissionContext = (runId: string, requestId: string) => ({
   approval_admission_evidence: {
     approval_admission_ref: `approval_admission_${runId}_${requestId}`,
@@ -24,13 +32,7 @@ const createApprovedAnonymousReadAdmissionContext = (runId: string, requestId: s
     approved: true,
     approver: "qa-reviewer",
     approved_at: "2026-03-23T10:00:00Z",
-    checks: {
-      target_domain_confirmed: true,
-      target_tab_confirmed: true,
-      target_page_confirmed: true,
-      risk_state_checked: true,
-      action_type_confirmed: true
-    },
+    checks: ISSUE209_APPROVAL_CHECKS,
     recorded_at: "2026-03-23T10:00:00Z"
   },
   audit_admission_evidence: {
@@ -44,15 +46,39 @@ const createApprovedAnonymousReadAdmissionContext = (runId: string, requestId: s
     action_type: "read",
     requested_execution_mode: "live_read_high_risk",
     risk_state: "allowed",
-    audited_checks: {
-      target_domain_confirmed: true,
-      target_tab_confirmed: true,
-      target_page_confirmed: true,
-      risk_state_checked: true,
-      action_type_confirmed: true
-    },
+    audited_checks: ISSUE209_APPROVAL_CHECKS,
     recorded_at: "2026-03-23T10:00:30Z"
   }
+});
+
+const createIssue209FormalApprovalRecord = (decisionId: string, approvalId: string) => ({
+  decision_id: decisionId,
+  approval_id: approvalId,
+  approved: true,
+  approver: "mcontheway",
+  approved_at: "2026-04-23T14:17:30Z",
+  checks: ISSUE209_APPROVAL_CHECKS
+});
+
+const createIssue209FormalAuditRecord = (
+  requestId: string,
+  decisionId: string,
+  approvalId: string
+) => ({
+  event_id: `gate_evt_${decisionId}`,
+  decision_id: decisionId,
+  approval_id: approvalId,
+  request_id: requestId,
+  issue_scope: "issue_209",
+  target_domain: "www.xiaohongshu.com",
+  target_tab_id: 32,
+  target_page: "search_result_tab",
+  action_type: "read",
+  requested_execution_mode: "live_read_high_risk",
+  risk_state: "allowed",
+  gate_decision: "allowed",
+  audited_checks: ISSUE209_APPROVAL_CHECKS,
+  recorded_at: "2026-04-23T14:17:31Z"
 });
 
 describe("ensureOfficialChromeRuntimeReady", () => {
@@ -1297,6 +1323,105 @@ describe("normalizeGateOptionsForContract", () => {
             audit_admission_ref: auditAdmissionRef
           }
         }
+      });
+    } finally {
+      process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
+      if (previousBrowserPath === undefined) {
+        delete process.env.WEBENVOY_BROWSER_PATH;
+      } else {
+        process.env.WEBENVOY_BROWSER_PATH = previousBrowserPath;
+      }
+      if (previousBrowserMockVersion === undefined) {
+        delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+      } else {
+        process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
+      }
+    }
+  });
+
+  it("preserves explicit top-level gate_invocation_id through formal-source live reads", async () => {
+    const runId = "run-formal-source-loopback-001";
+    const requestId = "issue209-live-formal-source-loopback-001";
+    const gateInvocationId = "issue209-gate-run-formal-source-loopback-001-001";
+    const decisionId = `gate_decision_${gateInvocationId}`;
+    const approvalId = `gate_appr_${decisionId}`;
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+    const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    process.env.WEBENVOY_NATIVE_TRANSPORT = "loopback";
+    process.env.WEBENVOY_BROWSER_PATH = join(process.cwd(), "tests", "fixtures", "mock-browser.sh");
+    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Chromium 146.0.0.0";
+
+    try {
+      const execution = await executeCommand(
+        {
+          cwd: "/tmp/webenvoy",
+          command: "xhs.search",
+          profile: "profile-formal-source-loopback-001",
+          run_id: runId,
+          params: {
+            request_id: requestId,
+            gate_invocation_id: gateInvocationId,
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              query: "露营"
+            },
+            options: {
+              simulate_result: "success",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_high_risk",
+              risk_state: "allowed",
+              approval_record: createIssue209FormalApprovalRecord(decisionId, approvalId),
+              audit_record: createIssue209FormalAuditRecord(requestId, decisionId, approvalId)
+            }
+          }
+        } as RuntimeContext,
+        createCommandRegistry()
+      );
+
+      expect(execution.summary).toMatchObject({
+        gate_input: {
+          admission_context: {
+            approval_admission_evidence: {
+              decision_id: decisionId,
+              approval_id: approvalId,
+              run_id: runId
+            },
+            audit_admission_evidence: {
+              decision_id: decisionId,
+              approval_id: approvalId,
+              run_id: runId
+            }
+          }
+        },
+        gate_outcome: {
+          decision_id: decisionId,
+          gate_decision: "allowed",
+          gate_reasons: ["LIVE_MODE_APPROVED"]
+        },
+        approval_record: {
+          decision_id: decisionId,
+          approval_id: approvalId,
+          approved: true
+        },
+        audit_record: {
+          decision_id: decisionId,
+          approval_id: approvalId,
+          gate_decision: "allowed"
+        },
+        request_admission_result: {
+          request_ref: requestId,
+          admission_decision: "allowed"
+        },
+        execution_audit: null
       });
     } finally {
       process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;

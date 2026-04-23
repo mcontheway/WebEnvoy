@@ -1685,6 +1685,8 @@ const evaluateXhsGate = (input) => {
   const requestAdmissionResult = evaluateRequestAdmissionResult({
     state,
     upstream: state.upstreamAuthorizationRequest,
+    requestId: input.requestId,
+    commandRequestId: input.commandRequestId,
     legacyRequestedExecutionMode: state.legacyRequestedExecutionMode,
     anonymousIsolationVerified:
       input.anonymousIsolationVerified === true || input.__anonymous_isolation_verified === true,

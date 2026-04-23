@@ -66,6 +66,8 @@ const buildLoopbackXhsReadGateBundle = (input) => {
     });
     const gate = buildLoopbackGate(input.options, input.abilityAction, {
         runId: input.runId,
+        requestId: input.requestId,
+        commandRequestId: asString(input.commandRequestId) ?? undefined,
         sessionId: input.sessionId,
         gateInvocationId: asString(input.gateInvocationId) ?? undefined,
         decisionId
