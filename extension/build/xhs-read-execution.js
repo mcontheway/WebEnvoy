@@ -461,6 +461,13 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
                 allowDetailResponseBareIdAlias: true,
                 allowDetailRequestFallback: true
             });
+            if (derivedShape && serializeReadShape(derivedShape) !== serializeReadShape(expectedShape)) {
+                return {
+                    state: "incompatible",
+                    reason: "shape_mismatch",
+                    shape: derivedShape
+                };
+            }
             return {
                 state: "rejected_source",
                 reason: resolveRejectedSourceReason(spec, rejectedObservation),

@@ -1056,6 +1056,72 @@ describe("xhs read request-context exact-shape reuse", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
+  it("treats rejected exact-shape detail observations with conflicting canonical note_id as incompatible", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-rejected-exact-shape-note-conflict-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-rejected-exact-shape-note-conflict-001")
+      },
+      createEnvironment({
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => ({
+          page_context_namespace: "detail-page",
+          shape_key:
+            '{"command":"xhs.detail","method":"POST","pathname":"/api/sns/web/v1/feed","note_id":"note-001"}',
+          admitted_template: null,
+          rejected_observation: createDetailArtifact({
+            shape: {
+              command: "xhs.detail",
+              method: "POST",
+              pathname: "/api/sns/web/v1/feed",
+              note_id: "note-001"
+            },
+            template_ready: false,
+            rejection_reason: "failed_request_rejected",
+            request_status: {
+              completion: "failed",
+              http_status: 200
+            },
+            response: {
+              headers: {},
+              body: {
+                code: 0,
+                data: {
+                  note: {
+                    note_id: "note-999"
+                  }
+                }
+              }
+            }
+          }),
+          incompatible_observation: null
+        })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.payload.details).toMatchObject({
+      request_context_result: "request_context_incompatible",
+      request_context_lookup_state: "incompatible",
+      request_context_miss_reason: "shape_mismatch",
+      captured_request_shape: {
+        note_id: "note-999"
+      }
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
   it("accepts a later detail response candidate when it is the first one matching the requested note_id", async () => {
     const fetchJson = vi.fn(async () => ({
       status: 200,
