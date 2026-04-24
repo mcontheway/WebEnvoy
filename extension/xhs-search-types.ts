@@ -107,7 +107,7 @@ export interface CapturedRequestContextLookup {
 
 export interface CapturedRequestContextArtifact {
   source_kind: "page_request" | "synthetic_request";
-  transport: "fetch";
+  transport: "fetch" | "xhr";
   method: CapturedRequestContextMethod;
   path: CapturedRequestContextPath;
   url: string;

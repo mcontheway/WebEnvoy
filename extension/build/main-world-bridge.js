@@ -159,6 +159,7 @@ const MAIN_WORLD_EVENT_RESULT_PREFIX = "__mw_res__";
 const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
 const MAIN_WORLD_BRIDGE_SHARED_STATE_SYMBOL = Symbol.for("webenvoy.main_world.bridge.state.v1");
 const FETCH_CAPTURE_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.capture.fetch.v1");
+const XHR_CAPTURE_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.capture.xhr.v1");
 const PAGE_CONTEXT_NAVIGATION_PATCH_SYMBOL = Symbol.for("webenvoy.main_world.page_context_navigation.v1");
 const SYNTHETIC_REQUEST_SYMBOL = Symbol.for("webenvoy.main_world.synthetic_request.v1");
 const DEFAULT_PLUGIN_DESCRIPTORS = [
@@ -937,7 +938,7 @@ const storeCapturedRequestContext = (candidate, input) => {
     else if (!incompatibleObservation) {
         setRouteBucketIncompatibleObservation(candidate.pageContextNamespace, contextShape.routeScopeKey, null);
     }
-    if (artifact.rejection_reason === "failed_request_rejected") {
+    if (artifact.rejection_reason === "failed_request_rejected" && input.status > 0) {
         bucket.admittedTemplate = null;
     }
     bucket.rejectedObservation = artifact;
@@ -1012,6 +1013,64 @@ const captureFetchFailure = (candidate, error) => {
         }
     });
 };
+const resolveXhrCandidate = async (state, bodySource) => {
+    if (!state?.method || !state.url) {
+        return null;
+    }
+    const url = resolveAbsoluteUrl(state.url);
+    const path = url ? resolvePathname(url) : null;
+    if (!url || !path) {
+        return null;
+    }
+    const body = await readArtifactPayload(bodySource);
+    const pageCaptureContext = resolveCurrentPageCaptureContext();
+    return {
+        transport: "xhr",
+        method: state.method,
+        path,
+        url,
+        headers: state.headers,
+        body,
+        synthetic: isSyntheticRequest(state.headers),
+        pageContextNamespace: pageCaptureContext.pageContextNamespace,
+        referrer: pageCaptureContext.referrer
+    };
+};
+const captureXhrResponse = (candidate, xhr) => {
+    const responseBody = readXhrResponseBody(xhr);
+    storeCapturedRequestContext(candidate, {
+        status: typeof xhr.status === "number" ? xhr.status : 0,
+        responseHeaders: headersToRecord(typeof xhr.getAllResponseHeaders === "function" ? xhr.getAllResponseHeaders() : ""),
+        responseBody
+    });
+};
+const readXhrResponseBody = (xhr) => {
+    const responseType = typeof xhr.responseType === "string" ? xhr.responseType : "";
+    if (responseType === "" || responseType === "text") {
+        const responseText = readXhrProperty(xhr, "responseText");
+        if (typeof responseText === "string") {
+            return parseArtifactPayloadText(responseText);
+        }
+        const response = readXhrProperty(xhr, "response");
+        return typeof response === "string" ? parseArtifactPayloadText(response) : response;
+    }
+    const response = readXhrProperty(xhr, "response");
+    if (responseType === "json") {
+        return response;
+    }
+    return {
+        response_type: responseType,
+        response_available: response !== null && response !== undefined
+    };
+};
+const readXhrProperty = (xhr, property) => {
+    try {
+        return xhr[property];
+    }
+    catch {
+        return undefined;
+    }
+};
 const installFetchCapture = () => {
     const originalFetch = window.fetch;
     if (typeof originalFetch !== "function") {
@@ -1045,11 +1104,68 @@ const installFetchCapture = () => {
     });
     window.fetch = patchedFetch;
 };
+const installXhrCapture = () => {
+    const XhrCtor = window.XMLHttpRequest;
+    if (typeof XhrCtor !== "function") {
+        return;
+    }
+    const prototype = XhrCtor.prototype;
+    if (prototype[XHR_CAPTURE_PATCH_SYMBOL] === true) {
+        return;
+    }
+    const originalOpen = prototype.open;
+    const originalSend = prototype.send;
+    const originalSetRequestHeader = prototype.setRequestHeader;
+    const stateByXhr = new WeakMap();
+    prototype.open = function patchedOpen(method, url, ...args) {
+        stateByXhr.set(this, {
+            method: normalizeCapturedRequestMethod(method),
+            url: String(url),
+            headers: {}
+        });
+        Reflect.apply(originalOpen, this, [method, url, ...args]);
+    };
+    prototype.setRequestHeader = function patchedSetRequestHeader(name, value) {
+        const state = stateByXhr.get(this);
+        if (state) {
+            state.headers = mergeHeaders(state.headers, headersToRecord([[name, value]]));
+        }
+        Reflect.apply(originalSetRequestHeader, this, [name, value]);
+    };
+    prototype.send = function patchedSend(body) {
+        const state = stateByXhr.get(this);
+        const candidatePromise = resolveXhrCandidate(state, body);
+        let captured = false;
+        const finalize = () => {
+            if (captured) {
+                return;
+            }
+            captured = true;
+            void candidatePromise.then((candidate) => {
+                if (candidate) {
+                    captureXhrResponse(candidate, this);
+                }
+            });
+        };
+        this.addEventListener("loadend", finalize, { once: true });
+        this.addEventListener("error", finalize, { once: true });
+        this.addEventListener("abort", finalize, { once: true });
+        this.addEventListener("timeout", finalize, { once: true });
+        Reflect.apply(originalSend, this, [body]);
+    };
+    Object.defineProperty(prototype, XHR_CAPTURE_PATCH_SYMBOL, {
+        configurable: false,
+        enumerable: false,
+        writable: false,
+        value: true
+    });
+};
 const installCapturedRequestContextCapture = () => {
     if (mainWorldBridgeSharedState.capturedRequestContextCaptureInstalled) {
         return;
     }
     installFetchCapture();
+    installXhrCapture();
     mainWorldBridgeSharedState.capturedRequestContextCaptureInstalled = true;
 };
 const refreshPageContextLifecycle = (options) => {
