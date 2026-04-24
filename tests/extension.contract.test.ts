@@ -2406,7 +2406,7 @@ describe("extension build contract", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
-  it("fails closed when the request-context exact-hit URL is outside the search replay allowlist", async () => {
+  it("fails closed when the request-context exact-hit URL uses a non-canonical replay port", async () => {
     const fetchJson = vi.fn(async () => ({
       status: 200,
       body: {
@@ -2476,7 +2476,7 @@ describe("extension build contract", () => {
               href: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
               keyword: "露营装备",
               captured_at: 1_710_000_000_000,
-              templateUrl: "https://attacker.example/api/sns/web/v1/search/notes"
+              templateUrl: "https://edith.xiaohongshu.com:8443/api/sns/web/v1/search/notes"
             }),
           callSignature: async () => {
             throw new Error("signature should not be used on untrusted exact-hit URL");

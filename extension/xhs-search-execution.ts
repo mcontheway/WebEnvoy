@@ -122,9 +122,9 @@ const serializeCanonicalShape = (value: unknown): string | null => {
   return shape ? serializeSearchRequestShape(shape) : null;
 };
 
-const XHS_SEARCH_REPLAY_HOST_ALLOWLIST = new Set([
-  "www.xiaohongshu.com",
-  "edith.xiaohongshu.com"
+const XHS_SEARCH_REPLAY_ORIGIN_ALLOWLIST = new Set([
+  "https://www.xiaohongshu.com",
+  "https://edith.xiaohongshu.com"
 ]);
 
 const resolveTrustedSearchReplayUrl = (value: unknown): string | null => {
@@ -135,7 +135,7 @@ const resolveTrustedSearchReplayUrl = (value: unknown): string | null => {
     const parsed = new URL(value);
     if (
       parsed.protocol !== "https:" ||
-      !XHS_SEARCH_REPLAY_HOST_ALLOWLIST.has(parsed.hostname) ||
+      !XHS_SEARCH_REPLAY_ORIGIN_ALLOWLIST.has(parsed.origin) ||
       parsed.pathname !== SEARCH_ENDPOINT
     ) {
       return null;
