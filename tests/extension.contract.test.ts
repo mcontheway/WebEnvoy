@@ -1496,6 +1496,194 @@ describe("extension build contract", () => {
     });
   });
 
+  it("waits for a fresh captured xhs.search template before failing closed", async () => {
+    const admissionContext = buildLiveReadAdmissionContext({
+      runId: "run-source-search-live-context-wait-001",
+      sessionId: "nm-session-source-search-live-context-wait-001",
+      gateInvocationId: "issue209-gate-run-source-search-live-context-wait-001",
+      targetTabId: 11,
+      targetPage: "search_result_tab"
+    });
+    const href = "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5";
+    let lookupCount = 0;
+    const sleep = vi.fn(async () => {});
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          items: []
+        }
+      }
+    }));
+
+    await expect(
+      executeXhsSearch(
+        {
+          abilityId: "xhs.note.search.v1",
+          abilityLayer: "L3",
+          abilityAction: "read",
+          params: {
+            query: "露营装备"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 11,
+            target_page: "search_result_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 11,
+            actual_target_page: "search_result_tab",
+            action_type: "read",
+            risk_state: "allowed",
+            requested_execution_mode: "live_read_high_risk",
+            upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+              requestRef: "upstream_source_search_live_context_wait_001",
+              actionName: "xhs.read_search_results",
+              targetPage: "search_result_tab",
+              targetTabId: 11,
+              profileRef: "profile-a",
+              approvalRefs: [
+                String(admissionContext.approval_admission_evidence.approval_admission_ref)
+              ],
+              auditRefs: [String(admissionContext.audit_admission_evidence.audit_admission_ref)]
+            }),
+            admission_context: admissionContext
+          },
+          executionContext: {
+            runId: "run-source-search-live-context-wait-001",
+            sessionId: "nm-session-source-search-live-context-wait-001",
+            profile: "profile-a",
+            gateInvocationId: "issue209-gate-run-source-search-live-context-wait-001"
+          }
+        },
+        {
+          now: () => 1_710_000_000_000,
+          randomId: () => "source-req-context-wait-001",
+          getLocationHref: () => href,
+          getDocumentTitle: () => "Search Result",
+          getReadyState: () => "complete",
+          getCookie: () => "a1=session-cookie",
+          sleep,
+          readCapturedRequestContext: async () => {
+            lookupCount += 1;
+            return lookupCount === 1
+              ? null
+              : createCapturedSearchContextArtifact({
+                  href,
+                  keyword: "露营装备",
+                  captured_at: 1_710_000_000_000
+                });
+          },
+          callSignature: async () => {
+            throw new Error("signature should not be used on exact hit");
+          },
+          fetchJson
+        }
+      )
+    ).resolves.toMatchObject({
+      ok: true,
+      payload: {
+        summary: {
+          request_context: {
+            status: "exact_hit"
+          }
+        }
+      }
+    });
+
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps xhs.search fail-closed when no captured template appears after waiting", async () => {
+    const admissionContext = buildLiveReadAdmissionContext({
+      runId: "run-source-search-live-context-missing-001",
+      sessionId: "nm-session-source-search-live-context-missing-001",
+      gateInvocationId: "issue209-gate-run-source-search-live-context-missing-001",
+      targetTabId: 11,
+      targetPage: "search_result_tab"
+    });
+    const sleep = vi.fn(async () => {});
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          items: []
+        }
+      }
+    }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    await expect(
+      executeXhsSearch(
+        {
+          abilityId: "xhs.note.search.v1",
+          abilityLayer: "L3",
+          abilityAction: "read",
+          params: {
+            query: "露营装备"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 11,
+            target_page: "search_result_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 11,
+            actual_target_page: "search_result_tab",
+            action_type: "read",
+            risk_state: "allowed",
+            requested_execution_mode: "live_read_high_risk",
+            upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+              requestRef: "upstream_source_search_live_context_missing_001",
+              actionName: "xhs.read_search_results",
+              targetPage: "search_result_tab",
+              targetTabId: 11,
+              profileRef: "profile-a",
+              approvalRefs: [
+                String(admissionContext.approval_admission_evidence.approval_admission_ref)
+              ],
+              auditRefs: [String(admissionContext.audit_admission_evidence.audit_admission_ref)]
+            }),
+            admission_context: admissionContext
+          },
+          executionContext: {
+            runId: "run-source-search-live-context-missing-001",
+            sessionId: "nm-session-source-search-live-context-missing-001",
+            profile: "profile-a",
+            gateInvocationId: "issue209-gate-run-source-search-live-context-missing-001"
+          }
+        },
+        {
+          now: () => 1_710_000_000_000,
+          randomId: () => "source-req-context-missing-001",
+          getLocationHref: () => "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
+          getDocumentTitle: () => "Search Result",
+          getReadyState: () => "complete",
+          getCookie: () => "a1=session-cookie",
+          sleep,
+          readCapturedRequestContext: async () => null,
+          callSignature,
+          fetchJson
+        }
+      )
+    ).resolves.toMatchObject({
+      ok: false,
+      payload: {
+        details: {
+          reason: "REQUEST_CONTEXT_MISSING",
+          request_context_reason: "template_missing"
+        }
+      }
+    });
+
+    expect(sleep).toHaveBeenCalledTimes(9);
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
   it("accepts an exact-hit template when the captured request body used the limit alias", async () => {
     const admissionContext = buildLiveReadAdmissionContext({
       runId: "run-source-search-live-limit-alias-001",

@@ -77,6 +77,67 @@ const createMockMainWorldEnvironment = (href = SEARCH_PAGE_HREF) => {
   const dispatched: Array<{ type: string; detail: unknown }> = [];
   let fetchHandler: ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) | null =
     null;
+  const xhrRequests: Array<{
+    method: string;
+    url: string;
+    headers: Record<string, string>;
+    body: unknown;
+  }> = [];
+
+  class MockXMLHttpRequest {
+    method = "GET";
+    url = "";
+    headers: Record<string, string> = {};
+    status = 200;
+    responseText = JSON.stringify({ code: 0, data: { items: [{ id: "note-xhr-001" }] } });
+    response = this.responseText;
+    readonly listeners = new Map<string, MockEventListener[]>();
+
+    open(method: string, url: string | URL): void {
+      this.method = method;
+      this.url = String(url);
+    }
+
+    setRequestHeader(name: string, value: string): void {
+      this.headers[name] = value;
+    }
+
+    send(body?: unknown): void {
+      xhrRequests.push({
+        method: this.method,
+        url: this.url,
+        headers: { ...this.headers },
+        body
+      });
+      void Promise.resolve().then(() => {
+        this.dispatch("loadend");
+      });
+    }
+
+    addEventListener(type: string, listener: MockEventListener): void {
+      const existing = this.listeners.get(type) ?? [];
+      existing.push(listener);
+      this.listeners.set(type, existing);
+    }
+
+    removeEventListener(type: string, listener: MockEventListener): void {
+      const existing = this.listeners.get(type) ?? [];
+      this.listeners.set(
+        type,
+        existing.filter((entry) => entry !== listener)
+      );
+    }
+
+    getAllResponseHeaders(): string {
+      return "content-type: application/json\r\n";
+    }
+
+    private dispatch(type: string): void {
+      for (const listener of this.listeners.get(type) ?? []) {
+        listener({ type } as unknown as Event);
+      }
+    }
+  }
 
   const mockWindow = {
     addEventListener: (type: string, listener: MockEventListener) => {
@@ -109,7 +170,8 @@ const createMockMainWorldEnvironment = (href = SEARCH_PAGE_HREF) => {
     location: {
       href
     },
-    navigator: {}
+    navigator: {},
+    XMLHttpRequest: MockXMLHttpRequest
   };
   const updateHref = (url?: string | URL | null): void => {
     if (url === undefined || url === null) {
@@ -138,6 +200,7 @@ const createMockMainWorldEnvironment = (href = SEARCH_PAGE_HREF) => {
     listeners,
     mockWindow,
     mockDocument,
+    xhrRequests,
     setFetchHandler: (
       handler: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
     ) => {
@@ -381,6 +444,86 @@ describe("main-world bridge contract", () => {
       result: {
         admitted_template: {
           source_kind: "page_request"
+        }
+      }
+    });
+  });
+
+  it("captures XHR search request-context as a real page request", async () => {
+    const env = createMockMainWorldEnvironment();
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    const xhr = new (env.mockWindow.XMLHttpRequest as unknown as {
+      new (): XMLHttpRequest;
+    })();
+    xhr.open("POST", `https://www.xiaohongshu.com${SEARCH_ENDPOINT}`);
+    xhr.setRequestHeader("content-type", "application/json;charset=utf-8");
+    xhr.send(JSON.stringify({ keyword: "xhr-camp" }));
+
+    const result = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: createPageContextNamespace(SEARCH_PAGE_HREF),
+      shapeKey: createShapeKey({ keyword: "xhr-camp" })
+    });
+
+    expect(env.xhrRequests).toHaveLength(1);
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          source_kind: "page_request",
+          transport: "xhr",
+          request: {
+            body: {
+              keyword: "xhr-camp"
+            }
+          }
+        },
+        rejected_observation: null
+      }
+    });
+  });
+
+  it("keeps synthetic XHR search requests out of admitted templates", async () => {
+    const env = createMockMainWorldEnvironment();
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    const xhr = new (env.mockWindow.XMLHttpRequest as unknown as {
+      new (): XMLHttpRequest;
+    })();
+    xhr.open("POST", `https://www.xiaohongshu.com${SEARCH_ENDPOINT}`);
+    xhr.setRequestHeader("content-type", "application/json;charset=utf-8");
+    xhr.setRequestHeader("x-webenvoy-synthetic-request", "1");
+    xhr.send(JSON.stringify({ keyword: "xhr-synthetic" }));
+
+    const result = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: createPageContextNamespace(SEARCH_PAGE_HREF),
+      shapeKey: createShapeKey({ keyword: "xhr-synthetic" })
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: null,
+        rejected_observation: {
+          source_kind: "synthetic_request",
+          transport: "xhr",
+          rejection_reason: "synthetic_request_rejected"
         }
       }
     });
