@@ -86,6 +86,14 @@ const isTrustedRejectedObservation = (observation, expected) => {
     return serializeCanonicalShape(asRecord(observationRecord.shape) ?? asRecord(asRecord(observationRecord.request)?.body)) ===
         expected.shapeKey;
 };
+const isTransientFailedRequestObservation = (observation) => {
+    const observationRecord = asRecord(observation);
+    if (observationRecord?.rejection_reason !== "failed_request_rejected") {
+        return false;
+    }
+    const requestStatus = asRecord(observationRecord.request_status);
+    return requestStatus?.http_status === null;
+};
 const isTrustedIncompatibleObservation = (observation, expected) => {
     const observationRecord = asRecord(observation);
     if (!observationRecord) {
@@ -202,6 +210,18 @@ const resolveRequestContextState = async (input, env) => {
             };
         }
         if (rejectedObservation) {
+            if (input?.deferTransientMisses === true &&
+                isTransientFailedRequestObservation(rejectedObservation)) {
+                return {
+                    status: "miss",
+                    failureReason: "template_missing",
+                    detailReason: "failed_request_rejected",
+                    pageContextNamespace,
+                    shapeKey,
+                    availableShapeKeys,
+                    observedAt: rejectedObservation.observed_at ?? rejectedObservation.captured_at
+                };
+            }
             return {
                 status: "miss",
                 failureReason: "rejected_source",
@@ -215,7 +235,7 @@ const resolveRequestContextState = async (input, env) => {
             };
         }
         if (incompatibleObservation || siblingShapeKeys.length > 0) {
-            if (input?.deferShapeMismatch === true) {
+            if (input?.deferTransientMisses === true) {
                 return {
                     status: "miss",
                     failureReason: "template_missing",
@@ -243,14 +263,14 @@ const resolveRequestContextState = async (input, env) => {
         };
     };
     let lastState = await lookupOnce({
-        deferShapeMismatch: REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS > 1
+        deferTransientMisses: REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS > 1
     });
     for (let attempt = 1; attempt < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS &&
         lastState.status === "miss" &&
         lastState.failureReason === "template_missing"; attempt += 1) {
         await waitForRequestContextRetry(env, REQUEST_CONTEXT_WAIT_RETRY_MS);
         lastState = await lookupOnce({
-            deferShapeMismatch: attempt + 1 < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS
+            deferTransientMisses: attempt + 1 < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS
         });
     }
     return lastState;
