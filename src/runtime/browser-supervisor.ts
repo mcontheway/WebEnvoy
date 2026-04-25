@@ -21,6 +21,8 @@ interface BrowserInstanceState {
   controllerPid: number;
   browserPid: number;
   launchedAt: string;
+  headless: boolean;
+  executionSurface: "headless_browser" | "real_browser";
 }
 
 interface ShutdownCommand {
@@ -132,7 +134,11 @@ const run = async (): Promise<void> => {
     browserPath: args.browserPath,
     controllerPid: process.pid,
     browserPid,
-    launchedAt: new Date().toISOString()
+    launchedAt: new Date().toISOString(),
+    headless: args.launchArgs.includes("--headless=new"),
+    executionSurface: args.launchArgs.includes("--headless=new")
+      ? "headless_browser"
+      : "real_browser"
   };
   await writeFile(args.stateFilePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 

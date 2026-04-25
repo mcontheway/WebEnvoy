@@ -315,6 +315,7 @@ export const launchBrowser = async (input) => {
         launchArgs.push(`--proxy-server=${input.proxyUrl}`);
     }
     const shouldHeadless = input.command === "runtime.login" ? false : shouldLaunchHeadless(input.params);
+    const executionSurface = shouldHeadless ? "headless_browser" : "real_browser";
     if (shouldHeadless) {
         launchArgs.push("--headless=new");
     }
@@ -345,7 +346,9 @@ export const launchBrowser = async (input) => {
             browserPid: state.browserPid,
             controllerPid: state.controllerPid,
             launchArgs: [...launchArgs],
-            launchedAt: launched.launchedAt
+            launchedAt: launched.launchedAt,
+            headless: shouldHeadless,
+            executionSurface
         };
     }
     catch (error) {

@@ -454,6 +454,137 @@ describe("profile-runtime start rollback", () => {
 });
 
 describe("profile-runtime identity preflight", () => {
+  it("blocks XHS managed profile runtime.start unless the launch is explicitly visible", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-xhs-visible-guard-"));
+    tempDirs.push(baseDir);
+    const launchSpy = vi.fn();
+    const service = createTestService({
+      browserLauncher: {
+        launch: async (input) => {
+          launchSpy(input);
+          return {
+            browserPath: "/mock/chrome",
+            browserPid: 999999,
+            controllerPid: 999998,
+            launchArgs: ["about:blank"],
+            launchedAt: new Date().toISOString()
+          };
+        },
+        shutdown: async () => undefined
+      }
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "xhs_001",
+        runId: "run-runtime-xhs-visible-guard-001",
+        params: {}
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_INVALID",
+      details: {
+        reason: "XHS_HEADLESS_RUNTIME_BLOCKED",
+        required_param: "params.headless=false"
+      }
+    });
+    expect(launchSpy).not.toHaveBeenCalled();
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "xhs_001",
+        runId: "run-runtime-xhs-visible-guard-002",
+        params: {
+          headless: false,
+          startUrl: "https://www.xiaohongshu.com/search_result?keyword=test"
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      browserState: "ready"
+    });
+    expect(launchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks non-XHS profiles when runtime.start targets an XHS page without explicit visible mode", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-xhs-url-guard-"));
+    tempDirs.push(baseDir);
+    const launchSpy = vi.fn();
+    const service = createTestService({
+      browserLauncher: {
+        launch: async (input) => {
+          launchSpy(input);
+          return {
+            browserPath: "/mock/chrome",
+            browserPid: 999999,
+            controllerPid: 999998,
+            launchArgs: ["about:blank"],
+            launchedAt: new Date().toISOString()
+          };
+        },
+        shutdown: async () => undefined
+      }
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "general_profile",
+        runId: "run-runtime-xhs-url-guard-001",
+        params: {
+          startUrl: "https://www.xiaohongshu.com/explore"
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_INVALID",
+      details: {
+        reason: "XHS_HEADLESS_RUNTIME_BLOCKED",
+        start_url: "https://www.xiaohongshu.com/explore"
+      }
+    });
+    expect(launchSpy).not.toHaveBeenCalled();
+  });
+
+  it("blocks non-XHS profiles when runtime.start targets the XHS creator domain without explicit visible mode", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-xhs-creator-guard-"));
+    tempDirs.push(baseDir);
+    const launchSpy = vi.fn();
+    const service = createTestService({
+      browserLauncher: {
+        launch: async (input) => {
+          launchSpy(input);
+          return {
+            browserPath: "/mock/chrome",
+            browserPid: 999999,
+            controllerPid: 999998,
+            launchArgs: ["about:blank"],
+            launchedAt: new Date().toISOString()
+          };
+        },
+        shutdown: async () => undefined
+      }
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile: "general_profile",
+        runId: "run-runtime-xhs-creator-guard-001",
+        params: {
+          target_domain: "creator.xiaohongshu.com"
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_INVALID",
+      details: {
+        reason: "XHS_HEADLESS_RUNTIME_BLOCKED",
+        target_domain: "creator.xiaohongshu.com"
+      }
+    });
+    expect(launchSpy).not.toHaveBeenCalled();
+  });
+
   it("reports missing identity binding in runtime.status for official Chrome persistent path", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-identity-status-"));
     tempDirs.push(baseDir);
@@ -1955,6 +2086,96 @@ describe("profile-runtime identity preflight", () => {
           "status_non_owner_profile",
           "run-runtime-status-owner-001"
         )
+      })
+    });
+  });
+
+  it("does not expose launch-surface audit fields from a stale browser-state snapshot", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-status-stale-surface-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    const profile = "status_stale_surface_profile";
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile
+    });
+    const service = createTestService({
+      browserLauncher: {
+        launch: async () => ({
+          browserPath: "/mock/chrome",
+          browserPid: 999999,
+          controllerPid: 999998,
+          launchArgs: ["about:blank"],
+          launchedAt: new Date().toISOString(),
+          headless: false,
+          executionSurface: "real_browser"
+        }),
+        shutdown: async () => undefined
+      }
+    });
+
+    await expect(
+      service.start({
+        cwd: baseDir,
+        profile,
+        runId: "run-runtime-status-stale-surface-owner-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: true,
+      executionSurface: "real_browser"
+    });
+
+    const profileDir = join(baseDir, ".webenvoy", "profiles", profile);
+    await writeFile(
+      join(profileDir, BROWSER_STATE_FILENAME),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          launchToken: "stale-launch-surface-token-001",
+          profileDir,
+          runId: "run-runtime-status-stale-surface-old-001",
+          browserPath: "/mock/chrome",
+          controllerPid: 999998,
+          browserPid: 999999,
+          headless: true,
+          executionSurface: "headless_browser",
+          launchedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    await expect(
+      service.status({
+        cwd: baseDir,
+        profile,
+        runId: "run-runtime-status-stale-surface-owner-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: true,
+      headless: null,
+      executionSurface: null,
+      runtimeTakeoverEvidence: expect.objectContaining({
+        observedRunId: "run-runtime-status-stale-surface-owner-001"
       })
     });
   });

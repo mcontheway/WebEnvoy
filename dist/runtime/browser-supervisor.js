@@ -97,7 +97,11 @@ const run = async () => {
         browserPath: args.browserPath,
         controllerPid: process.pid,
         browserPid,
-        launchedAt: new Date().toISOString()
+        launchedAt: new Date().toISOString(),
+        headless: args.launchArgs.includes("--headless=new"),
+        executionSurface: args.launchArgs.includes("--headless=new")
+            ? "headless_browser"
+            : "real_browser"
     };
     await writeFile(args.stateFilePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
     let shuttingDown = false;

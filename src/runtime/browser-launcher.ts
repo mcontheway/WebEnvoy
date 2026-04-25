@@ -60,6 +60,8 @@ export interface BrowserLaunchResult {
   controllerPid: number;
   launchArgs: string[];
   launchedAt: string;
+  headless?: boolean;
+  executionSurface?: "headless_browser" | "real_browser";
 }
 
 export interface BrowserShutdownInput {
@@ -78,6 +80,8 @@ interface BrowserInstanceState {
   controllerPid: number;
   browserPid: number;
   launchedAt: string;
+  headless?: boolean;
+  executionSurface?: "headless_browser" | "real_browser";
 }
 
 interface BrowserInstanceArtifactPaths {
@@ -457,6 +461,7 @@ export const launchBrowser = async (input: BrowserLaunchInput): Promise<BrowserL
   }
   const shouldHeadless =
     input.command === "runtime.login" ? false : shouldLaunchHeadless(input.params);
+  const executionSurface = shouldHeadless ? "headless_browser" : "real_browser";
   if (shouldHeadless) {
     launchArgs.push("--headless=new");
   }
@@ -488,7 +493,9 @@ export const launchBrowser = async (input: BrowserLaunchInput): Promise<BrowserL
       browserPid: state.browserPid,
       controllerPid: state.controllerPid,
       launchArgs: [...launchArgs],
-      launchedAt: launched.launchedAt
+      launchedAt: launched.launchedAt,
+      headless: shouldHeadless,
+      executionSurface
     };
   } catch (error) {
     if (controllerPid !== null && isProcessAlive(controllerPid)) {

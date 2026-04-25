@@ -7,6 +7,8 @@ export interface BrowserInstanceStateSnapshot {
   runId: string;
   controllerPid: number;
   browserPid: number;
+  headless?: boolean;
+  executionSurface?: "headless_browser" | "real_browser";
 }
 
 export interface ProfileLockInspection {

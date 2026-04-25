@@ -416,6 +416,8 @@ describe("browser-launcher", () => {
     expect(launched.browserPath).toBe(scriptPath);
     expect(launched.browserPid).toBeGreaterThan(0);
     expect(launched.controllerPid).toBeGreaterThan(0);
+    expect(launched.headless).toBe(true);
+    expect(launched.executionSurface).toBe("headless_browser");
     const profileStat = await stat(profileDir);
     expect(profileStat.isDirectory()).toBe(true);
 
@@ -429,6 +431,13 @@ describe("browser-launcher", () => {
     expect(disableExtensionsExcept).toBeTruthy();
     expect(loadExtension).toBeTruthy();
     expect(disableExtensionsExcept).toBe(loadExtension);
+    const browserStateRaw = await readFile(join(profileDir, BROWSER_STATE_FILENAME), "utf8");
+    const browserState = JSON.parse(browserStateRaw) as Record<string, unknown>;
+    expect(browserState).toMatchObject({
+      runId: "run-launcher-test-001",
+      headless: true,
+      executionSurface: "headless_browser"
+    });
 
     await shutdownBrowserSession({
       profileDir,
@@ -843,6 +852,8 @@ describe("browser-launcher", () => {
 
     const launchLog = await waitForLaunchLog(logPath);
     expect(launchLog).not.toContain("--headless=new");
+    expect(launched.headless).toBe(false);
+    expect(launched.executionSurface).toBe("real_browser");
     await shutdownBrowserSession({
       profileDir,
       controllerPid: launched.controllerPid,

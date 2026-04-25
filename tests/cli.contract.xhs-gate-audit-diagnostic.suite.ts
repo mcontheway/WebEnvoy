@@ -1819,6 +1819,8 @@ process.stdin.on("data", (chunk) => {
         runId,
         "--params",
         JSON.stringify({
+          headless: false,
+          startUrl: "https://www.xiaohongshu.com/search_result?keyword=test",
           persistent_extension_identity: {
             extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             manifest_path: manifestPath

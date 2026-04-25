@@ -2982,6 +2982,31 @@ describe("webenvoy cli contract / install and identity", () => {
     });
   });
 
+  it("blocks bare XHS managed profile runtime.start before launching a headless browser", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+
+    const start = runCli(
+      ["runtime.start", "--profile", "xhs_001", "--run-id", "run-contract-xhs-headless-guard-001"],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_PATH: mockBrowserPath
+      }
+    );
+    expect(start.status).toBe(5);
+    expect(parseSingleJsonLine(start.stdout)).toMatchObject({
+      command: "runtime.start",
+      status: "error",
+      error: {
+        code: "ERR_PROFILE_INVALID",
+        details: {
+          reason: "XHS_HEADLESS_RUNTIME_BLOCKED",
+          required_param: "params.headless=false"
+        }
+      }
+    });
+    await assertLockMissing(path.join(runtimeCwd, ".webenvoy", "profiles", "xhs_001"));
+  });
+
   it("keeps logging_in before confirmation and persists lastLoginAt after confirmation", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const login = runCli(
