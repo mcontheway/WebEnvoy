@@ -143,12 +143,15 @@ export const classifyXhsAccountSafetySurface = (input: {
   bodyText?: string | null;
 }): XhsAccountSafetySurface | null => {
   const href = input.href.toLowerCase();
-  const text = normalizeSurfaceText(`${input.title} ${input.bodyText ?? ""}`);
+  const title = normalizeSurfaceText(input.title);
+  const bodyText = normalizeSurfaceText(input.bodyText ?? "");
+  const text = `${title} ${bodyText}`;
   if (
-    text.includes("验证码") ||
     text.includes("captcha") ||
     text.includes("人机验证") ||
-    text.includes("请完成验证")
+    text.includes("请完成验证") ||
+    (text.includes("验证码") &&
+      (text.includes("输入") || text.includes("请完成") || text.includes("滑块")))
   ) {
     return {
       reason: "CAPTCHA_REQUIRED",
@@ -167,12 +170,23 @@ export const classifyXhsAccountSafetySurface = (input: {
       message: "浏览器环境异常，平台拒绝当前请求"
     };
   }
+  if (title.includes("浏览器环境异常") || bodyText.includes("当前浏览器环境异常")) {
+    return {
+      reason: "BROWSER_ENV_ABNORMAL",
+      message: "浏览器环境异常，平台拒绝当前请求"
+    };
+  }
   if (
-    text.includes("安全验证") ||
-    text.includes("风险") ||
-    text.includes("访问异常") ||
-    text.includes("环境异常") ||
-    text.includes("操作频繁")
+    title.includes("安全验证") ||
+    title.includes("访问异常") ||
+    bodyText.includes("账号存在风险") ||
+    bodyText.includes("账号安全风险") ||
+    (bodyText.includes("安全验证") &&
+      (bodyText.includes("请完成") || bodyText.includes("继续访问") || bodyText.includes("验证"))) ||
+    (bodyText.includes("访问异常") &&
+      (bodyText.includes("稍后") || bodyText.includes("刷新") || bodyText.includes("验证"))) ||
+    (bodyText.includes("操作频繁") &&
+      (bodyText.includes("稍后") || bodyText.includes("验证")))
   ) {
     return {
       reason: "XHS_ACCOUNT_RISK_PAGE",
