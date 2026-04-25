@@ -1778,7 +1778,7 @@ describe("content-script handler contract", () => {
     }
   );
 
-  it("classifies xhs.search login modal separately from request-context missing", async () => {
+  it("keeps xhs.search login URL separate from request-context missing", async () => {
     await withMockMainWorld(async () => {
       const readCapturedRequestContext = vi.fn(async () => null);
       const fetchJson = vi.fn(async () => ({
@@ -1794,7 +1794,7 @@ describe("content-script handler contract", () => {
         xhsEnv: {
           now: () => Date.now(),
           randomId: () => "req-login-modal-001",
-          getLocationHref: () => "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
+          getLocationHref: () => "https://www.xiaohongshu.com/login",
           getDocumentTitle: () => "小红书 - 登录",
           getReadyState: () => "complete",
           getCookie: () => "a1=cookie-token",
@@ -1873,12 +1873,13 @@ describe("content-script handler contract", () => {
     const payload = results[0]?.payload as Record<string, unknown>;
     const details = payload?.details as Record<string, unknown>;
     const observability = payload?.observability as Record<string, unknown>;
-    expect(details?.reason).toBe("XHS_LOGIN_REQUIRED");
+    expect(details?.reason).toBe("EXECUTION_MODE_GATE_BLOCKED");
     expect(details?.reason).not.toBe("REQUEST_CONTEXT_MISSING");
-    expect((observability?.failure_site as Record<string, unknown>)?.target).toBe(
-      "xhs.account_safety_surface"
-    );
-    expect(observability?.key_requests).toEqual([]);
+    expect(observability?.key_requests).toEqual([
+      expect.objectContaining({
+        failure_reason: "EXECUTION_MODE_GATE_BLOCKED"
+      })
+    ]);
     expect(readCapturedRequestContext).not.toHaveBeenCalled();
       expect(fetchJson).not.toHaveBeenCalled();
     });

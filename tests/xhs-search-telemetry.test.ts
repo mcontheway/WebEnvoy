@@ -105,7 +105,7 @@ describe("xhs-search telemetry helpers", () => {
   it("classifies high-confidence XHS account safety surfaces", () => {
     expect(
       classifyXhsAccountSafetySurface({
-        href: "https://www.xiaohongshu.com/explore",
+        href: "https://www.xiaohongshu.com/security/verify",
         title: "安全验证",
         bodyText: "安全验证后继续访问"
       })
@@ -114,7 +114,7 @@ describe("xhs-search telemetry helpers", () => {
     });
     expect(
       classifyXhsAccountSafetySurface({
-        href: "https://www.xiaohongshu.com/explore",
+        href: "https://www.xiaohongshu.com/login",
         title: "小红书 - 登录",
         bodyText: "登录后推荐更懂你的笔记 扫码登录 输入手机号"
       })

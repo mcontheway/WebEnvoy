@@ -267,7 +267,7 @@ describe("xhs read execution fallback", () => {
         executionContext: createFallbackExecutionContext("run-detail-login-modal-001")
       },
       createEnvironment({
-        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-login-modal-001",
+        getLocationHref: () => "https://www.xiaohongshu.com/login",
         getDocumentTitle: () => "小红书 - 登录",
         getBodyText: () => "登录后推荐更懂你的笔记 扫码登录 输入手机号",
         readCapturedRequestContext,
@@ -281,7 +281,7 @@ describe("xhs read execution fallback", () => {
     }
     expect(result.payload.details).toMatchObject({
       reason: "XHS_LOGIN_REQUIRED",
-      page_url: "https://www.xiaohongshu.com/explore/note-login-modal-001"
+      page_url: "https://www.xiaohongshu.com/login"
     });
     expect(result.payload.diagnosis).toMatchObject({
       category: "page_changed",

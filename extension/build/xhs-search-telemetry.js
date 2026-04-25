@@ -102,58 +102,22 @@ export const classifyPageKind = (href) => {
     }
     return "unknown";
 };
-const normalizeSurfaceText = (value) => value.replace(/\s+/gu, " ").toLowerCase();
 export const classifyXhsAccountSafetySurface = (input) => {
     const href = input.href.toLowerCase();
-    const title = normalizeSurfaceText(input.title);
-    const bodyText = normalizeSurfaceText(input.bodyText ?? "");
-    if (((title.includes("captcha") || title.includes("人机验证") || title.includes("请完成验证")) &&
-        (bodyText.includes("请完成") || bodyText.includes("验证") || bodyText.includes("滑块"))) ||
-        (bodyText.includes("请完成验证") &&
-            (bodyText.includes("验证码") || bodyText.includes("滑块") || bodyText.includes("人机验证")))) {
+    if (href.includes("captcha")) {
         return {
             reason: "CAPTCHA_REQUIRED",
             message: "平台要求额外人机验证，无法继续执行"
         };
     }
-    if (title.includes("账号异常") &&
-        (bodyText.includes("平台拒绝") || bodyText.includes("无法继续"))) {
-        return {
-            reason: "ACCOUNT_ABNORMAL",
-            message: "账号异常，平台拒绝当前请求"
-        };
-    }
-    if (title.includes("browser environment abnormal") &&
-        (bodyText.includes("platform") || bodyText.includes("reject"))) {
-        return {
-            reason: "BROWSER_ENV_ABNORMAL",
-            message: "浏览器环境异常，平台拒绝当前请求"
-        };
-    }
-    if ((title.includes("浏览器环境异常") && bodyText.includes("平台拒绝当前请求"))) {
-        return {
-            reason: "BROWSER_ENV_ABNORMAL",
-            message: "浏览器环境异常，平台拒绝当前请求"
-        };
-    }
     if (href.includes("/security") ||
-        href.includes("/risk") ||
-        ((title.includes("安全验证") || title.includes("访问异常")) &&
-            (bodyText.includes("请完成") ||
-                bodyText.includes("继续访问") ||
-                bodyText.includes("验证后继续访问") ||
-                bodyText.includes("当前访问存在安全风险") ||
-                bodyText.includes("账号存在安全风险") ||
-                bodyText.includes("访问异常，请稍后重试")))) {
+        href.includes("/risk")) {
         return {
             reason: "XHS_ACCOUNT_RISK_PAGE",
             message: "当前页面命中小红书账号风险或安全验证页面"
         };
     }
-    if (href.includes("/login") ||
-        (title.includes("登录") &&
-            (bodyText.includes("扫码登录") || bodyText.includes("输入手机号"))) ||
-        (title.includes("小红书") && href.includes("/login"))) {
+    if (href.includes("/login")) {
         return {
             reason: "XHS_LOGIN_REQUIRED",
             message: "当前页面要求登录小红书，无法继续执行"
