@@ -78,7 +78,8 @@ describe("xhs-search telemetry helpers", () => {
       classifyXhsAccountSafetySurface({
         href: "https://www.xiaohongshu.com/explore/note-body-risk-text-001",
         title: "普通笔记",
-        bodyText: "当前访问存在安全风险、请完成安全验证、访问异常，请稍后重试，这些只是笔记内容。"
+        bodyText:
+          "当前访问存在安全风险、请完成安全验证、访问异常，请稍后重试、扫码登录、输入手机号、300011、300015，这些只是笔记内容。"
       })
     ).toBeNull();
   });

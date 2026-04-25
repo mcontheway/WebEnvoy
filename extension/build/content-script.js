@@ -4373,7 +4373,6 @@ const classifyXhsAccountSafetySurface = (input) => {
     const href = input.href.toLowerCase();
     const title = normalizeSurfaceText(input.title);
     const bodyText = normalizeSurfaceText(input.bodyText ?? "");
-    const text = `${title} ${bodyText}`;
     if (((title.includes("captcha") || title.includes("人机验证") || title.includes("请完成验证")) &&
         (bodyText.includes("请完成") || bodyText.includes("验证") || bodyText.includes("滑块"))) ||
         (bodyText.includes("请完成验证") &&
@@ -4383,13 +4382,15 @@ const classifyXhsAccountSafetySurface = (input) => {
             message: "平台要求额外人机验证，无法继续执行"
         };
     }
-    if (text.includes("300011")) {
+    if (title.includes("账号异常") &&
+        (bodyText.includes("平台拒绝") || bodyText.includes("无法继续"))) {
         return {
             reason: "ACCOUNT_ABNORMAL",
             message: "账号异常，平台拒绝当前请求"
         };
     }
-    if (text.includes("browser environment abnormal") || text.includes("300015")) {
+    if (title.includes("browser environment abnormal") &&
+        (bodyText.includes("platform") || bodyText.includes("reject"))) {
         return {
             reason: "BROWSER_ENV_ABNORMAL",
             message: "浏览器环境异常，平台拒绝当前请求"
@@ -4419,9 +4420,7 @@ const classifyXhsAccountSafetySurface = (input) => {
     if (href.includes("/login") ||
         (title.includes("登录") &&
             (bodyText.includes("扫码登录") || bodyText.includes("输入手机号"))) ||
-        (bodyText.includes("扫码登录") &&
-            (bodyText.includes("输入手机号") || bodyText.includes("小红书如何扫码"))) ||
-        text.includes("登录探索更多内容")) {
+        (title.includes("小红书") && href.includes("/login"))) {
         return {
             reason: "XHS_LOGIN_REQUIRED",
             message: "当前页面要求登录小红书，无法继续执行"
