@@ -297,21 +297,41 @@ export const toXhsCloseoutRhythmStatus = (input: {
 export const toSessionRhythmStatusView = (input: {
   rhythm?: XhsCloseoutRhythmRecord;
   accountSafety?: AccountSafetyRecord;
+  profile: string;
+  issueScope?: string | null;
   now?: Date;
 }): JsonObject => {
-  const status = toXhsCloseoutRhythmStatus(input);
+  const now = input.now ?? new Date();
+  const status = toXhsCloseoutRhythmStatus({ ...input, now });
+  const reasonCodes = Array.isArray(status.reason_codes)
+    ? status.reason_codes.filter((reason): reason is string => typeof reason === "string")
+    : [];
+  const state = typeof status.state === "string" ? status.state : "not_required";
+  const phase =
+    state === "cooldown"
+      ? "cooldown"
+      : state === "operator_confirmation_required" || state === "single_probe_required"
+        ? "recovery_probe"
+        : state === "single_probe_passed"
+          ? "stability"
+          : "steady";
+  const riskState =
+    state === "cooldown" || input.accountSafety?.state === "account_risk_blocked"
+      ? "paused"
+      : state === "not_required"
+        ? "allowed"
+        : "limited";
   return {
-    source: "profile_meta",
+    profile: input.profile,
     platform: "xhs",
-    state: status.state,
+    issue_scope: input.issueScope ?? "issue_209",
+    current_phase: phase,
+    current_risk_state: riskState,
+    window_state: phase === "steady" ? "stability" : phase,
     cooldown_until: status.cooldown_until,
-    recovery: {
-      operator_confirmed_at: status.operator_confirmed_at,
-      single_probe_required: status.single_probe_required,
-      single_probe_passed_at: status.single_probe_passed_at,
-      probe_run_id: status.probe_run_id
-    },
-    full_bundle_blocked: status.full_bundle_blocked,
-    reason_codes: status.reason_codes
+    stability_window_until: null,
+    latest_event_id: status.probe_run_id,
+    latest_reason: reasonCodes[reasonCodes.length - 1] ?? null,
+    derived_at: now.toISOString()
   };
 };

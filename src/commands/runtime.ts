@@ -99,6 +99,7 @@ const buildSessionRhythmStatusViewForProfile = async (
   const profileStore = new ProfileStore(resolveRuntimeProfileRoot(cwd));
   const meta = await profileStore.readMeta(profile, { mode: "readonly" });
   return toSessionRhythmStatusView({
+    profile,
     rhythm: meta?.xhsCloseoutRhythm,
     accountSafety: meta?.accountSafety
   });
@@ -265,7 +266,7 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
       const auditProfile = asString((enrichedAuditRecords[0] as Record<string, unknown> | undefined)?.profile);
       const sessionRhythmStatusView = await buildSessionRhythmStatusViewForProfile(
         context.cwd,
-        profile ?? auditProfile
+        auditProfile
       );
       return {
         query: {

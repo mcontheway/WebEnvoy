@@ -378,6 +378,7 @@ const assertXhsLivePreflightAllowsCommand = (input: {
   accountSafety: JsonObject;
   xhsCloseoutRhythm: JsonObject;
   options: JsonObject;
+  requestedExecutionMode: XhsExecutionMode;
 }): void => {
   const recoveryProbe = isXhsRecoveryProbe(input);
   const rhythmState = asString(input.xhsCloseoutRhythm.state);
@@ -387,6 +388,7 @@ const assertXhsLivePreflightAllowsCommand = (input: {
 
   if (
     recoveryProbe &&
+    input.requestedExecutionMode === "recon" &&
     rhythmState === "single_probe_required" &&
     input.accountSafety.state !== "account_risk_blocked" &&
     probeRunId === null
@@ -402,6 +404,8 @@ const assertXhsLivePreflightAllowsCommand = (input: {
       reason:
         input.accountSafety.state === "account_risk_blocked"
           ? "ACCOUNT_RISK_BLOCKED"
+          : recoveryProbe && input.requestedExecutionMode !== "recon"
+            ? "XHS_RECOVERY_PROBE_MODE_INVALID"
           : fullBundleBlocked || singleProbeRequired
             ? "XHS_CLOSEOUT_RHYTHM_BLOCKED"
             : "XHS_CLOSEOUT_RHYTHM_UNAVAILABLE",
@@ -540,7 +544,10 @@ const xhsReadCommand = async (
     ability: envelope.ability,
     options: gate.options
   });
-  if (context.profile && isLiveXhsExecutionMode(gate.requestedExecutionMode)) {
+  if (
+    context.profile &&
+    (isLiveXhsExecutionMode(gate.requestedExecutionMode) || recoveryProbeRequested)
+  ) {
     const rhythmState = asString(xhsCloseoutRhythmStatus.state);
     const shouldRunRhythmGate =
       recoveryProbeRequested ||
@@ -552,7 +559,8 @@ const xhsReadCommand = async (
         ability: envelope.ability,
         accountSafety: accountSafetyStatus,
         xhsCloseoutRhythm: xhsCloseoutRhythmStatus,
-        options: gate.options
+        options: gate.options,
+        requestedExecutionMode: gate.requestedExecutionMode
       });
     }
   }
@@ -583,7 +591,6 @@ const xhsReadCommand = async (
     });
     if (
       context.profile &&
-      isLiveXhsExecutionMode(gate.requestedExecutionMode) &&
       recoveryProbeRequested
     ) {
       await profileRuntime.claimXhsCloseoutSingleProbe({
@@ -698,7 +705,6 @@ const xhsReadCommand = async (
 
     if (
       context.profile &&
-      isLiveXhsExecutionMode(gate.requestedExecutionMode) &&
       recoveryProbeRequested
     ) {
       await profileRuntime.markXhsCloseoutSingleProbePassed({

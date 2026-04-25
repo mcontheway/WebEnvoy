@@ -277,6 +277,7 @@ const assertXhsLivePreflightAllowsCommand = (input) => {
     const singleProbeRequired = input.xhsCloseoutRhythm.single_probe_required === true;
     const probeRunId = asString(input.xhsCloseoutRhythm.probe_run_id);
     if (recoveryProbe &&
+        input.requestedExecutionMode === "recon" &&
         rhythmState === "single_probe_required" &&
         input.accountSafety.state !== "account_risk_blocked" &&
         probeRunId === null) {
@@ -289,9 +290,11 @@ const assertXhsLivePreflightAllowsCommand = (input) => {
             stage: "execution",
             reason: input.accountSafety.state === "account_risk_blocked"
                 ? "ACCOUNT_RISK_BLOCKED"
-                : fullBundleBlocked || singleProbeRequired
-                    ? "XHS_CLOSEOUT_RHYTHM_BLOCKED"
-                    : "XHS_CLOSEOUT_RHYTHM_UNAVAILABLE",
+                : recoveryProbe && input.requestedExecutionMode !== "recon"
+                    ? "XHS_RECOVERY_PROBE_MODE_INVALID"
+                    : fullBundleBlocked || singleProbeRequired
+                        ? "XHS_CLOSEOUT_RHYTHM_BLOCKED"
+                        : "XHS_CLOSEOUT_RHYTHM_UNAVAILABLE",
             account_safety: input.accountSafety,
             xhs_closeout_rhythm: input.xhsCloseoutRhythm
         }
@@ -384,7 +387,8 @@ const xhsReadCommand = async (context, inputConfig) => {
         ability: envelope.ability,
         options: gate.options
     });
-    if (context.profile && isLiveXhsExecutionMode(gate.requestedExecutionMode)) {
+    if (context.profile &&
+        (isLiveXhsExecutionMode(gate.requestedExecutionMode) || recoveryProbeRequested)) {
         const rhythmState = asString(xhsCloseoutRhythmStatus.state);
         const shouldRunRhythmGate = recoveryProbeRequested ||
             accountSafetyStatus.state === "account_risk_blocked" ||
@@ -395,7 +399,8 @@ const xhsReadCommand = async (context, inputConfig) => {
                 ability: envelope.ability,
                 accountSafety: accountSafetyStatus,
                 xhsCloseoutRhythm: xhsCloseoutRhythmStatus,
-                options: gate.options
+                options: gate.options,
+                requestedExecutionMode: gate.requestedExecutionMode
             });
         }
     }
@@ -418,7 +423,6 @@ const xhsReadCommand = async (context, inputConfig) => {
             profile: context.profile
         });
         if (context.profile &&
-            isLiveXhsExecutionMode(gate.requestedExecutionMode) &&
             recoveryProbeRequested) {
             await profileRuntime.claimXhsCloseoutSingleProbe({
                 cwd: context.cwd,
@@ -505,7 +509,6 @@ const xhsReadCommand = async (context, inputConfig) => {
             ...(executionAudit !== undefined ? { execution_audit: executionAudit } : {})
         });
         if (context.profile &&
-            isLiveXhsExecutionMode(gate.requestedExecutionMode) &&
             recoveryProbeRequested) {
             await profileRuntime.markXhsCloseoutSingleProbePassed({
                 cwd: context.cwd,

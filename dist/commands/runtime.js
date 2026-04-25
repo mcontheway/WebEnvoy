@@ -64,6 +64,7 @@ const buildSessionRhythmStatusViewForProfile = async (cwd, profile) => {
     const profileStore = new ProfileStore(resolveRuntimeProfileRoot(cwd));
     const meta = await profileStore.readMeta(profile, { mode: "readonly" });
     return toSessionRhythmStatusView({
+        profile,
         rhythm: meta?.xhsCloseoutRhythm,
         accountSafety: meta?.accountSafety
     });
@@ -196,7 +197,7 @@ const runtimeAuditQuery = async (context) => {
             const enrichedAuditRecords = trail.auditRecords.map((record) => enrichAuditRecordWithWriteTier(record));
             const currentRiskState = resolveCurrentRiskState(asObject(trail.approvalRecord), enrichedAuditRecords);
             const auditProfile = asString(enrichedAuditRecords[0]?.profile);
-            const sessionRhythmStatusView = await buildSessionRhythmStatusViewForProfile(context.cwd, profile ?? auditProfile);
+            const sessionRhythmStatusView = await buildSessionRhythmStatusViewForProfile(context.cwd, auditProfile);
             return {
                 query: {
                     run_id: runId

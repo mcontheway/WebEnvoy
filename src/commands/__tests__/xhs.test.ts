@@ -1562,7 +1562,7 @@ describe("normalizeGateOptionsForContract", () => {
               target_tab_id: 32,
               target_page: "search_result_tab",
               action_type: "read",
-              requested_execution_mode: "live_read_high_risk",
+              requested_execution_mode: "recon",
               risk_state: "allowed",
               approval_record: createIssue209FormalApprovalRecord(decisionId, approvalId),
               audit_record: createIssue209FormalAuditRecord(requestId, decisionId, approvalId)
@@ -1575,7 +1575,7 @@ describe("normalizeGateOptionsForContract", () => {
       expect(result.summary).toMatchObject({
         capability_result: {
           ability_id: "xhs.note.search.v1",
-          outcome: "success"
+          outcome: "partial"
         }
       });
       const persisted = await profileStore.readMeta("xhs_rhythm_probe_profile");
@@ -1673,7 +1673,7 @@ describe("normalizeGateOptionsForContract", () => {
                 target_tab_id: 32,
                 target_page: "search_result_tab",
                 action_type: "read",
-                requested_execution_mode: "live_read_high_risk",
+                requested_execution_mode: "recon",
                 risk_state: "allowed"
               }
             }
@@ -1770,7 +1770,7 @@ describe("normalizeGateOptionsForContract", () => {
                 target_tab_id: 32,
                 target_page: "search_result_tab",
                 action_type: "read",
-                requested_execution_mode: "live_read_high_risk",
+                requested_execution_mode: "recon",
                 risk_state: "allowed"
               }
             }
@@ -1853,7 +1853,7 @@ describe("normalizeGateOptionsForContract", () => {
                 target_tab_id: 32,
                 target_page: "search_result_tab",
                 action_type: "read",
-                requested_execution_mode: "live_read_high_risk",
+                requested_execution_mode: "recon",
                 risk_state: "allowed"
               }
             }
@@ -1907,7 +1907,7 @@ describe("normalizeGateOptionsForContract", () => {
                 target_tab_id: 32,
                 target_page: "search_result_tab",
                 action_type: "read",
-                requested_execution_mode: "live_read_high_risk",
+                requested_execution_mode: "recon",
                 risk_state: "allowed"
               }
             }
@@ -1988,7 +1988,7 @@ describe("normalizeGateOptionsForContract", () => {
                 target_tab_id: 32,
                 target_page: "search_result_tab",
                 action_type: "read",
-                requested_execution_mode: "live_read_high_risk",
+                requested_execution_mode: "recon",
                 risk_state: "allowed"
               }
             }

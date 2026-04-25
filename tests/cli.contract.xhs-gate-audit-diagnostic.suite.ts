@@ -2874,14 +2874,15 @@ process.stdin.on("data", (chunk) => {
           }
         },
         session_rhythm_status_view: {
-          source: "profile_meta",
+          profile: auditProfile,
           platform: "xhs",
-          state: "single_probe_passed",
-          recovery: {
-            probe_run_id: "run-session-audit-probe-001"
-          },
-          full_bundle_blocked: true,
-          reason_codes: expect.arrayContaining(["ANTI_DETECTION_BASELINE_REQUIRED"])
+          issue_scope: "issue_209",
+          current_phase: "stability",
+          current_risk_state: "limited",
+          window_state: "stability",
+          latest_event_id: "run-session-audit-probe-001",
+          latest_reason: "ANTI_DETECTION_BASELINE_REQUIRED",
+          derived_at: expect.any(String)
         }
       }
     });
@@ -2968,16 +2969,15 @@ process.stdin.on("data", (chunk) => {
           limit: 1
         },
         session_rhythm_status_view: {
-          source: "profile_meta",
+          profile,
           platform: "xhs",
-          state: "single_probe_passed",
-          recovery: {
-            single_probe_required: false,
-            single_probe_passed_at: "2026-04-25T10:40:00.000Z",
-            probe_run_id: "run-rhythm-audit-probe-001"
-          },
-          full_bundle_blocked: true,
-          reason_codes: expect.arrayContaining(["ANTI_DETECTION_BASELINE_REQUIRED"])
+          issue_scope: "issue_209",
+          current_phase: "stability",
+          current_risk_state: "limited",
+          window_state: "stability",
+          latest_event_id: "run-rhythm-audit-probe-001",
+          latest_reason: "ANTI_DETECTION_BASELINE_REQUIRED",
+          derived_at: expect.any(String)
         }
       }
     });
