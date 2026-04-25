@@ -188,5 +188,31 @@ describe("xhs-search telemetry helpers", () => {
     ).toMatchObject({
       reason: "CAPTCHA_REQUIRED"
     });
+    expect(
+      classifyXhsAccountSafetySurface({
+        href: "https://www.xiaohongshu.com/search_result",
+        title: "小红书",
+        overlay: {
+          source: "dom_overlay",
+          selector: ".risk-modal",
+          text: "账号异常 平台拒绝当前请求"
+        }
+      })
+    ).toMatchObject({
+      reason: "ACCOUNT_ABNORMAL"
+    });
+    expect(
+      classifyXhsAccountSafetySurface({
+        href: "https://www.xiaohongshu.com/search_result",
+        title: "小红书",
+        overlay: {
+          source: "dom_overlay",
+          selector: ".risk-modal",
+          text: "Browser environment abnormal"
+        }
+      })
+    ).toMatchObject({
+      reason: "BROWSER_ENV_ABNORMAL"
+    });
   });
 });

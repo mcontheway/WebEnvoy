@@ -35,7 +35,7 @@ import {
   ExtensionContractError,
   validateXhsCommandInputForExtension
 } from "./xhs-command-contract.js";
-import { containsCookie } from "./xhs-search-telemetry.js";
+import { containsCookie, hasXhsAccountSafetyOverlaySignal } from "./xhs-search-telemetry.js";
 
 export {
   encodeMainWorldPayload,
@@ -256,7 +256,7 @@ const readAccountSafetyOverlay = (): XhsAccountSafetyOverlay | null => {
       continue;
     }
     const text = ((element as HTMLElement).innerText || element.textContent || "").trim();
-    if (!text) {
+    if (!text || !hasXhsAccountSafetyOverlaySignal(text)) {
       continue;
     }
     const selector = ACCOUNT_SAFETY_OVERLAY_SELECTORS.find((candidate) => element.matches(candidate)) ?? null;

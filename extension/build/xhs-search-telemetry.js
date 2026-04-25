@@ -112,6 +112,21 @@ export const classifyPageKind = (href) => {
     return "unknown";
 };
 const normalizeSurfaceText = (value) => (value ?? "").replace(/\s+/gu, "");
+export const hasXhsAccountSafetyOverlaySignal = (value) => {
+    const overlayText = normalizeSurfaceText(value);
+    return ((overlayText.includes("请完成验证") &&
+        (overlayText.includes("滑块") ||
+            overlayText.includes("验证码") ||
+            overlayText.includes("人机验证"))) ||
+        (overlayText.includes("当前访问存在安全风险") &&
+            (overlayText.includes("验证后继续访问") || overlayText.includes("继续访问"))) ||
+        (overlayText.includes("登录后推荐更懂你的笔记") &&
+            overlayText.includes("扫码") &&
+            overlayText.includes("输入手机号")) ||
+        overlayText.includes("账号异常") ||
+        overlayText.includes("浏览器环境异常") ||
+        overlayText.toLowerCase().includes("browserenvironmentabnormal"));
+};
 export const classifyXhsAccountSafetySurface = (input) => {
     const path = extractUrlPath(input.href);
     const overlayText = normalizeSurfaceText(input.overlay?.text);
@@ -154,6 +169,19 @@ export const classifyXhsAccountSafetySurface = (input) => {
         return {
             reason: "XHS_LOGIN_REQUIRED",
             message: "当前页面要求登录小红书，无法继续执行"
+        };
+    }
+    if (overlayText.includes("账号异常")) {
+        return {
+            reason: "ACCOUNT_ABNORMAL",
+            message: "账号异常，平台拒绝当前请求"
+        };
+    }
+    if (overlayText.includes("浏览器环境异常") ||
+        overlayText.toLowerCase().includes("browserenvironmentabnormal")) {
+        return {
+            reason: "BROWSER_ENV_ABNORMAL",
+            message: "浏览器环境异常，平台拒绝当前请求"
         };
     }
     return null;
