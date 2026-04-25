@@ -58,6 +58,18 @@ export const markXhsCloseoutSingleProbePassed = (input) => ({
     fullBundleBlocked: true,
     reasonCodes: uniqueReasons(["XHS_RECOVERY_SINGLE_PROBE_PASSED", "ANTI_DETECTION_BASELINE_REQUIRED"])
 });
+export const claimXhsCloseoutSingleProbe = (input) => ({
+    ...normalizeXhsCloseoutRhythmRecord(input.current),
+    state: "single_probe_required",
+    singleProbeRequired: true,
+    singleProbePassedAt: null,
+    probeRunId: input.probeRunId,
+    fullBundleBlocked: true,
+    reasonCodes: uniqueReasons([
+        ...normalizeXhsCloseoutRhythmRecord(input.current).reasonCodes,
+        "XHS_RECOVERY_SINGLE_PROBE_CLAIMED"
+    ])
+});
 export function assertXhsCloseoutRhythmRecordShape(value) {
     const record = isObjectRecord(value) ? value : null;
     if (!record) {

@@ -383,8 +383,14 @@ const assertXhsLivePreflightAllowsCommand = (input: {
   const rhythmState = asString(input.xhsCloseoutRhythm.state);
   const fullBundleBlocked = input.xhsCloseoutRhythm.full_bundle_blocked === true;
   const singleProbeRequired = input.xhsCloseoutRhythm.single_probe_required === true;
+  const probeRunId = asString(input.xhsCloseoutRhythm.probe_run_id);
 
-  if (recoveryProbe && rhythmState === "single_probe_required") {
+  if (
+    recoveryProbe &&
+    rhythmState === "single_probe_required" &&
+    input.accountSafety.state !== "account_risk_blocked" &&
+    probeRunId === null
+  ) {
     return;
   }
 
@@ -528,6 +534,7 @@ const xhsReadCommand = async (
     rhythm: profileMeta?.xhsCloseoutRhythm,
     accountSafety: profileMeta?.accountSafety
   });
+  const profileRuntime = new ProfileRuntimeService();
   const recoveryProbeRequested = isXhsRecoveryProbe({
     command: context.command,
     ability: envelope.ability,
@@ -550,7 +557,6 @@ const xhsReadCommand = async (
     }
   }
   const bridge = resolveRuntimeBridge();
-  const profileRuntime = new ProfileRuntimeService();
   const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
     requestedExecutionMode: gate.requestedExecutionMode
   });
@@ -561,6 +567,18 @@ const xhsReadCommand = async (
       gateInvocationId: envelope.gateInvocationId,
       runId: context.run_id
     });
+    if (
+      context.profile &&
+      isLiveXhsExecutionMode(gate.requestedExecutionMode) &&
+      recoveryProbeRequested
+    ) {
+      await profileRuntime.claimXhsCloseoutSingleProbe({
+        cwd: context.cwd,
+        profile: context.profile,
+        runId: context.run_id,
+        params: {}
+      });
+    }
     await ensureOfficialChromeRuntimeReady(
       context,
       envelope.ability,

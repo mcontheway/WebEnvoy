@@ -1689,6 +1689,87 @@ describe("normalizeGateOptionsForContract", () => {
     }
   });
 
+  it("keeps account-safety blocked for recovery probes until the operator clears it", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-rhythm-account-block-"));
+    try {
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.initializeMeta(
+        "xhs_rhythm_account_block_profile",
+        "2026-04-25T10:00:00.000Z",
+        { allowUnsupportedExtensionBrowser: true }
+      );
+      await profileStore.writeMeta("xhs_rhythm_account_block_profile", {
+        ...meta,
+        accountSafety: {
+          state: "account_risk_blocked",
+          platform: "xhs",
+          reason: "ACCOUNT_ABNORMAL",
+          observedAt: "2026-04-25T10:00:00.000Z",
+          cooldownUntil: "2000-01-01T00:30:00.000Z",
+          sourceRunId: "run-risk-account-block-001",
+          sourceCommand: "xhs.search",
+          targetDomain: "www.xiaohongshu.com",
+          targetTabId: 32,
+          pageUrl: "https://www.xiaohongshu.com/search_result?keyword=test",
+          statusCode: 461,
+          platformCode: 300011
+        },
+        xhsCloseoutRhythm: {
+          state: "single_probe_required",
+          cooldownUntil: "2000-01-01T00:30:00.000Z",
+          operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+          singleProbeRequired: true,
+          singleProbePassedAt: null,
+          probeRunId: null,
+          fullBundleBlocked: true,
+          reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_REQUIRED"]
+        }
+      });
+
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.search",
+            profile: "xhs_rhythm_account_block_profile",
+            run_id: "run-rhythm-account-block-001",
+            params: {
+              ability: {
+                id: "xhs.note.search.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                query: "露营"
+              },
+              options: {
+                xhs_recovery_probe: true,
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "search_result_tab",
+                action_type: "read",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed"
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "ACCOUNT_RISK_BLOCKED",
+          account_safety: expect.objectContaining({
+            state: "account_risk_blocked"
+          })
+        }
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("rejects xhs_recovery_probe when no active recovery state requires it", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-rhythm-probe-invalid-"));
     try {
@@ -1735,6 +1816,87 @@ describe("normalizeGateOptionsForContract", () => {
           reason: "XHS_CLOSEOUT_RHYTHM_UNAVAILABLE",
           xhs_closeout_rhythm: expect.objectContaining({
             state: "not_required"
+          })
+        }
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a second recovery probe after the budget is already claimed", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-rhythm-probe-claimed-"));
+    try {
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.initializeMeta(
+        "xhs_rhythm_probe_claimed_profile",
+        "2026-04-25T10:00:00.000Z",
+        { allowUnsupportedExtensionBrowser: true }
+      );
+      await profileStore.writeMeta("xhs_rhythm_probe_claimed_profile", {
+        ...meta,
+        accountSafety: {
+          state: "clear",
+          platform: null,
+          reason: null,
+          observedAt: null,
+          cooldownUntil: null,
+          sourceRunId: null,
+          sourceCommand: null,
+          targetDomain: null,
+          targetTabId: null,
+          pageUrl: null,
+          statusCode: null,
+          platformCode: null
+        },
+        xhsCloseoutRhythm: {
+          state: "single_probe_required",
+          cooldownUntil: "2000-01-01T00:30:00.000Z",
+          operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+          singleProbeRequired: true,
+          singleProbePassedAt: null,
+          probeRunId: "run-already-claimed-probe-001",
+          fullBundleBlocked: true,
+          reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_CLAIMED"]
+        }
+      });
+
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.search",
+            profile: "xhs_rhythm_probe_claimed_profile",
+            run_id: "run-rhythm-probe-claimed-002",
+            params: {
+              ability: {
+                id: "xhs.note.search.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                query: "露营"
+              },
+              options: {
+                xhs_recovery_probe: true,
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "search_result_tab",
+                action_type: "read",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed"
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_RHYTHM_BLOCKED",
+          xhs_closeout_rhythm: expect.objectContaining({
+            probe_run_id: "run-already-claimed-probe-001"
           })
         }
       });

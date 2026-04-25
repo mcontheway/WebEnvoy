@@ -58,6 +58,7 @@ import {
 } from "./account-safety.js";
 import {
   buildBlockedXhsCloseoutRhythmRecord,
+  claimXhsCloseoutSingleProbe,
   markXhsCloseoutOperatorConfirmed,
   markXhsCloseoutSingleProbePassed,
   toXhsCloseoutRhythmStatus
@@ -164,6 +165,7 @@ export interface MarkAccountSafetyBlockedInput extends RuntimeActionInput {
 }
 
 export interface MarkXhsCloseoutSingleProbePassedInput extends RuntimeActionInput {}
+export interface ClaimXhsCloseoutSingleProbeInput extends RuntimeActionInput {}
 
 interface ProfileStoreLike {
   ensureProfileDir(profileName: string): Promise<string>;
@@ -1461,6 +1463,67 @@ export class ProfileRuntimeService {
       profileDir,
       xhsCloseoutRhythm,
       updatedAt: passedAt
+    };
+    await store.writeMeta(input.profile, nextMeta);
+
+    return {
+      profile: input.profile,
+      xhs_closeout_rhythm: toXhsCloseoutRhythmStatus({
+        rhythm: xhsCloseoutRhythm,
+        accountSafety: nextMeta.accountSafety
+      })
+    };
+  }
+
+  async claimXhsCloseoutSingleProbe(input: ClaimXhsCloseoutSingleProbeInput): Promise<JsonObject> {
+    const claimedAt = isoNow();
+    const store = this.#createStore(input.cwd);
+    const profileDir = this.#resolveProfileDir(store, input.profile);
+    await store.ensureProfileDir(input.profile);
+    const existingMeta =
+      await this.#readMeta(store, input.profile, { mode: "readonly" }) ??
+      this.#buildMinimalProfileMeta({
+        profile: input.profile,
+        profileDir,
+        nowIso: claimedAt
+      });
+    const currentStatus = toXhsCloseoutRhythmStatus({
+      rhythm: existingMeta.xhsCloseoutRhythm,
+      accountSafety: existingMeta.accountSafety
+    });
+    if (
+      existingMeta.accountSafety?.state === "account_risk_blocked" ||
+      currentStatus.state !== "single_probe_required" ||
+      currentStatus.probe_run_id !== null
+    ) {
+      throw new CliError(
+        "ERR_EXECUTION_FAILED",
+        "XHS recovery single-probe budget is not available",
+        {
+          retryable: false,
+          details: {
+            ability_id: "xhs.note.search.v1",
+            stage: "execution",
+            reason:
+              existingMeta.accountSafety?.state === "account_risk_blocked"
+                ? "ACCOUNT_RISK_BLOCKED"
+                : "XHS_CLOSEOUT_RHYTHM_BLOCKED",
+            account_safety: toAccountSafetyStatus(existingMeta.accountSafety),
+            xhs_closeout_rhythm: currentStatus
+          }
+        }
+      );
+    }
+    const xhsCloseoutRhythm = claimXhsCloseoutSingleProbe({
+      current: existingMeta.xhsCloseoutRhythm,
+      probeRunId: input.runId
+    });
+    const nextMeta: ProfileMeta = {
+      ...existingMeta,
+      profileName: input.profile,
+      profileDir,
+      xhsCloseoutRhythm,
+      updatedAt: claimedAt
     };
     await store.writeMeta(input.profile, nextMeta);
 
