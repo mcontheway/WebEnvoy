@@ -1428,7 +1428,7 @@ describe("xhs read execution fallback", () => {
         fetchJson: async () => ({
           status: 461,
           body: {
-            code: 300011,
+            code: "300011",
             msg: "account abnormal"
           }
         })
@@ -1505,7 +1505,7 @@ describe("xhs read execution fallback", () => {
         fetchJson: async () => ({
           status: 200,
           body: {
-            code: 300015,
+            code: "300015",
             msg: "browser environment abnormal"
           }
         })

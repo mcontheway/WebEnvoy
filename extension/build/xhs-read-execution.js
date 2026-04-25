@@ -786,7 +786,7 @@ const createReadObservability = (input) => ({
 });
 const inferReadFailure = (spec, status, body) => {
     const record = asRecord(body);
-    const businessCode = record?.code;
+    const businessCode = asInteger(record?.code);
     const message = typeof record?.msg === "string"
         ? record.msg
         : typeof record?.message === "string"
@@ -1565,8 +1565,8 @@ const executeXhsRead = async (input, spec, env) => {
         }), gate, auditRecord), gate.execution_audit);
     }
     const responseRecord = asRecord(response.body);
-    const businessCode = responseRecord?.code;
-    if (response.status >= 400 || (typeof businessCode === "number" && businessCode !== 0)) {
+    const businessCode = asInteger(responseRecord?.code);
+    if (response.status >= 400 || (businessCode !== null && businessCode !== 0)) {
         const failure = inferReadFailure(spec, response.status, response.body);
         const pageStateRoot = await resolvePageStateRoot();
         if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
@@ -1575,7 +1575,7 @@ const executeXhsRead = async (input, spec, env) => {
                 message: failure.message,
                 detail: failure.message,
                 statusCode: response.status,
-                platformCode: typeof businessCode === "number" ? businessCode : undefined
+                platformCode: businessCode ?? undefined
             });
         }
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failure.message, {
@@ -1583,7 +1583,7 @@ const executeXhsRead = async (input, spec, env) => {
             stage: "execution",
             reason: failure.reason,
             status_code: response.status,
-            ...(typeof businessCode === "number" ? { platform_code: businessCode } : {})
+            ...(businessCode !== null ? { platform_code: businessCode } : {})
         }, createReadObservability({
             spec,
             href: env.getLocationHref(),

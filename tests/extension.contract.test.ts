@@ -1665,6 +1665,93 @@ describe("extension build contract", () => {
     );
   });
 
+  it("normalizes string platform risk codes before accepting xhs.search responses", async () => {
+    const admissionContext = buildLiveReadAdmissionContext({
+      runId: "run-source-search-string-code-001",
+      sessionId: "nm-session-source-search-string-code-001",
+      gateInvocationId: "issue209-gate-run-source-search-string-code-001",
+      targetTabId: 11,
+      targetPage: "search_result_tab"
+    });
+
+    const result = await executeXhsSearch(
+      {
+        abilityId: "xhs.note.search.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          query: "露营装备"
+        },
+        options: {
+          issue_scope: "issue_209",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 11,
+          target_page: "search_result_tab",
+          actual_target_domain: "www.xiaohongshu.com",
+          actual_target_tab_id: 11,
+          actual_target_page: "search_result_tab",
+          action_type: "read",
+          risk_state: "allowed",
+          requested_execution_mode: "live_read_high_risk",
+          upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+            requestRef: "upstream_source_search_string_code_001",
+            actionName: "xhs.read_search_results",
+            targetPage: "search_result_tab",
+            targetTabId: 11,
+            profileRef: "profile-a",
+            approvalRefs: [
+              String(admissionContext.approval_admission_evidence.approval_admission_ref)
+            ],
+            auditRefs: [String(admissionContext.audit_admission_evidence.audit_admission_ref)]
+          }),
+          admission_context: admissionContext
+        },
+        executionContext: {
+          runId: "run-source-search-string-code-001",
+          sessionId: "nm-session-source-search-string-code-001",
+          profile: "profile-a",
+          gateInvocationId: "issue209-gate-run-source-search-string-code-001"
+        }
+      },
+      {
+        now: () => 1_710_000_000_000,
+        randomId: () => "source-req-string-code-001",
+        getLocationHref: () => "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
+        getDocumentTitle: () => "Search Result",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=session-cookie",
+        readCapturedRequestContext: async () =>
+          createCapturedSearchContextArtifact({
+            href: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
+            keyword: "露营装备",
+            captured_at: 1_710_000_000_000
+          }),
+        callSignature: async () => ({ "X-s": "fresh-signature", "X-t": "1710000000" }),
+        fetchJson: async () => ({
+          status: 200,
+          body: {
+            code: "300011",
+            msg: "account abnormal"
+          }
+        })
+      }
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected string platform code failure");
+    }
+    expect(result.error).toMatchObject({
+      code: "ERR_EXECUTION_FAILED",
+      message: "账号异常，平台拒绝当前请求"
+    });
+    expect(result.payload.details).toMatchObject({
+      reason: "ACCOUNT_ABNORMAL",
+      status_code: 200,
+      platform_code: 300011
+    });
+  });
+
   it("falls back to captured exact-hit signature when the page signer is unavailable", async () => {
     const admissionContext = buildLiveReadAdmissionContext({
       runId: "run-source-search-live-captured-signature-001",

@@ -93,6 +93,15 @@ describe("xhs-search telemetry helpers", () => {
     });
   });
 
+  it("normalizes string platform risk codes before classifying API failures", () => {
+    expect(inferFailure(200, { code: "300011", msg: "account abnormal" })).toMatchObject({
+      reason: "ACCOUNT_ABNORMAL"
+    });
+    expect(inferFailure(200, { code: "300015", msg: "browser environment abnormal" })).toMatchObject({
+      reason: "BROWSER_ENV_ABNORMAL"
+    });
+  });
+
   it("classifies high-confidence XHS account safety surfaces", () => {
     expect(
       classifyXhsAccountSafetySurface({

@@ -4,6 +4,16 @@ const asRecord = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asArray = (value) => (Array.isArray(value) ? value : null);
+const asInteger = (value) => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return Math.trunc(value);
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+    }
+    return null;
+};
 const resolveRiskState = (value) => resolveSharedRiskState(value);
 const SEARCH_FAILURE_SEMANTICS = {
     SIGNATURE_ENTRY_MISSING: {
@@ -385,7 +395,7 @@ export const parseCount = (body) => {
 };
 export const inferFailure = (status, body) => {
     const record = asRecord(body);
-    const businessCode = record?.code;
+    const businessCode = asInteger(record?.code);
     const message = typeof record?.msg === "string" ? record.msg : typeof record?.message === "string" ? record.message : "";
     const normalized = `${message}`.toLowerCase();
     if (status === 401 || normalized.includes("login")) {

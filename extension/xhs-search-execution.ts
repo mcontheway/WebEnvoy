@@ -1212,8 +1212,8 @@ export const executeXhsSearch = async (
   }
 
   const responseRecord = asRecord(response.body);
-  const businessCode = responseRecord?.code;
-  if (response.status >= 400 || (typeof businessCode === "number" && businessCode !== 0)) {
+  const businessCode = asInteger(responseRecord?.code);
+  if (response.status >= 400 || (businessCode !== null && businessCode !== 0)) {
     const failure = inferFailure(response.status, response.body);
     return withExecutionAuditInFailurePayload(
       createFailure(
@@ -1224,7 +1224,7 @@ export const executeXhsSearch = async (
           stage: "execution",
           reason: failure.reason,
           status_code: response.status,
-          ...(typeof businessCode === "number" ? { platform_code: businessCode } : {})
+          ...(businessCode !== null ? { platform_code: businessCode } : {})
         },
         createObservability({
           href: env.getLocationHref(),
