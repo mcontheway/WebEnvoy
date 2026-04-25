@@ -214,6 +214,9 @@ const resolveRejectedSourceMessage = (spec, reason) => {
             return null;
     }
 };
+const isBackendRejectedSourceLookup = (lookupResult) => lookupResult.state === "rejected_source" &&
+    (BACKEND_REJECTED_SOURCE_REASONS.has(lookupResult.reason) ||
+        lookupResult.reason === "failed_request_rejected");
 const waitForRequestContextRetry = async (env, ms) => {
     if (typeof env.sleep === "function") {
         await env.sleep(ms);
@@ -611,6 +614,7 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
 };
 const failClosedForRequestContext = (input, env) => {
     const failureSurface = resolveRequestContextFailureSurface(input.spec, input.lookupResult);
+    const backendRejectedSource = isBackendRejectedSourceLookup(input.lookupResult);
     return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failureSurface.message, {
         ability_id: input.abilityId,
         stage: "execution",
@@ -660,7 +664,7 @@ const failClosedForRequestContext = (input, env) => {
     }), createReadDiagnosis(input.spec, {
         reason: input.lookupResult.reason,
         summary: failureSurface.message,
-        category: "page_changed"
+        category: backendRejectedSource ? "request_failed" : "page_changed"
     }), input.gate, input.auditRecord), input.gate.execution_audit);
 };
 const resolveRequestContextFailureSurface = (spec, lookupResult) => {

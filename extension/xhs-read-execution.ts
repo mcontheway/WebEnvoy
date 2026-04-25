@@ -436,6 +436,13 @@ const resolveRejectedSourceMessage = (
   }
 };
 
+const isBackendRejectedSourceLookup = (
+  lookupResult: Exclude<ReadRequestContextLookupResult, { state: "hit" }>
+): boolean =>
+  lookupResult.state === "rejected_source" &&
+  (BACKEND_REJECTED_SOURCE_REASONS.has(lookupResult.reason) ||
+    lookupResult.reason === "failed_request_rejected");
+
 const waitForRequestContextRetry = async (
   env: XhsSearchEnvironment,
   ms: number
@@ -927,6 +934,7 @@ const failClosedForRequestContext = (
   env: XhsSearchEnvironment
 ): SearchExecutionResult => {
   const failureSurface = resolveRequestContextFailureSurface(input.spec, input.lookupResult);
+  const backendRejectedSource = isBackendRejectedSourceLookup(input.lookupResult);
   return withExecutionAuditInFailurePayload(
     createFailure(
       "ERR_EXECUTION_FAILED",
@@ -987,7 +995,7 @@ const failClosedForRequestContext = (
       createReadDiagnosis(input.spec, {
         reason: input.lookupResult.reason,
         summary: failureSurface.message,
-        category: "page_changed"
+        category: backendRejectedSource ? "request_failed" : "page_changed"
       }),
       input.gate,
       input.auditRecord

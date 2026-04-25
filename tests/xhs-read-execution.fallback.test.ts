@@ -982,6 +982,65 @@ describe("xhs read execution fallback", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
+  it("classifies detail backend rejected-source diagnosis as request_failed without page fallback", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-rejected-no-fallback-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-rejected-no-fallback-001",
+          targetPage: "explore_detail_tab"
+        }),
+        executionContext: createFallbackExecutionContext("run-detail-rejected-no-fallback-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-rejected-no-fallback-001",
+        readCapturedRequestContext: createRequestContextReader(
+          createDetailRequestContext("note-rejected-no-fallback-001", {
+            template_ready: false,
+            rejection_reason: "failed_request_rejected",
+            request_status: {
+              completion: "failed",
+              http_status: 429
+            },
+            response: {
+              headers: {},
+              body: {
+                code: 429001,
+                msg: "captcha required"
+              }
+            }
+          })
+        ),
+        readPageStateRoot: async () => null,
+        fetchJson
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected detail rejected-context failure envelope");
+    }
+    expect(result.payload.details).toMatchObject({
+      reason: "CAPTCHA_REQUIRED",
+      request_context_lookup_state: "rejected_source",
+      request_context_miss_reason: "CAPTCHA_REQUIRED"
+    });
+    expect(result.payload.diagnosis).toMatchObject({
+      category: "request_failed",
+      failure_site: {
+        component: "network",
+        target: "/api/sns/web/v1/feed"
+      }
+    });
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
   it("does not treat metadata user id as user_home success evidence", async () => {
     const result = await executeXhsUserHome(
       {
@@ -1264,6 +1323,65 @@ describe("xhs read execution fallback", () => {
       request_context_result: "request_context_missing",
       request_context_lookup_state: "rejected_source",
       request_context_miss_reason: "GATEWAY_INVOKER_FAILED"
+    });
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("classifies user_home backend rejected-source diagnosis as request_failed without page fallback", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-rejected-no-fallback-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-user-rejected-no-fallback-001",
+          targetPage: "profile_tab"
+        }),
+        executionContext: createFallbackExecutionContext("run-user-rejected-no-fallback-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-rejected-no-fallback-001",
+        readCapturedRequestContext: createRequestContextReader(
+          createUserHomeRequestContext("user-rejected-no-fallback-001", {
+            template_ready: false,
+            rejection_reason: "failed_request_rejected",
+            request_status: {
+              completion: "failed",
+              http_status: 500
+            },
+            response: {
+              headers: {},
+              body: {
+                code: 500100,
+                msg: "create invoker failed"
+              }
+            }
+          })
+        ),
+        readPageStateRoot: async () => null,
+        fetchJson
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected user_home rejected-context failure envelope");
+    }
+    expect(result.payload.details).toMatchObject({
+      reason: "GATEWAY_INVOKER_FAILED",
+      request_context_lookup_state: "rejected_source",
+      request_context_miss_reason: "GATEWAY_INVOKER_FAILED"
+    });
+    expect(result.payload.diagnosis).toMatchObject({
+      category: "request_failed",
+      failure_site: {
+        component: "network",
+        target: "/api/sns/web/v1/user/otherinfo"
+      }
     });
     expect(fetchJson).not.toHaveBeenCalled();
   });
