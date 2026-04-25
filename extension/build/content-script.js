@@ -4761,7 +4761,7 @@ const containsCookie = (cookie, key) => cookie
     .split(";")
     .map((item) => item.trim())
     .some((item) => item.startsWith(`${key}=`));
-return { buildEditorInputEvidence, classifyXhsAccountSafetySurface, containsCookie, createDiagnosis, createFailure, createObservability, inferFailure, inferRequestException, isTrustedEditorInputValidation, parseCount, resolveSimulatedResult, resolveRiskStateOutput, resolveXsCommon };
+return { buildEditorInputEvidence, classifyXhsAccountSafetySurface, containsCookie, createDiagnosis, createFailure, createObservability, hasXhsAccountSafetyOverlaySignal, inferFailure, inferRequestException, isTrustedEditorInputValidation, parseCount, resolveSimulatedResult, resolveRiskStateOutput, resolveXsCommon };
 })();
 const __webenvoy_module_xhs_search_gate = (() => {
 const {
@@ -8807,7 +8807,7 @@ const {
   ExtensionContractError,
   validateXhsCommandInputForExtension
 } = __webenvoy_module_xhs_command_contract;
-const { containsCookie } = __webenvoy_module_xhs_search_telemetry;
+const { containsCookie, hasXhsAccountSafetyOverlaySignal } = __webenvoy_module_xhs_search_telemetry;
 const {
   encodeMainWorldPayload,
   installFingerprintRuntimeViaMainWorld,

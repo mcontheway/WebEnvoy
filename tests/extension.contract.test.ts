@@ -776,6 +776,9 @@ describe("extension build contract", () => {
     expect((result.error as { message?: string } | undefined)?.message).not.toBe(
       "containsCookie is not defined"
     );
+    expect((result.error as { message?: string } | undefined)?.message).not.toBe(
+      "hasXhsAccountSafetyOverlaySignal is not defined"
+    );
   });
 
   it("executes bundled content-script handler xhs.search live-read via main-world request bridge", async () => {
