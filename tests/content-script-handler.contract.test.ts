@@ -1801,7 +1801,7 @@ describe("content-script handler contract", () => {
           getBodyText: () => "登录后推荐更懂你的笔记 扫码登录 输入手机号",
           getAccountSafetyOverlay: () => ({
             source: "dom_overlay",
-            selector: '[role="dialog"]',
+            selector: '.login-modal',
             text: "登录后推荐更懂你的笔记 可用小红书或微信扫码 输入手机号"
           }),
           readCapturedRequestContext,
@@ -1891,18 +1891,18 @@ describe("content-script handler contract", () => {
 
   it("continues scanning visible overlays until an account-safety container is found", async () => {
     await withMockMainWorld(async ({ mockWindow }) => {
-      const createOverlay = (text: string) => ({
+      const createOverlay = (text: string, matchedSelector: string) => ({
         innerText: text,
         textContent: text,
         getBoundingClientRect: () => ({ width: 320, height: 240 }),
-        matches: (selector: string) => selector === '[role="dialog"]'
+        matches: (selector: string) => selector === matchedSelector
       });
       (globalThis.document as Document & {
         querySelectorAll?: (selector: string) => unknown[];
         cookie?: string;
       }).querySelectorAll = () => [
-        createOverlay("普通提示弹层"),
-        createOverlay("登录后推荐更懂你的笔记 可用小红书或微信扫码 输入手机号")
+        createOverlay("普通提示弹层", '[role="dialog"]'),
+        createOverlay("登录后推荐更懂你的笔记 可用小红书或微信扫码 输入手机号", ".login-modal")
       ];
       (globalThis.document as Document & { cookie?: string }).cookie = "a1=cookie-token";
       (mockWindow as Window & {

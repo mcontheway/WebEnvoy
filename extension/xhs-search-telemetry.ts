@@ -159,6 +159,12 @@ export interface XhsAccountSafetySurface {
 const normalizeSurfaceText = (value: string | null | undefined): string =>
   (value ?? "").replace(/\s+/gu, "");
 
+const hasSpecificOverlaySelector = (selector: string | null | undefined): boolean =>
+  typeof selector === "string" &&
+  selector.length > 0 &&
+  selector !== '[role="dialog"]' &&
+  selector !== '[aria-modal="true"]';
+
 export const hasXhsAccountSafetyOverlaySignal = (value: string | null | undefined): boolean => {
   const overlayText = normalizeSurfaceText(value);
   return (
@@ -184,7 +190,9 @@ export const classifyXhsAccountSafetySurface = (input: {
   overlay?: XhsAccountSafetyOverlay | null;
 }): XhsAccountSafetySurface | null => {
   const path = extractUrlPath(input.href);
-  const overlayText = normalizeSurfaceText(input.overlay?.text);
+  const overlayText = hasSpecificOverlaySelector(input.overlay?.selector)
+    ? normalizeSurfaceText(input.overlay?.text)
+    : "";
   if (path.includes("captcha")) {
     return {
       reason: "CAPTCHA_REQUIRED",

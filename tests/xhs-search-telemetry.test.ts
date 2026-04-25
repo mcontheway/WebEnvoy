@@ -152,10 +152,21 @@ describe("xhs-search telemetry helpers", () => {
       classifyXhsAccountSafetySurface({
         href: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
         title: "小红书 - 你的生活兴趣社区",
-        bodyText: "普通页面",
         overlay: {
           source: "dom_overlay",
           selector: '[role="dialog"]',
+          text: "登录后推荐更懂你的笔记 可用小红书或微信扫码 输入手机号 新用户可直接登录"
+        }
+      })
+    ).toBeNull();
+    expect(
+      classifyXhsAccountSafetySurface({
+        href: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
+        title: "小红书 - 你的生活兴趣社区",
+        bodyText: "普通页面",
+        overlay: {
+          source: "dom_overlay",
+          selector: '.login-modal',
           text: "登录后推荐更懂你的笔记 可用小红书或微信扫码 输入手机号 新用户可直接登录"
         }
       })

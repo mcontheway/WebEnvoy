@@ -102,8 +102,6 @@ const buildRuntimeBootstrapAckPayload = (input) => ({
     ...(input.runtimeWithInjection ? { fingerprint_runtime: input.runtimeWithInjection } : {})
 });
 const ACCOUNT_SAFETY_OVERLAY_SELECTORS = [
-    '[role="dialog"]',
-    '[aria-modal="true"]',
     ".login-modal",
     ".login-container",
     ".login-wrapper",
@@ -112,8 +110,21 @@ const ACCOUNT_SAFETY_OVERLAY_SELECTORS = [
     ".verify-container",
     ".security-verify",
     ".risk-page",
-    ".risk-modal"
+    ".risk-modal",
+    '[class*="login"]',
+    '[class*="captcha"]',
+    '[class*="verify"]',
+    '[class*="security"]',
+    '[class*="risk"]',
+    '[id*="login"]',
+    '[id*="captcha"]',
+    '[id*="verify"]',
+    '[id*="security"]',
+    '[id*="risk"]',
+    '[role="dialog"]',
+    '[aria-modal="true"]'
 ];
+const GENERIC_OVERLAY_SELECTORS = new Set(['[role="dialog"]', '[aria-modal="true"]']);
 const isVisibleElement = (element) => {
     const candidate = element;
     if (typeof candidate.getBoundingClientRect !== "function") {
@@ -142,6 +153,9 @@ const readAccountSafetyOverlay = () => {
             continue;
         }
         const selector = ACCOUNT_SAFETY_OVERLAY_SELECTORS.find((candidate) => element.matches(candidate)) ?? null;
+        if (!selector || GENERIC_OVERLAY_SELECTORS.has(selector)) {
+            continue;
+        }
         return {
             source: "dom_overlay",
             selector,
