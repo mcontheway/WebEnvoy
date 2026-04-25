@@ -2187,7 +2187,8 @@ const executeXhsRead = async (
         reason: failure.reason,
         message: failure.message,
         detail: failure.message,
-        statusCode: response.status
+        statusCode: response.status,
+        platformCode: typeof businessCode === "number" ? businessCode : undefined
       });
     }
     return withExecutionAuditInFailurePayload(

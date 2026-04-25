@@ -45,7 +45,8 @@ describe("xhs-search telemetry helpers", () => {
       classifyXhsAccountSafetySurface({
         href: "https://www.xiaohongshu.com/search_result?keyword=%E9%A3%8E%E9%99%A9",
         title: "小红书 - 搜索",
-        bodyText: "这是一篇普通笔记，讨论露营投资风险和环境异常天气如何应对。"
+        bodyText:
+          "这是一篇普通笔记，讨论账号异常、安全验证、操作频繁、稍后再试和环境异常天气如何应对。"
       })
     ).toBeNull();
   });

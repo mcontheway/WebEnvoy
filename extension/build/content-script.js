@@ -4374,17 +4374,17 @@ const classifyXhsAccountSafetySurface = (input) => {
     const title = normalizeSurfaceText(input.title);
     const bodyText = normalizeSurfaceText(input.bodyText ?? "");
     const text = `${title} ${bodyText}`;
-    if (text.includes("captcha") ||
-        text.includes("人机验证") ||
-        text.includes("请完成验证") ||
-        (text.includes("验证码") &&
-            (text.includes("输入") || text.includes("请完成") || text.includes("滑块")))) {
+    if (title.includes("captcha") ||
+        title.includes("人机验证") ||
+        title.includes("请完成验证") ||
+        (bodyText.includes("请完成验证") &&
+            (bodyText.includes("验证码") || bodyText.includes("滑块") || bodyText.includes("人机验证")))) {
         return {
             reason: "CAPTCHA_REQUIRED",
             message: "平台要求额外人机验证，无法继续执行"
         };
     }
-    if (text.includes("账号异常") || text.includes("300011")) {
+    if (title.includes("账号异常") || text.includes("300011")) {
         return {
             reason: "ACCOUNT_ABNORMAL",
             message: "账号异常，平台拒绝当前请求"
@@ -4404,14 +4404,11 @@ const classifyXhsAccountSafetySurface = (input) => {
     }
     if (title.includes("安全验证") ||
         title.includes("访问异常") ||
-        bodyText.includes("账号存在风险") ||
-        bodyText.includes("账号安全风险") ||
-        (bodyText.includes("安全验证") &&
-            (bodyText.includes("请完成") || bodyText.includes("继续访问") || bodyText.includes("验证"))) ||
-        (bodyText.includes("访问异常") &&
-            (bodyText.includes("稍后") || bodyText.includes("刷新") || bodyText.includes("验证"))) ||
-        (bodyText.includes("操作频繁") &&
-            (bodyText.includes("稍后") || bodyText.includes("验证")))) {
+        bodyText.includes("当前访问存在安全风险") ||
+        bodyText.includes("账号存在安全风险") ||
+        bodyText.includes("请完成安全验证") ||
+        bodyText.includes("验证后继续访问") ||
+        bodyText.includes("访问异常，请稍后重试")) {
         return {
             reason: "XHS_ACCOUNT_RISK_PAGE",
             message: "当前页面命中小红书账号风险或安全验证页面"
@@ -7556,7 +7553,8 @@ const executeXhsRead = async (input, spec, env) => {
                 reason: failure.reason,
                 message: failure.message,
                 detail: failure.message,
-                statusCode: response.status
+                statusCode: response.status,
+                platformCode: typeof businessCode === "number" ? businessCode : undefined
             });
         }
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failure.message, {

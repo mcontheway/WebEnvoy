@@ -1574,7 +1574,8 @@ const executeXhsRead = async (input, spec, env) => {
                 reason: failure.reason,
                 message: failure.message,
                 detail: failure.message,
-                statusCode: response.status
+                statusCode: response.status,
+                platformCode: typeof businessCode === "number" ? businessCode : undefined
             });
         }
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", failure.message, {

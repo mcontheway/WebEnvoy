@@ -1469,6 +1469,11 @@ describe("xhs read execution fallback", () => {
         })
       ])
     );
+    expect(result.payload.details).toMatchObject({
+      reason: "ACCOUNT_ABNORMAL",
+      status_code: 461,
+      platform_code: 300011
+    });
   });
 
   it("uses user_home page-state fallback when profile api returns env-abnormal but page state remains readable", async () => {
@@ -1523,6 +1528,11 @@ describe("xhs read execution fallback", () => {
       failure_site: {
         target: "/api/sns/web/v1/user/otherinfo"
       }
+    });
+    expect(result.payload.details).toMatchObject({
+      reason: "BROWSER_ENV_ABNORMAL",
+      status_code: 200,
+      platform_code: 300015
     });
   });
 
