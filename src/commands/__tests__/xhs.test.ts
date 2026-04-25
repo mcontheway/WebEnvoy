@@ -1689,6 +1689,60 @@ describe("normalizeGateOptionsForContract", () => {
     }
   });
 
+  it("rejects xhs_recovery_probe when no active recovery state requires it", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-rhythm-probe-invalid-"));
+    try {
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      await profileStore.initializeMeta(
+        "xhs_rhythm_probe_invalid_profile",
+        "2026-04-25T10:00:00.000Z",
+        { allowUnsupportedExtensionBrowser: true }
+      );
+
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.search",
+            profile: "xhs_rhythm_probe_invalid_profile",
+            run_id: "run-rhythm-probe-invalid-001",
+            params: {
+              ability: {
+                id: "xhs.note.search.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                query: "露营"
+              },
+              options: {
+                xhs_recovery_probe: true,
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "search_result_tab",
+                action_type: "read",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed"
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_RHYTHM_UNAVAILABLE",
+          xhs_closeout_rhythm: expect.objectContaining({
+            state: "not_required"
+          })
+        }
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("does not persist account_safety when an XHS live command returns a generic API warning", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-account-safety-generic-"));
     const runId = "run-account-risk-generic-001";

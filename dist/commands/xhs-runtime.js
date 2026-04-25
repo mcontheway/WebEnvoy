@@ -374,9 +374,15 @@ const xhsReadCommand = async (context, inputConfig) => {
         rhythm: profileMeta?.xhsCloseoutRhythm,
         accountSafety: profileMeta?.accountSafety
     });
+    const recoveryProbeRequested = isXhsRecoveryProbe({
+        command: context.command,
+        ability: envelope.ability,
+        options: gate.options
+    });
     if (context.profile && isLiveXhsExecutionMode(gate.requestedExecutionMode)) {
         const rhythmState = asString(xhsCloseoutRhythmStatus.state);
-        const shouldRunRhythmGate = accountSafetyStatus.state === "account_risk_blocked" ||
+        const shouldRunRhythmGate = recoveryProbeRequested ||
+            accountSafetyStatus.state === "account_risk_blocked" ||
             (rhythmState !== null && rhythmState !== "not_required");
         if (shouldRunRhythmGate) {
             assertXhsLivePreflightAllowsCommand({
@@ -486,11 +492,7 @@ const xhsReadCommand = async (context, inputConfig) => {
         });
         if (context.profile &&
             isLiveXhsExecutionMode(gate.requestedExecutionMode) &&
-            isXhsRecoveryProbe({
-                command: context.command,
-                ability: envelope.ability,
-                options: gate.options
-            })) {
+            recoveryProbeRequested) {
             await profileRuntime.markXhsCloseoutSingleProbePassed({
                 cwd: context.cwd,
                 profile: context.profile,
