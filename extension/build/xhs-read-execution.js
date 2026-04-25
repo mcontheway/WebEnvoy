@@ -1367,7 +1367,8 @@ const executeXhsRead = async (input, spec, env) => {
     const accountSafetySurface = classifyXhsAccountSafetySurface({
         href: env.getLocationHref(),
         title: env.getDocumentTitle(),
-        bodyText: env.getBodyText?.()
+        bodyText: env.getBodyText?.(),
+        overlay: env.getAccountSafetyOverlay?.()
     });
     if (accountSafetySurface) {
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", accountSafetySurface.message, {

@@ -147,6 +147,18 @@ describe("xhs-search telemetry helpers", () => {
         title: "小红书 - 你的生活兴趣社区",
         bodyText: "登录后推荐更懂你的笔记 可用小红书或微信扫码 输入手机号 新用户可直接登录"
       })
+    ).toBeNull();
+    expect(
+      classifyXhsAccountSafetySurface({
+        href: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
+        title: "小红书 - 你的生活兴趣社区",
+        bodyText: "普通页面",
+        overlay: {
+          source: "dom_overlay",
+          selector: '[role="dialog"]',
+          text: "登录后推荐更懂你的笔记 可用小红书或微信扫码 输入手机号 新用户可直接登录"
+        }
+      })
     ).toMatchObject({
       reason: "XHS_LOGIN_REQUIRED"
     });
@@ -154,7 +166,11 @@ describe("xhs-search telemetry helpers", () => {
       classifyXhsAccountSafetySurface({
         href: "https://www.xiaohongshu.com/explore/note-risk-overlay-001",
         title: "小红书",
-        bodyText: "当前访问存在安全风险 验证后继续访问"
+        overlay: {
+          source: "dom_overlay",
+          selector: ".risk-modal",
+          text: "当前访问存在安全风险 验证后继续访问"
+        }
       })
     ).toMatchObject({
       reason: "XHS_ACCOUNT_RISK_PAGE"
@@ -163,7 +179,11 @@ describe("xhs-search telemetry helpers", () => {
       classifyXhsAccountSafetySurface({
         href: "https://www.xiaohongshu.com/explore/note-captcha-overlay-001",
         title: "小红书",
-        bodyText: "请完成验证 拖动滑块"
+        overlay: {
+          source: "dom_overlay",
+          selector: ".captcha-container",
+          text: "请完成验证 拖动滑块"
+        }
       })
     ).toMatchObject({
       reason: "CAPTCHA_REQUIRED"

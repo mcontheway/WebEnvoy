@@ -114,15 +114,15 @@ export const classifyPageKind = (href) => {
 const normalizeSurfaceText = (value) => (value ?? "").replace(/\s+/gu, "");
 export const classifyXhsAccountSafetySurface = (input) => {
     const path = extractUrlPath(input.href);
-    const bodyText = normalizeSurfaceText(input.bodyText);
+    const overlayText = normalizeSurfaceText(input.overlay?.text);
     if (path.includes("captcha")) {
         return {
             reason: "CAPTCHA_REQUIRED",
             message: "平台要求额外人机验证，无法继续执行"
         };
     }
-    if (bodyText.includes("请完成验证") &&
-        (bodyText.includes("滑块") || bodyText.includes("验证码") || bodyText.includes("人机验证"))) {
+    if (overlayText.includes("请完成验证") &&
+        (overlayText.includes("滑块") || overlayText.includes("验证码") || overlayText.includes("人机验证"))) {
         return {
             reason: "CAPTCHA_REQUIRED",
             message: "平台要求额外人机验证，无法继续执行"
@@ -135,8 +135,8 @@ export const classifyXhsAccountSafetySurface = (input) => {
             message: "当前页面命中小红书账号风险或安全验证页面"
         };
     }
-    if (bodyText.includes("当前访问存在安全风险") &&
-        (bodyText.includes("验证后继续访问") || bodyText.includes("继续访问"))) {
+    if (overlayText.includes("当前访问存在安全风险") &&
+        (overlayText.includes("验证后继续访问") || overlayText.includes("继续访问"))) {
         return {
             reason: "XHS_ACCOUNT_RISK_PAGE",
             message: "当前页面命中小红书账号风险或安全验证页面"
@@ -148,9 +148,9 @@ export const classifyXhsAccountSafetySurface = (input) => {
             message: "当前页面要求登录小红书，无法继续执行"
         };
     }
-    if (bodyText.includes("登录后推荐更懂你的笔记") &&
-        bodyText.includes("扫码") &&
-        bodyText.includes("输入手机号")) {
+    if (overlayText.includes("登录后推荐更懂你的笔记") &&
+        overlayText.includes("扫码") &&
+        overlayText.includes("输入手机号")) {
         return {
             reason: "XHS_LOGIN_REQUIRED",
             message: "当前页面要求登录小红书，无法继续执行"

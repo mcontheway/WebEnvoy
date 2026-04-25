@@ -17,6 +17,7 @@ export type {
   SearchExecutionResult,
   SearchExecutionSuccess,
   SignatureResult,
+  XhsAccountSafetyOverlay,
   XhsExecutionAuditRecord,
   XhsExecutionContext,
   XhsSearchEnvironment,

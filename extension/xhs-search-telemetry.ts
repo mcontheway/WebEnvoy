@@ -3,6 +3,7 @@ import {
   type SearchExecutionFailure,
   type SearchExecutionResult,
   type SearchExecutionSuccess,
+  type XhsAccountSafetyOverlay,
   type XhsExecutionAuditRecord,
   type XhsSearchEnvironment,
   type XhsSearchGate,
@@ -162,9 +163,10 @@ export const classifyXhsAccountSafetySurface = (input: {
   href: string;
   title: string;
   bodyText?: string | null;
+  overlay?: XhsAccountSafetyOverlay | null;
 }): XhsAccountSafetySurface | null => {
   const path = extractUrlPath(input.href);
-  const bodyText = normalizeSurfaceText(input.bodyText);
+  const overlayText = normalizeSurfaceText(input.overlay?.text);
   if (path.includes("captcha")) {
     return {
       reason: "CAPTCHA_REQUIRED",
@@ -172,8 +174,8 @@ export const classifyXhsAccountSafetySurface = (input: {
     };
   }
   if (
-    bodyText.includes("请完成验证") &&
-    (bodyText.includes("滑块") || bodyText.includes("验证码") || bodyText.includes("人机验证"))
+    overlayText.includes("请完成验证") &&
+    (overlayText.includes("滑块") || overlayText.includes("验证码") || overlayText.includes("人机验证"))
   ) {
     return {
       reason: "CAPTCHA_REQUIRED",
@@ -190,8 +192,8 @@ export const classifyXhsAccountSafetySurface = (input: {
     };
   }
   if (
-    bodyText.includes("当前访问存在安全风险") &&
-    (bodyText.includes("验证后继续访问") || bodyText.includes("继续访问"))
+    overlayText.includes("当前访问存在安全风险") &&
+    (overlayText.includes("验证后继续访问") || overlayText.includes("继续访问"))
   ) {
     return {
       reason: "XHS_ACCOUNT_RISK_PAGE",
@@ -205,9 +207,9 @@ export const classifyXhsAccountSafetySurface = (input: {
     };
   }
   if (
-    bodyText.includes("登录后推荐更懂你的笔记") &&
-    bodyText.includes("扫码") &&
-    bodyText.includes("输入手机号")
+    overlayText.includes("登录后推荐更懂你的笔记") &&
+    overlayText.includes("扫码") &&
+    overlayText.includes("输入手机号")
   ) {
     return {
       reason: "XHS_LOGIN_REQUIRED",

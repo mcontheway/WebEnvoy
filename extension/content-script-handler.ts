@@ -1,4 +1,9 @@
-import { executeXhsSearch, type SearchExecutionResult, type XhsSearchEnvironment } from "./xhs-search.js";
+import {
+  executeXhsSearch,
+  type SearchExecutionResult,
+  type XhsAccountSafetyOverlay,
+  type XhsSearchEnvironment
+} from "./xhs-search.js";
 import { executeXhsDetail } from "./xhs-detail.js";
 import { executeXhsUserHome } from "./xhs-user-home.js";
 import { performEditorInputValidation } from "./xhs-editor-input.js";
@@ -212,6 +217,58 @@ const buildRuntimeBootstrapAckPayload = (input: {
   ...(input.runtimeWithInjection ? { fingerprint_runtime: input.runtimeWithInjection } : {})
 });
 
+const ACCOUNT_SAFETY_OVERLAY_SELECTORS = [
+  '[role="dialog"]',
+  '[aria-modal="true"]',
+  ".login-modal",
+  ".login-container",
+  ".login-wrapper",
+  ".reds-login-container",
+  ".captcha-container",
+  ".verify-container",
+  ".security-verify",
+  ".risk-page",
+  ".risk-modal"
+];
+
+const isVisibleElement = (element: Element): boolean => {
+  const candidate = element as HTMLElement;
+  if (typeof candidate.getBoundingClientRect !== "function") {
+    return false;
+  }
+  if (typeof window.getComputedStyle !== "function") {
+    return false;
+  }
+  const style = window.getComputedStyle(element);
+  if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) {
+    return false;
+  }
+  const rect = candidate.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+};
+
+const readAccountSafetyOverlay = (): XhsAccountSafetyOverlay | null => {
+  if (typeof document.querySelectorAll !== "function") {
+    return null;
+  }
+  for (const element of Array.from(document.querySelectorAll(ACCOUNT_SAFETY_OVERLAY_SELECTORS.join(",")))) {
+    if (!isVisibleElement(element)) {
+      continue;
+    }
+    const text = ((element as HTMLElement).innerText || element.textContent || "").trim();
+    if (!text) {
+      continue;
+    }
+    const selector = ACCOUNT_SAFETY_OVERLAY_SELECTORS.find((candidate) => element.matches(candidate)) ?? null;
+    return {
+      source: "dom_overlay",
+      selector,
+      text: text.slice(0, 2000)
+    };
+  }
+  return null;
+};
+
 const createBrowserEnvironment = (): XhsSearchEnvironment => ({
   now: () => Date.now(),
   randomId: () =>
@@ -223,6 +280,7 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
   getReadyState: () => document.readyState,
   getCookie: () => document.cookie,
   getBodyText: () => (document.body?.innerText ?? "").slice(0, 5000),
+  getAccountSafetyOverlay: () => readAccountSafetyOverlay(),
   getPageStateRoot: () => (window as typeof window & { __INITIAL_STATE__?: unknown }).__INITIAL_STATE__,
   readPageStateRoot: async () => await readPageStateViaMainWorld(),
   readCapturedRequestContext: async (input) => await readCapturedRequestContextViaMainWorld(input),

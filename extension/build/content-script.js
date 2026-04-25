@@ -4390,15 +4390,15 @@ const classifyPageKind = (href) => {
 const normalizeSurfaceText = (value) => (value ?? "").replace(/\s+/gu, "");
 const classifyXhsAccountSafetySurface = (input) => {
     const path = extractUrlPath(input.href);
-    const bodyText = normalizeSurfaceText(input.bodyText);
+    const overlayText = normalizeSurfaceText(input.overlay?.text);
     if (path.includes("captcha")) {
         return {
             reason: "CAPTCHA_REQUIRED",
             message: "平台要求额外人机验证，无法继续执行"
         };
     }
-    if (bodyText.includes("请完成验证") &&
-        (bodyText.includes("滑块") || bodyText.includes("验证码") || bodyText.includes("人机验证"))) {
+    if (overlayText.includes("请完成验证") &&
+        (overlayText.includes("滑块") || overlayText.includes("验证码") || overlayText.includes("人机验证"))) {
         return {
             reason: "CAPTCHA_REQUIRED",
             message: "平台要求额外人机验证，无法继续执行"
@@ -4411,8 +4411,8 @@ const classifyXhsAccountSafetySurface = (input) => {
             message: "当前页面命中小红书账号风险或安全验证页面"
         };
     }
-    if (bodyText.includes("当前访问存在安全风险") &&
-        (bodyText.includes("验证后继续访问") || bodyText.includes("继续访问"))) {
+    if (overlayText.includes("当前访问存在安全风险") &&
+        (overlayText.includes("验证后继续访问") || overlayText.includes("继续访问"))) {
         return {
             reason: "XHS_ACCOUNT_RISK_PAGE",
             message: "当前页面命中小红书账号风险或安全验证页面"
@@ -4424,9 +4424,9 @@ const classifyXhsAccountSafetySurface = (input) => {
             message: "当前页面要求登录小红书，无法继续执行"
         };
     }
-    if (bodyText.includes("登录后推荐更懂你的笔记") &&
-        bodyText.includes("扫码") &&
-        bodyText.includes("输入手机号")) {
+    if (overlayText.includes("登录后推荐更懂你的笔记") &&
+        overlayText.includes("扫码") &&
+        overlayText.includes("输入手机号")) {
         return {
             reason: "XHS_LOGIN_REQUIRED",
             message: "当前页面要求登录小红书，无法继续执行"
@@ -5638,7 +5638,8 @@ const executeXhsSearch = async (input, env) => {
     const accountSafetySurface = classifyXhsAccountSafetySurface({
         href: env.getLocationHref(),
         title: env.getDocumentTitle(),
-        bodyText: env.getBodyText?.()
+        bodyText: env.getBodyText?.(),
+        overlay: env.getAccountSafetyOverlay?.()
     });
     if (accountSafetySurface) {
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", accountSafetySurface.message, {
@@ -7353,7 +7354,8 @@ const executeXhsRead = async (input, spec, env) => {
     const accountSafetySurface = classifyXhsAccountSafetySurface({
         href: env.getLocationHref(),
         title: env.getDocumentTitle(),
-        bodyText: env.getBodyText?.()
+        bodyText: env.getBodyText?.(),
+        overlay: env.getAccountSafetyOverlay?.()
     });
     if (accountSafetySurface) {
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", accountSafetySurface.message, {
@@ -8881,6 +8883,55 @@ const buildRuntimeBootstrapAckPayload = (input) => ({
     runtime_bootstrap_attested: input.attested,
     ...(input.runtimeWithInjection ? { fingerprint_runtime: input.runtimeWithInjection } : {})
 });
+const ACCOUNT_SAFETY_OVERLAY_SELECTORS = [
+    '[role="dialog"]',
+    '[aria-modal="true"]',
+    ".login-modal",
+    ".login-container",
+    ".login-wrapper",
+    ".reds-login-container",
+    ".captcha-container",
+    ".verify-container",
+    ".security-verify",
+    ".risk-page",
+    ".risk-modal"
+];
+const isVisibleElement = (element) => {
+    const candidate = element;
+    if (typeof candidate.getBoundingClientRect !== "function") {
+        return false;
+    }
+    if (typeof window.getComputedStyle !== "function") {
+        return false;
+    }
+    const style = window.getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) {
+        return false;
+    }
+    const rect = candidate.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+};
+const readAccountSafetyOverlay = () => {
+    if (typeof document.querySelectorAll !== "function") {
+        return null;
+    }
+    for (const element of Array.from(document.querySelectorAll(ACCOUNT_SAFETY_OVERLAY_SELECTORS.join(",")))) {
+        if (!isVisibleElement(element)) {
+            continue;
+        }
+        const text = (element.innerText || element.textContent || "").trim();
+        if (!text) {
+            continue;
+        }
+        const selector = ACCOUNT_SAFETY_OVERLAY_SELECTORS.find((candidate) => element.matches(candidate)) ?? null;
+        return {
+            source: "dom_overlay",
+            selector,
+            text: text.slice(0, 2000)
+        };
+    }
+    return null;
+};
 const createBrowserEnvironment = () => ({
     now: () => Date.now(),
     randomId: () => typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -8891,6 +8942,7 @@ const createBrowserEnvironment = () => ({
     getReadyState: () => document.readyState,
     getCookie: () => document.cookie,
     getBodyText: () => (document.body?.innerText ?? "").slice(0, 5000),
+    getAccountSafetyOverlay: () => readAccountSafetyOverlay(),
     getPageStateRoot: () => window.__INITIAL_STATE__,
     readPageStateRoot: async () => await readPageStateViaMainWorld(),
     readCapturedRequestContext: async (input) => await readCapturedRequestContextViaMainWorld(input),

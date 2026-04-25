@@ -1799,6 +1799,11 @@ describe("content-script handler contract", () => {
           getReadyState: () => "complete",
           getCookie: () => "a1=cookie-token",
           getBodyText: () => "登录后推荐更懂你的笔记 扫码登录 输入手机号",
+          getAccountSafetyOverlay: () => ({
+            source: "dom_overlay",
+            selector: '[role="dialog"]',
+            text: "登录后推荐更懂你的笔记 可用小红书或微信扫码 输入手机号"
+          }),
           readCapturedRequestContext,
           callSignature: async () => ({
             "X-s": "signature",

@@ -101,6 +101,55 @@ const buildRuntimeBootstrapAckPayload = (input) => ({
     runtime_bootstrap_attested: input.attested,
     ...(input.runtimeWithInjection ? { fingerprint_runtime: input.runtimeWithInjection } : {})
 });
+const ACCOUNT_SAFETY_OVERLAY_SELECTORS = [
+    '[role="dialog"]',
+    '[aria-modal="true"]',
+    ".login-modal",
+    ".login-container",
+    ".login-wrapper",
+    ".reds-login-container",
+    ".captcha-container",
+    ".verify-container",
+    ".security-verify",
+    ".risk-page",
+    ".risk-modal"
+];
+const isVisibleElement = (element) => {
+    const candidate = element;
+    if (typeof candidate.getBoundingClientRect !== "function") {
+        return false;
+    }
+    if (typeof window.getComputedStyle !== "function") {
+        return false;
+    }
+    const style = window.getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) {
+        return false;
+    }
+    const rect = candidate.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+};
+const readAccountSafetyOverlay = () => {
+    if (typeof document.querySelectorAll !== "function") {
+        return null;
+    }
+    for (const element of Array.from(document.querySelectorAll(ACCOUNT_SAFETY_OVERLAY_SELECTORS.join(",")))) {
+        if (!isVisibleElement(element)) {
+            continue;
+        }
+        const text = (element.innerText || element.textContent || "").trim();
+        if (!text) {
+            continue;
+        }
+        const selector = ACCOUNT_SAFETY_OVERLAY_SELECTORS.find((candidate) => element.matches(candidate)) ?? null;
+        return {
+            source: "dom_overlay",
+            selector,
+            text: text.slice(0, 2000)
+        };
+    }
+    return null;
+};
 const createBrowserEnvironment = () => ({
     now: () => Date.now(),
     randomId: () => typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -111,6 +160,7 @@ const createBrowserEnvironment = () => ({
     getReadyState: () => document.readyState,
     getCookie: () => document.cookie,
     getBodyText: () => (document.body?.innerText ?? "").slice(0, 5000),
+    getAccountSafetyOverlay: () => readAccountSafetyOverlay(),
     getPageStateRoot: () => window.__INITIAL_STATE__,
     readPageStateRoot: async () => await readPageStateViaMainWorld(),
     readCapturedRequestContext: async (input) => await readCapturedRequestContextViaMainWorld(input),

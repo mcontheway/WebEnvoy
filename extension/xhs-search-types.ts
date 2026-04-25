@@ -55,6 +55,12 @@ export interface FetchResult {
   body: unknown;
 }
 
+export interface XhsAccountSafetyOverlay {
+  source: "dom_overlay";
+  selector: string | null;
+  text: string;
+}
+
 export type CapturedRequestContextMethod = "POST" | "GET";
 export type CapturedRequestContextCommand = "xhs.search" | "xhs.detail" | "xhs.user_home";
 export type PageContextNamespace = string;
@@ -152,6 +158,7 @@ export interface XhsSearchEnvironment {
   getReadyState(): string;
   getCookie(): string;
   getBodyText?(): string;
+  getAccountSafetyOverlay?(): XhsAccountSafetyOverlay | null;
   getPageStateRoot?(): unknown;
   readPageStateRoot?(): Promise<unknown>;
   readCapturedRequestContext?(
