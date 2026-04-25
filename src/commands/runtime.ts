@@ -97,12 +97,16 @@ const buildSessionRhythmStatusViewForProfile = async (
     return null;
   }
   const profileStore = new ProfileStore(resolveRuntimeProfileRoot(cwd));
-  const meta = await profileStore.readMeta(profile, { mode: "readonly" });
-  return toSessionRhythmStatusView({
-    profile,
-    rhythm: meta?.xhsCloseoutRhythm,
-    accountSafety: meta?.accountSafety
-  });
+  try {
+    const meta = await profileStore.readMeta(profile, { mode: "readonly" });
+    return toSessionRhythmStatusView({
+      profile,
+      rhythm: meta?.xhsCloseoutRhythm,
+      accountSafety: meta?.accountSafety
+    });
+  } catch {
+    return null;
+  }
 };
 
 const resolveCurrentRiskState = (
