@@ -253,8 +253,10 @@ const resolveAccountSafetySignal = (payload, fallback) => {
 };
 const mergeAccountSafetyIntoFailurePayload = (payload, accountSafety, xhsCloseoutRhythm, runtimeStop) => {
     const details = asObject(payload.details) ?? {};
+    const accountSafetyReason = asString(accountSafety.reason);
     payload.details = {
         ...details,
+        ...(!asString(details.reason) && accountSafetyReason ? { reason: accountSafetyReason } : {}),
         account_safety: accountSafety,
         ...(xhsCloseoutRhythm ? { xhs_closeout_rhythm: xhsCloseoutRhythm } : {}),
         ...(runtimeStop ? { runtime_stop: runtimeStop } : {})

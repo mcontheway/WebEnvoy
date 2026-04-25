@@ -1788,6 +1788,7 @@ describe("normalizeGateOptionsForContract", () => {
       ).rejects.toMatchObject({
         code: "ERR_EXECUTION_FAILED",
         details: {
+          reason: "ACCOUNT_ABNORMAL",
           account_safety: expect.objectContaining({
             state: "account_risk_blocked",
             reason: "ACCOUNT_ABNORMAL",
