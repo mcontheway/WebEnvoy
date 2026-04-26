@@ -3315,6 +3315,89 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  itWithSqlite("projects anti-detection validation readiness using audit requested mode before effective mode", async () => {
+    const cwd = await createRuntimeCwd();
+    const runId = "run-audit-validation-requested-mode-priority-001";
+    await seedXhsCloseoutReadyProfile({
+      cwd,
+      profile: "loopback_profile",
+      effectiveExecutionMode: "live_write"
+    });
+
+    const executeResult = runCli([
+      "xhs.search",
+      "--run-id",
+      runId,
+      "--profile",
+      "loopback_profile",
+      "--params",
+      JSON.stringify({
+        ability: {
+          id: "xhs.note.search.v1",
+          layer: "L3",
+          action: "write"
+        },
+        input: {
+          query: "露营装备"
+        },
+        options: {
+          target_domain: "creator.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "creator_publish_tab",
+          issue_scope: "issue_208",
+          action_type: "write",
+          requested_execution_mode: "live_write",
+          risk_state: "allowed",
+          validation_action: "editor_input",
+          approval_record: {
+            approved: true,
+            approver: "qa-reviewer",
+            approved_at: "2026-03-23T10:00:00Z",
+            checks: {
+              target_domain_confirmed: true,
+              target_tab_confirmed: true,
+              target_page_confirmed: true,
+              risk_state_checked: true,
+              action_type_confirmed: true
+            }
+          }
+        }
+      })
+    ], cwd, {
+      WEBENVOY_NATIVE_TRANSPORT: "loopback"
+    });
+    expect(executeResult.status).toBe(6);
+
+    const queryResult = runCli([
+      "runtime.audit",
+      "--run-id",
+      "run-audit-validation-requested-mode-priority-query-001",
+      "--params",
+      JSON.stringify({
+        run_id: runId
+      })
+    ], cwd);
+    expect(queryResult.status).toBe(0);
+    const body = parseSingleJsonLine(queryResult.stdout);
+    expect(body.summary).toMatchObject({
+      anti_detection_validation_view: {
+        profile_ref: "profile/loopback_profile",
+        effective_execution_mode: "live_write",
+        all_required_ready: true,
+        blocking_target_fr_refs: []
+      }
+    });
+    expect(body.summary.audit_records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          run_id: runId,
+          requested_execution_mode: "live_write",
+          effective_execution_mode: "dry_run"
+        })
+      ])
+    );
+  });
+
   itWithSqlite("persists issue_scope for issue_208 audit records and returns matching write matrix query", async () => {
     const cwd = await createRuntimeCwd();
     const runId = "run-audit-query-issue-scope-208-001";

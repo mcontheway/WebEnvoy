@@ -311,6 +311,8 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
         store,
         profile: auditProfile,
         effectiveExecutionMode:
+          (enrichedAuditRecords[0] as Record<string, unknown> | undefined)
+            ?.requested_execution_mode ??
           requestedExecutionMode ??
           (enrichedAuditRecords[0] as Record<string, unknown> | undefined)
             ?.effective_execution_mode
@@ -355,6 +357,8 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
       store,
       profile: profile ?? auditProfile,
       effectiveExecutionMode:
+        (enrichedAuditRecords[0] as Record<string, unknown> | undefined)
+          ?.requested_execution_mode ??
         requestedExecutionMode ??
         (enrichedAuditRecords[0] as Record<string, unknown> | undefined)
           ?.effective_execution_mode
