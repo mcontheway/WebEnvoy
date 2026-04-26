@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { repoRoot, binPath, mockBrowserPath, nativeHostMockPath, repoOwnedNativeHostEntryPath, browserStateFilename, tempDirs, resolveDatabaseSync, DatabaseSync, itWithSqlite, createRuntimeCwd, createNativeHostManifest, seedInstalledPersistentExtension, defaultRuntimeEnv, runCli, expectBundledNativeHostStarts, createNativeHostCommand, createShellWrappedNativeHostCommand, PROFILE_MODE_ROOT_PREFERRED, quoteLauncherExportValue, resolveCanonicalExpectedProfileDir, expectProfileRootOnlyLauncherContract, expectDualEnvRootPreferredLauncherContract, runGit, createGitWorktreePair, runCliAsync, parseSingleJsonLine, encodeNativeBridgeEnvelope, readSingleNativeBridgeEnvelope, asRecord, resolveCliGateEnvelope, resolveWriteInteractionTier, scopedXhsGateOptions, assertLockMissing, detectSystemChromePath, wait, runHeadlessDomProbe, realBrowserContractsEnabled, BROWSER_STATE_FILENAME, BROWSER_CONTROL_FILENAME, isPidAlive, scopedReadGateOptions, path, readFile, writeFile, mkdir, mkdtemp, realpath, rm, stat, chmod, symlink, spawn, spawnSync, createServer, createRequire, tmpdir, resolveRuntimeStorePath, type DatabaseSyncCtor } from "./cli.contract.shared.js";
+import { SQLiteRuntimeStore } from "../src/runtime/store/sqlite-runtime-store.js";
 
 describe("webenvoy cli contract / xhs gate and audit", () => {
   const isolatedProfileSalt = `${process.pid}_${Date.now()}`;
@@ -21,6 +22,170 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       ...overrides
     };
   };
+
+  const seedReadyAntiDetectionValidationViews = async (input: {
+    cwd: string;
+    profile: string;
+    effectiveExecutionMode?: "live_read_high_risk" | "live_read_limited" | "recon";
+  }): Promise<void> => {
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(input.cwd));
+    const effectiveExecutionMode = input.effectiveExecutionMode ?? "live_read_high_risk";
+    const scopes = [
+      ["FR-0012", "layer1_consistency"],
+      ["FR-0013", "layer2_interaction"],
+      ["FR-0014", "layer3_session_rhythm"]
+    ] as const;
+    try {
+      for (const [targetFrRef, validationScope] of scopes) {
+        const requestRef = `validation-request/${targetFrRef}/${effectiveExecutionMode}/${input.profile}`;
+        const sampleRef = `validation-sample/${targetFrRef}/${effectiveExecutionMode}/${input.profile}`;
+        const baselineRef = `baseline/${targetFrRef}/${effectiveExecutionMode}/${input.profile}`;
+        const recordRef = `validation-record/${targetFrRef}/${effectiveExecutionMode}/${input.profile}`;
+        const scope = {
+          targetFrRef,
+          validationScope,
+          profileRef: `profile/${input.profile}`,
+          browserChannel: "Google Chrome stable" as const,
+          executionSurface: "real_browser" as const,
+          effectiveExecutionMode,
+          probeBundleRef: "probe-bundle/xhs-closeout-min-v1"
+        };
+        await store.upsertAntiDetectionValidationRequest({
+          requestRef,
+          validationScope,
+          targetFrRef,
+          profileRef: `profile/${input.profile}`,
+          browserChannel: "Google Chrome stable",
+          executionSurface: "real_browser",
+          sampleGoal: `capture ${targetFrRef} closeout baseline`,
+          requestedExecutionMode: effectiveExecutionMode,
+          probeBundleRef: "probe-bundle/xhs-closeout-min-v1",
+          requestState: "completed",
+          requestedAt: "2026-04-25T10:00:00.000Z"
+        });
+        await store.insertAntiDetectionStructuredSample({
+          ...scope,
+          sampleRef,
+          requestRef,
+          runId: `run-${targetFrRef}-${input.profile}`,
+          capturedAt: "2026-04-25T12:05:00.000Z",
+          structuredPayload: { target_fr_ref: targetFrRef, stable: true },
+          artifactRefs: []
+        });
+        await store.insertAntiDetectionBaselineSnapshot({
+          ...scope,
+          baselineRef,
+          signalVector: { stable: true },
+          capturedAt: "2026-04-25T12:06:00.000Z",
+          sourceSampleRefs: [sampleRef],
+          sourceRunIds: [`run-${targetFrRef}-${input.profile}`]
+        });
+        await store.insertAntiDetectionValidationRecord({
+          ...scope,
+          recordRef,
+          requestRef,
+          sampleRef,
+          baselineRef,
+          resultState: "verified",
+          driftState: "no_drift",
+          failureClass: null,
+          runId: `run-${targetFrRef}-${input.profile}`,
+          validatedAt: "2026-04-25T12:10:00.000Z"
+        });
+        await store.upsertAntiDetectionBaselineRegistryEntry({
+          ...scope,
+          activeBaselineRef: baselineRef,
+          supersededBaselineRefs: [],
+          replacementReason: "initial_seed",
+          updatedAt: "2026-04-25T12:11:00.000Z"
+        });
+      }
+    } finally {
+      store.close();
+    }
+  };
+
+  const seedXhsCloseoutReadyProfile = async (input: {
+    cwd: string;
+    profile: string;
+    effectiveExecutionMode?: "live_read_high_risk" | "live_read_limited" | "recon";
+  }): Promise<void> => {
+    const profileDir = path.join(input.cwd, ".webenvoy", "profiles", input.profile);
+    const metaPath = path.join(profileDir, "__webenvoy_meta.json");
+    await mkdir(profileDir, { recursive: true });
+    const existingMeta = await readFile(metaPath, "utf8")
+      .then((value) => JSON.parse(value) as Record<string, unknown>)
+      .catch(() => ({} as Record<string, unknown>));
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          ...existingMeta,
+          schemaVersion: 1,
+          profileName: input.profile,
+          profileDir,
+          profileState: existingMeta.profileState ?? "ready",
+          proxyBinding: existingMeta.proxyBinding ?? null,
+          accountSafety: {
+            state: "clear",
+            platform: null,
+            reason: null,
+            observedAt: null,
+            cooldownUntil: null,
+            sourceRunId: null,
+            sourceCommand: null,
+            targetDomain: null,
+            targetTabId: null,
+            pageUrl: null,
+            statusCode: null,
+            platformCode: null
+          },
+          xhsCloseoutRhythm: {
+            state: "single_probe_passed",
+            cooldownUntil: "2000-01-01T00:30:00.000Z",
+            operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+            singleProbeRequired: false,
+            singleProbePassedAt: "2026-04-25T10:40:00.000Z",
+            probeRunId: `run-${input.profile}-recovery-probe`,
+            fullBundleBlocked: true,
+            reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED", "ANTI_DETECTION_BASELINE_REQUIRED"]
+          },
+          fingerprintSeeds: {
+            audioNoiseSeed: `seed-${input.profile}-a`,
+            canvasNoiseSeed: `seed-${input.profile}-c`
+          },
+          localStorageSnapshots: existingMeta.localStorageSnapshots ?? [],
+          createdAt: existingMeta.createdAt ?? "2026-04-25T10:00:00.000Z",
+          updatedAt: "2026-04-25T10:40:00.000Z",
+          lastStartedAt: existingMeta.lastStartedAt ?? null,
+          lastLoginAt: existingMeta.lastLoginAt ?? null,
+          lastStoppedAt: existingMeta.lastStoppedAt ?? null,
+          lastDisconnectedAt: existingMeta.lastDisconnectedAt ?? null
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await seedReadyAntiDetectionValidationViews(input);
+  };
+
+  beforeEach(async () => {
+    await seedXhsCloseoutReadyProfile({ cwd: repoRoot, profile: "xhs_account_001" });
+    await seedXhsCloseoutReadyProfile({
+      cwd: repoRoot,
+      profile: "xhs_account_001",
+      effectiveExecutionMode: "live_read_limited"
+    });
+    await seedXhsCloseoutReadyProfile({ cwd: repoRoot, profile: "loopback_profile" });
+    await seedXhsCloseoutReadyProfile({
+      cwd: repoRoot,
+      profile: "loopback_profile",
+      effectiveExecutionMode: "live_read_limited"
+    });
+    await seedXhsCloseoutReadyProfile({ cwd: repoRoot, profile: "anon-cli-profile-001" });
+    await seedXhsCloseoutReadyProfile({ cwd: repoRoot, profile: "profile-session-001" });
+  });
 
   const createLoopbackFingerprintContext = (
     executionOverrides: Record<string, unknown> = {}
@@ -2080,9 +2245,10 @@ process.stdin.on("data", (chunk) => {
     onRequest(request);
   }
 });
-`,
+	`,
       "utf8"
     );
+    await seedXhsCloseoutReadyProfile({ cwd: runtimeCwd, profile });
 
     const result = runCli([
       "xhs.search",
@@ -2628,6 +2794,7 @@ process.stdin.on("data", (chunk) => {
     const cwd = await createRuntimeCwd();
     const runId = "run-audit-query-allowed-001";
     const requestId = "issue209-live-high-risk-audit-query-001";
+    await seedXhsCloseoutReadyProfile({ cwd, profile: "xhs_account_001" });
 
     const executeResult = runCli([
       "xhs.search",
@@ -2750,6 +2917,7 @@ process.stdin.on("data", (chunk) => {
   itWithSqlite("queries persisted blocked gate audit records by session_id filter", async () => {
     const cwd = await createRuntimeCwd();
     const runId = "run-audit-query-blocked-001";
+    await seedXhsCloseoutReadyProfile({ cwd, profile: "xhs_account_001" });
 
     const executeResult = runCli([
       "xhs.search",
@@ -2981,6 +3149,120 @@ process.stdin.on("data", (chunk) => {
         }
       }
     });
+  });
+
+  itWithSqlite("projects anti-detection validation readiness in runtime.audit profile queries", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_audit_profile";
+    const profileDir = path.join(cwd, ".webenvoy", "profiles", profile);
+    await mkdir(profileDir, { recursive: true });
+    await writeFile(
+      path.join(profileDir, "__webenvoy_meta.json"),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          profileName: profile,
+          profileDir,
+          profileState: "ready",
+          proxyBinding: null,
+          accountSafety: {
+            state: "clear",
+            platform: null,
+            reason: null,
+            observedAt: null,
+            cooldownUntil: null,
+            sourceRunId: null,
+            sourceCommand: null,
+            targetDomain: null,
+            targetTabId: null,
+            pageUrl: null,
+            statusCode: null,
+            platformCode: null
+          },
+          xhsCloseoutRhythm: {
+            state: "single_probe_passed",
+            cooldownUntil: "2000-01-01T00:30:00.000Z",
+            operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+            singleProbeRequired: false,
+            singleProbePassedAt: "2026-04-25T10:40:00.000Z",
+            probeRunId: "run-validation-audit-probe-001",
+            fullBundleBlocked: true,
+            reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED", "ANTI_DETECTION_BASELINE_REQUIRED"]
+          },
+          fingerprintSeeds: {
+            audioNoiseSeed: "seed-validation-a",
+            canvasNoiseSeed: "seed-validation-c"
+          },
+          localStorageSnapshots: [],
+          createdAt: "2026-04-25T10:00:00.000Z",
+          updatedAt: "2026-04-25T10:40:00.000Z",
+          lastStartedAt: null,
+          lastLoginAt: null,
+          lastStoppedAt: null,
+          lastDisconnectedAt: null
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await seedReadyAntiDetectionValidationViews({ cwd, profile });
+
+    const queryResult = runCli([
+      "runtime.audit",
+      "--run-id",
+      "run-audit-validation-status-view-001",
+      "--params",
+      JSON.stringify({
+        profile,
+        requested_execution_mode: "live_read_high_risk",
+        limit: 1
+      })
+    ], cwd);
+    expect(queryResult.status).toBe(0);
+    const body = parseSingleJsonLine(queryResult.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.audit",
+      status: "success",
+      summary: {
+        anti_detection_validation_view: {
+          profile_ref: `profile/${profile}`,
+          browser_channel: "Google Chrome stable",
+          execution_surface: "real_browser",
+          effective_execution_mode: "live_read_high_risk",
+          probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1",
+          all_required_ready: true,
+          blocking_target_fr_refs: []
+        }
+      }
+    });
+    const validationView = (body.summary as Record<string, unknown>)
+      .anti_detection_validation_view as Record<string, unknown>;
+    expect(validationView.views).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          target_fr_ref: "FR-0012",
+          validation_scope: "layer1_consistency",
+          baseline_status: "ready",
+          current_result_state: "verified",
+          current_drift_state: "no_drift"
+        }),
+        expect.objectContaining({
+          target_fr_ref: "FR-0013",
+          validation_scope: "layer2_interaction",
+          baseline_status: "ready",
+          current_result_state: "verified",
+          current_drift_state: "no_drift"
+        }),
+        expect.objectContaining({
+          target_fr_ref: "FR-0014",
+          validation_scope: "layer3_session_rhythm",
+          baseline_status: "ready",
+          current_result_state: "verified",
+          current_drift_state: "no_drift"
+        })
+      ])
+    );
   });
 
   itWithSqlite("persists issue_scope for issue_208 audit records and returns matching write matrix query", async () => {
@@ -3396,7 +3678,7 @@ process.stdin.on("data", (chunk) => {
     }
   ])(
     "returns structured execution details for xhs.search $simulateResult path",
-    ({
+    async ({
       simulateResult,
       reason,
       category,
@@ -3407,6 +3689,7 @@ process.stdin.on("data", (chunk) => {
     }) => {
       const runId = `run-sim-${simulateResult}`;
       const profile = isolatedProfile(`account_sim_${simulateResult}`);
+      await seedXhsCloseoutReadyProfile({ cwd: repoRoot, profile });
       const result = runCli([
         "xhs.search",
         "--profile",
@@ -3491,12 +3774,14 @@ process.stdin.on("data", (chunk) => {
     }
   );
 
-  it("returns structured output mapping details for xhs.search bad output path", () => {
+  it("returns structured output mapping details for xhs.search bad output path", async () => {
     const runId = "run-output-bad-output-001";
+    const profile = isolatedProfile("account_output_bad");
+    await seedXhsCloseoutReadyProfile({ cwd: repoRoot, profile });
     const result = runCli([
       "xhs.search",
       "--profile",
-      isolatedProfile("account_output_bad"),
+      profile,
       "--run-id",
       runId,
       "--params",
@@ -3556,12 +3841,14 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
-  it("returns output mapping failure when runtime success payload omits capability_result", () => {
+  it("returns output mapping failure when runtime success payload omits capability_result", async () => {
     const runId = "run-output-missing-capability-001";
+    const profile = isolatedProfile("account_missing_capability");
+    await seedXhsCloseoutReadyProfile({ cwd: repoRoot, profile });
     const result = runCli([
       "xhs.search",
       "--profile",
-      isolatedProfile("account_missing_capability"),
+      profile,
       "--run-id",
       runId,
       "--params",
@@ -3626,12 +3913,14 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
-  it("returns output mapping failure when runtime success payload carries invalid capability_result", () => {
+  it("returns output mapping failure when runtime success payload carries invalid capability_result", async () => {
     const runId = "run-output-invalid-capability-001";
+    const profile = isolatedProfile("account_invalid_capability");
+    await seedXhsCloseoutReadyProfile({ cwd: repoRoot, profile });
     const result = runCli([
       "xhs.search",
       "--profile",
-      isolatedProfile("account_invalid_capability"),
+      profile,
       "--run-id",
       runId,
       "--params",

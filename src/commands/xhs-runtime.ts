@@ -17,6 +17,15 @@ import {
 import { toXhsCloseoutRhythmStatus } from "../runtime/xhs-closeout-rhythm.js";
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
+import {
+  readXhsCloseoutValidationGateView,
+  toXhsCloseoutValidationGateJson,
+  type XhsCloseoutValidationGateView
+} from "../runtime/anti-detection-validation.js";
+import {
+  SQLiteRuntimeStore,
+  resolveRuntimeStorePath
+} from "../runtime/store/sqlite-runtime-store.js";
 import { prepareOfficialChromeRuntime } from "../runtime/official-chrome-runtime.js";
 import { buildOfficialChromeRuntimeStatusParams } from "../runtime/official-chrome-runtime.js";
 import {
@@ -173,6 +182,7 @@ const pickGateErrorDetails = (
     "risk_state_output",
     "account_safety",
     "xhs_closeout_rhythm",
+    "anti_detection_validation_view",
     "runtime_stop",
     "status_code",
     "platform_code"
@@ -374,15 +384,29 @@ const isXhsRecoveryProbe = (input: {
   input.ability.id === "xhs.note.search.v1" &&
   input.options.xhs_recovery_probe === true;
 
+const isIssue209LiveReadCloseoutCommand = (input: {
+  command: string;
+  options: JsonObject;
+  requestedExecutionMode: XhsExecutionMode;
+}): boolean =>
+  (input.command === "xhs.search" ||
+    input.command === "xhs.detail" ||
+    input.command === "xhs.user_home") &&
+  input.options.issue_scope === "issue_209" &&
+  input.options.action_type === "read" &&
+  isLiveXhsExecutionMode(input.requestedExecutionMode);
+
 const assertXhsLivePreflightAllowsCommand = (input: {
   command: string;
   ability: AbilityRef;
   accountSafety: JsonObject;
   xhsCloseoutRhythm: JsonObject;
+  antiDetectionValidationView?: XhsCloseoutValidationGateView | null;
   options: JsonObject;
   requestedExecutionMode: XhsExecutionMode;
 }): void => {
   const recoveryProbe = isXhsRecoveryProbe(input);
+  const issue209LiveReadCloseout = isIssue209LiveReadCloseoutCommand(input);
   const rhythmState = asString(input.xhsCloseoutRhythm.state);
   const fullBundleBlocked = input.xhsCloseoutRhythm.full_bundle_blocked === true;
   const singleProbeRequired = input.xhsCloseoutRhythm.single_probe_required === true;
@@ -398,6 +422,16 @@ const assertXhsLivePreflightAllowsCommand = (input: {
     return;
   }
 
+  if (
+    !recoveryProbe &&
+    issue209LiveReadCloseout &&
+    input.accountSafety.state === "clear" &&
+    rhythmState === "single_probe_passed" &&
+    input.antiDetectionValidationView?.all_required_ready === true
+  ) {
+    return;
+  }
+
   throw new CliError("ERR_EXECUTION_FAILED", "XHS account-safety gate blocked current live command", {
     retryable: false,
     details: {
@@ -408,11 +442,20 @@ const assertXhsLivePreflightAllowsCommand = (input: {
           ? "ACCOUNT_RISK_BLOCKED"
           : recoveryProbe && input.requestedExecutionMode !== "recon"
             ? "XHS_RECOVERY_PROBE_MODE_INVALID"
+          : !recoveryProbe && issue209LiveReadCloseout && rhythmState === "single_probe_passed"
+            ? "ANTI_DETECTION_VALIDATION_BASELINE_BLOCKED"
           : fullBundleBlocked || singleProbeRequired
             ? "XHS_CLOSEOUT_RHYTHM_BLOCKED"
             : "XHS_CLOSEOUT_RHYTHM_UNAVAILABLE",
       account_safety: input.accountSafety,
-      xhs_closeout_rhythm: input.xhsCloseoutRhythm
+      xhs_closeout_rhythm: input.xhsCloseoutRhythm,
+      ...(input.antiDetectionValidationView
+        ? {
+            anti_detection_validation_view: toXhsCloseoutValidationGateJson(
+              input.antiDetectionValidationView
+            )
+          }
+        : {})
     }
   });
 };
@@ -546,21 +589,50 @@ const xhsReadCommand = async (
     ability: envelope.ability,
     options: gate.options
   });
+  const issue209LiveReadCloseoutRequested = isIssue209LiveReadCloseoutCommand({
+    command: context.command,
+    options: gate.options,
+    requestedExecutionMode: gate.requestedExecutionMode
+  });
+  let antiDetectionValidationGate: XhsCloseoutValidationGateView | null = null;
   if (
     context.profile &&
-    (isLiveXhsExecutionMode(gate.requestedExecutionMode) || recoveryProbeRequested)
+    (issue209LiveReadCloseoutRequested || recoveryProbeRequested)
   ) {
     const rhythmState = asString(xhsCloseoutRhythmStatus.state);
     const shouldRunRhythmGate =
       recoveryProbeRequested ||
+      issue209LiveReadCloseoutRequested ||
       accountSafetyStatus.state === "account_risk_blocked" ||
       (rhythmState !== null && rhythmState !== "not_required");
     if (shouldRunRhythmGate) {
+      if (
+        !recoveryProbeRequested &&
+        issue209LiveReadCloseoutRequested &&
+        rhythmState === "single_probe_passed"
+      ) {
+        let store: SQLiteRuntimeStore | null = null;
+        try {
+          store = new SQLiteRuntimeStore(resolveRuntimeStorePath(context.cwd));
+          antiDetectionValidationGate = await readXhsCloseoutValidationGateView({
+            store,
+            profile: context.profile,
+            effectiveExecutionMode: gate.requestedExecutionMode
+          });
+        } finally {
+          try {
+            store?.close();
+          } catch {
+            // Read-only preflight best-effort close.
+          }
+        }
+      }
       assertXhsLivePreflightAllowsCommand({
         command: context.command,
         ability: envelope.ability,
         accountSafety: accountSafetyStatus,
         xhsCloseoutRhythm: xhsCloseoutRhythmStatus,
+        antiDetectionValidationView: antiDetectionValidationGate,
         options: gate.options,
         requestedExecutionMode: gate.requestedExecutionMode
       });

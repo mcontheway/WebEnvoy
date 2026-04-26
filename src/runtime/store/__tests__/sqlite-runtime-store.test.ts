@@ -89,6 +89,109 @@ const expectLegacyMigrationAllowsNullActionTypeWrite = async (
   expect(appended.action_type).toBeNull();
 };
 
+const seedAntiDetectionValidationRecord = async (
+  store: SQLiteRuntimeStore,
+  input: {
+    targetFrRef?: "FR-0012" | "FR-0013" | "FR-0014";
+    validationScope?: "layer1_consistency" | "layer2_interaction" | "layer3_session_rhythm";
+    profileRef?: string;
+    effectiveExecutionMode?: "live_read_high_risk" | "recon";
+    probeBundleRef?: string;
+    requestRef?: string;
+    sampleRef?: string;
+    baselineRef?: string | null;
+    activeBaselineRef?: string | null;
+    recordRef?: string;
+    resultState?: "captured" | "verified" | "broken" | "stale";
+    driftState?: "no_drift" | "drift_detected" | "insufficient_baseline";
+    validatedAt?: string;
+  } = {}
+) => {
+  const targetFrRef = input.targetFrRef ?? "FR-0012";
+  const validationScope = input.validationScope ?? "layer1_consistency";
+  const profileRef = input.profileRef ?? "profile/xhs_001";
+  const effectiveExecutionMode = input.effectiveExecutionMode ?? "live_read_high_risk";
+  const probeBundleRef = input.probeBundleRef ?? "probe-bundle/xhs-closeout-min-v1";
+  const requestRef = input.requestRef ?? `validation-request/${targetFrRef}/001`;
+  const sampleRef = input.sampleRef ?? `validation-sample/${targetFrRef}/001`;
+  const baselineRef = input.baselineRef === undefined ? `baseline/${targetFrRef}/001` : input.baselineRef;
+  const recordRef = input.recordRef ?? `validation-record/${targetFrRef}/001`;
+  const validatedAt = input.validatedAt ?? "2026-04-25T10:10:00.000Z";
+  const scope = {
+    targetFrRef,
+    validationScope,
+    profileRef,
+    browserChannel: "Google Chrome stable" as const,
+    executionSurface: "real_browser" as const,
+    effectiveExecutionMode,
+    probeBundleRef
+  };
+
+  await store.upsertAntiDetectionValidationRequest({
+    requestRef,
+    validationScope,
+    targetFrRef,
+    profileRef,
+    browserChannel: "Google Chrome stable",
+    executionSurface: "real_browser",
+    sampleGoal: `capture ${targetFrRef} closeout baseline`,
+    requestedExecutionMode: effectiveExecutionMode,
+    probeBundleRef,
+    requestState: "completed",
+    requestedAt: "2026-04-25T10:00:00.000Z"
+  });
+  await store.insertAntiDetectionStructuredSample({
+    ...scope,
+    sampleRef,
+    requestRef,
+    runId: `run-${recordRef.replace(/[^a-z0-9]+/gi, "-")}`,
+    capturedAt: "2026-04-25T10:05:00.000Z",
+    structuredPayload: {
+      target_fr_ref: targetFrRef,
+      signal: "stable"
+    },
+    artifactRefs: []
+  });
+  if (baselineRef) {
+    await store.insertAntiDetectionBaselineSnapshot({
+      ...scope,
+      baselineRef,
+      signalVector: {
+        stable: true
+      },
+      capturedAt: "2026-04-25T10:06:00.000Z",
+      sourceSampleRefs: [sampleRef],
+      sourceRunIds: [`run-${recordRef.replace(/[^a-z0-9]+/gi, "-")}`]
+    });
+  }
+  await store.insertAntiDetectionValidationRecord({
+    ...scope,
+    recordRef,
+    requestRef,
+    sampleRef,
+    baselineRef,
+    resultState: input.resultState ?? "verified",
+    driftState: input.driftState ?? "no_drift",
+    failureClass: null,
+    runId: `run-${recordRef.replace(/[^a-z0-9]+/gi, "-")}`,
+    validatedAt
+  });
+  if (input.activeBaselineRef !== null && baselineRef) {
+    await store.upsertAntiDetectionBaselineRegistryEntry({
+      ...scope,
+      activeBaselineRef: input.activeBaselineRef ?? baselineRef,
+      supersededBaselineRefs:
+        input.activeBaselineRef && input.activeBaselineRef !== baselineRef ? [baselineRef] : [],
+      replacementReason: input.activeBaselineRef && input.activeBaselineRef !== baselineRef
+        ? "manual_reseed"
+        : "initial_seed",
+      updatedAt: "2026-04-25T10:07:00.000Z"
+    });
+  }
+
+  return scope;
+};
+
 describeWithSqlite("sqlite-runtime-store", () => {
   it("initializes schema with WAL and schema version", async () => {
     const cwd = await createTempCwd();
@@ -109,6 +212,237 @@ describeWithSqlite("sqlite-runtime-store", () => {
 
     const sqliteHeader = await readFile(dbPath, { encoding: "utf8" });
     expect(sqliteHeader.slice(0, 16)).toBe("SQLite format 3\u0000");
+  });
+
+  it("projects FR-0020 anti-detection validation views from exact scoped records", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    const scope = await seedAntiDetectionValidationRecord(store);
+
+    await expect(
+      store.getAntiDetectionValidationView({
+        ...scope,
+        effectiveExecutionMode: "recon"
+      })
+    ).resolves.toBeNull();
+
+    await expect(store.getAntiDetectionValidationView(scope)).resolves.toMatchObject({
+      target_fr_ref: "FR-0012",
+      validation_scope: "layer1_consistency",
+      profile_ref: "profile/xhs_001",
+      browser_channel: "Google Chrome stable",
+      execution_surface: "real_browser",
+      effective_execution_mode: "live_read_high_risk",
+      probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1",
+      latest_record_ref: "validation-record/FR-0012/001",
+      baseline_status: "ready",
+      current_result_state: "verified",
+      current_drift_state: "no_drift",
+      last_success_at: "2026-04-25T10:10:00.000Z"
+    });
+
+    await store.insertAntiDetectionBaselineSnapshot({
+      ...scope,
+      baselineRef: "baseline/FR-0012/002",
+      signalVector: { stable: true, reseeded: true },
+      capturedAt: "2026-04-25T11:00:00.000Z",
+      sourceSampleRefs: ["validation-sample/FR-0012/001"],
+      sourceRunIds: ["run-validation-record-FR-0012-001"]
+    });
+    await store.upsertAntiDetectionBaselineRegistryEntry({
+      ...scope,
+      activeBaselineRef: "baseline/FR-0012/002",
+      supersededBaselineRefs: ["baseline/FR-0012/001"],
+      replacementReason: "manual_reseed",
+      updatedAt: "2026-04-25T11:01:00.000Z"
+    });
+
+    await expect(store.getAntiDetectionValidationView(scope)).resolves.toMatchObject({
+      latest_record_ref: "validation-record/FR-0012/001",
+      baseline_status: "superseded",
+      current_result_state: "stale",
+      current_drift_state: "insufficient_baseline"
+    });
+    store.close();
+  });
+
+  it("keeps anti-detection validation view insufficient when no active baseline exists", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    const scope = await seedAntiDetectionValidationRecord(store, {
+      targetFrRef: "FR-0013",
+      validationScope: "layer2_interaction",
+      requestRef: "validation-request/FR-0013/001",
+      sampleRef: "validation-sample/FR-0013/001",
+      baselineRef: null,
+      activeBaselineRef: null,
+      recordRef: "validation-record/FR-0013/001",
+      resultState: "captured",
+      driftState: "insufficient_baseline"
+    });
+
+    await expect(store.getAntiDetectionValidationView(scope)).resolves.toMatchObject({
+      latest_record_ref: "validation-record/FR-0013/001",
+      baseline_status: "insufficient",
+      current_result_state: "captured",
+      current_drift_state: "insufficient_baseline",
+      last_success_at: null
+    });
+    store.close();
+  });
+
+  it("rejects anti-detection validation links when referenced records use another scope", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    const scope = await seedAntiDetectionValidationRecord(store);
+
+    await store.upsertAntiDetectionValidationRequest({
+      requestRef: "validation-request/FR-0012/stub",
+      validationScope: "layer1_consistency",
+      targetFrRef: "FR-0012",
+      profileRef: "profile/xhs_001",
+      browserChannel: "Google Chrome stable",
+      executionSurface: "stub",
+      sampleGoal: "capture invalid stub baseline",
+      requestedExecutionMode: "live_read_high_risk",
+      probeBundleRef: "probe-bundle/xhs-closeout-min-v1",
+      requestState: "completed",
+      requestedAt: "2026-04-25T10:00:00.000Z"
+    });
+
+    await expect(
+      store.insertAntiDetectionStructuredSample({
+        ...scope,
+        sampleRef: "validation-sample/FR-0012/scope-mismatch",
+        requestRef: "validation-request/FR-0012/stub",
+        runId: "run-scope-mismatch",
+        capturedAt: "2026-04-25T10:15:00.000Z",
+        structuredPayload: { target_fr_ref: "FR-0012", stable: true },
+        artifactRefs: []
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+    });
+
+    await store.insertAntiDetectionStructuredSample({
+      ...scope,
+      sampleRef: "validation-sample/FR-0012/stub",
+      requestRef: "validation-request/FR-0012/stub",
+      executionSurface: "stub",
+      runId: "run-stub-sample",
+      capturedAt: "2026-04-25T10:16:00.000Z",
+      structuredPayload: { target_fr_ref: "FR-0012", stable: true },
+      artifactRefs: []
+    });
+
+    await expect(
+      store.insertAntiDetectionBaselineSnapshot({
+        ...scope,
+        baselineRef: "baseline/FR-0012/scope-mismatch",
+        signalVector: { stable: true },
+        capturedAt: "2026-04-25T10:17:00.000Z",
+        sourceSampleRefs: ["validation-sample/FR-0012/stub"],
+        sourceRunIds: ["run-stub-sample"]
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+    });
+    store.close();
+  });
+
+  it("rejects anti-detection ref reuse across immutable validation scopes", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    const scope = await seedAntiDetectionValidationRecord(store);
+
+    await store.upsertAntiDetectionValidationRequest({
+      requestRef: "validation-request/FR-0012/other-profile",
+      validationScope: "layer1_consistency",
+      targetFrRef: "FR-0012",
+      profileRef: "profile/other_xhs",
+      browserChannel: "Google Chrome stable",
+      executionSurface: "real_browser",
+      sampleGoal: "capture other profile baseline",
+      requestedExecutionMode: "live_read_high_risk",
+      probeBundleRef: "probe-bundle/xhs-closeout-min-v1",
+      requestState: "completed",
+      requestedAt: "2026-04-25T10:20:00.000Z"
+    });
+
+    await expect(
+      store.insertAntiDetectionStructuredSample({
+        ...scope,
+        profileRef: "profile/other_xhs",
+        sampleRef: "validation-sample/FR-0012/001",
+        requestRef: "validation-request/FR-0012/other-profile",
+        runId: "run-other-profile-sample",
+        capturedAt: "2026-04-25T10:21:00.000Z",
+        structuredPayload: { target_fr_ref: "FR-0012", stable: true },
+        artifactRefs: []
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+    });
+
+    const otherScope = {
+      ...scope,
+      profileRef: "profile/other_xhs"
+    };
+    await store.insertAntiDetectionStructuredSample({
+      ...otherScope,
+      sampleRef: "validation-sample/FR-0012/other-profile",
+      requestRef: "validation-request/FR-0012/other-profile",
+      runId: "run-other-profile-sample",
+      capturedAt: "2026-04-25T10:22:00.000Z",
+      structuredPayload: { target_fr_ref: "FR-0012", stable: true },
+      artifactRefs: []
+    });
+
+    await expect(
+      store.insertAntiDetectionBaselineSnapshot({
+        ...otherScope,
+        baselineRef: "baseline/FR-0012/001",
+        signalVector: { stable: true, other_profile: true },
+        capturedAt: "2026-04-25T10:23:00.000Z",
+        sourceSampleRefs: ["validation-sample/FR-0012/other-profile"],
+        sourceRunIds: ["run-other-profile-sample"]
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+    });
+
+    await store.insertAntiDetectionBaselineSnapshot({
+      ...otherScope,
+      baselineRef: "baseline/FR-0012/other-profile",
+      signalVector: { stable: true, other_profile: true },
+      capturedAt: "2026-04-25T10:24:00.000Z",
+      sourceSampleRefs: ["validation-sample/FR-0012/other-profile"],
+      sourceRunIds: ["run-other-profile-sample"]
+    });
+
+    await expect(
+      store.insertAntiDetectionValidationRecord({
+        ...otherScope,
+        recordRef: "validation-record/FR-0012/001",
+        requestRef: "validation-request/FR-0012/other-profile",
+        sampleRef: "validation-sample/FR-0012/other-profile",
+        baselineRef: "baseline/FR-0012/other-profile",
+        resultState: "verified",
+        driftState: "no_drift",
+        failureClass: null,
+        runId: "run-other-profile-record",
+        validatedAt: "2026-04-25T10:25:00.000Z"
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+    });
+
+    await expect(store.getAntiDetectionValidationView(scope)).resolves.toMatchObject({
+      baseline_status: "ready",
+      current_result_state: "verified",
+      current_drift_state: "no_drift"
+    });
+    store.close();
   });
 
   it("upserts run idempotently", async () => {

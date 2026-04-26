@@ -41,3 +41,21 @@ export const mapGateApprovalRecordRow = (row) => ({
     created_at: row.created_at,
     updated_at: row.updated_at
 });
+export const mapAntiDetectionValidationRequestRow = (row) => ({ ...row });
+export const mapAntiDetectionStructuredSampleRow = (row) => ({
+    ...row,
+    structured_payload: parseJsonObject(row.structured_payload, {}),
+    artifact_refs: parseJsonArray(row.artifact_refs)
+});
+export const mapAntiDetectionBaselineSnapshotRow = (row) => ({
+    ...row,
+    signal_vector: parseJsonObject(row.signal_vector, {}),
+    source_sample_refs: parseJsonArray(row.source_sample_refs),
+    source_run_ids: parseJsonArray(row.source_run_ids)
+});
+export const mapAntiDetectionBaselineRegistryEntryRow = (row) => ({
+    ...row,
+    superseded_baseline_refs: parseJsonArray(row.superseded_baseline_refs)
+});
+export const mapAntiDetectionValidationRecordRow = (row) => ({ ...row });
+export const mapAntiDetectionValidationViewRow = (row) => ({ ...row });

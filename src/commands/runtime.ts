@@ -28,6 +28,10 @@ import {
   SQLiteRuntimeStore,
   resolveRuntimeStorePath
 } from "../runtime/store/sqlite-runtime-store.js";
+import {
+  readXhsCloseoutValidationGateView,
+  toXhsCloseoutValidationGateJson
+} from "../runtime/anti-detection-validation.js";
 
 const asBoolean = (value: unknown): boolean => value === true;
 const asString = (value: unknown): string | null =>
@@ -107,6 +111,36 @@ const buildSessionRhythmStatusViewForProfile = async (
   } catch {
     return null;
   }
+};
+
+const resolveAntiDetectionEffectiveExecutionMode = (value: unknown) => {
+  const mode = asString(value) ?? "live_read_high_risk";
+  if (
+    mode === "dry_run" ||
+    mode === "recon" ||
+    mode === "live_read_limited" ||
+    mode === "live_read_high_risk" ||
+    mode === "live_write"
+  ) {
+    return mode;
+  }
+  return "live_read_high_risk";
+};
+
+const buildAntiDetectionValidationViewForProfile = async (input: {
+  store: SQLiteRuntimeStore;
+  profile: string | null;
+  effectiveExecutionMode: unknown;
+}): Promise<Record<string, unknown> | null> => {
+  if (!input.profile) {
+    return null;
+  }
+  const gate = await readXhsCloseoutValidationGateView({
+    store: input.store,
+    profile: input.profile,
+    effectiveExecutionMode: resolveAntiDetectionEffectiveExecutionMode(input.effectiveExecutionMode)
+  });
+  return toXhsCloseoutValidationGateJson(gate);
 };
 
 const resolveCurrentRiskState = (
@@ -272,6 +306,12 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
         context.cwd,
         auditProfile
       );
+      const antiDetectionValidationView = await buildAntiDetectionValidationViewForProfile({
+        store,
+        profile: auditProfile,
+        effectiveExecutionMode: (enrichedAuditRecords[0] as Record<string, unknown> | undefined)
+          ?.effective_execution_mode
+      });
       return {
         query: {
           run_id: runId
@@ -285,7 +325,8 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
         risk_state_output: buildUnifiedRiskStateOutput(currentRiskState, {
           auditRecords: enrichedAuditRecords
         }),
-        session_rhythm_status_view: sessionRhythmStatusView
+        session_rhythm_status_view: sessionRhythmStatusView,
+        anti_detection_validation_view: antiDetectionValidationView
       };
     }
 
@@ -306,6 +347,12 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
       context.cwd,
       profile ?? auditProfile
     );
+    const antiDetectionValidationView = await buildAntiDetectionValidationViewForProfile({
+      store,
+      profile: profile ?? auditProfile,
+      effectiveExecutionMode: (enrichedAuditRecords[0] as Record<string, unknown> | undefined)
+        ?.effective_execution_mode
+    });
     return {
       query: {
         ...(sessionId ? { session_id: sessionId } : {}),
@@ -318,7 +365,8 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
       risk_state_output: buildUnifiedRiskStateOutput(currentRiskState, {
         auditRecords: enrichedAuditRecords
       }),
-      session_rhythm_status_view: sessionRhythmStatusView
+      session_rhythm_status_view: sessionRhythmStatusView,
+      anti_detection_validation_view: antiDetectionValidationView
     };
   } catch (error) {
     if (error instanceof RuntimeStoreError) {

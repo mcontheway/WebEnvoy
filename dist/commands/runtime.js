@@ -10,6 +10,7 @@ import { toSessionRhythmStatusView } from "../runtime/xhs-closeout-rhythm.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import { buildUnifiedRiskStateOutput, resolveRiskState } from "../runtime/risk-state.js";
 import { RuntimeStoreError, SQLiteRuntimeStore, resolveRuntimeStorePath } from "../runtime/store/sqlite-runtime-store.js";
+import { readXhsCloseoutValidationGateView, toXhsCloseoutValidationGateJson } from "../runtime/anti-detection-validation.js";
 const asBoolean = (value) => value === true;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
@@ -73,6 +74,28 @@ const buildSessionRhythmStatusViewForProfile = async (cwd, profile) => {
     catch {
         return null;
     }
+};
+const resolveAntiDetectionEffectiveExecutionMode = (value) => {
+    const mode = asString(value) ?? "live_read_high_risk";
+    if (mode === "dry_run" ||
+        mode === "recon" ||
+        mode === "live_read_limited" ||
+        mode === "live_read_high_risk" ||
+        mode === "live_write") {
+        return mode;
+    }
+    return "live_read_high_risk";
+};
+const buildAntiDetectionValidationViewForProfile = async (input) => {
+    if (!input.profile) {
+        return null;
+    }
+    const gate = await readXhsCloseoutValidationGateView({
+        store: input.store,
+        profile: input.profile,
+        effectiveExecutionMode: resolveAntiDetectionEffectiveExecutionMode(input.effectiveExecutionMode)
+    });
+    return toXhsCloseoutValidationGateJson(gate);
 };
 const resolveCurrentRiskState = (approvalRecord, auditRecords) => {
     const latestAudit = auditRecords[0] ?? null;
@@ -203,6 +226,12 @@ const runtimeAuditQuery = async (context) => {
             const currentRiskState = resolveCurrentRiskState(asObject(trail.approvalRecord), enrichedAuditRecords);
             const auditProfile = asString(enrichedAuditRecords[0]?.profile);
             const sessionRhythmStatusView = await buildSessionRhythmStatusViewForProfile(context.cwd, auditProfile);
+            const antiDetectionValidationView = await buildAntiDetectionValidationViewForProfile({
+                store,
+                profile: auditProfile,
+                effectiveExecutionMode: enrichedAuditRecords[0]
+                    ?.effective_execution_mode
+            });
             return {
                 query: {
                     run_id: runId
@@ -215,7 +244,8 @@ const runtimeAuditQuery = async (context) => {
                 risk_state_output: buildUnifiedRiskStateOutput(currentRiskState, {
                     auditRecords: enrichedAuditRecords
                 }),
-                session_rhythm_status_view: sessionRhythmStatusView
+                session_rhythm_status_view: sessionRhythmStatusView,
+                anti_detection_validation_view: antiDetectionValidationView
             };
         }
         const records = await store.listGateAuditRecords({
@@ -227,6 +257,12 @@ const runtimeAuditQuery = async (context) => {
         const currentRiskState = resolveCurrentRiskState(null, enrichedAuditRecords);
         const auditProfile = asString(enrichedAuditRecords[0]?.profile);
         const sessionRhythmStatusView = await buildSessionRhythmStatusViewForProfile(context.cwd, profile ?? auditProfile);
+        const antiDetectionValidationView = await buildAntiDetectionValidationViewForProfile({
+            store,
+            profile: profile ?? auditProfile,
+            effectiveExecutionMode: enrichedAuditRecords[0]
+                ?.effective_execution_mode
+        });
         return {
             query: {
                 ...(sessionId ? { session_id: sessionId } : {}),
@@ -239,7 +275,8 @@ const runtimeAuditQuery = async (context) => {
             risk_state_output: buildUnifiedRiskStateOutput(currentRiskState, {
                 auditRecords: enrichedAuditRecords
             }),
-            session_rhythm_status_view: sessionRhythmStatusView
+            session_rhythm_status_view: sessionRhythmStatusView,
+            anti_detection_validation_view: antiDetectionValidationView
         };
     }
     catch (error) {

@@ -1,4 +1,13 @@
-import type { GateApprovalRecord, GateAuditRecord } from "./sqlite-runtime-store.js";
+import type {
+  AntiDetectionBaselineRegistryEntryRecord,
+  AntiDetectionBaselineSnapshotRecord,
+  AntiDetectionStructuredSampleRecord,
+  AntiDetectionValidationRecord,
+  AntiDetectionValidationRequestRecord,
+  AntiDetectionValidationViewRecord,
+  GateApprovalRecord,
+  GateAuditRecord
+} from "./sqlite-runtime-store.js";
 
 export const parseJsonObject = <T extends Record<string, unknown>>(
   value: unknown,
@@ -60,3 +69,51 @@ export const mapGateApprovalRecordRow = (
   created_at: row.created_at,
   updated_at: row.updated_at
 });
+
+export const mapAntiDetectionValidationRequestRow = (
+  row: AntiDetectionValidationRequestRecord
+): AntiDetectionValidationRequestRecord => ({ ...row });
+
+export const mapAntiDetectionStructuredSampleRow = (
+  row: Omit<AntiDetectionStructuredSampleRecord, "structured_payload" | "artifact_refs"> & {
+    structured_payload: string;
+    artifact_refs: string;
+  }
+): AntiDetectionStructuredSampleRecord => ({
+  ...row,
+  structured_payload: parseJsonObject<Record<string, unknown>>(row.structured_payload, {}),
+  artifact_refs: parseJsonArray(row.artifact_refs)
+});
+
+export const mapAntiDetectionBaselineSnapshotRow = (
+  row: Omit<
+    AntiDetectionBaselineSnapshotRecord,
+    "signal_vector" | "source_sample_refs" | "source_run_ids"
+  > & {
+    signal_vector: string;
+    source_sample_refs: string;
+    source_run_ids: string;
+  }
+): AntiDetectionBaselineSnapshotRecord => ({
+  ...row,
+  signal_vector: parseJsonObject<Record<string, unknown>>(row.signal_vector, {}),
+  source_sample_refs: parseJsonArray(row.source_sample_refs),
+  source_run_ids: parseJsonArray(row.source_run_ids)
+});
+
+export const mapAntiDetectionBaselineRegistryEntryRow = (
+  row: Omit<AntiDetectionBaselineRegistryEntryRecord, "superseded_baseline_refs"> & {
+    superseded_baseline_refs: string;
+  }
+): AntiDetectionBaselineRegistryEntryRecord => ({
+  ...row,
+  superseded_baseline_refs: parseJsonArray(row.superseded_baseline_refs)
+});
+
+export const mapAntiDetectionValidationRecordRow = (
+  row: AntiDetectionValidationRecord
+): AntiDetectionValidationRecord => ({ ...row });
+
+export const mapAntiDetectionValidationViewRow = (
+  row: AntiDetectionValidationViewRecord
+): AntiDetectionValidationViewRecord => ({ ...row });

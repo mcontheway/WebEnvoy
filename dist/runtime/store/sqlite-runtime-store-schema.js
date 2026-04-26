@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 const hasColumn = (db, tableName, columnName) => {
     const rows = db
         .prepare(`PRAGMA table_info(${tableName})`)
@@ -374,6 +374,9 @@ const migrateV10ToV11 = (db) => {
   `);
     db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION));
 };
+const migrateV11ToV12 = (db) => {
+    db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION));
+};
 export const initializeRuntimeStoreSchema = ({ db, onSchemaMismatch }) => {
     db.exec("PRAGMA journal_mode=WAL;");
     db.exec(`
@@ -454,6 +457,212 @@ export const initializeRuntimeStoreSchema = ({ db, onSchemaMismatch }) => {
       ON runtime_gate_audit_records(session_id, recorded_at DESC);
     CREATE INDEX IF NOT EXISTS idx_runtime_gate_audit_profile_recorded
       ON runtime_gate_audit_records(profile, recorded_at DESC);
+    CREATE TABLE IF NOT EXISTS anti_detection_validation_request (
+      request_ref TEXT PRIMARY KEY,
+      validation_scope TEXT NOT NULL,
+      target_fr_ref TEXT NOT NULL,
+      profile_ref TEXT NOT NULL,
+      browser_channel TEXT NOT NULL,
+      execution_surface TEXT NOT NULL,
+      sample_goal TEXT NOT NULL,
+      requested_execution_mode TEXT NOT NULL,
+      probe_bundle_ref TEXT NOT NULL,
+      request_state TEXT NOT NULL,
+      requested_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS anti_detection_structured_sample (
+      sample_ref TEXT PRIMARY KEY,
+      request_ref TEXT NOT NULL,
+      target_fr_ref TEXT NOT NULL,
+      validation_scope TEXT NOT NULL,
+      profile_ref TEXT NOT NULL,
+      browser_channel TEXT NOT NULL,
+      execution_surface TEXT NOT NULL,
+      effective_execution_mode TEXT NOT NULL,
+      probe_bundle_ref TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      captured_at TEXT NOT NULL,
+      structured_payload TEXT NOT NULL,
+      artifact_refs TEXT NOT NULL,
+      FOREIGN KEY(request_ref) REFERENCES anti_detection_validation_request(request_ref)
+    );
+    CREATE TABLE IF NOT EXISTS anti_detection_baseline_snapshot (
+      baseline_ref TEXT PRIMARY KEY,
+      target_fr_ref TEXT NOT NULL,
+      validation_scope TEXT NOT NULL,
+      probe_bundle_ref TEXT NOT NULL,
+      profile_ref TEXT NOT NULL,
+      browser_channel TEXT NOT NULL,
+      execution_surface TEXT NOT NULL,
+      effective_execution_mode TEXT NOT NULL,
+      signal_vector TEXT NOT NULL,
+      captured_at TEXT NOT NULL,
+      source_sample_refs TEXT NOT NULL,
+      source_run_ids TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS anti_detection_baseline_registry_entry (
+      target_fr_ref TEXT NOT NULL,
+      validation_scope TEXT NOT NULL,
+      profile_ref TEXT NOT NULL,
+      browser_channel TEXT NOT NULL,
+      execution_surface TEXT NOT NULL,
+      effective_execution_mode TEXT NOT NULL,
+      probe_bundle_ref TEXT NOT NULL,
+      active_baseline_ref TEXT NOT NULL,
+      superseded_baseline_refs TEXT NOT NULL,
+      replacement_reason TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (
+        target_fr_ref,
+        validation_scope,
+        profile_ref,
+        browser_channel,
+        execution_surface,
+        effective_execution_mode,
+        probe_bundle_ref
+      ),
+      FOREIGN KEY(active_baseline_ref) REFERENCES anti_detection_baseline_snapshot(baseline_ref)
+    );
+    CREATE TABLE IF NOT EXISTS anti_detection_validation_record (
+      record_ref TEXT PRIMARY KEY,
+      request_ref TEXT NOT NULL,
+      target_fr_ref TEXT NOT NULL,
+      validation_scope TEXT NOT NULL,
+      profile_ref TEXT NOT NULL,
+      browser_channel TEXT NOT NULL,
+      execution_surface TEXT NOT NULL,
+      effective_execution_mode TEXT NOT NULL,
+      probe_bundle_ref TEXT NOT NULL,
+      sample_ref TEXT NOT NULL,
+      baseline_ref TEXT,
+      result_state TEXT NOT NULL,
+      drift_state TEXT NOT NULL,
+      failure_class TEXT,
+      run_id TEXT NOT NULL,
+      validated_at TEXT NOT NULL,
+      FOREIGN KEY(request_ref) REFERENCES anti_detection_validation_request(request_ref),
+      FOREIGN KEY(sample_ref) REFERENCES anti_detection_structured_sample(sample_ref),
+      FOREIGN KEY(baseline_ref) REFERENCES anti_detection_baseline_snapshot(baseline_ref)
+    );
+    CREATE INDEX IF NOT EXISTS idx_anti_detection_validation_record_scope_latest
+      ON anti_detection_validation_record(
+        target_fr_ref,
+        validation_scope,
+        profile_ref,
+        browser_channel,
+        execution_surface,
+        effective_execution_mode,
+        probe_bundle_ref,
+        validated_at DESC
+      );
+    CREATE INDEX IF NOT EXISTS idx_anti_detection_validation_record_scope_success
+      ON anti_detection_validation_record(
+        target_fr_ref,
+        validation_scope,
+        profile_ref,
+        browser_channel,
+        execution_surface,
+        effective_execution_mode,
+        probe_bundle_ref,
+        result_state,
+        validated_at DESC
+      );
+  `);
+    db.exec(`
+    DROP VIEW IF EXISTS anti_detection_validation_view;
+    CREATE VIEW anti_detection_validation_view AS
+    WITH latest_records AS (
+      SELECT
+        anti_detection_validation_record.record_ref,
+        anti_detection_validation_record.target_fr_ref,
+        anti_detection_validation_record.validation_scope,
+        anti_detection_validation_record.profile_ref,
+        anti_detection_validation_record.browser_channel,
+        anti_detection_validation_record.execution_surface,
+        anti_detection_validation_record.effective_execution_mode,
+        anti_detection_validation_record.probe_bundle_ref,
+        anti_detection_validation_record.baseline_ref,
+        anti_detection_validation_record.result_state,
+        anti_detection_validation_record.drift_state,
+        anti_detection_validation_record.validated_at,
+        ROW_NUMBER() OVER (
+          PARTITION BY
+            anti_detection_validation_record.target_fr_ref,
+            anti_detection_validation_record.validation_scope,
+            anti_detection_validation_record.profile_ref,
+            anti_detection_validation_record.browser_channel,
+            anti_detection_validation_record.execution_surface,
+            anti_detection_validation_record.effective_execution_mode,
+            anti_detection_validation_record.probe_bundle_ref
+          ORDER BY anti_detection_validation_record.validated_at DESC, anti_detection_validation_record.record_ref DESC
+        ) AS row_num,
+        MAX(
+          CASE
+            WHEN anti_detection_validation_record.result_state = 'verified'
+              THEN anti_detection_validation_record.validated_at
+            ELSE NULL
+          END
+        ) OVER (
+          PARTITION BY
+            anti_detection_validation_record.target_fr_ref,
+            anti_detection_validation_record.validation_scope,
+            anti_detection_validation_record.profile_ref,
+            anti_detection_validation_record.browser_channel,
+            anti_detection_validation_record.execution_surface,
+            anti_detection_validation_record.effective_execution_mode,
+            anti_detection_validation_record.probe_bundle_ref
+        ) AS last_success_at
+      FROM anti_detection_validation_record
+    )
+    SELECT
+      latest_records.target_fr_ref,
+      latest_records.validation_scope,
+      latest_records.profile_ref,
+      latest_records.browser_channel,
+      latest_records.execution_surface,
+      latest_records.effective_execution_mode,
+      latest_records.probe_bundle_ref,
+      latest_records.record_ref AS latest_record_ref,
+      CASE
+        WHEN anti_detection_baseline_registry_entry.active_baseline_ref IS NULL
+          OR anti_detection_baseline_registry_entry.active_baseline_ref = ''
+          THEN 'insufficient'
+        WHEN latest_records.baseline_ref IS NULL OR latest_records.baseline_ref = ''
+          THEN 'insufficient'
+        WHEN latest_records.baseline_ref != anti_detection_baseline_registry_entry.active_baseline_ref
+          THEN 'superseded'
+        ELSE 'ready'
+      END AS baseline_status,
+      CASE
+        WHEN anti_detection_baseline_registry_entry.active_baseline_ref IS NOT NULL
+          AND anti_detection_baseline_registry_entry.active_baseline_ref != ''
+          AND latest_records.baseline_ref IS NOT NULL
+          AND latest_records.baseline_ref != ''
+          AND latest_records.baseline_ref != anti_detection_baseline_registry_entry.active_baseline_ref
+          THEN 'stale'
+        ELSE latest_records.result_state
+      END AS current_result_state,
+      CASE
+        WHEN anti_detection_baseline_registry_entry.active_baseline_ref IS NULL
+          OR anti_detection_baseline_registry_entry.active_baseline_ref = ''
+          THEN 'insufficient_baseline'
+        WHEN latest_records.baseline_ref IS NULL OR latest_records.baseline_ref = ''
+          THEN 'insufficient_baseline'
+        WHEN latest_records.baseline_ref != anti_detection_baseline_registry_entry.active_baseline_ref
+          THEN 'insufficient_baseline'
+        ELSE latest_records.drift_state
+      END AS current_drift_state,
+      latest_records.last_success_at
+    FROM latest_records
+    LEFT JOIN anti_detection_baseline_registry_entry
+      ON anti_detection_baseline_registry_entry.target_fr_ref = latest_records.target_fr_ref
+      AND anti_detection_baseline_registry_entry.validation_scope = latest_records.validation_scope
+      AND anti_detection_baseline_registry_entry.profile_ref = latest_records.profile_ref
+      AND anti_detection_baseline_registry_entry.browser_channel = latest_records.browser_channel
+      AND anti_detection_baseline_registry_entry.execution_surface = latest_records.execution_surface
+      AND anti_detection_baseline_registry_entry.effective_execution_mode = latest_records.effective_execution_mode
+      AND anti_detection_baseline_registry_entry.probe_bundle_ref = latest_records.probe_bundle_ref
+    WHERE latest_records.row_num = 1;
   `);
     const row = db
         .prepare("SELECT value FROM runtime_store_meta WHERE key = 'schema_version'")
@@ -512,6 +721,11 @@ export const initializeRuntimeStoreSchema = ({ db, onSchemaMismatch }) => {
         if (currentVersion === 10) {
             migrateV10ToV11(db);
             currentVersion = 11;
+            continue;
+        }
+        if (currentVersion === 11) {
+            migrateV11ToV12(db);
+            currentVersion = 12;
             continue;
         }
         break;
