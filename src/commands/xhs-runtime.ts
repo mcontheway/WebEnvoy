@@ -23,6 +23,7 @@ import {
   type XhsCloseoutValidationGateView
 } from "../runtime/anti-detection-validation.js";
 import {
+  RuntimeStoreError,
   SQLiteRuntimeStore,
   resolveRuntimeStorePath
 } from "../runtime/store/sqlite-runtime-store.js";
@@ -635,6 +636,23 @@ const xhsReadCommand = async (
             profile: context.profile,
             effectiveExecutionMode: gate.requestedExecutionMode
           });
+        } catch (error) {
+          if (error instanceof RuntimeStoreError) {
+            if (error.code === "ERR_RUNTIME_STORE_INVALID_INPUT") {
+              throw new CliError("ERR_CLI_INVALID_ARGS", "XHS 反检测验证查询参数不合法", {
+                details: {
+                  ability_id: envelope.ability.id,
+                  stage: "input_validation",
+                  reason: "ANTI_DETECTION_VALIDATION_QUERY_INVALID_INPUT"
+                }
+              });
+            }
+            throw new CliError("ERR_RUNTIME_UNAVAILABLE", `运行记录存储失败: ${error.code}`, {
+              retryable: error.code !== "ERR_RUNTIME_STORE_SCHEMA_MISMATCH",
+              cause: error
+            });
+          }
+          throw error;
         } finally {
           try {
             store?.close();

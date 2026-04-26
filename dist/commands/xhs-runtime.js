@@ -10,7 +10,7 @@ import { toXhsCloseoutRhythmStatus } from "../runtime/xhs-closeout-rhythm.js";
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import { readXhsCloseoutValidationGateView, toXhsCloseoutValidationGateJson } from "../runtime/anti-detection-validation.js";
-import { SQLiteRuntimeStore, resolveRuntimeStorePath } from "../runtime/store/sqlite-runtime-store.js";
+import { RuntimeStoreError, SQLiteRuntimeStore, resolveRuntimeStorePath } from "../runtime/store/sqlite-runtime-store.js";
 import { prepareOfficialChromeRuntime } from "../runtime/official-chrome-runtime.js";
 import { buildCapabilityResult, ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY, normalizeGateOptionsForContract, parseAbilityEnvelopeForContract, parseDetailInputForContract, parseSearchInputForContract, parseUserHomeInputForContract, prepareIssue209LiveReadEnvelopeForContract } from "./xhs-input.js";
 export { buildOfficialChromeRuntimeStatusParams } from "../runtime/official-chrome-runtime.js";
@@ -448,6 +448,24 @@ const xhsReadCommand = async (context, inputConfig) => {
                         profile: context.profile,
                         effectiveExecutionMode: gate.requestedExecutionMode
                     });
+                }
+                catch (error) {
+                    if (error instanceof RuntimeStoreError) {
+                        if (error.code === "ERR_RUNTIME_STORE_INVALID_INPUT") {
+                            throw new CliError("ERR_CLI_INVALID_ARGS", "XHS 反检测验证查询参数不合法", {
+                                details: {
+                                    ability_id: envelope.ability.id,
+                                    stage: "input_validation",
+                                    reason: "ANTI_DETECTION_VALIDATION_QUERY_INVALID_INPUT"
+                                }
+                            });
+                        }
+                        throw new CliError("ERR_RUNTIME_UNAVAILABLE", `运行记录存储失败: ${error.code}`, {
+                            retryable: error.code !== "ERR_RUNTIME_STORE_SCHEMA_MISMATCH",
+                            cause: error
+                        });
+                    }
+                    throw error;
                 }
                 finally {
                     try {

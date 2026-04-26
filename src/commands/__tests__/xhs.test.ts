@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -16,6 +17,11 @@ import {
   resolveRuntimeStorePath
 } from "../../runtime/store/sqlite-runtime-store.js";
 import type { RuntimeContext } from "../../core/types.js";
+
+type DatabaseSyncCtor = new (path: string) => {
+  prepare: (sql: string) => { run: (...args: unknown[]) => unknown };
+  close: () => void;
+};
 
 const ISSUE209_APPROVAL_CHECKS = {
   target_domain_confirmed: true,
@@ -205,6 +211,22 @@ const seedXhsCloseoutReady = async (input: {
     }
   } finally {
     store.close();
+  }
+};
+
+const createSchemaMismatchRuntimeStore = async (cwd: string): Promise<void> => {
+  const require = createRequire(import.meta.url);
+  const sqliteModule = require("node:sqlite") as { DatabaseSync?: DatabaseSyncCtor };
+  if (typeof sqliteModule.DatabaseSync !== "function") {
+    throw new Error("node:sqlite DatabaseSync unavailable");
+  }
+  await mkdir(join(cwd, ".webenvoy", "runtime"), { recursive: true });
+  const db = new sqliteModule.DatabaseSync(resolveRuntimeStorePath(cwd));
+  try {
+    db.prepare("CREATE TABLE runtime_store_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)").run();
+    db.prepare("INSERT INTO runtime_store_meta(key, value) VALUES('schema_version', ?)").run("999");
+  } finally {
+    db.close();
   }
 };
 
@@ -1776,6 +1798,80 @@ describe("normalizeGateOptionsForContract", () => {
         details: {
           reason: "ANTI_DETECTION_VALIDATION_BASELINE_BLOCKED"
         }
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("maps validation store failures before blocking XHS live reads", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-baseline-store-failure-"));
+    try {
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.initializeMeta(
+        "xhs_baseline_store_failure_profile",
+        "2026-04-25T10:00:00.000Z",
+        { allowUnsupportedExtensionBrowser: true }
+      );
+      await profileStore.writeMeta("xhs_baseline_store_failure_profile", {
+        ...meta,
+        accountSafety: {
+          state: "clear",
+          platform: null,
+          reason: null,
+          observedAt: null,
+          cooldownUntil: null,
+          sourceRunId: null,
+          sourceCommand: null,
+          targetDomain: null,
+          targetTabId: null,
+          pageUrl: null,
+          statusCode: null,
+          platformCode: null
+        },
+        xhsCloseoutRhythm: {
+          state: "single_probe_passed",
+          cooldownUntil: "2000-01-01T00:30:00.000Z",
+          operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+          singleProbeRequired: false,
+          singleProbePassedAt: "2026-04-25T10:40:00.000Z",
+          probeRunId: "run-store-failure-recovery-probe",
+          fullBundleBlocked: true,
+          reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED", "ANTI_DETECTION_BASELINE_REQUIRED"]
+        }
+      });
+      await createSchemaMismatchRuntimeStore(cwd);
+
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.search",
+            profile: "xhs_baseline_store_failure_profile",
+            run_id: "run-baseline-store-failure-001",
+            params: {
+              ability: {
+                id: "xhs.note.search.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                query: "露营"
+              },
+              options: {
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "search_result_tab",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed"
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_RUNTIME_UNAVAILABLE",
+        retryable: false
       });
     } finally {
       await rm(cwd, { recursive: true, force: true });
