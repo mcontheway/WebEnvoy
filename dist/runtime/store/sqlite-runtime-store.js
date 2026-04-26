@@ -20,8 +20,7 @@ export class RuntimeStoreError extends Error {
     }
 }
 const SUMMARY_MAX_CHARS = 512;
-const SQLITE_BUSY_MESSAGE = /SQLITE_BUSY|database is locked/i;
-const SQLITE_OPEN_RETRY_LIMIT = 8;
+const SQLITE_BUSY_MESSAGE = /SQLITE_BUSY|SQLITE_LOCKED|database is locked|database table is locked/i;
 let databaseSyncCtorCache;
 export const sanitizeRuntimeEventSummary = (summary) => {
     if (summary === null) {
@@ -46,7 +45,20 @@ export const sanitizeRuntimeEventSummary = (summary) => {
     };
 };
 const isIsoLike = (value) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value);
-const isSqliteBusyError = (error) => error instanceof Error && SQLITE_BUSY_MESSAGE.test(error.message);
+const isSqliteBusyError = (error) => {
+    if (!(error instanceof Error)) {
+        return false;
+    }
+    const sqliteFields = [
+        error.name,
+        error.message,
+        error.code,
+        error.cause instanceof Error
+            ? error.cause?.message
+            : null
+    ];
+    return sqliteFields.some((value) => typeof value === "string" && SQLITE_BUSY_MESSAGE.test(value));
+};
 const invalidRuntimeStoreInput = (message) => {
     throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", message);
 };
@@ -65,11 +77,6 @@ const antiDetectionScopeMatches = (actual, expected) => actual.target_fr_ref ===
         expected.effectiveExecutionMode &&
     actual.probe_bundle_ref === expected.probeBundleRef;
 export const resolveRuntimeStorePath = (cwd) => path.join(cwd, ".webenvoy", "runtime", "store.sqlite");
-const sleepSync = (milliseconds) => {
-    const buffer = new SharedArrayBuffer(4);
-    const view = new Int32Array(buffer);
-    Atomics.wait(view, 0, 0, milliseconds);
-};
 const resolveDatabaseSyncConstructor = () => {
     if (databaseSyncCtorCache === null) {
         throw new Error("node:sqlite unavailable");
@@ -93,32 +100,24 @@ export class SQLiteRuntimeStore {
         try {
             mkdirSync(path.dirname(dbPath), { recursive: true });
             const DatabaseSyncCtor = resolveDatabaseSyncConstructor();
-            for (let attempt = 0; attempt <= SQLITE_OPEN_RETRY_LIMIT; attempt += 1) {
+            try {
+                this.#db = new DatabaseSyncCtor(dbPath);
+                this.#db.exec("PRAGMA busy_timeout=2000;");
+                this.#initialize();
+                return;
+            }
+            catch (error) {
                 try {
-                    this.#db = new DatabaseSyncCtor(dbPath);
-                    this.#db.exec("PRAGMA busy_timeout=2000;");
-                    this.#initialize();
-                    return;
+                    this.#db?.close();
                 }
-                catch (error) {
-                    try {
-                        this.#db?.close();
-                    }
-                    catch {
-                        // Ignore cleanup failure in retry loop.
-                    }
-                    if (error instanceof RuntimeStoreError &&
-                        error.code === "ERR_RUNTIME_STORE_SCHEMA_MISMATCH") {
-                        throw error;
-                    }
-                    if (isSqliteBusyError(error) && attempt < SQLITE_OPEN_RETRY_LIMIT) {
-                        sleepSync(25 * (attempt + 1));
-                        lastError = error;
-                        continue;
-                    }
-                    lastError = error;
-                    break;
+                catch {
+                    // Ignore cleanup failure after constructor initialization fails.
                 }
+                if (error instanceof RuntimeStoreError &&
+                    error.code === "ERR_RUNTIME_STORE_SCHEMA_MISMATCH") {
+                    throw error;
+                }
+                lastError = error;
             }
         }
         catch (error) {
@@ -126,6 +125,11 @@ export class SQLiteRuntimeStore {
         }
         if (lastError instanceof RuntimeStoreError) {
             throw lastError;
+        }
+        if (isSqliteBusyError(lastError)) {
+            throw new RuntimeStoreError("ERR_RUNTIME_STORE_CONFLICT", "runtime store write conflict", {
+                cause: lastError
+            });
         }
         throw new RuntimeStoreError("ERR_RUNTIME_STORE_UNAVAILABLE", "runtime store unavailable", {
             cause: lastError
