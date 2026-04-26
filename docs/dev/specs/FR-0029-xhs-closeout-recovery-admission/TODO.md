@@ -8,6 +8,7 @@
 - [ ] reviewer 确认 `xhs.search + requested_execution_mode=live_read_high_risk` 已被冻结为当前唯一 closeout admission live probe
 - [ ] reviewer 确认开始 `closeout_admission_probe_live` 前，必须先满足 recon probe、account safety、rhythm live-admission gate 与三条 validation view
 - [ ] reviewer 确认进入 `closeout_bundle_allowed` 前，除了 recon probe 之外还必须显式通过 live admission probe
+- [ ] reviewer 确认 `live admission success` 已被冻结为带 producer `run_id`、scope 键与同 run `runtime.audit` 追溯入口的正式来源，而不是裸布尔值
 - [ ] reviewer 确认 `xhs.detail` / `xhs.user_home` 不参与恢复 single-probe，并在 live admission probe 成功前不得恢复
 - [ ] reviewer 确认 `FR-0012`、`FR-0013`、`FR-0014` 三条 validation view 已被显式绑定为 `ready + verified + no_drift`
 - [ ] reviewer 确认三条 validation view 还被显式绑定到当前 `profile_ref / browser_channel / execution_surface / effective_execution_mode=live_read_high_risk / probe_bundle_ref=probe-bundle/xhs-closeout-min-v1`

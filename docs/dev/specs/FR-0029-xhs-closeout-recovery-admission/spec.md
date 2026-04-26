@@ -127,6 +127,16 @@ Canonical Issue: #552
 - 它的职责是证明“当前可以开始 `#445`”，不是证明 `#445` 已关闭。
 - 它不允许被 `xhs.detail` / `xhs.user_home` 替代。
 - 它通过前，不得进入 `#445` 的 `xhs.detail` / `xhs.user_home` rerun。
+- 它的成功必须产出可机器校验的 live admission success 来源，至少绑定：
+  - producer command = `xhs.search`
+  - producer `run_id`
+  - `profile_ref`
+  - `target_domain = www.xiaohongshu.com`
+  - `browser_channel = Google Chrome stable`
+  - `execution_surface = real_browser`
+  - `effective_execution_mode = live_read_high_risk`
+  - `probe_bundle_ref = probe-bundle/xhs-closeout-min-v1`
+  - 同一 `run_id` 的 `runtime.audit` 追溯入口
 - 它只有在以下条件全部满足时才允许开始：
   - recon recovery probe 已通过
   - `runtime.status.account_safety.state = clear`
@@ -138,7 +148,7 @@ Canonical Issue: #552
 系统必须冻结：只有当以下条件全部满足时，才允许进入 `closeout_bundle_allowed`：
 
 - recon recovery probe 已通过
-- closeout admission live probe 已通过
+- 存在一条属于当前 closeout admission scope 的 live admission success 来源
 - `runtime.status.account_safety.state = clear`
 - `runtime.status.xhs_closeout_rhythm` 已允许进入 live admission probe 之后的 bundle escalation
 - `runtime.audit.anti_detection_validation_view` 对以下三条 scope 同时满足：
@@ -159,6 +169,7 @@ Canonical Issue: #552
 约束：
 
 - 其中任一条件不满足，都不得进入 `closeout_bundle_allowed`。
+- `closeout_bundle_allowed` 不得消费裸布尔值 `live_admission_probe_passed=true`；必须消费带 producer/run identity 的 live admission success 来源。
 - 当前 formal baseline 下，`FR-0020` 的 validation view 只能作为 rerun admission predicate 输入，不得直接充当 `FR-0016` PR merge gate。
 
 ### 8. FR-0012 / 0013 / 0014 / 0020 binding
@@ -230,11 +241,12 @@ And 这三条 validation view 都绑定当前 `profile_ref / browser_channel / e
 When 系统评估 `closeout_admission_probe_live`
 Then 才允许进入 live admission probe
 And probe bundle 必须固定为 `probe-bundle/xhs-closeout-min-v1`
+And 后续若 probe 成功，必须产出绑定 producer `run_id` 与同 run `runtime.audit` 的 live admission success 来源
 
 ### 场景 4：live admission probe 未通过时不得进入 bundle
 
 Given recon recovery probe 已通过
-And closeout admission live probe 尚未通过
+And 不存在属于当前 closeout admission scope 的 live admission success 来源
 When 系统判断是否允许进入 `closeout_bundle_allowed`
 Then 必须继续保持阻断
 And 不得恢复 `#445` full bundle
@@ -264,7 +276,7 @@ And 只有显式 truth-sync 后，才允许升级为新的恢复门
 1. recon probe 成功，但 validation view 未 ready：不得进入 live admission probe。
 2. validation view ready，但 account safety 不 clear：不得进入 live admission probe。
 3. recon probe 成功，但 rhythm gate 尚未允许 live admission probe：不得进入 live admission probe。
-4. recon probe 成功，但 live admission probe 未通过：仍不得进入 `closeout_bundle_allowed`。
+4. recon probe 成功，但 live admission probe 未通过，或未形成可机器校验的 live admission success 来源：仍不得进入 `closeout_bundle_allowed`。
 5. live admission probe 成功前尝试直接运行 `xhs.detail` / `xhs.user_home`：必须继续阻断。
 6. probe bundle 错误或 scope 混用：必须视为 admission invalid。
 7. 企图把具体 profile 名字写成 formal contract 常量：视为 scope 污染。

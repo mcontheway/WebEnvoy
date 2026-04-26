@@ -79,6 +79,29 @@ type XhsCloseoutAdmissionLiveProbeV1 = {
 - 它不允许被 `xhs.detail` / `xhs.user_home` 替代。
 - 它通过前，不得恢复 `#445` 的 `detail/user_home` 路径。
 
+### `XhsCloseoutAdmissionProbeSuccessV1`
+
+```ts
+type XhsCloseoutAdmissionProbeSuccessV1 = {
+  producer_command: "xhs.search";
+  producer_run_id: string;
+  profile_ref: string;
+  target_domain: "www.xiaohongshu.com";
+  browser_channel: "Google Chrome stable";
+  execution_surface: "real_browser";
+  effective_execution_mode: "live_read_high_risk";
+  probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1";
+  runtime_audit_run_id: string;
+};
+```
+
+约束：
+
+- `producer_run_id` 只允许来自当前 `closeout_admission_probe_live` 的 producer run。
+- `runtime_audit_run_id` 必须与 `producer_run_id` 相同，不得引用 recon probe 或其他命令 run。
+- `profile_ref`、`target_domain`、`browser_channel`、`execution_surface`、`effective_execution_mode`、`probe_bundle_ref` 必须与当前 `XhsCloseoutRecoveryScopeV1` 和 live admission probe 定义一致。
+- 若缺少同 run 的 `runtime.audit` 追溯入口，或 run identity 与 scope 键不一致，则不得成立 `live admission success`。
+
 ## Validation Binding
 
 ```ts
@@ -146,7 +169,7 @@ type XhsCloseoutAdmissionLiveProbeGateV1 = {
 ```ts
 type XhsCloseoutBundleAdmissionPredicateV1 = {
   recon_probe_passed: true;
-  live_admission_probe_passed: true;
+  live_admission_probe_success: XhsCloseoutAdmissionProbeSuccessV1;
   account_safety_state: "clear";
   rhythm_stage_allows_escalation: true;
   validation_requirements_satisfied: true;
@@ -156,7 +179,7 @@ type XhsCloseoutBundleAdmissionPredicateV1 = {
 当前 v1 进入 `closeout_bundle_allowed` 的正式条件固定为：
 
 1. recon recovery probe 已通过
-2. closeout admission live probe 已通过
+2. 存在一条 `XhsCloseoutAdmissionProbeSuccessV1`
 3. `runtime.status.account_safety.state = clear`
 4. `runtime.status.xhs_closeout_rhythm` 已允许从 live admission probe 进入 bundle escalation
 5. `FR-0012/0013/0014` 三条 validation view 全部满足 `ready + verified + no_drift`

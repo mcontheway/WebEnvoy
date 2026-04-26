@@ -148,6 +148,30 @@
 - `recon` 与 `live_read_high_risk` 不得共用同一 baseline scope。
 - 不同 `profile_ref`、`browser_channel`、`execution_surface`、`effective_execution_mode`、`probe_bundle_ref` 之间不得互相替代。
 
+### 7. `XhsCloseoutAdmissionProbeSuccessV1`
+
+角色：
+
+- `FR-0029` 自有的 formal derived success identity
+
+字段：
+
+- `producer_command = xhs.search`
+- `producer_run_id`
+- `profile_ref`
+- `target_domain = www.xiaohongshu.com`
+- `browser_channel = Google Chrome stable`
+- `execution_surface = real_browser`
+- `effective_execution_mode = live_read_high_risk`
+- `probe_bundle_ref = probe-bundle/xhs-closeout-min-v1`
+- `runtime_audit_run_id`
+
+约束：
+
+- 这不是新的持久化真相源，而是从既有 producer run 与同 run `runtime.audit` 读模型中导出的正式成功标识。
+- `runtime_audit_run_id` 必须与 `producer_run_id` 相同。
+- 不得引用 recon probe、非 `xhs.search` 命令、错误 execution mode、错误 bundle 或错误 scope 的 run 作为 live admission success。
+
 ## Admission Predicate
 
 ### 1. `closeout_admission_probe_live` 进入条件
@@ -169,7 +193,7 @@
 `closeout_bundle_allowed` 的正式判断输入必须同时满足：
 
 - `recon_probe_passed = true`
-- `live_admission_probe_passed = true`
+- `live_admission_probe_success = XhsCloseoutAdmissionProbeSuccessV1`
 - `account_safety_state = clear`
 - `rhythm_stage_allows_escalation = true`
 - `validation_requirements_satisfied = true`
@@ -177,7 +201,7 @@
 其中：
 
 - `recon_probe_passed` 指 `xhs.search + options.xhs_recovery_probe=true + requested_execution_mode=recon`
-- `live_admission_probe_passed` 指 `xhs.search + requested_execution_mode=live_read_high_risk` 的 closeout admission probe
+- `live_admission_probe_success` 指 `xhs.search + requested_execution_mode=live_read_high_risk` 的 closeout admission probe 成功后，导出的带 producer/run identity 的正式成功标识
 - `validation_requirements_satisfied` 指三条 validation view 全部满足 `ready + verified + no_drift`
 
 ## 不属于本 FR 的对象
