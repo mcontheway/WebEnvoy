@@ -18,6 +18,7 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+const hasOwn = (record, key) => Object.prototype.hasOwnProperty.call(record, key);
 const resolveRuntimeBridge = () => {
     if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
         return new NativeMessagingBridge({
@@ -77,15 +78,16 @@ const buildSessionRhythmStatusViewForProfile = async (cwd, profile) => {
 };
 const resolveAntiDetectionEffectiveExecutionMode = (value) => {
     const mode = asString(value) ?? "live_read_high_risk";
-    if (mode === "dry_run" ||
-        mode === "recon" ||
-        mode === "live_read_limited" ||
-        mode === "live_read_high_risk" ||
-        mode === "live_write") {
+    if (isAntiDetectionExecutionMode(mode)) {
         return mode;
     }
     return "live_read_high_risk";
 };
+const isAntiDetectionExecutionMode = (mode) => mode === "dry_run" ||
+    mode === "recon" ||
+    mode === "live_read_limited" ||
+    mode === "live_read_high_risk" ||
+    mode === "live_write";
 const buildAntiDetectionValidationViewForProfile = async (input) => {
     if (!input.profile) {
         return null;
@@ -209,6 +211,16 @@ const runtimeAuditQuery = async (context) => {
     const requestedExecutionMode = asString(context.params.requested_execution_mode);
     const limitRaw = asInteger(context.params.limit);
     const limit = limitRaw === null ? 20 : Math.max(1, Math.min(100, limitRaw));
+    if (hasOwn(context.params, "requested_execution_mode") &&
+        (!requestedExecutionMode || !isAntiDetectionExecutionMode(requestedExecutionMode))) {
+        throw new CliError("ERR_CLI_INVALID_ARGS", "审计查询参数不合法", {
+            details: {
+                ability_id: "runtime.audit",
+                stage: "input_validation",
+                reason: "AUDIT_QUERY_REQUESTED_EXECUTION_MODE_INVALID"
+            }
+        });
+    }
     if (!runId && !sessionId && !profile) {
         throw new CliError("ERR_CLI_INVALID_ARGS", "审计查询参数不合法", {
             details: {

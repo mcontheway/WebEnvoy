@@ -26,7 +26,8 @@ import {
 import {
   RuntimeStoreError,
   SQLiteRuntimeStore,
-  resolveRuntimeStorePath
+  resolveRuntimeStorePath,
+  type AntiDetectionExecutionMode
 } from "../runtime/store/sqlite-runtime-store.js";
 import {
   readXhsCloseoutValidationGateView,
@@ -44,6 +45,8 @@ const asObject = (value: unknown): Record<string, unknown> | null =>
     : null;
 const asStringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+const hasOwn = (record: Record<string, unknown>, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(record, key);
 
 const resolveRuntimeBridge = (): NativeMessagingBridge => {
   if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
@@ -115,17 +118,18 @@ const buildSessionRhythmStatusViewForProfile = async (
 
 const resolveAntiDetectionEffectiveExecutionMode = (value: unknown) => {
   const mode = asString(value) ?? "live_read_high_risk";
-  if (
-    mode === "dry_run" ||
-    mode === "recon" ||
-    mode === "live_read_limited" ||
-    mode === "live_read_high_risk" ||
-    mode === "live_write"
-  ) {
+  if (isAntiDetectionExecutionMode(mode)) {
     return mode;
   }
   return "live_read_high_risk";
 };
+
+const isAntiDetectionExecutionMode = (mode: string): mode is AntiDetectionExecutionMode =>
+    mode === "dry_run" ||
+    mode === "recon" ||
+    mode === "live_read_limited" ||
+    mode === "live_read_high_risk" ||
+    mode === "live_write";
 
 const buildAntiDetectionValidationViewForProfile = async (input: {
   store: SQLiteRuntimeStore;
@@ -279,6 +283,19 @@ const runtimeAuditQuery = async (context: RuntimeContext) => {
   const requestedExecutionMode = asString(context.params.requested_execution_mode);
   const limitRaw = asInteger(context.params.limit);
   const limit = limitRaw === null ? 20 : Math.max(1, Math.min(100, limitRaw));
+
+  if (
+    hasOwn(context.params, "requested_execution_mode") &&
+    (!requestedExecutionMode || !isAntiDetectionExecutionMode(requestedExecutionMode))
+  ) {
+    throw new CliError("ERR_CLI_INVALID_ARGS", "审计查询参数不合法", {
+      details: {
+        ability_id: "runtime.audit",
+        stage: "input_validation",
+        reason: "AUDIT_QUERY_REQUESTED_EXECUTION_MODE_INVALID"
+      }
+    });
+  }
 
   if (!runId && !sessionId && !profile) {
     throw new CliError("ERR_CLI_INVALID_ARGS", "审计查询参数不合法", {

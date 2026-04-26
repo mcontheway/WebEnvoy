@@ -3441,6 +3441,32 @@ process.stdin.on("data", (chunk) => {
     });
   });
 
+  it("returns invalid args when runtime.audit requested_execution_mode is invalid", () => {
+    const result = runCli([
+      "runtime.audit",
+      "--run-id",
+      "run-audit-invalid-requested-mode-query-001",
+      "--params",
+      JSON.stringify({
+        profile: "xhs_account_001",
+        requested_execution_mode: "invalid_live_mode"
+      })
+    ], repoRoot);
+
+    expect(result.status).toBe(2);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.audit",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "AUDIT_QUERY_REQUESTED_EXECUTION_MODE_INVALID"
+        }
+      }
+    });
+  });
+
   itWithSqlite("persists issue_scope for issue_208 audit records and returns matching write matrix query", async () => {
     const cwd = await createRuntimeCwd();
     const runId = "run-audit-query-issue-scope-208-001";
