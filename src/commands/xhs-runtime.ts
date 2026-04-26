@@ -449,7 +449,8 @@ const assertXhsLivePreflightAllowsCommand = (input: {
     !xhsLiveReadBaselineGate &&
     isLiveXhsExecutionMode(input.requestedExecutionMode) &&
     accountSafetyClear &&
-    rhythmState === "single_probe_passed"
+    rhythmState === "single_probe_passed" &&
+    input.antiDetectionValidationView?.all_required_ready === true
   ) {
     return;
   }
@@ -464,7 +465,7 @@ const assertXhsLivePreflightAllowsCommand = (input: {
           ? "ACCOUNT_RISK_BLOCKED"
           : recoveryProbe && input.requestedExecutionMode !== "recon"
             ? "XHS_RECOVERY_PROBE_MODE_INVALID"
-          : !recoveryProbe && xhsLiveReadBaselineGate && rhythmState === "single_probe_passed"
+          : !recoveryProbe && isLiveXhsExecutionMode(input.requestedExecutionMode) && rhythmState === "single_probe_passed"
             ? "ANTI_DETECTION_VALIDATION_BASELINE_BLOCKED"
           : fullBundleBlocked || singleProbeRequired
             ? "XHS_CLOSEOUT_RHYTHM_BLOCKED"
@@ -634,7 +635,7 @@ const xhsReadCommand = async (
     if (shouldRunRhythmGate) {
       if (
         !recoveryProbeRequested &&
-        xhsLiveReadBaselineGateRequested &&
+        liveXhsCommandRequested &&
         rhythmState === "single_probe_passed"
       ) {
         let store: SQLiteRuntimeStore | null = null;

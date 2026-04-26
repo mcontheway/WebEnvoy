@@ -2043,6 +2043,88 @@ describe("normalizeGateOptionsForContract", () => {
     }
   });
 
+  it("blocks non-closeout XHS live commands after recovery probe until validation baseline is ready", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-rhythm-live-write-baseline-"));
+    try {
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.initializeMeta(
+        "xhs_rhythm_live_write_baseline_profile",
+        "2026-04-25T10:00:00.000Z",
+        { allowUnsupportedExtensionBrowser: true }
+      );
+      await profileStore.writeMeta("xhs_rhythm_live_write_baseline_profile", {
+        ...meta,
+        accountSafety: {
+          state: "clear",
+          platform: null,
+          reason: null,
+          observedAt: null,
+          cooldownUntil: null,
+          sourceRunId: null,
+          sourceCommand: null,
+          targetDomain: null,
+          targetTabId: null,
+          pageUrl: null,
+          statusCode: null,
+          platformCode: null
+        },
+        xhsCloseoutRhythm: {
+          state: "single_probe_passed",
+          cooldownUntil: "2000-01-01T00:30:00.000Z",
+          operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+          singleProbeRequired: false,
+          singleProbePassedAt: "2026-04-25T10:40:00.000Z",
+          probeRunId: "run-live-write-baseline-recovery-probe",
+          fullBundleBlocked: true,
+          reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED", "ANTI_DETECTION_BASELINE_REQUIRED"]
+        }
+      });
+
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.search",
+            profile: "xhs_rhythm_live_write_baseline_profile",
+            run_id: "run-rhythm-live-write-baseline-001",
+            params: {
+              ability: {
+                id: "xhs.note.search.v1",
+                layer: "L3",
+                action: "write"
+              },
+              input: {
+                query: "露营装备"
+              },
+              options: {
+                issue_scope: "issue_208",
+                target_domain: "creator.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "creator_publish_tab",
+                action_type: "write",
+                requested_execution_mode: "live_write",
+                validation_action: "editor_input",
+                risk_state: "allowed"
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "ANTI_DETECTION_VALIDATION_BASELINE_BLOCKED",
+          anti_detection_validation_view: expect.objectContaining({
+            effective_execution_mode: "live_write",
+            all_required_ready: false
+          })
+        }
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("allows a marked xhs.search recovery single-probe and records the passed probe", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-rhythm-probe-"));
     const runId = "run-rhythm-probe-001";
