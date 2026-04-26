@@ -16,7 +16,7 @@
 
 ### 阶段 2：recovery admission contract 冻结
 
-- 产出：`spec.md`、`contracts/xhs-closeout-recovery-admission.md`
+- 产出：`spec.md`、`contracts/xhs-closeout-recovery-admission.md`、`data-model.md`
 - 重点：
   - 冻结三段恢复阶段
   - 冻结 recon probe 与 live admission probe 的正式分工
@@ -38,6 +38,7 @@
 - 不把具体 profile 名（例如 `xhs_001`）冻结为 formal contract 常量。
 - 不把 `#238 / FR-0022` 直接升级为最小恢复门。
 - 不执行 `#445` full closeout bundle 或其他 fresh live rerun。
+- `data-model.md` 只允许冻结“复用哪些既有 formal object family”与“哪些字段组成恢复作用域 / admission predicate”，不得借机发明新的持久化真相源。
 
 ## 测试与验证策略
 

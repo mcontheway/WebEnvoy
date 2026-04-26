@@ -11,6 +11,7 @@
 - [ ] reviewer 确认 `FR-0012`、`FR-0013`、`FR-0014` 三条 validation view 已被显式绑定为 `ready + verified + no_drift`
 - [ ] reviewer 确认 `probe-bundle/xhs-recovery-recon-v1` 与 `probe-bundle/xhs-closeout-min-v1` 已被冻结为两条独立 formal bundle
 - [ ] reviewer 确认不同 bundle / execution mode / profile_ref / execution_surface 不得互相替代
+- [ ] reviewer 确认 `data-model.md` 只复用既有 formal object family，没有发明新的持久化真相源
 - [ ] reviewer 确认具体 profile 名（例如 `xhs_001`）没有被写成 formal contract 常量
 - [ ] reviewer 确认 `#238 / FR-0022` 当前只保留条件升级 hook，未被直接提升为最小恢复门
 - [ ] reviewer 确认后续实现顺序已冻结为 `#265 -> #267 -> #266 -> #239 -> #552 integrated verify`
