@@ -387,15 +387,16 @@ const isXhsRecoveryProbe = (input: {
   input.ability.id === "xhs.note.search.v1" &&
   input.options.xhs_recovery_probe === true;
 
-const isIssue209LiveReadCloseoutCommand = (input: {
+const isXhsLiveReadBaselineGateCommand = (input: {
   command: string;
+  ability: AbilityRef;
   options: JsonObject;
   requestedExecutionMode: XhsExecutionMode;
 }): boolean =>
   (input.command === "xhs.search" ||
     input.command === "xhs.detail" ||
     input.command === "xhs.user_home") &&
-  input.options.issue_scope === "issue_209" &&
+  input.ability.action === "read" &&
   isLiveXhsReadExecutionMode(input.requestedExecutionMode);
 
 const assertXhsLivePreflightAllowsCommand = (input: {
@@ -408,7 +409,7 @@ const assertXhsLivePreflightAllowsCommand = (input: {
   requestedExecutionMode: XhsExecutionMode;
 }): void => {
   const recoveryProbe = isXhsRecoveryProbe(input);
-  const issue209LiveReadCloseout = isIssue209LiveReadCloseoutCommand(input);
+  const xhsLiveReadBaselineGate = isXhsLiveReadBaselineGateCommand(input);
   const rhythmState = asString(input.xhsCloseoutRhythm.state);
   const fullBundleBlocked = input.xhsCloseoutRhythm.full_bundle_blocked === true;
   const singleProbeRequired = input.xhsCloseoutRhythm.single_probe_required === true;
@@ -427,7 +428,7 @@ const assertXhsLivePreflightAllowsCommand = (input: {
 
   if (
     !recoveryProbe &&
-    issue209LiveReadCloseout &&
+    xhsLiveReadBaselineGate &&
     accountSafetyClear &&
     rhythmState === "single_probe_passed" &&
     input.antiDetectionValidationView?.all_required_ready === true
@@ -437,7 +438,7 @@ const assertXhsLivePreflightAllowsCommand = (input: {
 
   if (
     !recoveryProbe &&
-    !issue209LiveReadCloseout &&
+    !xhsLiveReadBaselineGate &&
     isLiveXhsExecutionMode(input.requestedExecutionMode) &&
     accountSafetyClear &&
     (rhythmState === "not_required" || rhythmState === "single_probe_passed")
@@ -455,7 +456,7 @@ const assertXhsLivePreflightAllowsCommand = (input: {
           ? "ACCOUNT_RISK_BLOCKED"
           : recoveryProbe && input.requestedExecutionMode !== "recon"
             ? "XHS_RECOVERY_PROBE_MODE_INVALID"
-          : !recoveryProbe && issue209LiveReadCloseout && rhythmState === "single_probe_passed"
+          : !recoveryProbe && xhsLiveReadBaselineGate && rhythmState === "single_probe_passed"
             ? "ANTI_DETECTION_VALIDATION_BASELINE_BLOCKED"
           : fullBundleBlocked || singleProbeRequired
             ? "XHS_CLOSEOUT_RHYTHM_BLOCKED"
@@ -603,8 +604,9 @@ const xhsReadCommand = async (
     options: gate.options
   });
   const liveXhsCommandRequested = isLiveXhsExecutionMode(gate.requestedExecutionMode);
-  const issue209LiveReadCloseoutRequested = isIssue209LiveReadCloseoutCommand({
+  const xhsLiveReadBaselineGateRequested = isXhsLiveReadBaselineGateCommand({
     command: context.command,
+    ability: envelope.ability,
     options: gate.options,
     requestedExecutionMode: gate.requestedExecutionMode
   });
@@ -625,7 +627,7 @@ const xhsReadCommand = async (
     if (shouldRunRhythmGate) {
       if (
         !recoveryProbeRequested &&
-        issue209LiveReadCloseoutRequested &&
+        xhsLiveReadBaselineGateRequested &&
         rhythmState === "single_probe_passed"
       ) {
         let store: SQLiteRuntimeStore | null = null;

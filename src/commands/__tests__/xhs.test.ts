@@ -1707,7 +1707,7 @@ describe("normalizeGateOptionsForContract", () => {
     }
   });
 
-  it("blocks issue_209 live reads at the validation baseline gate even when action_type is omitted", async () => {
+  it("blocks XHS live reads at the validation baseline gate even when scope and action_type are omitted", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-baseline-action-omitted-"));
     try {
       const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
@@ -1761,7 +1761,6 @@ describe("normalizeGateOptionsForContract", () => {
                 query: "露营"
               },
               options: {
-                issue_scope: "issue_209",
                 target_domain: "www.xiaohongshu.com",
                 target_tab_id: 32,
                 target_page: "search_result_tab",
