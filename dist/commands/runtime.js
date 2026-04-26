@@ -206,6 +206,7 @@ const runtimeAuditQuery = async (context) => {
     const runId = asString(context.params.run_id);
     const sessionId = asString(context.params.session_id);
     const profile = asString(context.params.profile);
+    const requestedExecutionMode = asString(context.params.requested_execution_mode);
     const limitRaw = asInteger(context.params.limit);
     const limit = limitRaw === null ? 20 : Math.max(1, Math.min(100, limitRaw));
     if (!runId && !sessionId && !profile) {
@@ -229,12 +230,14 @@ const runtimeAuditQuery = async (context) => {
             const antiDetectionValidationView = await buildAntiDetectionValidationViewForProfile({
                 store,
                 profile: auditProfile,
-                effectiveExecutionMode: enrichedAuditRecords[0]
-                    ?.effective_execution_mode
+                effectiveExecutionMode: requestedExecutionMode ??
+                    enrichedAuditRecords[0]
+                        ?.effective_execution_mode
             });
             return {
                 query: {
-                    run_id: runId
+                    run_id: runId,
+                    ...(requestedExecutionMode ? { requested_execution_mode: requestedExecutionMode } : {})
                 },
                 approval_record: trail.approvalRecord,
                 audit_records: enrichedAuditRecords,
@@ -260,13 +263,15 @@ const runtimeAuditQuery = async (context) => {
         const antiDetectionValidationView = await buildAntiDetectionValidationViewForProfile({
             store,
             profile: profile ?? auditProfile,
-            effectiveExecutionMode: enrichedAuditRecords[0]
-                ?.effective_execution_mode
+            effectiveExecutionMode: requestedExecutionMode ??
+                enrichedAuditRecords[0]
+                    ?.effective_execution_mode
         });
         return {
             query: {
                 ...(sessionId ? { session_id: sessionId } : {}),
                 ...(profile ? { profile } : {}),
+                ...(requestedExecutionMode ? { requested_execution_mode: requestedExecutionMode } : {}),
                 limit
             },
             audit_records: enrichedAuditRecords,

@@ -594,16 +594,19 @@ const xhsReadCommand = async (
     options: gate.options,
     requestedExecutionMode: gate.requestedExecutionMode
   });
+  const accountSafetyBlockedLiveCommand =
+    accountSafetyStatus.state === "account_risk_blocked" &&
+    (isLiveXhsExecutionMode(gate.requestedExecutionMode) || recoveryProbeRequested);
   let antiDetectionValidationGate: XhsCloseoutValidationGateView | null = null;
   if (
     context.profile &&
-    (issue209LiveReadCloseoutRequested || recoveryProbeRequested)
+    (issue209LiveReadCloseoutRequested || recoveryProbeRequested || accountSafetyBlockedLiveCommand)
   ) {
     const rhythmState = asString(xhsCloseoutRhythmStatus.state);
     const shouldRunRhythmGate =
       recoveryProbeRequested ||
       issue209LiveReadCloseoutRequested ||
-      accountSafetyStatus.state === "account_risk_blocked" ||
+      accountSafetyBlockedLiveCommand ||
       (rhythmState !== null && rhythmState !== "not_required");
     if (shouldRunRhythmGate) {
       if (

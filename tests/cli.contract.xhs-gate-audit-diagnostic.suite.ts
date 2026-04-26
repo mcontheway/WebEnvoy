@@ -3263,6 +3263,37 @@ process.stdin.on("data", (chunk) => {
         })
       ])
     );
+
+    const reconQueryResult = runCli([
+      "runtime.audit",
+      "--run-id",
+      "run-audit-validation-status-view-recon-001",
+      "--params",
+      JSON.stringify({
+        profile,
+        requested_execution_mode: "recon",
+        limit: 1
+      })
+    ], cwd);
+    expect(reconQueryResult.status).toBe(0);
+    const reconBody = parseSingleJsonLine(reconQueryResult.stdout);
+    expect(reconBody).toMatchObject({
+      status: "success",
+      summary: {
+        query: {
+          profile,
+          requested_execution_mode: "recon",
+          limit: 1
+        },
+        anti_detection_validation_view: {
+          profile_ref: `profile/${profile}`,
+          effective_execution_mode: "recon",
+          all_required_ready: false,
+          missing_target_fr_refs: ["FR-0012", "FR-0013", "FR-0014"],
+          blocking_target_fr_refs: ["FR-0012", "FR-0013", "FR-0014"]
+        }
+      }
+    });
   });
 
   itWithSqlite("persists issue_scope for issue_208 audit records and returns matching write matrix query", async () => {
