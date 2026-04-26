@@ -303,10 +303,16 @@ const assertXhsLivePreflightAllowsCommand = (input) => {
         return;
     }
     if (!recoveryProbe &&
+        isLiveXhsExecutionMode(input.requestedExecutionMode) &&
+        accountSafetyClear &&
+        rhythmState === "not_required") {
+        return;
+    }
+    if (!recoveryProbe &&
         !xhsLiveReadBaselineGate &&
         isLiveXhsExecutionMode(input.requestedExecutionMode) &&
         accountSafetyClear &&
-        (rhythmState === "not_required" || rhythmState === "single_probe_passed")) {
+        rhythmState === "single_probe_passed") {
         return;
     }
     throw new CliError("ERR_EXECUTION_FAILED", "XHS account-safety gate blocked current live command", {

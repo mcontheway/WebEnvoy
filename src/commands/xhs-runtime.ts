@@ -437,10 +437,19 @@ const assertXhsLivePreflightAllowsCommand = (input: {
 
   if (
     !recoveryProbe &&
+    isLiveXhsExecutionMode(input.requestedExecutionMode) &&
+    accountSafetyClear &&
+    rhythmState === "not_required"
+  ) {
+    return;
+  }
+
+  if (
+    !recoveryProbe &&
     !xhsLiveReadBaselineGate &&
     isLiveXhsExecutionMode(input.requestedExecutionMode) &&
     accountSafetyClear &&
-    (rhythmState === "not_required" || rhythmState === "single_probe_passed")
+    rhythmState === "single_probe_passed"
   ) {
     return;
   }
