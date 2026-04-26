@@ -36,6 +36,7 @@ const LIVE_XHS_EXECUTION_MODES = new Set([
     "live_write"
 ]);
 const isLiveXhsExecutionMode = (mode) => LIVE_XHS_EXECUTION_MODES.has(mode);
+const isLiveXhsReadExecutionMode = (mode) => mode === "live_read_limited" || mode === "live_read_high_risk";
 const ACCOUNT_SAFETY_REASON_ALIASES = {
     SESSION_EXPIRED: "SESSION_EXPIRED",
     XHS_LOGIN_REQUIRED: "XHS_LOGIN_REQUIRED",
@@ -279,8 +280,7 @@ const isIssue209LiveReadCloseoutCommand = (input) => (input.command === "xhs.sea
     input.command === "xhs.detail" ||
     input.command === "xhs.user_home") &&
     input.options.issue_scope === "issue_209" &&
-    input.options.action_type === "read" &&
-    isLiveXhsExecutionMode(input.requestedExecutionMode);
+    isLiveXhsReadExecutionMode(input.requestedExecutionMode);
 const assertXhsLivePreflightAllowsCommand = (input) => {
     const recoveryProbe = isXhsRecoveryProbe(input);
     const issue209LiveReadCloseout = isIssue209LiveReadCloseoutCommand(input);
