@@ -17,6 +17,16 @@ import {
 import { toXhsCloseoutRhythmStatus } from "../runtime/xhs-closeout-rhythm.js";
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
+import {
+  readXhsCloseoutValidationGateView,
+  toXhsCloseoutValidationGateJson,
+  type XhsCloseoutValidationGateView
+} from "../runtime/anti-detection-validation.js";
+import {
+  RuntimeStoreError,
+  SQLiteRuntimeStore,
+  resolveRuntimeStorePath
+} from "../runtime/store/sqlite-runtime-store.js";
 import { prepareOfficialChromeRuntime } from "../runtime/official-chrome-runtime.js";
 import { buildOfficialChromeRuntimeStatusParams } from "../runtime/official-chrome-runtime.js";
 import {
@@ -70,6 +80,9 @@ const LIVE_XHS_EXECUTION_MODES = new Set<XhsExecutionMode>([
 
 const isLiveXhsExecutionMode = (mode: XhsExecutionMode): boolean =>
   LIVE_XHS_EXECUTION_MODES.has(mode);
+
+const isLiveXhsReadExecutionMode = (mode: XhsExecutionMode): boolean =>
+  mode === "live_read_limited" || mode === "live_read_high_risk";
 
 const ACCOUNT_SAFETY_REASON_ALIASES: Record<string, AccountSafetyReason> = {
   SESSION_EXPIRED: "SESSION_EXPIRED",
@@ -173,6 +186,7 @@ const pickGateErrorDetails = (
     "risk_state_output",
     "account_safety",
     "xhs_closeout_rhythm",
+    "anti_detection_validation_view",
     "runtime_stop",
     "status_code",
     "platform_code"
@@ -374,26 +388,69 @@ const isXhsRecoveryProbe = (input: {
   input.ability.id === "xhs.note.search.v1" &&
   input.options.xhs_recovery_probe === true;
 
+const isXhsLiveReadBaselineGateCommand = (input: {
+  command: string;
+  options: JsonObject;
+  requestedExecutionMode: XhsExecutionMode;
+}): boolean =>
+  (input.command === "xhs.search" ||
+    input.command === "xhs.detail" ||
+    input.command === "xhs.user_home") &&
+  isLiveXhsReadExecutionMode(input.requestedExecutionMode);
+
 const assertXhsLivePreflightAllowsCommand = (input: {
   command: string;
   ability: AbilityRef;
   accountSafety: JsonObject;
   xhsCloseoutRhythm: JsonObject;
+  antiDetectionValidationView?: XhsCloseoutValidationGateView | null;
   options: JsonObject;
   requestedExecutionMode: XhsExecutionMode;
 }): void => {
   const recoveryProbe = isXhsRecoveryProbe(input);
+  const xhsLiveReadBaselineGate = isXhsLiveReadBaselineGateCommand(input);
   const rhythmState = asString(input.xhsCloseoutRhythm.state);
   const fullBundleBlocked = input.xhsCloseoutRhythm.full_bundle_blocked === true;
   const singleProbeRequired = input.xhsCloseoutRhythm.single_probe_required === true;
   const probeRunId = asString(input.xhsCloseoutRhythm.probe_run_id);
+  const accountSafetyClear = input.accountSafety.state === "clear";
 
   if (
     recoveryProbe &&
     input.requestedExecutionMode === "recon" &&
     rhythmState === "single_probe_required" &&
-    input.accountSafety.state !== "account_risk_blocked" &&
+    accountSafetyClear &&
     probeRunId === null
+  ) {
+    return;
+  }
+
+  if (
+    !recoveryProbe &&
+    xhsLiveReadBaselineGate &&
+    accountSafetyClear &&
+    rhythmState === "single_probe_passed" &&
+    input.antiDetectionValidationView?.all_required_ready === true
+  ) {
+    return;
+  }
+
+  if (
+    !recoveryProbe &&
+    isLiveXhsExecutionMode(input.requestedExecutionMode) &&
+    accountSafetyClear &&
+    rhythmState === "not_required"
+  ) {
+    return;
+  }
+
+  if (
+    !recoveryProbe &&
+    !xhsLiveReadBaselineGate &&
+    isLiveXhsExecutionMode(input.requestedExecutionMode) &&
+    accountSafetyClear &&
+    rhythmState === "single_probe_passed" &&
+    input.antiDetectionValidationView?.all_required_ready === true
   ) {
     return;
   }
@@ -408,11 +465,20 @@ const assertXhsLivePreflightAllowsCommand = (input: {
           ? "ACCOUNT_RISK_BLOCKED"
           : recoveryProbe && input.requestedExecutionMode !== "recon"
             ? "XHS_RECOVERY_PROBE_MODE_INVALID"
+          : !recoveryProbe && isLiveXhsExecutionMode(input.requestedExecutionMode) && rhythmState === "single_probe_passed"
+            ? "ANTI_DETECTION_VALIDATION_BASELINE_BLOCKED"
           : fullBundleBlocked || singleProbeRequired
             ? "XHS_CLOSEOUT_RHYTHM_BLOCKED"
             : "XHS_CLOSEOUT_RHYTHM_UNAVAILABLE",
       account_safety: input.accountSafety,
-      xhs_closeout_rhythm: input.xhsCloseoutRhythm
+      xhs_closeout_rhythm: input.xhsCloseoutRhythm,
+      ...(input.antiDetectionValidationView
+        ? {
+            anti_detection_validation_view: toXhsCloseoutValidationGateJson(
+              input.antiDetectionValidationView
+            )
+          }
+        : {})
     }
   });
 };
@@ -546,21 +612,71 @@ const xhsReadCommand = async (
     ability: envelope.ability,
     options: gate.options
   });
+  const liveXhsCommandRequested = isLiveXhsExecutionMode(gate.requestedExecutionMode);
+  const xhsLiveReadBaselineGateRequested = isXhsLiveReadBaselineGateCommand({
+    command: context.command,
+    options: gate.options,
+    requestedExecutionMode: gate.requestedExecutionMode
+  });
+  const accountSafetyBlockedLiveCommand =
+    accountSafetyStatus.state === "account_risk_blocked" &&
+    (liveXhsCommandRequested || recoveryProbeRequested);
+  let antiDetectionValidationGate: XhsCloseoutValidationGateView | null = null;
   if (
     context.profile &&
-    (isLiveXhsExecutionMode(gate.requestedExecutionMode) || recoveryProbeRequested)
+    (liveXhsCommandRequested || recoveryProbeRequested || accountSafetyBlockedLiveCommand)
   ) {
     const rhythmState = asString(xhsCloseoutRhythmStatus.state);
     const shouldRunRhythmGate =
       recoveryProbeRequested ||
-      accountSafetyStatus.state === "account_risk_blocked" ||
+      liveXhsCommandRequested ||
+      accountSafetyBlockedLiveCommand ||
       (rhythmState !== null && rhythmState !== "not_required");
     if (shouldRunRhythmGate) {
+      if (
+        !recoveryProbeRequested &&
+        liveXhsCommandRequested &&
+        rhythmState === "single_probe_passed"
+      ) {
+        let store: SQLiteRuntimeStore | null = null;
+        try {
+          store = new SQLiteRuntimeStore(resolveRuntimeStorePath(context.cwd));
+          antiDetectionValidationGate = await readXhsCloseoutValidationGateView({
+            store,
+            profile: context.profile,
+            effectiveExecutionMode: gate.requestedExecutionMode
+          });
+        } catch (error) {
+          if (error instanceof RuntimeStoreError) {
+            if (error.code === "ERR_RUNTIME_STORE_INVALID_INPUT") {
+              throw new CliError("ERR_CLI_INVALID_ARGS", "XHS 反检测验证查询参数不合法", {
+                details: {
+                  ability_id: envelope.ability.id,
+                  stage: "input_validation",
+                  reason: "ANTI_DETECTION_VALIDATION_QUERY_INVALID_INPUT"
+                }
+              });
+            }
+            throw new CliError("ERR_RUNTIME_UNAVAILABLE", `运行记录存储失败: ${error.code}`, {
+              retryable: error.code !== "ERR_RUNTIME_STORE_SCHEMA_MISMATCH",
+              cause: error
+            });
+          }
+          throw error;
+        } finally {
+          try {
+            store?.close();
+          } catch {
+            // Read-only preflight best-effort close.
+          }
+        }
+      }
       assertXhsLivePreflightAllowsCommand({
         command: context.command,
         ability: envelope.ability,
         accountSafety: accountSafetyStatus,
         xhsCloseoutRhythm: xhsCloseoutRhythmStatus,
+        antiDetectionValidationView: antiDetectionValidationGate,
         options: gate.options,
         requestedExecutionMode: gate.requestedExecutionMode
       });

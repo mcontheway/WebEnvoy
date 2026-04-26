@@ -10,6 +10,7 @@ import { toSessionRhythmStatusView } from "../runtime/xhs-closeout-rhythm.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import { buildUnifiedRiskStateOutput, resolveRiskState } from "../runtime/risk-state.js";
 import { RuntimeStoreError, SQLiteRuntimeStore, resolveRuntimeStorePath } from "../runtime/store/sqlite-runtime-store.js";
+import { readXhsCloseoutValidationGateView, toXhsCloseoutValidationGateJson } from "../runtime/anti-detection-validation.js";
 const asBoolean = (value) => value === true;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
@@ -17,6 +18,7 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asStringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+const hasOwn = (record, key) => Object.prototype.hasOwnProperty.call(record, key);
 const resolveRuntimeBridge = () => {
     if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
         return new NativeMessagingBridge({
@@ -73,6 +75,29 @@ const buildSessionRhythmStatusViewForProfile = async (cwd, profile) => {
     catch {
         return null;
     }
+};
+const resolveAntiDetectionEffectiveExecutionMode = (value) => {
+    const mode = asString(value) ?? "live_read_high_risk";
+    if (isAntiDetectionExecutionMode(mode)) {
+        return mode;
+    }
+    return "live_read_high_risk";
+};
+const isAntiDetectionExecutionMode = (mode) => mode === "dry_run" ||
+    mode === "recon" ||
+    mode === "live_read_limited" ||
+    mode === "live_read_high_risk" ||
+    mode === "live_write";
+const buildAntiDetectionValidationViewForProfile = async (input) => {
+    if (!input.profile) {
+        return null;
+    }
+    const gate = await readXhsCloseoutValidationGateView({
+        store: input.store,
+        profile: input.profile,
+        effectiveExecutionMode: resolveAntiDetectionEffectiveExecutionMode(input.effectiveExecutionMode)
+    });
+    return toXhsCloseoutValidationGateJson(gate);
 };
 const resolveCurrentRiskState = (approvalRecord, auditRecords) => {
     const latestAudit = auditRecords[0] ?? null;
@@ -183,8 +208,19 @@ const runtimeAuditQuery = async (context) => {
     const runId = asString(context.params.run_id);
     const sessionId = asString(context.params.session_id);
     const profile = asString(context.params.profile);
+    const requestedExecutionMode = asString(context.params.requested_execution_mode);
     const limitRaw = asInteger(context.params.limit);
     const limit = limitRaw === null ? 20 : Math.max(1, Math.min(100, limitRaw));
+    if (hasOwn(context.params, "requested_execution_mode") &&
+        (!requestedExecutionMode || !isAntiDetectionExecutionMode(requestedExecutionMode))) {
+        throw new CliError("ERR_CLI_INVALID_ARGS", "审计查询参数不合法", {
+            details: {
+                ability_id: "runtime.audit",
+                stage: "input_validation",
+                reason: "AUDIT_QUERY_REQUESTED_EXECUTION_MODE_INVALID"
+            }
+        });
+    }
     if (!runId && !sessionId && !profile) {
         throw new CliError("ERR_CLI_INVALID_ARGS", "审计查询参数不合法", {
             details: {
@@ -203,9 +239,19 @@ const runtimeAuditQuery = async (context) => {
             const currentRiskState = resolveCurrentRiskState(asObject(trail.approvalRecord), enrichedAuditRecords);
             const auditProfile = asString(enrichedAuditRecords[0]?.profile);
             const sessionRhythmStatusView = await buildSessionRhythmStatusViewForProfile(context.cwd, auditProfile);
+            const antiDetectionValidationView = await buildAntiDetectionValidationViewForProfile({
+                store,
+                profile: auditProfile,
+                effectiveExecutionMode: requestedExecutionMode ??
+                    enrichedAuditRecords[0]
+                        ?.requested_execution_mode ??
+                    enrichedAuditRecords[0]
+                        ?.effective_execution_mode
+            });
             return {
                 query: {
-                    run_id: runId
+                    run_id: runId,
+                    ...(requestedExecutionMode ? { requested_execution_mode: requestedExecutionMode } : {})
                 },
                 approval_record: trail.approvalRecord,
                 audit_records: enrichedAuditRecords,
@@ -215,7 +261,8 @@ const runtimeAuditQuery = async (context) => {
                 risk_state_output: buildUnifiedRiskStateOutput(currentRiskState, {
                     auditRecords: enrichedAuditRecords
                 }),
-                session_rhythm_status_view: sessionRhythmStatusView
+                session_rhythm_status_view: sessionRhythmStatusView,
+                anti_detection_validation_view: antiDetectionValidationView
             };
         }
         const records = await store.listGateAuditRecords({
@@ -227,10 +274,20 @@ const runtimeAuditQuery = async (context) => {
         const currentRiskState = resolveCurrentRiskState(null, enrichedAuditRecords);
         const auditProfile = asString(enrichedAuditRecords[0]?.profile);
         const sessionRhythmStatusView = await buildSessionRhythmStatusViewForProfile(context.cwd, profile ?? auditProfile);
+        const antiDetectionValidationView = await buildAntiDetectionValidationViewForProfile({
+            store,
+            profile: profile ?? auditProfile,
+            effectiveExecutionMode: requestedExecutionMode ??
+                enrichedAuditRecords[0]
+                    ?.requested_execution_mode ??
+                enrichedAuditRecords[0]
+                    ?.effective_execution_mode
+        });
         return {
             query: {
                 ...(sessionId ? { session_id: sessionId } : {}),
                 ...(profile ? { profile } : {}),
+                ...(requestedExecutionMode ? { requested_execution_mode: requestedExecutionMode } : {}),
                 limit
             },
             audit_records: enrichedAuditRecords,
@@ -239,7 +296,8 @@ const runtimeAuditQuery = async (context) => {
             risk_state_output: buildUnifiedRiskStateOutput(currentRiskState, {
                 auditRecords: enrichedAuditRecords
             }),
-            session_rhythm_status_view: sessionRhythmStatusView
+            session_rhythm_status_view: sessionRhythmStatusView,
+            anti_detection_validation_view: antiDetectionValidationView
         };
     }
     catch (error) {

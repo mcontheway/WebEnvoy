@@ -3,6 +3,11 @@ import { join } from "node:path";
 
 import { createCommandRegistry } from "../../commands/index.js";
 import { executeCommand } from "../router.js";
+import { ProfileStore } from "../../runtime/profile-store.js";
+import {
+  SQLiteRuntimeStore,
+  resolveRuntimeStorePath
+} from "../../runtime/store/sqlite-runtime-store.js";
 import type { CommandExecutionResult, RuntimeContext } from "../types.js";
 
 const baseContext: RuntimeContext = {
@@ -79,6 +84,138 @@ describe("executeCommand", () => {
     target_page: "search_result_tab",
     requested_execution_mode: "dry_run"
   } as const;
+
+  const seedXhsCloseoutReady = async (input: {
+    cwd: string;
+    profile: string;
+    effectiveExecutionMode?: "live_read_high_risk";
+  }): Promise<void> => {
+    const effectiveExecutionMode = input.effectiveExecutionMode ?? "live_read_high_risk";
+    const profileStore = new ProfileStore(join(input.cwd, ".webenvoy", "profiles"));
+    const nowIso = new Date().toISOString();
+    const meta = await profileStore.initializeMeta(input.profile, nowIso, {
+      allowUnsupportedExtensionBrowser: true
+    });
+    await profileStore.writeMeta(input.profile, {
+      ...meta,
+      profileState: "ready",
+      accountSafety: {
+        state: "clear",
+        platform: null,
+        reason: null,
+        observedAt: null,
+        cooldownUntil: null,
+        sourceRunId: null,
+        sourceCommand: null,
+        targetDomain: null,
+        targetTabId: null,
+        pageUrl: null,
+        statusCode: null,
+        platformCode: null
+      },
+      xhsCloseoutRhythm: {
+        state: "single_probe_passed",
+        cooldownUntil: "2000-01-01T00:30:00.000Z",
+        operatorConfirmedAt: nowIso,
+        singleProbeRequired: false,
+        singleProbePassedAt: nowIso,
+        probeRunId: `run-${input.profile}-router-recovery-probe`,
+        fullBundleBlocked: true,
+        reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED", "ANTI_DETECTION_BASELINE_REQUIRED"]
+      }
+    });
+
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(input.cwd));
+    const safeProfile = input.profile.replace(/[^a-z0-9_-]+/gi, "-");
+    const scopes = [
+      ["FR-0012", "layer1_consistency"],
+      ["FR-0013", "layer2_interaction"],
+      ["FR-0014", "layer3_session_rhythm"]
+    ] as const;
+    try {
+      for (const [targetFrRef, validationScope] of scopes) {
+        const uniqueRef = `${safeProfile}/${effectiveExecutionMode}/${process.hrtime.bigint()}`;
+        const requestRef = `validation-request/${targetFrRef}/${uniqueRef}`;
+        const sampleRef = `validation-sample/${targetFrRef}/${uniqueRef}`;
+        const baselineRef = `baseline/${targetFrRef}/${uniqueRef}`;
+        const recordRef = `validation-record/${targetFrRef}/${uniqueRef}`;
+        const runId = `run-${targetFrRef}-${safeProfile}-${effectiveExecutionMode}`;
+        const scope = {
+          targetFrRef,
+          validationScope,
+          profileRef: `profile/${input.profile}`,
+          browserChannel: "Google Chrome stable" as const,
+          executionSurface: "real_browser" as const,
+          effectiveExecutionMode,
+          probeBundleRef: "probe-bundle/xhs-closeout-min-v1"
+        };
+        await store.upsertAntiDetectionValidationRequest({
+          requestRef,
+          validationScope,
+          targetFrRef,
+          profileRef: `profile/${input.profile}`,
+          browserChannel: "Google Chrome stable",
+          executionSurface: "real_browser",
+          sampleGoal: `capture ${targetFrRef} closeout baseline`,
+          requestedExecutionMode: effectiveExecutionMode,
+          probeBundleRef: "probe-bundle/xhs-closeout-min-v1",
+          requestState: "accepted",
+          requestedAt: nowIso
+        });
+        await store.upsertAntiDetectionValidationRequest({
+          requestRef,
+          validationScope,
+          targetFrRef,
+          profileRef: `profile/${input.profile}`,
+          browserChannel: "Google Chrome stable",
+          executionSurface: "real_browser",
+          sampleGoal: `capture ${targetFrRef} closeout baseline`,
+          requestedExecutionMode: effectiveExecutionMode,
+          probeBundleRef: "probe-bundle/xhs-closeout-min-v1",
+          requestState: "completed",
+          requestedAt: nowIso
+        });
+        await store.insertAntiDetectionStructuredSample({
+          ...scope,
+          sampleRef,
+          requestRef,
+          runId,
+          capturedAt: nowIso,
+          structuredPayload: { target_fr_ref: targetFrRef, stable: true },
+          artifactRefs: []
+        });
+        await store.insertAntiDetectionBaselineSnapshot({
+          ...scope,
+          baselineRef,
+          signalVector: { stable: true },
+          capturedAt: nowIso,
+          sourceSampleRefs: [sampleRef],
+          sourceRunIds: [runId]
+        });
+        await store.insertAntiDetectionValidationRecord({
+          ...scope,
+          recordRef,
+          requestRef,
+          sampleRef,
+          baselineRef,
+          resultState: "verified",
+          driftState: "no_drift",
+          failureClass: null,
+          runId,
+          validatedAt: nowIso
+        });
+        await store.upsertAntiDetectionBaselineRegistryEntry({
+          ...scope,
+          activeBaselineRef: baselineRef,
+          supersededBaselineRefs: [],
+          replacementReason: "initial_seed",
+          updatedAt: nowIso
+        });
+      }
+    } finally {
+      store.close();
+    }
+  };
 
   it("returns summary when command is implemented", async () => {
     const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
@@ -271,6 +408,7 @@ describe("executeCommand", () => {
     process.env.WEBENVOY_BROWSER_PATH = join(process.cwd(), "tests", "fixtures", "mock-browser.sh");
     process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Chromium 146.0.0.0";
     try {
+      await seedXhsCloseoutReady({ cwd: baseContext.cwd, profile: "xhs_account_001" });
       const execution = await executeCommand(
         {
           ...baseContext,
@@ -349,6 +487,7 @@ describe("executeCommand", () => {
     process.env.WEBENVOY_BROWSER_PATH = join(process.cwd(), "tests", "fixtures", "mock-browser.sh");
     process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Chromium 146.0.0.0";
     try {
+      await seedXhsCloseoutReady({ cwd: baseContext.cwd, profile: "xhs_account_001" });
       await expect(
         executeCommand(
           {
@@ -424,6 +563,7 @@ describe("executeCommand", () => {
     process.env.WEBENVOY_BROWSER_PATH = join(process.cwd(), "tests", "fixtures", "mock-browser.sh");
     process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Chromium 146.0.0.0";
     try {
+      await seedXhsCloseoutReady({ cwd: baseContext.cwd, profile: "xhs_account_001" });
       await expect(
         executeCommand(
           {
