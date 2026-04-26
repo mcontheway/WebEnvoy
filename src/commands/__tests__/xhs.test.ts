@@ -1707,7 +1707,7 @@ describe("normalizeGateOptionsForContract", () => {
     }
   });
 
-  it("blocks XHS live reads at the validation baseline gate even when scope and action_type are omitted", async () => {
+  it("blocks XHS live reads at the validation baseline gate even when scope and caller action are wrong", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-baseline-action-omitted-"));
     try {
       const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
@@ -1755,7 +1755,7 @@ describe("normalizeGateOptionsForContract", () => {
               ability: {
                 id: "xhs.note.search.v1",
                 layer: "L3",
-                action: "read"
+                action: "write"
               },
               input: {
                 query: "露营"

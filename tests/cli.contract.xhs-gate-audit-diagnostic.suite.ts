@@ -3321,6 +3321,11 @@ process.stdin.on("data", (chunk) => {
     await seedXhsCloseoutReadyProfile({
       cwd,
       profile: "loopback_profile",
+      effectiveExecutionMode: "live_read_high_risk"
+    });
+    await seedXhsCloseoutReadyProfile({
+      cwd,
+      profile: "loopback_profile",
       effectiveExecutionMode: "live_write"
     });
 
@@ -3396,6 +3401,31 @@ process.stdin.on("data", (chunk) => {
         })
       ])
     );
+
+    const explicitModeQueryResult = runCli([
+      "runtime.audit",
+      "--run-id",
+      "run-audit-validation-explicit-mode-priority-query-001",
+      "--params",
+      JSON.stringify({
+        run_id: runId,
+        requested_execution_mode: "live_read_high_risk"
+      })
+    ], cwd);
+    expect(explicitModeQueryResult.status).toBe(0);
+    const explicitModeBody = parseSingleJsonLine(explicitModeQueryResult.stdout);
+    expect(explicitModeBody.summary).toMatchObject({
+      query: {
+        run_id: runId,
+        requested_execution_mode: "live_read_high_risk"
+      },
+      anti_detection_validation_view: {
+        profile_ref: "profile/loopback_profile",
+        effective_execution_mode: "live_read_high_risk",
+        all_required_ready: true,
+        blocking_target_fr_refs: []
+      }
+    });
   });
 
   itWithSqlite("persists issue_scope for issue_208 audit records and returns matching write matrix query", async () => {

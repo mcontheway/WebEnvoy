@@ -230,9 +230,9 @@ const runtimeAuditQuery = async (context) => {
             const antiDetectionValidationView = await buildAntiDetectionValidationViewForProfile({
                 store,
                 profile: auditProfile,
-                effectiveExecutionMode: enrichedAuditRecords[0]
-                    ?.requested_execution_mode ??
-                    requestedExecutionMode ??
+                effectiveExecutionMode: requestedExecutionMode ??
+                    enrichedAuditRecords[0]
+                        ?.requested_execution_mode ??
                     enrichedAuditRecords[0]
                         ?.effective_execution_mode
             });
@@ -265,9 +265,9 @@ const runtimeAuditQuery = async (context) => {
         const antiDetectionValidationView = await buildAntiDetectionValidationViewForProfile({
             store,
             profile: profile ?? auditProfile,
-            effectiveExecutionMode: enrichedAuditRecords[0]
-                ?.requested_execution_mode ??
-                requestedExecutionMode ??
+            effectiveExecutionMode: requestedExecutionMode ??
+                enrichedAuditRecords[0]
+                    ?.requested_execution_mode ??
                 enrichedAuditRecords[0]
                     ?.effective_execution_mode
         });

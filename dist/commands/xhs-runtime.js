@@ -279,7 +279,6 @@ const isXhsRecoveryProbe = (input) => input.command === "xhs.search" &&
 const isXhsLiveReadBaselineGateCommand = (input) => (input.command === "xhs.search" ||
     input.command === "xhs.detail" ||
     input.command === "xhs.user_home") &&
-    input.ability.action === "read" &&
     isLiveXhsReadExecutionMode(input.requestedExecutionMode);
 const assertXhsLivePreflightAllowsCommand = (input) => {
     const recoveryProbe = isXhsRecoveryProbe(input);
@@ -424,7 +423,6 @@ const xhsReadCommand = async (context, inputConfig) => {
     const liveXhsCommandRequested = isLiveXhsExecutionMode(gate.requestedExecutionMode);
     const xhsLiveReadBaselineGateRequested = isXhsLiveReadBaselineGateCommand({
         command: context.command,
-        ability: envelope.ability,
         options: gate.options,
         requestedExecutionMode: gate.requestedExecutionMode
     });

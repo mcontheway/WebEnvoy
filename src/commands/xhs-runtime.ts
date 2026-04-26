@@ -389,14 +389,12 @@ const isXhsRecoveryProbe = (input: {
 
 const isXhsLiveReadBaselineGateCommand = (input: {
   command: string;
-  ability: AbilityRef;
   options: JsonObject;
   requestedExecutionMode: XhsExecutionMode;
 }): boolean =>
   (input.command === "xhs.search" ||
     input.command === "xhs.detail" ||
     input.command === "xhs.user_home") &&
-  input.ability.action === "read" &&
   isLiveXhsReadExecutionMode(input.requestedExecutionMode);
 
 const assertXhsLivePreflightAllowsCommand = (input: {
@@ -606,7 +604,6 @@ const xhsReadCommand = async (
   const liveXhsCommandRequested = isLiveXhsExecutionMode(gate.requestedExecutionMode);
   const xhsLiveReadBaselineGateRequested = isXhsLiveReadBaselineGateCommand({
     command: context.command,
-    ability: envelope.ability,
     options: gate.options,
     requestedExecutionMode: gate.requestedExecutionMode
   });
