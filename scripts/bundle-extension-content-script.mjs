@@ -300,7 +300,11 @@ const buildContentScriptBundle = async () => {
   const layer2HumanizedEventsModule = renderClassicModule({
     moduleVar: "__webenvoy_module_layer2_humanized_events",
     sourceBody: layer2HumanizedEventsSource,
-    exports: ["buildLayer2InteractionEvidence", "buildXhsSearchLayer2InteractionEvidence"]
+    exports: [
+      "buildLayer2InteractionEvidence",
+      "buildXhsSearchLayer2InteractionEvidence",
+      "getLayer2EventChainPolicies"
+    ]
   });
 
   const xhsSearchExecutionModule = renderClassicModule({

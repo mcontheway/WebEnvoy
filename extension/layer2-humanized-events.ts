@@ -207,7 +207,21 @@ const EVENT_CHAINS: Record<Layer2ActionKind, EventChainPolicy> = {
   }
 };
 
+const CHANGE_BLUR_FINALIZE_CHAIN: EventChainPolicy = {
+  chain_name: "change_blur_finalize",
+  action_kind: "keyboard_input",
+  required_events: ["change", "blur"],
+  optional_events: ["input"],
+  completion_signal: ["framework_value_finalized", "dom_settled"],
+  requires_settled_wait: true
+};
+
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+export const getLayer2EventChainPolicies = (): EventChainPolicy[] => [
+  ...Object.values(EVENT_CHAINS).map((chain) => clone(chain)),
+  clone(CHANGE_BLUR_FINALIZE_CHAIN)
+];
 
 export const buildLayer2InteractionEvidence = (input: {
   actionKind: Layer2ActionKind;
@@ -267,7 +281,7 @@ export const buildXhsSearchLayer2InteractionEvidence = (input: {
   recoveryProbe?: boolean;
   executionApplied?: boolean;
 }): Layer2InteractionEvidence | null => {
-  if (!input.recoveryProbe) {
+  if (!input.recoveryProbe || input.requestedExecutionMode !== "recon") {
     return null;
   }
   return buildLayer2InteractionEvidence({

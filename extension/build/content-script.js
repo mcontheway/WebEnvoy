@@ -5159,7 +5159,19 @@ const EVENT_CHAINS = {
         requires_settled_wait: true
     }
 };
+const CHANGE_BLUR_FINALIZE_CHAIN = {
+    chain_name: "change_blur_finalize",
+    action_kind: "keyboard_input",
+    required_events: ["change", "blur"],
+    optional_events: ["input"],
+    completion_signal: ["framework_value_finalized", "dom_settled"],
+    requires_settled_wait: true
+};
 const clone = (value) => JSON.parse(JSON.stringify(value));
+const getLayer2EventChainPolicies = () => [
+    ...Object.values(EVENT_CHAINS).map((chain) => clone(chain)),
+    clone(CHANGE_BLUR_FINALIZE_CHAIN)
+];
 const buildLayer2InteractionEvidence = (input) => {
     const strategy = clone(STRATEGY_PROFILES[input.actionKind]);
     const chain = clone(EVENT_CHAINS[input.actionKind]);
@@ -5202,7 +5214,7 @@ const buildLayer2InteractionEvidence = (input) => {
     };
 };
 const buildXhsSearchLayer2InteractionEvidence = (input) => {
-    if (!input.recoveryProbe) {
+    if (!input.recoveryProbe || input.requestedExecutionMode !== "recon") {
         return null;
     }
     return buildLayer2InteractionEvidence({
@@ -5211,7 +5223,7 @@ const buildXhsSearchLayer2InteractionEvidence = (input) => {
         executionApplied: input.executionApplied ?? false
     });
 };
-return { buildLayer2InteractionEvidence, buildXhsSearchLayer2InteractionEvidence };
+return { buildLayer2InteractionEvidence, buildXhsSearchLayer2InteractionEvidence, getLayer2EventChainPolicies };
 })();
 const __webenvoy_module_xhs_search_execution = (() => {
 const {

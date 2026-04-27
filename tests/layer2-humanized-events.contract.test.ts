@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildLayer2InteractionEvidence,
-  buildXhsSearchLayer2InteractionEvidence
+  buildXhsSearchLayer2InteractionEvidence,
+  getLayer2EventChainPolicies
 } from "../extension/layer2-humanized-events.js";
 
 describe("FR-0013 layer2 humanized events", () => {
@@ -92,6 +93,19 @@ describe("FR-0013 layer2 humanized events", () => {
     });
   });
 
+  it("includes the frozen change/blur finalize chain policy", () => {
+    expect(getLayer2EventChainPolicies()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          chain_name: "change_blur_finalize",
+          action_kind: "keyboard_input",
+          required_events: ["change", "blur"],
+          completion_signal: expect.arrayContaining(["framework_value_finalized"])
+        })
+      ])
+    );
+  });
+
   it("does not emit layer2 evidence for generic xhs recon without recovery probe marker", () => {
     const evidence = buildXhsSearchLayer2InteractionEvidence({
       requestedExecutionMode: "recon",
@@ -105,6 +119,15 @@ describe("FR-0013 layer2 humanized events", () => {
     const evidence = buildXhsSearchLayer2InteractionEvidence({
       requestedExecutionMode: "live_read_high_risk",
       recoveryProbe: false
+    });
+
+    expect(evidence).toBeNull();
+  });
+
+  it("does not emit recovery evidence for non-recon modes even when marked as recovery probe", () => {
+    const evidence = buildXhsSearchLayer2InteractionEvidence({
+      requestedExecutionMode: "live_read_high_risk",
+      recoveryProbe: true
     });
 
     expect(evidence).toBeNull();
