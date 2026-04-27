@@ -790,8 +790,7 @@ describe("extension build contract", () => {
       xhsEnv: {
         now: () => 1_710_000_000_000,
         randomId: () => "bundle-handler-recovery-req-001",
-        getLocationHref: () =>
-          "https://www.xiaohongshu.com/search_result/?keyword=%E9%9C%B2%E8%90%A5",
+        getLocationHref: () => "https://www.xiaohongshu.com/search_result",
         getDocumentTitle: () => "Search Result",
         getReadyState: () => "complete",
         getCookie: () => "a1=session-cookie"
@@ -853,18 +852,16 @@ describe("extension build contract", () => {
     const result = await resultPromise;
     expect(result).toMatchObject({
       kind: "result",
-      ok: true,
+      ok: false,
       payload: {
-        summary: {
-          layer2_interaction: {
-            strategy_selection: {
-              selected_path: "blocked",
-              blocked_by: "FR-0013.gate_only_probe_no_event_chain"
-            },
-            execution_trace: {
-              settled_wait_applied: false,
-              settled_wait_result: "skipped"
-            }
+        layer2_interaction: {
+          strategy_selection: {
+            selected_path: "blocked",
+            blocked_by: "FR-0013.gate_only_probe_no_event_chain"
+          },
+          execution_trace: {
+            settled_wait_applied: false,
+            settled_wait_result: "skipped"
           }
         }
       }

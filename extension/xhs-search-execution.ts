@@ -159,6 +159,22 @@ const withLayer2InteractionInSuccessPayload = (
   };
 };
 
+const withLayer2InteractionInPayload = (
+  result: SearchExecutionResult,
+  layer2Interaction: Layer2InteractionEvidence | null
+): SearchExecutionResult => {
+  if (!layer2Interaction) {
+    return result;
+  }
+  return {
+    ...result,
+    payload: {
+      ...result.payload,
+      layer2_interaction: layer2Interaction
+    }
+  };
+};
+
 const serializeCanonicalShape = (value: unknown): string | null => {
   const record = asRecord(value);
   if (!record) {
@@ -652,37 +668,40 @@ export const executeXhsSearch = async (
   });
   const startedAt = env.now();
   if (gate.consumer_gate_result.gate_decision === "blocked") {
-    return withExecutionAuditInFailurePayload(
-      createFailure(
-        "ERR_EXECUTION_FAILED",
-        "执行模式门禁阻断了当前 xhs.search 请求",
-        {
-          ability_id: input.abilityId,
-          stage: "execution",
-          reason: "EXECUTION_MODE_GATE_BLOCKED"
-        },
-        createObservability({
-          href: env.getLocationHref(),
-          title: env.getDocumentTitle(),
-          readyState: env.getReadyState(),
-          requestId: `req-${env.randomId()}`,
-          outcome: "failed",
-          failureReason: "EXECUTION_MODE_GATE_BLOCKED",
-          failureSite: {
+    return withLayer2InteractionInPayload(
+      withExecutionAuditInFailurePayload(
+        createFailure(
+          "ERR_EXECUTION_FAILED",
+          "执行模式门禁阻断了当前 xhs.search 请求",
+          {
+            ability_id: input.abilityId,
             stage: "execution",
-            component: "gate",
-            target: "requested_execution_mode",
+            reason: "EXECUTION_MODE_GATE_BLOCKED"
+          },
+          createObservability({
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: "EXECUTION_MODE_GATE_BLOCKED",
+            failureSite: {
+              stage: "execution",
+              component: "gate",
+              target: "requested_execution_mode",
+              summary: "执行模式门禁阻断"
+            }
+          }),
+          createDiagnosis({
+            reason: "EXECUTION_MODE_GATE_BLOCKED",
             summary: "执行模式门禁阻断"
-          }
-        }),
-        createDiagnosis({
-          reason: "EXECUTION_MODE_GATE_BLOCKED",
-          summary: "执行模式门禁阻断"
-        }),
-        gate,
-        auditRecord
+          }),
+          gate,
+          auditRecord
+        ),
+        gate.execution_audit as JsonRecord | null
       ),
-      gate.execution_audit as JsonRecord | null
+      layer2Interaction
     );
   }
 

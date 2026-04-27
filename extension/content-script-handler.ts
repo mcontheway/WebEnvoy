@@ -682,7 +682,13 @@ export class ContentScriptHandler {
     const options = asRecord(commandParams.options) ?? {};
     const locationHref = this.#xhsEnv.getLocationHref();
     const actualTargetDomain = resolveTargetDomainFromHref(locationHref);
-    const actualTargetPage = resolveTargetPageFromHref(locationHref, message.command);
+    const actualTargetPage =
+      resolveTargetPageFromHref(locationHref, message.command) ??
+      (actualTargetDomain === XHS_READ_DOMAIN &&
+      message.command === "xhs.search" &&
+      locationHref.includes("/search_result")
+        ? "search_result_tab"
+        : null);
     const observedTargetSiteLoggedIn =
       actualTargetDomain === XHS_READ_DOMAIN && containsCookie(this.#xhsEnv.getCookie(), "a1");
     const observedAnonymousIsolationVerified =
@@ -735,22 +741,9 @@ export class ContentScriptHandler {
           ...(typeof options.target_page === "string"
             ? { target_page: options.target_page }
             : {}),
-          ...(typeof options.actual_target_domain === "string"
-            ? { actual_target_domain: options.actual_target_domain }
-            : actualTargetDomain
-              ? { actual_target_domain: actualTargetDomain }
-              : {}),
-          ...(typeof options.actual_target_tab_id === "number"
-            ? { actual_target_tab_id: options.actual_target_tab_id }
-            : typeof message.tabId === "number"
-              ? { actual_target_tab_id: message.tabId }
-              : {}),
-          ...(typeof options.actual_target_page === "string"
-            ? { actual_target_page: options.actual_target_page }
-            : actualTargetPage
-              ? { actual_target_page: actualTargetPage }
-              : {}),
           ...(typeof message.tabId === "number" ? { actual_target_tab_id: message.tabId } : {}),
+          ...(actualTargetDomain ? { actual_target_domain: actualTargetDomain } : {}),
+          ...(actualTargetPage ? { actual_target_page: actualTargetPage } : {}),
           ...(typeof ability.action === "string" ? { ability_action: ability.action } : {}),
           ...(typeof options.action_type === "string"
             ? { action_type: options.action_type }

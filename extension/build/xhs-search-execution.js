@@ -64,6 +64,18 @@ const withLayer2InteractionInSuccessPayload = (result, layer2Interaction) => {
         }
     };
 };
+const withLayer2InteractionInPayload = (result, layer2Interaction) => {
+    if (!layer2Interaction) {
+        return result;
+    }
+    return {
+        ...result,
+        payload: {
+            ...result.payload,
+            layer2_interaction: layer2Interaction
+        }
+    };
+};
 const serializeCanonicalShape = (value) => {
     const record = asRecord(value);
     if (!record) {
@@ -450,7 +462,7 @@ export const executeXhsSearch = async (input, env) => {
     });
     const startedAt = env.now();
     if (gate.consumer_gate_result.gate_decision === "blocked") {
-        return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "执行模式门禁阻断了当前 xhs.search 请求", {
+        return withLayer2InteractionInPayload(withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", "执行模式门禁阻断了当前 xhs.search 请求", {
             ability_id: input.abilityId,
             stage: "execution",
             reason: "EXECUTION_MODE_GATE_BLOCKED"
@@ -470,7 +482,7 @@ export const executeXhsSearch = async (input, env) => {
         }), createDiagnosis({
             reason: "EXECUTION_MODE_GATE_BLOCKED",
             summary: "执行模式门禁阻断"
-        }), gate, auditRecord), gate.execution_audit);
+        }), gate, auditRecord), gate.execution_audit), layer2Interaction);
     }
     if (gate.consumer_gate_result.effective_execution_mode === "dry_run" ||
         gate.consumer_gate_result.effective_execution_mode === "recon") {
