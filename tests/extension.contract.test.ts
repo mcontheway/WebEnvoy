@@ -961,15 +961,15 @@ describe("extension build contract", () => {
           },
           layer2_interaction: {
             event_strategy_profile: {
-              action_kind: "keyboard_input"
+              action_kind: "api_read"
             },
             strategy_selection: {
-              selected_path: "mixed_input",
-              event_chain: "keyboard_input"
+              selected_path: "not_executed",
+              event_chain: "api_replay_no_ui_event_chain"
             },
             execution_trace: {
-              settled_wait_applied: true,
-              settled_wait_result: "settled"
+              settled_wait_applied: false,
+              settled_wait_result: "not_required"
             }
           },
           execution_audit: {

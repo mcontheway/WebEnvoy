@@ -1,4 +1,5 @@
 export type Layer2ActionKind =
+  | "api_read"
   | "click"
   | "focus"
   | "keyboard_input"
@@ -6,7 +7,12 @@ export type Layer2ActionKind =
   | "hover"
   | "scroll";
 
-export type Layer2SelectedPath = "real_input" | "mixed_input" | "synthetic_chain" | "blocked";
+export type Layer2SelectedPath =
+  | "real_input"
+  | "mixed_input"
+  | "synthetic_chain"
+  | "not_executed"
+  | "blocked";
 export type Layer2RhythmProfileSource = "default" | "platform_override";
 export type Layer2FailureCategory =
   | "focus_not_acquired"
@@ -64,7 +70,7 @@ export interface ExecutionTrace {
   event_chain: string;
   rhythm_profile_source: Layer2RhythmProfileSource;
   settled_wait_applied: boolean;
-  settled_wait_result: "settled" | "not_required" | "failed";
+  settled_wait_result: "settled" | "not_required" | "not_observed" | "failed";
   failure_category: Layer2FailureCategory | null;
 }
 
@@ -92,6 +98,15 @@ const DEFAULT_RHYTHM_PROFILE: RhythmProfile = {
 };
 
 const STRATEGY_PROFILES: Record<Layer2ActionKind, EventStrategyProfile> = {
+  api_read: {
+    action_kind: "api_read",
+    preferred_path: "real_input",
+    fallback_path: null,
+    requires_focus: false,
+    requires_hover_confirm: false,
+    requires_settled_wait: false,
+    blocked_when_tier: []
+  },
   click: {
     action_kind: "click",
     preferred_path: "real_input",
@@ -149,6 +164,14 @@ const STRATEGY_PROFILES: Record<Layer2ActionKind, EventStrategyProfile> = {
 };
 
 const EVENT_CHAINS: Record<Layer2ActionKind, EventChainPolicy> = {
+  api_read: {
+    chain_name: "api_replay_no_ui_event_chain",
+    action_kind: "api_read",
+    required_events: [],
+    optional_events: [],
+    completion_signal: ["api_replay_requested"],
+    requires_settled_wait: false
+  },
   click: {
     chain_name: "hover_click",
     action_kind: "click",
@@ -213,7 +236,7 @@ export const buildLayer2InteractionEvidence = (input: {
   actionKind: Layer2ActionKind;
   writeInteractionTierName?: string | null;
   rhythmProfileSource?: Layer2RhythmProfileSource;
-  settledWaitResult?: "settled" | "not_required" | "failed";
+  settledWaitResult?: "settled" | "not_required" | "not_observed" | "failed";
 }): Layer2InteractionEvidence => {
   const strategy = clone(STRATEGY_PROFILES[input.actionKind]);
   const chain = clone(EVENT_CHAINS[input.actionKind]);
@@ -223,13 +246,14 @@ export const buildLayer2InteractionEvidence = (input: {
     strategy.blocked_when_tier.includes(input.writeInteractionTierName)
       ? "FR-0011.write_interaction_tier"
       : null;
-  const selectedPath: Layer2SelectedPath = blockedBy ? "blocked" : strategy.preferred_path;
+  const selectedPath: Layer2SelectedPath =
+    blockedBy ? "blocked" : input.actionKind === "api_read" ? "not_executed" : strategy.preferred_path;
   const settledWaitApplied = selectedPath !== "blocked" && chain.requires_settled_wait;
   const settledWaitResult =
     selectedPath === "blocked"
       ? "failed"
       : settledWaitApplied
-        ? input.settledWaitResult ?? "settled"
+        ? input.settledWaitResult ?? "not_observed"
         : "not_required";
 
   return {
@@ -266,6 +290,6 @@ export const buildXhsSearchLayer2InteractionEvidence = (input: {
     actionKind:
       input.recoveryProbe || input.requestedExecutionMode === "recon"
         ? "scroll"
-        : "keyboard_input",
+        : "api_read",
     writeInteractionTierName: input.writeInteractionTierName ?? null
   });

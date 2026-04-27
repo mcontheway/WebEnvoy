@@ -5046,6 +5046,15 @@ const DEFAULT_RHYTHM_PROFILE = {
     lookback_probability: 0.12
 };
 const STRATEGY_PROFILES = {
+    api_read: {
+        action_kind: "api_read",
+        preferred_path: "real_input",
+        fallback_path: null,
+        requires_focus: false,
+        requires_hover_confirm: false,
+        requires_settled_wait: false,
+        blocked_when_tier: []
+    },
     click: {
         action_kind: "click",
         preferred_path: "real_input",
@@ -5102,6 +5111,14 @@ const STRATEGY_PROFILES = {
     }
 };
 const EVENT_CHAINS = {
+    api_read: {
+        chain_name: "api_replay_no_ui_event_chain",
+        action_kind: "api_read",
+        required_events: [],
+        optional_events: [],
+        completion_signal: ["api_replay_requested"],
+        requires_settled_wait: false
+    },
     click: {
         chain_name: "hover_click",
         action_kind: "click",
@@ -5168,12 +5185,12 @@ const buildLayer2InteractionEvidence = (input) => {
         strategy.blocked_when_tier.includes(input.writeInteractionTierName)
         ? "FR-0011.write_interaction_tier"
         : null;
-    const selectedPath = blockedBy ? "blocked" : strategy.preferred_path;
+    const selectedPath = blockedBy ? "blocked" : input.actionKind === "api_read" ? "not_executed" : strategy.preferred_path;
     const settledWaitApplied = selectedPath !== "blocked" && chain.requires_settled_wait;
     const settledWaitResult = selectedPath === "blocked"
         ? "failed"
         : settledWaitApplied
-            ? input.settledWaitResult ?? "settled"
+            ? input.settledWaitResult ?? "not_observed"
             : "not_required";
     return {
         event_strategy_profile: strategy,
@@ -5202,7 +5219,7 @@ const buildLayer2InteractionEvidence = (input) => {
 const buildXhsSearchLayer2InteractionEvidence = (input) => buildLayer2InteractionEvidence({
     actionKind: input.recoveryProbe || input.requestedExecutionMode === "recon"
         ? "scroll"
-        : "keyboard_input",
+        : "api_read",
     writeInteractionTierName: input.writeInteractionTierName ?? null
 });
 return { buildLayer2InteractionEvidence, buildXhsSearchLayer2InteractionEvidence };

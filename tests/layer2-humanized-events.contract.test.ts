@@ -36,8 +36,21 @@ describe("FR-0013 layer2 humanized events", () => {
       action_kind: "keyboard_input",
       selected_path: "mixed_input",
       settled_wait_applied: true,
-      settled_wait_result: "settled",
+      settled_wait_result: "not_observed",
       failure_category: null
+    });
+  });
+
+  it("records settled only when the caller supplies an observed wait result", () => {
+    const evidence = buildLayer2InteractionEvidence({
+      actionKind: "keyboard_input",
+      settledWaitResult: "settled"
+    });
+
+    expect(evidence.execution_trace).toMatchObject({
+      action_kind: "keyboard_input",
+      settled_wait_applied: true,
+      settled_wait_result: "settled"
     });
   });
 
@@ -68,6 +81,34 @@ describe("FR-0013 layer2 humanized events", () => {
       action_kind: "scroll",
       selected_path: "real_input",
       event_chain: "scroll_segment"
+    });
+    expect(evidence.execution_trace).toMatchObject({
+      settled_wait_applied: true,
+      settled_wait_result: "not_observed"
+    });
+  });
+
+  it("does not label xhs live API replay as keyboard input", () => {
+    const evidence = buildXhsSearchLayer2InteractionEvidence({
+      requestedExecutionMode: "live_read_high_risk",
+      recoveryProbe: false
+    });
+
+    expect(evidence.event_strategy_profile).toMatchObject({
+      action_kind: "api_read",
+      requires_focus: false,
+      requires_settled_wait: false
+    });
+    expect(evidence.strategy_selection).toMatchObject({
+      action_kind: "api_read",
+      selected_path: "not_executed",
+      event_chain: "api_replay_no_ui_event_chain"
+    });
+    expect(evidence.execution_trace).toMatchObject({
+      action_kind: "api_read",
+      selected_path: "not_executed",
+      settled_wait_applied: false,
+      settled_wait_result: "not_required"
     });
   });
 });
