@@ -127,8 +127,7 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input) => {
             runId: input.runId
         });
         const currentWindowId = asString(current?.window_state.window_id);
-        const currentDecisionIdFromStore = asString(current?.decision.run_id) === input.runId &&
-            asString(current?.decision.decision) === "allowed"
+        const currentDecisionIdFromStore = asString(current?.decision.run_id) === input.runId
             ? asString(current?.decision.decision_id)
             : null;
         if (currentWindowId || currentDecisionIdFromStore) {

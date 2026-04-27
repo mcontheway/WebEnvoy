@@ -3907,7 +3907,7 @@ describe("normalizeGateOptionsForContract", () => {
             approval_admission_ref: approvalAdmissionRef,
             audit_admission_ref: auditAdmissionRef,
             session_rhythm_window_id: "rhythm_win_persisted_issue_209",
-            session_rhythm_decision_id: null
+            session_rhythm_decision_id: `rhythm_decision_preflight_${runId}`
           }
         }
       });
