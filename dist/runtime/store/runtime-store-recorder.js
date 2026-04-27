@@ -234,6 +234,11 @@ const extractGateAuditRecordInput = (source) => {
         recordedAt
     };
 };
+const hasSessionRhythmCompatibilityRefs = (summary) => {
+    const compatibilityRefs = asObject(asObject(summary.execution_audit)?.compatibility_refs);
+    return (asString(compatibilityRefs?.session_rhythm_window_id) !== null ||
+        asString(compatibilityRefs?.session_rhythm_decision_id) !== null);
+};
 export class RuntimeStoreRecorder {
     #store;
     #cwd;
@@ -377,7 +382,10 @@ export class RuntimeStoreRecorder {
                 ...buildSummaryProjection(toSummaryText(summary))
             }));
             await this.#recordGateArtifacts(summary);
-            if (context.profile && (summary.xhs_closeout_rhythm || summary.account_safety)) {
+            if (context.profile &&
+                (summary.xhs_closeout_rhythm ||
+                    summary.account_safety ||
+                    hasSessionRhythmCompatibilityRefs(summary))) {
                 await this.#recordSessionRhythmArtifacts({
                     profile: context.profile,
                     issueScope: "issue_209",

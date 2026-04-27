@@ -61,6 +61,9 @@ const asObject = (value: unknown): JsonObject | null =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const toSessionRhythmIdPart = (value: string): string =>
+  value.replace(/[^A-Za-z0-9._-]+/gu, "_");
+
 const buildSessionRhythmCompatibilityRefsForRuntime = async (input: {
   cwd: string;
   profile: string | null;
@@ -80,7 +83,12 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input: {
       issueScope: asString(input.gate.options.issue_scope) ?? "issue_209"
     });
     const windowId = asString(persisted?.window_state.window_id);
-    const decisionId = asString(persisted?.decision.decision_id);
+    const persistedDecisionRunId = asString(persisted?.decision.run_id);
+    const persistedDecisionId = asString(persisted?.decision.decision_id);
+    const decisionId =
+      persistedDecisionRunId === input.runId
+        ? persistedDecisionId
+        : `rhythm_decision_${toSessionRhythmIdPart(input.runId)}`;
     if (windowId || decisionId) {
       return {
         ...(windowId ? { __session_rhythm_window_id: windowId } : {}),
