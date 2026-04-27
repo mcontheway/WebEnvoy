@@ -163,6 +163,27 @@ const readPersistedSessionRhythmBlockStatus = async (input) => {
         const profileRhythmState = asString(input.profileMeta?.xhsCloseoutRhythm?.state);
         if (asString(windowState?.current_phase) !== "cooldown" &&
             asString(windowState?.risk_state) !== "paused") {
+            if (persistedDecisionValue === "deferred" &&
+                (!profileRhythmState || profileRhythmState === "not_required")) {
+                const reasonCodes = Array.isArray(persistedDecision?.reason_codes) &&
+                    persistedDecision.reason_codes.every((reason) => typeof reason === "string")
+                    ? persistedDecision.reason_codes
+                    : [
+                        asString(event?.reason) ??
+                            asString(windowState?.last_event_id) ??
+                            "XHS_RECOVERY_SINGLE_PROBE_PASSED"
+                    ];
+                return {
+                    state: "single_probe_passed",
+                    cooldown_until: asString(windowState?.cooldown_until),
+                    operator_confirmed_at: null,
+                    single_probe_required: false,
+                    single_probe_passed_at: asString(persistedDecision?.decided_at) ?? asString(event?.recorded_at),
+                    probe_run_id: asString(persistedDecision?.run_id) ?? asString(windowState?.source_run_id),
+                    full_bundle_blocked: true,
+                    reason_codes: reasonCodes
+                };
+            }
             if (persistedDecisionValue &&
                 persistedDecisionValue !== "allowed" &&
                 (!profileRhythmState || profileRhythmState === "not_required")) {
