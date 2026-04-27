@@ -116,6 +116,9 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input: {
     if (!windowId || !windowStateForRecord || !eventForRecord || !decisionForRecord) {
       return null;
     }
+    const liveRunAdmittedAfterDeferredProbe =
+      isLiveXhsExecutionMode(input.gate.requestedExecutionMode) &&
+      asString(decisionForRecord.decision) === "deferred";
     const currentSourceKey = toSessionRhythmIdPart(input.runId);
     const currentEventId = `rhythm_evt_preflight_${currentSourceKey}`;
     const currentDecisionId = `rhythm_decision_preflight_${currentSourceKey}`;
@@ -159,7 +162,20 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input: {
           asString(windowStateForRecord.risk_state) ??
           asString(decisionForRecord.next_risk_state) ??
           "paused",
-        effective_execution_mode: input.gate.requestedExecutionMode
+        effective_execution_mode: input.gate.requestedExecutionMode,
+        decision: liveRunAdmittedAfterDeferredProbe
+          ? "allowed"
+          : (asString(decisionForRecord.decision) ?? "blocked"),
+        reason_codes: liveRunAdmittedAfterDeferredProbe
+          ? ["XHS_CLOSEOUT_LIVE_ADMISSION_ALLOWED"]
+          : Array.isArray(decisionForRecord.reason_codes)
+            ? decisionForRecord.reason_codes
+            : [],
+        requires: liveRunAdmittedAfterDeferredProbe
+          ? []
+          : Array.isArray(decisionForRecord.requires)
+            ? decisionForRecord.requires
+            : []
       }
     });
     const current = await store.getSessionRhythmStatusView({

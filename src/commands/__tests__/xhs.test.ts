@@ -2708,6 +2708,27 @@ describe("normalizeGateOptionsForContract", () => {
           admission_decision: "allowed"
         }
       });
+      const verificationStore = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+      try {
+        await expect(
+          verificationStore.getSessionRhythmStatusView({
+            profile: "xhs_validation_ready_profile",
+            platform: "xhs",
+            issueScope: "issue_209",
+            runId
+          })
+        ).resolves.toMatchObject({
+          decision: {
+            decision_id: `rhythm_decision_preflight_${runId}`,
+            run_id: runId,
+            decision: "allowed",
+            reason_codes: ["XHS_CLOSEOUT_LIVE_ADMISSION_ALLOWED"],
+            requires: []
+          }
+        });
+      } finally {
+        verificationStore.close();
+      }
     } finally {
       await rm(cwd, { recursive: true, force: true });
       if (previousTransport === undefined) {
