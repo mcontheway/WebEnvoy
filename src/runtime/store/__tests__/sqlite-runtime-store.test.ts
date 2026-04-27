@@ -600,7 +600,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
         issue_scope: "issue_209",
         session_id: "nm-session-001",
         window_id: "rhythm_win_xhs_001_issue_209",
-        event_type: "risk_signal_detected",
+        event_type: "risk_signal",
         phase_before: "steady",
         phase_after: "cooldown",
         risk_state_before: "limited",

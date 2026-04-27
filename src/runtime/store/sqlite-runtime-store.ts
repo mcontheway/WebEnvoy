@@ -384,7 +384,6 @@ const SESSION_RHYTHM_PHASES = new Set([
 
 const SESSION_RHYTHM_EVENT_TYPES = new Set([
   "risk_signal",
-  "risk_signal_detected",
   "cooldown_started",
   "recovery_probe_started",
   "recovery_probe_passed",

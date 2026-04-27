@@ -3191,7 +3191,7 @@ process.stdin.on("data", (chunk) => {
           issue_scope: "issue_209",
           session_id: "nm-session-persisted-rhythm",
           window_id: `rhythm_win_${profile}_issue_209`,
-          event_type: "risk_signal_detected",
+          event_type: "risk_signal",
           phase_before: "steady",
           phase_after: "cooldown",
           risk_state_before: "limited",
@@ -3258,7 +3258,7 @@ process.stdin.on("data", (chunk) => {
           }),
           session_rhythm_event: expect.objectContaining({
             event_id: "rhythm_evt_persisted_block",
-            event_type: "risk_signal_detected"
+            event_type: "risk_signal"
           }),
           session_rhythm_decision: expect.objectContaining({
             decision_id: "rhythm_decision_persisted_block",
