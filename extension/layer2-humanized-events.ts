@@ -214,15 +214,19 @@ export const buildLayer2InteractionEvidence = (input: {
   writeInteractionTierName?: string | null;
   rhythmProfileSource?: Layer2RhythmProfileSource;
   settledWaitResult?: "settled" | "timeout" | "skipped";
+  executionApplied?: boolean;
 }): Layer2InteractionEvidence => {
   const strategy = clone(STRATEGY_PROFILES[input.actionKind]);
   const chain = clone(EVENT_CHAINS[input.actionKind]);
   const rhythm = clone(DEFAULT_RHYTHM_PROFILE);
-  const blockedBy =
+  const gateOnlyBlockedBy =
+    input.executionApplied === false ? "FR-0013.gate_only_probe_no_event_chain" : null;
+  const tierBlockedBy =
     input.writeInteractionTierName &&
     strategy.blocked_when_tier.includes(input.writeInteractionTierName)
       ? "FR-0011.write_interaction_tier"
       : null;
+  const blockedBy = gateOnlyBlockedBy ?? tierBlockedBy;
   const selectedPath: Layer2SelectedPath = blockedBy ? "blocked" : strategy.preferred_path;
   const settledWaitApplied = selectedPath !== "blocked" && chain.requires_settled_wait;
   const settledWaitResult =
@@ -252,7 +256,7 @@ export const buildLayer2InteractionEvidence = (input: {
       rhythm_profile_source: input.rhythmProfileSource ?? "default",
       settled_wait_applied: settledWaitApplied,
       settled_wait_result: settledWaitResult,
-      failure_category: blockedBy ? "blocked_by_fr0011" : null
+      failure_category: tierBlockedBy ? "blocked_by_fr0011" : null
     }
   };
 };
@@ -261,12 +265,14 @@ export const buildXhsSearchLayer2InteractionEvidence = (input: {
   writeInteractionTierName?: string | null;
   requestedExecutionMode?: string | null;
   recoveryProbe?: boolean;
+  executionApplied?: boolean;
 }): Layer2InteractionEvidence | null => {
   if (!input.recoveryProbe) {
     return null;
   }
   return buildLayer2InteractionEvidence({
     actionKind: "scroll",
-    writeInteractionTierName: input.writeInteractionTierName ?? null
+    writeInteractionTierName: input.writeInteractionTierName ?? null,
+    executionApplied: input.executionApplied ?? false
   });
 };

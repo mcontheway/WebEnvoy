@@ -72,7 +72,7 @@ describe("FR-0013 layer2 humanized events", () => {
     });
   });
 
-  it("uses scroll evidence for xhs recovery recon probes", () => {
+  it("marks gate-only xhs recovery recon probes as not executed", () => {
     const evidence = buildXhsSearchLayer2InteractionEvidence({
       requestedExecutionMode: "recon",
       recoveryProbe: true
@@ -80,12 +80,15 @@ describe("FR-0013 layer2 humanized events", () => {
 
     expect(evidence.strategy_selection).toMatchObject({
       action_kind: "scroll",
-      selected_path: "real_input",
-      event_chain: "scroll_segment"
+      selected_path: "blocked",
+      event_chain: "scroll_segment",
+      blocked_by: "FR-0013.gate_only_probe_no_event_chain"
     });
     expect(evidence.execution_trace).toMatchObject({
-      settled_wait_applied: true,
-      settled_wait_result: "timeout"
+      selected_path: "blocked",
+      settled_wait_applied: false,
+      settled_wait_result: "skipped",
+      failure_category: null
     });
   });
 
