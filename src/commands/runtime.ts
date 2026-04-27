@@ -154,7 +154,9 @@ const buildSessionRhythmStatusViewForProfile = async (
     const persisted = await store.getSessionRhythmStatusView({
       profile,
       platform: "xhs",
-      issueScope: "issue_209"
+      issueScope: "issue_209",
+      sessionId: input?.sessionId ?? null,
+      runId: input?.sourceRunId ?? null
     });
     return persisted ? buildPersistedSessionRhythmStatusView(persisted) : fallbackView;
   } catch {

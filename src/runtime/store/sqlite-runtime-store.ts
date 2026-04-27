@@ -162,6 +162,8 @@ export interface SessionRhythmStatusViewQuery {
   profile: string;
   platform?: string;
   issueScope?: string;
+  sessionId?: string | null;
+  runId?: string | null;
 }
 
 export interface SessionRhythmStatusViewRecord {
@@ -1042,7 +1044,7 @@ export class SQLiteRuntimeStore {
             window_started_at, window_deadline_at, cooldown_until, recovery_probe_due_at,
             stability_window_until, risk_signal_count, last_event_id, source_run_id, updated_at
           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(profile, platform, issue_scope) DO UPDATE SET
+          ON CONFLICT(profile, platform, issue_scope, session_id) DO UPDATE SET
             window_id = excluded.window_id,
             session_id = excluded.session_id,
             current_phase = excluded.current_phase,
@@ -1157,6 +1159,8 @@ export class SQLiteRuntimeStore {
   ): Promise<SessionRhythmStatusViewRecord | null> {
     const platform = input.platform ?? "xhs";
     const issueScope = input.issueScope ?? "issue_209";
+    const sessionId = asNullableRuntimeStoreString(input.sessionId);
+    const runId = asNullableRuntimeStoreString(input.runId);
     const row = this.#db
       .prepare(
         `
@@ -1180,11 +1184,23 @@ export class SQLiteRuntimeStore {
         LEFT JOIN session_rhythm_event e ON e.event_id = w.last_event_id
         LEFT JOIN session_rhythm_decision d ON d.window_id = w.window_id
         WHERE w.profile = ? AND w.platform = ? AND w.issue_scope = ?
-        ORDER BY d.decided_at DESC
+          AND (? IS NULL OR w.session_id = ? OR d.session_id = ?)
+        ORDER BY
+          CASE WHEN ? IS NOT NULL AND d.run_id = ? THEN 0 ELSE 1 END,
+          d.decided_at DESC
         LIMIT 1
       `
       )
-      .get(input.profile, platform, issueScope) as Record<string, unknown> | undefined;
+      .get(
+        input.profile,
+        platform,
+        issueScope,
+        sessionId,
+        sessionId,
+        sessionId,
+        runId,
+        runId
+      ) as Record<string, unknown> | undefined;
     if (!row) {
       return null;
     }

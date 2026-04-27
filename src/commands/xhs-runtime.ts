@@ -82,7 +82,9 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input: {
     const persisted = await store.getSessionRhythmStatusView({
       profile: input.profile,
       platform: "xhs",
-      issueScope
+      issueScope,
+      sessionId: input.sessionId,
+      runId: input.runId
     });
     const shouldWriteCurrentDecision =
       !!persisted ||
