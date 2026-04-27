@@ -1022,7 +1022,21 @@ describe("runtime-store-recorder", () => {
 
       expect(recordSessionRhythmStatusView).toHaveBeenCalledWith(
         expect.objectContaining({
+          windowState: expect.objectContaining({
+            session_id: "session-recorder-rhythm-live",
+            last_event_id: "rhythm_evt_run-recorder-rhythm-live",
+            source_run_id: "run-recorder-rhythm-live"
+          }),
+          event: expect.objectContaining({
+            event_id: "rhythm_evt_run-recorder-rhythm-live",
+            session_id: "session-recorder-rhythm-live",
+            source_audit_event_id: "gate_evt_recorder_rhythm_live",
+            reason: "XHS_CLOSEOUT_LIVE_ADMISSION_ALLOWED"
+          }),
           decision: expect.objectContaining({
+            decision_id: "rhythm_decision_run-recorder-rhythm-live",
+            run_id: "run-recorder-rhythm-live",
+            session_id: "session-recorder-rhythm-live",
             decision: "allowed",
             reason_codes: ["XHS_CLOSEOUT_LIVE_ADMISSION_ALLOWED"],
             requires: []

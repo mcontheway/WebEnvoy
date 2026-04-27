@@ -28,6 +28,7 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const toSessionRhythmIdPart = (value) => value.replace(/[^A-Za-z0-9._-]+/gu, "_");
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
 const asBoolean = (value) => value === true;
 const REQUIRED_APPROVAL_CHECK_KEYS = APPROVAL_CHECK_KEYS;
@@ -336,15 +337,36 @@ export class RuntimeStoreRecorder {
             input.effectiveExecutionMode === "live_read_high_risk" ||
             input.effectiveExecutionMode === "live_write") &&
             asString(decision.decision) === "deferred";
+        const currentLiveRunKey = toSessionRhythmIdPart(input.runId);
+        const currentLiveEventId = `rhythm_evt_${currentLiveRunKey}`;
+        const currentLiveDecisionId = `rhythm_decision_${currentLiveRunKey}`;
         await this.#store.recordSessionRhythmStatusView({
             profile,
             platform: "xhs",
             issueScope: input.issueScope ?? "issue_209",
-            windowState,
-            event,
+            windowState: liveRunAdmittedAfterDeferredProbe
+                ? {
+                    ...windowState,
+                    session_id: input.sessionId,
+                    last_event_id: currentLiveEventId,
+                    source_run_id: input.runId
+                }
+                : windowState,
+            event: liveRunAdmittedAfterDeferredProbe
+                ? {
+                    ...event,
+                    event_id: currentLiveEventId,
+                    session_id: input.sessionId,
+                    source_audit_event_id: asString(persistedAuditRecord?.event_id) ?? input.sourceAuditEventId ?? null,
+                    reason: "XHS_CLOSEOUT_LIVE_ADMISSION_ALLOWED"
+                }
+                : event,
             decision: liveRunAdmittedAfterDeferredProbe
                 ? {
                     ...decision,
+                    decision_id: currentLiveDecisionId,
+                    run_id: input.runId,
+                    session_id: input.sessionId,
                     decision: "allowed",
                     reason_codes: ["XHS_CLOSEOUT_LIVE_ADMISSION_ALLOWED"],
                     requires: []
