@@ -332,13 +332,24 @@ export class RuntimeStoreRecorder {
         if (!windowState || !event || !decision) {
             return;
         }
+        const liveRunAdmittedAfterDeferredProbe = (input.effectiveExecutionMode === "live_read_limited" ||
+            input.effectiveExecutionMode === "live_read_high_risk" ||
+            input.effectiveExecutionMode === "live_write") &&
+            asString(decision.decision) === "deferred";
         await this.#store.recordSessionRhythmStatusView({
             profile,
             platform: "xhs",
             issueScope: input.issueScope ?? "issue_209",
             windowState,
             event,
-            decision
+            decision: liveRunAdmittedAfterDeferredProbe
+                ? {
+                    ...decision,
+                    decision: "allowed",
+                    reason_codes: ["XHS_CLOSEOUT_LIVE_ADMISSION_ALLOWED"],
+                    requires: []
+                }
+                : decision
         });
     }
     async recordStart(context) {
