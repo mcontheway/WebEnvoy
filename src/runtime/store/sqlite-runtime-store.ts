@@ -410,6 +410,10 @@ export class RuntimeStoreError extends Error {
 
 const SUMMARY_MAX_CHARS = 512;
 const SQLITE_BUSY_MESSAGE = /SQLITE_BUSY|SQLITE_LOCKED|database is locked|database table is locked/i;
+const SQLITE_OPEN_MAX_ATTEMPTS = 8;
+const SQLITE_OPEN_RETRY_MS = 50;
+const SQLITE_OPEN_BUSY_TIMEOUT_MS = 250;
+const SQLITE_RUNTIME_BUSY_TIMEOUT_MS = 2000;
 type DatabaseSyncConstructor = new (path: string) => DatabaseSync;
 let databaseSyncCtorCache: DatabaseSyncConstructor | null | undefined;
 
@@ -461,6 +465,9 @@ const isSqliteBusyError = (error: unknown): error is Error => {
   return sqliteFields.some(
     (value) => typeof value === "string" && SQLITE_BUSY_MESSAGE.test(value)
   );
+};
+const sleepSync = (ms: number): void => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 };
 const invalidRuntimeStoreInput = (message: string): never => {
   throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", message);
@@ -526,24 +533,32 @@ export class SQLiteRuntimeStore {
     try {
       mkdirSync(path.dirname(dbPath), { recursive: true });
       const DatabaseSyncCtor = resolveDatabaseSyncConstructor();
-      try {
-        this.#db = new DatabaseSyncCtor(dbPath);
-        this.#db.exec("PRAGMA busy_timeout=2000;");
-        this.#initialize();
-        return;
-      } catch (error) {
+      for (let attempt = 0; attempt < SQLITE_OPEN_MAX_ATTEMPTS; attempt += 1) {
         try {
-          this.#db?.close();
-        } catch {
-          // Ignore cleanup failure after constructor initialization fails.
+          this.#db = new DatabaseSyncCtor(dbPath);
+          this.#db.exec(`PRAGMA busy_timeout=${SQLITE_OPEN_BUSY_TIMEOUT_MS};`);
+          this.#initialize();
+          this.#db.exec(`PRAGMA busy_timeout=${SQLITE_RUNTIME_BUSY_TIMEOUT_MS};`);
+          return;
+        } catch (error) {
+          try {
+            this.#db?.close();
+          } catch {
+            // Ignore cleanup failure after constructor initialization fails.
+          }
+          if (
+            error instanceof RuntimeStoreError &&
+            error.code === "ERR_RUNTIME_STORE_SCHEMA_MISMATCH"
+          ) {
+            throw error;
+          }
+          lastError = error;
+          if (isSqliteBusyError(error) && attempt < SQLITE_OPEN_MAX_ATTEMPTS - 1) {
+            sleepSync(SQLITE_OPEN_RETRY_MS);
+            continue;
+          }
+          break;
         }
-        if (
-          error instanceof RuntimeStoreError &&
-          error.code === "ERR_RUNTIME_STORE_SCHEMA_MISMATCH"
-        ) {
-          throw error;
-        }
-        lastError = error;
       }
     } catch (error) {
       lastError = error;

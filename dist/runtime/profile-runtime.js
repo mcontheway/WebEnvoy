@@ -1333,7 +1333,7 @@ export class ProfileRuntimeService {
     async #updateLockOwnerPid(lockPath, runId, ownerPid, nowIso) {
         const existing = await this.#readLock(lockPath);
         if (!existing) {
-            throw new CliError("ERR_RUNTIME_UNAVAILABLE", "profile 锁丢失，浏览器启动状态不可恢复", {
+            throw new CliError("ERR_PROFILE_LOCKED", "profile 当前被其他运行占用", {
                 retryable: true
             });
         }
@@ -1461,7 +1461,7 @@ export class ProfileRuntimeService {
                 }
             }
         }
-        throw new CliError("ERR_RUNTIME_UNAVAILABLE", "profile 锁获取失败，请重试", {
+        throw new CliError("ERR_PROFILE_LOCKED", "profile 当前被其他运行占用", {
             retryable: true
         });
     }
