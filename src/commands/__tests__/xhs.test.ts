@@ -2222,6 +2222,29 @@ describe("normalizeGateOptionsForContract", () => {
         fullBundleBlocked: true,
         reasonCodes: expect.arrayContaining(["ANTI_DETECTION_BASELINE_REQUIRED"])
       });
+      const verificationStore = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+      try {
+        await expect(
+          verificationStore.getSessionRhythmStatusView({
+            profile: "xhs_rhythm_probe_profile",
+            platform: "xhs",
+            issueScope: "issue_209",
+            runId
+          })
+        ).resolves.toMatchObject({
+          event: {
+            event_id: `rhythm_evt_${runId}`,
+            event_type: "recovery_probe_passed"
+          },
+          decision: {
+            decision_id: `rhythm_decision_${runId}`,
+            decision: "deferred",
+            reason_codes: expect.arrayContaining(["ANTI_DETECTION_BASELINE_REQUIRED"])
+          }
+        });
+      } finally {
+        verificationStore.close();
+      }
     } finally {
       await rm(cwd, { recursive: true, force: true });
       if (previousTransport === undefined) {
@@ -3428,7 +3451,7 @@ describe("normalizeGateOptionsForContract", () => {
             approval_admission_ref: approvalAdmissionRef,
             audit_admission_ref: auditAdmissionRef,
             session_rhythm_window_id: "rhythm_win_persisted_issue_209",
-            session_rhythm_decision_id: `rhythm_decision_${runId}`
+            session_rhythm_decision_id: `rhythm_decision_preflight_${runId}`
           }
         }
       });
@@ -3437,10 +3460,11 @@ describe("normalizeGateOptionsForContract", () => {
         const persistedRhythm = await verificationStore.getSessionRhythmStatusView({
           profile,
           platform: "xhs",
-          issueScope: "issue_209"
+          issueScope: "issue_209",
+          runId
         });
         expect(persistedRhythm?.decision).toMatchObject({
-          decision_id: `rhythm_decision_${runId}`,
+          decision_id: `rhythm_decision_preflight_${runId}`,
           run_id: runId,
           session_id: expect.any(String),
           effective_execution_mode: "live_read_high_risk"

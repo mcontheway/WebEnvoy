@@ -1187,6 +1187,10 @@ export class SQLiteRuntimeStore {
           AND (? IS NULL OR w.session_id = ? OR d.session_id = ?)
         ORDER BY
           CASE WHEN ? IS NOT NULL AND d.run_id = ? THEN 0 ELSE 1 END,
+          CASE
+            WHEN d.decision_id LIKE 'rhythm_decision_preflight_%' THEN 1
+            ELSE 0
+          END,
           d.decided_at DESC
         LIMIT 1
       `

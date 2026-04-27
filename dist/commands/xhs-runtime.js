@@ -58,8 +58,8 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input) => {
             return null;
         }
         const currentSourceKey = toSessionRhythmIdPart(input.runId);
-        const currentEventId = `rhythm_evt_${currentSourceKey}`;
-        const currentDecisionId = `rhythm_decision_${currentSourceKey}`;
+        const currentEventId = `rhythm_evt_preflight_${currentSourceKey}`;
+        const currentDecisionId = `rhythm_decision_preflight_${currentSourceKey}`;
         await store.recordSessionRhythmStatusView({
             profile: input.profile,
             platform: "xhs",
@@ -89,7 +89,9 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input) => {
         const current = await store.getSessionRhythmStatusView({
             profile: input.profile,
             platform: "xhs",
-            issueScope
+            issueScope,
+            sessionId: input.sessionId,
+            runId: input.runId
         });
         const currentWindowId = asString(current?.window_state.window_id);
         const currentDecisionIdFromStore = asString(current?.decision.run_id) === input.runId
@@ -795,6 +797,8 @@ const xhsReadCommand = async (context, inputConfig) => {
         const executionAudit = pickCanonicalSummaryField(bridgeResult.payload, "execution_audit");
         const summary = mapCapabilitySummaryForContract(envelope.ability.id, {
             ...(asObject(bridgeResult.payload.summary) ?? {}),
+            session_id: bridgeSessionId,
+            requested_execution_mode: gate.requestedExecutionMode,
             ...(consumerGateResult ? { consumer_gate_result: consumerGateResult } : {}),
             ...(requestAdmissionResult !== undefined
                 ? { request_admission_result: requestAdmissionResult }
@@ -803,12 +807,46 @@ const xhsReadCommand = async (context, inputConfig) => {
         });
         if (context.profile &&
             recoveryProbeRequested) {
-            await profileRuntime.markXhsCloseoutSingleProbePassed({
+            const recoveryStatus = await profileRuntime.markXhsCloseoutSingleProbePassed({
                 cwd: context.cwd,
                 profile: context.profile,
                 runId: context.run_id,
                 params: {}
             });
+            const xhsCloseoutRhythm = asObject(recoveryStatus.xhs_closeout_rhythm);
+            if (xhsCloseoutRhythm) {
+                summary.xhs_closeout_rhythm = xhsCloseoutRhythm;
+            }
+            const profileStore = new ProfileStore(resolveRuntimeProfileRoot(context.cwd));
+            const latestMeta = await profileStore.readMeta(context.profile, { mode: "readonly" });
+            const recoveryRhythmView = toSessionRhythmStatusView({
+                profile: context.profile,
+                rhythm: latestMeta?.xhsCloseoutRhythm,
+                accountSafety: latestMeta?.accountSafety,
+                issueScope: asString(gate.options.issue_scope) ?? "issue_209",
+                sessionId: bridgeSessionId,
+                sourceRunId: context.run_id,
+                effectiveExecutionMode: gate.requestedExecutionMode
+            });
+            const windowState = asObject(recoveryRhythmView.session_rhythm_window_state);
+            const event = asObject(recoveryRhythmView.session_rhythm_event);
+            const decision = asObject(recoveryRhythmView.session_rhythm_decision);
+            if (windowState && event && decision) {
+                const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(context.cwd));
+                try {
+                    await store.recordSessionRhythmStatusView({
+                        profile: context.profile,
+                        platform: "xhs",
+                        issueScope: asString(gate.options.issue_scope) ?? "issue_209",
+                        windowState,
+                        event,
+                        decision
+                    });
+                }
+                finally {
+                    store.close();
+                }
+            }
         }
         return {
             summary,
