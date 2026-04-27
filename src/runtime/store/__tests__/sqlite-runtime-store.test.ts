@@ -295,6 +295,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
         issueScope: "issue_209",
         windowState: {
           ...view.window_state,
+          session_id: "nm-session-002",
+          current_phase: "steady",
           updated_at: "2026-04-25T10:45:00.000Z"
         },
         event: {
@@ -318,13 +320,20 @@ describeWithSqlite("sqlite-runtime-store", () => {
           issueScope: "issue_209"
         })
       ).resolves.toMatchObject({
+        window_state: {
+          session_id: "nm-session-002",
+          current_phase: "steady"
+        },
         event: {
           event_id: "rhythm_evt_run-probe-001",
+          session_id: "nm-session-001",
           source_audit_event_id: "gate_evt_probe",
           reason: "XHS_RECOVERY_SINGLE_PROBE_PASSED"
         },
         decision: {
           decision_id: "rhythm_decision_run-probe-001",
+          session_id: "nm-session-001",
+          current_phase: "recovery_probe",
           decision: "allowed",
           reason_codes: ["XHS_RECOVERY_SINGLE_PROBE_PASSED"]
         }
