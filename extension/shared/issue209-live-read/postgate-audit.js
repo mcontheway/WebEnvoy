@@ -94,7 +94,8 @@ const buildIssue209ExecutionAudit = (input) => {
         : consumedEvidence.auditAdmissionRef,
       approval_record_ref: asString(input.approvalRecord?.approval_id),
       audit_record_ref: asString(input.auditRecord?.event_id),
-      session_rhythm_window_id: asString(input.gate?.gate_input?.session_rhythm_window_id),
+      session_rhythm_window_id:
+        asString(input.gate?.gate_input?.session_rhythm_window_id) ?? null,
       session_rhythm_decision_id: asString(input.gate?.gate_input?.session_rhythm_decision_id) ??
         null
     },
