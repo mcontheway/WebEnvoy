@@ -32,6 +32,8 @@ export interface XhsSearchOptions {
   upstream_authorization_request?: Record<string, unknown>;
   __legacy_requested_execution_mode?: string;
   __runtime_profile_ref?: string;
+  __session_rhythm_window_id?: string;
+  __session_rhythm_decision_id?: string;
   __anonymous_isolation_verified?: boolean;
   target_site_logged_in?: boolean;
   risk_state?: string;

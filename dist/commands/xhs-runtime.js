@@ -6,7 +6,7 @@ import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging
 import { appendFingerprintContext, buildFingerprintContextForMeta } from "../runtime/fingerprint-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
 import { isAccountSafetyReason, toAccountSafetyStatus } from "../runtime/account-safety.js";
-import { toXhsCloseoutRhythmStatus } from "../runtime/xhs-closeout-rhythm.js";
+import { toSessionRhythmStatusView, toXhsCloseoutRhythmStatus } from "../runtime/xhs-closeout-rhythm.js";
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import { readXhsCloseoutValidationGateView, toXhsCloseoutValidationGateJson } from "../runtime/anti-detection-validation.js";
@@ -19,6 +19,30 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const buildSessionRhythmCompatibilityRefsForRuntime = (input) => {
+    if (!input.profile) {
+        return null;
+    }
+    const view = toSessionRhythmStatusView({
+        profile: input.profile,
+        rhythm: input.profileMeta?.xhsCloseoutRhythm,
+        accountSafety: input.profileMeta?.accountSafety,
+        issueScope: asString(input.gate.options.issue_scope) ?? "issue_209",
+        sourceRunId: input.runId,
+        effectiveExecutionMode: input.gate.requestedExecutionMode
+    });
+    const windowState = asObject(view.session_rhythm_window_state);
+    const decision = asObject(view.session_rhythm_decision);
+    const windowId = asString(windowState?.window_id);
+    const decisionId = asString(decision?.decision_id);
+    if (!windowId && !decisionId) {
+        return null;
+    }
+    return {
+        ...(windowId ? { __session_rhythm_window_id: windowId } : {}),
+        ...(decisionId ? { __session_rhythm_decision_id: decisionId } : {})
+    };
+};
 const asInteger = (value) => {
     if (typeof value === "number" && Number.isFinite(value)) {
         return Math.trunc(value);
@@ -523,8 +547,15 @@ const xhsReadCommand = async (context, inputConfig) => {
         }
         const transportIsLoopback = process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback";
         const { __anonymous_isolation_verified: anonymousIsolationVerified, target_site_logged_in: targetSiteLoggedIn, ...preparedGateOptions } = preparedIssue209LiveRead.options;
+        const sessionRhythmCompatibilityRefs = buildSessionRhythmCompatibilityRefsForRuntime({
+            profile: context.profile,
+            runId: context.run_id,
+            profileMeta,
+            gate
+        });
         const runtimeGateOptions = {
             ...preparedGateOptions,
+            ...(sessionRhythmCompatibilityRefs ?? {}),
             ...(transportIsLoopback && typeof anonymousIsolationVerified === "boolean"
                 ? { __anonymous_isolation_verified: anonymousIsolationVerified }
                 : {}),

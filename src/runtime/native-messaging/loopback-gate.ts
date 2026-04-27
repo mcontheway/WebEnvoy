@@ -134,6 +134,8 @@ export const buildLoopbackGate = (
     requestedExecutionMode: options.requested_execution_mode,
     legacyRequestedExecutionMode: options.__legacy_requested_execution_mode,
     runtimeProfileRef: options.__runtime_profile_ref ?? linkage?.profile,
+    sessionRhythmWindowId: options.__session_rhythm_window_id,
+    sessionRhythmDecisionId: options.__session_rhythm_decision_id,
     upstreamAuthorizationRequest: options.upstream_authorization_request,
     ...(anonymousIsolationVerified !== null ? { anonymousIsolationVerified } : {}),
     ...(targetSiteLoggedIn !== null ? { targetSiteLoggedIn } : {}),

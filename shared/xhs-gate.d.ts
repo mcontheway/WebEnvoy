@@ -210,6 +210,10 @@ export interface XhsGateCoreInput {
   legacy_requested_execution_mode?: unknown;
   runtimeProfileRef?: unknown;
   __runtime_profile_ref?: unknown;
+  sessionRhythmWindowId?: unknown;
+  sessionRhythmDecisionId?: unknown;
+  __session_rhythm_window_id?: unknown;
+  __session_rhythm_decision_id?: unknown;
   upstreamAuthorizationRequest?: unknown;
   upstream_authorization_request?: unknown;
   anonymousIsolationVerified?: boolean;

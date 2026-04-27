@@ -1722,6 +1722,8 @@ const evaluateXhsGate = (input) => {
       action_type: state.actionType,
       requested_execution_mode: state.requestedExecutionMode,
       risk_state: state.riskState,
+      session_rhythm_window_id: asString(input.sessionRhythmWindowId ?? input.__session_rhythm_window_id),
+      session_rhythm_decision_id: asString(input.sessionRhythmDecisionId ?? input.__session_rhythm_decision_id),
       admission_context: admissionContext
     },
     gate_outcome: {

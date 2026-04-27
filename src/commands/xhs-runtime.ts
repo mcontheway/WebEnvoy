@@ -14,7 +14,10 @@ import {
   toAccountSafetyStatus,
   type AccountSafetyReason
 } from "../runtime/account-safety.js";
-import { toXhsCloseoutRhythmStatus } from "../runtime/xhs-closeout-rhythm.js";
+import {
+  toSessionRhythmStatusView,
+  toXhsCloseoutRhythmStatus
+} from "../runtime/xhs-closeout-rhythm.js";
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import {
@@ -57,6 +60,36 @@ const asObject = (value: unknown): JsonObject | null =>
 
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+
+const buildSessionRhythmCompatibilityRefsForRuntime = (input: {
+  profile: string | null;
+  runId: string;
+  profileMeta: Awaited<ReturnType<ProfileStore["readMeta"]>> | null;
+  gate: ReturnType<typeof normalizeGateOptionsForContract>;
+}): JsonObject | null => {
+  if (!input.profile) {
+    return null;
+  }
+  const view = toSessionRhythmStatusView({
+    profile: input.profile,
+    rhythm: input.profileMeta?.xhsCloseoutRhythm,
+    accountSafety: input.profileMeta?.accountSafety,
+    issueScope: asString(input.gate.options.issue_scope) ?? "issue_209",
+    sourceRunId: input.runId,
+    effectiveExecutionMode: input.gate.requestedExecutionMode
+  });
+  const windowState = asObject(view.session_rhythm_window_state);
+  const decision = asObject(view.session_rhythm_decision);
+  const windowId = asString(windowState?.window_id);
+  const decisionId = asString(decision?.decision_id);
+  if (!windowId && !decisionId) {
+    return null;
+  }
+  return {
+    ...(windowId ? { __session_rhythm_window_id: windowId } : {}),
+    ...(decisionId ? { __session_rhythm_decision_id: decisionId } : {})
+  };
+};
 
 const asInteger = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -724,8 +757,15 @@ const xhsReadCommand = async (
       target_site_logged_in: targetSiteLoggedIn,
       ...preparedGateOptions
     } = preparedIssue209LiveRead.options;
+    const sessionRhythmCompatibilityRefs = buildSessionRhythmCompatibilityRefsForRuntime({
+      profile: context.profile,
+      runId: context.run_id,
+      profileMeta,
+      gate
+    });
     const runtimeGateOptions = {
       ...preparedGateOptions,
+      ...(sessionRhythmCompatibilityRefs ?? {}),
       ...(transportIsLoopback && typeof anonymousIsolationVerified === "boolean"
         ? { __anonymous_isolation_verified: anonymousIsolationVerified }
         : {}),

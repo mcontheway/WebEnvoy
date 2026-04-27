@@ -1188,6 +1188,8 @@ type ResolvedXhsGateCommandInput = {
   upstreamAuthorizationRequest: Record<string, unknown> | null;
   legacyRequestedExecutionMode: XhsExecutionMode | null;
   runtimeProfileRef: string | null;
+  sessionRhythmWindowId: string | null;
+  sessionRhythmDecisionId: string | null;
   anonymousIsolationVerified: boolean | null;
   targetSiteLoggedIn: boolean | null;
   limitedReadRolloutReadyTrue: boolean;
@@ -1266,6 +1268,8 @@ const resolveXhsGateCommandInput = (
       readGateParam("__legacy_requested_execution_mode")
     ),
     runtimeProfileRef: asNonEmptyString(readGateParam("__runtime_profile_ref")),
+    sessionRhythmWindowId: asNonEmptyString(readGateParam("__session_rhythm_window_id")),
+    sessionRhythmDecisionId: asNonEmptyString(readGateParam("__session_rhythm_decision_id")),
     anonymousIsolationVerified: asOptionalBoolean(readGateParam("__anonymous_isolation_verified")),
     targetSiteLoggedIn: asOptionalBoolean(readGateParam("target_site_logged_in")),
     limitedReadRolloutReadyTrue: readGateParam("limited_read_rollout_ready_true") === true,
@@ -1360,6 +1364,8 @@ const buildCanonicalGateAuditArtifacts = (input: {
   requestedExecutionMode: XhsExecutionMode | null;
   legacyRequestedExecutionMode: XhsExecutionMode | null;
   runtimeProfileRef: string | null;
+  sessionRhythmWindowId: string | null;
+  sessionRhythmDecisionId: string | null;
   upstreamAuthorizationRequest: Record<string, unknown> | null;
   anonymousIsolationVerified: boolean | null;
   targetSiteLoggedIn: boolean | null;
@@ -1387,6 +1393,8 @@ const buildCanonicalGateAuditArtifacts = (input: {
     requestedExecutionMode: input.requestedExecutionMode,
     legacyRequestedExecutionMode: input.legacyRequestedExecutionMode,
     runtimeProfileRef: input.runtimeProfileRef,
+    sessionRhythmWindowId: input.sessionRhythmWindowId,
+    sessionRhythmDecisionId: input.sessionRhythmDecisionId,
     upstreamAuthorizationRequest: input.upstreamAuthorizationRequest,
     ...(input.anonymousIsolationVerified !== null
       ? { anonymousIsolationVerified: input.anonymousIsolationVerified }
@@ -4458,6 +4466,8 @@ class ChromeBackgroundBridge {
       upstreamAuthorizationRequest,
       legacyRequestedExecutionMode,
       runtimeProfileRef,
+      sessionRhythmWindowId,
+      sessionRhythmDecisionId,
       anonymousIsolationVerified,
       targetSiteLoggedIn,
       gateInvocationId,
@@ -4738,6 +4748,8 @@ class ChromeBackgroundBridge {
       requestedExecutionMode: canonicalRequestedExecutionMode,
       legacyRequestedExecutionMode: canonicalLegacyRequestedExecutionMode,
       runtimeProfileRef,
+      sessionRhythmWindowId,
+      sessionRhythmDecisionId,
       upstreamAuthorizationRequest: canonicalUpstreamAuthorizationRequest,
       anonymousIsolationVerified,
       targetSiteLoggedIn,
