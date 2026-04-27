@@ -53,8 +53,12 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input) => {
         const currentWindowState = asObject(currentView.session_rhythm_window_state);
         const currentEvent = asObject(currentView.session_rhythm_event);
         const currentDecision = asObject(currentView.session_rhythm_decision);
-        const windowId = asString(persisted?.window_state.window_id) ?? asString(currentWindowState?.window_id);
-        if (!windowId || !currentWindowState || !currentEvent || !currentDecision) {
+        const persistedWindowState = persisted?.window_state;
+        const persistedEvent = persisted?.event;
+        const windowId = asString(persistedWindowState?.window_id) ?? asString(currentWindowState?.window_id);
+        const windowStateForRecord = persistedWindowState ?? currentWindowState;
+        const eventForRecord = persistedEvent ?? currentEvent;
+        if (!windowId || !windowStateForRecord || !eventForRecord || !currentDecision) {
             return null;
         }
         const currentSourceKey = toSessionRhythmIdPart(input.runId);
@@ -65,17 +69,17 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input) => {
             platform: "xhs",
             issueScope,
             windowState: {
-                ...currentWindowState,
+                ...windowStateForRecord,
                 window_id: windowId,
-                last_event_id: currentEventId,
-                source_run_id: input.runId
+                last_event_id: asString(persistedWindowState?.last_event_id) ?? currentEventId,
+                source_run_id: asString(persistedWindowState?.source_run_id) ?? input.runId
             },
             event: {
-                ...currentEvent,
-                event_id: currentEventId,
-                session_id: input.sessionId,
+                ...eventForRecord,
+                event_id: asString(persistedEvent?.event_id) ?? currentEventId,
+                session_id: asString(persistedEvent?.session_id) ?? input.sessionId,
                 window_id: windowId,
-                source_audit_event_id: null
+                source_audit_event_id: asString(persistedEvent?.source_audit_event_id)
             },
             decision: {
                 ...currentDecision,
@@ -141,9 +145,12 @@ const readPersistedSessionRhythmBlockStatus = async (input) => {
         const persistedDecision = persisted?.decision;
         const persistedDecisionValue = asString(persistedDecision?.decision);
         const event = persisted?.event;
+        const profileRhythmState = asString(input.profileMeta?.xhsCloseoutRhythm?.state);
         if (asString(windowState?.current_phase) !== "cooldown" &&
             asString(windowState?.risk_state) !== "paused") {
-            if (persistedDecisionValue && persistedDecisionValue !== "allowed") {
+            if (persistedDecisionValue &&
+                persistedDecisionValue !== "allowed" &&
+                (!profileRhythmState || profileRhythmState === "not_required")) {
                 return {
                     state: "operator_confirmation_required",
                     cooldown_until: null,
