@@ -2402,6 +2402,116 @@ describe("normalizeGateOptionsForContract", () => {
     }
   });
 
+  it("preserves persisted cooldown before XHS closeout live execution", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-persisted-cooldown-"));
+    const profile = "xhs_persisted_cooldown_profile";
+    try {
+      await seedXhsCloseoutReady({ cwd, profile });
+      const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+      try {
+        await store.recordSessionRhythmStatusView({
+          profile,
+          platform: "xhs",
+          issueScope: "issue_209",
+          windowState: {
+            window_id: `rhythm_win_${profile}_issue_209`,
+            profile,
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-cooldown",
+            current_phase: "cooldown",
+            risk_state: "paused",
+            window_started_at: "2026-04-25T10:35:00.000Z",
+            window_deadline_at: "2026-04-25T11:05:00.000Z",
+            cooldown_until: "2026-04-25T11:05:00.000Z",
+            recovery_probe_due_at: "2026-04-25T11:05:00.000Z",
+            stability_window_until: null,
+            risk_signal_count: 1,
+            last_event_id: "rhythm_evt_persisted_cooldown",
+            source_run_id: "run-persisted-cooldown-source",
+            updated_at: "2026-04-25T10:35:00.000Z"
+          },
+          event: {
+            event_id: "rhythm_evt_persisted_cooldown",
+            profile,
+            platform: "xhs",
+            issue_scope: "issue_209",
+            session_id: "nm-session-cooldown",
+            window_id: `rhythm_win_${profile}_issue_209`,
+            event_type: "risk_signal_detected",
+            phase_before: "steady",
+            phase_after: "cooldown",
+            risk_state_before: "limited",
+            risk_state_after: "paused",
+            source_audit_event_id: "gate_evt_persisted_cooldown",
+            reason: "ACCOUNT_RISK_RECOVERY_REQUIRED",
+            recorded_at: "2026-04-25T10:35:00.000Z"
+          },
+          decision: {
+            decision_id: "rhythm_decision_persisted_cooldown",
+            window_id: `rhythm_win_${profile}_issue_209`,
+            run_id: "run-persisted-cooldown-source",
+            session_id: "nm-session-cooldown",
+            profile,
+            current_phase: "cooldown",
+            current_risk_state: "paused",
+            next_phase: "cooldown",
+            next_risk_state: "paused",
+            effective_execution_mode: "live_read_high_risk",
+            decision: "blocked",
+            reason_codes: ["ACCOUNT_RISK_RECOVERY_REQUIRED"],
+            requires: ["cooldown_until_elapsed"],
+            decided_at: "2026-04-25T10:35:00.000Z"
+          }
+        });
+      } finally {
+        store.close();
+      }
+
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.detail",
+            profile,
+            run_id: "run-persisted-cooldown-current",
+            params: {
+              ability: {
+                id: "xhs.note.detail.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                note_id: "note-persisted-cooldown"
+              },
+              options: {
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 33,
+                target_page: "explore_detail_tab",
+                action_type: "read",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed"
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_RHYTHM_BLOCKED",
+          xhs_closeout_rhythm: expect.objectContaining({
+            state: "cooldown",
+            full_bundle_blocked: true
+          })
+        }
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("does not consume the recovery probe budget when runtime readiness fails first", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-rhythm-probe-readiness-"));
     const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;

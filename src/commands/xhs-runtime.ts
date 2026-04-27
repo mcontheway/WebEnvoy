@@ -158,6 +158,61 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input: {
   return null;
 };
 
+const readPersistedSessionRhythmBlockStatus = async (input: {
+  cwd: string;
+  profile: string | null;
+  issueScope: string | null;
+}): Promise<JsonObject | null> => {
+  if (!input.profile) {
+    return null;
+  }
+  let store: SQLiteRuntimeStore | null = null;
+  try {
+    store = new SQLiteRuntimeStore(resolveRuntimeStorePath(input.cwd));
+    const persisted = await store.getSessionRhythmStatusView({
+      profile: input.profile,
+      platform: "xhs",
+      issueScope: input.issueScope ?? "issue_209"
+    });
+    const windowState = persisted?.window_state;
+    if (
+      asString(windowState?.current_phase) !== "cooldown" &&
+      asString(windowState?.risk_state) !== "paused"
+    ) {
+      return null;
+    }
+    const event = persisted?.event;
+    return {
+      state: "cooldown",
+      cooldown_until: windowState?.cooldown_until ?? null,
+      operator_confirmed_at: null,
+      single_probe_required: true,
+      single_probe_passed_at: null,
+      probe_run_id: null,
+      full_bundle_blocked: true,
+      reason_codes: [
+        asString(event?.reason) ??
+          asString(windowState?.last_event_id) ??
+          "PERSISTED_SESSION_RHYTHM_PAUSED"
+      ]
+    };
+  } catch (error) {
+    if (error instanceof RuntimeStoreError) {
+      throw new CliError("ERR_RUNTIME_UNAVAILABLE", `运行记录存储失败: ${error.code}`, {
+        retryable: error.code !== "ERR_RUNTIME_STORE_SCHEMA_MISMATCH",
+        cause: error
+      });
+    }
+    throw error;
+  } finally {
+    try {
+      store?.close();
+    } catch {
+      // Read-only preflight best-effort close.
+    }
+  }
+};
+
 const asInteger = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) {
     return Math.trunc(value);
@@ -702,10 +757,16 @@ const xhsReadCommand = async (
   const profileStore = new ProfileStore(resolveRuntimeProfileRoot(context.cwd));
   let profileMeta = context.profile ? await profileStore.readMeta(context.profile) : null;
   const accountSafetyStatus = toAccountSafetyStatus(profileMeta?.accountSafety);
-  const xhsCloseoutRhythmStatus = toXhsCloseoutRhythmStatus({
+  let xhsCloseoutRhythmStatus = toXhsCloseoutRhythmStatus({
     rhythm: profileMeta?.xhsCloseoutRhythm,
     accountSafety: profileMeta?.accountSafety
   });
+  xhsCloseoutRhythmStatus =
+    (await readPersistedSessionRhythmBlockStatus({
+      cwd: context.cwd,
+      profile: context.profile,
+      issueScope: asString(gate.options.issue_scope)
+    })) ?? xhsCloseoutRhythmStatus;
   const profileRuntime = new ProfileRuntimeService();
   const recoveryProbeRequested = isXhsRecoveryProbe({
     command: context.command,

@@ -446,6 +446,110 @@ describeWithSqlite("sqlite-runtime-store", () => {
     }
   });
 
+  it("backfills missing FR-0014 rhythm event audit links without overwriting existing links", async () => {
+    const cwd = await createTempCwd();
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    const input = {
+      profile: "xhs_001",
+      platform: "xhs",
+      issueScope: "issue_209",
+      windowState: {
+        window_id: "rhythm_win_xhs_001_issue_209",
+        profile: "xhs_001",
+        platform: "xhs",
+        issue_scope: "issue_209",
+        session_id: "nm-session-001",
+        current_phase: "steady",
+        risk_state: "limited",
+        window_started_at: "2026-04-25T10:35:00.000Z",
+        window_deadline_at: "2026-04-25T10:55:00.000Z",
+        cooldown_until: null,
+        recovery_probe_due_at: null,
+        stability_window_until: "2026-04-25T10:55:00.000Z",
+        risk_signal_count: 0,
+        last_event_id: "rhythm_evt_run-current-001",
+        source_run_id: "run-current-001",
+        updated_at: "2026-04-25T10:40:00.000Z"
+      },
+      event: {
+        event_id: "rhythm_evt_run-current-001",
+        profile: "xhs_001",
+        platform: "xhs",
+        issue_scope: "issue_209",
+        session_id: "nm-session-001",
+        window_id: "rhythm_win_xhs_001_issue_209",
+        event_type: "stability_window_passed",
+        phase_before: "steady",
+        phase_after: "steady",
+        risk_state_before: "limited",
+        risk_state_after: "limited",
+        source_audit_event_id: null,
+        reason: "SESSION_RHYTHM_STATUS_OBSERVED",
+        recorded_at: "2026-04-25T10:40:00.000Z"
+      },
+      decision: {
+        decision_id: "rhythm_decision_run-current-001",
+        window_id: "rhythm_win_xhs_001_issue_209",
+        run_id: "run-current-001",
+        session_id: "nm-session-001",
+        profile: "xhs_001",
+        current_phase: "steady",
+        current_risk_state: "limited",
+        next_phase: "steady",
+        next_risk_state: "limited",
+        effective_execution_mode: "live_read_high_risk",
+        decision: "allowed",
+        reason_codes: ["SESSION_RHYTHM_STATUS_OBSERVED"],
+        requires: [],
+        decided_at: "2026-04-25T10:40:00.000Z"
+      }
+    };
+    try {
+      await store.recordSessionRhythmStatusView(input);
+      await store.recordSessionRhythmStatusView({
+        ...input,
+        event: {
+          ...input.event,
+          source_audit_event_id: "gate_evt_current",
+          reason: "OVERWRITE_ATTEMPT"
+        }
+      });
+      await expect(
+        store.getSessionRhythmStatusView({
+          profile: "xhs_001",
+          platform: "xhs",
+          issueScope: "issue_209"
+        })
+      ).resolves.toMatchObject({
+        event: {
+          event_id: "rhythm_evt_run-current-001",
+          source_audit_event_id: "gate_evt_current",
+          reason: "SESSION_RHYTHM_STATUS_OBSERVED"
+        }
+      });
+      await store.recordSessionRhythmStatusView({
+        ...input,
+        event: {
+          ...input.event,
+          source_audit_event_id: "gate_evt_late_overwrite"
+        }
+      });
+      await expect(
+        store.getSessionRhythmStatusView({
+          profile: "xhs_001",
+          platform: "xhs",
+          issueScope: "issue_209"
+        })
+      ).resolves.toMatchObject({
+        event: {
+          source_audit_event_id: "gate_evt_current"
+        }
+      });
+    } finally {
+      store.close();
+    }
+  });
+
   it("projects FR-0020 anti-detection validation views from exact scoped records", async () => {
     const cwd = await createTempCwd();
     const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));

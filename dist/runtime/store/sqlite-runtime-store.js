@@ -498,7 +498,11 @@ export class SQLiteRuntimeStore {
             phase_before, phase_after, risk_state_before, risk_state_after,
             source_audit_event_id, reason, recorded_at
           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(event_id) DO NOTHING
+          ON CONFLICT(event_id) DO UPDATE SET
+            source_audit_event_id = COALESCE(
+              session_rhythm_event.source_audit_event_id,
+              excluded.source_audit_event_id
+            )
         `)
                 .run(eventId, input.profile, input.platform, input.issueScope, asNonEmptyRuntimeStoreString(event.session_id, "event.session_id"), windowId, asNonEmptyRuntimeStoreString(event.event_type, "event_type"), asNonEmptyRuntimeStoreString(event.phase_before, "phase_before"), asNonEmptyRuntimeStoreString(event.phase_after, "phase_after"), asSessionRhythmRiskState(event.risk_state_before, "risk_state_before"), asSessionRhythmRiskState(event.risk_state_after, "risk_state_after"), asNullableRuntimeStoreString(event.source_audit_event_id), asNullableRuntimeStoreString(event.reason), recordedAt);
             this.#db

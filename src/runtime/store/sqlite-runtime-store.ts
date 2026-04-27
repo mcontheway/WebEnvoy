@@ -1086,7 +1086,11 @@ export class SQLiteRuntimeStore {
             phase_before, phase_after, risk_state_before, risk_state_after,
             source_audit_event_id, reason, recorded_at
           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(event_id) DO NOTHING
+          ON CONFLICT(event_id) DO UPDATE SET
+            source_audit_event_id = COALESCE(
+              session_rhythm_event.source_audit_event_id,
+              excluded.source_audit_event_id
+            )
         `
         )
         .run(
