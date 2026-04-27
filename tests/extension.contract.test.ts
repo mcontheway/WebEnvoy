@@ -761,6 +761,9 @@ describe("extension build contract", () => {
             target_domain: "www.xiaohongshu.com",
             target_tab_id: 8,
             target_page: "search_result_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 8,
+            actual_target_page: "search_result_tab",
             action_type: "read",
             risk_state: "limited",
             requested_execution_mode: "dry_run"
@@ -779,6 +782,90 @@ describe("extension build contract", () => {
     expect((result.error as { message?: string } | undefined)?.message).not.toBe(
       "hasXhsAccountSafetyOverlaySignal is not defined"
     );
+  });
+
+  it("forwards xhs recovery probe marker through bundled content-script handler", async () => {
+    const { ContentScriptHandler } = loadBundledContentScriptHandlerModule(contentScriptBuildPath);
+    const handler = new ContentScriptHandler({
+      xhsEnv: {
+        now: () => 1_710_000_000_000,
+        randomId: () => "bundle-handler-recovery-req-001",
+        getLocationHref: () => "https://www.xiaohongshu.com/search_result",
+        getDocumentTitle: () => "Search Result",
+        getReadyState: () => "complete",
+        getCookie: () => "a1=session-cookie"
+      }
+    });
+
+    const resultPromise = new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        off();
+        reject(new Error("did not receive bundled recovery content-script handler result"));
+      }, 500);
+      const off = handler.onResult((message) => {
+        clearTimeout(timeout);
+        off();
+        resolve(message as Record<string, unknown>);
+      });
+    });
+
+    expect(
+      handler.onBackgroundMessage({
+        kind: "forward",
+        id: "msg-bundled-handler-recovery-001",
+        runId: "run-bundled-handler-recovery-001",
+        tabId: 8,
+        profile: "profile-a",
+        cwd: "/tmp/webenvoy",
+        timeoutMs: 3_000,
+        command: "xhs.search",
+        params: {
+          session_id: "nm-session-bundled-handler-recovery-001"
+        },
+        commandParams: {
+          request_id: "req-bundled-handler-recovery-001",
+          ability: {
+            id: "xhs.note.search.v1",
+            layer: "L3",
+            action: "read"
+          },
+          input: {
+            query: "露营装备"
+          },
+          options: {
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 8,
+            target_page: "search_result_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 8,
+            actual_target_page: "search_result_tab",
+            action_type: "read",
+            risk_state: "limited",
+            requested_execution_mode: "recon",
+            xhs_recovery_probe: true
+          }
+        }
+      })
+    ).toBe(true);
+
+    const result = await resultPromise;
+    expect(result).toMatchObject({
+      kind: "result",
+      ok: false,
+      payload: {
+        layer2_interaction: {
+          strategy_selection: {
+            selected_path: "blocked",
+            blocked_by: "FR-0013.gate_only_probe_no_event_chain"
+          },
+          execution_trace: {
+            settled_wait_applied: false,
+            settled_wait_result: "skipped"
+          }
+        }
+      }
+    });
   });
 
   it("executes bundled content-script handler xhs.search live-read via main-world request bridge", async () => {
@@ -943,7 +1030,8 @@ describe("extension build contract", () => {
       })
     ).toBe(true);
 
-    await expect(resultPromise).resolves.toMatchObject({
+    const searchResult = await resultPromise;
+    expect(searchResult).toMatchObject({
       kind: "result",
       ok: true,
       payload: {
@@ -965,6 +1053,7 @@ describe("extension build contract", () => {
         }
       }
     });
+    expect(searchResult.payload.summary).not.toHaveProperty("layer2_interaction");
     expect(bridgeRequests).toHaveLength(1);
     expect(bridgeRequests[0]).toMatchObject({
       type: "captured-request-context-read",

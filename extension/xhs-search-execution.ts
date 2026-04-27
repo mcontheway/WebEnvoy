@@ -27,6 +27,10 @@ import {
   resolveXsCommon
 } from "./xhs-search-telemetry.js";
 import type { EditorInputValidationResult } from "./xhs-editor-input.js";
+import {
+  buildXhsSearchLayer2InteractionEvidence,
+  type Layer2InteractionEvidence
+} from "./layer2-humanized-events.js";
 
 const asRecord = (value: unknown): JsonRecord | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -132,6 +136,45 @@ const withExecutionAuditInFailurePayload = (
   };
 };
 
+const withLayer2InteractionInSuccessPayload = (
+  result: SearchExecutionResult,
+  layer2Interaction: Layer2InteractionEvidence | null
+): SearchExecutionResult => {
+  if (!result.ok || !layer2Interaction) {
+    return result;
+  }
+  const summary = asRecord(result.payload.summary);
+  if (!summary) {
+    return result;
+  }
+  return {
+    ...result,
+    payload: {
+      ...result.payload,
+      summary: {
+        ...summary,
+        layer2_interaction: layer2Interaction
+      }
+    }
+  };
+};
+
+const withLayer2InteractionInPayload = (
+  result: SearchExecutionResult,
+  layer2Interaction: Layer2InteractionEvidence | null
+): SearchExecutionResult => {
+  if (!layer2Interaction) {
+    return result;
+  }
+  return {
+    ...result,
+    payload: {
+      ...result.payload,
+      layer2_interaction: layer2Interaction
+    }
+  };
+};
+
 const serializeCanonicalShape = (value: unknown): string | null => {
   const record = asRecord(value);
   if (!record) {
@@ -147,6 +190,11 @@ const serializeCanonicalShape = (value: unknown): string | null => {
   });
   return shape ? serializeSearchRequestShape(shape) : null;
 };
+
+const layer2InteractionSummary = (
+  layer2Interaction: Layer2InteractionEvidence | null
+): { layer2_interaction: Layer2InteractionEvidence } | Record<string, never> =>
+  layer2Interaction ? { layer2_interaction: layer2Interaction } : {};
 
 const XHS_SEARCH_REPLAY_ORIGIN_ALLOWLIST = new Set([
   "https://www.xiaohongshu.com",
@@ -613,39 +661,47 @@ export const executeXhsSearch = async (
 ): Promise<SearchExecutionResult> => {
   const gate = resolveGate(input.options, input.executionContext, env.getLocationHref());
   const auditRecord = createAuditRecord(input.executionContext, gate, env);
+  const layer2Interaction = buildXhsSearchLayer2InteractionEvidence({
+    writeInteractionTierName: gate.write_action_matrix_decisions?.write_interaction_tier ?? null,
+    requestedExecutionMode: input.options.requested_execution_mode,
+    recoveryProbe: input.options.xhs_recovery_probe === true
+  });
   const startedAt = env.now();
   if (gate.consumer_gate_result.gate_decision === "blocked") {
-    return withExecutionAuditInFailurePayload(
-      createFailure(
-        "ERR_EXECUTION_FAILED",
-        "执行模式门禁阻断了当前 xhs.search 请求",
-        {
-          ability_id: input.abilityId,
-          stage: "execution",
-          reason: "EXECUTION_MODE_GATE_BLOCKED"
-        },
-        createObservability({
-          href: env.getLocationHref(),
-          title: env.getDocumentTitle(),
-          readyState: env.getReadyState(),
-          requestId: `req-${env.randomId()}`,
-          outcome: "failed",
-          failureReason: "EXECUTION_MODE_GATE_BLOCKED",
-          failureSite: {
+    return withLayer2InteractionInPayload(
+      withExecutionAuditInFailurePayload(
+        createFailure(
+          "ERR_EXECUTION_FAILED",
+          "执行模式门禁阻断了当前 xhs.search 请求",
+          {
+            ability_id: input.abilityId,
             stage: "execution",
-            component: "gate",
-            target: "requested_execution_mode",
+            reason: "EXECUTION_MODE_GATE_BLOCKED"
+          },
+          createObservability({
+            href: env.getLocationHref(),
+            title: env.getDocumentTitle(),
+            readyState: env.getReadyState(),
+            requestId: `req-${env.randomId()}`,
+            outcome: "failed",
+            failureReason: "EXECUTION_MODE_GATE_BLOCKED",
+            failureSite: {
+              stage: "execution",
+              component: "gate",
+              target: "requested_execution_mode",
+              summary: "执行模式门禁阻断"
+            }
+          }),
+          createDiagnosis({
+            reason: "EXECUTION_MODE_GATE_BLOCKED",
             summary: "执行模式门禁阻断"
-          }
-        }),
-        createDiagnosis({
-          reason: "EXECUTION_MODE_GATE_BLOCKED",
-          summary: "执行模式门禁阻断"
-        }),
-        gate,
-        auditRecord
+          }),
+          gate,
+          auditRecord
+        ),
+        gate.execution_audit as JsonRecord | null
       ),
-      gate.execution_audit as JsonRecord | null
+      layer2Interaction
     );
   }
 
@@ -653,7 +709,10 @@ export const executeXhsSearch = async (
     gate.consumer_gate_result.effective_execution_mode === "dry_run" ||
     gate.consumer_gate_result.effective_execution_mode === "recon"
   ) {
-    return createGateOnlySuccess(input, gate, auditRecord, env) as SearchExecutionResult;
+    return withLayer2InteractionInSuccessPayload(
+      createGateOnlySuccess(input, gate, auditRecord, env) as SearchExecutionResult,
+      layer2Interaction
+    );
   }
 
   if (
@@ -802,6 +861,7 @@ export const executeXhsSearch = async (
           approval_record: gate.approval_record,
           risk_state_output: resolveRiskStateOutput(gate, auditRecord),
           audit_record: auditRecord,
+          ...layer2InteractionSummary(layer2Interaction),
           interaction_result: buildEditorInputEvidence(validationResult)
         },
         observability: createObservability({
@@ -844,7 +904,8 @@ export const executeXhsSearch = async (
             execution_audit: gate.execution_audit,
             approval_record: gate.approval_record,
             risk_state_output: resolveRiskStateOutput(gate, auditRecord),
-            audit_record: auditRecord
+            audit_record: auditRecord,
+            ...layer2InteractionSummary(layer2Interaction)
           }
         }
       };
@@ -1285,6 +1346,7 @@ export const executeXhsSearch = async (
         approval_record: gate.approval_record,
         risk_state_output: resolveRiskStateOutput(gate, auditRecord),
         audit_record: auditRecord,
+        ...layer2InteractionSummary(layer2Interaction),
         request_context: {
           status: "exact_hit",
           page_context_namespace: requestContextState.pageContextNamespace,

@@ -40,6 +40,7 @@ export interface XhsSearchOptions {
   audit_record?: Record<string, unknown>;
   admission_context?: Record<string, unknown>;
   limited_read_rollout_ready_true?: boolean;
+  xhs_recovery_probe?: boolean;
   validation_action?: string;
   validation_text?: string;
   editor_focus_attestation?: EditorInputFocusAttestation | Record<string, unknown>;

@@ -1086,6 +1086,7 @@ const XHS_FORWARD_OPTION_KEYS = [
   "target_site_logged_in",
   "approval",
   "limited_read_rollout_ready_true",
+  "xhs_recovery_probe",
   "timeout_ms",
   "simulate_result",
   "x_s_common"

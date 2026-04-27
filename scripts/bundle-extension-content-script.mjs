@@ -61,6 +61,9 @@ const buildContentScriptBundle = async () => {
   );
   const sharedXhsGateSource = await readSource(join(sharedRoot, "xhs-gate.js"));
   const xhsSearchTypesSource = await readSource(join(buildRoot, "xhs-search-types.js"));
+  const layer2HumanizedEventsSource = await readSource(
+    join(buildRoot, "layer2-humanized-events.js")
+  );
   const xhsSearchTelemetrySource = await readSource(join(buildRoot, "xhs-search-telemetry.js"));
   const xhsSearchGateSource = await readSource(join(buildRoot, "xhs-search-gate.js"));
   const xhsSearchExecutionSource = await readSource(join(buildRoot, "xhs-search-execution.js"));
@@ -294,6 +297,16 @@ const buildContentScriptBundle = async () => {
     exports: ["createAuditRecord", "createGateOnlySuccess", "resolveGate"]
   });
 
+  const layer2HumanizedEventsModule = renderClassicModule({
+    moduleVar: "__webenvoy_module_layer2_humanized_events",
+    sourceBody: layer2HumanizedEventsSource,
+    exports: [
+      "buildLayer2InteractionEvidence",
+      "buildXhsSearchLayer2InteractionEvidence",
+      "getLayer2EventChainPolicies"
+    ]
+  });
+
   const xhsSearchExecutionModule = renderClassicModule({
     moduleVar: "__webenvoy_module_xhs_search_execution",
     prelude: [
@@ -322,7 +335,10 @@ const buildContentScriptBundle = async () => {
       "  resolveSimulatedResult,",
       "  resolveRiskStateOutput,",
       "  resolveXsCommon",
-      "} = __webenvoy_module_xhs_search_telemetry;"
+      "} = __webenvoy_module_xhs_search_telemetry;",
+      "const {",
+      "  buildXhsSearchLayer2InteractionEvidence",
+      "} = __webenvoy_module_layer2_humanized_events;"
     ].join("\n"),
     sourceBody: xhsSearchExecutionSource,
     exports: ["executeXhsSearch"]
@@ -502,6 +518,7 @@ const buildContentScriptBundle = async () => {
     xhsSearchTypesModule,
     xhsSearchTelemetryModule,
     xhsSearchGateModule,
+    layer2HumanizedEventsModule,
     xhsSearchExecutionModule,
     xhsSearchModule,
     xhsReadExecutionModule,

@@ -511,7 +511,12 @@ export class ContentScriptHandler {
         const options = asRecord(commandParams.options) ?? {};
         const locationHref = this.#xhsEnv.getLocationHref();
         const actualTargetDomain = resolveTargetDomainFromHref(locationHref);
-        const actualTargetPage = resolveTargetPageFromHref(locationHref, message.command);
+        const actualTargetPage = resolveTargetPageFromHref(locationHref, message.command) ??
+            (actualTargetDomain === XHS_READ_DOMAIN &&
+                message.command === "xhs.search" &&
+                locationHref.includes("/search_result")
+                ? "search_result_tab"
+                : null);
         const observedTargetSiteLoggedIn = actualTargetDomain === XHS_READ_DOMAIN && containsCookie(this.#xhsEnv.getCookie(), "a1");
         const observedAnonymousIsolationVerified = actualTargetDomain === XHS_READ_DOMAIN && observedTargetSiteLoggedIn === false;
         if (!ability || !input) {
@@ -585,6 +590,7 @@ export class ContentScriptHandler {
                     ...(options.limited_read_rollout_ready_true === true
                         ? { limited_read_rollout_ready_true: true }
                         : {}),
+                    ...(options.xhs_recovery_probe === true ? { xhs_recovery_probe: true } : {}),
                     ...(typeof options.validation_action === "string"
                         ? { validation_action: options.validation_action }
                         : {}),
