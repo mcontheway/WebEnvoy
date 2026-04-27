@@ -473,7 +473,7 @@ export class SQLiteRuntimeStore {
             window_started_at, window_deadline_at, cooldown_until, recovery_probe_due_at,
             stability_window_until, risk_signal_count, last_event_id, source_run_id, updated_at
           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(profile, platform, issue_scope, session_id) DO UPDATE SET
+          ON CONFLICT(profile, platform, issue_scope) DO UPDATE SET
             window_id = excluded.window_id,
             session_id = excluded.session_id,
             current_phase = excluded.current_phase,

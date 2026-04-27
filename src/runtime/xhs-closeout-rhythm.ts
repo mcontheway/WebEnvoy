@@ -374,11 +374,7 @@ export const buildSessionRhythmFormalView = (input: {
       : null;
   const sourceRunId = statusProbeRunId ?? input.sourceRunId ?? null;
   const sourceKey = sanitizeIdPart(sourceRunId ?? `${profileKey}_${state}`);
-  const sessionKey =
-    typeof input.sessionId === "string" && input.sessionId.length > 0
-      ? sanitizeIdPart(input.sessionId)
-      : `run_${sourceKey}`;
-  const windowId = `rhythm_win_${profileKey}_${sanitizeIdPart(issueScope)}_${sessionKey}`;
+  const windowId = `rhythm_win_${profileKey}_${sanitizeIdPart(issueScope)}`;
   const latestEventId = `rhythm_evt_${sourceKey}`;
   const decisionId = `rhythm_decision_${sourceKey}`;
   const latestReason = reasonCodes[reasonCodes.length - 1] ?? null;
@@ -494,6 +490,13 @@ export const toSessionRhythmStatusView = (input: {
   const phase = resolveSessionRhythmPhase(state);
   const riskState = resolveSessionRhythmRiskState({ state, accountSafety: input.accountSafety });
   const formalView = buildSessionRhythmFormalView({ ...input, now });
+  const hasFormalIds =
+    typeof input.sessionId === "string" &&
+    input.sessionId.length > 0 &&
+    typeof formalView.windowState.source_run_id === "string" &&
+    formalView.windowState.source_run_id.length > 0 &&
+    typeof formalView.decision.run_id === "string" &&
+    formalView.decision.run_id.length > 0;
   return {
     profile: input.profile,
     platform: "xhs",
@@ -506,8 +509,12 @@ export const toSessionRhythmStatusView = (input: {
     latest_event_id: formalView.event.event_id,
     latest_reason: reasonCodes[reasonCodes.length - 1] ?? null,
     derived_at: now.toISOString(),
-    session_rhythm_window_state: formalView.windowState,
-    session_rhythm_event: formalView.event,
-    session_rhythm_decision: formalView.decision
+    ...(hasFormalIds
+      ? {
+          session_rhythm_window_state: formalView.windowState,
+          session_rhythm_event: formalView.event,
+          session_rhythm_decision: formalView.decision
+        }
+      : {})
   };
 };

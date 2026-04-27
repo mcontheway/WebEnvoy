@@ -46,12 +46,11 @@ const createTempCwd = async (): Promise<string> => {
   return cwd;
 };
 
-const getGeneratedSessionRhythmWindowId = (input: {
+const getGeneratedSessionRhythmView = (input: {
   profile: string;
-  sessionId: string;
-  sourceRunId: string;
-}): string | undefined => {
-  const view = toSessionRhythmStatusView({
+  sessionId?: string | null;
+  sourceRunId?: string | null;
+}) => toSessionRhythmStatusView({
     profile: input.profile,
     issueScope: "issue_209",
     sessionId: input.sessionId,
@@ -61,9 +60,9 @@ const getGeneratedSessionRhythmWindowId = (input: {
     session_rhythm_window_state?: {
       window_id?: string;
     };
+    session_rhythm_event?: Record<string, unknown>;
+    session_rhythm_decision?: Record<string, unknown>;
   };
-  return view.session_rhythm_window_state?.window_id;
-};
 
 const expectLegacyMigrationAllowsNullActionTypeWrite = async (
   store: SQLiteRuntimeStore,
@@ -226,20 +225,28 @@ const seedAntiDetectionValidationRecord = async (
 };
 
 describeWithSqlite("sqlite-runtime-store", () => {
-  it("generates FR-0014 rhythm window ids per runtime session", () => {
-    const firstWindowId = getGeneratedSessionRhythmWindowId({
+  it("keeps one FR-0014 writable rhythm window and only emits formal objects with run/session ids", () => {
+    const firstView = getGeneratedSessionRhythmView({
       profile: "xhs_001",
       sessionId: "nm-session-001",
       sourceRunId: "run-session-window-001"
     });
-    const secondWindowId = getGeneratedSessionRhythmWindowId({
+    const secondView = getGeneratedSessionRhythmView({
       profile: "xhs_001",
       sessionId: "nm-session-002",
       sourceRunId: "run-session-window-002"
     });
+    const missingIdsView = getGeneratedSessionRhythmView({
+      profile: "xhs_001",
+      sessionId: null,
+      sourceRunId: null
+    });
 
-    expect(firstWindowId).toBe("rhythm_win_xhs_001_issue_209_nm-session-001");
-    expect(secondWindowId).toBe("rhythm_win_xhs_001_issue_209_nm-session-002");
+    expect(firstView.session_rhythm_window_state?.window_id).toBe("rhythm_win_xhs_001_issue_209");
+    expect(secondView.session_rhythm_window_state?.window_id).toBe("rhythm_win_xhs_001_issue_209");
+    expect(missingIdsView.session_rhythm_window_state).toBeUndefined();
+    expect(missingIdsView.session_rhythm_event).toBeUndefined();
+    expect(missingIdsView.session_rhythm_decision).toBeUndefined();
   });
 
   it("persists FR-0014 session rhythm window event and decision view", async () => {
@@ -379,7 +386,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
     }
   });
 
-  it("migrates v12 rhythm windows to session-scoped uniqueness", async () => {
+  it("keeps v12 rhythm windows as a single writable window across sessions", async () => {
     const DatabaseSyncCtor = DatabaseSync;
     expect(DatabaseSyncCtor).toBeTruthy();
     if (!DatabaseSyncCtor) {
@@ -496,12 +503,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
           issueScope: "issue_209",
           sessionId: "nm-session-legacy-001"
         })
-      ).resolves.toMatchObject({
-        window_state: {
-          window_id: "rhythm_win_legacy_session_001",
-          session_id: "nm-session-legacy-001"
-        }
-      });
+      ).resolves.toBeNull();
       await expect(
         store.getSessionRhythmStatusView({
           profile: "xhs_001",
