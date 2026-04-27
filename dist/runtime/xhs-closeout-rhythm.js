@@ -219,6 +219,7 @@ export const toXhsCloseoutRhythmStatus = (input) => {
     };
 };
 const sanitizeIdPart = (value) => value.replace(/[^A-Za-z0-9._-]+/gu, "_");
+const addMinutesIso = (value, minutes) => new Date(Date.parse(value) + minutes * 60 * 1000).toISOString();
 const resolveSessionRhythmPhase = (state) => state === "cooldown"
     ? "cooldown"
     : state === "operator_confirmation_required" || state === "single_probe_required"
@@ -229,6 +230,21 @@ const resolveSessionRhythmRiskState = (input) => input.state === "cooldown" || i
     : input.state === "not_required"
         ? "allowed"
         : "limited";
+const resolveSessionRhythmEventType = (input) => {
+    if (input.accountSafety?.state === "account_risk_blocked") {
+        return "risk_signal";
+    }
+    if (input.state === "single_probe_passed") {
+        return "recovery_probe_passed";
+    }
+    if (input.phase === "cooldown") {
+        return "cooldown_started";
+    }
+    if (input.phase === "recovery_probe") {
+        return "recovery_probe_started";
+    }
+    return "stability_window_passed";
+};
 export const buildSessionRhythmFormalView = (input) => {
     const now = input.now ?? new Date();
     const status = toXhsCloseoutRhythmStatus({ ...input, now });
@@ -249,6 +265,25 @@ export const buildSessionRhythmFormalView = (input) => {
     const latestEventId = `rhythm_evt_${sourceKey}`;
     const decisionId = `rhythm_decision_${sourceKey}`;
     const latestReason = reasonCodes[reasonCodes.length - 1] ?? null;
+    const observedAt = input.accountSafety?.observedAt ?? null;
+    const operatorConfirmedAt = typeof status.operator_confirmed_at === "string" ? status.operator_confirmed_at : null;
+    const singleProbePassedAt = typeof status.single_probe_passed_at === "string" ? status.single_probe_passed_at : null;
+    const cooldownUntil = typeof status.cooldown_until === "string" ? status.cooldown_until : null;
+    const windowStartedAt = observedAt ??
+        operatorConfirmedAt ??
+        singleProbePassedAt ??
+        now.toISOString();
+    const recoveryProbeDueAt = state === "single_probe_required"
+        ? operatorConfirmedAt ?? now.toISOString()
+        : state === "operator_confirmation_required"
+            ? cooldownUntil ?? now.toISOString()
+            : null;
+    const stabilityWindowUntil = phase === "steady" ? addMinutesIso(singleProbePassedAt ?? windowStartedAt, 20) : null;
+    const windowDeadlineAt = phase === "cooldown"
+        ? cooldownUntil ?? addMinutesIso(windowStartedAt, 30)
+        : phase === "recovery_probe"
+            ? recoveryProbeDueAt ?? addMinutesIso(windowStartedAt, 5)
+            : stabilityWindowUntil ?? addMinutesIso(windowStartedAt, 20);
     const decision = phase === "cooldown" || state === "operator_confirmation_required" || state === "single_probe_required"
         ? "blocked"
         : state === "single_probe_passed"
@@ -263,11 +298,11 @@ export const buildSessionRhythmFormalView = (input) => {
             session_id: input.sessionId ?? null,
             current_phase: phase,
             risk_state: riskState,
-            window_started_at: null,
-            window_deadline_at: null,
-            cooldown_until: status.cooldown_until,
-            recovery_probe_due_at: state === "single_probe_required" ? status.operator_confirmed_at : null,
-            stability_window_until: null,
+            window_started_at: windowStartedAt,
+            window_deadline_at: windowDeadlineAt,
+            cooldown_until: cooldownUntil,
+            recovery_probe_due_at: recoveryProbeDueAt,
+            stability_window_until: stabilityWindowUntil,
             risk_signal_count: input.accountSafety?.state === "account_risk_blocked" ? 1 : 0,
             last_event_id: latestEventId,
             source_run_id: sourceRunId,
@@ -280,19 +315,17 @@ export const buildSessionRhythmFormalView = (input) => {
             issue_scope: issueScope,
             session_id: input.sessionId ?? null,
             window_id: windowId,
-            event_type: state === "single_probe_passed"
-                ? "recovery_probe_passed"
-                : phase === "cooldown"
-                    ? "cooldown_started"
-                    : phase === "recovery_probe"
-                        ? "recovery_probe_required"
-                        : "steady_observed",
+            event_type: resolveSessionRhythmEventType({
+                state,
+                phase,
+                accountSafety: input.accountSafety
+            }),
             phase_before: phase,
             phase_after: phase,
             risk_state_before: riskState,
             risk_state_after: riskState,
             source_audit_event_id: input.sourceAuditEventId ?? null,
-            reason: latestReason,
+            reason: latestReason ?? "SESSION_RHYTHM_STATUS_OBSERVED",
             recorded_at: now.toISOString()
         },
         decision: {
