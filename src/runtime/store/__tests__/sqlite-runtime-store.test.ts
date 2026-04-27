@@ -226,7 +226,7 @@ const seedAntiDetectionValidationRecord = async (
 };
 
 describeWithSqlite("sqlite-runtime-store", () => {
-  it("keeps one FR-0014 writable rhythm window and only emits formal objects with run/session ids", () => {
+  it("keeps FR-0014 rhythm windows session-bound and only emits formal objects with run/session ids", () => {
     const firstView = getGeneratedSessionRhythmView({
       profile: "xhs_001",
       sessionId: "nm-session-001",
@@ -243,8 +243,12 @@ describeWithSqlite("sqlite-runtime-store", () => {
       sourceRunId: null
     });
 
-    expect(firstView.session_rhythm_window_state?.window_id).toBe("rhythm_win_xhs_001_issue_209");
-    expect(secondView.session_rhythm_window_state?.window_id).toBe("rhythm_win_xhs_001_issue_209");
+    expect(firstView.session_rhythm_window_state?.window_id).toBe(
+      "rhythm_win_xhs_001_issue_209_nm-session-001"
+    );
+    expect(secondView.session_rhythm_window_state?.window_id).toBe(
+      "rhythm_win_xhs_001_issue_209_nm-session-002"
+    );
     expect(missingIdsView.session_rhythm_window_state).toBeUndefined();
     expect(missingIdsView.session_rhythm_event).toBeUndefined();
     expect(missingIdsView.session_rhythm_decision).toBeUndefined();
@@ -406,7 +410,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
     }
   });
 
-  it("keeps v12 rhythm windows as a single writable window across sessions", async () => {
+  it("migrates v12 rhythm windows into session-bound writable windows", async () => {
     const DatabaseSyncCtor = DatabaseSync;
     expect(DatabaseSyncCtor).toBeTruthy();
     if (!DatabaseSyncCtor) {
@@ -525,8 +529,8 @@ describeWithSqlite("sqlite-runtime-store", () => {
         })
       ).resolves.toMatchObject({
         window_state: {
-          window_id: "rhythm_win_legacy_session_002",
-          session_id: "nm-session-legacy-002"
+          window_id: "rhythm_win_legacy_session_001",
+          session_id: "nm-session-legacy-001"
         }
       });
       await expect(
@@ -815,6 +819,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
         ...conservativeInput,
         windowState: {
           ...conservativeInput.windowState,
+          window_id: "rhythm_win_xhs_001_issue_209_stale",
           session_id: "nm-session-stale",
           current_phase: "steady",
           risk_state: "limited",
@@ -827,6 +832,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
           ...conservativeInput.event,
           event_id: "rhythm_evt_stale_steady",
           session_id: "nm-session-stale",
+          window_id: "rhythm_win_xhs_001_issue_209_stale",
           event_type: "stability_window_passed",
           phase_before: "steady",
           phase_after: "steady",
@@ -838,6 +844,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
         decision: {
           ...conservativeInput.decision,
           decision_id: "rhythm_decision_stale_steady",
+          window_id: "rhythm_win_xhs_001_issue_209_stale",
           run_id: "run-stale-steady",
           session_id: "nm-session-stale",
           current_phase: "steady",

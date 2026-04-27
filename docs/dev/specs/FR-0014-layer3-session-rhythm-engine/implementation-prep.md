@@ -193,7 +193,7 @@
 
 后续实现必须先冻结并遵守：
 
-- 同一 `(profile, platform, issue_scope)` 只能有一个可写窗口
+- 同一 `(profile, platform, issue_scope, session_id)` 只能有一个可写窗口；不同 session 不得互相覆盖
 - `session_rhythm_window_state` 是 Layer 3 窗口真相源
 - `runtime.audit` 只能投影，不得反写
 - `FR-0013` 或其他消费者只能读取共享视图，不能自造并行窗口状态
@@ -329,7 +329,7 @@
 - 新表存在，schema 可迁移
 - `schema v5 -> v6` 后旧库仍可读
 - 能根据已有 `audit_record` 写入最小 `session_rhythm_event`
-- 能维护一条 `(profile, platform, issue_scope)` 级唯一窗口
+- 能维护一条 `(profile, platform, issue_scope, session_id)` 级唯一窗口
 - `runtime.audit` 能读出 `session_rhythm_status_view`
 - 保持现有 `risk_state_output` 与 `approval_record` / `audit_records` 查询兼容
 
@@ -377,7 +377,7 @@
 
 最关键的失败注入：
 
-- 并发 session 争抢同一 `(profile, platform, issue_scope)`
+- 同一 session 内并发 run 争抢同一 `(profile, platform, issue_scope, session_id)`
 - stale window
 - 重复 recovery probe
 - 浏览器断开后窗口未收敛

@@ -107,11 +107,13 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input: {
     const currentDecision = asObject(currentView.session_rhythm_decision);
     const persistedWindowState = persisted?.window_state;
     const persistedEvent = persisted?.event;
+    const persistedDecision = persisted?.decision;
     const windowId =
       asString(persistedWindowState?.window_id) ?? asString(currentWindowState?.window_id);
     const windowStateForRecord = persistedWindowState ?? currentWindowState;
     const eventForRecord = persistedEvent ?? currentEvent;
-    if (!windowId || !windowStateForRecord || !eventForRecord || !currentDecision) {
+    const decisionForRecord = persistedDecision ?? currentDecision;
+    if (!windowId || !windowStateForRecord || !eventForRecord || !decisionForRecord) {
       return null;
     }
     const currentSourceKey = toSessionRhythmIdPart(input.runId);
@@ -135,12 +137,29 @@ const buildSessionRhythmCompatibilityRefsForRuntime = async (input: {
         source_audit_event_id: asString(persistedEvent?.source_audit_event_id)
       },
       decision: {
-        ...currentDecision,
+        ...decisionForRecord,
         decision_id: currentDecisionId,
         window_id: windowId,
         run_id: input.runId,
         session_id: input.sessionId,
-        profile: input.profile
+        profile: input.profile,
+        current_phase:
+          asString(windowStateForRecord.current_phase) ??
+          asString(decisionForRecord.current_phase) ??
+          "warmup",
+        current_risk_state:
+          asString(windowStateForRecord.risk_state) ??
+          asString(decisionForRecord.current_risk_state) ??
+          "paused",
+        next_phase:
+          asString(windowStateForRecord.current_phase) ??
+          asString(decisionForRecord.next_phase) ??
+          "warmup",
+        next_risk_state:
+          asString(windowStateForRecord.risk_state) ??
+          asString(decisionForRecord.next_risk_state) ??
+          "paused",
+        effective_execution_mode: input.gate.requestedExecutionMode
       }
     });
     const current = await store.getSessionRhythmStatusView({

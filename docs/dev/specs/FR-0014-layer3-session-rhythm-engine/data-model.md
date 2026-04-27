@@ -84,7 +84,7 @@
 - `updated_at` TEXT NOT NULL
 
 约束：
-- 同一 `(profile, platform, issue_scope)` 同时只能有一个可写 `SessionRhythmWindowState`。
+- 同一 `(profile, platform, issue_scope, session_id)` 同时只能有一个可写 `SessionRhythmWindowState`；不同 native-messaging session 不得互相覆盖节律窗口。
 - `cooldown` 时 `cooldown_until` 必填。
 - `recovery_probe` 时 `recovery_probe_due_at` 必填。
 - 存在稳定观察时 `stability_window_until` 必填。

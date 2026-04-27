@@ -3084,7 +3084,7 @@ process.stdin.on("data", (chunk) => {
           latest_reason: "ANTI_DETECTION_BASELINE_REQUIRED",
           derived_at: expect.any(String),
           session_rhythm_window_state: expect.objectContaining({
-            window_id: `rhythm_win_${auditProfile}_issue_209`,
+            window_id: `rhythm_win_${auditProfile}_issue_209_nm-session-001`,
             current_phase: "steady",
             source_run_id: "run-session-audit-probe-001"
           }),

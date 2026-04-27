@@ -79,7 +79,7 @@
   - `cooldown`
   - `recovery_probe`
   - `afterglow_hook`
-2. 同一 `(profile, platform, issue_scope)` 同时只能有一个可写窗口。
+2. 同一 `(profile, platform, issue_scope, session_id)` 同时只能有一个可写窗口；不同 native-messaging session 不得互相覆盖节律窗口。
 3. `cooldown`、`recovery_probe`、稳定观察阶段必须显式填写对应截止时间字段。
 
 ## session_rhythm_event

@@ -374,7 +374,11 @@ export const buildSessionRhythmFormalView = (input: {
       : null;
   const sourceRunId = statusProbeRunId ?? input.sourceRunId ?? null;
   const sourceKey = sanitizeIdPart(sourceRunId ?? `${profileKey}_${state}`);
-  const windowId = `rhythm_win_${profileKey}_${sanitizeIdPart(issueScope)}`;
+  const sessionKey =
+    typeof input.sessionId === "string" && input.sessionId.length > 0
+      ? sanitizeIdPart(input.sessionId)
+      : "no_session";
+  const windowId = `rhythm_win_${profileKey}_${sanitizeIdPart(issueScope)}_${sessionKey}`;
   const latestEventId = `rhythm_evt_${sourceKey}`;
   const decisionId = `rhythm_decision_${sourceKey}`;
   const latestReason = reasonCodes[reasonCodes.length - 1] ?? null;
