@@ -134,6 +134,40 @@ describe("native messaging contract", () => {
     });
   });
 
+  it("exposes runtime.tabs via the official native bridge for managed target discovery", () => {
+    const result = runCli(
+      [
+        "runtime.tabs",
+        "--profile",
+        "xhs_probe_profile",
+        "--run-id",
+        "run-nm-tabs-001",
+        "--params",
+        '{"current_window_only":false,"url_patterns":["*://www.xiaohongshu.com/*"]}'
+      ],
+      withNativeHost("success")
+    );
+    expect(result.status).toBe(0);
+
+    const body = parseJson(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.tabs",
+      status: "success",
+      summary: {
+        relay_path: "host>background",
+        tabs: [
+          {
+            tab_id: 10857874,
+            active: true
+          }
+        ]
+      }
+    });
+    expect(String(((body.summary as Record<string, unknown>).tabs as Array<Record<string, unknown>>)[0]?.url)).toContain(
+      "xiaohongshu.com/search_result"
+    );
+  });
+
   it("returns transport metadata on runtime.ping success via repo-owned native host entry", () => {
     const result = runCli(
       ["runtime.ping", "--run-id", "run-nm-repo-owned-001"],

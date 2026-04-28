@@ -246,11 +246,29 @@ describe("extension service worker recovery contract / xhs gate and live forward
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const forwardResult = firstPort.postMessage.mock.calls
-      .map((call) => call[0] as { id?: string; status?: string; error?: { code?: string; message?: string } })
+      .map(
+        (call) =>
+          call[0] as {
+            id?: string;
+            status?: string;
+            payload?: Record<string, unknown>;
+            error?: { code?: string; message?: string };
+          }
+      )
       .find((message) => message.id === "run-xhs-no-tab-001");
     expect(forwardResult).toMatchObject({
       id: "run-xhs-no-tab-001",
       status: "error",
+      payload: {
+        details: {
+          stage: "execution",
+          reason: "TARGET_TAB_NOT_FOUND",
+          forward_failure_stage: "gate_target_resolve",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab"
+        }
+      },
       error: {
         code: "ERR_TRANSPORT_FORWARD_FAILED",
         message: "target tab is unavailable"

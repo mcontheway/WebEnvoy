@@ -285,6 +285,23 @@ export const prepareOfficialChromeRuntime = async (input) => {
             params: envelope
         });
         if (!bootstrapResult.ok) {
+            const failurePayload = asObject(bootstrapResult.payload);
+            const failureDetails = asObject(failurePayload?.details);
+            const failureReason = typeof failureDetails?.reason === "string" && failureDetails.reason.length > 0
+                ? failureDetails.reason
+                : null;
+            if (failureReason === "TARGET_TAB_DISPATCH_FAILED" ||
+                failureReason === "TARGET_TAB_UNAVAILABLE" ||
+                failureReason === "TARGET_TAB_NOT_FOUND") {
+                throw new CliError("ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED", "official Chrome runtime bootstrap target tab 不可达", {
+                    details: {
+                        ...buildBaseDetails(),
+                        ...failureDetails,
+                        reason: failureReason
+                    },
+                    retryable: true
+                });
+            }
             if (isTransportFailureCode(bootstrapResult.error.code)) {
                 throw new CliError("ERR_RUNTIME_UNAVAILABLE", `通信链路不可用: ${bootstrapResult.error.code}`, {
                     details: {

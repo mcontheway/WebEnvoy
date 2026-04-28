@@ -176,6 +176,31 @@ const onRequest = (request) => {
       }
     }
 
+    if (command === "runtime.tabs") {
+      writeMessage({
+        id: request.id,
+        status: "success",
+        summary: {
+          session_id: String(request.params?.session_id ?? "nm-session-001"),
+          run_id: String(request.params?.run_id ?? request.id),
+          command,
+          relay_path: "host>background"
+        },
+        payload: {
+          tabs: [
+            {
+              tab_id: 10857874,
+              active: true,
+              url: "https://www.xiaohongshu.com/search_result/?keyword=%E9%9C%B2%E8%90%A5&type=51"
+            }
+          ]
+        },
+        error: null
+      });
+      process.exit(0);
+      return;
+    }
+
     writeMessage(success(request));
     process.exit(0);
   }

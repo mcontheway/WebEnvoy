@@ -54,6 +54,7 @@ export class NativeBridgePendingForwardState {
       summary: {
         relay_path: "host>background>content-script>background>host"
       },
+      ...(pending.gatePayload ? { payload: { ...pending.gatePayload } } : {}),
       error
     });
   }

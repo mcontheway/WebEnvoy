@@ -217,6 +217,50 @@ const runtimePing = async (context) => {
         await bridge?.close().catch(() => undefined);
     }
 };
+const runtimeTabs = async (context) => {
+    let bridge = null;
+    try {
+        bridge = resolveRuntimeBridge();
+        const result = await bridge.runCommand({
+            runId: context.run_id,
+            profile: context.profile,
+            cwd: context.cwd,
+            command: "runtime.tabs",
+            params: context.params
+        });
+        if (!result.ok) {
+            throw new CliError("ERR_RUNTIME_UNAVAILABLE", result.error.message, {
+                retryable: result.error.code === "ERR_TRANSPORT_TIMEOUT",
+                details: {
+                    ability_id: "runtime.tabs",
+                    stage: "execution",
+                    reason: result.error.code
+                }
+            });
+        }
+        return {
+            ...(asObject(result.payload) ?? {}),
+            relay_path: result.relay_path
+        };
+    }
+    catch (error) {
+        if (error instanceof NativeMessagingTransportError) {
+            throw new CliError("ERR_RUNTIME_UNAVAILABLE", `通信链路不可用: ${error.code}`, {
+                retryable: error.retryable,
+                cause: error,
+                details: {
+                    ability_id: "runtime.tabs",
+                    stage: "execution",
+                    reason: error.code
+                }
+            });
+        }
+        throw error;
+    }
+    finally {
+        await bridge?.close().catch(() => undefined);
+    }
+};
 const runtimeStart = async (context) => profileRuntime.start({
     cwd: context.cwd,
     profile: context.profile ?? "",
@@ -388,6 +432,7 @@ const runtimeHelp = async () => ({
         "runtime.start",
         "runtime.login",
         "runtime.status",
+        "runtime.tabs",
         "runtime.stop",
         "runtime.audit",
         "xhs.search",
@@ -424,6 +469,12 @@ export const runtimeCommands = () => [
         status: "implemented",
         requiresProfile: true,
         handler: runtimeStatus
+    },
+    {
+        name: "runtime.tabs",
+        status: "implemented",
+        requiresProfile: true,
+        handler: runtimeTabs
     },
     {
         name: "runtime.stop",
