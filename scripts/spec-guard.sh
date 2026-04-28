@@ -20,7 +20,7 @@ warn() {
 
 SPEC_SUITE_FILE_REGEX='^docs/dev/specs/FR-[0-9][0-9][0-9][0-9]-[^/]+/'
 SPEC_SUPPORT_FILE_REGEX='^\.github/spec-issue-sync-map\.yml$'
-GOVERNANCE_FILE_REGEX='^(docs/dev/roadmap\.md|docs/dev/architecture/|docs/dev/templates/|docs/dev/AGENTS\.md|docs/dev/review/guardian-review-addendum\.md|docs/AGENTS\.md|docs/research/ref/AGENTS\.md|AGENTS\.md|vision\.md|code_review\.md|spec_review\.md|scripts/spec-guard\.sh|scripts/spec-issue-sync-map\.sh|scripts/spec-issue-sync\.sh|\.github/workflows/spec-guard\.yml|\.github/workflows/spec-issue-sync\.yml|\.github/workflows/test-gate\.yml|\.github/spec-issue-sync-map\.yml|\.github/PULL_REQUEST_TEMPLATE\.md|\.githooks/|tests/pr-review-poller\.test\.sh|tests/pr-guardian\.merge-guard(\.test\.sh|/)|tests/spec-issue-sync\.contract(\.test\.sh|/))'
+GOVERNANCE_FILE_REGEX='^(docs/dev/roadmap\.md|docs/dev/architecture/|docs/dev/templates/|docs/dev/AGENTS\.md|docs/dev/review/guardian-review-addendum\.md|docs/dev/github-rest-automation\.md|docs/AGENTS\.md|docs/research/ref/AGENTS\.md|AGENTS\.md|vision\.md|code_review\.md|spec_review\.md|scripts/spec-guard\.sh|scripts/spec-issue-sync-map\.sh|scripts/spec-issue-sync\.sh|scripts/pr-guardian\.sh|scripts/pr-review-poller\.sh|scripts/open-pr\.sh|\.github/workflows/spec-guard\.yml|\.github/workflows/spec-issue-sync\.yml|\.github/workflows/test-gate\.yml|\.github/spec-issue-sync-map\.yml|\.github/PULL_REQUEST_TEMPLATE\.md|\.githooks/|tests/open-pr\.test\.sh|tests/pr-review-poller\.test\.sh|tests/pr-guardian\.merge-guard[^/]*\.sh|tests/pr-guardian\.merge-guard/|tests/spec-issue-sync\.contract(\.test\.sh|/))'
 
 resolve_base_ref() {
   if [[ -n "${SPEC_GUARD_BASE_REF:-}" ]]; then

@@ -53,16 +53,16 @@ repository_slug() {
   fi
 
   origin_url="$(git -C "${REPO_ROOT}" remote get-url origin 2>/dev/null || true)"
-  if [[ "${origin_url}" =~ ^https://github\.com/([^/]+/[^/.]+?)(\.git)?$ ]]; then
-    printf '%s\n' "${BASH_REMATCH[1]}"
+  if [[ "${origin_url}" =~ ^https://github\.com/([^/]+/[^/]+)$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]%.git}"
     return 0
   fi
-  if [[ "${origin_url}" =~ ^git@github\.com:([^/]+/[^/.]+?)(\.git)?$ ]]; then
-    printf '%s\n' "${BASH_REMATCH[1]}"
+  if [[ "${origin_url}" =~ ^git@github\.com:([^/]+/[^/]+)$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]%.git}"
     return 0
   fi
-  if [[ "${origin_url}" =~ ^ssh://git@github\.com/([^/]+/[^/.]+?)(\.git)?$ ]]; then
-    printf '%s\n' "${BASH_REMATCH[1]}"
+  if [[ "${origin_url}" =~ ^ssh://git@github\.com/([^/]+/[^/]+)$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]%.git}"
     return 0
   fi
 

@@ -46,9 +46,10 @@ setup_case_dir() {
   MOCK_REMOTE_BRANCH_EXISTS="${MOCK_REMOTE_BRANCH_EXISTS:-1}"
   MOCK_LOCAL_HEAD_SHA="${MOCK_LOCAL_HEAD_SHA:-local-head-sha}"
   MOCK_REMOTE_HEAD_SHA="${MOCK_REMOTE_HEAD_SHA:-local-head-sha}"
+  MOCK_REMOTE_URL="${MOCK_REMOTE_URL:-git@github.com:MC-and-his-Agents/WebEnvoy.git}"
   GITHUB_REPOSITORY="MC-and-his-Agents/WebEnvoy"
   : > "${MOCK_GH_CALLS_LOG}"
-  export MOCK_GH_CALLS_LOG MOCK_PR_PAYLOAD_FILE MOCK_REMOTE_BRANCH_EXISTS MOCK_LOCAL_HEAD_SHA MOCK_REMOTE_HEAD_SHA GITHUB_REPOSITORY
+  export MOCK_GH_CALLS_LOG MOCK_PR_PAYLOAD_FILE MOCK_REMOTE_BRANCH_EXISTS MOCK_LOCAL_HEAD_SHA MOCK_REMOTE_HEAD_SHA MOCK_REMOTE_URL GITHUB_REPOSITORY
 
   cat > "${mock_bin}/git" <<'EOF'
 #!/usr/bin/env bash
@@ -88,7 +89,7 @@ case "${1:-}" in
     exit 2
     ;;
   remote)
-    printf '%s\n' "git@github.com:MC-and-his-Agents/WebEnvoy.git"
+    printf '%s\n' "${MOCK_REMOTE_URL}"
     exit 0
     ;;
 esac
@@ -218,10 +219,26 @@ test_open_pr_fails_when_remote_branch_is_not_current_head() {
   fi
 }
 
+test_repository_slug_parses_origin_without_env_override() {
+  MOCK_REMOTE_URL="https://github.com/MC-and-his-Agents/WebEnvoy.git"
+  export MOCK_REMOTE_URL
+  setup_case_dir "repository-slug-origin"
+  load_open_pr_without_main
+  unset GITHUB_REPOSITORY || true
+
+  local actual
+  actual="$(repository_slug)"
+  if [[ "${actual}" != "MC-and-his-Agents/WebEnvoy" ]]; then
+    echo "expected repository_slug to parse HTTPS origin, got '${actual}'" >&2
+    exit 1
+  fi
+}
+
 main() {
   test_open_pr_uses_rest_create_payload
   test_open_pr_fails_when_remote_branch_missing
   test_open_pr_fails_when_remote_branch_is_not_current_head
+  test_repository_slug_parses_origin_without_env_override
   echo "open-pr REST test passed."
 }
 

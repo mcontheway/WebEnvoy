@@ -74,12 +74,12 @@ repository_slug() {
   local origin_url=""
   origin_url="$(git -C "${REPO_ROOT}" remote get-url origin 2>/dev/null || true)"
 
-  if [[ "${origin_url}" =~ ^https://github\.com/([^/]+/[^/.]+?)(\.git)?$ ]]; then
-    REPO_SLUG="${BASH_REMATCH[1]}"
-  elif [[ "${origin_url}" =~ ^git@github\.com:([^/]+/[^/.]+?)(\.git)?$ ]]; then
-    REPO_SLUG="${BASH_REMATCH[1]}"
-  elif [[ "${origin_url}" =~ ^ssh://git@github\.com/([^/]+/[^/.]+?)(\.git)?$ ]]; then
-    REPO_SLUG="${BASH_REMATCH[1]}"
+  if [[ "${origin_url}" =~ ^https://github\.com/([^/]+/[^/]+)$ ]]; then
+    REPO_SLUG="${BASH_REMATCH[1]%.git}"
+  elif [[ "${origin_url}" =~ ^git@github\.com:([^/]+/[^/]+)$ ]]; then
+    REPO_SLUG="${BASH_REMATCH[1]%.git}"
+  elif [[ "${origin_url}" =~ ^ssh://git@github\.com/([^/]+/[^/]+)$ ]]; then
+    REPO_SLUG="${BASH_REMATCH[1]%.git}"
   else
     die "无法从 origin remote 推导 GitHub repo slug，请设置 REPO_SLUG=owner/repo 后重试。"
   fi
