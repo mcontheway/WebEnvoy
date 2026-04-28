@@ -1974,6 +1974,7 @@ describe("extension build contract", () => {
     });
     const href = "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5";
     let lookupCount = 0;
+    const actionOrder: string[] = [];
     const sleep = vi.fn(async () => {});
     const fetchJson = vi.fn(async () => ({
       status: 200,
@@ -2033,7 +2034,15 @@ describe("extension build contract", () => {
           getReadyState: () => "complete",
           getCookie: () => "a1=session-cookie",
           sleep,
+          performSearchPassiveAction: async () => {
+            actionOrder.push("humanized_action");
+            return {
+              evidence_class: "humanized_action",
+              action_kind: "scroll"
+            };
+          },
           readCapturedRequestContext: async () => {
+            actionOrder.push("capture_poll");
             lookupCount += 1;
             return lookupCount === 1
               ? null
@@ -2058,6 +2067,7 @@ describe("extension build contract", () => {
       }
     });
 
+    expect(actionOrder.slice(0, 2)).toEqual(["humanized_action", "capture_poll"]);
     expect(sleep).toHaveBeenCalledTimes(1);
     expect(fetchJson).not.toHaveBeenCalled();
   });
@@ -2517,6 +2527,98 @@ describe("extension build contract", () => {
           request_context: {
             status: "missing"
           }
+        }
+      }
+    });
+
+    expect(sleep).toHaveBeenCalledTimes(9);
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("keeps DOM/state fallback fail-closed when state has token but no card link", async () => {
+    const admissionContext = buildLiveReadAdmissionContext({
+      runId: "run-source-search-live-dom-token-only-001",
+      sessionId: "nm-session-source-search-live-dom-token-only-001",
+      gateInvocationId: "issue580-gate-run-source-search-live-dom-token-only-001",
+      targetTabId: 11,
+      targetPage: "search_result_tab"
+    });
+    const sleep = vi.fn(async () => {});
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
+
+    await expect(
+      executeXhsSearch(
+        {
+          abilityId: "xhs.note.search.v1",
+          abilityLayer: "L3",
+          abilityAction: "read",
+          params: {
+            query: "露营装备"
+          },
+          options: {
+            issue_scope: "issue_580",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 11,
+            target_page: "search_result_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 11,
+            actual_target_page: "search_result_tab",
+            action_type: "read",
+            risk_state: "allowed",
+            requested_execution_mode: "live_read_high_risk",
+            upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+              requestRef: "upstream_source_search_live_dom_token_only_001",
+              actionName: "xhs.read_search_results",
+              targetPage: "search_result_tab",
+              targetTabId: 11,
+              profileRef: "profile-a",
+              approvalRefs: [
+                String(admissionContext.approval_admission_evidence.approval_admission_ref)
+              ],
+              auditRefs: [String(admissionContext.audit_admission_evidence.audit_admission_ref)]
+            }),
+            admission_context: admissionContext
+          },
+          executionContext: {
+            runId: "run-source-search-live-dom-token-only-001",
+            sessionId: "nm-session-source-search-live-dom-token-only-001",
+            profile: "profile-a",
+            gateInvocationId: "issue580-gate-run-source-search-live-dom-token-only-001"
+          }
+        },
+        {
+          now: () => 1_710_000_000_000,
+          randomId: () => "source-req-dom-token-only-001",
+          getLocationHref: () =>
+            "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5%E8%A3%85%E5%A4%87",
+          getDocumentTitle: () => "Search Result",
+          getReadyState: () => "complete",
+          getCookie: () => "a1=session-cookie",
+          sleep,
+          readCapturedRequestContext: async () => null,
+          readPageStateRoot: async () => ({
+            feed: {
+              items: [
+                {
+                  title: "只有 token 没有卡片链接",
+                  xsec_token: "token-only-001",
+                  xsec_source: "pc_search"
+                }
+              ]
+            }
+          }),
+          callSignature,
+          fetchJson
+        }
+      )
+    ).resolves.toMatchObject({
+      ok: false,
+      payload: {
+        details: {
+          reason: "REQUEST_CONTEXT_MISSING",
+          request_context_reason: "template_missing"
         }
       }
     });

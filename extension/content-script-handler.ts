@@ -368,6 +368,80 @@ const readXhsSearchDomState = (): Record<string, unknown> | null => {
     : null;
 };
 
+const normalizeSearchQueryText = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.normalize("NFKC").trim().toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+};
+
+const isCurrentSearchPageForQuery = (href: string, query: string): boolean => {
+  const expectedQuery = normalizeSearchQueryText(query);
+  if (!expectedQuery) {
+    return false;
+  }
+  try {
+    const url = new URL(href);
+    return (
+      url.hostname === XHS_READ_DOMAIN &&
+      url.pathname.includes("/search_result") &&
+      normalizeSearchQueryText(url.searchParams.get("keyword")) === expectedQuery
+    );
+  } catch {
+    return false;
+  }
+};
+
+const performXhsSearchPassiveAction = async (input: {
+  query: string;
+  pageUrl: string;
+  runId: string;
+  actionRef: string;
+}): Promise<Record<string, unknown>> => {
+  const queryMatched = isCurrentSearchPageForQuery(window.location.href, input.query);
+  if (queryMatched) {
+    const target = document.scrollingElement ?? document.documentElement;
+    const beforeScrollY = window.scrollY;
+    const deltaY = 240;
+    target.dispatchEvent(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY
+      })
+    );
+    window.scrollBy({
+      top: deltaY,
+      left: 0,
+      behavior: "auto"
+    });
+    target.dispatchEvent(new Event("scroll", { bubbles: true }));
+    return {
+      evidence_class: "humanized_action",
+      action_kind: "scroll",
+      action_ref: input.actionRef,
+      run_id: input.runId,
+      page_url: input.pageUrl,
+      query: input.query,
+      query_matched: true,
+      before_scroll_y: beforeScrollY,
+      after_scroll_y: window.scrollY,
+      trigger_surface: "xhs.search_result"
+    };
+  }
+  return {
+    evidence_class: "humanized_action",
+    action_kind: "scroll",
+    action_ref: input.actionRef,
+    run_id: input.runId,
+    page_url: input.pageUrl,
+    query: input.query,
+    query_matched: false,
+    skipped_reason: "query_mismatch"
+  };
+};
+
 const createBrowserEnvironment = (): XhsSearchEnvironment => ({
   now: () => Date.now(),
   randomId: () =>
@@ -383,6 +457,7 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
   getPageStateRoot: () => (window as typeof window & { __INITIAL_STATE__?: unknown }).__INITIAL_STATE__,
   readPageStateRoot: async () => await readPageStateViaMainWorld(),
   readSearchDomState: async () => readXhsSearchDomState(),
+  performSearchPassiveAction: async (input) => await performXhsSearchPassiveAction(input),
   readCapturedRequestContext: async (input) => await readCapturedRequestContextViaMainWorld(input),
   callSignature: async (
     uri: Parameters<XhsSearchEnvironment["callSignature"]>[0],

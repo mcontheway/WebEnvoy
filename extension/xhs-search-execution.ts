@@ -99,6 +99,15 @@ type RequestContextState =
       observedAt?: number;
     };
 
+type ExecuteXhsSearchInput = {
+  abilityId: string;
+  abilityLayer: string;
+  abilityAction: string;
+  params: XhsSearchParams;
+  options: XhsSearchOptions;
+  executionContext: XhsExecutionContext;
+};
+
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
@@ -226,8 +235,7 @@ const collectSearchDomCards = (value: unknown, seen = new Set<object>()): Search
         parsedDetail.xsec_source ??
         parsedUser.xsec_source
     };
-    const hasCardSignal =
-      card.detail_url !== null || card.user_home_url !== null || card.xsec_token !== null;
+    const hasCardSignal = card.detail_url !== null || card.user_home_url !== null;
     return [
       ...(hasCardSignal ? [card] : []),
       ...Object.values(record).flatMap((entry) => collectSearchDomCards(entry, seen))
@@ -287,6 +295,27 @@ const buildSearchTargetContinuity = (cards: SearchDomCard[]): JsonRecord[] =>
           : "missing",
     source_route: "xhs.search"
   }));
+
+const performSearchPassiveAction = async (
+  input: ExecuteXhsSearchInput,
+  env: XhsSearchEnvironment
+): Promise<JsonRecord | null> => {
+  if (typeof env.performSearchPassiveAction !== "function") {
+    return null;
+  }
+  try {
+    return asRecord(
+      await env.performSearchPassiveAction({
+        query: input.params.query,
+        pageUrl: env.getLocationHref(),
+        runId: input.executionContext.runId,
+        actionRef: input.executionContext.gateInvocationId ?? input.executionContext.runId
+      })
+    );
+  } catch {
+    return null;
+  }
+};
 
 const withExecutionAuditInFailurePayload = (
   result: SearchExecutionResult,
@@ -768,14 +797,7 @@ const resolveRequestContextState = async (
 };
 
 export const executeXhsSearch = async (
-  input: {
-    abilityId: string;
-    abilityLayer: string;
-    abilityAction: string;
-    params: XhsSearchParams;
-    options: XhsSearchOptions;
-    executionContext: XhsExecutionContext;
-  },
+  input: ExecuteXhsSearchInput,
   env: XhsSearchEnvironment
 ): Promise<SearchExecutionResult> => {
   const gate = resolveGate(input.options, input.executionContext, env.getLocationHref());
@@ -1130,6 +1152,7 @@ export const executeXhsSearch = async (
     sort: input.params.sort ?? "general",
     note_type: input.params.note_type ?? 0
   };
+  const passiveActionEvidence = await performSearchPassiveAction(input, env);
   const requestContextState = await resolveRequestContextState(
     {
       params: input.params,
@@ -1261,6 +1284,7 @@ export const executeXhsSearch = async (
               extracted_at: toIsoString(env.now()),
               target_continuity: buildSearchTargetContinuity(domExtraction.cards),
               risk_surface_classification: "none",
+              ...(passiveActionEvidence ? { humanized_action: passiveActionEvidence } : {}),
               item_kind: "search_card",
               cards: domExtraction.cards
             },
@@ -1439,6 +1463,7 @@ export const executeXhsSearch = async (
           captured_at: requestContextState.template.capturedAt,
           page_context_namespace: requestContextState.pageContextNamespace,
           shape_key: requestContextState.shapeKey,
+          ...(passiveActionEvidence ? { humanized_action: passiveActionEvidence } : {}),
           target_continuity: passiveTargetContinuity,
           ...(passiveCards.length > 0
             ? {

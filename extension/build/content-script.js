@@ -5376,7 +5376,7 @@ const collectSearchDomCards = (value, seen = new Set()) => {
                 parsedDetail.xsec_source ??
                 parsedUser.xsec_source
         };
-        const hasCardSignal = card.detail_url !== null || card.user_home_url !== null || card.xsec_token !== null;
+        const hasCardSignal = card.detail_url !== null || card.user_home_url !== null;
         return [
             ...(hasCardSignal ? [card] : []),
             ...Object.values(record).flatMap((entry) => collectSearchDomCards(entry, seen))
@@ -5426,6 +5426,22 @@ const buildSearchTargetContinuity = (cards) => cards.map((card) => ({
             : "missing",
     source_route: "xhs.search"
 }));
+const performSearchPassiveAction = async (input, env) => {
+    if (typeof env.performSearchPassiveAction !== "function") {
+        return null;
+    }
+    try {
+        return asRecord(await env.performSearchPassiveAction({
+            query: input.params.query,
+            pageUrl: env.getLocationHref(),
+            runId: input.executionContext.runId,
+            actionRef: input.executionContext.gateInvocationId ?? input.executionContext.runId
+        }));
+    }
+    catch {
+        return null;
+    }
+};
 const withExecutionAuditInFailurePayload = (result, executionAudit) => {
     if (result.ok) {
         return result;
@@ -6094,6 +6110,7 @@ const executeXhsSearch = async (input, env) => {
         sort: input.params.sort ?? "general",
         note_type: input.params.note_type ?? 0
     };
+    const passiveActionEvidence = await performSearchPassiveAction(input, env);
     const requestContextState = await resolveRequestContextState({
         params: input.params,
         options: input.options
@@ -6209,6 +6226,7 @@ const executeXhsSearch = async (input, env) => {
                             extracted_at: toIsoString(env.now()),
                             target_continuity: buildSearchTargetContinuity(domExtraction.cards),
                             risk_surface_classification: "none",
+                            ...(passiveActionEvidence ? { humanized_action: passiveActionEvidence } : {}),
                             item_kind: "search_card",
                             cards: domExtraction.cards
                         },
@@ -6361,6 +6379,7 @@ const executeXhsSearch = async (input, env) => {
                     captured_at: requestContextState.template.capturedAt,
                     page_context_namespace: requestContextState.pageContextNamespace,
                     shape_key: requestContextState.shapeKey,
+                    ...(passiveActionEvidence ? { humanized_action: passiveActionEvidence } : {}),
                     target_continuity: passiveTargetContinuity,
                     ...(passiveCards.length > 0
                         ? {
@@ -9449,6 +9468,69 @@ const readXhsSearchDomState = () => {
         }
         : null;
 };
+const normalizeSearchQueryText = (value) => {
+    if (typeof value !== "string") {
+        return null;
+    }
+    const normalized = value.normalize("NFKC").trim().toLowerCase();
+    return normalized.length > 0 ? normalized : null;
+};
+const isCurrentSearchPageForQuery = (href, query) => {
+    const expectedQuery = normalizeSearchQueryText(query);
+    if (!expectedQuery) {
+        return false;
+    }
+    try {
+        const url = new URL(href);
+        return (url.hostname === XHS_READ_DOMAIN &&
+            url.pathname.includes("/search_result") &&
+            normalizeSearchQueryText(url.searchParams.get("keyword")) === expectedQuery);
+    }
+    catch {
+        return false;
+    }
+};
+const performXhsSearchPassiveAction = async (input) => {
+    const queryMatched = isCurrentSearchPageForQuery(window.location.href, input.query);
+    if (queryMatched) {
+        const target = document.scrollingElement ?? document.documentElement;
+        const beforeScrollY = window.scrollY;
+        const deltaY = 240;
+        target.dispatchEvent(new WheelEvent("wheel", {
+            bubbles: true,
+            cancelable: true,
+            deltaY
+        }));
+        window.scrollBy({
+            top: deltaY,
+            left: 0,
+            behavior: "auto"
+        });
+        target.dispatchEvent(new Event("scroll", { bubbles: true }));
+        return {
+            evidence_class: "humanized_action",
+            action_kind: "scroll",
+            action_ref: input.actionRef,
+            run_id: input.runId,
+            page_url: input.pageUrl,
+            query: input.query,
+            query_matched: true,
+            before_scroll_y: beforeScrollY,
+            after_scroll_y: window.scrollY,
+            trigger_surface: "xhs.search_result"
+        };
+    }
+    return {
+        evidence_class: "humanized_action",
+        action_kind: "scroll",
+        action_ref: input.actionRef,
+        run_id: input.runId,
+        page_url: input.pageUrl,
+        query: input.query,
+        query_matched: false,
+        skipped_reason: "query_mismatch"
+    };
+};
 const createBrowserEnvironment = () => ({
     now: () => Date.now(),
     randomId: () => typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -9463,6 +9545,7 @@ const createBrowserEnvironment = () => ({
     getPageStateRoot: () => window.__INITIAL_STATE__,
     readPageStateRoot: async () => await readPageStateViaMainWorld(),
     readSearchDomState: async () => readXhsSearchDomState(),
+    performSearchPassiveAction: async (input) => await performXhsSearchPassiveAction(input),
     readCapturedRequestContext: async (input) => await readCapturedRequestContextViaMainWorld(input),
     callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
     fetchJson: async (input) => {
