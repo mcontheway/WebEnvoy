@@ -690,6 +690,7 @@ const resolveRequestContextState = async (
     let lookup: Awaited<ReturnType<NonNullable<XhsSearchEnvironment["readCapturedRequestContext"]>>> =
       null;
     try {
+      pageContextNamespace = createPageContextNamespace(env.getLocationHref());
       lookup = await readCapturedRequestContext({
         method: "POST",
         path: SEARCH_ENDPOINT,

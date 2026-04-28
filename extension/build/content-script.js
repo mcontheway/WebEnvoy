@@ -5729,6 +5729,7 @@ const resolveRequestContextState = async (requestInput, env) => {
     const lookupOnce = async (input) => {
         let lookup = null;
         try {
+            pageContextNamespace = createPageContextNamespace(env.getLocationHref());
             lookup = await readCapturedRequestContext({
                 method: "POST",
                 path: SEARCH_ENDPOINT,
