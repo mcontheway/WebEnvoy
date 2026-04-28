@@ -955,6 +955,29 @@ export class SQLiteRuntimeStore {
             .get(scope.targetFrRef, scope.validationScope, scope.profileRef, scope.browserChannel, scope.executionSurface, scope.effectiveExecutionMode, scope.probeBundleRef);
         return row ? mapAntiDetectionValidationViewRow(row) : null;
     }
+    async getAntiDetectionBaselineRegistryEntry(scope) {
+        assertAntiDetectionValidationScopeKeyInput(scope, {
+            invalidInput: invalidRuntimeStoreInput,
+            isIsoLike
+        });
+        try {
+            return this.#getOptionalAntiDetectionBaselineRegistryEntry(scope);
+        }
+        catch (error) {
+            throw this.#toStoreDbError(error);
+        }
+    }
+    async getAntiDetectionBaselineSnapshot(baselineRef) {
+        if (typeof baselineRef !== "string" || baselineRef.trim().length === 0) {
+            throw invalidRuntimeStoreInput("missing required anti-detection baseline_ref");
+        }
+        try {
+            return this.#getOptionalAntiDetectionBaselineSnapshotByRef(baselineRef);
+        }
+        catch (error) {
+            throw this.#toStoreDbError(error);
+        }
+    }
     #getAntiDetectionValidationRequestByRef(requestRef) {
         const row = this.#getOptionalAntiDetectionValidationRequestByRef(requestRef);
         if (!row) {
@@ -1043,6 +1066,13 @@ export class SQLiteRuntimeStore {
         return row ? mapAntiDetectionBaselineSnapshotRow(row) : null;
     }
     #getAntiDetectionBaselineRegistryEntry(scope) {
+        const row = this.#getOptionalAntiDetectionBaselineRegistryEntry(scope);
+        if (!row) {
+            throw new RuntimeStoreError("ERR_RUNTIME_STORE_UNAVAILABLE", "anti-detection baseline registry entry not found");
+        }
+        return row;
+    }
+    #getOptionalAntiDetectionBaselineRegistryEntry(scope) {
         const row = this.#db
             .prepare(`
         SELECT
@@ -1068,7 +1098,7 @@ export class SQLiteRuntimeStore {
       `)
             .get(scope.targetFrRef, scope.validationScope, scope.profileRef, scope.browserChannel, scope.executionSurface, scope.effectiveExecutionMode, scope.probeBundleRef);
         if (!row) {
-            throw new RuntimeStoreError("ERR_RUNTIME_STORE_UNAVAILABLE", "anti-detection baseline registry entry not found");
+            return null;
         }
         return mapAntiDetectionBaselineRegistryEntryRow(row);
     }

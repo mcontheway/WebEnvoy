@@ -1012,10 +1012,7 @@ const xhsReadCommand = async (
     const bridgeSessionId = await bridge.ensureSession({
       profile: context.profile
     });
-    if (
-      context.profile &&
-      recoveryProbeRequested
-    ) {
+    if (context.profile && recoveryProbeRequested) {
       await profileRuntime.claimXhsCloseoutSingleProbe({
         cwd: context.cwd,
         profile: context.profile,

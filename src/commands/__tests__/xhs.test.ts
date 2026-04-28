@@ -16,6 +16,7 @@ import {
   SQLiteRuntimeStore,
   resolveRuntimeStorePath
 } from "../../runtime/store/sqlite-runtime-store.js";
+import { persistXhsCloseoutValidationSignals } from "../../runtime/anti-detection-validation.js";
 import type { RuntimeContext } from "../../core/types.js";
 
 type DatabaseSyncCtor = new (path: string) => {
@@ -30,6 +31,8 @@ const ISSUE209_APPROVAL_CHECKS = {
   risk_state_checked: true,
   action_type_confirmed: true
 };
+
+let xhsCloseoutValidationSeedSequence = 0;
 
 const createApprovedAnonymousReadAdmissionContext = (runId: string, requestId: string) => ({
   approval_admission_evidence: {
@@ -135,93 +138,76 @@ const seedXhsCloseoutReady = async (input: {
   });
 
   const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(input.cwd));
-  const scopes = [
-    ["FR-0012", "layer1_consistency"],
-    ["FR-0013", "layer2_interaction"],
-    ["FR-0014", "layer3_session_rhythm"]
-  ] as const;
   try {
-    for (const [targetFrRef, validationScope] of scopes) {
-      const safeProfile = input.profile.replace(/[^a-z0-9_-]+/gi, "-");
-      const uniqueRef = `${safeProfile}/${effectiveExecutionMode}/${process.hrtime.bigint()}`;
-      const requestRef = `validation-request/${targetFrRef}/${uniqueRef}`;
-      const sampleRef = `validation-sample/${targetFrRef}/${uniqueRef}`;
-      const baselineRef = `baseline/${targetFrRef}/${uniqueRef}`;
-      const recordRef = `validation-record/${targetFrRef}/${uniqueRef}`;
-      const observedAt = new Date().toISOString();
-      const runId = `run-${targetFrRef}-${safeProfile}-${effectiveExecutionMode}`;
-      const scope = {
-        targetFrRef,
-        validationScope,
-        profileRef: `profile/${input.profile}`,
-        browserChannel: "Google Chrome stable" as const,
-        executionSurface: "real_browser" as const,
-        effectiveExecutionMode,
-        probeBundleRef: "probe-bundle/xhs-closeout-min-v1"
-      };
-      await store.upsertAntiDetectionValidationRequest({
-        requestRef,
-        validationScope,
-        targetFrRef,
-        profileRef: `profile/${input.profile}`,
-        browserChannel: "Google Chrome stable",
-        executionSurface: "real_browser",
-        sampleGoal: `capture ${targetFrRef} closeout baseline`,
-        requestedExecutionMode: effectiveExecutionMode,
-        probeBundleRef: "probe-bundle/xhs-closeout-min-v1",
-        requestState: "accepted",
-        requestedAt: observedAt
-      });
-      await store.upsertAntiDetectionValidationRequest({
-        requestRef,
-        validationScope,
-        targetFrRef,
-        profileRef: `profile/${input.profile}`,
-        browserChannel: "Google Chrome stable",
-        executionSurface: "real_browser",
-        sampleGoal: `capture ${targetFrRef} closeout baseline`,
-        requestedExecutionMode: effectiveExecutionMode,
-        probeBundleRef: "probe-bundle/xhs-closeout-min-v1",
-        requestState: "completed",
-        requestedAt: observedAt
-      });
-      await store.insertAntiDetectionStructuredSample({
-        ...scope,
-        sampleRef,
-        requestRef,
-        runId,
-        capturedAt: observedAt,
-        structuredPayload: { target_fr_ref: targetFrRef, stable: true },
-        artifactRefs: []
-      });
-      await store.insertAntiDetectionBaselineSnapshot({
-        ...scope,
-        baselineRef,
-        signalVector: { stable: true },
-        capturedAt: observedAt,
-        sourceSampleRefs: [sampleRef],
-        sourceRunIds: [runId]
-      });
-      await store.insertAntiDetectionValidationRecord({
-        ...scope,
-        recordRef,
-        requestRef,
-        sampleRef,
-        baselineRef,
-        resultState: "verified",
-        driftState: "no_drift",
-        failureClass: null,
-        runId,
-        validatedAt: observedAt
-      });
-      await store.upsertAntiDetectionBaselineRegistryEntry({
-        ...scope,
-        activeBaselineRef: baselineRef,
-        supersededBaselineRefs: [],
-        replacementReason: "initial_seed",
-        updatedAt: observedAt
-      });
-    }
+    xhsCloseoutValidationSeedSequence += 1;
+    await persistXhsCloseoutValidationSignals({
+      store,
+      profile: input.profile,
+      effectiveExecutionMode,
+      targetDomain: "www.xiaohongshu.com",
+      runId: `run-${input.profile}-xhs-closeout-validation-${process.pid}-${xhsCloseoutValidationSeedSequence}`,
+      observedAt: "2026-04-25T10:45:00.000Z",
+      signals: {
+        layer1_consistency: {
+          browser_returned_evidence: {
+            source: "main_world",
+            target_domain: "www.xiaohongshu.com",
+            probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1"
+          },
+          fingerprint_runtime: {
+            fingerprint_profile_bundle_ref: "fingerprint-bundle/xhs-closeout",
+            fingerprint_patch_manifest: {
+              required_patches: ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"]
+            },
+            injection: {
+              installed: true,
+              required_patches: ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"],
+              missing_required_patches: [],
+              source: "main_world"
+            }
+          }
+        },
+        layer2_interaction: {
+          browser_returned_evidence: {
+            source: "main_world",
+            target_domain: "www.xiaohongshu.com",
+            probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1"
+          },
+          event_strategy_profile: {
+            action_kind: "scroll",
+            preferred_path: "real_input"
+          },
+          event_chain_policy: {
+            chain_name: "scroll_segment",
+            required_events: ["wheel", "scroll"]
+          },
+          rhythm_profile: {
+            profile_name: "default_layer2",
+            scroll_segment_min_px: 120,
+            scroll_segment_max_px: 480
+          },
+          strategy_selection: {
+            action_kind: "scroll",
+            selected_path: "real_input"
+          },
+          execution_trace: {
+            action_kind: "scroll",
+            selected_path: "real_input",
+            settled_wait_result: "settled"
+          }
+        },
+        layer3_session_rhythm: {
+          browser_returned_evidence: {
+            source: "execution_audit",
+            target_domain: "www.xiaohongshu.com",
+            probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1"
+          },
+          session_rhythm_window_id: `rhythm_win_${input.profile}_issue_209`,
+          session_rhythm_decision_id: `rhythm_decision_${input.profile}_single_probe`,
+          escalation: "recon_probe_to_live_admission"
+        }
+      }
+    });
   } finally {
     store.close();
   }

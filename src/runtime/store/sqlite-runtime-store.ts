@@ -1735,6 +1735,33 @@ export class SQLiteRuntimeStore {
     return row ? mapAntiDetectionValidationViewRow(row) : null;
   }
 
+  async getAntiDetectionBaselineRegistryEntry(
+    scope: AntiDetectionValidationScopeKeyInput
+  ): Promise<AntiDetectionBaselineRegistryEntryRecord | null> {
+    assertAntiDetectionValidationScopeKeyInput(scope, {
+      invalidInput: invalidRuntimeStoreInput,
+      isIsoLike
+    });
+    try {
+      return this.#getOptionalAntiDetectionBaselineRegistryEntry(scope);
+    } catch (error) {
+      throw this.#toStoreDbError(error);
+    }
+  }
+
+  async getAntiDetectionBaselineSnapshot(
+    baselineRef: string
+  ): Promise<AntiDetectionBaselineSnapshotRecord | null> {
+    if (typeof baselineRef !== "string" || baselineRef.trim().length === 0) {
+      throw invalidRuntimeStoreInput("missing required anti-detection baseline_ref");
+    }
+    try {
+      return this.#getOptionalAntiDetectionBaselineSnapshotByRef(baselineRef);
+    } catch (error) {
+      throw this.#toStoreDbError(error);
+    }
+  }
+
   #getAntiDetectionValidationRequestByRef(
     requestRef: string
   ): AntiDetectionValidationRequestRecord {
@@ -1877,6 +1904,19 @@ export class SQLiteRuntimeStore {
   #getAntiDetectionBaselineRegistryEntry(
     scope: AntiDetectionValidationScopeKeyInput
   ): AntiDetectionBaselineRegistryEntryRecord {
+    const row = this.#getOptionalAntiDetectionBaselineRegistryEntry(scope);
+    if (!row) {
+      throw new RuntimeStoreError(
+        "ERR_RUNTIME_STORE_UNAVAILABLE",
+        "anti-detection baseline registry entry not found"
+      );
+    }
+    return row;
+  }
+
+  #getOptionalAntiDetectionBaselineRegistryEntry(
+    scope: AntiDetectionValidationScopeKeyInput
+  ): AntiDetectionBaselineRegistryEntryRecord | null {
     const row = this.#db
       .prepare(
         `
@@ -1917,10 +1957,7 @@ export class SQLiteRuntimeStore {
       | undefined;
 
     if (!row) {
-      throw new RuntimeStoreError(
-        "ERR_RUNTIME_STORE_UNAVAILABLE",
-        "anti-detection baseline registry entry not found"
-      );
+      return null;
     }
 
     return mapAntiDetectionBaselineRegistryEntryRow(row);
