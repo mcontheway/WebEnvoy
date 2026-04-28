@@ -1051,6 +1051,7 @@ const storeCapturedRequestContext = (
       ));
 
   const artifact: CapturedRequestContextArtifact = {
+    ...(candidate.synthetic ? {} : { route_evidence_class: "passive_api_capture" as const }),
     source_kind: candidate.synthetic ? "synthetic_request" : "page_request",
     transport: candidate.transport,
     method: candidate.method,

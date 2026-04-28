@@ -880,6 +880,7 @@ const storeCapturedRequestContext = (candidate, input) => {
         (contextShape.routeScope.command !== "xhs.detail" ||
             detailResponseContainsCanonicalNoteId(input.responseBody, contextShape.shape.note_id ?? ""));
     const artifact = {
+        ...(candidate.synthetic ? {} : { route_evidence_class: "passive_api_capture" }),
         source_kind: candidate.synthetic ? "synthetic_request" : "page_request",
         transport: candidate.transport,
         method: candidate.method,

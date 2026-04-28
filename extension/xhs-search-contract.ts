@@ -73,6 +73,7 @@ export interface XhsSearchEnvironment {
   getCookie(): string;
   getPageStateRoot?(): unknown;
   readPageStateRoot?(): Promise<unknown>;
+  readSearchDomState?(): Promise<unknown>;
   callSignature(uri: string, payload: JsonRecord): Promise<SignatureResult>;
   fetchJson(input: {
     url: string;

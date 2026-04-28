@@ -1654,6 +1654,9 @@ describe("extension build contract", () => {
           request_admission_result: {
             admission_decision: "allowed"
           },
+          route_evidence: {
+            evidence_class: "passive_api_capture"
+          },
           request_context: {
             status: "exact_hit"
           },
@@ -1663,18 +1666,11 @@ describe("extension build contract", () => {
         }
       }
     });
-    expect(callSignature).toHaveBeenCalledWith("/api/sns/web/v1/search/notes", {
-      keyword: "露营装备",
-      page: 1,
-      page_size: 20,
-      search_id: "source-req-001",
-      sort: "general",
-      note_type: 0
-    });
-    expect(fetchJson).toHaveBeenCalledTimes(1);
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
   });
 
-  it("normalizes trusted captured search URLs before replay", async () => {
+  it("accepts trusted captured search URLs as passive evidence without active fetch", async () => {
     const admissionContext = buildLiveReadAdmissionContext({
       runId: "run-source-search-live-url-normalize-001",
       sessionId: "nm-session-source-search-live-url-normalize-001",
@@ -1750,11 +1746,7 @@ describe("extension build contract", () => {
       }
     );
 
-    expect(fetchJson).toHaveBeenCalledWith(
-      expect.objectContaining({
-        url: `https://edith.xiaohongshu.com${SEARCH_ENDPOINT}`
-      })
-    );
+    expect(fetchJson).not.toHaveBeenCalled();
   });
 
   it("normalizes string platform risk codes before accepting xhs.search responses", async () => {
@@ -1816,16 +1808,14 @@ describe("extension build contract", () => {
           createCapturedSearchContextArtifact({
             href: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
             keyword: "露营装备",
-            captured_at: 1_710_000_000_000
+            captured_at: 1_710_000_000_000,
+            responseBody: {
+              code: "300011",
+              msg: "account abnormal"
+            }
           }),
         callSignature: async () => ({ "X-s": "fresh-signature", "X-t": "1710000000" }),
-        fetchJson: async () => ({
-          status: 200,
-          body: {
-            code: "300011",
-            msg: "account abnormal"
-          }
-        })
+        fetchJson: async () => ({ status: 200, body: { code: 0 } })
       }
     );
 
@@ -1844,7 +1834,7 @@ describe("extension build contract", () => {
     });
   });
 
-  it("falls back to captured exact-hit signature when the page signer is unavailable", async () => {
+  it("accepts captured exact-hit template without page signer or active fetch", async () => {
     const admissionContext = buildLiveReadAdmissionContext({
       runId: "run-source-search-live-captured-signature-001",
       sessionId: "nm-session-source-search-live-captured-signature-001",
@@ -1852,31 +1842,15 @@ describe("extension build contract", () => {
       targetTabId: 11,
       targetPage: "search_result_tab"
     });
-    const fetchJson = vi.fn(async (request: { body?: string; headers: Record<string, string> }) => {
-      expect(request.headers).toMatchObject({
-        "X-s": "signed-template",
-        "X-t": "1700000000"
-      });
-      expect(request.body).toBe(
-        JSON.stringify({
-          keyword: "露营装备",
-          page: 1,
-          page_size: 20,
-          search_id: "captured-search-id",
-          sort: "general",
-          note_type: 0
-        })
-      );
-      return {
-        status: 200,
-        body: {
-          code: 0,
-          data: {
-            items: []
-          }
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          items: []
         }
-      };
-    });
+      }
+    }));
 
     await expect(
       executeXhsSearch(
@@ -1947,7 +1921,7 @@ describe("extension build contract", () => {
         }
       }
     });
-    expect(fetchJson).toHaveBeenCalledTimes(1);
+    expect(fetchJson).not.toHaveBeenCalled();
   });
 
   it("waits for a fresh captured xhs.search template before failing closed", async () => {
@@ -2045,7 +2019,7 @@ describe("extension build contract", () => {
     });
 
     expect(sleep).toHaveBeenCalledTimes(1);
-    expect(fetchJson).toHaveBeenCalledTimes(1);
+    expect(fetchJson).not.toHaveBeenCalled();
   });
 
   it("keeps waiting when a sibling search shape appears before the exact template", async () => {
@@ -2163,7 +2137,7 @@ describe("extension build contract", () => {
     });
 
     expect(sleep).toHaveBeenCalledTimes(1);
-    expect(fetchJson).toHaveBeenCalledTimes(1);
+    expect(fetchJson).not.toHaveBeenCalled();
   });
 
   it("keeps waiting when an aborted same-shape XHR appears before the exact template", async () => {
@@ -2278,7 +2252,7 @@ describe("extension build contract", () => {
     });
 
     expect(sleep).toHaveBeenCalledTimes(1);
-    expect(fetchJson).toHaveBeenCalledTimes(1);
+    expect(fetchJson).not.toHaveBeenCalled();
   });
 
   it("keeps xhs.search fail-closed when no captured template appears after waiting", async () => {
@@ -2360,6 +2334,137 @@ describe("extension build contract", () => {
         details: {
           reason: "REQUEST_CONTEXT_MISSING",
           request_context_reason: "template_missing"
+        }
+      }
+    });
+
+    expect(sleep).toHaveBeenCalledTimes(9);
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("returns DOM/state search-card evidence when no passive template appears", async () => {
+    const admissionContext = buildLiveReadAdmissionContext({
+      runId: "run-source-search-live-dom-state-001",
+      sessionId: "nm-session-source-search-live-dom-state-001",
+      gateInvocationId: "issue580-gate-run-source-search-live-dom-state-001",
+      targetTabId: 11,
+      targetPage: "search_result_tab"
+    });
+    const sleep = vi.fn(async () => {});
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          items: []
+        }
+      }
+    }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    await expect(
+      executeXhsSearch(
+        {
+          abilityId: "xhs.note.search.v1",
+          abilityLayer: "L3",
+          abilityAction: "read",
+          params: {
+            query: "露营装备"
+          },
+          options: {
+            issue_scope: "issue_580",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 11,
+            target_page: "search_result_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 11,
+            actual_target_page: "search_result_tab",
+            action_type: "read",
+            risk_state: "allowed",
+            requested_execution_mode: "live_read_high_risk",
+            upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+              requestRef: "upstream_source_search_live_dom_state_001",
+              actionName: "xhs.read_search_results",
+              targetPage: "search_result_tab",
+              targetTabId: 11,
+              profileRef: "profile-a",
+              approvalRefs: [
+                String(admissionContext.approval_admission_evidence.approval_admission_ref)
+              ],
+              auditRefs: [String(admissionContext.audit_admission_evidence.audit_admission_ref)]
+            }),
+            admission_context: admissionContext
+          },
+          executionContext: {
+            runId: "run-source-search-live-dom-state-001",
+            sessionId: "nm-session-source-search-live-dom-state-001",
+            profile: "profile-a",
+            gateInvocationId: "issue580-gate-run-source-search-live-dom-state-001"
+          }
+        },
+        {
+          now: () => 1_710_000_000_000,
+          randomId: () => "source-req-dom-state-001",
+          getLocationHref: () => "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
+          getDocumentTitle: () => "Search Result",
+          getReadyState: () => "complete",
+          getCookie: () => "a1=session-cookie",
+          sleep,
+          readCapturedRequestContext: async () => null,
+          readPageStateRoot: async () => ({
+            feed: {
+              items: [
+                {
+                  title: "露营装备清单",
+                  detail_url:
+                    "https://www.xiaohongshu.com/explore/note-001?xsec_token=token-001&xsec_source=pc_search",
+                  user_home_url:
+                    "https://www.xiaohongshu.com/user/profile/user-001?xsec_token=token-user-001&xsec_source=pc_search"
+                }
+              ]
+            }
+          }),
+          callSignature,
+          fetchJson
+        }
+      )
+    ).resolves.toMatchObject({
+      ok: true,
+      payload: {
+        summary: {
+          capability_result: {
+            outcome: "success",
+            metrics: {
+              count: 1
+            }
+          },
+          route_evidence: {
+            evidence_class: "dom_state_extraction",
+            extraction_layer: "hydration_state",
+            extraction_locator: "window.__INITIAL_STATE__",
+            item_kind: "search_card",
+            cards: [
+              {
+                title: "露营装备清单",
+                detail_url:
+                  "https://www.xiaohongshu.com/explore/note-001?xsec_token=token-001&xsec_source=pc_search",
+                user_home_url:
+                  "https://www.xiaohongshu.com/user/profile/user-001?xsec_token=token-user-001&xsec_source=pc_search",
+                xsec_token: "token-001",
+                xsec_source: "pc_search"
+              }
+            ],
+            target_continuity: [
+              {
+                token_presence: "present",
+                source_route: "xhs.search"
+              }
+            ]
+          },
+          request_context: {
+            status: "missing"
+          }
         }
       }
     });
@@ -2590,7 +2695,7 @@ describe("extension build contract", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
-  it("fails closed when the request-context exact-hit URL uses a non-canonical replay port", async () => {
+  it("fails closed when the request-context exact-hit URL uses a non-canonical template port", async () => {
     const fetchJson = vi.fn(async () => ({
       status: 200,
       body: {

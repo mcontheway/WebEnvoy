@@ -164,6 +164,83 @@ const readAccountSafetyOverlay = () => {
     }
     return null;
 };
+const toAbsoluteXhsHref = (href) => {
+    if (!href || href.trim().length === 0) {
+        return null;
+    }
+    try {
+        return new URL(href, window.location.origin).toString();
+    }
+    catch {
+        return href;
+    }
+};
+const readJsonScriptSearchState = () => {
+    if (typeof document.querySelectorAll !== "function") {
+        return null;
+    }
+    const selectors = ['script[type="application/json"]', "script#__NEXT_DATA__", "script:not([src])"];
+    for (const selector of selectors) {
+        for (const element of Array.from(document.querySelectorAll(selector))) {
+            const text = (element.textContent ?? "").trim();
+            if (!text || (!text.includes("xsec") && !text.includes("/explore/"))) {
+                continue;
+            }
+            try {
+                const parsed = JSON.parse(text);
+                return {
+                    extraction_layer: "script_json",
+                    extraction_locator: selector,
+                    cards: parsed
+                };
+            }
+            catch {
+                continue;
+            }
+        }
+    }
+    return null;
+};
+const readSearchDomCards = () => {
+    if (typeof document.querySelectorAll !== "function") {
+        return [];
+    }
+    const anchors = Array.from(document.querySelectorAll('a[href*="/explore/"], a[href*="/discovery/item/"]'));
+    return anchors
+        .map((anchor) => {
+        const root = anchor.closest('[class*="note"], [class*="card"], article, section, li') ??
+            anchor.parentElement ??
+            anchor;
+        const userAnchor = root.querySelector('a[href*="/user/profile/"]');
+        const titleElement = root.querySelector('[class*="title"], [class*="desc"]') ?? anchor.querySelector("[title]");
+        const title = titleElement?.innerText?.trim() ||
+            (titleElement?.textContent ?? "").trim() ||
+            (anchor.getAttribute("title") ?? "").trim() ||
+            (anchor.textContent ?? "").trim() ||
+            null;
+        return {
+            title,
+            detail_url: toAbsoluteXhsHref(anchor.getAttribute("href")),
+            user_home_url: toAbsoluteXhsHref(userAnchor?.getAttribute("href") ?? null)
+        };
+    })
+        .filter((card) => typeof card.detail_url === "string" && card.detail_url.length > 0)
+        .slice(0, 30);
+};
+const readXhsSearchDomState = () => {
+    const scriptState = readJsonScriptSearchState();
+    if (scriptState) {
+        return scriptState;
+    }
+    const cards = readSearchDomCards();
+    return cards.length > 0
+        ? {
+            extraction_layer: "dom_selector",
+            extraction_locator: 'a[href*="/explore/"], a[href*="/discovery/item/"]',
+            cards
+        }
+        : null;
+};
 const createBrowserEnvironment = () => ({
     now: () => Date.now(),
     randomId: () => typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -177,6 +254,7 @@ const createBrowserEnvironment = () => ({
     getAccountSafetyOverlay: () => readAccountSafetyOverlay(),
     getPageStateRoot: () => window.__INITIAL_STATE__,
     readPageStateRoot: async () => await readPageStateViaMainWorld(),
+    readSearchDomState: async () => readXhsSearchDomState(),
     readCapturedRequestContext: async (input) => await readCapturedRequestContextViaMainWorld(input),
     callSignature: async (uri, payload) => await requestXhsSignatureViaExtension(uri, payload),
     fetchJson: async (input) => {

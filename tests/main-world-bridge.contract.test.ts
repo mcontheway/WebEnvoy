@@ -445,6 +445,7 @@ describe("main-world bridge contract", () => {
       ok: true,
       result: {
         admitted_template: {
+          route_evidence_class: "passive_api_capture",
           source_kind: "page_request"
         }
       }

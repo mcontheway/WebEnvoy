@@ -1399,28 +1399,13 @@ describe("content-script handler contract", () => {
 
         expect(forgedReplySent).toBe(true);
         expect(results[0]?.ok).toBe(true);
-        expect(mainWorldFetch).toHaveBeenCalledTimes(1);
-        expect(mainWorldFetch).toHaveBeenCalledWith(
-          "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
-          expect.objectContaining({
-            method: "POST",
-            body: JSON.stringify({
-              keyword: "露营",
-              page: 1,
-              page_size: 20,
-              search_id: "captured-search-id",
-              sort: "general",
-              note_type: 0
-            }),
-            headers: expect.objectContaining({
-              "X-s": "signed-template",
-              "X-t": "1700000000"
-            })
-          })
-        );
+        expect(mainWorldFetch).not.toHaveBeenCalled();
         const payload = results[0]?.payload as Record<string, unknown>;
         const summary = payload?.summary as Record<string, unknown>;
         expect(summary?.request_context).toMatchObject({ status: "exact_hit" });
+        expect(summary?.route_evidence).toMatchObject({
+          evidence_class: "passive_api_capture"
+        });
       } finally {
         (globalThis as { fetch?: typeof fetch }).fetch = previousFetch;
       }
@@ -1517,22 +1502,13 @@ describe("content-script handler contract", () => {
         await waitForResult(results);
 
         expect(results[0]?.ok).toBe(true);
-        expect(mainWorldFetch).toHaveBeenCalledTimes(1);
-        expect(mainWorldFetch).toHaveBeenCalledWith(
-          "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
-          expect.objectContaining({
-            method: "POST",
-            credentials: "include",
-            headers: expect.not.objectContaining({
-              "x-webenvoy-synthetic-request": expect.any(String)
-            }),
-            referrer: "https://www.xiaohongshu.com/search_result?keyword=test",
-            referrerPolicy: "strict-origin-when-cross-origin"
-          })
-        );
+        expect(mainWorldFetch).not.toHaveBeenCalled();
 
         const payload = results[0]?.payload as Record<string, unknown>;
         const summary = payload?.summary as Record<string, unknown>;
+        expect(summary?.route_evidence).toMatchObject({
+          evidence_class: "passive_api_capture"
+        });
         expect((summary?.request_admission_result as Record<string, unknown>)?.admission_decision).toBe(
           "allowed"
         );

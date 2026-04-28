@@ -115,6 +115,7 @@ export interface CapturedRequestContextLookup {
 }
 
 export interface CapturedRequestContextArtifact {
+  route_evidence_class?: "passive_api_capture";
   source_kind: "page_request" | "synthetic_request";
   transport: "fetch" | "xhr";
   method: CapturedRequestContextMethod;
@@ -167,6 +168,7 @@ export interface XhsSearchEnvironment {
   readCapturedRequestContext?(
     input: CapturedRequestContextLookup
   ): Promise<CapturedRequestContextLookupResult | null>;
+  readSearchDomState?(): Promise<unknown>;
   sleep?(ms: number): Promise<void>;
   callSignature(uri: string, payload: JsonRecord): Promise<SignatureResult>;
   fetchJson(input: {
