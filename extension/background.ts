@@ -3746,13 +3746,27 @@ class ChromeBackgroundBridge {
       consumerGateResult = gateResult.consumerGateResult;
       gatePayload = gateResult.gatePayload;
       if (!gateResult.allowed || (!gateResult.targetTabId && !gateResult.gateOnly)) {
+        const gateFailureReason =
+          gateResult.consumerGateResult.gate_reasons[0] ?? "TARGET_TAB_NOT_EXPLICIT";
+        const existingDetails = asRecord(gateResult.gatePayload.details) ?? {};
         this.#emit({
           id: dispatchRequest.id,
           status: "error",
           summary: {
             relay_path: "host>background>content-script>background>host"
           },
-          payload: gateResult.gatePayload,
+          payload: {
+            ...gateResult.gatePayload,
+            details: {
+              ...existingDetails,
+              stage: "execution",
+              reason: gateFailureReason,
+              forward_failure_stage: "gate_target_resolve",
+              target_domain: gateResult.consumerGateResult.target_domain,
+              target_tab_id: gateResult.consumerGateResult.target_tab_id,
+              target_page: gateResult.consumerGateResult.target_page
+            }
+          },
           error: {
             code: "ERR_TRANSPORT_FORWARD_FAILED",
             message: gateResult.errorMessage
@@ -3813,6 +3827,13 @@ class ChromeBackgroundBridge {
         status: "error",
         summary: {
           relay_path: "host>background>content-script>background>host"
+        },
+        payload: {
+          details: {
+            stage: "execution",
+            reason: "TARGET_TAB_UNAVAILABLE",
+            forward_failure_stage: "target_tab_resolve"
+          }
         },
         error: {
           code: "ERR_TRANSPORT_FORWARD_FAILED",
@@ -3934,10 +3955,40 @@ class ChromeBackgroundBridge {
       commandParams,
       fingerprintContext: forwardFingerprintContext
     };
+    const dispatchFailurePayload =
+      command === "runtime.bootstrap"
+        ? {
+            details: {
+              stage: "execution",
+              reason: "TARGET_TAB_DISPATCH_FAILED",
+              forward_failure_stage: "content_dispatch",
+              target_tab_id: tabId
+            }
+          }
+        : undefined;
 
     try {
       await this.#sendMessageWithContentScriptRecovery(tabId, forward, dispatchRequest);
     } catch (error) {
+      if (dispatchFailurePayload && !gatePayload) {
+        const existing = this.#pendingState.take(dispatchRequest.id);
+        if (!existing || existing.suppressHostResponse === true) {
+          return;
+        }
+        this.#emit({
+          id: dispatchRequest.id,
+          status: "error",
+          summary: {
+            relay_path: "host>background>content-script>background>host"
+          },
+          payload: dispatchFailurePayload,
+          error: {
+            code: "ERR_TRANSPORT_FORWARD_FAILED",
+            message: error instanceof Error ? error.message : "content script dispatch failed"
+          }
+        });
+        return;
+      }
       this.#failPending(dispatchRequest.id, {
         code: "ERR_TRANSPORT_FORWARD_FAILED",
         message: error instanceof Error ? error.message : "content script dispatch failed"
