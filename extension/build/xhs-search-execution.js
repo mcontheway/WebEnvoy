@@ -63,6 +63,31 @@ const normalizeXhsUrl = (value) => {
         return value;
     }
 };
+const isXhsNoteCardUrl = (value) => {
+    if (!value) {
+        return false;
+    }
+    try {
+        const url = new URL(value, "https://www.xiaohongshu.com");
+        return (url.hostname === "www.xiaohongshu.com" &&
+            (url.pathname.startsWith("/explore/") || url.pathname.startsWith("/discovery/item/")));
+    }
+    catch {
+        return false;
+    }
+};
+const isXhsUserProfileUrl = (value) => {
+    if (!value) {
+        return false;
+    }
+    try {
+        const url = new URL(value, "https://www.xiaohongshu.com");
+        return url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/user/profile/");
+    }
+    catch {
+        return false;
+    }
+};
 const parseXsecFromUrl = (value) => {
     if (!value) {
         return {
@@ -91,10 +116,12 @@ const collectSearchDomCards = (value, seen = new Set()) => {
             return [];
         }
         seen.add(record);
-        const detailUrl = normalizeXhsUrl(pickFirstString(record, ["detail_url", "detailUrl", "note_url", "noteUrl", "href", "url", "link"]));
+        const rawDetailUrl = normalizeXhsUrl(pickFirstString(record, ["detail_url", "detailUrl", "note_url", "noteUrl", "href", "url", "link"]));
+        const detailUrl = isXhsNoteCardUrl(rawDetailUrl) ? rawDetailUrl : null;
         const userRecord = asRecord(record.user) ?? asRecord(record.author);
-        const userHomeUrl = normalizeXhsUrl(pickFirstString(record, ["user_home_url", "userHomeUrl", "author_url", "authorUrl", "user_url", "userUrl"]) ??
+        const rawUserHomeUrl = normalizeXhsUrl(pickFirstString(record, ["user_home_url", "userHomeUrl", "author_url", "authorUrl", "user_url", "userUrl"]) ??
             (userRecord ? pickFirstString(userRecord, ["user_home_url", "userHomeUrl", "url", "link"]) : null));
+        const userHomeUrl = isXhsUserProfileUrl(rawUserHomeUrl) ? rawUserHomeUrl : null;
         const parsedDetail = parseXsecFromUrl(detailUrl);
         const parsedUser = parseXsecFromUrl(userHomeUrl);
         const card = {
@@ -378,13 +405,13 @@ const waitForRequestContextRetry = async (env, ms) => {
         setTimeout(resolve, ms);
     });
 };
-const resolveRequestContextState = async (input, env) => {
+const resolveRequestContextState = async (requestInput, env) => {
     const shape = createSearchRequestShape({
-        keyword: input.params.query,
-        page: input.params.page ?? 1,
-        page_size: input.params.limit ?? 20,
-        sort: input.params.sort ?? "general",
-        note_type: input.params.note_type ?? 0
+        keyword: requestInput.params.query,
+        page: requestInput.params.page ?? 1,
+        page_size: requestInput.params.limit ?? 20,
+        sort: requestInput.params.sort ?? "general",
+        note_type: requestInput.params.note_type ?? 0
     });
     const fallbackNamespace = createPageContextNamespace(env.getLocationHref());
     const readCapturedRequestContext = env.readCapturedRequestContext;
@@ -406,7 +433,10 @@ const resolveRequestContextState = async (input, env) => {
                 method: "POST",
                 path: SEARCH_ENDPOINT,
                 page_context_namespace: pageContextNamespace,
-                shape_key: shapeKey
+                shape_key: shapeKey,
+                ...(typeof requestInput.minObservedAt === "number"
+                    ? { min_observed_at: requestInput.minObservedAt }
+                    : {})
             });
         }
         catch {
@@ -851,10 +881,12 @@ export const executeXhsSearch = async (input, env) => {
         sort: input.params.sort ?? "general",
         note_type: input.params.note_type ?? 0
     };
+    const passiveActionStartedAt = env.now();
     const passiveActionEvidence = await performSearchPassiveAction(input, env);
     const requestContextState = await resolveRequestContextState({
         params: input.params,
-        options: input.options
+        options: input.options,
+        minObservedAt: passiveActionEvidence ? passiveActionStartedAt : null
     }, env);
     if (requestContextState.status !== "hit") {
         const backendRejectedReason = requestContextState.detailReason &&

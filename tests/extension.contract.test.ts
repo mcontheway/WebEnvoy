@@ -2041,7 +2041,8 @@ describe("extension build contract", () => {
               action_kind: "scroll"
             };
           },
-          readCapturedRequestContext: async () => {
+          readCapturedRequestContext: async (lookup) => {
+            expect(lookup.min_observed_at).toBe(1_710_000_000_000);
             actionOrder.push("capture_poll");
             lookupCount += 1;
             return lookupCount === 1
@@ -2602,7 +2603,9 @@ describe("extension build contract", () => {
             feed: {
               items: [
                 {
-                  title: "只有 token 没有卡片链接",
+                  title: "只有 token 没有真实卡片链接",
+                  detail_url:
+                    "https://example.com/explore/not-xhs-001?xsec_token=token-only-001&xsec_source=pc_search",
                   xsec_token: "token-only-001",
                   xsec_source: "pc_search"
                 }

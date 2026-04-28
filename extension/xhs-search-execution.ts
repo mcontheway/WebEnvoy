@@ -172,6 +172,33 @@ const normalizeXhsUrl = (value: string | null): string | null => {
   }
 };
 
+const isXhsNoteCardUrl = (value: string | null): boolean => {
+  if (!value) {
+    return false;
+  }
+  try {
+    const url = new URL(value, "https://www.xiaohongshu.com");
+    return (
+      url.hostname === "www.xiaohongshu.com" &&
+      (url.pathname.startsWith("/explore/") || url.pathname.startsWith("/discovery/item/"))
+    );
+  } catch {
+    return false;
+  }
+};
+
+const isXhsUserProfileUrl = (value: string | null): boolean => {
+  if (!value) {
+    return false;
+  }
+  try {
+    const url = new URL(value, "https://www.xiaohongshu.com");
+    return url.hostname === "www.xiaohongshu.com" && url.pathname.startsWith("/user/profile/");
+  } catch {
+    return false;
+  }
+};
+
 const parseXsecFromUrl = (
   value: string | null
 ): { xsec_token: string | null; xsec_source: string | null } => {
@@ -202,14 +229,16 @@ const collectSearchDomCards = (value: unknown, seen = new Set<object>()): Search
       return [];
     }
     seen.add(record);
-    const detailUrl = normalizeXhsUrl(
+    const rawDetailUrl = normalizeXhsUrl(
       pickFirstString(record, ["detail_url", "detailUrl", "note_url", "noteUrl", "href", "url", "link"])
     );
+    const detailUrl = isXhsNoteCardUrl(rawDetailUrl) ? rawDetailUrl : null;
     const userRecord = asRecord(record.user) ?? asRecord(record.author);
-    const userHomeUrl = normalizeXhsUrl(
+    const rawUserHomeUrl = normalizeXhsUrl(
       pickFirstString(record, ["user_home_url", "userHomeUrl", "author_url", "authorUrl", "user_url", "userUrl"]) ??
         (userRecord ? pickFirstString(userRecord, ["user_home_url", "userHomeUrl", "url", "link"]) : null)
     );
+    const userHomeUrl = isXhsUserProfileUrl(rawUserHomeUrl) ? rawUserHomeUrl : null;
     const parsedDetail = parseXsecFromUrl(detailUrl);
     const parsedUser = parseXsecFromUrl(userHomeUrl);
     const card: SearchDomCard = {
@@ -574,18 +603,19 @@ const waitForRequestContextRetry = async (
 };
 
 const resolveRequestContextState = async (
-  input: {
+  requestInput: {
     params: XhsSearchParams;
     options: XhsSearchOptions;
+    minObservedAt?: number | null;
   },
   env: XhsSearchEnvironment
 ): Promise<RequestContextState> => {
   const shape = createSearchRequestShape({
-    keyword: input.params.query,
-    page: input.params.page ?? 1,
-    page_size: input.params.limit ?? 20,
-    sort: input.params.sort ?? "general",
-    note_type: input.params.note_type ?? 0
+    keyword: requestInput.params.query,
+    page: requestInput.params.page ?? 1,
+    page_size: requestInput.params.limit ?? 20,
+    sort: requestInput.params.sort ?? "general",
+    note_type: requestInput.params.note_type ?? 0
   });
   const fallbackNamespace = createPageContextNamespace(env.getLocationHref());
   const readCapturedRequestContext = env.readCapturedRequestContext;
@@ -611,7 +641,10 @@ const resolveRequestContextState = async (
         method: "POST",
         path: SEARCH_ENDPOINT,
         page_context_namespace: pageContextNamespace,
-        shape_key: shapeKey
+        shape_key: shapeKey,
+        ...(typeof requestInput.minObservedAt === "number"
+          ? { min_observed_at: requestInput.minObservedAt }
+          : {})
       });
     } catch {
       return {
@@ -1152,11 +1185,13 @@ export const executeXhsSearch = async (
     sort: input.params.sort ?? "general",
     note_type: input.params.note_type ?? 0
   };
+  const passiveActionStartedAt = env.now();
   const passiveActionEvidence = await performSearchPassiveAction(input, env);
   const requestContextState = await resolveRequestContextState(
     {
       params: input.params,
-      options: input.options
+      options: input.options,
+      minObservedAt: passiveActionEvidence ? passiveActionStartedAt : null
     },
     env
   );

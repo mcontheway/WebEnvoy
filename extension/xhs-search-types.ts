@@ -112,6 +112,7 @@ export interface CapturedRequestContextLookup {
   path: CapturedRequestContextPath;
   page_context_namespace: PageContextNamespace;
   shape_key: string;
+  min_observed_at?: number;
 }
 
 export interface CapturedRequestContextArtifact {
