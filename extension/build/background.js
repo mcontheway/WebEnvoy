@@ -1412,7 +1412,13 @@ class ChromeBackgroundBridge {
             if (this.#port !== port) {
                 return;
             }
-            this.#handleDisconnect("native messaging disconnected");
+            const lastErrorMessage = typeof this.chromeApi.runtime.lastError?.message === "string" &&
+                this.chromeApi.runtime.lastError.message.trim().length > 0
+                ? this.chromeApi.runtime.lastError.message.trim()
+                : null;
+            this.#handleDisconnect(lastErrorMessage
+                ? `native messaging disconnected: ${lastErrorMessage}`
+                : "native messaging disconnected");
         });
         this.#sendHandshakeOpen(port);
     }

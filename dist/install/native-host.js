@@ -1,4 +1,4 @@
-import { chmod, copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inspectManagedNativeHostInstall } from "./native-host-install-root.js";
@@ -164,6 +164,25 @@ const writeManagedInstallMetadata = async (input) => {
     };
     await writeFile(join(input.channelRoot, MANAGED_INSTALL_METADATA_FILENAME), `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
 };
+const readManagedInstallMetadata = async (channelRoot) => {
+    try {
+        const raw = await readFile(join(channelRoot, MANAGED_INSTALL_METADATA_FILENAME), "utf8");
+        const parsed = JSON.parse(raw);
+        const profileRoot = typeof parsed.profile_root === "string" && parsed.profile_root.trim().length > 0
+            ? parsed.profile_root.trim()
+            : null;
+        if (!profileRoot) {
+            return null;
+        }
+        return {
+            profile_root: profileRoot,
+            bundle_runtime_expected: parsed.bundle_runtime_expected === true
+        };
+    }
+    catch {
+        return null;
+    }
+};
 const resolveNativeHostRuntimeBundlePlan = async (input) => {
     if (input.hostCommandSource === "explicit") {
         return {
@@ -177,6 +196,41 @@ const resolveNativeHostRuntimeBundlePlan = async (input) => {
         bundleRuntimeWritten: true
     };
 };
+const listProfileScopedNativeHostManifestPaths = async (input) => {
+    if (input.profileDir) {
+        return [join(input.profileDir, "NativeMessagingHosts", `${input.nativeHostName}.json`)];
+    }
+    let entries;
+    try {
+        entries = await readdir(input.profileRoot, { withFileTypes: true });
+    }
+    catch (error) {
+        const nodeError = error;
+        if (nodeError.code === "ENOENT") {
+            return [];
+        }
+        throw error;
+    }
+    return entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => join(input.profileRoot, entry.name, "NativeMessagingHosts", `${input.nativeHostName}.json`));
+};
+const resolveProfileScopedNativeHostManifestCleanupPaths = async (input) => {
+    const removable = [];
+    const expectedLauncherPath = normalizePathForBoundaryCheck(input.launcherPath);
+    for (const candidate of input.candidates) {
+        if (!(await pathExists(candidate))) {
+            removable.push(candidate);
+            continue;
+        }
+        const registration = await readNativeHostRegistrationManifest(candidate);
+        if (registration?.launcherPath &&
+            normalizePathForBoundaryCheck(registration.launcherPath) === expectedLauncherPath) {
+            removable.push(candidate);
+        }
+    }
+    return removable;
+};
 export const installNativeHost = async (input) => {
     const resolvedPaths = resolveInstallPaths({
         command: "runtime.install",
@@ -189,6 +243,7 @@ export const installNativeHost = async (input) => {
     const profileRoot = resolveProfileRoot(resolvedPaths.worktreePath);
     const allowedOrigin = `chrome-extension://${input.extensionId}/`;
     const profileDir = resolveProfileDirForLauncher({
+        command: "runtime.install",
         cwd: resolvedPaths.worktreePath,
         profileRoot,
         profileDir: input.profileDir
@@ -209,6 +264,21 @@ export const installNativeHost = async (input) => {
         ? currentRegistration.launcherPath
         : null;
     const manifestExisted = await pathExists(resolvedPaths.manifestPath);
+    const profileScopedManifestPath = profileDir
+        ? join(profileDir, "NativeMessagingHosts", `${input.nativeHostName}.json`)
+        : null;
+    const profileScopedManifestExisted = profileScopedManifestPath
+        ? await pathExists(profileScopedManifestPath)
+        : false;
+    if (profileScopedManifestPath && profileDir) {
+        await assertNoSymlinkAncestorBetween({
+            command: "runtime.install",
+            field: "profile_dir",
+            fromDir: profileDir,
+            targetDir: dirname(profileScopedManifestPath)
+        });
+        await assertNotSymlink("runtime.install", "manifest_path", profileScopedManifestPath);
+    }
     const launcherExisted = await pathExists(resolvedPaths.launcherPath);
     const bundleRuntimeExisted = await pathExists(join(resolvedPaths.runtimeRoot, "native-messaging", "native-host-entry.js"));
     await mkdir(resolvedPaths.manifestDir, { recursive: true });
@@ -252,6 +322,10 @@ export const installNativeHost = async (input) => {
         allowed_origins: [allowedOrigin]
     };
     await writeFile(resolvedPaths.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    if (profileScopedManifestPath) {
+        await mkdir(dirname(profileScopedManifestPath), { recursive: true });
+        await writeFile(profileScopedManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    }
     if (previousManagedInstall &&
         normalizePathForBoundaryCheck(previousManagedInstall.channelRoot) !==
             normalizePathForBoundaryCheck(resolvedPaths.channelRoot)) {
@@ -281,6 +355,7 @@ export const installNativeHost = async (input) => {
         profile_dir: normalizePathForOutput(profileDir),
         profile_root_bridge_socket_path: normalizePathForOutput(resolveProfileScopedNativeBridgeSocketPath(profileRoot)),
         profile_scoped_bridge_socket_path: normalizePathForOutput(profileDir ? resolveProfileScopedNativeBridgeSocketPath(profileDir) : null),
+        profile_scoped_manifest_path: normalizePathForOutput(profileScopedManifestPath),
         allowed_origins: [allowedOrigin],
         persistent_extension_identity: {
             extension_id: input.extensionId,
@@ -290,16 +365,23 @@ export const installNativeHost = async (input) => {
         },
         existed_before: {
             manifest: manifestExisted,
+            profile_scoped_manifest: profileScopedManifestExisted,
             launcher: launcherExisted,
             bundle_runtime: bundleRuntimeExisted
         },
         write_result: {
             manifest: manifestExisted ? "overwritten" : "created",
+            profile_scoped_manifest: profileScopedManifestPath
+                ? profileScopedManifestExisted
+                    ? "overwritten"
+                    : "created"
+                : "not_applicable",
             launcher: launcherExisted ? "overwritten" : "created",
             bundle_runtime: bundleRuntimeWritten ? (bundleRuntimeExisted ? "overwritten" : "created") : "unchanged"
         },
         created: {
             manifest: true,
+            profile_scoped_manifest: profileScopedManifestPath !== null,
             launcher: true,
             bundle_runtime: bundleRuntimeWritten
         }
@@ -313,6 +395,13 @@ export const uninstallNativeHost = async (input) => {
         browserChannel: input.browserChannel,
         manifestDir: input.manifestDir,
         launcherPath: input.launcherPath
+    });
+    const profileRoot = resolveProfileRoot(resolvedPaths.worktreePath);
+    const profileDir = resolveProfileDirForLauncher({
+        command: "runtime.uninstall",
+        cwd: resolvedPaths.worktreePath,
+        profileRoot,
+        profileDir: input.profileDir
     });
     await assertNoSymlinkAncestorBetween({
         command: "runtime.uninstall",
@@ -337,6 +426,12 @@ export const uninstallNativeHost = async (input) => {
     const shouldDeleteRegisteredManagedLauncher = !resolvedPaths.hasCustomLauncherPath && registeredManagedInstall !== null;
     const launcherPath = shouldDeleteExplicitLauncher || !registeredLauncherPath ? resolvedPaths.launcherPath : registeredLauncherPath;
     const managedInstall = shouldDeleteRegisteredManagedLauncher ? registeredManagedInstall : null;
+    const managedInstallMetadata = managedInstall
+        ? await readManagedInstallMetadata(managedInstall.channelRoot)
+        : null;
+    const profileRootForCleanup = !profileDir && managedInstallMetadata?.profile_root
+        ? managedInstallMetadata.profile_root
+        : profileRoot;
     const launcherPathSource = resolvedPaths.hasCustomLauncherPath
         ? "custom"
         : managedInstall
@@ -355,6 +450,37 @@ export const uninstallNativeHost = async (input) => {
         await assertNotSymlink("runtime.uninstall", "launcher_path", legacyLauncherPath);
     }
     const manifestExisted = await pathExists(resolvedPaths.manifestPath);
+    const profileScopedManifestPaths = await listProfileScopedNativeHostManifestPaths({
+        profileRoot: profileRootForCleanup,
+        profileDir,
+        nativeHostName: input.nativeHostName
+    });
+    const removableProfileScopedManifestPaths = await resolveProfileScopedNativeHostManifestCleanupPaths({
+        candidates: profileScopedManifestPaths,
+        launcherPath
+    });
+    for (const profileScopedManifestPath of removableProfileScopedManifestPaths) {
+        const scopedProfileDir = dirname(dirname(profileScopedManifestPath));
+        await assertNoSymlinkAncestorBetween({
+            command: "runtime.uninstall",
+            field: "profile_dir",
+            fromDir: profileRootForCleanup,
+            targetDir: scopedProfileDir
+        });
+        await assertNoSymlinkAncestorBetween({
+            command: "runtime.uninstall",
+            field: "profile_dir",
+            fromDir: scopedProfileDir,
+            targetDir: dirname(profileScopedManifestPath)
+        });
+        await assertNotSymlink("runtime.uninstall", "manifest_path", profileScopedManifestPath);
+    }
+    const profileScopedManifestExistingPaths = [];
+    for (const profileScopedManifestPath of removableProfileScopedManifestPaths) {
+        if (await pathExists(profileScopedManifestPath)) {
+            profileScopedManifestExistingPaths.push(profileScopedManifestPath);
+        }
+    }
     const launcherExisted = shouldDeleteExplicitLauncher || shouldDeleteRegisteredLegacyLauncher || managedInstall
         ? await pathExists(launcherPath)
         : false;
@@ -363,6 +489,9 @@ export const uninstallNativeHost = async (input) => {
         ? await pathExists(legacyLauncherPath)
         : false;
     await rm(resolvedPaths.manifestPath, { force: true });
+    for (const profileScopedManifestPath of removableProfileScopedManifestPaths) {
+        await rm(profileScopedManifestPath, { force: true });
+    }
     if (managedInstall) {
         await rm(managedInstall.channelRoot, { recursive: true, force: true });
     }
@@ -382,18 +511,30 @@ export const uninstallNativeHost = async (input) => {
         manifest_dir: normalizePathForOutput(resolvedPaths.manifestDir),
         manifest_path: normalizePathForOutput(resolvedPaths.manifestPath),
         manifest_path_source: resolvedPaths.manifestPathSource,
+        profile_dir: normalizePathForOutput(profileDir),
+        profile_scoped_manifest_path: profileDir && removableProfileScopedManifestPaths.length > 0
+            ? normalizePathForOutput(removableProfileScopedManifestPaths[0])
+            : null,
+        profile_scoped_manifest_paths: removableProfileScopedManifestPaths.map((entry) => normalizePathForOutput(entry)),
         launcher_dir: normalizePathForOutput(dirname(launcherPath)),
         launcher_path: normalizePathForOutput(launcherPath),
         launcher_path_source: launcherPathSource,
         legacy_launcher_path: normalizePathForOutput(legacyLauncherPath && legacyLauncherPath !== launcherPath ? legacyLauncherPath : null),
         removed: {
             manifest: manifestExisted,
+            profile_scoped_manifest: profileScopedManifestExistingPaths.length > 0,
+            profile_scoped_manifest_count: profileScopedManifestExistingPaths.length,
             launcher: launcherExisted,
             bundle_runtime: bundleRuntimeExisted,
             legacy_launcher: legacyLauncherExisted
         },
         remove_result: {
             manifest: manifestExisted ? "removed" : "already_absent",
+            profile_scoped_manifest: removableProfileScopedManifestPaths.length > 0
+                ? profileScopedManifestExistingPaths.length > 0
+                    ? "removed"
+                    : "already_absent"
+                : "not_applicable",
             launcher: shouldDeleteExplicitLauncher || shouldDeleteRegisteredLegacyLauncher || managedInstall
                 ? launcherExisted
                     ? "removed"
@@ -402,6 +543,10 @@ export const uninstallNativeHost = async (input) => {
             bundle_runtime: bundleRuntimeExisted ? "removed" : "already_absent",
             legacy_launcher: legacyLauncherExisted ? "removed" : "already_absent"
         },
-        idempotent: !manifestExisted && !launcherExisted && !bundleRuntimeExisted && !legacyLauncherExisted
+        idempotent: !manifestExisted &&
+            profileScopedManifestExistingPaths.length === 0 &&
+            !launcherExisted &&
+            !bundleRuntimeExisted &&
+            !legacyLauncherExisted
     };
 };

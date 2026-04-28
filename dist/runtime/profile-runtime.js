@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { readFile, unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, lstat, readFile, unlink, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { CliError } from "../core/errors.js";
 import { BROWSER_CONTROL_FILENAME, BROWSER_STATE_FILENAME, BrowserLaunchError, launchBrowser, shutdownBrowserSession } from "./browser-launcher.js";
 import { createProfileLock } from "./profile-lock.js";
@@ -20,6 +20,52 @@ import { browserStateFromProfileState, buildBoundlessRuntimeReadiness, buildNonP
 const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
 const LOCK_ACQUIRE_MAX_RETRIES = 6;
 const STOP_LOCK_DELETE_MAX_RETRIES = 3;
+const assertNotSymlinkPath = async (path, reason) => {
+    try {
+        const stat = await lstat(path);
+        if (!stat.isSymbolicLink()) {
+            return;
+        }
+    }
+    catch (error) {
+        const nodeError = error;
+        if (nodeError.code === "ENOENT") {
+            return;
+        }
+        throw error;
+    }
+    throw new CliError("ERR_PROFILE_INVALID", "profile native host manifest path contains symlink", {
+        details: {
+            ability_id: "runtime.identity_preflight",
+            stage: "input_validation",
+            reason,
+            received_path: path
+        }
+    });
+};
+const assertProfileNativeHostManifestPathSafe = async (input) => {
+    const manifestDir = dirname(input.manifestPath);
+    const rel = relative(input.profileDir, manifestDir);
+    const inside = rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+    if (!inside) {
+        throw new CliError("ERR_PROFILE_INVALID", "profile native host manifest path escapes profile dir", {
+            details: {
+                ability_id: "runtime.identity_preflight",
+                stage: "input_validation",
+                reason: "PROFILE_NATIVE_HOST_MANIFEST_OUTSIDE_PROFILE_DIR",
+                profile_dir: input.profileDir,
+                received_path: input.manifestPath
+            }
+        });
+    }
+    await assertNotSymlinkPath(input.profileDir, "PROFILE_DIR_SYMBOLIC_LINK");
+    let current = input.profileDir;
+    for (const segment of rel.split(sep).filter((entry) => entry.length > 0 && entry !== ".")) {
+        current = join(current, segment);
+        await assertNotSymlinkPath(current, "PROFILE_NATIVE_HOST_MANIFEST_PARENT_SYMBOLIC_LINK");
+    }
+    await assertNotSymlinkPath(input.manifestPath, "PROFILE_NATIVE_HOST_MANIFEST_SYMBOLIC_LINK");
+};
 const hasRequestedPersistentExtensionIdentity = (params) => {
     const candidate = params.persistent_extension_identity ?? params.persistentExtensionIdentity;
     return typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
@@ -850,8 +896,8 @@ export class ProfileRuntimeService {
         const pinnedControllerPid = typeof lock.controllerPid === "number"
             ? lock.controllerPid
             : lock.ownerPid;
-        const identityPreflight = await this.#runIdentityPreflight({
-            input,
+        const identityPreflight = await runIdentityPreflight({
+            params: input.params,
             meta,
             profileDir
         });
@@ -931,6 +977,10 @@ export class ProfileRuntimeService {
                 nowIso
             });
         }
+        await this.#ensureProfileScopedNativeHostManifest({
+            preflight: identityPreflight,
+            profileDir
+        });
         let attachedProfileState = accessState.profileState;
         let nextMeta = meta;
         if (attachableRecoverableRuntime && meta && meta.profileState !== attachedProfileState) {
@@ -1863,11 +1913,32 @@ export class ProfileRuntimeService {
         });
     }
     async #runIdentityPreflight(input) {
-        return runIdentityPreflight({
+        const preflight = await runIdentityPreflight({
             params: input.input.params,
             meta: input.meta,
             profileDir: input.profileDir
         });
+        await this.#ensureProfileScopedNativeHostManifest({
+            preflight,
+            profileDir: input.profileDir
+        });
+        return preflight;
+    }
+    async #ensureProfileScopedNativeHostManifest(input) {
+        if (input.preflight.mode !== "official_chrome_persistent_extension" ||
+            !input.preflight.binding ||
+            !input.preflight.manifestPath ||
+            input.preflight.identityBindingState !== "bound") {
+            return;
+        }
+        const sourceManifest = await readFile(input.preflight.manifestPath, "utf8");
+        const profileManifestPath = join(input.profileDir, "NativeMessagingHosts", `${input.preflight.binding.nativeHostName}.json`);
+        await assertProfileNativeHostManifestPathSafe({
+            profileDir: input.profileDir,
+            manifestPath: profileManifestPath
+        });
+        await mkdir(dirname(profileManifestPath), { recursive: true });
+        await writeFile(profileManifestPath, sourceManifest, "utf8");
     }
     #buildMinimalProfileMeta(input) {
         return {

@@ -231,6 +231,7 @@ export const resolveInstallPaths = (input: ResolveInstallPathsInput) => {
 };
 
 export const resolveProfileDirForLauncher = (input: {
+  command: "runtime.install" | "runtime.uninstall";
   cwd: string;
   profileRoot: string;
   profileDir?: string;
@@ -240,7 +241,7 @@ export const resolveProfileDirForLauncher = (input: {
   }
   const normalizedProfileDir = asAbsolutePath(input.cwd, input.profileDir.trim());
   if (!isPathInside(input.profileRoot, normalizedProfileDir)) {
-    throw nativeHostPathError("runtime.install", "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT", {
+    throw nativeHostPathError(input.command, "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT", {
       field: "profile_dir",
       allowed_root: input.profileRoot,
       received_path: normalizedProfileDir

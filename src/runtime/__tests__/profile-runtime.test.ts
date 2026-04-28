@@ -2496,6 +2496,80 @@ describe("profile-runtime identity preflight", () => {
     expect(browserState.runId).toBe("run-runtime-attach-next-001");
   });
 
+  it("does not auto-provision profile native host manifest when attach fails before ownership is rebound", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-attach-no-prelock-mutation-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "attach_no_prelock_mutation_profile"
+    });
+    const ownerService = createTestService();
+    await expect(
+      ownerService.start({
+        cwd: baseDir,
+        profile: "attach_no_prelock_mutation_profile",
+        runId: "run-runtime-attach-no-prelock-owner-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: true
+    });
+    const profileDir = join(baseDir, ".webenvoy", "profiles", "attach_no_prelock_mutation_profile");
+    const profileManifestPath = join(profileDir, "NativeMessagingHosts", "com.webenvoy.host.json");
+    await rm(profileManifestPath, { force: true });
+
+    const blockedAttachService = createTestService({
+      bridgeFactory: () => ({
+        runCommand: async ({ command }: { command: string }) => {
+          if (command === "runtime.readiness") {
+            return {
+              ok: true as const,
+              payload: {
+                bootstrap_state: "not_started",
+                transport_state: "not_connected"
+              },
+              relay_path: "host>background"
+            };
+          }
+          throw new Error(`unexpected bridge command: ${command}`);
+        }
+      })
+    });
+
+    await expect(
+      blockedAttachService.attach({
+        cwd: baseDir,
+        profile: "attach_no_prelock_mutation_profile",
+        runId: "run-runtime-attach-no-prelock-next-001",
+        params: {
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: manifestPath
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_PROFILE_LOCKED"
+    });
+    await expect(readFile(profileManifestPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+
+    const lockRaw = await readFile(join(profileDir, "__webenvoy_lock.json"), "utf8");
+    const lock = JSON.parse(lockRaw) as ProfileLock;
+    expect(lock.ownerRunId).toBe("run-runtime-attach-no-prelock-owner-001");
+  });
+
   it("keeps ready runtime takeover attachable even when the next request targets a different XHS page", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-attach-target-mismatch-"));
     tempDirs.push(baseDir);

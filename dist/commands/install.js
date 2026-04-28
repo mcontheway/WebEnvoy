@@ -49,12 +49,14 @@ const runtimeUninstall = async (context) => {
     const browserChannel = resolveBrowserChannel("runtime.uninstall", context.params.browser_channel);
     const manifestDir = asString(context.params.manifest_dir) ?? undefined;
     const launcherPath = asString(context.params.launcher_path) ?? undefined;
+    const profileDir = asString(context.params.profile_dir) ?? undefined;
     return uninstallNativeHost({
         cwd: context.cwd,
         nativeHostName,
         browserChannel,
         manifestDir,
-        launcherPath
+        launcherPath,
+        profileDir
     });
 };
 export const installCommands = () => [

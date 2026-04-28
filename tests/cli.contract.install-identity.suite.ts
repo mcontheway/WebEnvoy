@@ -1035,6 +1035,39 @@ describe("webenvoy cli contract / install and identity", () => {
     });
   });
 
+  it("rejects runtime.uninstall when profile_dir escapes controlled profile root with uninstall ability context", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+
+    const uninstall = runCli(
+      [
+        "runtime.uninstall",
+        "--run-id",
+        "run-contract-uninstall-profile-dir-boundary-001",
+        "--params",
+        JSON.stringify({
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          profile_dir: "/tmp/webenvoy-profile-outside"
+        })
+      ],
+      runtimeCwd
+    );
+
+    expect(uninstall.status).toBe(2);
+    expect(parseSingleJsonLine(uninstall.stdout)).toMatchObject({
+      command: "runtime.uninstall",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          ability_id: "runtime.uninstall",
+          reason: "INSTALL_PATH_OUTSIDE_ALLOWED_ROOT",
+          field: "profile_dir"
+        }
+      }
+    });
+  });
+
   it("keeps launcher execution shell-safe when host_command contains dollar-like characters", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
@@ -1795,6 +1828,113 @@ describe("webenvoy cli contract / install and identity", () => {
     ).rejects.toMatchObject({
       code: "ENOENT"
     });
+  });
+
+  it("preserves profile-scoped manifests that do not belong to the registered managed launcher", async () => {
+    const { repositoryCwd, linkedWorktreeCwd, sharedManifestRoot } = await createGitWorktreePair();
+    const install = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-install-profile-cleanup-ownership-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome"
+        })
+      ],
+      linkedWorktreeCwd,
+      {
+        WEBENVOY_NATIVE_HOST_MANIFEST_DIR: sharedManifestRoot
+      }
+    );
+    expect(install.status).toBe(0);
+    const installSummary = parseSingleJsonLine(install.stdout).summary as Record<string, unknown>;
+    const linkedLauncherPath = String(installSummary.launcher_path);
+    const matchingManifestPath = path.join(
+      linkedWorktreeCwd,
+      ".webenvoy",
+      "profiles",
+      "owned-profile",
+      "NativeMessagingHosts",
+      "com.webenvoy.host.json"
+    );
+    const decoyManifestPath = path.join(
+      linkedWorktreeCwd,
+      ".webenvoy",
+      "profiles",
+      "decoy-profile",
+      "NativeMessagingHosts",
+      "com.webenvoy.host.json"
+    );
+    const decoyLauncherPath = path.join(linkedWorktreeCwd, "external-decoy-launcher.sh");
+    await mkdir(path.dirname(matchingManifestPath), { recursive: true });
+    await mkdir(path.dirname(decoyManifestPath), { recursive: true });
+    await writeFile(decoyLauncherPath, "#!/usr/bin/env bash\nexit 0\n", "utf8");
+    await writeFile(
+      matchingManifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          path: linkedLauncherPath,
+          type: "stdio",
+          allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeFile(
+      decoyManifestPath,
+      `${JSON.stringify(
+        {
+          name: "com.webenvoy.host",
+          path: decoyLauncherPath,
+          type: "stdio",
+          allowed_origins: ["chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/"]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const uninstall = runCli(
+      [
+        "runtime.uninstall",
+        "--run-id",
+        "run-contract-uninstall-profile-cleanup-ownership-001",
+        "--params",
+        JSON.stringify({
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host"
+        })
+      ],
+      repositoryCwd,
+      {
+        WEBENVOY_NATIVE_HOST_MANIFEST_DIR: sharedManifestRoot
+      }
+    );
+
+    expect(uninstall.status).toBe(0);
+    expect(parseSingleJsonLine(uninstall.stdout)).toMatchObject({
+      command: "runtime.uninstall",
+      status: "success",
+      summary: {
+        removed: {
+          profile_scoped_manifest: true,
+          profile_scoped_manifest_count: 1
+        },
+        remove_result: {
+          profile_scoped_manifest: "removed"
+        }
+      }
+    });
+    await expect(readFile(matchingManifestPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(readFile(decoyManifestPath, "utf8")).resolves.toContain(decoyLauncherPath);
   });
 
   it("keeps a non-managed live launcher on disk when runtime.uninstall omits launcher_path", async () => {
