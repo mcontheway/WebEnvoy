@@ -398,6 +398,12 @@ export const uninstallNativeHost = async (input) => {
             fromDir: profileRoot,
             targetDir: profileDir
         });
+        await assertNoSymlinkAncestorBetween({
+            command: "runtime.uninstall",
+            field: "profile_dir",
+            fromDir: profileDir,
+            targetDir: dirname(profileScopedManifestPath)
+        });
         await assertNotSymlink("runtime.uninstall", "manifest_path", profileScopedManifestPath);
     }
     const profileScopedManifestExisted = profileScopedManifestPath

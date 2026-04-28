@@ -1744,6 +1744,44 @@ describe("webenvoy cli contract / runtime install and identity", () => {
     });
   });
 
+  it("rejects runtime.uninstall when profile scoped NativeMessagingHosts parent is a symlink", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", "uninstall-profile-symlink");
+    const outsideDir = path.join(runtimeCwd, ".webenvoy", "outside-native-hosts-uninstall");
+    await mkdir(profileDir, { recursive: true });
+    await mkdir(outsideDir, { recursive: true });
+    await symlink(outsideDir, path.join(profileDir, "NativeMessagingHosts"));
+
+    const result = runCli(
+      [
+        "runtime.uninstall",
+        "--run-id",
+        "run-contract-uninstall-profile-scoped-manifest-symlink-001",
+        "--params",
+        JSON.stringify({
+          browser_channel: "chrome",
+          native_host_name: "com.webenvoy.host",
+          profile_dir: profileDir
+        })
+      ],
+      runtimeCwd
+    );
+
+    expect(result.status).toBe(2);
+    expect(parseSingleJsonLine(result.stdout)).toMatchObject({
+      command: "runtime.uninstall",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "INSTALL_PATH_PARENT_SYMBOLIC_LINK",
+          field: "profile_dir",
+          received_path: path.join(profileDir, "NativeMessagingHosts")
+        }
+      }
+    });
+  });
+
   it("removes legacy browser-adjacent launcher when runtime.uninstall uses default install paths", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const manifestDir = path.join(runtimeCwd, ".webenvoy", "native-host-install", "chrome", "manifests");
