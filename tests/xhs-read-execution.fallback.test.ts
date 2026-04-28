@@ -185,7 +185,7 @@ const createDetailRequestContext = (
       }
     }
   },
-  referrer: `https://www.xiaohongshu.com/explore/${noteId}`,
+  referrer: `https://www.xiaohongshu.com/explore/${noteId}?xsec_token=token-${noteId}&xsec_source=pc_search`,
   ...(overrides ?? {})
 });
 
@@ -231,7 +231,7 @@ const createUserHomeRequestContext = (
       }
     }
   },
-  referrer: `https://www.xiaohongshu.com/user/profile/${userId}`,
+  referrer: `https://www.xiaohongshu.com/user/profile/${userId}?xsec_token=token-${userId}&xsec_source=pc_search`,
   ...(overrides ?? {})
 });
 

@@ -138,7 +138,24 @@ type RequestContextMissReason =
   | "BROWSER_ENV_ABNORMAL"
   | "GATEWAY_INVOKER_FAILED"
   | "CAPTCHA_REQUIRED"
-  | "TARGET_API_RESPONSE_INVALID";
+  | "TARGET_API_RESPONSE_INVALID"
+  | "XSEC_TOKEN_MISSING"
+  | "XSEC_TOKEN_EMPTY"
+  | "XSEC_TOKEN_STALE"
+  | "XSEC_SOURCE_MISMATCH"
+  | "SECURITY_REDIRECT";
+
+type XhsSignedContinuity = {
+  source_url: string | null;
+  target_url: string | null;
+  detail_url?: string | null;
+  user_home_url?: string | null;
+  xsec_token: string | null;
+  xsec_source: string | null;
+  token_presence: "present" | "missing" | "empty";
+  observed_at: number | null;
+  source_route: "xhs.search" | "xhs.detail" | "xhs.user_home" | "unknown";
+};
 
 type ReadRequestContextLookupResult =
   | {
@@ -148,6 +165,8 @@ type ReadRequestContextLookupResult =
       referrer: string | null;
       requestUrl: string | null;
       requestBody: JsonRecord | null;
+      observedAt: number | null;
+      signedContinuity: XhsSignedContinuity;
     }
   | {
       state: "miss";
@@ -415,6 +434,16 @@ const resolveRejectedSourceMessage = (
   reason: RequestContextMissReason
 ): string | null => {
   switch (reason) {
+    case "XSEC_TOKEN_MISSING":
+      return `当前页面现场缺少 ${spec.command} signed URL 或 xsec_token，无法继续执行`;
+    case "XSEC_TOKEN_EMPTY":
+      return `当前页面现场的 ${spec.command} xsec_token 为空，无法继续执行`;
+    case "XSEC_TOKEN_STALE":
+      return `当前页面现场的 ${spec.command} xsec_token 已过期，无法继续执行`;
+    case "XSEC_SOURCE_MISMATCH":
+      return `当前页面现场的 ${spec.command} xsec_source 与来源不匹配，无法继续执行`;
+    case "SECURITY_REDIRECT":
+      return "当前页面被安全重定向拦截，无法继续执行";
     case "SESSION_EXPIRED":
       return `登录已失效，无法执行 ${spec.command}`;
     case "XHS_LOGIN_REQUIRED":
@@ -442,6 +471,119 @@ const isBackendRejectedSourceLookup = (
   lookupResult.state === "rejected_source" &&
   (BACKEND_REJECTED_SOURCE_REASONS.has(lookupResult.reason) ||
     lookupResult.reason === "failed_request_rejected");
+
+const SECURITY_REDIRECT_URL_PATTERN = /\/(security|captcha|verify|risk|safe|login)(\/|$)/i;
+
+const classifySignedContinuitySourceRoute = (
+  xsecSource: string | null
+): XhsSignedContinuity["source_route"] => {
+  switch (xsecSource) {
+    case "pc_search":
+      return "xhs.search";
+    case "pc_note":
+      return "xhs.detail";
+    case "pc_profile":
+    case "pc_user":
+      return "xhs.user_home";
+    default:
+      return "unknown";
+  }
+};
+
+const isSecurityRedirectUrl = (value: string | null): boolean => {
+  if (!value) {
+    return false;
+  }
+  try {
+    const url = new URL(value, "https://www.xiaohongshu.com");
+    return SECURITY_REDIRECT_URL_PATTERN.test(url.pathname);
+  } catch {
+    return SECURITY_REDIRECT_URL_PATTERN.test(value);
+  }
+};
+
+const resolveSignedContinuityUrl = (
+  spec: XhsReadCommandSpec,
+  expectedShape: ReadRequestShape,
+  value: string | null
+): URL | null => {
+  if (!value || isSecurityRedirectUrl(value)) {
+    return null;
+  }
+  try {
+    const url = new URL(value, "https://www.xiaohongshu.com");
+    if (url.protocol !== "https:" || url.hostname !== "www.xiaohongshu.com") {
+      return null;
+    }
+    if (spec.command === "xhs.detail") {
+      const noteId = (expectedShape as DetailRequestShape).note_id;
+      const expectedPaths = [`/explore/${noteId}`, `/discovery/item/${noteId}`];
+      return expectedPaths.includes(url.pathname) ? url : null;
+    }
+    const userId = (expectedShape as UserHomeRequestShape).user_id;
+    return url.pathname === `/user/profile/${userId}` ? url : null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveSignedContinuity = (
+  spec: XhsReadCommandSpec,
+  expectedShape: ReadRequestShape,
+  artifact: unknown
+): XhsSignedContinuity => {
+  const record = asRecord(artifact);
+  const referrer = resolveCapturedArtifactReferrer(record);
+  const url = asString(record?.url);
+  const signedUrl =
+    resolveSignedContinuityUrl(spec, expectedShape, referrer) ??
+    resolveSignedContinuityUrl(spec, expectedShape, url);
+  const sourceUrl = referrer ?? url;
+  const rawToken = signedUrl?.searchParams.get("xsec_token") ?? null;
+  const xsecToken = rawToken === null ? null : rawToken.trim();
+  const rawSource = signedUrl?.searchParams.get("xsec_source") ?? null;
+  const xsecSource = rawSource === null ? null : rawSource.trim() || null;
+  const tokenPresence =
+    rawToken === null ? "missing" : rawToken.trim().length > 0 ? "present" : "empty";
+  const targetUrl = signedUrl ? signedUrl.toString() : null;
+  return {
+    source_url: sourceUrl,
+    target_url: targetUrl,
+    ...(spec.command === "xhs.detail" ? { detail_url: targetUrl } : { user_home_url: targetUrl }),
+    xsec_token: xsecToken,
+    xsec_source: xsecSource,
+    token_presence: tokenPresence,
+    observed_at: resolveCapturedArtifactObservedAt(record),
+    source_route: classifySignedContinuitySourceRoute(xsecSource)
+  };
+};
+
+const resolveSignedContinuityFailure = (
+  continuity: XhsSignedContinuity,
+  observedAt: number | null,
+  now: number,
+  pageUrl: string
+): RequestContextMissReason | null => {
+  if (isSecurityRedirectUrl(pageUrl) || isSecurityRedirectUrl(continuity.source_url)) {
+    return "SECURITY_REDIRECT";
+  }
+  if (!continuity.target_url) {
+    return "XSEC_TOKEN_MISSING";
+  }
+  if (continuity.token_presence === "missing") {
+    return "XSEC_TOKEN_MISSING";
+  }
+  if (continuity.token_presence === "empty") {
+    return "XSEC_TOKEN_EMPTY";
+  }
+  if (continuity.source_route !== "xhs.search" || continuity.xsec_source !== "pc_search") {
+    return "XSEC_SOURCE_MISMATCH";
+  }
+  if (observedAt === null || now - observedAt > REQUEST_CONTEXT_FRESHNESS_WINDOW_MS) {
+    return "XSEC_TOKEN_STALE";
+  }
+  return null;
+};
 
 const waitForRequestContextRetry = async (
   env: XhsSearchEnvironment,
@@ -918,7 +1060,9 @@ const resolveReadRequestContext = (
     headers: resolveCapturedArtifactHeaders(artifact),
     referrer: resolveCapturedArtifactReferrer(artifact),
     requestUrl: resolveCapturedArtifactRequestUrl(artifact),
-    requestBody: resolveCapturedArtifactRequestBody(artifact)
+    requestBody: resolveCapturedArtifactRequestBody(artifact),
+    observedAt: resolveCapturedArtifactObservedAt(artifact),
+    signedContinuity: resolveSignedContinuity(spec, expectedShape, artifact)
   };
 };
 
@@ -996,6 +1140,62 @@ const failClosedForRequestContext = (
         reason: input.lookupResult.reason,
         summary: failureSurface.message,
         category: backendRejectedSource ? "request_failed" : "page_changed"
+      }),
+      input.gate,
+      input.auditRecord
+    ),
+    input.gate.execution_audit as JsonRecord | null
+  );
+};
+
+const failClosedForSignedContinuity = (
+  input: {
+    abilityId: string;
+    spec: XhsReadCommandSpec;
+    expectedShape: ReadRequestShape;
+    reason: RequestContextMissReason;
+    continuity: XhsSignedContinuity;
+    gate: ReturnType<typeof resolveGate>;
+    auditRecord: ReturnType<typeof createAuditRecord>;
+  },
+  env: XhsSearchEnvironment
+): SearchExecutionResult => {
+  const message =
+    resolveRejectedSourceMessage(input.spec, input.reason) ??
+    `当前页面现场缺少可复用的 ${input.spec.command} signed continuity`;
+  return withExecutionAuditInFailurePayload(
+    createFailure(
+      "ERR_EXECUTION_FAILED",
+      message,
+      {
+        ability_id: input.abilityId,
+        stage: "execution",
+        reason: input.reason,
+        request_context_result: "signed_continuity_invalid",
+        request_context_shape: input.expectedShape,
+        request_context_shape_key: serializeReadShape(input.expectedShape),
+        signed_continuity: input.continuity
+      },
+      createReadObservability({
+        spec: input.spec,
+        href: env.getLocationHref(),
+        title: env.getDocumentTitle(),
+        readyState: env.getReadyState(),
+        requestId: `req-${env.randomId()}`,
+        outcome: "failed",
+        failureReason: input.reason,
+        includeKeyRequest: false,
+        failureSite: {
+          stage: "execution",
+          component: "page",
+          target: "xhs.signed_continuity",
+          summary: message
+        }
+      }),
+      createReadDiagnosis(input.spec, {
+        reason: input.reason,
+        summary: message,
+        category: "page_changed"
       }),
       input.gate,
       input.auditRecord
@@ -2080,6 +2280,26 @@ const executeXhsRead = async (
   const requestPayload = requestContextResult.requestBody ?? builtPayload;
   const requestUrl = requestContextResult.requestUrl ?? spec.buildUrl(input.params);
   const signatureUri = requestContextResult.requestUrl ?? spec.buildSignatureUri(input.params);
+  const continuityFailure = resolveSignedContinuityFailure(
+    requestContextResult.signedContinuity,
+    requestContextResult.observedAt,
+    env.now(),
+    env.getLocationHref()
+  );
+  if (continuityFailure) {
+    return failClosedForSignedContinuity(
+      {
+        abilityId: input.abilityId,
+        spec,
+        expectedShape,
+        reason: continuityFailure,
+        continuity: requestContextResult.signedContinuity,
+        gate,
+        auditRecord
+      },
+      env
+    );
+  }
 
   let signature: { "X-s": string; "X-t": string | number };
   try {
@@ -2307,7 +2527,8 @@ const executeXhsRead = async (
         execution_audit: gate.execution_audit,
         approval_record: gate.approval_record,
         risk_state_output: resolveRiskStateOutput(gate, auditRecord),
-        audit_record: auditRecord
+        audit_record: auditRecord,
+        signed_continuity: requestContextResult.signedContinuity
       },
       observability: createReadObservability({
         spec,

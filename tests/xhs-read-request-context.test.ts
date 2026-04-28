@@ -153,7 +153,8 @@ const createDetailArtifact = (
         }
       }
     },
-    referrer: "https://www.xiaohongshu.com/explore/note-001",
+    referrer:
+      "https://www.xiaohongshu.com/explore/note-001?xsec_token=token-note-001&xsec_source=pc_search",
     ...(overrides ?? {})
   }) as unknown as CapturedRequestContextArtifact;
 
@@ -198,7 +199,8 @@ const createUserHomeArtifact = (
         }
       }
     },
-    referrer: "https://www.xiaohongshu.com/user/profile/user-001",
+    referrer:
+      "https://www.xiaohongshu.com/user/profile/user-001?xsec_token=token-user-001&xsec_source=pc_search",
     ...(overrides ?? {})
   }) as unknown as CapturedRequestContextArtifact;
 
@@ -262,7 +264,8 @@ describe("xhs read request-context exact-shape reuse", () => {
         url: "/api/sns/web/v1/feed",
         method: "POST",
         pageContextRequest: true,
-        referrer: "https://www.xiaohongshu.com/explore/note-001",
+        referrer:
+          "https://www.xiaohongshu.com/explore/note-001?xsec_token=token-note-001&xsec_source=pc_search",
         headers: expect.objectContaining({
           "X-S-Common": "{\"detailId\":\"captured-detail-id\"}",
           "x-b3-traceid": "generatedid001",
@@ -319,6 +322,187 @@ describe("xhs read request-context exact-shape reuse", () => {
         })
       })
     );
+  });
+
+  it("fails closed for detail exact hits when signed continuity lacks xsec_token", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-continuity-missing-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-continuity-missing-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () =>
+          createDetailArtifact({
+            referrer: "https://www.xiaohongshu.com/explore/note-001?xsec_source=pc_search"
+          })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected signed continuity failure");
+    }
+    expect(result.payload.details).toMatchObject({
+      reason: "XSEC_TOKEN_MISSING",
+      request_context_result: "signed_continuity_invalid",
+      signed_continuity: {
+        detail_url: "https://www.xiaohongshu.com/explore/note-001?xsec_source=pc_search",
+        token_presence: "missing",
+        xsec_token: null,
+        xsec_source: "pc_search"
+      }
+    });
+    expect(result.payload.diagnosis).toMatchObject({
+      category: "page_changed"
+    });
+    expect(result.payload.observability).toMatchObject({
+      failure_site: {
+        target: "xhs.signed_continuity"
+      }
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for user_home exact hits when xsec_token is empty", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-001"
+        },
+        options: createLiveReadOptions("run-user-continuity-empty-001", "profile_tab"),
+        executionContext: createExecutionContext("run-user-continuity-empty-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () =>
+          createUserHomeArtifact({
+            referrer:
+              "https://www.xiaohongshu.com/user/profile/user-001?xsec_token=&xsec_source=pc_search"
+          })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected signed continuity failure");
+    }
+    expect(result.payload.details).toMatchObject({
+      reason: "XSEC_TOKEN_EMPTY",
+      signed_continuity: {
+        user_home_url:
+          "https://www.xiaohongshu.com/user/profile/user-001?xsec_token=&xsec_source=pc_search",
+        token_presence: "empty",
+        xsec_token: ""
+      }
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for detail exact hits when xsec_source does not match allowed continuity sources", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-continuity-source-mismatch-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-continuity-source-mismatch-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () =>
+          createDetailArtifact({
+            referrer:
+              "https://www.xiaohongshu.com/explore/note-001?xsec_token=token-note-001&xsec_source=unexpected"
+          })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected signed continuity failure");
+    }
+    expect(result.payload.details).toMatchObject({
+      reason: "XSEC_SOURCE_MISMATCH",
+      signed_continuity: {
+        xsec_token: "token-note-001",
+        xsec_source: "unexpected"
+      }
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for detail exact hits when xsec_source is known but not search-context compatible", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-continuity-known-source-mismatch-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-continuity-known-source-mismatch-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () =>
+          createDetailArtifact({
+            referrer:
+              "https://www.xiaohongshu.com/explore/note-001?xsec_token=token-note-001&xsec_source=pc_note"
+          })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected signed continuity failure");
+    }
+    expect(result.payload.details).toMatchObject({
+      reason: "XSEC_SOURCE_MISMATCH",
+      signed_continuity: {
+        source_route: "xhs.detail",
+        xsec_token: "token-note-001",
+        xsec_source: "pc_note"
+      }
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
   });
 
   it("waits for captured detail context before failing closed on a fresh navigation", async () => {
@@ -1881,7 +2065,8 @@ describe("xhs read request-context exact-shape reuse", () => {
     expect(fetchJson).toHaveBeenCalledWith(
       expect.objectContaining({
         pageContextRequest: true,
-        referrer: "https://www.xiaohongshu.com/explore/note-001"
+        referrer:
+          "https://www.xiaohongshu.com/explore/note-001?xsec_token=token-note-001&xsec_source=pc_search"
       })
     );
   });
@@ -2036,7 +2221,8 @@ describe("xhs read request-context exact-shape reuse", () => {
         url: "/api/sns/web/v1/user/otherinfo?user_id=user-001&sec_user_id=sec-001",
         method: "GET",
         pageContextRequest: true,
-        referrer: "https://www.xiaohongshu.com/user/profile/user-001",
+        referrer:
+          "https://www.xiaohongshu.com/user/profile/user-001?xsec_token=token-user-001&xsec_source=pc_search",
         headers: expect.objectContaining({
           "X-S-Common": "{\"userId\":\"captured-user-id\"}",
           "x-b3-traceid": "generatedid001",
