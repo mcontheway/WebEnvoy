@@ -419,16 +419,10 @@ export class ProfileRuntimeService {
                 throw buildIdentityPreflightError(identityPreflight);
             }
             if (!existingMeta) {
-                existingMeta = usesPersistentIdentityMode
-                    ? this.#buildMinimalProfileMeta({
-                        profile: input.profile,
-                        profileDir,
-                        nowIso
-                    })
-                    : await store.initializeMeta(input.profile, nowIso, {
-                        allowUnsupportedExtensionBrowser: usesPersistentIdentityMode ||
-                            hasRequestedPersistentExtensionIdentity(input.params)
-                    });
+                existingMeta = await store.initializeMeta(input.profile, nowIso, {
+                    allowUnsupportedExtensionBrowser: usesPersistentIdentityMode ||
+                        hasRequestedPersistentExtensionIdentity(input.params)
+                });
             }
             let recoveredMeta = shouldRecoverAsDisconnected(lockAcquireResult.acquisition, existingMeta.profileState)
                 ? this.#patchMeta(existingMeta, {
@@ -568,16 +562,10 @@ export class ProfileRuntimeService {
                 throw buildIdentityPreflightError(identityPreflight);
             }
             if (!existingMeta) {
-                existingMeta = usesPersistentIdentityMode
-                    ? this.#buildMinimalProfileMeta({
-                        profile: input.profile,
-                        profileDir,
-                        nowIso
-                    })
-                    : await store.initializeMeta(input.profile, nowIso, {
-                        allowUnsupportedExtensionBrowser: usesPersistentIdentityMode ||
-                            hasRequestedPersistentExtensionIdentity(input.params)
-                    });
+                existingMeta = await store.initializeMeta(input.profile, nowIso, {
+                    allowUnsupportedExtensionBrowser: usesPersistentIdentityMode ||
+                        hasRequestedPersistentExtensionIdentity(input.params)
+                });
             }
             let recoveredMeta = shouldRecoverAsDisconnected(lockAcquireResult.acquisition, existingMeta.profileState)
                 ? this.#patchMeta(existingMeta, {

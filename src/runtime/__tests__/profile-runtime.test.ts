@@ -1034,6 +1034,28 @@ describe("profile-runtime identity preflight", () => {
       browserChannel: "chrome",
       manifestPath
     });
+    expect(persistedMeta.fingerprintProfileBundle).toMatchObject({
+      ua: expect.stringContaining("Chrome/146.0.7680.154")
+    });
+    expect(persistedMeta.fingerprintProfileBundle).not.toHaveProperty("legacy_migration");
+
+    const liveStatus = await service.status({
+      cwd: baseDir,
+      profile: "identity_meta_fallback_profile",
+      runId: "run-runtime-identity-meta-fallback-live-status-001",
+      params: {
+        requested_execution_mode: "live_read_limited"
+      }
+    });
+    expect(liveStatus).toMatchObject({
+      fingerprint_runtime: {
+        execution: {
+          live_allowed: true,
+          live_decision: "allowed",
+          reason_codes: []
+        }
+      }
+    });
 
     await service.stop({
       cwd: baseDir,
@@ -1911,6 +1933,33 @@ describe("profile-runtime identity preflight", () => {
       baseDir,
       profile: "identity_live_profile"
     });
+    const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
+    await writeFile(
+      profileStore.getMetaPath("identity_live_profile"),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          profileName: "identity_live_profile",
+          profileDir: profileStore.getProfileDir("identity_live_profile"),
+          profileState: "stopped",
+          proxyBinding: null,
+          fingerprintSeeds: {
+            audioNoiseSeed: "legacy-audio-seed",
+            canvasNoiseSeed: "legacy-canvas-seed"
+          },
+          localStorageSnapshots: [],
+          createdAt: "2026-03-19T10:00:00.000Z",
+          updatedAt: "2026-03-19T10:01:00.000Z",
+          lastStartedAt: null,
+          lastLoginAt: null,
+          lastStoppedAt: "2026-03-19T10:01:00.000Z",
+          lastDisconnectedAt: null
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
     const launchSpy = vi.fn();
     const service = createTestService({
       browserLauncher: {
@@ -1947,9 +1996,11 @@ describe("profile-runtime identity preflight", () => {
 
     expect(launchSpy).not.toHaveBeenCalled();
 
-    const profileStore = new ProfileStore(join(baseDir, ".webenvoy", "profiles"));
     const meta = await profileStore.readMeta("identity_live_profile");
-    expect(meta).toBeNull();
+    expect(meta?.fingerprintProfileBundle?.legacy_migration).toMatchObject({
+      status: "backfilled_from_legacy",
+      reason_codes: ["LEGACY_PROFILE_BUNDLE_MIGRATED"]
+    });
 
   });
 
@@ -2074,6 +2125,10 @@ describe("profile-runtime identity preflight", () => {
       browserChannel: "chrome",
       manifestPath
     });
+    expect(meta?.fingerprintProfileBundle).toMatchObject({
+      ua: expect.stringContaining("Chrome/146.0.7680.154")
+    });
+    expect(meta?.fingerprintProfileBundle).not.toHaveProperty("legacy_migration");
   });
 
   it("keeps identity preflight bound when later calls provide identity params", async () => {
