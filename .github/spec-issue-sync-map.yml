@@ -57,3 +57,5 @@ mappings:
     canonical_issue_number: 510
   - spec_path: docs/dev/specs/FR-0029-xhs-closeout-recovery-admission/spec.md
     canonical_issue_number: 552
+  - spec_path: docs/dev/specs/FR-0030-xhs-closeout-route-evidence/spec.md
+    canonical_issue_number: 581
