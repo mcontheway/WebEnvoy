@@ -209,6 +209,12 @@ export const installNativeHost = async (input) => {
         ? currentRegistration.launcherPath
         : null;
     const manifestExisted = await pathExists(resolvedPaths.manifestPath);
+    const profileScopedManifestPath = profileDir
+        ? join(profileDir, "NativeMessagingHosts", `${input.nativeHostName}.json`)
+        : null;
+    const profileScopedManifestExisted = profileScopedManifestPath
+        ? await pathExists(profileScopedManifestPath)
+        : false;
     const launcherExisted = await pathExists(resolvedPaths.launcherPath);
     const bundleRuntimeExisted = await pathExists(join(resolvedPaths.runtimeRoot, "native-messaging", "native-host-entry.js"));
     await mkdir(resolvedPaths.manifestDir, { recursive: true });
@@ -252,6 +258,10 @@ export const installNativeHost = async (input) => {
         allowed_origins: [allowedOrigin]
     };
     await writeFile(resolvedPaths.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    if (profileScopedManifestPath) {
+        await mkdir(dirname(profileScopedManifestPath), { recursive: true });
+        await writeFile(profileScopedManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    }
     if (previousManagedInstall &&
         normalizePathForBoundaryCheck(previousManagedInstall.channelRoot) !==
             normalizePathForBoundaryCheck(resolvedPaths.channelRoot)) {
@@ -281,6 +291,7 @@ export const installNativeHost = async (input) => {
         profile_dir: normalizePathForOutput(profileDir),
         profile_root_bridge_socket_path: normalizePathForOutput(resolveProfileScopedNativeBridgeSocketPath(profileRoot)),
         profile_scoped_bridge_socket_path: normalizePathForOutput(profileDir ? resolveProfileScopedNativeBridgeSocketPath(profileDir) : null),
+        profile_scoped_manifest_path: normalizePathForOutput(profileScopedManifestPath),
         allowed_origins: [allowedOrigin],
         persistent_extension_identity: {
             extension_id: input.extensionId,
@@ -290,16 +301,23 @@ export const installNativeHost = async (input) => {
         },
         existed_before: {
             manifest: manifestExisted,
+            profile_scoped_manifest: profileScopedManifestExisted,
             launcher: launcherExisted,
             bundle_runtime: bundleRuntimeExisted
         },
         write_result: {
             manifest: manifestExisted ? "overwritten" : "created",
+            profile_scoped_manifest: profileScopedManifestPath
+                ? profileScopedManifestExisted
+                    ? "overwritten"
+                    : "created"
+                : "not_applicable",
             launcher: launcherExisted ? "overwritten" : "created",
             bundle_runtime: bundleRuntimeWritten ? (bundleRuntimeExisted ? "overwritten" : "created") : "unchanged"
         },
         created: {
             manifest: true,
+            profile_scoped_manifest: profileScopedManifestPath !== null,
             launcher: true,
             bundle_runtime: bundleRuntimeWritten
         }

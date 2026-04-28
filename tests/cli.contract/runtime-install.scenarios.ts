@@ -841,8 +841,22 @@ describe("webenvoy cli contract / runtime install and identity", () => {
         native_bridge_launcher_contract: "profile_root_only",
         profile_root_bridge_socket_path: path.join(runtimeCwd, ".webenvoy", "profiles", "nm.sock"),
         profile_dir: profileDir,
+        profile_scoped_manifest_path: path.join(
+          profileDir,
+          "NativeMessagingHosts",
+          "com.webenvoy.host.json"
+        ),
         profile_scoped_bridge_socket_path: path.join(profileDir, "nm.sock")
       }
+    });
+    const profileManifestRaw = await readFile(
+      path.join(profileDir, "NativeMessagingHosts", "com.webenvoy.host.json"),
+      "utf8"
+    );
+    expect(JSON.parse(profileManifestRaw)).toMatchObject({
+      name: "com.webenvoy.host",
+      path: launcherPath,
+      allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
     });
     const launcherRaw = await expectProfileRootOnlyLauncherContract({
       launcherPath,

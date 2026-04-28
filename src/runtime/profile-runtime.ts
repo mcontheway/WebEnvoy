@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { readFile, unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 import { CliError } from "../core/errors.js";
 import type { JsonObject } from "../core/types.js";
@@ -2423,11 +2423,38 @@ export class ProfileRuntimeService {
     meta: ProfileMeta | null;
     profileDir: string;
   }): Promise<IdentityPreflightResult> {
-    return runIdentityPreflight({
+    const preflight = await runIdentityPreflight({
       params: input.input.params,
       meta: input.meta,
       profileDir: input.profileDir
     });
+    await this.#ensureProfileScopedNativeHostManifest({
+      preflight,
+      profileDir: input.profileDir
+    });
+    return preflight;
+  }
+
+  async #ensureProfileScopedNativeHostManifest(input: {
+    preflight: IdentityPreflightResult;
+    profileDir: string;
+  }): Promise<void> {
+    if (
+      input.preflight.mode !== "official_chrome_persistent_extension" ||
+      !input.preflight.binding ||
+      !input.preflight.manifestPath ||
+      input.preflight.identityBindingState !== "bound"
+    ) {
+      return;
+    }
+    const sourceManifest = await readFile(input.preflight.manifestPath, "utf8");
+    const profileManifestPath = join(
+      input.profileDir,
+      "NativeMessagingHosts",
+      `${input.preflight.binding.nativeHostName}.json`
+    );
+    await mkdir(dirname(profileManifestPath), { recursive: true });
+    await writeFile(profileManifestPath, sourceManifest, "utf8");
   }
 
   #buildMinimalProfileMeta(input: {
