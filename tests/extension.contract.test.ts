@@ -2611,6 +2611,7 @@ describe("extension build contract", () => {
             feed: {
               items: [
                 {
+                  id: "metadata-only-001",
                   title: "只有 token 没有真实卡片链接",
                   detail_url:
                     "https://example.com/explore/not-xhs-001?xsec_token=token-only-001&xsec_source=pc_search",

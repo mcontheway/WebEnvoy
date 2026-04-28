@@ -5391,6 +5391,13 @@ const collectSearchDomCards = (value, seen = new Set()) => {
         seen.add(record);
         const userRecord = asRecord(record.user) ?? asRecord(record.author);
         const noteCardRecord = asRecord(record.note_card) ?? asRecord(record.noteCard);
+        const hasKnownSearchCardShape = noteCardRecord !== null ||
+            "display_title" in record ||
+            "displayTitle" in record ||
+            "interact_info" in record ||
+            "cover" in record ||
+            "image_list" in record ||
+            "video_info" in record;
         const noteCardUserRecord = asRecord(noteCardRecord?.user) ?? asRecord(noteCardRecord?.author) ?? null;
         const noteId = pickFirstString(record, ["note_id", "noteId", "id"]) ??
             (noteCardRecord ? pickFirstString(noteCardRecord, ["note_id", "noteId", "id"]) : null);
@@ -5418,20 +5425,24 @@ const collectSearchDomCards = (value, seen = new Set()) => {
             parsedUser.xsec_source;
         const detailUrl = isXhsNoteCardUrl(rawDetailUrl)
             ? rawDetailUrl
-            : buildXhsContinuityUrl({
-                kind: "note",
-                id: noteId,
-                xsecToken,
-                xsecSource
-            });
+            : hasKnownSearchCardShape
+                ? buildXhsContinuityUrl({
+                    kind: "note",
+                    id: noteId,
+                    xsecToken,
+                    xsecSource
+                })
+                : null;
         const userHomeUrl = isXhsUserProfileUrl(rawUserHomeUrl)
             ? rawUserHomeUrl
-            : buildXhsContinuityUrl({
-                kind: "user",
-                id: userId,
-                xsecToken,
-                xsecSource
-            });
+            : hasKnownSearchCardShape
+                ? buildXhsContinuityUrl({
+                    kind: "user",
+                    id: userId,
+                    xsecToken,
+                    xsecSource
+                })
+                : null;
         const card = {
             title: pickFirstString(record, ["title", "display_title", "displayTitle", "desc"]) ??
                 (noteCardRecord ? pickFirstString(noteCardRecord, ["title", "display_title", "displayTitle"]) : null),

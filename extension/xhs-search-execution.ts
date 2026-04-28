@@ -254,6 +254,14 @@ const collectSearchDomCards = (value: unknown, seen = new Set<object>()): Search
     seen.add(record);
     const userRecord = asRecord(record.user) ?? asRecord(record.author);
     const noteCardRecord = asRecord(record.note_card) ?? asRecord(record.noteCard);
+    const hasKnownSearchCardShape =
+      noteCardRecord !== null ||
+      "display_title" in record ||
+      "displayTitle" in record ||
+      "interact_info" in record ||
+      "cover" in record ||
+      "image_list" in record ||
+      "video_info" in record;
     const noteCardUserRecord =
       asRecord(noteCardRecord?.user) ?? asRecord(noteCardRecord?.author) ?? null;
     const noteId =
@@ -290,20 +298,24 @@ const collectSearchDomCards = (value: unknown, seen = new Set<object>()): Search
       parsedUser.xsec_source;
     const detailUrl = isXhsNoteCardUrl(rawDetailUrl)
       ? rawDetailUrl
-      : buildXhsContinuityUrl({
-          kind: "note",
-          id: noteId,
-          xsecToken,
-          xsecSource
-        });
+      : hasKnownSearchCardShape
+        ? buildXhsContinuityUrl({
+            kind: "note",
+            id: noteId,
+            xsecToken,
+            xsecSource
+          })
+        : null;
     const userHomeUrl = isXhsUserProfileUrl(rawUserHomeUrl)
       ? rawUserHomeUrl
-      : buildXhsContinuityUrl({
-          kind: "user",
-          id: userId,
-          xsecToken,
-          xsecSource
-        });
+      : hasKnownSearchCardShape
+        ? buildXhsContinuityUrl({
+            kind: "user",
+            id: userId,
+            xsecToken,
+            xsecSource
+          })
+        : null;
     const card: SearchDomCard = {
       title:
         pickFirstString(record, ["title", "display_title", "displayTitle", "desc"]) ??
