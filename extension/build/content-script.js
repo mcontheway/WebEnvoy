@@ -6076,6 +6076,65 @@ const executeXhsSearch = async (input, env) => {
         options: input.options
     }, env);
     if (requestContextState.status !== "hit") {
+        const backendRejectedReason = requestContextState.detailReason &&
+            BACKEND_REJECTED_SOURCE_REASONS.has(requestContextState.detailReason)
+            ? requestContextState.detailReason
+            : null;
+        const reason = backendRejectedReason ??
+            (requestContextState.failureReason === "shape_mismatch" ||
+                requestContextState.failureReason === "rejected_source"
+                ? "REQUEST_CONTEXT_INCOMPATIBLE"
+                : "REQUEST_CONTEXT_MISSING");
+        const summaryMap = {
+            template_missing: "当前页面现场缺少可复用的搜索请求模板",
+            template_stale: "当前页面现场的搜索请求模板已过期",
+            shape_mismatch: "当前页面现场存在不同 shape 的搜索请求模板",
+            rejected_source: "当前页面现场的搜索请求来源已被拒绝"
+        };
+        const summary = requestContextState.detailMessage ?? summaryMap[requestContextState.failureReason];
+        const isBackendRejectedSource = backendRejectedReason !== null;
+        if (requestContextState.failureReason === "rejected_source") {
+            return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", summary, {
+                ability_id: input.abilityId,
+                stage: "execution",
+                reason,
+                request_context_reason: requestContextState.failureReason,
+                page_context_namespace: requestContextState.pageContextNamespace,
+                shape_key: requestContextState.shapeKey,
+                available_shape_keys: requestContextState.availableShapeKeys,
+                ...(requestContextState.statusCode !== undefined
+                    ? { status_code: requestContextState.statusCode }
+                    : {}),
+                ...(requestContextState.platformCode !== undefined
+                    ? { platform_code: requestContextState.platformCode }
+                    : {}),
+                ...(backendRejectedReason ? { rejected_source_reason: backendRejectedReason } : {}),
+                ...(requestContextState.observedAt !== undefined
+                    ? { observed_at: requestContextState.observedAt }
+                    : {})
+            }, createObservability({
+                href: env.getLocationHref(),
+                title: env.getDocumentTitle(),
+                readyState: env.getReadyState(),
+                requestId: `req-${env.randomId()}`,
+                outcome: "failed",
+                ...(requestContextState.statusCode !== undefined
+                    ? { statusCode: requestContextState.statusCode }
+                    : {}),
+                failureReason: reason,
+                includeKeyRequest: false,
+                failureSite: {
+                    stage: "action",
+                    component: "page",
+                    target: isBackendRejectedSource ? SEARCH_ENDPOINT : "captured_request_context",
+                    summary
+                }
+            }), createDiagnosis({
+                reason,
+                summary,
+                category: isBackendRejectedSource ? "request_failed" : "page_changed"
+            }), gate, auditRecord), gate.execution_audit);
+        }
         const domExtraction = await resolveSearchDomExtraction(env);
         if (domExtraction) {
             const count = domExtraction.cards.length;
@@ -6144,23 +6203,6 @@ const executeXhsSearch = async (input, env) => {
                 }
             };
         }
-        const backendRejectedReason = requestContextState.detailReason &&
-            BACKEND_REJECTED_SOURCE_REASONS.has(requestContextState.detailReason)
-            ? requestContextState.detailReason
-            : null;
-        const reason = backendRejectedReason ??
-            (requestContextState.failureReason === "shape_mismatch" ||
-                requestContextState.failureReason === "rejected_source"
-                ? "REQUEST_CONTEXT_INCOMPATIBLE"
-                : "REQUEST_CONTEXT_MISSING");
-        const summaryMap = {
-            template_missing: "当前页面现场缺少可复用的搜索请求模板",
-            template_stale: "当前页面现场的搜索请求模板已过期",
-            shape_mismatch: "当前页面现场存在不同 shape 的搜索请求模板",
-            rejected_source: "当前页面现场的搜索请求来源已被拒绝"
-        };
-        const summary = requestContextState.detailMessage ?? summaryMap[requestContextState.failureReason];
-        const isBackendRejectedSource = backendRejectedReason !== null;
         return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", summary, {
             ability_id: input.abilityId,
             stage: "execution",
@@ -6234,6 +6276,18 @@ const executeXhsSearch = async (input, env) => {
             summary: "当前页面现场缺少可复用的搜索请求模板"
         }), gate, auditRecord), gate.execution_audit);
     }
+    const passiveCards = collectSearchDomCards(requestContextState.template.response.body);
+    const passiveTargetContinuity = passiveCards.length > 0
+        ? buildSearchTargetContinuity(passiveCards)
+        : [
+            {
+                target_url: env.getLocationHref(),
+                xsec_token: null,
+                xsec_source: null,
+                token_presence: "missing",
+                source_route: "xhs.search"
+            }
+        ];
     const count = parseCount(requestContextState.template.response.body);
     return {
         ok: true,
@@ -6282,15 +6336,13 @@ const executeXhsSearch = async (input, env) => {
                     captured_at: requestContextState.template.capturedAt,
                     page_context_namespace: requestContextState.pageContextNamespace,
                     shape_key: requestContextState.shapeKey,
-                    target_continuity: [
-                        {
-                            target_url: env.getLocationHref(),
-                            xsec_token: null,
-                            xsec_source: null,
-                            token_presence: "missing",
-                            source_route: "xhs.search"
+                    target_continuity: passiveTargetContinuity,
+                    ...(passiveCards.length > 0
+                        ? {
+                            item_kind: "search_card",
+                            cards: passiveCards
                         }
-                    ]
+                        : {})
                 },
                 request_context: {
                     status: "exact_hit",

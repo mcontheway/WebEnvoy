@@ -1047,6 +1047,9 @@ describe("extension build contract", () => {
           request_context: {
             status: "exact_hit"
           },
+          route_evidence: {
+            evidence_class: "passive_api_capture"
+          },
           execution_audit: {
             request_admission_decision: "allowed"
           }
@@ -1063,17 +1066,7 @@ describe("extension build contract", () => {
         )
       }
     });
-    expect(runtimeMessages.map((message) => message.kind)).toEqual([
-      "xhs-sign-request",
-      "xhs-main-world-request"
-    ]);
-    expect(runtimeMessages[0]).toMatchObject({
-      kind: "xhs-sign-request",
-      uri: "/api/sns/web/v1/search/notes"
-    });
-    expect(runtimeMessages[1]).toMatchObject({
-      kind: "xhs-main-world-request"
-    });
+    expect(runtimeMessages).toEqual([]);
   });
 
   it("executes bundled content-script handler xhs.search live-read with default browser env", async () => {
@@ -1236,14 +1229,14 @@ describe("extension build contract", () => {
         summary: {
           request_context: {
             status: "exact_hit"
+          },
+          route_evidence: {
+            evidence_class: "passive_api_capture"
           }
         }
       }
     });
-    expect(runtimeMessages.map((message) => message.kind)).toEqual([
-      "xhs-sign-request",
-      "xhs-main-world-request"
-    ]);
+    expect(runtimeMessages).toEqual([]);
   });
 
   it("executes bundled content-script handler xhs.search live-read with canonical grant only", async () => {
@@ -1429,15 +1422,15 @@ describe("extension build contract", () => {
           },
           request_context: {
             status: "exact_hit"
+          },
+          route_evidence: {
+            evidence_class: "passive_api_capture"
           }
         }
       }
     });
     expect(bridgeRequests).toHaveLength(1);
-    expect(runtimeMessages.map((message) => message.kind)).toEqual([
-      "xhs-sign-request",
-      "xhs-main-world-request"
-    ]);
+    expect(runtimeMessages).toEqual([]);
   });
 
   it("executes bundled xhs.detail classic module without unresolved implementation references", async () => {
@@ -1637,7 +1630,21 @@ describe("extension build contract", () => {
             createCapturedSearchContextArtifact({
               href: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
               keyword: "露营装备",
-              captured_at: 1_710_000_000_000
+              captured_at: 1_710_000_000_000,
+              responseBody: {
+                code: 0,
+                data: {
+                  items: [
+                    {
+                      title: "露营装备清单",
+                      detail_url:
+                        "https://www.xiaohongshu.com/explore/note-passive-001?xsec_token=token-passive-001&xsec_source=pc_search",
+                      user_home_url:
+                        "https://www.xiaohongshu.com/user/profile/user-passive-001?xsec_token=token-user-passive-001&xsec_source=pc_search"
+                    }
+                  ]
+                }
+              }
             }),
           callSignature,
           fetchJson
@@ -1655,7 +1662,25 @@ describe("extension build contract", () => {
             admission_decision: "allowed"
           },
           route_evidence: {
-            evidence_class: "passive_api_capture"
+            evidence_class: "passive_api_capture",
+            item_kind: "search_card",
+            cards: [
+              {
+                title: "露营装备清单",
+                detail_url:
+                  "https://www.xiaohongshu.com/explore/note-passive-001?xsec_token=token-passive-001&xsec_source=pc_search",
+                user_home_url:
+                  "https://www.xiaohongshu.com/user/profile/user-passive-001?xsec_token=token-user-passive-001&xsec_source=pc_search",
+                xsec_token: "token-passive-001",
+                xsec_source: "pc_search"
+              }
+            ],
+            target_continuity: [
+              {
+                token_presence: "present",
+                source_route: "xhs.search"
+              }
+            ]
           },
           request_context: {
             status: "exact_hit"
@@ -1757,6 +1782,8 @@ describe("extension build contract", () => {
       targetTabId: 11,
       targetPage: "search_result_tab"
     });
+    const callSignature = vi.fn(async () => ({ "X-s": "fresh-signature", "X-t": "1710000000" }));
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0 } }));
 
     const result = await executeXhsSearch(
       {
@@ -1814,8 +1841,19 @@ describe("extension build contract", () => {
               msg: "account abnormal"
             }
           }),
-        callSignature: async () => ({ "X-s": "fresh-signature", "X-t": "1710000000" }),
-        fetchJson: async () => ({ status: 200, body: { code: 0 } })
+        readPageStateRoot: async () => ({
+          feed: {
+            items: [
+              {
+                title: "不应覆盖账号异常",
+                detail_url:
+                  "https://www.xiaohongshu.com/explore/rejected-source-001?xsec_token=token-rejected-001&xsec_source=pc_search"
+              }
+            ]
+          }
+        }),
+        callSignature,
+        fetchJson
       }
     );
 
@@ -1832,6 +1870,8 @@ describe("extension build contract", () => {
       status_code: 200,
       platform_code: 300011
     });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
   });
 
   it("accepts captured exact-hit template without page signer or active fetch", async () => {
