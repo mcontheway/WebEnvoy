@@ -2977,6 +2977,212 @@ describe("normalizeGateOptionsForContract", () => {
     }
   });
 
+  it("allows xhs.search dry_run without official Chrome runtime readiness", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-dry-run-no-runtime-readiness-"));
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+    const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    delete process.env.WEBENVOY_NATIVE_TRANSPORT;
+    delete process.env.WEBENVOY_BROWSER_PATH;
+    delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    try {
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.initializeMeta(
+        "xhs_dry_run_no_runtime_readiness_profile",
+        "2026-04-28T01:45:00.000Z",
+        { allowUnsupportedExtensionBrowser: true }
+      );
+      await profileStore.writeMeta("xhs_dry_run_no_runtime_readiness_profile", {
+        ...meta,
+        profileState: "logging_in"
+      });
+
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.search",
+            profile: "xhs_dry_run_no_runtime_readiness_profile",
+            run_id: "run-xhs-dry-run-no-runtime-readiness-001",
+            params: {
+              ability: {
+                id: "xhs.note.search.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                query: "露营",
+                limit: 3
+              },
+              options: {
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "search_result_tab",
+                action_type: "read",
+                requested_execution_mode: "dry_run",
+                risk_state: "allowed"
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).resolves.toMatchObject({
+        summary: {
+          session_id: "gate-only-run-xhs-dry-run-no-runtime-readiness-001",
+          requested_execution_mode: "dry_run",
+          consumer_gate_result: expect.objectContaining({
+            effective_execution_mode: "dry_run"
+          }),
+          audit_record: expect.objectContaining({
+            recorded_at: expect.not.stringMatching(/^2026-03-23T10:00:00/)
+          }),
+          risk_state_output: expect.objectContaining({
+            session_rhythm: expect.objectContaining({
+              last_event_at: expect.not.stringMatching(/^2026-03-23T10:00:00/)
+            })
+          })
+        }
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+      if (previousTransport === undefined) {
+        delete process.env.WEBENVOY_NATIVE_TRANSPORT;
+      } else {
+        process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
+      }
+      if (previousBrowserPath === undefined) {
+        delete process.env.WEBENVOY_BROWSER_PATH;
+      } else {
+        process.env.WEBENVOY_BROWSER_PATH = previousBrowserPath;
+      }
+      if (previousBrowserMockVersion === undefined) {
+        delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+      } else {
+        process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
+      }
+    }
+  });
+
+  it("preserves anonymous admission signals in xhs.search dry_run gate-only mode", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-dry-run-anon-gate-only-"));
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+    const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    delete process.env.WEBENVOY_NATIVE_TRANSPORT;
+    delete process.env.WEBENVOY_BROWSER_PATH;
+    delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    try {
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.initializeMeta(
+        "xhs_dry_run_anon_gate_only_profile",
+        "2026-04-28T02:45:00.000Z",
+        { allowUnsupportedExtensionBrowser: true }
+      );
+      await profileStore.writeMeta("xhs_dry_run_anon_gate_only_profile", {
+        ...meta,
+        profileState: "logging_in"
+      });
+
+      const execution = await executeCommand(
+        {
+          cwd,
+          command: "xhs.search",
+          profile: "xhs_dry_run_anon_gate_only_profile",
+          run_id: "run-xhs-dry-run-anon-gate-only-001",
+          params: {
+            request_id: "req-xhs-dry-run-anon-gate-only-001",
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              query: "露营",
+              limit: 3
+            },
+            options: {
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "dry_run",
+              risk_state: "allowed",
+              upstream_authorization_request: {
+                action_request: {
+                  request_ref: "upstream_req_dry_run_anon_gate_only_001",
+                  action_name: "xhs.read_search_results",
+                  action_category: "read"
+                },
+                resource_binding: {
+                  binding_ref: "binding_dry_run_anon_gate_only_001",
+                  resource_kind: "anonymous_context",
+                  profile_ref: null,
+                  binding_constraints: {
+                    anonymous_required: true,
+                    reuse_logged_in_context_forbidden: true
+                  }
+                },
+                authorization_grant: {
+                  grant_ref: "grant_dry_run_anon_gate_only_001",
+                  allowed_actions: ["xhs.read_search_results"],
+                  binding_scope: {
+                    allowed_resource_kinds: ["anonymous_context"],
+                    allowed_profile_refs: []
+                  },
+                  target_scope: {
+                    allowed_domains: ["www.xiaohongshu.com"],
+                    allowed_pages: ["search_result_tab"]
+                  },
+                  resource_state_snapshot: "paused"
+                },
+                runtime_target: {
+                  target_ref: "target_dry_run_anon_gate_only_001",
+                  domain: "www.xiaohongshu.com",
+                  page: "search_result_tab",
+                  tab_id: 32,
+                  url: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5"
+                }
+              },
+              __anonymous_isolation_verified: true,
+              target_site_logged_in: false
+            }
+          }
+        } as RuntimeContext,
+        createCommandRegistry()
+      );
+
+      expect(execution.summary).toMatchObject({
+        requested_execution_mode: "dry_run",
+        __anonymous_isolation_verified: true,
+        target_site_logged_in: false,
+        request_admission_result: {
+          admission_decision: "allowed",
+          anonymous_isolation_ok: true,
+          effective_runtime_mode: "dry_run"
+        }
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+      if (previousTransport === undefined) {
+        delete process.env.WEBENVOY_NATIVE_TRANSPORT;
+      } else {
+        process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
+      }
+      if (previousBrowserPath === undefined) {
+        delete process.env.WEBENVOY_BROWSER_PATH;
+      } else {
+        process.env.WEBENVOY_BROWSER_PATH = previousBrowserPath;
+      }
+      if (previousBrowserMockVersion === undefined) {
+        delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+      } else {
+        process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
+      }
+    }
+  });
+
   it("does not consume the recovery probe budget when runtime readiness fails first", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-rhythm-probe-readiness-"));
     const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
