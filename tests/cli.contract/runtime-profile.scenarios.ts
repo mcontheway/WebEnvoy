@@ -22,6 +22,7 @@ const {
   chmod,
   mkdir,
   rm,
+  symlink,
   path,
   realpath,
   mockBrowserPath,
@@ -661,6 +662,70 @@ describe("webenvoy cli contract / runtime profile lifecycle", () => {
     expect(profileManifest).toMatchObject({
       name: "com.webenvoy.host",
       allowed_origins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+  });
+
+  it("blocks auto-provisioning when profile scoped NativeMessagingHosts parent is a symlink", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const profileName = "identity_profile_scoped_manifest_symlink_profile";
+    const install = runCli(
+      [
+        "runtime.install",
+        "--run-id",
+        "run-contract-profile-scoped-manifest-symlink-install-001",
+        "--params",
+        JSON.stringify({
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          browser_channel: "chrome"
+        })
+      ],
+      runtimeCwd
+    );
+    expect(install.status).toBe(0);
+    const installSummary = (parseSingleJsonLine(install.stdout).summary ?? {}) as {
+      manifest_path: string;
+    };
+    await seedInstalledPersistentExtension({
+      cwd: runtimeCwd,
+      profile: profileName
+    });
+    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", profileName);
+    const outsideDir = path.join(runtimeCwd, ".webenvoy", "outside-native-hosts");
+    await mkdir(outsideDir, { recursive: true });
+    await symlink(outsideDir, path.join(profileDir, "NativeMessagingHosts"));
+
+    const start = runCli(
+      [
+        "runtime.start",
+        "--profile",
+        profileName,
+        "--run-id",
+        "run-contract-profile-scoped-manifest-symlink-start-001",
+        "--params",
+        JSON.stringify({
+          persistent_extension_identity: {
+            extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            manifest_path: installSummary.manifest_path
+          }
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+      }
+    );
+
+    expect(start.status).toBe(5);
+    expect(parseSingleJsonLine(start.stdout)).toMatchObject({
+      command: "runtime.start",
+      status: "error",
+      error: {
+        code: "ERR_PROFILE_INVALID",
+        details: {
+          reason: "PROFILE_NATIVE_HOST_MANIFEST_PARENT_SYMBOLIC_LINK",
+          received_path: path.join(profileDir, "NativeMessagingHosts")
+        }
+      }
     });
   });
 

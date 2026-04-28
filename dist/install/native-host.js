@@ -215,6 +215,15 @@ export const installNativeHost = async (input) => {
     const profileScopedManifestExisted = profileScopedManifestPath
         ? await pathExists(profileScopedManifestPath)
         : false;
+    if (profileScopedManifestPath && profileDir) {
+        await assertNoSymlinkAncestorBetween({
+            command: "runtime.install",
+            field: "profile_dir",
+            fromDir: profileDir,
+            targetDir: dirname(profileScopedManifestPath)
+        });
+        await assertNotSymlink("runtime.install", "manifest_path", profileScopedManifestPath);
+    }
     const launcherExisted = await pathExists(resolvedPaths.launcherPath);
     const bundleRuntimeExisted = await pathExists(join(resolvedPaths.runtimeRoot, "native-messaging", "native-host-entry.js"));
     await mkdir(resolvedPaths.manifestDir, { recursive: true });

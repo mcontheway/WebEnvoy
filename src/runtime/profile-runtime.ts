@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, lstat, readFile, unlink, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 
 import { CliError } from "../core/errors.js";
 import type { JsonObject } from "../core/types.js";
@@ -91,6 +91,58 @@ import {
 const PROFILE_LOCK_FILENAME = "__webenvoy_lock.json";
 const LOCK_ACQUIRE_MAX_RETRIES = 6;
 const STOP_LOCK_DELETE_MAX_RETRIES = 3;
+
+const assertNotSymlinkPath = async (path: string, reason: string): Promise<void> => {
+  try {
+    const stat = await lstat(path);
+    if (!stat.isSymbolicLink()) {
+      return;
+    }
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+
+  throw new CliError("ERR_PROFILE_INVALID", "profile native host manifest path contains symlink", {
+    details: {
+      ability_id: "runtime.identity_preflight",
+      stage: "input_validation",
+      reason,
+      received_path: path
+    }
+  });
+};
+
+const assertProfileNativeHostManifestPathSafe = async (input: {
+  profileDir: string;
+  manifestPath: string;
+}): Promise<void> => {
+  const manifestDir = dirname(input.manifestPath);
+  const rel = relative(input.profileDir, manifestDir);
+  const inside = rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  if (!inside) {
+    throw new CliError("ERR_PROFILE_INVALID", "profile native host manifest path escapes profile dir", {
+      details: {
+        ability_id: "runtime.identity_preflight",
+        stage: "input_validation",
+        reason: "PROFILE_NATIVE_HOST_MANIFEST_OUTSIDE_PROFILE_DIR",
+        profile_dir: input.profileDir,
+        received_path: input.manifestPath
+      }
+    });
+  }
+
+  await assertNotSymlinkPath(input.profileDir, "PROFILE_DIR_SYMBOLIC_LINK");
+  let current = input.profileDir;
+  for (const segment of rel.split(sep).filter((entry) => entry.length > 0 && entry !== ".")) {
+    current = join(current, segment);
+    await assertNotSymlinkPath(current, "PROFILE_NATIVE_HOST_MANIFEST_PARENT_SYMBOLIC_LINK");
+  }
+  await assertNotSymlinkPath(input.manifestPath, "PROFILE_NATIVE_HOST_MANIFEST_SYMBOLIC_LINK");
+};
 
 const hasRequestedPersistentExtensionIdentity = (params: JsonObject): boolean => {
   const candidate = params.persistent_extension_identity ?? params.persistentExtensionIdentity;
@@ -2453,6 +2505,10 @@ export class ProfileRuntimeService {
       "NativeMessagingHosts",
       `${input.preflight.binding.nativeHostName}.json`
     );
+    await assertProfileNativeHostManifestPathSafe({
+      profileDir: input.profileDir,
+      manifestPath: profileManifestPath
+    });
     await mkdir(dirname(profileManifestPath), { recursive: true });
     await writeFile(profileManifestPath, sourceManifest, "utf8");
   }
