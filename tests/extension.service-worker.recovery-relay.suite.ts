@@ -2,6 +2,60 @@ import { describe, expect, it, vi } from "vitest";
 import { createMockPort, createEditorInputProbeResult, createChromeApi, respondHandshake, waitForBridgeTurn, waitForPostedMessage, primeTrustedFingerprintContext, promoteBootstrapReadinessThroughPing, createXhsCommandParams, createRequestBoundXhsCommandParams, createXhsEditorInputCommandParams, createApprovedReadApprovalRecord, createApprovedReadAuditRecordForRequest, createFingerprintRuntimeContext, asRecord, resolveWriteInteractionTier, startChromeBackgroundBridge } from "./extension.service-worker.shared.js";
 
 describe("extension service worker / recovery and relay prerequisites", () => {
+  it("includes chrome runtime.lastError in native messaging disconnect diagnostics and retries", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "native-host-not-found-forward-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "native-host-not-found-forward-001",
+        command: "xhs.search",
+        command_params: createXhsCommandParams({
+          requested_execution_mode: "recon",
+          target_page: "search_result_tab"
+        }),
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+    expect(chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        id: "native-host-not-found-forward-001",
+        command: "xhs.search"
+      })
+    );
+    chromeApi.runtime.lastError = {
+      message: "Specified native messaging host not found."
+    };
+    firstPort.onDisconnectListeners[0]?.();
+    await Promise.resolve();
+
+    expect(chromeApi.runtime.connectNative).toHaveBeenCalledTimes(2);
+    expect(firstPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "native-host-not-found-forward-001",
+        status: "error",
+        error: expect.objectContaining({
+          code: "ERR_TRANSPORT_DISCONNECTED",
+          message:
+            "native messaging disconnected: Specified native messaging host not found."
+        })
+      })
+    );
+  });
+
   it("forwards top-level requested_execution_mode live path and relays required-patch missing block", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners, executeScript } = createChromeApi([firstPort]);

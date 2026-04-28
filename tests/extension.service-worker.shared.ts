@@ -65,6 +65,7 @@ export const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
   const debuggerDetach = vi.fn(async () => {});
   const chromeApi = {
     runtime: {
+      lastError: undefined as { message?: string } | undefined,
       connectNative: vi.fn(() => {
         const current = ports[Math.min(connectIndex, ports.length - 1)];
         connectIndex += 1;
