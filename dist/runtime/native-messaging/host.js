@@ -166,11 +166,9 @@ export class NativeHostBridgeTransport {
                 required: true
             };
         }
-        const candidates = [
-            ...(requestedProfile !== null ? [requestedProfileSocketPath] : []),
-            rootSocketPath,
-            this.#activeSocketPath
-        ].filter((candidate, index, all) => typeof candidate === "string" && candidate.length > 0 && all.indexOf(candidate) === index);
+        const candidates = (requestedProfile !== null
+            ? [requestedProfileSocketPath, rootSocketPath, this.#activeSocketPath]
+            : [this.#activeSocketPath, rootSocketPath]).filter((candidate, index, all) => typeof candidate === "string" && candidate.length > 0 && all.indexOf(candidate) === index);
         for (const candidate of candidates) {
             if (!candidate) {
                 continue;

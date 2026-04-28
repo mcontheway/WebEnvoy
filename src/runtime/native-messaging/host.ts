@@ -238,11 +238,10 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
       };
     }
 
-    const candidates = [
-      ...(requestedProfile !== null ? [requestedProfileSocketPath] : []),
-      rootSocketPath,
-      this.#activeSocketPath
-    ].filter(
+    const candidates = (requestedProfile !== null
+      ? [requestedProfileSocketPath, rootSocketPath, this.#activeSocketPath]
+      : [this.#activeSocketPath, rootSocketPath]
+    ).filter(
       (candidate, index, all): candidate is string =>
         typeof candidate === "string" && candidate.length > 0 && all.indexOf(candidate) === index
     );
