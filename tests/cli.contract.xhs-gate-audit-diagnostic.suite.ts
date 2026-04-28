@@ -543,7 +543,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
     ).toEqual(["DEFAULT_MODE_DRY_RUN"]);
   });
 
-  it("blocks xhs.search before execution when official Chrome runtime readiness is not ready", () => {
+  it("keeps xhs.search dry_run gate-only when official Chrome runtime readiness is not ready", () => {
     const result = runCli([
       "xhs.search",
       "--profile",
@@ -566,21 +566,23 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
         }
       })
     ], repoRoot, {
-      WEBENVOY_NATIVE_TRANSPORT: "loopback",
-      WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154"
+      WEBENVOY_NATIVE_TRANSPORT: "",
+      WEBENVOY_BROWSER_PATH: "",
+      WEBENVOY_BROWSER_MOCK_VERSION: ""
     });
 
-    expect(result.status).toBe(5);
+    expect(result.status).toBe(0);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
       command: "xhs.search",
-      status: "error",
-      error: {
-        code: "ERR_RUNTIME_IDENTITY_NOT_BOUND",
-        details: {
-          ability_id: "xhs.note.search.v1",
-          runtime_readiness: "blocked",
-          identity_binding_state: "missing"
+      status: "success",
+      summary: {
+        session_id: expect.stringMatching(/^gate-only-run-/),
+        requested_execution_mode: "dry_run",
+        consumer_gate_result: {
+          requested_execution_mode: "dry_run",
+          effective_execution_mode: "dry_run",
+          gate_decision: "allowed"
         }
       }
     });

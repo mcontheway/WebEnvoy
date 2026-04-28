@@ -7,6 +7,9 @@ import {
 } from "../runtime/native-messaging/bridge.js";
 import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
+import { buildLoopbackAuditRecord } from "../runtime/native-messaging/loopback-gate-audit.js";
+import { buildLoopbackGate } from "../runtime/native-messaging/loopback-gate.js";
+import { buildLoopbackGatePayload } from "../runtime/native-messaging/loopback-gate-payload.js";
 import { appendFingerprintContext, buildFingerprintContextForMeta } from "../runtime/fingerprint-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
 import {
@@ -696,6 +699,103 @@ const isXhsLiveReadBaselineGateCommand = (input: {
     input.command === "xhs.user_home") &&
   isLiveXhsReadExecutionMode(input.requestedExecutionMode);
 
+const shouldReturnInProcessGateOnlyResult = (input: {
+  requestedExecutionMode: XhsExecutionMode;
+}): boolean =>
+  input.requestedExecutionMode === "dry_run" &&
+  asString(process.env.WEBENVOY_NATIVE_TRANSPORT) === null;
+
+const buildInProcessGateOnlyResult = (input: {
+  context: RuntimeContext;
+  envelope: AbilityEnvelope;
+  gate: ReturnType<typeof normalizeGateOptionsForContract>;
+  parsedInput: JsonObject;
+  preparedIssue209LiveRead: ReturnType<typeof prepareIssue209LiveReadEnvelopeForContract>;
+  dataRefKey: "query" | "note_id" | "user_id";
+}): CommandExecutionResult => {
+  const profile = input.context.profile ?? "gate_only_profile";
+  const sessionId = `gate-only-${input.context.run_id}`;
+  const {
+    __anonymous_isolation_verified: anonymousIsolationVerified,
+    target_site_logged_in: targetSiteLoggedIn,
+    ...preparedGateOptions
+  } = input.preparedIssue209LiveRead.options;
+  const gateOptions = {
+    ...preparedGateOptions,
+    ...(typeof anonymousIsolationVerified === "boolean"
+      ? { __anonymous_isolation_verified: anonymousIsolationVerified }
+      : {}),
+    ...(typeof targetSiteLoggedIn === "boolean"
+      ? { target_site_logged_in: targetSiteLoggedIn }
+      : {}),
+    ...(typeof input.context.profile === "string"
+      ? { __runtime_profile_ref: input.context.profile }
+      : {})
+  };
+  const gateBundle = buildLoopbackGate(gateOptions, input.envelope.ability.action, {
+    runId: input.context.run_id,
+    requestId: input.envelope.requestId ?? undefined,
+    commandRequestId: input.preparedIssue209LiveRead.commandRequestId ?? undefined,
+    sessionId,
+    profile,
+    gateInvocationId: input.preparedIssue209LiveRead.gateInvocationId ?? undefined
+  });
+  const auditRecord = buildLoopbackAuditRecord({
+    runId: input.context.run_id,
+    sessionId,
+    profile,
+    gate: gateBundle
+  });
+  auditRecord.recorded_at = new Date().toISOString();
+  const payload = buildLoopbackGatePayload({
+    runId: input.context.run_id,
+    sessionId,
+    profile,
+    gate: gateBundle,
+    auditRecord
+  });
+
+  if (gateBundle.consumerGateResult.gate_decision === "blocked") {
+    payload.details = {
+      ability_id: input.envelope.ability.id,
+      stage: "execution",
+      reason: "EXECUTION_MODE_GATE_BLOCKED"
+    };
+    throw toCliExecutionError(
+      input.envelope.ability,
+      payload,
+      `执行模式门禁阻断了当前 ${input.context.command} 请求`
+    );
+  }
+
+  const dataRefValue =
+    typeof input.parsedInput[input.dataRefKey] === "string"
+      ? String(input.parsedInput[input.dataRefKey])
+      : "";
+  const summary = mapCapabilitySummaryForContract(input.envelope.ability.id, {
+    ...buildCapabilityResult(input.envelope.ability, {
+      data_ref: dataRefValue ? { [input.dataRefKey]: dataRefValue } : {},
+      metrics: {
+        count: 0
+      }
+    }),
+    ...payload,
+    session_id: sessionId,
+    requested_execution_mode: input.gate.requestedExecutionMode,
+    ...(typeof anonymousIsolationVerified === "boolean"
+      ? { __anonymous_isolation_verified: anonymousIsolationVerified }
+      : {}),
+    ...(typeof targetSiteLoggedIn === "boolean"
+      ? { target_site_logged_in: targetSiteLoggedIn }
+      : {})
+  });
+
+  return {
+    summary,
+    observability: asObservabilityInput(payload.observability)
+  };
+};
+
 const assertXhsLivePreflightAllowsCommand = (input: {
   command: string;
   ability: AbilityRef;
@@ -918,6 +1018,7 @@ const xhsReadCommand = async (
     options: gate.options
   });
   const liveXhsCommandRequested = isLiveXhsExecutionMode(gate.requestedExecutionMode);
+  const reconXhsCommandRequested = gate.requestedExecutionMode === "recon";
   const xhsLiveReadBaselineGateRequested = isXhsLiveReadBaselineGateCommand({
     command: context.command,
     options: gate.options,
@@ -987,10 +1088,6 @@ const xhsReadCommand = async (
       });
     }
   }
-  const bridge = resolveRuntimeBridge();
-  const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
-    requestedExecutionMode: gate.requestedExecutionMode
-  });
   try {
     const preparedIssue209LiveRead = prepareIssue209LiveReadEnvelopeForContract({
       options: gate.options,
@@ -998,17 +1095,38 @@ const xhsReadCommand = async (
       gateInvocationId: envelope.gateInvocationId,
       runId: context.run_id
     });
-    await ensureOfficialChromeRuntimeReady(
-      context,
-      envelope.ability,
-      gate.requestedExecutionMode,
-      bridge,
-      fingerprintContext,
-      {
-        ...gate,
-        targetResourceId: resolveBootstrapTargetResourceId(context.command, parsedInput)
-      }
-    );
+    if (
+      shouldReturnInProcessGateOnlyResult({
+        requestedExecutionMode: gate.requestedExecutionMode
+      })
+    ) {
+      return buildInProcessGateOnlyResult({
+        context,
+        envelope,
+        gate,
+        parsedInput,
+        preparedIssue209LiveRead,
+        dataRefKey: inputConfig.fixtureDataRefKey
+      });
+    }
+
+    const bridge = resolveRuntimeBridge();
+    const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
+      requestedExecutionMode: gate.requestedExecutionMode
+    });
+    if (liveXhsCommandRequested || recoveryProbeRequested || reconXhsCommandRequested) {
+      await ensureOfficialChromeRuntimeReady(
+        context,
+        envelope.ability,
+        gate.requestedExecutionMode,
+        bridge,
+        fingerprintContext,
+        {
+          ...gate,
+          targetResourceId: resolveBootstrapTargetResourceId(context.command, parsedInput)
+        }
+      );
+    }
     const bridgeSessionId = await bridge.ensureSession({
       profile: context.profile
     });
