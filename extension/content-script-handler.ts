@@ -22,6 +22,7 @@ import {
 } from "./content-script-fingerprint.js";
 import {
   encodeMainWorldPayload,
+  configureCapturedRequestContextProvenanceViaMainWorld,
   installMainWorldEventChannelSecret,
   installFingerprintRuntimeViaMainWorld,
   MAIN_WORLD_EVENT_BOOTSTRAP,
@@ -35,10 +36,12 @@ import {
   ExtensionContractError,
   validateXhsCommandInputForExtension
 } from "./xhs-command-contract.js";
+import { createPageContextNamespace } from "./xhs-search-types.js";
 import { containsCookie, hasXhsAccountSafetyOverlaySignal } from "./xhs-search-telemetry.js";
 
 export {
   encodeMainWorldPayload,
+  configureCapturedRequestContextProvenanceViaMainWorld,
   installFingerprintRuntimeViaMainWorld,
   installMainWorldEventChannelSecret,
   MAIN_WORLD_EVENT_BOOTSTRAP,
@@ -100,6 +103,89 @@ const asString = (value: unknown): string | null =>
 
 const asStringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
+const hasReadyFingerprintRuntime = (fingerprintRuntime: Record<string, unknown> | null): boolean => {
+  const injection = asRecord(fingerprintRuntime?.injection);
+  const execution = asRecord(fingerprintRuntime?.execution);
+  return (
+    injection?.installed === true &&
+    asStringArray(injection.missing_required_patches).length === 0 &&
+    execution?.live_allowed === true &&
+    execution.live_decision === "allowed"
+  );
+};
+
+const resolveTrustedActiveFallbackRuntimeAttestation = (input: {
+  raw: Record<string, unknown>;
+  profile: string | null;
+  runId: string;
+  sessionId: string;
+}): Record<string, unknown> | null => {
+  const attestation = asRecord(input.raw.runtime_attestation);
+  if (!attestation) {
+    return null;
+  }
+  if (
+    attestation.source !== "official_chrome_runtime_readiness" ||
+    attestation.runtime_readiness !== "ready" ||
+    attestation.profile_ref !== input.profile ||
+    attestation.run_id !== input.runId ||
+    attestation.session_id !== input.sessionId
+  ) {
+    return null;
+  }
+  return attestation;
+};
+
+const resolveActiveApiFetchFallbackGateOptions = (input: {
+  rawOptions: Record<string, unknown>;
+  fingerprintRuntime: Record<string, unknown> | null;
+  profile: string | null;
+  runId: string;
+  sessionId: string;
+}): Record<string, unknown> | null => {
+  const raw = asRecord(input.rawOptions.active_api_fetch_fallback);
+  if (!raw) {
+    return null;
+  }
+  const {
+    fingerprint_validation_state: _fingerprintValidationState,
+    execution_surface: _executionSurface,
+    headless: _headless,
+    runtime_attestation: _runtimeAttestation,
+    fingerprint_attestation: _fingerprintAttestation,
+    ...callerGate
+  } = raw;
+  const runtimeAttestation = resolveTrustedActiveFallbackRuntimeAttestation({
+    raw,
+    profile: input.profile,
+    runId: input.runId,
+    sessionId: input.sessionId
+  });
+  const fingerprintReady = hasReadyFingerprintRuntime(input.fingerprintRuntime);
+  const missingRequiredPatches = asStringArray(
+    asRecord(input.fingerprintRuntime?.injection)?.missing_required_patches
+  );
+  return {
+    ...callerGate,
+    ...(fingerprintReady ? { fingerprint_validation_state: "ready" } : {}),
+    ...(runtimeAttestation
+      ? {
+          execution_surface: asString(runtimeAttestation.execution_surface) ?? "unknown",
+          ...(typeof runtimeAttestation.headless === "boolean"
+            ? { headless: runtimeAttestation.headless }
+            : {}),
+          runtime_attestation: runtimeAttestation
+        }
+      : {}),
+    fingerprint_attestation: {
+      source: "content_script_fingerprint_runtime",
+      validation_state: fingerprintReady ? "ready" : "not_ready",
+      profile_ref: asString(input.fingerprintRuntime?.profile),
+      missing_required_patches: missingRequiredPatches
+    }
+  };
+};
 
 const toCliInvalidArgsResult = (input: {
   id: string;
@@ -556,6 +642,8 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
   readSearchDomState: async () => readXhsSearchDomState(),
   performSearchPassiveAction: async (input) => await performXhsSearchPassiveAction(input),
   readCapturedRequestContext: async (input) => await readCapturedRequestContextViaMainWorld(input),
+  configureCapturedRequestContextProvenance: async (input) =>
+    await configureCapturedRequestContextProvenanceViaMainWorld(input),
   callSignature: async (
     uri: Parameters<XhsSearchEnvironment["callSignature"]>[0],
     payload: Parameters<XhsSearchEnvironment["callSignature"]>[1]
@@ -950,6 +1038,14 @@ export class ContentScriptHandler {
       actualTargetDomain === XHS_READ_DOMAIN && containsCookie(this.#xhsEnv.getCookie(), "a1");
     const observedAnonymousIsolationVerified =
       actualTargetDomain === XHS_READ_DOMAIN && observedTargetSiteLoggedIn === false;
+    const sessionId = String(message.params.session_id ?? "nm-session-001");
+    const activeApiFetchFallback = resolveActiveApiFetchFallbackGateOptions({
+      rawOptions: options,
+      fingerprintRuntime,
+      profile: message.profile,
+      runId: message.runId,
+      sessionId
+    });
 
     if (!ability || !input) {
       this.#emit({
@@ -1031,6 +1127,9 @@ export class ContentScriptHandler {
           ...(typeof options.validation_text === "string"
             ? { validation_text: options.validation_text }
             : {}),
+          ...(activeApiFetchFallback
+            ? { active_api_fetch_fallback: activeApiFetchFallback }
+            : {}),
           ...(asRecord(options.editor_focus_attestation)
             ? {
                 editor_focus_attestation:
@@ -1056,7 +1155,7 @@ export class ContentScriptHandler {
         },
         executionContext: {
           runId: message.runId,
-          sessionId: String(message.params.session_id ?? "nm-session-001"),
+          sessionId,
           profile: message.profile ?? "unknown",
           requestId: message.id,
           commandRequestId: asString(commandParams.request_id) ?? undefined,
@@ -1093,6 +1192,17 @@ export class ContentScriptHandler {
           this.#xhsEnv
         );
       } else if (message.command === "xhs.detail") {
+        if (typeof this.#xhsEnv.configureCapturedRequestContextProvenance === "function") {
+          await this.#xhsEnv.configureCapturedRequestContextProvenance({
+            page_context_namespace: createPageContextNamespace(locationHref),
+            profile_ref: commonInput.executionContext.profile,
+            session_id: commonInput.executionContext.sessionId,
+            target_tab_id: typeof message.tabId === "number" ? message.tabId : null,
+            run_id: commonInput.executionContext.runId,
+            action_ref: commonInput.abilityAction,
+            page_url: locationHref
+          }).catch(() => null);
+        }
         result = await executeXhsDetail(
           {
             ...commonInput,
@@ -1103,6 +1213,17 @@ export class ContentScriptHandler {
           this.#xhsEnv
         );
       } else {
+        if (typeof this.#xhsEnv.configureCapturedRequestContextProvenance === "function") {
+          await this.#xhsEnv.configureCapturedRequestContextProvenance({
+            page_context_namespace: createPageContextNamespace(locationHref),
+            profile_ref: commonInput.executionContext.profile,
+            session_id: commonInput.executionContext.sessionId,
+            target_tab_id: typeof message.tabId === "number" ? message.tabId : null,
+            run_id: commonInput.executionContext.runId,
+            action_ref: commonInput.abilityAction,
+            page_url: locationHref
+          }).catch(() => null);
+        }
         result = await executeXhsUserHome(
           {
             ...commonInput,

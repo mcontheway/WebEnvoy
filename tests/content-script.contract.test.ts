@@ -208,7 +208,9 @@ const createRuntime = () => {
   };
 };
 
-const createCapturedRequestContextProbeWindow = (): {
+const createCapturedRequestContextProbeWindow = (input?: {
+  admittedTemplate?: Record<string, unknown> | null;
+}): {
   window: {
     addEventListener: (type: string, listener: EventListener) => void;
     removeEventListener: (type: string, listener: EventListener) => void;
@@ -218,9 +220,11 @@ const createCapturedRequestContextProbeWindow = (): {
     };
   };
   readRequests: Record<string, unknown>[];
+  configureRequests: Record<string, unknown>[];
 } => {
   const listeners = new Map<string, Set<EventListener>>();
   const readRequests: Record<string, unknown>[] = [];
+  const configureRequests: Record<string, unknown>[] = [];
   let requestEventName: string | null = null;
   let resultEventName: string | null = null;
   const locationHref = "https://www.xiaohongshu.com/search_result?keyword=contract";
@@ -275,10 +279,28 @@ const createCapturedRequestContextProbeWindow = (): {
                     ? activeNamespace
                     : requestedNamespace,
                 shape_key: detail.payload?.shape_key,
-                admitted_template: null,
+                admitted_template: input?.admittedTemplate ?? null,
                 rejected_observation: null,
                 incompatible_observation: null,
                 available_shape_keys: []
+              }
+            });
+            return true;
+          }
+          if (detail.type === "captured-request-context-provenance-set") {
+            configureRequests.push(detail);
+            emit(resultEventName, {
+              id: detail.id,
+              ok: true,
+              result: {
+                configured: true,
+                page_context_namespace: detail.payload?.page_context_namespace,
+                profile_ref: detail.payload?.profile_ref,
+                session_id: detail.payload?.session_id,
+                target_tab_id: detail.payload?.target_tab_id,
+                run_id: detail.payload?.run_id,
+                action_ref: detail.payload?.action_ref,
+                page_url: detail.payload?.page_url
               }
             });
             return true;
@@ -291,7 +313,8 @@ const createCapturedRequestContextProbeWindow = (): {
         href: locationHref
       }
     },
-    readRequests
+    readRequests,
+    configureRequests
   };
 };
 
@@ -928,6 +951,128 @@ describe("content-script bootstrap contract", () => {
     });
     expect(result).toMatchObject({
       page_context_namespace: createVisitedPageContextNamespace(window.location.href, 1)
+    });
+  });
+
+  it("forwards active fallback provenance to main-world reads without fabricating returned templates", async () => {
+    const { window, readRequests } = createCapturedRequestContextProbeWindow({
+      admittedTemplate: {
+        route_evidence_class: "passive_api_capture",
+        source_kind: "page_request",
+        transport: "fetch",
+        method: "POST",
+        path: "/api/sns/web/v1/feed",
+        url: "https://www.xiaohongshu.com/api/sns/web/v1/feed",
+        status: 200,
+        captured_at: 1_710_000_000_000,
+        observed_at: 1_710_000_000_000,
+        page_context_namespace: createVisitedPageContextNamespace(
+          "https://www.xiaohongshu.com/search_result?keyword=contract",
+          1
+        ),
+        shape_key: createShapeKey("contract"),
+        shape: {
+          command: "xhs.detail",
+          method: "POST",
+          pathname: "/api/sns/web/v1/feed",
+          note_id: "note-contract-001"
+        },
+        request: {
+          headers: {},
+          body: {
+            source_note_id: "note-contract-001"
+          }
+        },
+        response: {
+          headers: {},
+          body: {
+            code: 0,
+            data: {
+              note: {
+                note_id: "note-contract-001"
+              }
+            }
+          }
+        }
+      }
+    });
+    (globalThis as { window?: unknown }).window = window;
+
+    expect(contentScriptHandlerModule.installMainWorldEventChannelSecret("namespace-secret-003")).toBe(
+      true
+    );
+
+    const result = await contentScriptHandlerModule.readCapturedRequestContextViaMainWorld({
+      method: "POST",
+      path: "/api/sns/web/v1/feed",
+      page_context_namespace: createPageContextNamespace(window.location.href),
+      shape_key: createShapeKey("contract"),
+      profile_ref: "xhs_001",
+      session_id: "nm-session-001",
+      target_tab_id: 32,
+      run_id: "run-main-world-provenance-001",
+      action_ref: "read",
+      page_url: window.location.href
+    });
+
+    expect(readRequests).toHaveLength(1);
+    expect(asRecord(readRequests[0]?.payload)).toMatchObject({
+      profile_ref: "xhs_001",
+      session_id: "nm-session-001",
+      target_tab_id: 32,
+      run_id: "run-main-world-provenance-001",
+      action_ref: "read",
+      page_url: window.location.href
+    });
+    expect(result?.admitted_template).toMatchObject({
+      route_evidence_class: "passive_api_capture"
+    });
+    expect(result?.admitted_template).not.toHaveProperty("profile_ref");
+    expect(result?.admitted_template).not.toHaveProperty("session_id");
+    expect(result?.admitted_template).not.toHaveProperty("target_tab_id");
+    expect(result?.admitted_template).not.toHaveProperty("run_id");
+    expect(result?.admitted_template).not.toHaveProperty("action_ref");
+    expect(result?.admitted_template).not.toHaveProperty("page_url");
+  });
+
+  it("forwards active fallback provenance configuration to main-world without reading templates", async () => {
+    const { window, readRequests, configureRequests } = createCapturedRequestContextProbeWindow();
+    (globalThis as { window?: unknown }).window = window;
+
+    expect(contentScriptHandlerModule.installMainWorldEventChannelSecret("namespace-secret-004")).toBe(
+      true
+    );
+
+    const result =
+      await contentScriptHandlerModule.configureCapturedRequestContextProvenanceViaMainWorld({
+        page_context_namespace: createPageContextNamespace(window.location.href),
+        profile_ref: "xhs_001",
+        session_id: "nm-session-001",
+        target_tab_id: 1230427051,
+        run_id: "run-main-world-configure-provenance-001",
+        action_ref: "xhs.detail",
+        page_url: window.location.href
+      });
+
+    expect(configureRequests).toHaveLength(1);
+    expect(readRequests).toHaveLength(0);
+    expect(asRecord(configureRequests[0]?.payload)).toMatchObject({
+      page_context_namespace: createPageContextNamespace(window.location.href),
+      profile_ref: "xhs_001",
+      session_id: "nm-session-001",
+      target_tab_id: 1230427051,
+      run_id: "run-main-world-configure-provenance-001",
+      action_ref: "xhs.detail",
+      page_url: window.location.href
+    });
+    expect(result).toMatchObject({
+      configured: true,
+      profile_ref: "xhs_001",
+      session_id: "nm-session-001",
+      target_tab_id: 1230427051,
+      run_id: "run-main-world-configure-provenance-001",
+      action_ref: "xhs.detail",
+      page_url: window.location.href
     });
   });
 });

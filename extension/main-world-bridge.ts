@@ -23,6 +23,7 @@ type MainWorldRequestType =
   | "fingerprint-install"
   | "fingerprint-verify"
   | "page-state-read"
+  | "captured-request-context-provenance-set"
   | "captured-request-context-read";
 
 type MainWorldRequest = {
@@ -60,8 +61,18 @@ type MainWorldBridgeSharedState = {
     Map<string, CapturedRequestContextArtifact>
   >;
   capturedRequestContextCaptureInstalled: boolean;
+  capturedRequestContextProvenanceByNamespace: Map<PageContextNamespace, CapturedRequestContextProvenance>;
   pageContextVisitSequence: number;
   lastObservedPageContextHref: string;
+};
+
+type CapturedRequestContextProvenance = {
+  profile_ref: string | null;
+  session_id: string | null;
+  target_tab_id: number | null;
+  run_id: string | null;
+  action_ref: string | null;
+  page_url: string | null;
 };
 
 type FingerprintPatchInstallContext = {
@@ -80,6 +91,7 @@ type CapturedRequestCandidate = {
   body: unknown;
   synthetic: boolean;
   pageContextNamespace: PageContextNamespace;
+  provenance: CapturedRequestContextProvenance | null;
   referrer: string | null;
 };
 
@@ -114,6 +126,7 @@ const PAGE_CONTEXT_NAVIGATION_PATCH_SYMBOL = Symbol.for(
   "webenvoy.main_world.page_context_navigation.v1"
 );
 const SYNTHETIC_REQUEST_SYMBOL = Symbol.for("webenvoy.main_world.synthetic_request.v1");
+const PROVENANCE_BIND_FRESH_WINDOW_MS = 5000;
 
 const DEFAULT_PLUGIN_DESCRIPTORS = [
   {
@@ -173,6 +186,7 @@ const resolveMainWorldBridgeSharedState = (): MainWorldBridgeSharedState => {
       Map<string, CapturedRequestContextArtifact>
     >(),
     capturedRequestContextCaptureInstalled: false,
+    capturedRequestContextProvenanceByNamespace: new Map<PageContextNamespace, CapturedRequestContextProvenance>(),
     pageContextVisitSequence: 0,
     lastObservedPageContextHref:
       typeof window.location?.href === "string" ? window.location.href : "about:blank"
@@ -987,6 +1001,112 @@ const isSyntheticRejectedArtifact = (
   artifact?.source_kind === "synthetic_request" ||
   artifact?.rejection_reason === "synthetic_request_rejected";
 
+const resolveCapturedRequestContextProvenance = (
+  namespace: PageContextNamespace
+): CapturedRequestContextProvenance | null =>
+  mainWorldBridgeSharedState.capturedRequestContextProvenanceByNamespace.get(namespace) ?? null;
+
+const hasCapturedRequestContextProvenance = (artifact: CapturedRequestContextArtifact): boolean =>
+  Object.prototype.hasOwnProperty.call(artifact, "profile_ref") ||
+  Object.prototype.hasOwnProperty.call(artifact, "session_id") ||
+  Object.prototype.hasOwnProperty.call(artifact, "target_tab_id") ||
+  Object.prototype.hasOwnProperty.call(artifact, "run_id") ||
+  Object.prototype.hasOwnProperty.call(artifact, "action_ref") ||
+  Object.prototype.hasOwnProperty.call(artifact, "page_url");
+
+const bindCapturedRequestContextProvenance = (
+  artifact: CapturedRequestContextArtifact,
+  provenance: CapturedRequestContextProvenance
+): CapturedRequestContextArtifact => ({
+  ...artifact,
+  profile_ref: provenance.profile_ref,
+  session_id: provenance.session_id,
+  target_tab_id: provenance.target_tab_id,
+  run_id: provenance.run_id,
+  action_ref: provenance.action_ref,
+  page_url: provenance.page_url
+});
+
+const bindFreshUnprovenancedPassiveTemplates = (
+  namespace: PageContextNamespace,
+  provenance: CapturedRequestContextProvenance,
+  configuredAt: number
+): number => {
+  const namespaceBuckets =
+    mainWorldBridgeSharedState.capturedRequestContextBucketsByNamespace.get(namespace);
+  if (!namespaceBuckets) {
+    return 0;
+  }
+  let bound = 0;
+  for (const routeBucket of namespaceBuckets.values()) {
+    for (const bucket of routeBucket.values()) {
+      const template = bucket.admittedTemplate;
+      const observedAt = template?.observed_at ?? template?.captured_at ?? 0;
+      if (
+        !template ||
+        template.source_kind !== "page_request" ||
+        template.route_evidence_class !== "passive_api_capture" ||
+        hasCapturedRequestContextProvenance(template) ||
+        observedAt <= 0 ||
+        configuredAt - observedAt > PROVENANCE_BIND_FRESH_WINDOW_MS ||
+        (provenance.page_url !== null &&
+          template.referrer !== null &&
+          template.referrer !== undefined &&
+          template.referrer !== provenance.page_url)
+      ) {
+        continue;
+      }
+      bucket.admittedTemplate = bindCapturedRequestContextProvenance(template, provenance);
+      bound += 1;
+    }
+  }
+  return bound;
+};
+
+const handleCapturedRequestContextProvenanceSetRequest = async (
+  request: MainWorldRequest
+): Promise<void> => {
+  const currentPageCaptureContext = resolveCurrentPageCaptureContext();
+  const namespace = resolveActiveVisitedPageContextNamespace(
+    asString(request.payload.page_context_namespace) as PageContextNamespace | null,
+    currentPageCaptureContext.pageContextNamespace
+  );
+  if (!namespace) {
+    await emitMainWorldResult({
+      id: request.id,
+      ok: true,
+      result: {
+        configured: false,
+        reason: "page_context_namespace_missing"
+      }
+    });
+    return;
+  }
+  const provenance: CapturedRequestContextProvenance = {
+    profile_ref: asString(request.payload.profile_ref),
+    session_id: asString(request.payload.session_id),
+    target_tab_id:
+      typeof request.payload.target_tab_id === "number" && Number.isInteger(request.payload.target_tab_id)
+        ? request.payload.target_tab_id
+        : null,
+    run_id: asString(request.payload.run_id),
+    action_ref: asString(request.payload.action_ref),
+    page_url: asString(request.payload.page_url)
+  };
+  mainWorldBridgeSharedState.capturedRequestContextProvenanceByNamespace.set(namespace, provenance);
+  const boundFreshTemplates = bindFreshUnprovenancedPassiveTemplates(namespace, provenance, Date.now());
+  await emitMainWorldResult({
+    id: request.id,
+    ok: true,
+    result: {
+      configured: true,
+      page_context_namespace: namespace,
+      bound_fresh_existing_templates: boundFreshTemplates,
+      ...provenance
+    }
+  });
+};
+
 const resolveRouteScopeKeyFromLookup = (
   method: CapturedRequestContextMethod,
   path: string,
@@ -1049,7 +1169,6 @@ const storeCapturedRequestContext = (
         input.responseBody,
         (contextShape.shape as { note_id?: string }).note_id ?? ""
       ));
-
   const artifact: CapturedRequestContextArtifact = {
     ...(candidate.synthetic ? {} : { route_evidence_class: "passive_api_capture" as const }),
     source_kind: candidate.synthetic ? "synthetic_request" : "page_request",
@@ -1063,6 +1182,16 @@ const storeCapturedRequestContext = (
     page_context_namespace: candidate.pageContextNamespace,
     shape_key: contextShape.shapeKey,
     shape: contextShape.shape,
+    ...(candidate.provenance
+      ? {
+          profile_ref: candidate.provenance.profile_ref,
+          session_id: candidate.provenance.session_id,
+          target_tab_id: candidate.provenance.target_tab_id,
+          run_id: candidate.provenance.run_id,
+          action_ref: candidate.provenance.action_ref,
+          page_url: candidate.provenance.page_url
+        }
+      : {}),
     referrer: candidate.referrer,
     template_ready: templateReady,
     ...(!templateReady
@@ -1188,6 +1317,7 @@ const resolveFetchCandidate = async (
     body,
     synthetic: isSyntheticRequest(headers) || isSyntheticRequestInput(input),
     pageContextNamespace: pageCaptureContext.pageContextNamespace,
+    provenance: resolveCapturedRequestContextProvenance(pageCaptureContext.pageContextNamespace),
     referrer: pageCaptureContext.referrer
   };
 };
@@ -1252,6 +1382,7 @@ const resolveXhrCandidate = async (
     body,
     synthetic: isSyntheticRequest(state.headers),
     pageContextNamespace: pageCaptureContext.pageContextNamespace,
+    provenance: resolveCapturedRequestContextProvenance(pageCaptureContext.pageContextNamespace),
     referrer: pageCaptureContext.referrer
   };
 };
@@ -1503,6 +1634,7 @@ const parseMainWorldRequest = (event: Event): MainWorldRequest | null => {
     (type !== "fingerprint-install" &&
       type !== "fingerprint-verify" &&
       type !== "page-state-read" &&
+      type !== "captured-request-context-provenance-set" &&
       type !== "captured-request-context-read")
   ) {
     return null;
@@ -1669,6 +1801,10 @@ const handleRequest = async (request: MainWorldRequest): Promise<void> => {
   }
   if (request.type === "page-state-read") {
     await handlePageStateReadRequest(request);
+    return;
+  }
+  if (request.type === "captured-request-context-provenance-set") {
+    await handleCapturedRequestContextProvenanceSetRequest(request);
     return;
   }
   if (request.type === "captured-request-context-read") {

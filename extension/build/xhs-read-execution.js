@@ -153,6 +153,39 @@ const resolveCapturedArtifactObservedAt = (value) => {
     const record = asRecord(value);
     return asInteger(record?.observed_at) ?? asInteger(record?.captured_at);
 };
+const resolveCapturedTemplateIdentity = (record, expectedShape) => {
+    const explicitIdentity = asString(record?.template_identity);
+    if (explicitIdentity) {
+        return explicitIdentity;
+    }
+    const observedAt = asInteger(record?.observed_at) ?? asInteger(record?.captured_at) ?? 0;
+    const namespace = asString(record?.page_context_namespace) ?? "unknown_namespace";
+    const shapeKey = asString(record?.shape_key) ?? serializeReadShape(expectedShape);
+    return `captured:${namespace}:${shapeKey}:${observedAt}`;
+};
+const resolveActiveApiFetchFallbackTemplateEvidence = (artifact, expectedShape, now) => {
+    const record = asRecord(artifact);
+    const observedAt = resolveCapturedArtifactObservedAt(record);
+    const capturedAt = asInteger(record?.captured_at);
+    const freshnessWindowMs = asInteger(record?.freshness_window_ms) ?? REQUEST_CONTEXT_FRESHNESS_WINDOW_MS;
+    return {
+        route_evidence_class: asString(record?.route_evidence_class),
+        source_kind: asString(record?.source_kind),
+        template_identity: resolveCapturedTemplateIdentity(record, expectedShape),
+        profile_ref: asString(record?.profile_ref),
+        session_id: asString(record?.session_id),
+        target_tab_id: asInteger(record?.target_tab_id),
+        run_id: asString(record?.run_id),
+        action_ref: asString(record?.action_ref),
+        page_url: asString(record?.page_url),
+        observed_at: observedAt,
+        captured_at: capturedAt,
+        freshness_window_ms: freshnessWindowMs,
+        template_age_ms: observedAt === null ? null : Math.max(0, now - observedAt),
+        page_context_namespace: asString(record?.page_context_namespace),
+        shape_key: asString(record?.shape_key)
+    };
+};
 const isCapturedArtifactStale = (value, now) => {
     const observedAt = resolveCapturedArtifactObservedAt(value);
     return observedAt === null || now - observedAt > REQUEST_CONTEXT_FRESHNESS_WINDOW_MS;
@@ -713,7 +746,8 @@ const resolveReadRequestContext = (spec, artifact, expectedShape, now, options) 
         requestUrl: resolveCapturedArtifactRequestUrl(artifact),
         requestBody: resolveCapturedArtifactRequestBody(artifact),
         observedAt: resolveCapturedArtifactObservedAt(artifact),
-        signedContinuity: resolveSignedContinuity(spec, expectedShape, artifact)
+        signedContinuity: resolveSignedContinuity(spec, expectedShape, artifact),
+        templateEvidence: resolveActiveApiFetchFallbackTemplateEvidence(artifact, expectedShape, now)
     };
 };
 const failClosedForRequestContext = (input, env) => {
@@ -803,6 +837,144 @@ const failClosedForSignedContinuity = (input, env) => {
         category: "page_changed"
     }), input.gate, input.auditRecord), input.gate.execution_audit);
 };
+const buildActiveFallbackTemplateBinding = (input) => ({
+    profile_ref: input.executionContext.profile,
+    session_id: input.executionContext.sessionId,
+    target_tab_id: typeof input.options.actual_target_tab_id === "number" ? input.options.actual_target_tab_id : null,
+    run_id: input.executionContext.runId,
+    action_ref: input.abilityAction,
+    page_url: input.pageUrl
+});
+const resolveActiveApiFetchFallbackGate = (input) => {
+    const options = input.executionInput.options.active_api_fetch_fallback;
+    const runtimeAttestation = asRecord(options?.runtime_attestation);
+    const fingerprintAttestation = asRecord(options?.fingerprint_attestation);
+    const binding = buildActiveFallbackTemplateBinding({
+        executionContext: input.executionInput.executionContext,
+        options: input.executionInput.options,
+        abilityAction: input.executionInput.abilityAction,
+        pageUrl: input.env.getLocationHref()
+    });
+    const reasonCodes = [];
+    if (options?.enabled !== true) {
+        reasonCodes.push("ACTIVE_API_FETCH_FALLBACK_NOT_APPROVED");
+    }
+    if (options?.account_safety_state !== "clear") {
+        reasonCodes.push("ACCOUNT_SAFETY_NOT_CLEAR");
+    }
+    if (options?.rhythm_state !== "allowed") {
+        reasonCodes.push("RHYTHM_NOT_ALLOWED");
+    }
+    if (options?.fingerprint_validation_state !== "ready" ||
+        fingerprintAttestation?.source !== "content_script_fingerprint_runtime" ||
+        fingerprintAttestation.validation_state !== "ready") {
+        reasonCodes.push("FINGERPRINT_VALIDATION_NOT_READY");
+    }
+    if (runtimeAttestation?.source !== "official_chrome_runtime_readiness" ||
+        runtimeAttestation.runtime_readiness !== "ready") {
+        reasonCodes.push("RUNTIME_ATTESTATION_REQUIRED");
+    }
+    if (runtimeAttestation?.profile_ref !== binding.profile_ref ||
+        runtimeAttestation?.session_id !== binding.session_id ||
+        runtimeAttestation?.run_id !== binding.run_id) {
+        reasonCodes.push("RUNTIME_ATTESTATION_BINDING_MISMATCH");
+    }
+    if (runtimeAttestation?.execution_surface !== "real_browser") {
+        reasonCodes.push("EXECUTION_SURFACE_NOT_REAL_BROWSER");
+    }
+    if (runtimeAttestation?.headless !== false) {
+        reasonCodes.push("HEADLESS_NOT_FALSE");
+    }
+    if (input.templateEvidence.route_evidence_class !== "passive_api_capture") {
+        reasonCodes.push("PASSIVE_CAPTURE_TEMPLATE_REQUIRED");
+    }
+    if (input.templateEvidence.source_kind !== "page_request") {
+        reasonCodes.push("PAGE_REQUEST_TEMPLATE_REQUIRED");
+    }
+    if (input.templateEvidence.observed_at === null ||
+        input.templateEvidence.template_age_ms === null ||
+        input.templateEvidence.template_age_ms > input.templateEvidence.freshness_window_ms) {
+        reasonCodes.push("PASSIVE_CAPTURE_TEMPLATE_NOT_FRESH");
+    }
+    if (input.templateEvidence.profile_ref !== binding.profile_ref) {
+        reasonCodes.push("PASSIVE_CAPTURE_PROFILE_MISMATCH");
+    }
+    if (input.templateEvidence.session_id !== binding.session_id) {
+        reasonCodes.push("PASSIVE_CAPTURE_SESSION_MISMATCH");
+    }
+    if (binding.target_tab_id === null) {
+        reasonCodes.push("TARGET_TAB_BINDING_REQUIRED");
+    }
+    if (input.templateEvidence.target_tab_id !== binding.target_tab_id) {
+        reasonCodes.push("PASSIVE_CAPTURE_TAB_MISMATCH");
+    }
+    if (input.templateEvidence.run_id !== binding.run_id) {
+        reasonCodes.push("PASSIVE_CAPTURE_RUN_MISMATCH");
+    }
+    if (input.templateEvidence.action_ref !== binding.action_ref) {
+        reasonCodes.push("PASSIVE_CAPTURE_ACTION_MISMATCH");
+    }
+    if (input.templateEvidence.page_url !== binding.page_url) {
+        reasonCodes.push("PASSIVE_CAPTURE_PAGE_MISMATCH");
+    }
+    if (input.signedContinuity.token_presence !== "present" || !input.signedContinuity.target_url) {
+        reasonCodes.push("SIGNED_CONTINUITY_REQUIRED");
+    }
+    if (reasonCodes.length === 0) {
+        return {
+            gate_decision: "allowed",
+            reason_codes: [],
+            route_evidence_class: "active_api_fetch_fallback",
+            template_binding: {
+                ...binding,
+                runtime_attestation: runtimeAttestation,
+                fingerprint_attestation: fingerprintAttestation
+            },
+            consumed_template: input.templateEvidence
+        };
+    }
+    return {
+        gate_decision: "blocked",
+        reason_codes: reasonCodes,
+        route_evidence_class: "active_api_fetch_fallback",
+        template_binding: {
+            ...binding,
+            runtime_attestation: runtimeAttestation,
+            fingerprint_attestation: fingerprintAttestation
+        },
+        consumed_template: input.templateEvidence
+    };
+};
+const failClosedForActiveApiFetchFallbackGate = (input, env) => {
+    const message = `active_api_fetch_fallback 门禁阻断了当前 ${input.spec.command} 请求`;
+    return withExecutionAuditInFailurePayload(createFailure("ERR_EXECUTION_FAILED", message, {
+        ability_id: input.abilityId,
+        stage: "execution",
+        reason: "ACTIVE_API_FETCH_FALLBACK_GATE_BLOCKED",
+        request_context_shape: input.expectedShape,
+        request_context_shape_key: serializeReadShape(input.expectedShape),
+        active_api_fetch_fallback_gate: input.gateResult
+    }, createReadObservability({
+        spec: input.spec,
+        href: env.getLocationHref(),
+        title: env.getDocumentTitle(),
+        readyState: env.getReadyState(),
+        requestId: `req-${env.randomId()}`,
+        outcome: "failed",
+        failureReason: "ACTIVE_API_FETCH_FALLBACK_GATE_BLOCKED",
+        includeKeyRequest: false,
+        failureSite: {
+            stage: "execution",
+            component: "gate",
+            target: "xhs.active_api_fetch_fallback_gate",
+            summary: message
+        }
+    }), createReadDiagnosis(input.spec, {
+        reason: "ACTIVE_API_FETCH_FALLBACK_GATE_BLOCKED",
+        summary: message,
+        category: "page_changed"
+    }), input.gate, input.auditRecord), input.gate.execution_audit);
+};
 const resolveRequestContextFailureSurface = (spec, lookupResult) => {
     const isIncompatible = lookupResult.state === "incompatible" || lookupResult.reason === "shape_mismatch";
     if (lookupResult.state === "error") {
@@ -831,7 +1003,7 @@ const resolveRequestContextFailureSurface = (spec, lookupResult) => {
         reasonCode
     };
 };
-const readCapturedReadContextWithRetry = async (spec, expectedShape, env) => {
+const readCapturedReadContextWithRetry = async (spec, expectedShape, env, binding) => {
     const readCapturedRequestContext = env.readCapturedRequestContext;
     if (!readCapturedRequestContext) {
         return resolveReadRequestContext(spec, null, expectedShape, env.now());
@@ -843,7 +1015,13 @@ const readCapturedReadContextWithRetry = async (spec, expectedShape, env) => {
                 method: spec.method,
                 path: spec.endpoint,
                 page_context_namespace: pageContextNamespace,
-                shape_key: serializeReadShape(expectedShape)
+                shape_key: serializeReadShape(expectedShape),
+                ...(typeof binding?.profile_ref === "string" ? { profile_ref: binding.profile_ref } : {}),
+                ...(typeof binding?.session_id === "string" ? { session_id: binding.session_id } : {}),
+                ...(typeof binding?.target_tab_id === "number" ? { target_tab_id: binding.target_tab_id } : {}),
+                ...(typeof binding?.run_id === "string" ? { run_id: binding.run_id } : {}),
+                ...(typeof binding?.action_ref === "string" ? { action_ref: binding.action_ref } : {}),
+                ...(typeof binding?.page_url === "string" ? { page_url: binding.page_url } : {})
             });
             const nextNamespace = asString(asRecord(result)?.page_context_namespace);
             if (nextNamespace) {
@@ -1560,7 +1738,13 @@ const executeXhsRead = async (input, spec, env) => {
         }), gate, auditRecord), gate.execution_audit);
     }
     const expectedShape = deriveReadShapeFromCommand(spec, input.params);
-    const requestContextResult = await readCapturedReadContextWithRetry(spec, expectedShape, env);
+    const activeFallbackBinding = buildActiveFallbackTemplateBinding({
+        executionContext: input.executionContext,
+        options: input.options,
+        abilityAction: input.abilityAction,
+        pageUrl: env.getLocationHref()
+    });
+    const requestContextResult = await readCapturedReadContextWithRetry(spec, expectedShape, env, activeFallbackBinding);
     if (requestContextResult.state !== "hit") {
         const pageStateRoot = await resolvePageStateRoot();
         if (canUsePageStateFallback(spec, input.params, pageStateRoot)) {
@@ -1630,6 +1814,22 @@ const executeXhsRead = async (input, spec, env) => {
             expectedShape,
             reason: continuityFailure,
             continuity: requestContextResult.signedContinuity,
+            gate,
+            auditRecord
+        }, env);
+    }
+    const activeFallbackGate = resolveActiveApiFetchFallbackGate({
+        executionInput: input,
+        templateEvidence: requestContextResult.templateEvidence,
+        signedContinuity: requestContextResult.signedContinuity,
+        env
+    });
+    if (activeFallbackGate.gate_decision !== "allowed") {
+        return failClosedForActiveApiFetchFallbackGate({
+            abilityId: input.abilityId,
+            spec,
+            expectedShape,
+            gateResult: activeFallbackGate,
             gate,
             auditRecord
         }, env);
@@ -1814,7 +2014,8 @@ const executeXhsRead = async (input, spec, env) => {
                 approval_record: gate.approval_record,
                 risk_state_output: resolveRiskStateOutput(gate, auditRecord),
                 audit_record: auditRecord,
-                signed_continuity: requestContextResult.signedContinuity
+                signed_continuity: requestContextResult.signedContinuity,
+                route_evidence: activeFallbackGate
             },
             observability: createReadObservability({
                 spec,
