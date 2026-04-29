@@ -685,6 +685,137 @@ describe("native messaging bridge", () => {
     expect(forwardCall).toBe(1);
   });
 
+  it("does not replay runtime.restore_xhs_target after forward disconnect", async () => {
+    let forwardCall = 0;
+    const transport = {
+      async open(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            protocol: "webenvoy.native-bridge.v1",
+            session_id: "nm-session-001",
+            state: "ready"
+          },
+          error: null
+        };
+      },
+      async forward(): Promise<BridgeResponseEnvelope> {
+        forwardCall += 1;
+        throw new NativeMessagingTransportError(
+          "ERR_TRANSPORT_DISCONNECTED",
+          "forward disconnected"
+        );
+      },
+      async heartbeat(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            session_id: "nm-session-001"
+          },
+          error: null
+        };
+      }
+    };
+
+    const bridge = new NativeMessagingBridge({
+      transport
+    });
+
+    await expect(
+      bridge.runCommand({
+        runId: "run-no-restore-replay-001",
+        profile: "xhs_001",
+        cwd: "/tmp",
+        command: "runtime.restore_xhs_target",
+        params: {
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          query: "露营",
+          timeout_ms: 10
+        }
+      })
+    ).rejects.toMatchObject<Partial<NativeMessagingTransportError>>({
+      code: "ERR_TRANSPORT_DISCONNECTED"
+    });
+    expect(forwardCall).toBe(1);
+  });
+
+  it("binds runtime.restore_xhs_target safety gate to the active native session", async () => {
+    let forwardedParams: Record<string, unknown> | null = null;
+    const transport = {
+      async open(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            protocol: "webenvoy.native-bridge.v1",
+            session_id: "nm-session-restore-001",
+            state: "ready"
+          },
+          error: null
+        };
+      },
+      async forward(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        forwardedParams = request.params.command_params as Record<string, unknown>;
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            session_id: "nm-session-restore-001",
+            run_id: "run-restore-session-bind-001",
+            command: "runtime.restore_xhs_target"
+          },
+          payload: {},
+          error: null
+        };
+      },
+      async heartbeat(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
+        return {
+          id: request.id,
+          status: "success",
+          summary: {
+            session_id: "nm-session-restore-001"
+          },
+          error: null
+        };
+      }
+    };
+
+    const bridge = new NativeMessagingBridge({
+      transport
+    });
+
+    const result = await bridge.runCommand({
+      runId: "run-restore-session-bind-001",
+      profile: "xhs_001",
+      cwd: "/tmp",
+      command: "runtime.restore_xhs_target",
+      params: {
+        target_domain: "www.xiaohongshu.com",
+        target_page: "search_result_tab",
+        target_tab_id: 44,
+        query: "露营",
+        restore_safety_gate: {
+          source: "cli_persisted_runtime_gate",
+          profile_ref: "xhs_001",
+          run_id: "run-restore-session-bind-001"
+        }
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(forwardedParams).toMatchObject({
+      restore_safety_gate: {
+        source: "cli_persisted_runtime_gate",
+        profile_ref: "xhs_001",
+        run_id: "run-restore-session-bind-001",
+        session_id: "nm-session-restore-001"
+      }
+    });
+  });
+
   it("retries idempotent runCommand after recoverable forward disconnect", async () => {
     let forwardCall = 0;
     const transport = {

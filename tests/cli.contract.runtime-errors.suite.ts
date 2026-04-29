@@ -1,6 +1,60 @@
 import { describe, expect, it } from "vitest";
 import { repoRoot, binPath, mockBrowserPath, nativeHostMockPath, repoOwnedNativeHostEntryPath, browserStateFilename, tempDirs, resolveDatabaseSync, DatabaseSync, itWithSqlite, createRuntimeCwd, createNativeHostManifest, seedInstalledPersistentExtension, defaultRuntimeEnv, runCli, expectBundledNativeHostStarts, createNativeHostCommand, createShellWrappedNativeHostCommand, PROFILE_MODE_ROOT_PREFERRED, quoteLauncherExportValue, resolveCanonicalExpectedProfileDir, expectProfileRootOnlyLauncherContract, expectDualEnvRootPreferredLauncherContract, runGit, createGitWorktreePair, runCliAsync, parseSingleJsonLine, encodeNativeBridgeEnvelope, readSingleNativeBridgeEnvelope, asRecord, resolveCliGateEnvelope, resolveWriteInteractionTier, scopedXhsGateOptions, assertLockMissing, detectSystemChromePath, wait, runHeadlessDomProbe, realBrowserContractsEnabled, BROWSER_STATE_FILENAME, BROWSER_CONTROL_FILENAME, isPidAlive, scopedReadGateOptions, path, readFile, writeFile, mkdir, realpath, rm, stat, chmod, symlink, spawn, spawnSync, createServer, createRequire, tmpdir, type DatabaseSyncCtor } from "./cli.contract.shared.js";
 
+const startOfficialReadyRuntime = async (
+  runtimeCwd: string,
+  profile: string,
+  runId: string
+): Promise<Record<string, unknown>> => {
+  const manifestPath = await createNativeHostManifest({
+    allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+  });
+  await seedInstalledPersistentExtension({
+    cwd: runtimeCwd,
+    profile
+  });
+  const persistentExtensionIdentity = {
+    extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    manifest_path: manifestPath
+  };
+  const start = runCli(
+    [
+      "runtime.start",
+      "--profile",
+      profile,
+      "--run-id",
+      runId,
+      "--params",
+      JSON.stringify({
+        headless: false,
+        startUrl: "https://www.xiaohongshu.com/search_result/?keyword=test&type=51",
+        persistent_extension_identity: persistentExtensionIdentity
+      })
+    ],
+    runtimeCwd,
+    {
+      WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
+      WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+      WEBENVOY_NATIVE_HOST_MODE: "bootstrap-ack-timeout-error"
+    }
+  );
+  expect(start.status).toBe(0);
+  expect(parseSingleJsonLine(start.stdout)).toMatchObject({
+    command: "runtime.start",
+    status: "success",
+    summary: {
+      profile,
+      identityBindingState: "bound",
+      transportState: "ready"
+    }
+  });
+  await seedInstalledPersistentExtension({
+    cwd: runtimeCwd,
+    profile
+  });
+  return persistentExtensionIdentity;
+};
+
 describe("webenvoy cli contract / runtime errors and fallback", () => {
   it("requires profile for xhs.search", () => {
     const result = runCli([
@@ -293,6 +347,473 @@ describe("webenvoy cli contract / runtime errors and fallback", () => {
       status: "success"
     });
   });
+
+  it("preserves structured target restoration failure reasons on the CLI path", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const result = runCli(
+      [
+        "runtime.restore_xhs_target",
+        "--profile",
+        "xhs_001",
+        "--run-id",
+        "run-contract-restore-target-invalid-001",
+        "--params",
+        JSON.stringify({
+          target_domain: "www.xiaohongshu.com",
+          target_page: "explore_detail_tab",
+          query: "露营"
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_NATIVE_TRANSPORT: "native",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "restore-target-input-invalid"
+      }
+    );
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: "run-contract-restore-target-invalid-001",
+      command: "runtime.restore_xhs_target",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        retryable: false,
+        details: {
+          ability_id: "runtime.restore_xhs_target",
+          stage: "execution",
+          reason: "TARGET_RESTORE_INPUT_INVALID",
+          target_restore_details: {
+            reason: "TARGET_RESTORE_INPUT_INVALID",
+            target_domain: "www.xiaohongshu.com",
+            target_page: "explore_detail_tab",
+            active_fetch_performed: false,
+            closeout_bundle_entered: false
+          }
+        }
+      }
+    });
+  });
+
+  it("maps forwarded target restoration denials to execution failed instead of runtime unavailable", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const result = runCli(
+      [
+        "runtime.restore_xhs_target",
+        "--profile",
+        "xhs_001",
+        "--run-id",
+        "run-contract-restore-target-not-found-001",
+        "--params",
+        JSON.stringify({
+          target_domain: "www.xiaohongshu.com",
+          target_page: "explore_detail_tab",
+          target_tab_id: 44,
+          query: "露营"
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_NATIVE_TRANSPORT: "native",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "restore-target-not-found"
+      }
+    );
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: "run-contract-restore-target-not-found-001",
+      command: "runtime.restore_xhs_target",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        retryable: false,
+        details: {
+          ability_id: "runtime.restore_xhs_target",
+          stage: "execution",
+          reason: "TARGET_RESTORE_TARGET_TAB_NOT_FOUND",
+          target_restore_details: {
+            reason: "TARGET_RESTORE_TARGET_TAB_NOT_FOUND",
+            requested_target_tab_id: 44,
+            active_fetch_performed: false,
+            closeout_bundle_entered: false
+          }
+        }
+      }
+    });
+  });
+
+  it("keeps restore tab query runtime failures as runtime unavailable", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const result = runCli(
+      [
+        "runtime.restore_xhs_target",
+        "--profile",
+        "xhs_001",
+        "--run-id",
+        "run-contract-restore-target-tab-query-failed-001",
+        "--params",
+        JSON.stringify({
+          target_domain: "www.xiaohongshu.com",
+          target_page: "explore_detail_tab",
+          target_tab_id: 44,
+          query: "露营"
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_NATIVE_TRANSPORT: "native",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "restore-target-tab-query-failed"
+      }
+    );
+    expect(result.status).toBe(5);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: "run-contract-restore-target-tab-query-failed-001",
+      command: "runtime.restore_xhs_target",
+      status: "error",
+      error: {
+        code: "ERR_RUNTIME_UNAVAILABLE",
+        retryable: true,
+        details: {
+          ability_id: "runtime.restore_xhs_target",
+          stage: "execution",
+          reason: "TARGET_RESTORE_TAB_QUERY_FAILED",
+          target_restore_details: {
+            reason: "TARGET_RESTORE_TAB_QUERY_FAILED",
+            requested_target_tab_id: 44,
+            active_fetch_performed: false,
+            closeout_bundle_entered: false
+          }
+        }
+      }
+    });
+  });
+
+  it("maps unavailable restored tab ids to execution failed instead of runtime unavailable", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const result = runCli(
+      [
+        "runtime.restore_xhs_target",
+        "--profile",
+        "xhs_001",
+        "--run-id",
+        "run-contract-restore-target-tab-id-unavailable-001",
+        "--params",
+        JSON.stringify({
+          target_domain: "www.xiaohongshu.com",
+          target_page: "explore_detail_tab",
+          target_tab_id: 44,
+          query: "露营"
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_NATIVE_TRANSPORT: "native",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "restore-target-tab-id-unavailable"
+      }
+    );
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: "run-contract-restore-target-tab-id-unavailable-001",
+      command: "runtime.restore_xhs_target",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        retryable: false,
+        details: {
+          ability_id: "runtime.restore_xhs_target",
+          stage: "execution",
+          reason: "TARGET_TAB_ID_UNAVAILABLE",
+          target_restore_details: {
+            reason: "TARGET_TAB_ID_UNAVAILABLE",
+            active_fetch_performed: false,
+            closeout_bundle_entered: false
+          }
+        }
+      }
+    });
+  });
+
+  it("requires target_tab_id before XHS target restoration can mutate tabs", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const result = runCli(
+      [
+        "runtime.restore_xhs_target",
+        "--profile",
+        "xhs_001",
+        "--run-id",
+        "run-contract-restore-target-tab-required-001",
+        "--params",
+        JSON.stringify({
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          query: "露营"
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_NATIVE_TRANSPORT: "native",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "success"
+      }
+    );
+    expect(result.status).toBe(2);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: "run-contract-restore-target-tab-required-001",
+      command: "runtime.restore_xhs_target",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          ability_id: "runtime.restore_xhs_target",
+          stage: "input_validation",
+          reason: "TARGET_RESTORE_TARGET_TAB_REQUIRED"
+        }
+      }
+    });
+  });
+
+  it("blocks XHS target restoration before tab mutation when validation baseline is missing", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const persistentExtensionIdentity = await startOfficialReadyRuntime(
+      runtimeCwd,
+      "xhs_restore_validation_blocked",
+      "run-contract-restore-validation-blocked-001"
+    );
+    const result = runCli(
+      [
+        "runtime.restore_xhs_target",
+        "--profile",
+        "xhs_restore_validation_blocked",
+        "--run-id",
+        "run-contract-restore-validation-blocked-001",
+        "--params",
+        JSON.stringify({
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          target_tab_id: 44,
+          query: "露营",
+          persistent_extension_identity: persistentExtensionIdentity
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
+        WEBENVOY_NATIVE_TRANSPORT: "native",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "runtime-readiness-ready"
+      }
+    );
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: "run-contract-restore-validation-blocked-001",
+      command: "runtime.restore_xhs_target",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          ability_id: "runtime.restore_xhs_target",
+          stage: "execution",
+          reason: "ANTI_DETECTION_VALIDATION_BASELINE_BLOCKED",
+          account_safety: expect.objectContaining({
+            state: "clear"
+          }),
+          xhs_closeout_rhythm: expect.objectContaining({
+            state: "not_required"
+          }),
+          anti_detection_validation_view: expect.objectContaining({
+            all_required_ready: false
+          })
+        }
+      }
+    });
+  });
+
+  it("allows XHS target restoration during the recovery single-probe window before validation baseline is ready", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const profile = "xhs_restore_single_probe_required";
+    const persistentExtensionIdentity = await startOfficialReadyRuntime(
+      runtimeCwd,
+      profile,
+      "run-contract-restore-single-probe-required-001"
+    );
+    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", profile);
+    const metaPath = path.join(profileDir, "__webenvoy_meta.json");
+    const existingMeta = JSON.parse(await readFile(metaPath, "utf8")) as Record<string, unknown>;
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          ...existingMeta,
+          schemaVersion: 1,
+          profileName: profile,
+          profileDir,
+          accountSafety: {
+            state: "clear",
+            platform: null,
+            reason: null,
+            observedAt: null,
+            cooldownUntil: null,
+            sourceRunId: null,
+            sourceCommand: null,
+            targetDomain: null,
+            targetTabId: null,
+            pageUrl: null,
+            statusCode: null,
+            platformCode: null
+          },
+          xhsCloseoutRhythm: {
+            state: "single_probe_required",
+            cooldownUntil: "2000-01-01T00:30:00.000Z",
+            operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+            singleProbeRequired: true,
+            singleProbePassedAt: null,
+            probeRunId: null,
+            fullBundleBlocked: true,
+            reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_REQUIRED"]
+          },
+          fingerprintSeeds: {
+            audioNoiseSeed: "seed-restore-single-probe-a",
+            canvasNoiseSeed: "seed-restore-single-probe-c"
+          },
+          updatedAt: "2026-04-25T10:35:00.000Z"
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const result = runCli(
+      [
+        "runtime.restore_xhs_target",
+        "--profile",
+        profile,
+        "--run-id",
+        "run-contract-restore-single-probe-required-001",
+        "--params",
+        JSON.stringify({
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          target_tab_id: 44,
+          query: "露营",
+          persistent_extension_identity: persistentExtensionIdentity
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
+        WEBENVOY_NATIVE_TRANSPORT: "native",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "runtime-readiness-ready"
+      }
+    );
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: "run-contract-restore-single-probe-required-001",
+      command: "runtime.restore_xhs_target",
+      status: "success"
+    });
+  });
+
+  it("attaches a fresh CLI run before restoring an already-running XHS target", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const profile = "xhs_restore_attach_ready";
+    const ownerRunId = "run-contract-restore-attach-owner-001";
+    const restoreRunId = "run-contract-restore-attach-next-001";
+    const persistentExtensionIdentity = await startOfficialReadyRuntime(
+      runtimeCwd,
+      profile,
+      ownerRunId
+    );
+    const profileDir = path.join(runtimeCwd, ".webenvoy", "profiles", profile);
+    const metaPath = path.join(profileDir, "__webenvoy_meta.json");
+    const existingMeta = JSON.parse(await readFile(metaPath, "utf8")) as Record<string, unknown>;
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          ...existingMeta,
+          schemaVersion: 1,
+          profileName: profile,
+          profileDir,
+          accountSafety: {
+            state: "clear",
+            platform: null,
+            reason: null,
+            observedAt: null,
+            cooldownUntil: null,
+            sourceRunId: null,
+            sourceCommand: null,
+            targetDomain: null,
+            targetTabId: null,
+            pageUrl: null,
+            statusCode: null,
+            platformCode: null
+          },
+          xhsCloseoutRhythm: {
+            state: "single_probe_required",
+            cooldownUntil: "2000-01-01T00:30:00.000Z",
+            operatorConfirmedAt: "2026-04-25T10:35:00.000Z",
+            singleProbeRequired: true,
+            singleProbePassedAt: null,
+            probeRunId: null,
+            fullBundleBlocked: true,
+            reasonCodes: ["XHS_RECOVERY_SINGLE_PROBE_REQUIRED"]
+          },
+          fingerprintSeeds: {
+            audioNoiseSeed: "seed-restore-attach-a",
+            canvasNoiseSeed: "seed-restore-attach-c"
+          },
+          updatedAt: "2026-04-25T10:35:00.000Z"
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const result = runCli(
+      [
+        "runtime.restore_xhs_target",
+        "--profile",
+        profile,
+        "--run-id",
+        restoreRunId,
+        "--params",
+        JSON.stringify({
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          target_tab_id: 44,
+          query: "露营",
+          persistent_extension_identity: persistentExtensionIdentity
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
+        WEBENVOY_NATIVE_TRANSPORT: "native",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "runtime-readiness-stale-for-run",
+        WEBENVOY_NATIVE_HOST_STALE_RUN_ID: restoreRunId
+      }
+    );
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: restoreRunId,
+      command: "runtime.restore_xhs_target",
+      status: "success"
+    });
+  }, 10_000);
 
   it("keeps dry_run xhs.search on stdio fallback before official socket mode is confirmed", async () => {
     const runtimeCwd = await createRuntimeCwd();

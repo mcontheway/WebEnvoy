@@ -104,6 +104,8 @@ const XHS_MAIN_WORLD_REQUEST_PATH_ALLOWLIST = new Set([
   USER_HOME_ENDPOINT
 ]);
 const editorInputDebuggerProbeWaitMs = 150;
+const xhsTargetRestoreNavigationTimeoutMs = 5_000;
+const xhsTargetRestoreNavigationPollMs = 100;
 const editorInputDebuggerEntryLabels = ["新的创作"] as const;
 const editorInputSelectors = [
   'div.tiptap.ProseMirror[contenteditable="true"]',
@@ -142,6 +144,7 @@ type ExtensionTab = {
   id?: number;
   url?: string;
   active?: boolean;
+  status?: string;
 };
 
 interface ExtensionPort {
@@ -189,6 +192,9 @@ interface ExtensionChromeApi {
       currentWindow?: boolean;
       url?: string | string[];
     }): Promise<ExtensionTab[]>;
+    get?: (tabId: number) => Promise<ExtensionTab>;
+    create?: (properties: { url: string; active?: boolean }) => Promise<ExtensionTab>;
+    update?: (tabId: number, properties: { url?: string; active?: boolean }) => Promise<ExtensionTab>;
     sendMessage(tabId: number, message: BackgroundToContentMessage): Promise<void>;
   };
   scripting?: {
@@ -877,6 +883,92 @@ const parseUrl = (value: string, base?: string | URL): URL | null => {
   } catch {
     return null;
   }
+};
+
+const buildXhsSearchResultUrl = (query: string): string => {
+  const url = new URL("/search_result", `https://${XHS_READ_DOMAIN}`);
+  url.searchParams.set("keyword", query);
+  url.searchParams.set("type", "51");
+  return url.toString();
+};
+
+const normalizeXhsRestoreSearchUrl = (value: string | null): string | null => {
+  if (!value) {
+    return null;
+  }
+  const url = parseUrl(value);
+  if (!url || url.protocol !== "https:" || url.hostname !== XHS_READ_DOMAIN) {
+    return null;
+  }
+  const pathname = url.pathname.replace(/\/+$/, "") || "/";
+  if (pathname !== "/search_result") {
+    return null;
+  }
+  const normalized = new URL("/search_result", `https://${XHS_READ_DOMAIN}`);
+  const entries = Array.from(url.searchParams.entries()).sort(([leftKey, leftValue], [rightKey, rightValue]) =>
+    leftKey === rightKey ? leftValue.localeCompare(rightValue) : leftKey.localeCompare(rightKey)
+  );
+  for (const [key, entryValue] of entries) {
+    normalized.searchParams.append(key, entryValue);
+  }
+  return normalized.toString();
+};
+
+const xhsRestoreSearchUrlsMatch = (observedUrl: string | null, targetUrl: string): boolean => {
+  const observed = normalizeXhsRestoreSearchUrl(observedUrl);
+  const target = normalizeXhsRestoreSearchUrl(targetUrl);
+  return observed !== null && target !== null && observed === target;
+};
+
+const isRestoreTargetTabNotFoundError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  return /(?:no tab with id|tab not found)/i.test(message);
+};
+
+const isRestoreSafetyGateAllowed = (
+  value: Record<string, unknown> | null,
+  profile: string,
+  runId: string,
+  sessionId: string,
+  targetDomain: string | null,
+  targetPage: string | null,
+  targetTabId: number,
+  targetUrl: string,
+  actionRef: string
+): boolean => {
+  const rhythmState = asNonEmptyString(value?.xhs_closeout_rhythm_state);
+  const recoveryProbeWindow = value?.recovery_probe_window === true;
+  const runtimeContextId = asNonEmptyString(value?.runtime_context_id);
+  const directRuntimeReady =
+    value?.identity_binding_state === "bound" &&
+    value.transport_state === "ready" &&
+    value.bootstrap_state === "ready" &&
+    value.runtime_readiness === "ready";
+  const attachedRuntimeReady =
+    value?.restore_runtime_attach_state === "attached_existing_runtime" &&
+    value.identity_binding_state === "bound" &&
+    value.transport_state === "ready";
+  return (
+    value?.source === "cli_persisted_runtime_gate" &&
+    value.profile_ref === profile &&
+    value.run_id === runId &&
+    runtimeContextId !== null &&
+    value.session_id === sessionId &&
+    value.target_domain === targetDomain &&
+    value.target_page === targetPage &&
+    value.target_tab_id === targetTabId &&
+    value.target_url === targetUrl &&
+    value.action_ref === actionRef &&
+    value.account_safety_state === "clear" &&
+    value.official_runtime_ready === true &&
+    (directRuntimeReady || attachedRuntimeReady) &&
+    value.execution_surface === "real_browser" &&
+    value.headless === false &&
+    (rhythmState === "not_required" ||
+      rhythmState === "single_probe_passed" ||
+      rhythmState === "single_probe_required") &&
+    (recoveryProbeWindow || value.anti_detection_validation_ready === true)
+  );
 };
 
 const buildChromeUrlPatternForDomain = (value: string): string | null => {
@@ -2386,6 +2478,10 @@ class ChromeBackgroundBridge {
     this.#runtimeTrustState.clearRuntimeBootstrapStates();
   }
 
+  #clearRuntimeBootstrapStateByProfile(profile: string): void {
+    this.#runtimeTrustState.clearRuntimeBootstrapStateByProfile(profile);
+  }
+
   #clearTrustedFingerprintContextBySession(profile: string, sessionId: string): void {
     this.#runtimeTrustState.clearTrustedContextBySession(profile, sessionId);
   }
@@ -2413,9 +2509,11 @@ class ChromeBackgroundBridge {
 
     if (profile) {
       this.#clearTrustedFingerprintContextsByProfile(profile);
+      this.#clearRuntimeBootstrapStateByProfile(profile);
       return;
     }
     this.#clearTrustedFingerprintContexts();
+    this.#clearRuntimeBootstrapStates();
   }
 
   #rememberTrustedFingerprintContext(
@@ -2836,6 +2934,10 @@ class ChromeBackgroundBridge {
       await this.#handleRuntimeTabs(request);
       return;
     }
+    if (command === "runtime.restore_xhs_target") {
+      await this.#handleRuntimeRestoreXhsTarget(request);
+      return;
+    }
     if (command === "runtime.reload_tab") {
       await this.#handleRuntimeReloadTab(request);
       return;
@@ -3096,6 +3198,322 @@ class ChromeBackgroundBridge {
         }
       });
     }
+  }
+
+  async #resolveTabById(tabId: number): Promise<ExtensionTab | null> {
+    if (this.chromeApi.tabs.get) {
+      return await this.chromeApi.tabs.get(tabId);
+    }
+    const tabs = await this.chromeApi.tabs.query({});
+    return tabs.find((tab) => tab.id === tabId) ?? null;
+  }
+
+  async #waitForRestoredTargetNavigation(input: {
+    tabId: number;
+    targetUrl: string;
+    timeoutMs: number;
+  }): Promise<
+    | { ok: true; tab: ExtensionTab }
+    | {
+        ok: false;
+        reason:
+          | "TARGET_RESTORE_TARGET_TAB_NOT_FOUND"
+          | "TARGET_RESTORE_TAB_QUERY_FAILED"
+          | "TARGET_RESTORE_NAVIGATION_NOT_READY";
+        message: string;
+        details: Record<string, unknown>;
+      }
+  > {
+    const deadline = Date.now() + Math.max(1, input.timeoutMs);
+    let lastObservedUrl: string | null = null;
+    let lastObservedStatus: string | null = null;
+
+    while (true) {
+      let tab: ExtensionTab | null = null;
+      try {
+        tab = await this.#resolveTabById(input.tabId);
+      } catch (error) {
+        const targetNotFound = this.chromeApi.tabs.get ? isRestoreTargetTabNotFoundError(error) : false;
+        return {
+          ok: false,
+          reason: targetNotFound ? "TARGET_RESTORE_TARGET_TAB_NOT_FOUND" : "TARGET_RESTORE_TAB_QUERY_FAILED",
+          message: error instanceof Error ? error.message : String(error),
+          details: {
+            requested_target_tab_id: input.tabId,
+            target_url: input.targetUrl
+          }
+        };
+      }
+
+      if (!tab || tab.id !== input.tabId) {
+        return {
+          ok: false,
+          reason: "TARGET_RESTORE_TARGET_TAB_NOT_FOUND",
+          message: "runtime.restore_xhs_target could not confirm target_tab_id after navigation",
+          details: {
+            requested_target_tab_id: input.tabId,
+            resolved_target_tab_id: tab?.id ?? null,
+            target_url: input.targetUrl
+          }
+        };
+      }
+
+      lastObservedUrl = typeof tab.url === "string" ? tab.url : null;
+      lastObservedStatus = typeof tab.status === "string" ? tab.status : null;
+      if (xhsRestoreSearchUrlsMatch(lastObservedUrl, input.targetUrl) && lastObservedStatus === "complete") {
+        return { ok: true, tab };
+      }
+
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        return {
+          ok: false,
+          reason: "TARGET_RESTORE_NAVIGATION_NOT_READY",
+          message: "runtime.restore_xhs_target target tab did not reach the requested URL before timeout",
+          details: {
+            requested_target_tab_id: input.tabId,
+            target_url: input.targetUrl,
+            observed_url: lastObservedUrl,
+            observed_status: lastObservedStatus
+          }
+        };
+      }
+
+      await this.#sleep(Math.min(xhsTargetRestoreNavigationPollMs, remainingMs));
+    }
+  }
+
+  async #handleRuntimeRestoreXhsTarget(request: BridgeRequest): Promise<void> {
+    const commandParams = asRecord(request.params.command_params) ?? {};
+    const targetDomain = asNonEmptyString(commandParams.target_domain);
+    const targetPage = asNonEmptyString(commandParams.target_page);
+    const targetTabId = asInteger(commandParams.target_tab_id);
+    const query = asNonEmptyString(commandParams.query);
+    const actionRef =
+      asNonEmptyString(commandParams.action_ref) ??
+      asNonEmptyString(commandParams.gate_invocation_id) ??
+      asNonEmptyString(request.params.run_id) ??
+      request.id;
+    const runId = String(request.params.run_id ?? request.id);
+    const sessionId = String(request.params.session_id ?? this.#sessionId);
+    const profile = typeof request.profile === "string" ? request.profile : null;
+    const fail = (reason: string, message: string, extra?: Record<string, unknown>) => {
+      this.#emit({
+        id: request.id,
+        status: "error",
+        summary: {
+          session_id: sessionId,
+          run_id: runId,
+          command: "runtime.restore_xhs_target",
+          profile,
+          relay_path: "host>background"
+        },
+        payload: {
+          details: {
+            stage: "execution",
+            reason,
+            target_domain: targetDomain,
+            target_page: targetPage,
+            target_tab_id: targetTabId,
+            active_fetch_performed: false,
+            closeout_bundle_entered: false,
+            ...(extra ?? {})
+          }
+        },
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message
+        }
+      });
+    };
+
+    if (!profile) {
+      fail("TARGET_RESTORE_PROFILE_REQUIRED", "runtime.restore_xhs_target requires a managed profile");
+      return;
+    }
+
+    if (targetDomain !== XHS_READ_DOMAIN || targetPage !== "search_result_tab" || !query) {
+      fail("TARGET_RESTORE_INPUT_INVALID", "runtime.restore_xhs_target requires XHS search_result target and query");
+      return;
+    }
+
+    if (targetTabId === null) {
+      fail("TARGET_RESTORE_TARGET_TAB_REQUIRED", "runtime.restore_xhs_target requires target_tab_id");
+      return;
+    }
+    const targetUrl = buildXhsSearchResultUrl(query);
+    const restoreSafetyGate = asRecord(commandParams.restore_safety_gate);
+
+    if (
+      !isRestoreSafetyGateAllowed(
+        restoreSafetyGate,
+        profile,
+        runId,
+        sessionId,
+        targetDomain,
+        targetPage,
+        targetTabId,
+        targetUrl,
+        actionRef
+      )
+    ) {
+      fail(
+        "TARGET_RESTORE_SAFETY_GATE_BLOCKED",
+        "runtime.restore_xhs_target requires a current restore safety gate"
+      );
+      return;
+    }
+
+    let explicitTarget: ExtensionTab | null = null;
+    try {
+      explicitTarget = await this.#resolveTabById(targetTabId);
+    } catch (error) {
+      const targetNotFound = this.chromeApi.tabs.get ? isRestoreTargetTabNotFoundError(error) : false;
+      fail(
+        targetNotFound ? "TARGET_RESTORE_TARGET_TAB_NOT_FOUND" : "TARGET_RESTORE_TAB_QUERY_FAILED",
+        error instanceof Error ? error.message : String(error),
+        { requested_target_tab_id: targetTabId }
+      );
+      return;
+    }
+
+    if (!explicitTarget) {
+      fail("TARGET_RESTORE_TARGET_TAB_NOT_FOUND", "runtime.restore_xhs_target could not find target_tab_id", {
+        requested_target_tab_id: targetTabId
+      });
+      return;
+    }
+    if (explicitTarget.id !== targetTabId) {
+      fail("TARGET_RESTORE_TARGET_TAB_NOT_FOUND", "runtime.restore_xhs_target resolved a different tab id", {
+        requested_target_tab_id: targetTabId,
+        resolved_target_tab_id: explicitTarget.id ?? null
+      });
+      return;
+    }
+
+    const sourceTab = explicitTarget;
+    const previousUrl = typeof sourceTab?.url === "string" ? sourceTab.url : null;
+    if (typeof sourceTab.id !== "number") {
+      fail("TARGET_TAB_ID_UNAVAILABLE", "target tab id is unavailable", {
+        requested_target_tab_id: targetTabId,
+        target_url: targetUrl
+      });
+      return;
+    }
+    const bootstrap = this.#runtimeTrustState.getBootstrap(profile);
+    const trusted = this.#runtimeTrustState.getTrusted(profile, sessionId);
+    const bootstrapBindsTarget =
+      !!bootstrap &&
+      (bootstrap.status === "pending" || bootstrap.status === "ready") &&
+      bootstrap.sessionId === sessionId &&
+      bootstrap.sourceTabId === sourceTab.id &&
+      bootstrap.sourceDomain === targetDomain;
+    const trustedBindsTarget =
+      !!trusted &&
+      trusted.sessionId === sessionId &&
+      trusted.sourceTabId === sourceTab.id &&
+      trusted.sourceDomain === targetDomain;
+    if (!bootstrapBindsTarget && !trustedBindsTarget) {
+      fail("TARGET_RESTORE_MANAGED_TAB_NOT_BOUND", "runtime.restore_xhs_target requires a current managed tab binding", {
+        requested_target_tab_id: targetTabId,
+        bootstrap_session_id: bootstrap?.sessionId ?? null,
+        bootstrap_run_id: bootstrap?.runId ?? null,
+        bootstrap_runtime_context_id: bootstrap?.runtimeContextId ?? null,
+        bootstrap_source_tab_id: bootstrap?.sourceTabId ?? null,
+        bootstrap_source_domain: bootstrap?.sourceDomain ?? null,
+        trusted_source_tab_id: trusted?.sourceTabId ?? null,
+        trusted_source_domain: trusted?.sourceDomain ?? null
+      });
+      return;
+    }
+    let restoredTab = sourceTab;
+    let restoreAction: "already_matching" | "navigate_existing_tab";
+
+    if (xhsRestoreSearchUrlsMatch(previousUrl, targetUrl)) {
+      restoreAction = "already_matching";
+    } else {
+      if (!this.chromeApi.tabs.update) {
+        fail("TARGET_RESTORE_UNAVAILABLE", "chrome.tabs.update is unavailable");
+        return;
+      }
+      try {
+        restoredTab = await this.chromeApi.tabs.update(sourceTab.id, {
+          url: targetUrl,
+          active: true
+        });
+        restoreAction = "navigate_existing_tab";
+      } catch (error) {
+        fail(
+          "TARGET_RESTORE_NAVIGATION_FAILED",
+          error instanceof Error ? error.message : String(error),
+          { previous_url: previousUrl, target_url: targetUrl }
+        );
+        return;
+      }
+    }
+
+    const navigationResult = await this.#waitForRestoredTargetNavigation({
+      tabId: sourceTab.id,
+      targetUrl,
+      timeoutMs: xhsTargetRestoreNavigationTimeoutMs
+    });
+    if (!navigationResult.ok) {
+      fail(navigationResult.reason, navigationResult.message, {
+        ...navigationResult.details,
+        previous_url: previousUrl
+      });
+      return;
+    }
+    restoredTab = navigationResult.tab;
+
+    const restoredTabId = typeof restoredTab?.id === "number"
+      ? restoredTab.id
+      : typeof sourceTab?.id === "number"
+        ? sourceTab.id
+        : null;
+    if (restoredTabId === null) {
+      fail("TARGET_TAB_ID_UNAVAILABLE", "restored target tab id is unavailable", {
+        target_url: targetUrl
+      });
+      return;
+    }
+
+    const restoredAt = new Date().toISOString();
+    this.#emit({
+      id: request.id,
+      status: "success",
+      summary: {
+        session_id: String(request.params.session_id ?? this.#sessionId),
+        run_id: runId,
+        command: "runtime.restore_xhs_target",
+        profile,
+        tab_id: restoredTabId,
+        relay_path: "host>background"
+      },
+      payload: {
+        target_tab_id: restoredTabId,
+        target_url: targetUrl,
+        restore_evidence: {
+          evidence_class: "target_tab_restoration",
+          profile_ref: profile,
+          session_id: sessionId,
+          target_tab_id: restoredTabId,
+          target_domain: targetDomain,
+          target_page: targetPage,
+          page_url: targetUrl,
+          previous_url: previousUrl,
+          requested_target_tab_id: targetTabId,
+          run_id: runId,
+          action_ref: actionRef,
+          restore_action: restoreAction,
+          restored_at: restoredAt,
+          safety_scope: "webenvoy_managed_runtime",
+          active_fetch_performed: false,
+          closeout_bundle_entered: false
+        }
+      },
+      error: null
+    });
   }
 
   async #handleRuntimeReloadTab(request: BridgeRequest): Promise<void> {

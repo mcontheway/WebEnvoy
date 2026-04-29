@@ -150,21 +150,37 @@ const normalizeCanonicalGrantApprovalTimestamp = (params: JsonObject): JsonObjec
 const resolveForwardCommandParams = (
   params: JsonObject,
   runId: string,
-  sessionId: string
+  sessionId: string,
+  command: string
 ): JsonObject => {
   const boundParams = bindIssue209LiveReadEnvelopeToSessionForContract({
     params,
     runId,
     sessionId
   });
-  return normalizeCanonicalGrantApprovalTimestamp(boundParams);
+  const normalizedParams = normalizeCanonicalGrantApprovalTimestamp(boundParams);
+  if (command !== "runtime.restore_xhs_target") {
+    return normalizedParams;
+  }
+  const restoreSafetyGate = asObject(normalizedParams.restore_safety_gate);
+  if (!restoreSafetyGate) {
+    return normalizedParams;
+  }
+  return {
+    ...normalizedParams,
+    restore_safety_gate: {
+      ...restoreSafetyGate,
+      session_id: sessionId
+    }
+  };
 };
 
 const isNonIdempotentForward = (input: BridgeCommandInput): boolean => {
   if (
     input.command === "runtime.bootstrap" ||
     input.command === "runtime.start" ||
-    input.command === "runtime.login"
+    input.command === "runtime.login" ||
+    input.command === "runtime.restore_xhs_target"
   ) {
     return true;
   }
@@ -518,7 +534,7 @@ export class NativeMessagingBridge {
       sessionId,
       runId: input.runId,
       command: input.command,
-      commandParams: resolveForwardCommandParams(input.params, input.runId, sessionId),
+      commandParams: resolveForwardCommandParams(input.params, input.runId, sessionId, input.command),
       cwd: input.cwd,
       timeoutMs: forwardTimeoutMs
     });
@@ -553,7 +569,12 @@ export class NativeMessagingBridge {
         sessionId: retrySessionId,
         runId: input.runId,
         command: input.command,
-        commandParams: resolveForwardCommandParams(input.params, input.runId, retrySessionId),
+        commandParams: resolveForwardCommandParams(
+          input.params,
+          input.runId,
+          retrySessionId,
+          input.command
+        ),
         cwd: input.cwd,
         timeoutMs: retryTimeoutMs
       });

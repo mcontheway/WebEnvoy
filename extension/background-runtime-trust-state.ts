@@ -63,6 +63,10 @@ export class BackgroundRuntimeTrustState {
     this.#runtimeBootstrapStates.clear();
   }
 
+  clearRuntimeBootstrapStateByProfile(profile: string): void {
+    this.#runtimeBootstrapStates.delete(profile);
+  }
+
   clearTrustedContextBySession(profile: string, sessionId: string): void {
     this.#trustedFingerprintContexts.delete(buildTrustedFingerprintContextKey(profile, sessionId));
   }
