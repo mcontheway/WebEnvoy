@@ -17,6 +17,7 @@ type MainWorldRequestType =
   | "fingerprint-install"
   | "fingerprint-verify"
   | "page-state-read"
+  | "captured-request-context-provenance-set"
   | "captured-request-context-read";
 
 type MainWorldFetchResult = {
@@ -353,6 +354,32 @@ export const readPageStateViaMainWorld = async (): Promise<Record<string, unknow
     : null;
 };
 
+export const configureCapturedRequestContextProvenanceViaMainWorld = async (
+  input: {
+    page_context_namespace: CapturedRequestContextLookup["page_context_namespace"];
+    profile_ref: string;
+    session_id: string;
+    target_tab_id: number | null;
+    run_id: string;
+    action_ref: string;
+    page_url: string;
+  }
+): Promise<Record<string, unknown> | null> => {
+  const result = await mainWorldCall<unknown>({
+    type: "captured-request-context-provenance-set",
+    payload: {
+      page_context_namespace: input.page_context_namespace,
+      ...(typeof input.profile_ref === "string" ? { profile_ref: input.profile_ref } : {}),
+      ...(typeof input.session_id === "string" ? { session_id: input.session_id } : {}),
+      ...(typeof input.target_tab_id === "number" ? { target_tab_id: input.target_tab_id } : {}),
+      ...(typeof input.run_id === "string" ? { run_id: input.run_id } : {}),
+      ...(typeof input.action_ref === "string" ? { action_ref: input.action_ref } : {}),
+      ...(typeof input.page_url === "string" ? { page_url: input.page_url } : {})
+    }
+  });
+  return asRecord(result);
+};
+
 const asCapturedRequestContextLookupResult = (
   value: unknown
 ): CapturedRequestContextLookupResult | null => {
@@ -389,14 +416,20 @@ export const readCapturedRequestContextViaMainWorld = async (
   );
   const result = await mainWorldCall<unknown>({
     type: "captured-request-context-read",
-    payload: {
-      method: input.method,
-      path: input.path,
-      ...(pageContextNamespace ? { page_context_namespace: pageContextNamespace } : {}),
-      shape_key: input.shape_key,
-      ...(typeof input.min_observed_at === "number" && Number.isFinite(input.min_observed_at)
-        ? { min_observed_at: input.min_observed_at }
-        : {})
+      payload: {
+        method: input.method,
+        path: input.path,
+        ...(pageContextNamespace ? { page_context_namespace: pageContextNamespace } : {}),
+        shape_key: input.shape_key,
+        ...(typeof input.profile_ref === "string" ? { profile_ref: input.profile_ref } : {}),
+        ...(typeof input.session_id === "string" ? { session_id: input.session_id } : {}),
+        ...(typeof input.target_tab_id === "number" ? { target_tab_id: input.target_tab_id } : {}),
+        ...(typeof input.run_id === "string" ? { run_id: input.run_id } : {}),
+        ...(typeof input.action_ref === "string" ? { action_ref: input.action_ref } : {}),
+        ...(typeof input.page_url === "string" ? { page_url: input.page_url } : {}),
+        ...(typeof input.min_observed_at === "number" && Number.isFinite(input.min_observed_at)
+          ? { min_observed_at: input.min_observed_at }
+          : {})
     }
   });
   const normalized = asCapturedRequestContextLookupResult(result);

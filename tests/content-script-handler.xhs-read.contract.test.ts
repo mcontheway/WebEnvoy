@@ -83,6 +83,51 @@ const approvedLiveOptions = {
   }
 } as const;
 
+const createInstalledFingerprintContext = () => ({
+  profile: "xhs_001",
+  source: "profile_meta" as const,
+  fingerprint_profile_bundle: null,
+  fingerprint_patch_manifest: null,
+  fingerprint_consistency_check: {
+    profile: "xhs_001",
+    expected_environment: {
+      os_family: "linux",
+      os_version: "6.8",
+      arch: "x64"
+    },
+    actual_environment: {
+      os_family: "linux",
+      os_version: "6.8",
+      arch: "x64"
+    },
+    decision: "match" as const,
+    reason_codes: []
+  },
+  execution: {
+    live_allowed: true,
+    live_decision: "allowed" as const,
+    allowed_execution_modes: ["dry_run", "recon", "live_read_limited", "live_read_high_risk"],
+    reason_codes: []
+  },
+  injection: {
+    installed: true,
+    required_patches: [],
+    missing_required_patches: [],
+    source: "main_world"
+  }
+});
+
+const createActiveFallbackRuntimeAttestation = () => ({
+  source: "official_chrome_runtime_readiness",
+  runtime_readiness: "ready",
+  profile_ref: "xhs_001",
+  session_id: "nm-session-001",
+  run_id: "run-contract-001",
+  execution_surface: "real_browser",
+  headless: false,
+  observed_at: "2026-04-29T00:00:00.000Z"
+});
+
 const anonymousReadOptions = {
   target_domain: "www.xiaohongshu.com",
   target_tab_id: 32,
@@ -150,6 +195,7 @@ const createMessage = (input: {
   payload: Record<string, unknown>;
   cookie?: string;
   options?: Record<string, unknown>;
+  fingerprintContext?: Record<string, unknown> | null;
   xhsEnvOverrides?: Partial<XhsSearchEnvironment>;
 }): {
   handler: ContentScriptHandler;
@@ -214,6 +260,7 @@ const createMessage = (input: {
       params: {
         session_id: "nm-session-001"
       },
+      ...(input.fingerprintContext ? { fingerprintContext: input.fingerprintContext } : {}),
       commandParams: {
         request_id: "req-contract-001",
         gate_invocation_id: `issue209-gate-${input.command}-001`,
@@ -491,7 +538,249 @@ describe("content-script handler xhs read commands", () => {
     });
   });
 
-  it("preserves page-state fallback diagnostics for xhs.user_home failures on the extension path", async () => {
+	  it("configures active fallback provenance before consuming an already-stamped captured request context", async () => {
+	    const callOrder: string[] = [];
+    let configuredProvenance: Record<string, unknown> | null = null;
+    const callSignature = vi.fn(async () => ({
+      "X-s": "signature",
+      "X-t": "timestamp"
+    }));
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          note: {
+            note_id: "abc123"
+          }
+        }
+      }
+    }));
+    const { handler, message } = createMessage({
+      command: "xhs.detail",
+      abilityId: "xhs.note.detail.v1",
+      targetPage: "explore_detail_tab",
+      href: "https://www.xiaohongshu.com/explore/abc123",
+	      options: {
+	        simulate_result: null,
+	        active_api_fetch_fallback: {
+	          enabled: true,
+	          account_safety_state: "clear",
+	          rhythm_state: "allowed",
+	          runtime_attestation: createActiveFallbackRuntimeAttestation()
+	        }
+	      },
+	      fingerprintContext: createInstalledFingerprintContext(),
+	      payload: {
+	        note_id: "abc123"
+	      },
+      xhsEnvOverrides: {
+        now: () => 1_710_000_100_000,
+        configureCapturedRequestContextProvenance: async (input) => {
+          callOrder.push("configure");
+          configuredProvenance = input as unknown as Record<string, unknown>;
+        },
+        readCapturedRequestContext: async (input) => {
+          callOrder.push("read");
+          expect(configuredProvenance).toMatchObject({
+            profile_ref: "xhs_001",
+            session_id: "nm-session-001",
+            target_tab_id: 32,
+            run_id: "run-contract-001",
+            action_ref: "read",
+            page_url: "https://www.xiaohongshu.com/explore/abc123"
+          });
+          return {
+            page_context_namespace: input.page_context_namespace,
+            shape_key: input.shape_key,
+            admitted_template: {
+              route_evidence_class: "passive_api_capture",
+              source_kind: "page_request",
+              transport: "fetch",
+              method: "POST",
+              path: "/api/sns/web/v1/feed",
+              url: "https://www.xiaohongshu.com/api/sns/web/v1/feed",
+              status: 200,
+              captured_at: 1_710_000_099_000,
+              observed_at: 1_710_000_099_000,
+              page_context_namespace: input.page_context_namespace,
+              shape_key: input.shape_key,
+              shape: {
+                command: "xhs.detail",
+                method: "POST",
+                pathname: "/api/sns/web/v1/feed",
+                note_id: "abc123"
+              },
+              profile_ref: "xhs_001",
+              session_id: "nm-session-001",
+              target_tab_id: 32,
+              run_id: "run-contract-001",
+              action_ref: "read",
+              page_url: "https://www.xiaohongshu.com/explore/abc123",
+              request: {
+                headers: {
+                  "X-S-Common": "{\"detailId\":\"captured-detail-id\"}"
+                },
+                body: {
+                  source_note_id: "abc123"
+                }
+              },
+              response: {
+                headers: {},
+                body: {
+                  code: 0,
+                  data: {
+                    note: {
+                      note_id: "abc123"
+                    }
+                  }
+                }
+              },
+              referrer:
+                "https://www.xiaohongshu.com/explore/abc123?xsec_token=token-abc123&xsec_source=pc_search"
+            },
+            rejected_observation: null,
+            incompatible_observation: null,
+            available_shape_keys: [input.shape_key]
+          } as never;
+        },
+        callSignature,
+        fetchJson
+      }
+    });
+
+    const resultPromise = waitForSingleResult(handler);
+    expect(handler.onBackgroundMessage(message)).toBe(true);
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    expect(callOrder).toEqual(["configure", "read"]);
+	    expect(callSignature).toHaveBeenCalled();
+	    expect(fetchJson).toHaveBeenCalled();
+	  });
+
+	  it("blocks active fallback when browser surface is only caller self-attested on the extension path", async () => {
+	    const callSignature = vi.fn(async () => ({
+	      "X-s": "signature",
+	      "X-t": "timestamp"
+	    }));
+	    const fetchJson = vi.fn(async () => ({
+	      status: 200,
+	      body: {
+	        code: 0,
+	        data: {
+	          note: {
+	            note_id: "abc123"
+	          }
+	        }
+	      }
+	    }));
+	    const { handler, message } = createMessage({
+	      command: "xhs.detail",
+	      abilityId: "xhs.note.detail.v1",
+	      targetPage: "explore_detail_tab",
+	      href: "https://www.xiaohongshu.com/explore/abc123",
+	      options: {
+	        simulate_result: null,
+	        active_api_fetch_fallback: {
+	          enabled: true,
+	          account_safety_state: "clear",
+	          rhythm_state: "allowed",
+	          fingerprint_validation_state: "ready",
+	          execution_surface: "real_browser",
+	          headless: false
+	        }
+	      },
+	      payload: {
+	        note_id: "abc123"
+	      },
+	      xhsEnvOverrides: {
+	        now: () => 1_710_000_100_000,
+	        readCapturedRequestContext: async (input) => ({
+	          page_context_namespace: input.page_context_namespace,
+	          shape_key: input.shape_key,
+	          admitted_template: {
+	            route_evidence_class: "passive_api_capture",
+	            source_kind: "page_request",
+	            transport: "fetch",
+	            method: "POST",
+	            path: "/api/sns/web/v1/feed",
+	            url: "https://www.xiaohongshu.com/api/sns/web/v1/feed",
+	            status: 200,
+	            captured_at: 1_710_000_099_000,
+	            observed_at: 1_710_000_099_000,
+	            page_context_namespace: input.page_context_namespace,
+	            shape_key: input.shape_key,
+	            shape: {
+	              command: "xhs.detail",
+	              method: "POST",
+	              pathname: "/api/sns/web/v1/feed",
+	              note_id: "abc123"
+	            },
+	            profile_ref: "xhs_001",
+	            session_id: "nm-session-001",
+	            target_tab_id: 32,
+	            run_id: "run-contract-001",
+	            action_ref: "read",
+	            page_url: "https://www.xiaohongshu.com/explore/abc123",
+	            request: {
+	              headers: {
+	                "X-S-Common": "{\"detailId\":\"captured-detail-id\"}"
+	              },
+	              body: {
+	                source_note_id: "abc123"
+	              }
+	            },
+	            response: {
+	              headers: {},
+	              body: {
+	                code: 0,
+	                data: {
+	                  note: {
+	                    note_id: "abc123"
+	                  }
+	                }
+	              }
+	            },
+	            referrer:
+	              "https://www.xiaohongshu.com/explore/abc123?xsec_token=token-abc123&xsec_source=pc_search"
+	          },
+	          rejected_observation: null,
+	          incompatible_observation: null,
+	          available_shape_keys: [input.shape_key]
+	        }) as never,
+	        callSignature,
+	        fetchJson
+	      }
+	    });
+
+	    const resultPromise = waitForSingleResult(handler);
+	    expect(handler.onBackgroundMessage(message)).toBe(true);
+	    const result = await resultPromise;
+	    const payload = (result.payload ?? {}) as Record<string, unknown>;
+	    const details = (payload.details ?? {}) as Record<string, unknown>;
+	    const activeGate = (details.active_api_fetch_fallback_gate ?? {}) as Record<string, unknown>;
+
+	    expect(result.ok).toBe(false);
+	    expect(result.error).toMatchObject({
+	      code: "ERR_EXECUTION_FAILED"
+	    });
+	    expect(details).toMatchObject({
+	      reason: "ACTIVE_API_FETCH_FALLBACK_GATE_BLOCKED"
+	    });
+	    expect(activeGate.reason_codes).toEqual(
+	      expect.arrayContaining([
+	        "FINGERPRINT_VALIDATION_NOT_READY",
+	        "RUNTIME_ATTESTATION_REQUIRED",
+	        "EXECUTION_SURFACE_NOT_REAL_BROWSER",
+	        "HEADLESS_NOT_FALSE"
+	      ])
+	    );
+	    expect(callSignature).not.toHaveBeenCalled();
+	    expect(fetchJson).not.toHaveBeenCalled();
+	  });
+
+	  it("preserves page-state fallback diagnostics for xhs.user_home failures on the extension path", async () => {
     const { handler, message } = createMessage({
       command: "xhs.user_home",
       abilityId: "xhs.user.home.v1",

@@ -45,7 +45,37 @@ export interface XhsSearchOptions {
   xhs_recovery_probe?: boolean;
   validation_action?: string;
   validation_text?: string;
+  active_api_fetch_fallback?: ActiveApiFetchFallbackGateOptions;
   editor_focus_attestation?: EditorInputFocusAttestation | Record<string, unknown>;
+}
+
+export interface ActiveApiFetchFallbackGateOptions {
+  enabled?: boolean;
+  account_safety_state?: "clear" | string;
+  rhythm_state?: "allowed" | string;
+  fingerprint_validation_state?: "ready" | string;
+  execution_surface?: "real_browser" | string;
+  headless?: boolean;
+  runtime_attestation?: ActiveApiFetchFallbackRuntimeAttestation | Record<string, unknown> | null;
+  fingerprint_attestation?: ActiveApiFetchFallbackFingerprintAttestation | Record<string, unknown> | null;
+}
+
+export interface ActiveApiFetchFallbackRuntimeAttestation {
+  source?: "official_chrome_runtime_readiness" | string;
+  runtime_readiness?: "ready" | string;
+  profile_ref?: string | null;
+  session_id?: string | null;
+  run_id?: string | null;
+  execution_surface?: "real_browser" | "headless_browser" | string;
+  headless?: boolean;
+  observed_at?: string | null;
+}
+
+export interface ActiveApiFetchFallbackFingerprintAttestation {
+  source?: "content_script_fingerprint_runtime" | string;
+  validation_state?: "ready" | string;
+  profile_ref?: string | null;
+  missing_required_patches?: string[];
 }
 
 export interface SignatureResult {
@@ -113,10 +143,16 @@ export interface CapturedRequestContextLookup {
   page_context_namespace: PageContextNamespace;
   shape_key: string;
   min_observed_at?: number;
+  profile_ref?: string;
+  session_id?: string;
+  target_tab_id?: number;
+  run_id?: string;
+  action_ref?: string;
+  page_url?: string;
 }
 
 export interface CapturedRequestContextArtifact {
-  route_evidence_class?: "passive_api_capture";
+  route_evidence_class?: "passive_api_capture" | "active_api_fetch_fallback";
   source_kind: "page_request" | "synthetic_request";
   transport: "fetch" | "xhr";
   method: CapturedRequestContextMethod;
@@ -128,6 +164,14 @@ export interface CapturedRequestContextArtifact {
   page_context_namespace: PageContextNamespace;
   shape_key: string;
   shape: CapturedRequestContextShape;
+  profile_ref?: string | null;
+  session_id?: string | null;
+  target_tab_id?: number | null;
+  run_id?: string | null;
+  action_ref?: string | null;
+  page_url?: string | null;
+  template_identity?: string | null;
+  freshness_window_ms?: number | null;
   referrer?: string | null;
   template_ready?: boolean;
   rejection_reason?: CapturedRequestContextRejectionReason | null;
@@ -175,6 +219,15 @@ export interface XhsSearchEnvironment {
     pageUrl: string;
     runId: string;
     actionRef: string;
+  }): Promise<unknown>;
+  configureCapturedRequestContextProvenance?(input: {
+    page_context_namespace: PageContextNamespace;
+    profile_ref: string;
+    session_id: string;
+    target_tab_id: number | null;
+    run_id: string;
+    action_ref: string;
+    page_url: string;
   }): Promise<unknown>;
   sleep?(ms: number): Promise<void>;
   callSignature(uri: string, payload: JsonRecord): Promise<SignatureResult>;

@@ -238,6 +238,21 @@ export const readPageStateViaMainWorld = async () => {
         ? result
         : null;
 };
+export const configureCapturedRequestContextProvenanceViaMainWorld = async (input) => {
+    const result = await mainWorldCall({
+        type: "captured-request-context-provenance-set",
+        payload: {
+            page_context_namespace: input.page_context_namespace,
+            ...(typeof input.profile_ref === "string" ? { profile_ref: input.profile_ref } : {}),
+            ...(typeof input.session_id === "string" ? { session_id: input.session_id } : {}),
+            ...(typeof input.target_tab_id === "number" ? { target_tab_id: input.target_tab_id } : {}),
+            ...(typeof input.run_id === "string" ? { run_id: input.run_id } : {}),
+            ...(typeof input.action_ref === "string" ? { action_ref: input.action_ref } : {}),
+            ...(typeof input.page_url === "string" ? { page_url: input.page_url } : {})
+        }
+    });
+    return asRecord(result);
+};
 const asCapturedRequestContextLookupResult = (value) => {
     const record = asRecord(value);
     if (!record ||
@@ -267,6 +282,12 @@ export const readCapturedRequestContextViaMainWorld = async (input) => {
             path: input.path,
             ...(pageContextNamespace ? { page_context_namespace: pageContextNamespace } : {}),
             shape_key: input.shape_key,
+            ...(typeof input.profile_ref === "string" ? { profile_ref: input.profile_ref } : {}),
+            ...(typeof input.session_id === "string" ? { session_id: input.session_id } : {}),
+            ...(typeof input.target_tab_id === "number" ? { target_tab_id: input.target_tab_id } : {}),
+            ...(typeof input.run_id === "string" ? { run_id: input.run_id } : {}),
+            ...(typeof input.action_ref === "string" ? { action_ref: input.action_ref } : {}),
+            ...(typeof input.page_url === "string" ? { page_url: input.page_url } : {}),
             ...(typeof input.min_observed_at === "number" && Number.isFinite(input.min_observed_at)
                 ? { min_observed_at: input.min_observed_at }
                 : {})

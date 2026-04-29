@@ -679,8 +679,8 @@ const assertXhsLivePreflightAllowsCommand = (input) => {
         }
     });
 };
-export const ensureOfficialChromeRuntimeReady = async (context, ability, requestedExecutionMode, bridge, fingerprintContext, gate, readStatus) => {
-    await prepareOfficialChromeRuntime({
+const prepareXhsOfficialChromeRuntime = async (context, ability, requestedExecutionMode, bridge, fingerprintContext, gate, readStatus) => {
+    return await prepareOfficialChromeRuntime({
         context,
         consumerId: ability.id,
         requestedExecutionMode,
@@ -692,6 +692,9 @@ export const ensureOfficialChromeRuntimeReady = async (context, ability, request
         bootstrapTargetResourceId: gate.targetResourceId ?? null,
         readStatus
     });
+};
+export const ensureOfficialChromeRuntimeReady = async (context, ability, requestedExecutionMode, bridge, fingerprintContext, gate, readStatus) => {
+    await prepareXhsOfficialChromeRuntime(context, ability, requestedExecutionMode, bridge, fingerprintContext, gate, readStatus);
 };
 const resolveBootstrapTargetResourceId = (command, parsedInput) => {
     if (command === "xhs.detail") {
@@ -705,6 +708,38 @@ const resolveBootstrapTargetResourceId = (command, parsedInput) => {
             : null;
     }
     return null;
+};
+const buildActiveApiFetchFallbackRuntimeAttestation = (input) => {
+    const runtimeReadiness = asString(input.status?.runtimeReadiness ?? input.status?.runtime_readiness);
+    const executionSurface = asString(input.status?.executionSurface ?? input.status?.execution_surface);
+    const headless = typeof input.status?.headless === "boolean" ? input.status.headless : null;
+    if (!runtimeReadiness || !executionSurface || headless === null) {
+        return null;
+    }
+    return {
+        source: "official_chrome_runtime_readiness",
+        runtime_readiness: runtimeReadiness,
+        profile_ref: input.context.profile ?? null,
+        session_id: input.sessionId,
+        run_id: input.context.run_id,
+        execution_surface: executionSurface,
+        headless,
+        observed_at: new Date().toISOString()
+    };
+};
+const injectActiveApiFetchFallbackRuntimeAttestation = (input) => {
+    const activeFallback = asObject(input.options.active_api_fetch_fallback);
+    if (!activeFallback) {
+        return input.options;
+    }
+    const { fingerprint_validation_state: _fingerprintValidationState, execution_surface: _executionSurface, headless: _headless, runtime_attestation: _runtimeAttestation, fingerprint_attestation: _fingerprintAttestation, ...activeFallbackRest } = activeFallback;
+    return {
+        ...input.options,
+        active_api_fetch_fallback: {
+            ...activeFallbackRest,
+            ...(input.attestation ? { runtime_attestation: input.attestation } : {})
+        }
+    };
 };
 const xhsSearch = async (context) => {
     return xhsReadCommand(context, {
@@ -864,8 +899,9 @@ const xhsReadCommand = async (context, inputConfig) => {
         const fingerprintContext = buildFingerprintContextForMeta(context.profile ?? "unknown", profileMeta, {
             requestedExecutionMode: gate.requestedExecutionMode
         });
+        let officialChromeRuntimeStatus = null;
         if (liveXhsCommandRequested || recoveryProbeRequested || reconXhsCommandRequested) {
-            await ensureOfficialChromeRuntimeReady(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, {
+            officialChromeRuntimeStatus = await prepareXhsOfficialChromeRuntime(context, envelope.ability, gate.requestedExecutionMode, bridge, fingerprintContext, {
                 ...gate,
                 targetResourceId: resolveBootstrapTargetResourceId(context.command, parsedInput)
             });
@@ -893,7 +929,14 @@ const xhsReadCommand = async (context, inputConfig) => {
             gate
         });
         const runtimeGateOptions = {
-            ...preparedGateOptions,
+            ...injectActiveApiFetchFallbackRuntimeAttestation({
+                options: preparedGateOptions,
+                attestation: buildActiveApiFetchFallbackRuntimeAttestation({
+                    status: officialChromeRuntimeStatus,
+                    context,
+                    sessionId: bridgeSessionId
+                })
+            }),
             ...(sessionRhythmCompatibilityRefs ?? {}),
             ...(transportIsLoopback && typeof anonymousIsolationVerified === "boolean"
                 ? { __anonymous_isolation_verified: anonymousIsolationVerified }

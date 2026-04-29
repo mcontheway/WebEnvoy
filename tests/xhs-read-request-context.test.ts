@@ -82,6 +82,28 @@ const createAdmissionContext = (runId: string, targetPage: string) => ({
   }
 });
 
+const createActiveFallbackGate = (runId: string) => ({
+  enabled: true,
+  account_safety_state: "clear",
+  rhythm_state: "allowed",
+  fingerprint_validation_state: "ready",
+  runtime_attestation: {
+    source: "official_chrome_runtime_readiness",
+    runtime_readiness: "ready",
+    profile_ref: "xhs_001",
+    session_id: "nm-session-001",
+    run_id: runId,
+    execution_surface: "real_browser",
+    headless: false
+  },
+  fingerprint_attestation: {
+    source: "content_script_fingerprint_runtime",
+    validation_state: "ready",
+    profile_ref: "xhs_001",
+    missing_required_patches: []
+  }
+});
+
 const createLiveReadOptions = (
   runId: string,
   targetPage: string,
@@ -100,6 +122,7 @@ const createLiveReadOptions = (
   approval_record: createApprovalRecord(),
   audit_record: createAuditRecord(targetPage),
   admission_context: createAdmissionContext(runId, targetPage),
+  active_api_fetch_fallback: createActiveFallbackGate(runId),
   ...(overrides ?? {})
 });
 
@@ -110,10 +133,58 @@ const createExecutionContext = (runId: string) => ({
   profile: "xhs_001"
 });
 
+const bindArtifactForLookup = (
+  artifact: Record<string, unknown> | null,
+  input: Parameters<NonNullable<XhsSearchEnvironment["readCapturedRequestContext"]>>[0]
+): Record<string, unknown> | null => {
+  if (!artifact) {
+    return artifact;
+  }
+  return {
+    ...artifact,
+    profile_ref: artifact.profile_ref ?? input.profile_ref,
+    session_id: artifact.session_id ?? input.session_id,
+    target_tab_id: artifact.target_tab_id ?? input.target_tab_id,
+    run_id: artifact.run_id ?? input.run_id,
+    action_ref: artifact.action_ref ?? input.action_ref,
+    page_url: artifact.page_url ?? input.page_url
+  };
+};
+
+const bindLookupResultForTest = (
+  value: unknown,
+  input: Parameters<NonNullable<XhsSearchEnvironment["readCapturedRequestContext"]>>[0]
+): unknown => {
+  const record =
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  if (!record) {
+    return value;
+  }
+  if (
+    "admitted_template" in record ||
+    "rejected_observation" in record ||
+    "incompatible_observation" in record
+  ) {
+    return {
+      ...record,
+      admitted_template: bindArtifactForLookup(record.admitted_template as Record<string, unknown> | null, input),
+      rejected_observation: bindArtifactForLookup(record.rejected_observation as Record<string, unknown> | null, input),
+      incompatible_observation: bindArtifactForLookup(
+        record.incompatible_observation as Record<string, unknown> | null,
+        input
+      )
+    };
+  }
+  return bindArtifactForLookup(record, input);
+};
+
 const createDetailArtifact = (
   overrides?: Partial<CapturedRequestContextArtifact> & Record<string, unknown>
 ): CapturedRequestContextArtifact =>
   ({
+    route_evidence_class: "passive_api_capture",
     source_kind: "page_request",
     transport: "fetch",
     method: "POST",
@@ -162,6 +233,7 @@ const createUserHomeArtifact = (
   overrides?: Partial<CapturedRequestContextArtifact> & Record<string, unknown>
 ): CapturedRequestContextArtifact =>
   ({
+    route_evidence_class: "passive_api_capture",
     source_kind: "page_request",
     transport: "fetch",
     method: "GET",
@@ -204,21 +276,32 @@ const createUserHomeArtifact = (
     ...(overrides ?? {})
   }) as unknown as CapturedRequestContextArtifact;
 
-const createEnvironment = (overrides?: Partial<XhsSearchEnvironment>): XhsSearchEnvironment => ({
-  now: () => 1_710_000_100_000,
-  randomId: () => "generated-id-001",
-  sleep: async () => {},
-  getLocationHref: () => "https://www.xiaohongshu.com/",
-  getDocumentTitle: () => "XHS",
-  getReadyState: () => "complete",
-  getCookie: () => "a1=cookie-token",
-  getPageStateRoot: () => null,
-  readPageStateRoot: async () => null,
-  callSignature: async () => ({ "X-s": "sig", "X-t": "1710000000" }),
-  fetchJson: async () => ({ status: 200, body: { code: 0, data: {} } }),
-  readCapturedRequestContext: async () => null,
-  ...overrides
-});
+const createEnvironment = (overrides?: Partial<XhsSearchEnvironment>): XhsSearchEnvironment => {
+  const readCapturedRequestContext = overrides?.readCapturedRequestContext;
+  return {
+    now: () => 1_710_000_100_000,
+    randomId: () => "generated-id-001",
+    sleep: async () => {},
+    getLocationHref: () => "https://www.xiaohongshu.com/",
+    getDocumentTitle: () => "XHS",
+    getReadyState: () => "complete",
+    getCookie: () => "a1=cookie-token",
+    getPageStateRoot: () => null,
+    readPageStateRoot: async () => null,
+    callSignature: async () => ({ "X-s": "sig", "X-t": "1710000000" }),
+    fetchJson: async () => ({ status: 200, body: { code: 0, data: {} } }),
+    readCapturedRequestContext: readCapturedRequestContext
+      ? async (input) => bindLookupResultForTest(await readCapturedRequestContext(input), input) as never
+      : async () => null,
+    ...overrides,
+    ...(readCapturedRequestContext
+      ? {
+          readCapturedRequestContext: async (input) =>
+            bindLookupResultForTest(await readCapturedRequestContext(input), input) as never
+        }
+      : {})
+  };
+};
 
 describe("xhs read request-context exact-shape reuse", () => {
   it("reuses detail request context on exact note_id hit while keeping image_scenes out of identity", async () => {
@@ -234,6 +317,7 @@ describe("xhs read request-context exact-shape reuse", () => {
       }
     }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+    const readCapturedRequestContext = vi.fn(async () => createDetailArtifact());
 
     const result = await executeXhsDetail(
       {
@@ -250,11 +334,20 @@ describe("xhs read request-context exact-shape reuse", () => {
         getLocationHref: () => "https://www.xiaohongshu.com/explore/note-001",
         callSignature,
         fetchJson,
-        readCapturedRequestContext: async () => createDetailArtifact()
+        readCapturedRequestContext
       })
     );
 
     expect(result.ok).toBe(true);
+    expect(readCapturedRequestContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profile_ref: "xhs_001",
+        target_tab_id: 32,
+        run_id: "run-detail-context-hit-001",
+        action_ref: "read",
+        page_url: "https://www.xiaohongshu.com/explore/note-001"
+      })
+    );
     expect(callSignature).toHaveBeenCalledWith("/api/sns/web/v1/feed", {
       source_note_id: "note-001",
       image_scenes: ["WB_PRV", "CRD_PRV_WEBP"]
@@ -277,6 +370,59 @@ describe("xhs read request-context exact-shape reuse", () => {
         })
       })
     );
+    if (!result.ok) {
+      throw new Error("expected detail success");
+    }
+    expect(result.payload.summary).toMatchObject({
+      route_evidence: {
+        gate_decision: "allowed",
+        route_evidence_class: "active_api_fetch_fallback",
+        consumed_template: {
+          route_evidence_class: "passive_api_capture",
+          source_kind: "page_request"
+        }
+      }
+    });
+  });
+
+  it("blocks active fallback when actual tab binding is absent even if caller supplies target_tab_id", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-current-tab-required-001", "explore_detail_tab", {
+          actual_target_tab_id: undefined
+        }),
+        executionContext: createExecutionContext("run-detail-current-tab-required-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () => createDetailArtifact()
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected active fallback current tab binding failure");
+    }
+    expect(result.payload.details).toMatchObject({
+      reason: "ACTIVE_API_FETCH_FALLBACK_GATE_BLOCKED",
+      active_api_fetch_fallback_gate: {
+        gate_decision: "blocked",
+        reason_codes: expect.arrayContaining(["TARGET_TAB_BINDING_REQUIRED"])
+      }
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
   });
 
   it("prefers captured X-S-Common over caller-supplied options on exact detail hits", async () => {
@@ -370,6 +516,99 @@ describe("xhs read request-context exact-shape reuse", () => {
     expect(result.payload.observability).toMatchObject({
       failure_site: {
         target: "xhs.signed_continuity"
+      }
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("blocks active fallback when a captured template is bound to a different profile", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-cross-profile-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-cross-profile-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () =>
+          createDetailArtifact({
+            profile_ref: "xhs_other_profile"
+          })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected active fallback binding failure");
+    }
+    expect(result.payload.details).toMatchObject({
+      reason: "ACTIVE_API_FETCH_FALLBACK_GATE_BLOCKED",
+      active_api_fetch_fallback_gate: {
+        gate_decision: "blocked",
+        reason_codes: expect.arrayContaining(["PASSIVE_CAPTURE_PROFILE_MISMATCH"])
+      }
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("blocks active fallback when a captured template omits binding provenance", async () => {
+    const fetchJson = vi.fn(async () => ({ status: 200, body: { code: 0, data: {} } }));
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-001"
+        },
+        options: createLiveReadOptions("run-detail-missing-binding-001", "explore_detail_tab"),
+        executionContext: createExecutionContext("run-detail-missing-binding-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: async () =>
+          createDetailArtifact({
+            profile_ref: "",
+            session_id: "",
+            target_tab_id: null,
+            run_id: "",
+            action_ref: "",
+            page_url: ""
+          })
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected active fallback binding failure");
+    }
+    expect(result.payload.details).toMatchObject({
+      reason: "ACTIVE_API_FETCH_FALLBACK_GATE_BLOCKED",
+      active_api_fetch_fallback_gate: {
+        gate_decision: "blocked",
+        reason_codes: expect.arrayContaining([
+          "PASSIVE_CAPTURE_PROFILE_MISMATCH",
+          "PASSIVE_CAPTURE_SESSION_MISMATCH",
+          "PASSIVE_CAPTURE_RUN_MISMATCH",
+          "PASSIVE_CAPTURE_ACTION_MISMATCH",
+          "PASSIVE_CAPTURE_PAGE_MISMATCH"
+        ])
       }
     });
     expect(callSignature).not.toHaveBeenCalled();

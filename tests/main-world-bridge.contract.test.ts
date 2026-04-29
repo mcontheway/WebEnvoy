@@ -10,8 +10,7 @@ import {
   createUserHomeRequestShape,
   createVisitedPageContextNamespace,
   serializeDetailRequestShape,
-  serializeSearchRequestShape
-  ,
+  serializeSearchRequestShape,
   serializeUserHomeRequestShape
 } from "../extension/xhs-search-types.js";
 
@@ -281,6 +280,40 @@ const readCapturedContext = async (input: {
     {}) as Record<string, unknown>;
 };
 
+const configureCapturedContextProvenance = async (input: {
+  dispatched: Array<{ type: string; detail: unknown }>;
+  requestEvent: string;
+  resultEvent: string;
+  requestListener: MockEventListener;
+  pageContextNamespace: string;
+  profileRef: string;
+  sessionId: string;
+  targetTabId: number;
+  runId: string;
+  actionRef: string;
+  pageUrl: string;
+}) => {
+  input.requestListener({
+    type: input.requestEvent,
+    detail: {
+      id: `configure-provenance-${Date.now()}`,
+      type: "captured-request-context-provenance-set",
+      payload: {
+        page_context_namespace: input.pageContextNamespace,
+        profile_ref: input.profileRef,
+        session_id: input.sessionId,
+        target_tab_id: input.targetTabId,
+        run_id: input.runId,
+        action_ref: input.actionRef,
+        page_url: input.pageUrl
+      }
+    }
+  } as unknown as Event);
+  await flushMicrotasks();
+  return (input.dispatched.filter((entry) => entry.type === input.resultEvent).at(-1)?.detail ??
+    {}) as Record<string, unknown>;
+};
+
 describe("main-world bridge contract", () => {
   afterEach(() => {
     vi.resetModules();
@@ -450,6 +483,262 @@ describe("main-world bridge contract", () => {
         }
       }
     });
+  });
+
+  it("stores configured provenance on later passive-captured page requests", async () => {
+    const env = createMockMainWorldEnvironment();
+    const pageContextNamespace = createPageContextNamespace(SEARCH_PAGE_HREF);
+    env.setFetchHandler(async () => {
+      return new Response(JSON.stringify({ code: 0, data: { items: [{ id: "note-001" }] } }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    });
+
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    const configured = await configureCapturedContextProvenance({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace,
+      profileRef: "xhs_001",
+      sessionId: "nm-session-001",
+      targetTabId: 1230427051,
+      runId: "run-active-fallback-provenance-001",
+      actionRef: "xhs.detail",
+      pageUrl: SEARCH_PAGE_HREF
+    });
+    expect(configured).toMatchObject({
+      ok: true,
+      result: {
+        configured: true,
+        page_context_namespace: pageContextNamespace
+      }
+    });
+
+    await (env.mockWindow.fetch as typeof fetch)(`https://www.xiaohongshu.com${SEARCH_ENDPOINT}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ keyword: "contract" })
+    });
+
+    const captured = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace,
+      shapeKey: createShapeKey({ keyword: "contract" })
+    });
+
+    expect(captured).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          route_evidence_class: "passive_api_capture",
+          source_kind: "page_request",
+          profile_ref: "xhs_001",
+          session_id: "nm-session-001",
+          target_tab_id: 1230427051,
+          run_id: "run-active-fallback-provenance-001",
+          action_ref: "xhs.detail",
+          page_url: SEARCH_PAGE_HREF
+        }
+      }
+    });
+  });
+
+  it("binds fresh current-namespace passive templates captured just before provenance is configured", async () => {
+    const pageUrl = "https://www.xiaohongshu.com/search_result?keyword=fresh-bind";
+    const env = createMockMainWorldEnvironment(pageUrl);
+    const pageContextNamespace = createPageContextNamespace(pageUrl);
+    env.setFetchHandler(async () => {
+      return new Response(JSON.stringify({ code: 0, data: { items: [{ id: "note-old" }] } }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    });
+
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    await (env.mockWindow.fetch as typeof fetch)(`https://www.xiaohongshu.com${SEARCH_ENDPOINT}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ keyword: "contract" })
+    });
+    await flushMicrotasks();
+    const capturedBeforeProvenance = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace,
+      shapeKey: createShapeKey({ keyword: "contract" })
+    });
+    expect(capturedBeforeProvenance).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          route_evidence_class: "passive_api_capture",
+          source_kind: "page_request"
+        }
+      }
+    });
+    const configured = await configureCapturedContextProvenance({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace,
+      profileRef: "xhs_001",
+      sessionId: "nm-session-001",
+      targetTabId: 1230427051,
+      runId: "run-active-fallback-provenance-late-001",
+      actionRef: "xhs.detail",
+      pageUrl
+    });
+    expect(configured).toMatchObject({
+      ok: true,
+      result: {
+        configured: true,
+        page_context_namespace: pageContextNamespace,
+        bound_fresh_existing_templates: 1
+      }
+    });
+
+    const captured = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace,
+      shapeKey: createShapeKey({ keyword: "contract" })
+    });
+
+    expect(captured).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          route_evidence_class: "passive_api_capture",
+          source_kind: "page_request",
+          profile_ref: "xhs_001",
+          session_id: "nm-session-001",
+          target_tab_id: 1230427051,
+          run_id: "run-active-fallback-provenance-late-001",
+          action_ref: "xhs.detail",
+          page_url: pageUrl
+        }
+      }
+    });
+
+    const reconfigured = await configureCapturedContextProvenance({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace,
+      profileRef: "xhs_002",
+      sessionId: "nm-session-002",
+      targetTabId: 1230427052,
+      runId: "run-active-fallback-provenance-late-002",
+      actionRef: "xhs.detail",
+      pageUrl
+    });
+    expect(reconfigured).toMatchObject({
+      ok: true,
+      result: {
+        bound_fresh_existing_templates: 0
+      }
+    });
+  });
+
+  it("does not rebind stale passive templates when provenance is configured later", async () => {
+    const pageUrl = "https://www.xiaohongshu.com/search_result?keyword=stale-no-rebind";
+    const env = createMockMainWorldEnvironment(pageUrl);
+    const pageContextNamespace = createPageContextNamespace(pageUrl);
+    env.setFetchHandler(async () => {
+      return new Response(JSON.stringify({ code: 0, data: { items: [{ id: "note-old" }] } }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    });
+
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    await (env.mockWindow.fetch as typeof fetch)(`https://www.xiaohongshu.com${SEARCH_ENDPOINT}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ keyword: "contract" })
+    });
+    await flushMicrotasks();
+    const now = Date.now();
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now + 6000);
+    try {
+      const configured = await configureCapturedContextProvenance({
+        dispatched: env.dispatched,
+        requestEvent: channel.requestEvent,
+        resultEvent: channel.resultEvent,
+        requestListener: channel.requestListener,
+        pageContextNamespace,
+        profileRef: "xhs_001",
+        sessionId: "nm-session-001",
+        targetTabId: 1230427051,
+        runId: "run-active-fallback-provenance-stale-001",
+        actionRef: "xhs.detail",
+        pageUrl
+      });
+      expect(configured).toMatchObject({
+        ok: true,
+        result: {
+          configured: true,
+          bound_fresh_existing_templates: 0
+        }
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    const captured = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace,
+      shapeKey: createShapeKey({ keyword: "contract" })
+    });
+    const admittedTemplate = asRecord(asRecord(captured.result)?.admitted_template);
+    expect(admittedTemplate).not.toHaveProperty("profile_ref");
+    expect(admittedTemplate).not.toHaveProperty("session_id");
+    expect(admittedTemplate).not.toHaveProperty("target_tab_id");
+    expect(admittedTemplate).not.toHaveProperty("run_id");
+    expect(admittedTemplate).not.toHaveProperty("action_ref");
+    expect(admittedTemplate).not.toHaveProperty("page_url");
   });
 
   it("captures XHR search request-context as a real page request", async () => {

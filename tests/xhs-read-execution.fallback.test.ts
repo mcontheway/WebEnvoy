@@ -90,6 +90,28 @@ const createApprovedReadAdmissionContext = (input: {
 });
 };
 
+const createActiveFallbackGate = (runId: string = "run-live-read-fallback-001") => ({
+  enabled: true,
+  account_safety_state: "clear",
+  rhythm_state: "allowed",
+  fingerprint_validation_state: "ready",
+  runtime_attestation: {
+    source: "official_chrome_runtime_readiness",
+    runtime_readiness: "ready",
+    profile_ref: "xhs_001",
+    session_id: "nm-session-001",
+    run_id: runId,
+    execution_surface: "real_browser",
+    headless: false
+  },
+  fingerprint_attestation: {
+    source: "content_script_fingerprint_runtime",
+    validation_state: "ready",
+    profile_ref: "xhs_001",
+    missing_required_patches: []
+  }
+});
+
 const createLiveReadOptions = (overrides?: Partial<XhsSearchOptions>): XhsSearchOptions => ({
   issue_scope: "issue_209",
   target_domain: "www.xiaohongshu.com",
@@ -103,6 +125,7 @@ const createLiveReadOptions = (overrides?: Partial<XhsSearchOptions>): XhsSearch
   risk_state: "allowed",
   approval_record: createApprovalRecord(),
   audit_record: createAuditRecord(),
+  active_api_fetch_fallback: createActiveFallbackGate(),
   ...overrides
 });
 
@@ -114,6 +137,7 @@ const createAdmittedLiveReadOptions = (input: {
   createLiveReadOptions({
     target_page: input.targetPage,
     actual_target_page: input.targetPage,
+    active_api_fetch_fallback: createActiveFallbackGate(input.runId),
     admission_context: createApprovedReadAdmissionContext({
       runId: input.runId,
       targetPage: input.targetPage,
@@ -144,6 +168,7 @@ const createDetailRequestContext = (
   noteId: string,
   overrides?: Record<string, unknown>
 ): Record<string, unknown> => ({
+  route_evidence_class: "passive_api_capture",
   source_kind: "page_request",
   transport: "fetch",
   method: "POST",
@@ -193,6 +218,7 @@ const createUserHomeRequestContext = (
   userId: string,
   overrides?: Record<string, unknown>
 ): Record<string, unknown> => ({
+  route_evidence_class: "passive_api_capture",
   source_kind: "page_request",
   transport: "fetch",
   method: "GET",
@@ -235,10 +261,29 @@ const createUserHomeRequestContext = (
   ...(overrides ?? {})
 });
 
+const bindArtifactForLookup = (
+  artifact: Record<string, unknown> | null,
+  input: Parameters<NonNullable<XhsSearchEnvironment["readCapturedRequestContext"]>>[0]
+): Record<string, unknown> | null => {
+  if (!artifact) {
+    return artifact;
+  }
+  return {
+    ...artifact,
+    profile_ref: artifact.profile_ref ?? input.profile_ref,
+    session_id: artifact.session_id ?? input.session_id,
+    target_tab_id: artifact.target_tab_id ?? input.target_tab_id,
+    run_id: artifact.run_id ?? input.run_id,
+    action_ref: artifact.action_ref ?? input.action_ref,
+    page_url: artifact.page_url ?? input.page_url
+  };
+};
+
 const createRequestContextReader = (
   artifact: Record<string, unknown>
 ): NonNullable<XhsSearchEnvironment["readCapturedRequestContext"]> =>
-  (async () => artifact as never) as NonNullable<XhsSearchEnvironment["readCapturedRequestContext"]>;
+  (async (input) =>
+    bindArtifactForLookup(artifact, input) as never) as NonNullable<XhsSearchEnvironment["readCapturedRequestContext"]>;
 
 const createFallbackExecutionContext = (runId: string) => ({
   runId,
@@ -350,7 +395,178 @@ describe("xhs read execution fallback", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
-  it("returns detail success only when the api payload contains the requested note object", async () => {
+  it("blocks active api fetch fallback when explicit fallback gate approval is missing", async () => {
+    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: { code: 0, data: { note: { noteId: "note-no-active-gate-001" } } }
+    }));
+
+    const result = await executeXhsDetail(
+      {
+        abilityId: "xhs.note.detail.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          note_id: "note-no-active-gate-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-detail-no-active-gate-001",
+          targetPage: "explore_detail_tab",
+          overrides: {
+            active_api_fetch_fallback: undefined
+          }
+        }),
+        executionContext: createFallbackExecutionContext("run-detail-no-active-gate-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/explore/note-no-active-gate-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: createRequestContextReader(
+          createDetailRequestContext("note-no-active-gate-001")
+        )
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected active fallback gate failure");
+    }
+    expect(result.payload.details).toMatchObject({
+      reason: "ACTIVE_API_FETCH_FALLBACK_GATE_BLOCKED",
+      active_api_fetch_fallback_gate: {
+        gate_decision: "blocked",
+        route_evidence_class: "active_api_fetch_fallback",
+        reason_codes: expect.arrayContaining(["ACTIVE_API_FETCH_FALLBACK_NOT_APPROVED"])
+      }
+    });
+    expect(result.payload.observability).toMatchObject({
+      failure_site: {
+        target: "xhs.active_api_fetch_fallback_gate"
+      }
+    });
+    expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+	  it("blocks active api fetch fallback unless account, rhythm, fingerprint, real browser, and headless gates are all clear", async () => {
+	    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+	    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: { code: 0, data: { user: { userId: "user-active-block-001" } } }
+    }));
+
+    const result = await executeXhsUserHome(
+      {
+        abilityId: "xhs.user.home.v1",
+        abilityLayer: "L3",
+        abilityAction: "read",
+        params: {
+          user_id: "user-active-block-001"
+        },
+        options: createAdmittedLiveReadOptions({
+          runId: "run-user-active-block-001",
+          targetPage: "profile_tab",
+          overrides: {
+            active_api_fetch_fallback: {
+              enabled: true,
+              account_safety_state: "clear",
+              rhythm_state: "cooldown",
+              fingerprint_validation_state: "ready",
+              execution_surface: "real_browser",
+              headless: true
+            }
+          }
+        }),
+        executionContext: createFallbackExecutionContext("run-user-active-block-001")
+      },
+      createEnvironment({
+        getLocationHref: () => "https://www.xiaohongshu.com/user/profile/user-active-block-001",
+        callSignature,
+        fetchJson,
+        readCapturedRequestContext: createRequestContextReader(
+          createUserHomeRequestContext("user-active-block-001")
+        )
+      })
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected active fallback gate failure");
+    }
+    expect(result.payload.details).toMatchObject({
+      reason: "ACTIVE_API_FETCH_FALLBACK_GATE_BLOCKED",
+      active_api_fetch_fallback_gate: {
+        reason_codes: expect.arrayContaining(["RHYTHM_NOT_ALLOWED", "HEADLESS_NOT_FALSE"])
+      }
+    });
+	    expect(callSignature).not.toHaveBeenCalled();
+	    expect(fetchJson).not.toHaveBeenCalled();
+	  });
+
+	  it("blocks active api fetch fallback when browser surface is only caller self-attested", async () => {
+	    const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
+	    const fetchJson = vi.fn(async () => ({
+	      status: 200,
+	      body: { code: 0, data: { note: { note_id: "note-self-attested-001" } } }
+	    }));
+
+	    const result = await executeXhsDetail(
+	      {
+	        abilityId: "xhs.note.detail.v1",
+	        abilityLayer: "L3",
+	        abilityAction: "read",
+	        params: {
+	          note_id: "note-self-attested-001"
+	        },
+	        options: createAdmittedLiveReadOptions({
+	          runId: "run-detail-self-attested-001",
+	          targetPage: "explore_detail_tab",
+	          overrides: {
+	            active_api_fetch_fallback: {
+	              enabled: true,
+	              account_safety_state: "clear",
+	              rhythm_state: "allowed",
+	              fingerprint_validation_state: "ready",
+	              execution_surface: "real_browser",
+	              headless: false
+	            }
+	          }
+	        }),
+	        executionContext: createFallbackExecutionContext("run-detail-self-attested-001")
+	      },
+	      createEnvironment({
+	        getLocationHref: () =>
+	          "https://www.xiaohongshu.com/explore/note-self-attested-001",
+	        callSignature,
+	        fetchJson,
+	        readCapturedRequestContext: createRequestContextReader(
+	          createDetailRequestContext("note-self-attested-001")
+	        )
+	      })
+	    );
+
+	    expect(result.ok).toBe(false);
+	    if (result.ok) {
+	      throw new Error("expected active fallback gate failure");
+	    }
+	    expect(result.payload.details).toMatchObject({
+	      reason: "ACTIVE_API_FETCH_FALLBACK_GATE_BLOCKED",
+	      active_api_fetch_fallback_gate: {
+	        reason_codes: expect.arrayContaining([
+	          "FINGERPRINT_VALIDATION_NOT_READY",
+	          "RUNTIME_ATTESTATION_REQUIRED",
+	          "EXECUTION_SURFACE_NOT_REAL_BROWSER",
+	          "HEADLESS_NOT_FALSE"
+	        ])
+	      }
+	    });
+	    expect(callSignature).not.toHaveBeenCalled();
+	    expect(fetchJson).not.toHaveBeenCalled();
+	  });
+
+	  it("returns detail success only when the api payload contains the requested note object", async () => {
     const callSignature = vi.fn(async () => ({
       "X-s": "sig",
       "X-t": "1710000000"
@@ -401,6 +617,13 @@ describe("xhs read execution fallback", () => {
         outcome: "success",
         data_ref: {
           note_id: "note-success-001"
+        }
+      },
+      route_evidence: {
+        gate_decision: "allowed",
+        route_evidence_class: "active_api_fetch_fallback",
+        consumed_template: {
+          route_evidence_class: "passive_api_capture"
         }
       }
     });
