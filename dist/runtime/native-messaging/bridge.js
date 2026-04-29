@@ -87,18 +87,33 @@ const normalizeCanonicalGrantApprovalTimestamp = (params) => {
     }
     return normalizedParams;
 };
-const resolveForwardCommandParams = (params, runId, sessionId) => {
+const resolveForwardCommandParams = (params, runId, sessionId, command) => {
     const boundParams = bindIssue209LiveReadEnvelopeToSessionForContract({
         params,
         runId,
         sessionId
     });
-    return normalizeCanonicalGrantApprovalTimestamp(boundParams);
+    const normalizedParams = normalizeCanonicalGrantApprovalTimestamp(boundParams);
+    if (command !== "runtime.restore_xhs_target") {
+        return normalizedParams;
+    }
+    const restoreSafetyGate = asObject(normalizedParams.restore_safety_gate);
+    if (!restoreSafetyGate) {
+        return normalizedParams;
+    }
+    return {
+        ...normalizedParams,
+        restore_safety_gate: {
+            ...restoreSafetyGate,
+            session_id: sessionId
+        }
+    };
 };
 const isNonIdempotentForward = (input) => {
     if (input.command === "runtime.bootstrap" ||
         input.command === "runtime.start" ||
-        input.command === "runtime.login") {
+        input.command === "runtime.login" ||
+        input.command === "runtime.restore_xhs_target") {
         return true;
     }
     const requestedExecutionMode = input.params.requested_execution_mode;
@@ -335,7 +350,7 @@ export class NativeMessagingBridge {
             sessionId,
             runId: input.runId,
             command: input.command,
-            commandParams: resolveForwardCommandParams(input.params, input.runId, sessionId),
+            commandParams: resolveForwardCommandParams(input.params, input.runId, sessionId, input.command),
             cwd: input.cwd,
             timeoutMs: forwardTimeoutMs
         });
@@ -367,7 +382,7 @@ export class NativeMessagingBridge {
                 sessionId: retrySessionId,
                 runId: input.runId,
                 command: input.command,
-                commandParams: resolveForwardCommandParams(input.params, input.runId, retrySessionId),
+                commandParams: resolveForwardCommandParams(input.params, input.runId, retrySessionId, input.command),
                 cwd: input.cwd,
                 timeoutMs: retryTimeoutMs
             });

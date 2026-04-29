@@ -4,6 +4,7 @@ import { NativeMessagingBridge, NativeMessagingTransportError } from "../runtime
 import { NativeHostBridgeTransport } from "../runtime/native-messaging/host.js";
 import { createLoopbackNativeBridgeTransport } from "../runtime/native-messaging/loopback.js";
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
+import { buildRuntimeBootstrapContextId } from "../runtime/runtime-bootstrap.js";
 import { buildFingerprintContextForMeta, appendFingerprintContext } from "../runtime/fingerprint-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
 import { toSessionRhythmStatusView } from "../runtime/xhs-closeout-rhythm.js";
@@ -261,6 +262,229 @@ const runtimeTabs = async (context) => {
         await bridge?.close().catch(() => undefined);
     }
 };
+const isRuntimeRestoreXhsTargetMutation = (params) => asString(params.target_domain) === "www.xiaohongshu.com" &&
+    asString(params.target_page) === "search_result_tab" &&
+    typeof params.target_tab_id === "number" &&
+    Number.isInteger(params.target_tab_id) &&
+    asString(params.query) !== null;
+const isRuntimeRestoreXhsSearchTarget = (params) => asString(params.target_domain) === "www.xiaohongshu.com" &&
+    asString(params.target_page) === "search_result_tab" &&
+    asString(params.query) !== null;
+const buildXhsRestoreSearchResultUrl = (query) => {
+    const url = new URL("/search_result", "https://www.xiaohongshu.com");
+    url.searchParams.set("keyword", query);
+    url.searchParams.set("type", "51");
+    return url.toString();
+};
+const shouldAttachRuntimeForXhsRestore = (status) => {
+    const takeover = asObject(status.runtimeTakeoverEvidence);
+    return (status.lockHeld !== true &&
+        status.identityBindingState === "bound" &&
+        status.bootstrapState !== "stale" &&
+        (takeover?.attachableReadyRuntime === true ||
+            (status.runtimeReadiness === "recoverable" && takeover?.orphanRecoverable === true)));
+};
+const assertRuntimeRestoreXhsTargetSafetyGate = async (context) => {
+    if (!context.profile) {
+        throw new CliError("ERR_CLI_INVALID_ARGS", "runtime.restore_xhs_target requires profile", {
+            details: {
+                ability_id: "runtime.restore_xhs_target",
+                stage: "input_validation",
+                reason: "TARGET_RESTORE_PROFILE_REQUIRED"
+            }
+        });
+    }
+    if (isRuntimeRestoreXhsSearchTarget(context.params) &&
+        !(typeof context.params.target_tab_id === "number" &&
+            Number.isInteger(context.params.target_tab_id))) {
+        throw new CliError("ERR_CLI_INVALID_ARGS", "runtime.restore_xhs_target requires target_tab_id", {
+            details: {
+                ability_id: "runtime.restore_xhs_target",
+                stage: "input_validation",
+                reason: "TARGET_RESTORE_TARGET_TAB_REQUIRED"
+            }
+        });
+    }
+    if (!isRuntimeRestoreXhsTargetMutation(context.params)) {
+        return null;
+    }
+    let status = await profileRuntime.status({
+        cwd: context.cwd,
+        profile: context.profile,
+        runId: context.run_id,
+        params: context.params
+    });
+    let attachedRuntimeForRestore = false;
+    if (shouldAttachRuntimeForXhsRestore(status)) {
+        await profileRuntime.attach({
+            cwd: context.cwd,
+            profile: context.profile,
+            runId: context.run_id,
+            params: context.params
+        });
+        attachedRuntimeForRestore = true;
+        status = await profileRuntime.status({
+            cwd: context.cwd,
+            profile: context.profile,
+            runId: context.run_id,
+            params: context.params
+        });
+    }
+    const accountSafety = asObject(status.account_safety);
+    const xhsCloseoutRhythm = asObject(status.xhs_closeout_rhythm);
+    const rhythmState = asString(xhsCloseoutRhythm?.state);
+    const actionRef = asString(context.params.action_ref) ??
+        asString(context.params.gate_invocation_id) ??
+        context.run_id;
+    const query = asString(context.params.query);
+    const targetUrl = query ? buildXhsRestoreSearchResultUrl(query) : null;
+    const runtimeContextId = buildRuntimeBootstrapContextId(context.profile, context.run_id);
+    let antiDetectionValidationView = null;
+    let store = null;
+    try {
+        store = new SQLiteRuntimeStore(resolveRuntimeStorePath(context.cwd));
+        antiDetectionValidationView = await buildAntiDetectionValidationViewForProfile({
+            store,
+            profile: context.profile,
+            effectiveExecutionMode: "live_read_high_risk"
+        });
+    }
+    finally {
+        store?.close();
+    }
+    const accountSafetyClear = accountSafety?.state === "clear";
+    const recoveryProbeWindow = rhythmState === "single_probe_required";
+    const rhythmAllowsRestore = rhythmState === "not_required" || rhythmState === "single_probe_passed" || recoveryProbeWindow;
+    const officialRuntimeReady = status.identityBindingState === "bound" &&
+        status.transportState === "ready" &&
+        status.bootstrapState === "ready" &&
+        status.runtimeReadiness === "ready" &&
+        status.executionSurface === "real_browser" &&
+        status.headless === false;
+    const validationReady = antiDetectionValidationView?.all_required_ready === true;
+    if (accountSafetyClear &&
+        rhythmAllowsRestore &&
+        officialRuntimeReady &&
+        (recoveryProbeWindow || validationReady)) {
+        return {
+            source: "cli_persisted_runtime_gate",
+            profile_ref: context.profile,
+            run_id: context.run_id,
+            checked_at: new Date().toISOString(),
+            target_domain: context.params.target_domain,
+            target_page: context.params.target_page,
+            target_tab_id: context.params.target_tab_id,
+            target_url: targetUrl,
+            runtime_context_id: runtimeContextId,
+            action_ref: actionRef,
+            ...(attachedRuntimeForRestore
+                ? {
+                    managed_tab_continuity: {
+                        source: "cli_runtime_attach",
+                        profile_ref: context.profile,
+                        run_id: context.run_id,
+                        runtime_context_id: runtimeContextId,
+                        target_domain: context.params.target_domain,
+                        target_tab_id: context.params.target_tab_id
+                    }
+                }
+                : {}),
+            account_safety_state: accountSafety?.state ?? null,
+            xhs_closeout_rhythm_state: rhythmState,
+            recovery_probe_window: recoveryProbeWindow,
+            official_runtime_ready: true,
+            identity_binding_state: status.identityBindingState,
+            transport_state: status.transportState,
+            bootstrap_state: status.bootstrapState,
+            runtime_readiness: status.runtimeReadiness,
+            execution_surface: status.executionSurface,
+            headless: status.headless,
+            anti_detection_validation_ready: validationReady
+        };
+    }
+    throw new CliError("ERR_EXECUTION_FAILED", "XHS target restoration gate blocked current request", {
+        retryable: false,
+        details: {
+            ability_id: "runtime.restore_xhs_target",
+            stage: "execution",
+            reason: !accountSafetyClear
+                ? "ACCOUNT_RISK_BLOCKED"
+                : !rhythmAllowsRestore
+                    ? "XHS_CLOSEOUT_RHYTHM_BLOCKED"
+                    : !officialRuntimeReady
+                        ? "OFFICIAL_RUNTIME_NOT_READY"
+                        : "ANTI_DETECTION_VALIDATION_BASELINE_BLOCKED",
+            account_safety: accountSafety,
+            xhs_closeout_rhythm: xhsCloseoutRhythm,
+            runtime_status: {
+                identity_binding_state: status.identityBindingState,
+                transport_state: status.transportState,
+                bootstrap_state: status.bootstrapState,
+                runtime_readiness: status.runtimeReadiness,
+                execution_surface: status.executionSurface,
+                headless: status.headless
+            },
+            anti_detection_validation_view: antiDetectionValidationView
+        }
+    });
+};
+const runtimeRestoreXhsTarget = async (context) => {
+    let bridge = null;
+    try {
+        const restoreSafetyGate = await assertRuntimeRestoreXhsTargetSafetyGate(context);
+        bridge = resolveRuntimeBridge();
+        const result = await bridge.runCommand({
+            runId: context.run_id,
+            profile: context.profile,
+            cwd: context.cwd,
+            command: "runtime.restore_xhs_target",
+            params: restoreSafetyGate
+                ? {
+                    ...context.params,
+                    restore_safety_gate: restoreSafetyGate
+                }
+                : context.params
+        });
+        if (!result.ok) {
+            const payload = asObject(result.payload) ?? {};
+            const details = asObject(payload.details);
+            const structuredReason = typeof details?.reason === "string" && details.reason.trim().length > 0
+                ? details.reason.trim()
+                : result.error.code;
+            const semanticRestoreDenial = structuredReason.startsWith("TARGET_RESTORE_") || structuredReason === "TARGET_TAB_ID_UNAVAILABLE";
+            throw new CliError(semanticRestoreDenial ? "ERR_EXECUTION_FAILED" : "ERR_RUNTIME_UNAVAILABLE", result.error.message, {
+                retryable: !semanticRestoreDenial && result.error.code === "ERR_TRANSPORT_TIMEOUT",
+                details: {
+                    ability_id: "runtime.restore_xhs_target",
+                    stage: "execution",
+                    reason: structuredReason,
+                    ...(details ? { target_restore_details: details } : {})
+                }
+            });
+        }
+        return {
+            ...(asObject(result.payload) ?? {}),
+            relay_path: result.relay_path
+        };
+    }
+    catch (error) {
+        if (error instanceof NativeMessagingTransportError) {
+            throw new CliError("ERR_RUNTIME_UNAVAILABLE", `通信链路不可用: ${error.code}`, {
+                retryable: error.retryable,
+                cause: error,
+                details: {
+                    ability_id: "runtime.restore_xhs_target",
+                    stage: "execution",
+                    reason: error.code
+                }
+            });
+        }
+        throw error;
+    }
+    finally {
+        await bridge?.close().catch(() => undefined);
+    }
+};
 const runtimeStart = async (context) => profileRuntime.start({
     cwd: context.cwd,
     profile: context.profile ?? "",
@@ -433,6 +657,7 @@ const runtimeHelp = async () => ({
         "runtime.login",
         "runtime.status",
         "runtime.tabs",
+        "runtime.restore_xhs_target",
         "runtime.stop",
         "runtime.audit",
         "xhs.search",
@@ -475,6 +700,12 @@ export const runtimeCommands = () => [
         status: "implemented",
         requiresProfile: true,
         handler: runtimeTabs
+    },
+    {
+        name: "runtime.restore_xhs_target",
+        status: "implemented",
+        requiresProfile: true,
+        handler: runtimeRestoreXhsTarget
     },
     {
         name: "runtime.stop",

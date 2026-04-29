@@ -126,6 +126,26 @@ const onRequest = (request) => {
         ? request.params.command_params
         : {};
 
+    if (command === "runtime.readiness" && mode === "runtime-readiness-ready") {
+      writeMessage({
+        id: request.id,
+        status: "success",
+        summary: {
+          session_id: String(request.params?.session_id ?? "nm-session-001"),
+          run_id: String(request.params?.run_id ?? request.id),
+          command,
+          relay_path: "host>background"
+        },
+        payload: {
+          transport_state: "ready",
+          bootstrap_state: "ready"
+        },
+        error: null
+      });
+      process.exit(0);
+      return;
+    }
+
     if (command === "runtime.bootstrap") {
       if (mode === "bootstrap-ack-timeout-error") {
         writeMessage({
@@ -191,11 +211,99 @@ const onRequest = (request) => {
             {
               tab_id: 10857874,
               active: true,
-              url: "https://www.xiaohongshu.com/search_result/?keyword=%E9%9C%B2%E8%90%A5&type=51"
+              url: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5&type=51"
             }
           ]
         },
         error: null
+      });
+      process.exit(0);
+      return;
+    }
+
+    if (command === "runtime.restore_xhs_target" && mode === "restore-target-input-invalid") {
+      writeMessage({
+        id: request.id,
+        status: "error",
+        summary: {
+          session_id: String(request.params?.session_id ?? "nm-session-001"),
+          run_id: String(request.params?.run_id ?? request.id),
+          command,
+          profile: request.profile ?? null,
+          relay_path: "host>background"
+        },
+        payload: {
+          details: {
+            stage: "execution",
+            reason: "TARGET_RESTORE_INPUT_INVALID",
+            target_domain: commandParams.target_domain ?? null,
+            target_page: commandParams.target_page ?? null,
+            active_fetch_performed: false,
+            closeout_bundle_entered: false
+          }
+        },
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: "runtime.restore_xhs_target requires XHS search_result target and query"
+        }
+      });
+      process.exit(0);
+      return;
+    }
+
+    if (command === "runtime.restore_xhs_target" && mode === "restore-target-not-found") {
+      writeMessage({
+        id: request.id,
+        status: "error",
+        summary: {
+          session_id: String(request.params?.session_id ?? "nm-session-001"),
+          run_id: String(request.params?.run_id ?? request.id),
+          command,
+          profile: request.profile ?? null,
+          relay_path: "host>background"
+        },
+        payload: {
+          details: {
+            stage: "execution",
+            reason: "TARGET_RESTORE_TARGET_TAB_NOT_FOUND",
+            requested_target_tab_id: commandParams.target_tab_id ?? null,
+            active_fetch_performed: false,
+            closeout_bundle_entered: false
+          }
+        },
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: "runtime.restore_xhs_target could not find target_tab_id"
+        }
+      });
+      process.exit(0);
+      return;
+    }
+
+    if (command === "runtime.restore_xhs_target" && mode === "restore-target-tab-id-unavailable") {
+      writeMessage({
+        id: request.id,
+        status: "error",
+        summary: {
+          session_id: String(request.params?.session_id ?? "nm-session-001"),
+          run_id: String(request.params?.run_id ?? request.id),
+          command,
+          profile: request.profile ?? null,
+          relay_path: "host>background"
+        },
+        payload: {
+          details: {
+            stage: "execution",
+            reason: "TARGET_TAB_ID_UNAVAILABLE",
+            target_url: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5&type=51",
+            active_fetch_performed: false,
+            closeout_bundle_entered: false
+          }
+        },
+        error: {
+          code: "ERR_TRANSPORT_FORWARD_FAILED",
+          message: "restored target tab id is unavailable"
+        }
       });
       process.exit(0);
       return;
