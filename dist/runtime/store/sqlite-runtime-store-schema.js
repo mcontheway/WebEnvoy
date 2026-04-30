@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 16;
 const hasColumn = (db, tableName, columnName) => {
     const rows = db
         .prepare(`PRAGMA table_info(${tableName})`)
@@ -435,6 +435,15 @@ const migrateV13ToV14 = (db) => {
 const migrateV14ToV15 = (db) => {
     rebuildSessionRhythmWindowStateAsProfileScoped(db, 15);
 };
+const migrateV15ToV16 = (db) => {
+    if (!hasColumn(db, "runtime_gate_audit_records", "action_ref")) {
+        db.exec(`
+      ALTER TABLE runtime_gate_audit_records
+      ADD COLUMN action_ref TEXT;
+    `);
+    }
+    db.prepare("UPDATE runtime_store_meta SET value = ? WHERE key = 'schema_version'").run("16");
+};
 export const initializeRuntimeStoreSchema = ({ db, onSchemaMismatch }) => {
     db.exec("PRAGMA journal_mode=WAL;");
     db.exec(`
@@ -499,6 +508,7 @@ export const initializeRuntimeStoreSchema = ({ db, onSchemaMismatch }) => {
       target_tab_id INTEGER NOT NULL,
       target_page TEXT NOT NULL,
       action_type TEXT,
+      action_ref TEXT,
       requested_execution_mode TEXT NOT NULL,
       effective_execution_mode TEXT NOT NULL,
       gate_decision TEXT NOT NULL,
@@ -856,6 +866,11 @@ export const initializeRuntimeStoreSchema = ({ db, onSchemaMismatch }) => {
         if (currentVersion === 14) {
             migrateV14ToV15(db);
             currentVersion = 15;
+            continue;
+        }
+        if (currentVersion === 15) {
+            migrateV15ToV16(db);
+            currentVersion = 16;
             continue;
         }
         break;

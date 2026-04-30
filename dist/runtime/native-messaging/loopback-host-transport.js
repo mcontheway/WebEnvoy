@@ -25,6 +25,9 @@ export class InMemoryHostTransport {
     heartbeat(request) {
         return this.request(request);
     }
+    currentTransportProof() {
+        return { surface: "in_memory_loopback" };
+    }
     request(request) {
         ensureBridgeRequestEnvelope(request);
         return new Promise((resolve) => {

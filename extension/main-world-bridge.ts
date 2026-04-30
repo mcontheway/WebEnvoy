@@ -974,7 +974,8 @@ const installFingerprintRuntime = (runtime: RecordValue | null): RecordValue => 
     applied_patches: appliedPatches,
     required_patches: requiredPatches,
     missing_required_patches: missingRequiredPatches,
-    source: typeof runtime?.source === "string" ? runtime.source : "unknown"
+    source: "main_world",
+    runtime_source: typeof runtime?.source === "string" ? runtime.source : "unknown"
   };
 };
 

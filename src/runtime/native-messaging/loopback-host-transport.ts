@@ -3,7 +3,7 @@ import {
   type BridgeRequestEnvelope,
   type BridgeResponseEnvelope
 } from "./protocol.js";
-import type { NativeBridgeTransport } from "./transport.js";
+import type { NativeBridgeTransport, NativeBridgeTransportProof } from "./transport.js";
 import type { HostMessage } from "./loopback-messages.js";
 import type { InMemoryPort } from "./loopback-port.js";
 
@@ -42,6 +42,10 @@ export class InMemoryHostTransport implements NativeBridgeTransport {
 
   heartbeat(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
     return this.request(request);
+  }
+
+  currentTransportProof(): NativeBridgeTransportProof {
+    return { surface: "in_memory_loopback" };
   }
 
   private request(request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {

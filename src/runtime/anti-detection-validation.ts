@@ -5,6 +5,7 @@ import {
   type AntiDetectionValidationScope,
   type AntiDetectionValidationScopeKeyInput,
   type AntiDetectionValidationViewRecord,
+  type GateAuditRecord,
   RuntimeStoreError,
   SQLiteRuntimeStore
 } from "./store/sqlite-runtime-store.js";
@@ -161,6 +162,18 @@ const validationScopeSignal = (
     return signals.layer3_session_rhythm;
   }
   return null;
+};
+
+const assertRequiredSourceValidationSignals = (signals: XhsCloseoutValidationSignalMap): void => {
+  for (const requiredScope of XHS_CLOSEOUT_REQUIRED_VALIDATION_SCOPES) {
+    if (validationScopeSignal(signals, requiredScope.validationScope)) {
+      continue;
+    }
+    throw new RuntimeStoreError(
+      "ERR_RUNTIME_STORE_INVALID_INPUT",
+      `XHS closeout validation source is missing required ${requiredScope.targetFrRef}/${requiredScope.validationScope} evidence`
+    );
+  }
 };
 
 const isJsonObject = (value: unknown): value is JsonObject =>
@@ -695,4 +708,144 @@ export const persistXhsCloseoutValidationSourceSamples = async (input: {
     profile: input.profile,
     effectiveExecutionMode: input.effectiveExecutionMode
   });
+};
+
+export const persistXhsCloseoutValidationSourceEvidence = async (input: {
+  store: SQLiteRuntimeStore;
+  profile: string;
+  effectiveExecutionMode: AntiDetectionExecutionMode;
+  targetDomain: typeof XHS_CLOSEOUT_TARGET_DOMAIN;
+  sourceRunId: string;
+  observedAt: string;
+  sourceAudit: GateAuditRecord;
+  actionRef: string;
+  signals: XhsCloseoutValidationSignalMap;
+  artifactRefs?: string[];
+  useExistingTransaction?: boolean;
+}): Promise<AntiDetectionStructuredSampleRecord[]> => {
+  const profileKey = safeRefPart(input.profile);
+  const modeKey = safeRefPart(input.effectiveExecutionMode);
+  const sourceRunKey = safeRefPart(input.sourceRunId);
+  const artifactRefs = input.artifactRefs ?? [];
+
+  if (input.targetDomain !== XHS_CLOSEOUT_TARGET_DOMAIN) {
+    throw new RuntimeStoreError(
+      "ERR_RUNTIME_STORE_INVALID_INPUT",
+      "XHS closeout validation source target_domain must be www.xiaohongshu.com"
+    );
+  }
+
+  assertRequiredSourceValidationSignals(input.signals);
+  assertBrowserReturnedCloseoutSignals(input.signals);
+
+  const persistSamples = async () => {
+    for (const requiredScope of XHS_CLOSEOUT_REQUIRED_VALIDATION_SCOPES) {
+      const scope = buildXhsCloseoutValidationScope({
+        profile: input.profile,
+        effectiveExecutionMode: input.effectiveExecutionMode,
+        targetFrRef: requiredScope.targetFrRef,
+        validationScope: requiredScope.validationScope
+      });
+      const signal = validationScopeSignal(input.signals, requiredScope.validationScope);
+      if (!signal) {
+        throw new RuntimeStoreError(
+          "ERR_RUNTIME_STORE_INVALID_INPUT",
+          `XHS closeout validation source is missing required ${requiredScope.targetFrRef}/${requiredScope.validationScope} evidence`
+        );
+      }
+
+      const scopeKey = `${safeRefPart(requiredScope.targetFrRef)}/${safeRefPart(requiredScope.validationScope)}`;
+      const refSuffix = `${profileKey}/${modeKey}/${sourceRunKey}/${scopeKey}`;
+      const requestRef = `validation-request/source/xhs-closeout-min-v1/${refSuffix}`;
+      const sampleRef = `validation-sample/source/xhs-closeout-min-v1/${refSuffix}`;
+      const sampleGoal = `capture ${requiredScope.targetFrRef} XHS closeout validation source`;
+
+      await input.store.upsertAntiDetectionValidationRequest({
+        requestRef,
+        validationScope: requiredScope.validationScope,
+        targetFrRef: requiredScope.targetFrRef,
+        profileRef: scope.profileRef,
+        browserChannel: scope.browserChannel,
+        executionSurface: scope.executionSurface,
+        sampleGoal,
+        requestedExecutionMode: input.effectiveExecutionMode,
+        probeBundleRef: scope.probeBundleRef,
+        requestState: "accepted",
+        requestedAt: input.observedAt
+      });
+      await input.store.upsertAntiDetectionValidationRequest({
+        requestRef,
+        validationScope: requiredScope.validationScope,
+        targetFrRef: requiredScope.targetFrRef,
+        profileRef: scope.profileRef,
+        browserChannel: scope.browserChannel,
+        executionSurface: scope.executionSurface,
+        sampleGoal,
+        requestedExecutionMode: input.effectiveExecutionMode,
+        probeBundleRef: scope.probeBundleRef,
+        requestState: "sampling",
+        requestedAt: input.observedAt
+      });
+      await input.store.insertAntiDetectionStructuredSample({
+        ...scope,
+        sampleRef,
+        requestRef,
+        runId: input.sourceRunId,
+        capturedAt: input.observedAt,
+        structuredPayload: {
+          target_fr_ref: requiredScope.targetFrRef,
+          validation_scope: requiredScope.validationScope,
+          profile_ref: scope.profileRef,
+          probe_bundle_ref: scope.probeBundleRef,
+          source_gate_audit: {
+            event_id: input.sourceAudit.event_id,
+            decision_id: input.sourceAudit.decision_id,
+            session_id: input.sourceAudit.session_id,
+            action_ref: input.sourceAudit.action_ref ?? input.actionRef,
+            target_domain: input.sourceAudit.target_domain,
+            target_tab_id: input.sourceAudit.target_tab_id,
+            target_page: input.sourceAudit.target_page,
+            action_type: input.sourceAudit.action_type,
+            requested_execution_mode: input.sourceAudit.requested_execution_mode,
+            effective_execution_mode: input.sourceAudit.effective_execution_mode,
+            approved_at: input.sourceAudit.approved_at,
+            recorded_at: input.sourceAudit.recorded_at,
+            gate_reasons: input.sourceAudit.gate_reasons
+          },
+          signal
+        },
+        artifactRefs
+      });
+      await input.store.upsertAntiDetectionValidationRequest({
+        requestRef,
+        validationScope: requiredScope.validationScope,
+        targetFrRef: requiredScope.targetFrRef,
+        profileRef: scope.profileRef,
+        browserChannel: scope.browserChannel,
+        executionSurface: scope.executionSurface,
+        sampleGoal,
+        requestedExecutionMode: input.effectiveExecutionMode,
+        probeBundleRef: scope.probeBundleRef,
+        requestState: "completed",
+        requestedAt: input.observedAt
+      });
+    }
+  };
+
+  if (input.useExistingTransaction === true) {
+    await persistSamples();
+  } else {
+    await input.store.runInTransaction(persistSamples);
+  }
+
+  const samples = await Promise.all(
+    XHS_CLOSEOUT_REQUIRED_VALIDATION_SCOPES.map((requiredScope) =>
+      input.store.getAntiDetectionStructuredSample(
+        `validation-sample/source/xhs-closeout-min-v1/${profileKey}/${modeKey}/${sourceRunKey}/${safeRefPart(requiredScope.targetFrRef)}/${safeRefPart(requiredScope.validationScope)}`
+      )
+    )
+  );
+  return samples.filter(
+    (sample): sample is AntiDetectionStructuredSampleRecord => sample !== null
+  );
 };

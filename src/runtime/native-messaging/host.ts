@@ -9,7 +9,11 @@ import {
   type BridgeRequestEnvelope,
   type BridgeResponseEnvelope
 } from "./protocol.js";
-import type { NativeBridgeTransport } from "./transport.js";
+import type {
+  NativeBridgeTransport,
+  NativeBridgeTransportProof,
+  NativeBridgeTransportSurface
+} from "./transport.js";
 import { resolveRuntimeProfileRoot } from "../worktree-root.js";
 
 export const PROFILE_NATIVE_BRIDGE_SOCKET_FILENAME = "nm.sock";
@@ -135,6 +139,7 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
   readonly #hostSpec: { file: string; args: string[] } | null;
   readonly #socketPath: string | null;
   #activeSocketPath: string | null = null;
+  #lastTransportProof: NativeBridgeTransportProof = { surface: "unknown" };
   #child: ChildProcessWithoutNullStreams | null = null;
   #stdoutBuffer = Buffer.alloc(0);
   #pending = new Map<string, PendingMessage>();
@@ -207,12 +212,18 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
     return this.#closePromise;
   }
 
+  currentTransportProof(): NativeBridgeTransportProof {
+    return {
+      ...this.#lastTransportProof
+    };
+  }
+
   async #send(phase: TransportPhase, request: BridgeRequestEnvelope): Promise<BridgeResponseEnvelope> {
     ensureBridgeRequestEnvelope(request);
 
     const resolvedSocket = await this.#resolveSocketPath(request);
     if (resolvedSocket) {
-      return await this.#sendViaSocket(phase, request, resolvedSocket.path);
+      return await this.#sendViaSocket(phase, request, resolvedSocket.path, resolvedSocket.surface);
     }
 
     return await this.#sendViaSpawn(phase, request);
@@ -220,7 +231,7 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
 
   async #resolveSocketPath(
     request: BridgeRequestEnvelope
-  ): Promise<{ path: string; required: boolean } | null> {
+  ): Promise<{ path: string; required: boolean; surface: NativeBridgeTransportSurface } | null> {
     const profileRoot = resolveRuntimeProfileRoot(process.cwd());
     const requestedProfile =
       typeof request.profile === "string" && request.profile.trim().length > 0
@@ -234,7 +245,8 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
       this.#activeSocketPath = this.#socketPath;
       return {
         path: this.#socketPath,
-        required: true
+        required: true,
+        surface: "explicit_socket"
       };
     }
 
@@ -253,9 +265,16 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
       try {
         await access(candidate);
         this.#activeSocketPath = candidate;
+        const surface =
+          requestedProfileSocketPath && candidate === requestedProfileSocketPath
+            ? "profile_socket"
+            : candidate === rootSocketPath
+              ? "root_socket"
+              : "root_socket";
         return {
           path: candidate,
-          required: false
+          required: false,
+          surface
         };
       } catch {
         continue;
@@ -287,6 +306,10 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
     phase: TransportPhase,
     request: BridgeRequestEnvelope
   ): Promise<BridgeResponseEnvelope> {
+    this.#lastTransportProof = {
+      surface: "spawned_host",
+      spawned_host_configured: !!this.#hostCommand
+    };
     if (!this.#hostCommand || !this.#hostSpec) {
       const code =
         phase === "open" ? "ERR_TRANSPORT_HANDSHAKE_FAILED" : "ERR_TRANSPORT_DISCONNECTED";
@@ -339,8 +362,14 @@ export class NativeHostBridgeTransport implements NativeBridgeTransport {
   async #sendViaSocket(
     phase: TransportPhase,
     request: BridgeRequestEnvelope,
-    socketPath: string
+    socketPath: string,
+    surface: NativeBridgeTransportSurface
   ): Promise<BridgeResponseEnvelope> {
+    this.#lastTransportProof = {
+      surface,
+      socket_path: socketPath,
+      spawned_host_configured: !!this.#hostCommand
+    };
     try {
       await access(socketPath);
     } catch {

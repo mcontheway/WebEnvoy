@@ -50,6 +50,30 @@ const createRestoreSafetyGate = (
   anti_detection_validation_ready: input.antiDetectionValidationReady ?? true
 });
 
+const createManagedTabBindingGate = (
+  runId: string,
+  input: {
+    targetTabId?: number;
+    targetDomain?: string;
+    targetPage?: string;
+    actionRef?: string;
+    sessionId?: string;
+  } = {}
+) => ({
+  source: "cli_persisted_runtime_gate",
+  purpose: "xhs_closeout_validation_source",
+  profile_ref: "xhs_001",
+  session_id: input.sessionId ?? "nm-session-001",
+  run_id: runId,
+  checked_at: "2026-04-30T10:00:00.000Z",
+  target_domain: input.targetDomain ?? "www.xiaohongshu.com",
+  target_page: input.targetPage ?? "search_result_tab",
+  target_tab_id: input.targetTabId ?? 44,
+  action_ref: input.actionRef ?? runId,
+  active_fetch_performed: false,
+  closeout_bundle_entered: false
+});
+
 const primeManagedXhsBootstrap = async (
   port: ReturnType<typeof createMockPort>,
   chromeApi: ReturnType<typeof createChromeApi>["chromeApi"],
@@ -131,6 +155,173 @@ const primeStaleRestoreBindingLease = async (
 };
 
 describe("extension service worker / gate and approval", () => {
+  it("blocks XHS validation source main-world probe before managed tab bootstrap binding", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-validation-source-main-world-unbound-001",
+      method: "bridge.forward",
+      profile: "xhs_001",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-validation-source-main-world-unbound-001",
+        command: "runtime.main_world_probe",
+        command_params: {
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          target_tab_id: 44,
+          action_ref: "run-validation-source-main-world-unbound-001",
+          managed_tab_binding_gate: createManagedTabBindingGate(
+            "run-validation-source-main-world-unbound-001"
+          ),
+          main_world_secret: "validation-source-secret-unbound",
+          fingerprint_runtime: createFingerprintRuntimeContext()
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    expect(chromeApi.scripting.executeScript).not.toHaveBeenCalled();
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-validation-source-main-world-unbound-001",
+      status: "error"
+    });
+    const message = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as Record<string, unknown>)
+      .find((entry) => entry.id === "run-validation-source-main-world-unbound-001");
+    expect(asRecord(asRecord(message?.payload)?.details)).toMatchObject({
+      reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_MANAGED_TAB_NOT_BOUND",
+      target_tab_id: 44,
+      active_fetch_performed: false,
+      closeout_bundle_entered: false
+    });
+  });
+
+  it("allows XHS validation source main-world probe after current managed tab bootstrap binding", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    await primeManagedXhsBootstrap(firstPort, chromeApi, {
+      runId: "run-validation-source-main-world-bound-001",
+      targetTabId: 44
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-validation-source-main-world-bound-001",
+      method: "bridge.forward",
+      profile: "xhs_001",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-validation-source-main-world-bound-001",
+        command: "runtime.main_world_probe",
+        command_params: {
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          target_tab_id: 44,
+          action_ref: "run-validation-source-main-world-bound-001",
+          managed_tab_binding_gate: createManagedTabBindingGate(
+            "run-validation-source-main-world-bound-001"
+          ),
+          main_world_secret: "validation-source-secret-bound",
+          fingerprint_runtime: createFingerprintRuntimeContext()
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    expect(chromeApi.scripting.executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 44 },
+        world: "MAIN"
+      })
+    );
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-validation-source-main-world-bound-001",
+      status: "success"
+    });
+    const message = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as Record<string, unknown>)
+      .find((entry) => entry.id === "run-validation-source-main-world-bound-001");
+    expect(asRecord(message?.payload)?.browser_attestation).toMatchObject({
+      source: "chrome_scripting_main_world",
+      execution_surface: "real_browser",
+      extension_surface: "background_service_worker",
+      run_id: "run-validation-source-main-world-bound-001",
+      session_id: "nm-session-001",
+      profile: "xhs_001",
+      target_domain: "www.xiaohongshu.com",
+      target_page: "search_result_tab",
+      target_tab_id: 44,
+      action_ref: "run-validation-source-main-world-bound-001"
+    });
+  });
+
+  it("blocks XHS validation source main-world probe when managed tab bootstrap belongs to another run", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi } = createChromeApi([firstPort]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+    await primeManagedXhsBootstrap(firstPort, chromeApi, {
+      runId: "run-validation-source-main-world-old-001",
+      targetTabId: 44
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-validation-source-main-world-current-001",
+      method: "bridge.forward",
+      profile: "xhs_001",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-validation-source-main-world-current-001",
+        command: "runtime.main_world_probe",
+        command_params: {
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          target_tab_id: 44,
+          action_ref: "run-validation-source-main-world-current-001",
+          managed_tab_binding_gate: createManagedTabBindingGate(
+            "run-validation-source-main-world-current-001"
+          ),
+          main_world_secret: "validation-source-secret-current",
+          fingerprint_runtime: createFingerprintRuntimeContext()
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    expect(chromeApi.scripting.executeScript).not.toHaveBeenCalled();
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-validation-source-main-world-current-001",
+      status: "error"
+    });
+    const message = firstPort.postMessage.mock.calls
+      .map((call) => call[0] as Record<string, unknown>)
+      .find((entry) => entry.id === "run-validation-source-main-world-current-001");
+    expect(asRecord(asRecord(message?.payload)?.details)).toMatchObject({
+      reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_MANAGED_TAB_NOT_BOUND",
+      target_tab_id: 44,
+      bootstrap_run_id: "run-validation-source-main-world-old-001",
+      active_fetch_performed: false,
+      closeout_bundle_entered: false
+    });
+  });
+
   it("forwards fingerprint_context into background bridge", async () => {
     const firstPort = createMockPort();
     const { chromeApi } = createChromeApi([firstPort]);

@@ -1,7 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import { CliError } from "../core/errors.js";
-import type { CommandDefinition, RuntimeContext } from "../core/types.js";
+import type { CommandDefinition, JsonObject, RuntimeContext } from "../core/types.js";
 import {
   WRITE_INTERACTION_TIER,
   getWriteActionMatrixDecisions,
@@ -34,6 +35,7 @@ import {
   type SessionRhythmStatusViewRecord
 } from "../runtime/store/sqlite-runtime-store.js";
 import {
+  persistXhsCloseoutValidationSourceEvidence,
   persistXhsCloseoutValidationSourceSamples,
   readXhsCloseoutValidationGateView,
   toXhsCloseoutValidationGateJson,
@@ -81,6 +83,14 @@ const asStringArrayStrict = (value: unknown): string[] | null =>
   Array.isArray(value) && value.every((item) => typeof item === "string" && item.trim().length > 0)
     ? value.map((item) => item.trim())
     : null;
+
+const unwrapMainWorldProbeResult = (value: unknown): Record<string, unknown> | null => {
+  const envelope = asObject(value);
+  if (!envelope) {
+    return null;
+  }
+  return asObject(envelope.result) ?? envelope;
+};
 
 const resolveRuntimeBridge = (): NativeMessagingBridge => {
   if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
@@ -238,6 +248,9 @@ const requiredXhsCloseoutSampleScopes = [
   ["FR-0014", "layer3_session_rhythm"]
 ] as const;
 
+const XHS_CLOSEOUT_VALIDATION_SOURCE_APPROVED_REASON =
+  "XHS_CLOSEOUT_VALIDATION_SOURCE_APPROVED";
+
 const sampleSignal = (sample: AntiDetectionStructuredSampleRecord): Record<string, unknown> | null => {
   const payload = asObject(sample.structured_payload);
   return asObject(payload?.signal);
@@ -272,6 +285,8 @@ const sampleMatchesSourceGateAudit = (
     sourceGateAudit.event_id === sourceAudit.event_id &&
     sourceGateAudit.decision_id === sourceAudit.decision_id &&
     sourceGateAudit.session_id === sourceAudit.session_id &&
+    asString(sourceGateAudit.action_ref) !== null &&
+    asString(sourceGateAudit.action_ref) === asString(sourceAudit.action_ref) &&
     sourceGateAudit.target_domain === sourceAudit.target_domain &&
     sourceGateAudit.target_tab_id === sourceAudit.target_tab_id &&
     sourceGateAudit.target_page === sourceAudit.target_page &&
@@ -281,6 +296,71 @@ const sampleMatchesSourceGateAudit = (
     capturedAt !== null &&
     approvedAt !== null &&
     capturedAt >= approvedAt
+  );
+};
+
+const sourcePageUrlMatchesSourceAudit = (pageUrl: string | null, sourceAudit: GateAuditRecord): boolean => {
+  if (!pageUrl) {
+    return false;
+  }
+  try {
+    const parsed = new URL(pageUrl);
+    return (
+      parsed.hostname === sourceAudit.target_domain &&
+      sourceAudit.target_page === "search_result_tab" &&
+      parsed.pathname.replace(/\/+$/u, "").endsWith("/search_result")
+    );
+  } catch {
+    return false;
+  }
+};
+
+const signalMatchesSourceBinding = (input: {
+  signal: Record<string, unknown>;
+  sourceAudit: GateAuditRecord;
+  sourceActionRef: string;
+  sourceRunId: string;
+  validationScope: string;
+  rhythmView?: SessionRhythmStatusViewRecord | null;
+}): boolean => {
+  const browserEvidence = asObject(input.signal.browser_returned_evidence);
+  const browserBindingMatches =
+    browserEvidence?.target_domain === input.sourceAudit.target_domain &&
+    asInteger(browserEvidence?.target_tab_id) === input.sourceAudit.target_tab_id &&
+    asString(browserEvidence?.probe_bundle_ref) === "probe-bundle/xhs-closeout-min-v1" &&
+    sourcePageUrlMatchesSourceAudit(asString(browserEvidence?.page_url), input.sourceAudit);
+  if (!browserBindingMatches) {
+    return false;
+  }
+  if (input.validationScope !== "layer2_interaction") {
+    if (input.validationScope !== "layer3_session_rhythm") {
+      return true;
+    }
+    const rhythmView = input.rhythmView ?? null;
+    return (
+      rhythmView !== null &&
+      asString(input.signal.session_rhythm_window_id) === asString(rhythmView.window_state.window_id) &&
+      asString(input.signal.session_rhythm_decision_id) === asString(rhythmView.decision.decision_id) &&
+      asString(rhythmView.decision.run_id) === input.sourceRunId &&
+      asString(rhythmView.decision.session_id) === input.sourceAudit.session_id &&
+      asString(rhythmView.decision.decision) === "allowed" &&
+      asString(rhythmView.decision.current_risk_state) === "allowed" &&
+      asString(rhythmView.decision.next_risk_state) === "allowed" &&
+      input.signal.active_fetch_performed === false &&
+      input.signal.closeout_bundle_entered === false
+    );
+  }
+  const rhythmProfile = asObject(input.signal.rhythm_profile);
+  const strategySelection = asObject(input.signal.strategy_selection);
+  const executionTrace = asObject(input.signal.execution_trace);
+  return (
+    asString(rhythmProfile?.source_run_id) === input.sourceRunId &&
+    asString(strategySelection?.action_kind) === "validation_source_probe" &&
+    asString(strategySelection?.selected_path) === "managed_official_chrome_main_world" &&
+    asString(executionTrace?.action_kind) === "validation_source_probe" &&
+    asString(executionTrace?.action_ref) === input.sourceActionRef &&
+    asString(executionTrace?.session_id) === input.sourceAudit.session_id &&
+    asInteger(executionTrace?.target_tab_id) === input.sourceAudit.target_tab_id
   );
 };
 
@@ -296,10 +376,12 @@ const sourceAuditMatchesXhsCloseoutScope = (input: {
     input.sourceAudit.target_domain === input.targetDomain &&
     input.sourceAudit.target_page === "search_result_tab" &&
     input.sourceAudit.action_type === "read" &&
+    asString(input.sourceAudit.action_ref) !== null &&
     input.sourceAudit.requested_execution_mode === input.requestedExecutionMode &&
     input.sourceAudit.effective_execution_mode === input.requestedExecutionMode &&
     input.sourceAudit.gate_decision === "allowed" &&
-    input.sourceAudit.gate_reasons.includes("LIVE_MODE_APPROVED")
+    (input.sourceAudit.gate_reasons.includes("LIVE_MODE_APPROVED") ||
+      input.sourceAudit.gate_reasons.includes(XHS_CLOSEOUT_VALIDATION_SOURCE_APPROVED_REASON))
   );
 };
 
@@ -332,6 +414,28 @@ const readXhsCloseoutValidationSignalsFromSourceSamples = async (input: {
       ? await input.store.getAntiDetectionValidationRequest(sample.request_ref)
       : null;
     const signal = sample ? sampleSignal(sample) : null;
+    const sourceGateAuditPayload = sample ? sampleSourceGateAudit(sample) : null;
+    const sourceActionRef = asString(sourceGateAuditPayload?.action_ref);
+    const sourceRhythmView =
+      validationScope === "layer3_session_rhythm"
+        ? await input.store.getSessionRhythmStatusView({
+            profile: input.profile ?? "",
+            platform: "xhs",
+            issueScope: "issue_209",
+            sessionId: input.sourceAudit.session_id,
+            runId: input.sourceRunId
+          })
+        : null;
+    const sourceBindingMatched = signal
+      ? signalMatchesSourceBinding({
+          signal,
+          sourceAudit: input.sourceAudit,
+          sourceActionRef: sourceActionRef ?? "",
+          sourceRunId: input.sourceRunId,
+          validationScope,
+          rhythmView: sourceRhythmView
+        })
+      : false;
     if (
       !sample ||
       !sampleRequest ||
@@ -350,7 +454,8 @@ const readXhsCloseoutValidationSignalsFromSourceSamples = async (input: {
       sampleRequest.browser_channel !== "Google Chrome stable" ||
       sampleRequest.execution_surface !== "real_browser" ||
       sampleRequest.probe_bundle_ref !== "probe-bundle/xhs-closeout-min-v1" ||
-      !sampleMatchesSourceGateAudit(sample, input.sourceAudit)
+      !sampleMatchesSourceGateAudit(sample, input.sourceAudit) ||
+      !sourceBindingMatched
     ) {
       throw new CliError(
         "ERR_EXECUTION_FAILED",
@@ -373,7 +478,8 @@ const readXhsCloseoutValidationSignalsFromSourceSamples = async (input: {
             sample_request_state: sampleRequest?.request_state ?? null,
             sample_gate_audit_matched: sample
               ? sampleMatchesSourceGateAudit(sample, input.sourceAudit)
-              : false
+              : false,
+            sample_source_binding_matched: sourceBindingMatched
           }
         }
       );
@@ -437,7 +543,8 @@ const assertXhsCloseoutValidationSourceAudit = async (input: {
         gateAudit.event_id === sampleGateAudit.event_id &&
         gateAudit.decision_id === sampleGateAudit.decision_id &&
         gateAudit.session_id === sampleGateAudit.session_id &&
-        gateAudit.target_tab_id === sampleGateAudit.target_tab_id
+        gateAudit.target_tab_id === sampleGateAudit.target_tab_id &&
+        gateAudit.action_ref === sampleGateAudit.action_ref
     );
   let sourceAudit: GateAuditRecord | null = null;
   if (
@@ -512,6 +619,826 @@ const assertXhsCloseoutValidationSourceAudit = async (input: {
       }
     }
   );
+};
+
+const assertXhsCloseoutValidationSourceUrl = (input: {
+  href: string | null;
+  expectedDomain: string;
+}): void => {
+  if (!input.href) {
+    throw new CliError(
+      "ERR_EXECUTION_FAILED",
+      "XHS closeout validation source page URL is missing",
+      {
+        retryable: false,
+        details: {
+          ability_id: "runtime.xhs_closeout_validation_source",
+          stage: "execution",
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_PAGE_URL_MISSING"
+        }
+      }
+    );
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(input.href);
+  } catch {
+    throw new CliError("ERR_EXECUTION_FAILED", "XHS closeout validation source page URL invalid", {
+      retryable: false,
+      details: {
+        ability_id: "runtime.xhs_closeout_validation_source",
+        stage: "execution",
+        reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_PAGE_URL_INVALID",
+        page_url: input.href
+      }
+    });
+  }
+  if (
+    parsed.hostname !== input.expectedDomain ||
+    !parsed.pathname.replace(/\/+$/u, "").endsWith("/search_result")
+  ) {
+    throw new CliError(
+      "ERR_EXECUTION_FAILED",
+      "XHS closeout validation source must be collected from search_result",
+      {
+        retryable: false,
+        details: {
+          ability_id: "runtime.xhs_closeout_validation_source",
+          stage: "execution",
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_PAGE_MISMATCH",
+          page_url: input.href,
+          expected_domain: input.expectedDomain,
+          expected_page: "search_result_tab"
+        }
+      }
+    );
+  }
+};
+
+const assertXhsCloseoutValidationSourceOfficialRuntime = (input: {
+  profile: string;
+  profileMeta: Awaited<ReturnType<ProfileStore["readMeta"]>>;
+}): void => {
+  const binding = input.profileMeta?.persistentExtensionBinding ?? null;
+  const browserChannel = asString(binding?.browserChannel);
+  if (
+    input.profileMeta?.profileState !== "ready" ||
+    !binding ||
+    browserChannel !== "chrome"
+  ) {
+    throw new CliError(
+      "ERR_EXECUTION_FAILED",
+      "XHS closeout validation source requires managed official Chrome runtime",
+      {
+        retryable: false,
+        details: {
+          ability_id: "runtime.xhs_closeout_validation_source",
+          stage: "execution",
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_RUNTIME_SURFACE_BLOCKED",
+          profile: input.profile,
+          profile_state: input.profileMeta?.profileState ?? null,
+          browser_channel: browserChannel,
+          persistent_extension_bound: !!binding
+        }
+      }
+    );
+  }
+};
+
+const assertXhsCloseoutValidationSourceOfficialBridge = (input: {
+  proof: ReturnType<NativeMessagingBridge["currentTransportProof"]>;
+}): void => {
+  if (input.proof.surface === "profile_socket" || input.proof.surface === "root_socket") {
+    return;
+  }
+  throw new CliError(
+    "ERR_EXECUTION_FAILED",
+    "XHS closeout validation source requires official Chrome bridge transport",
+    {
+      retryable: false,
+      details: {
+        ability_id: "runtime.xhs_closeout_validation_source",
+        stage: "execution",
+        reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_STUB_BRIDGE_BLOCKED",
+        bridge_transport_surface: input.proof.surface,
+        bridge_socket_path: input.proof.socket_path ?? null,
+        bridge_spawned_host_configured: input.proof.spawned_host_configured ?? null
+      }
+    }
+  );
+};
+
+const assertXhsCloseoutValidationSourceBrowserAttestation = (input: {
+  bootstrapPayload: Record<string, unknown> | null;
+  probePayload: Record<string, unknown>;
+  runId: string;
+  sessionId: string;
+  profile: string;
+  targetDomain: string;
+  targetPage: string;
+  targetTabId: number;
+  actionRef: string;
+}): void => {
+  const browserAttestation = asObject(input.probePayload.browser_attestation);
+  const requestEvent = asString(input.probePayload.request_event);
+  const resultEvent = asString(input.probePayload.result_event);
+  const attested =
+    input.bootstrapPayload?.runtime_bootstrap_attested === true &&
+    browserAttestation?.source === "chrome_scripting_main_world" &&
+    browserAttestation.execution_surface === "real_browser" &&
+    browserAttestation.extension_surface === "background_service_worker" &&
+    browserAttestation.run_id === input.runId &&
+    browserAttestation.session_id === input.sessionId &&
+    browserAttestation.profile === input.profile &&
+    browserAttestation.target_domain === input.targetDomain &&
+    browserAttestation.target_page === input.targetPage &&
+    browserAttestation.target_tab_id === input.targetTabId &&
+    browserAttestation.action_ref === input.actionRef &&
+    browserAttestation.request_event === requestEvent &&
+    browserAttestation.result_event === resultEvent &&
+    requestEvent !== null &&
+    resultEvent !== null;
+  if (attested) {
+    return;
+  }
+  throw new CliError(
+    "ERR_EXECUTION_FAILED",
+    "XHS closeout validation source requires browser attestation",
+    {
+      retryable: false,
+      details: {
+        ability_id: "runtime.xhs_closeout_validation_source",
+        stage: "execution",
+        reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_BROWSER_ATTESTATION_MISSING",
+        bootstrap_attested: input.bootstrapPayload?.runtime_bootstrap_attested ?? null,
+        attestation_source: asString(browserAttestation?.source),
+        attestation_execution_surface: asString(browserAttestation?.execution_surface),
+        attestation_extension_surface: asString(browserAttestation?.extension_surface),
+        attestation_run_id: asString(browserAttestation?.run_id),
+        attestation_session_id: asString(browserAttestation?.session_id),
+        attestation_profile: asString(browserAttestation?.profile),
+        attestation_target_domain: asString(browserAttestation?.target_domain),
+        attestation_target_page: asString(browserAttestation?.target_page),
+        attestation_target_tab_id: asInteger(browserAttestation?.target_tab_id),
+        attestation_action_ref: asString(browserAttestation?.action_ref)
+      }
+    }
+  );
+};
+
+const buildXhsCloseoutValidationSourceSignals = (input: {
+  fingerprintRuntime: Record<string, unknown>;
+  injection: Record<string, unknown>;
+  targetDomain: string;
+  targetTabId: number;
+  pageUrl: string | null;
+  sessionRhythmWindowId: string;
+  sessionRhythmDecisionId: string;
+  runId: string;
+  sessionId: string;
+  actionRef: string;
+}): XhsCloseoutValidationSignalMap => ({
+  layer1_consistency: {
+    browser_returned_evidence: {
+      source: "main_world",
+      target_domain: input.targetDomain,
+      target_tab_id: input.targetTabId,
+      page_url: input.pageUrl,
+      probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1"
+    },
+    fingerprint_runtime: {
+      ...input.fingerprintRuntime,
+      injection: {
+        ...input.injection,
+        source: "main_world"
+      }
+    }
+  },
+  layer2_interaction: {
+    browser_returned_evidence: {
+      source: "main_world",
+      target_domain: input.targetDomain,
+      target_tab_id: input.targetTabId,
+      page_url: input.pageUrl,
+      probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1"
+    },
+    event_strategy_profile: {
+      action_kind: "validation_source_probe",
+      preferred_path: "managed_official_chrome_main_world"
+    },
+    event_chain_policy: {
+      chain_name: "xhs_closeout_validation_source",
+      required_events: ["main_world_probe", "fingerprint_install"]
+    },
+    rhythm_profile: {
+      profile_name: "xhs_closeout_min_v1",
+      min_action_interval_ms: 3000,
+      source_run_id: input.runId
+    },
+    strategy_selection: {
+      action_kind: "validation_source_probe",
+      selected_path: "managed_official_chrome_main_world",
+      active_fetch_performed: false,
+      closeout_bundle_entered: false
+    },
+    execution_trace: {
+      action_kind: "validation_source_probe",
+      selected_path: "managed_official_chrome_main_world",
+      settled_wait_result: "main_world_probe_returned",
+      session_id: input.sessionId,
+      target_tab_id: input.targetTabId,
+      action_ref: input.actionRef
+    }
+  },
+  layer3_session_rhythm: {
+    browser_returned_evidence: {
+      source: "execution_audit",
+      target_domain: input.targetDomain,
+      target_tab_id: input.targetTabId,
+      page_url: input.pageUrl,
+      probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1"
+    },
+    session_rhythm_window_id: input.sessionRhythmWindowId,
+    session_rhythm_decision_id: input.sessionRhythmDecisionId,
+    escalation: "validation_source_to_closeout_baseline",
+    active_fetch_performed: false,
+    closeout_bundle_entered: false
+  }
+});
+
+const assertAllowedXhsCloseoutValidationSourceRhythm = (input: {
+  rhythmView: SessionRhythmStatusViewRecord;
+  profile: string;
+  sessionId?: string | null;
+  runId: string;
+}): { sessionId: string; sessionRhythmWindowId: string; sessionRhythmDecisionId: string } => {
+  const sessionRhythmWindowId = asString(input.rhythmView.window_state.window_id);
+  const sessionRhythmDecisionId = asString(input.rhythmView.decision.decision_id);
+  const decisionRunId = asString(input.rhythmView.decision.run_id);
+  const decisionSessionId = asString(input.rhythmView.decision.session_id);
+  const decision = asString(input.rhythmView.decision.decision);
+  const currentRiskState = asString(input.rhythmView.decision.current_risk_state);
+  const nextRiskState = asString(input.rhythmView.decision.next_risk_state);
+  const windowRiskState = asString(input.rhythmView.window_state.risk_state);
+  if (!sessionRhythmWindowId || !sessionRhythmDecisionId || !decisionSessionId) {
+    throw new CliError(
+      "ERR_EXECUTION_FAILED",
+      "XHS closeout validation source rhythm evidence is missing",
+      {
+        retryable: false,
+        details: {
+          ability_id: "runtime.xhs_closeout_validation_source",
+          stage: "execution",
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_RHYTHM_EVIDENCE_MISSING"
+        }
+      }
+    );
+  }
+  if (
+    decisionRunId !== input.runId ||
+    (input.sessionId !== null && input.sessionId !== undefined && decisionSessionId !== input.sessionId) ||
+    decision !== "allowed" ||
+    currentRiskState !== "allowed" ||
+    nextRiskState !== "allowed" ||
+    windowRiskState !== "allowed"
+  ) {
+    throw new CliError(
+      "ERR_EXECUTION_FAILED",
+      "XHS closeout validation source rhythm evidence is not allowed",
+      {
+        retryable: false,
+        details: {
+          ability_id: "runtime.xhs_closeout_validation_source",
+          stage: "execution",
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_RHYTHM_BLOCKED",
+          profile: input.profile,
+          expected_run_id: input.runId,
+          rhythm_decision_run_id: decisionRunId,
+          expected_session_id: input.sessionId ?? null,
+          rhythm_decision_session_id: decisionSessionId,
+          rhythm_decision: decision,
+          rhythm_current_risk_state: currentRiskState,
+          rhythm_next_risk_state: nextRiskState,
+          rhythm_window_risk_state: windowRiskState
+        }
+      }
+    );
+  }
+  return { sessionId: decisionSessionId, sessionRhythmWindowId, sessionRhythmDecisionId };
+};
+
+const resolveXhsCloseoutValidationSourceRhythm = async (input: {
+  store: SQLiteRuntimeStore;
+  profile: string;
+  sessionId?: string | null;
+  runId: string;
+}): Promise<{ sessionId: string; sessionRhythmWindowId: string; sessionRhythmDecisionId: string }> => {
+  const persisted = await input.store.getSessionRhythmStatusView({
+    profile: input.profile,
+    platform: "xhs",
+    issueScope: "issue_209",
+    sessionId: input.sessionId,
+    runId: input.runId
+  });
+  if (persisted && asString(persisted.decision.run_id) === input.runId) {
+    return assertAllowedXhsCloseoutValidationSourceRhythm({
+      rhythmView: persisted,
+      profile: input.profile,
+      sessionId: input.sessionId,
+      runId: input.runId
+    });
+  }
+  throw new CliError(
+    "ERR_EXECUTION_FAILED",
+    "XHS closeout validation source rhythm evidence is missing for the current run",
+    {
+      retryable: false,
+      details: {
+        ability_id: "runtime.xhs_closeout_validation_source",
+        stage: "execution",
+        reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_RHYTHM_EVIDENCE_MISSING",
+        profile: input.profile,
+        expected_run_id: input.runId,
+        expected_session_id: input.sessionId ?? null
+      }
+    }
+  );
+};
+
+const runtimeXhsCloseoutValidationSource = async (context: RuntimeContext) => {
+  const targetDomain = asString(context.params.target_domain);
+  const requestedExecutionMode = asString(context.params.requested_execution_mode);
+  const targetTabId = asInteger(context.params.target_tab_id);
+  const targetPage = asString(context.params.target_page);
+  const actionRef =
+    asString(context.params.action_ref) ??
+    asString(context.params.gate_invocation_id) ??
+    context.run_id;
+  const observedAt = new Date().toISOString();
+
+  if (targetDomain !== "www.xiaohongshu.com") {
+    throw new CliError("ERR_CLI_INVALID_ARGS", "XHS closeout validation source target_domain invalid", {
+      details: {
+        ability_id: "runtime.xhs_closeout_validation_source",
+        stage: "input_validation",
+        reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_TARGET_DOMAIN_INVALID"
+      }
+    });
+  }
+  if (requestedExecutionMode !== "live_read_high_risk") {
+    throw new CliError(
+      "ERR_CLI_INVALID_ARGS",
+      "XHS closeout validation source requires live_read_high_risk mode",
+      {
+        details: {
+          ability_id: "runtime.xhs_closeout_validation_source",
+          stage: "input_validation",
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_MODE_INVALID"
+        }
+      }
+    );
+  }
+  if (!targetTabId || targetPage !== "search_result_tab") {
+    throw new CliError("ERR_CLI_INVALID_ARGS", "XHS closeout validation source target invalid", {
+      details: {
+        ability_id: "runtime.xhs_closeout_validation_source",
+        stage: "input_validation",
+        reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_TARGET_INVALID",
+        target_tab_id: targetTabId,
+        target_page: targetPage
+      }
+    });
+  }
+  if (!context.profile) {
+    throw new CliError("ERR_CLI_INVALID_ARGS", "XHS closeout validation source profile required", {
+      details: {
+        ability_id: "runtime.xhs_closeout_validation_source",
+        stage: "input_validation",
+        reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_PROFILE_REQUIRED"
+      }
+    });
+  }
+  if (hasOwn(context.params, "signals") || hasOwn(context.params, "artifact_refs")) {
+    throw new CliError(
+      "ERR_CLI_INVALID_ARGS",
+      "XHS closeout validation source inline evidence forbidden",
+      {
+        details: {
+          ability_id: "runtime.xhs_closeout_validation_source",
+          stage: "input_validation",
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_INLINE_EVIDENCE_FORBIDDEN"
+        }
+      }
+    );
+  }
+
+  const profile = context.profile;
+  const profileStore = new ProfileStore(resolveRuntimeProfileRoot(context.cwd));
+  const profileMeta = await profileStore.readMeta(profile, { mode: "readonly" });
+  assertXhsCloseoutValidationSourceOfficialRuntime({ profile, profileMeta });
+  if (profileMeta?.accountSafety?.state === "account_risk_blocked") {
+    throw new CliError(
+      "ERR_EXECUTION_FAILED",
+      "XHS closeout validation source blocked by account-safety state",
+      {
+        retryable: false,
+        details: {
+          ability_id: "runtime.xhs_closeout_validation_source",
+          stage: "execution",
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_ACCOUNT_SAFETY_BLOCKED",
+          account_safety_state: profileMeta.accountSafety.state
+        }
+      }
+    );
+  }
+
+  const fingerprintContext = buildFingerprintContextForMeta(profile, profileMeta, {
+    requestedExecutionMode
+  });
+  if (!fingerprintContext.execution.live_allowed) {
+    throw new CliError(
+      "ERR_EXECUTION_FAILED",
+      "XHS closeout validation source fingerprint gate blocked live_read_high_risk",
+      {
+        retryable: false,
+        details: {
+          ability_id: "runtime.xhs_closeout_validation_source",
+          stage: "execution",
+          reason:
+            fingerprintContext.execution.reason_codes[0] ??
+            "XHS_CLOSEOUT_VALIDATION_SOURCE_FINGERPRINT_BLOCKED"
+        }
+      }
+    );
+  }
+
+  let bridge: NativeMessagingBridge | null = null;
+  let store: SQLiteRuntimeStore | null = null;
+  try {
+    const runtimeStore = new SQLiteRuntimeStore(resolveRuntimeStorePath(context.cwd));
+    store = runtimeStore;
+    const {
+      sessionId: rhythmSessionId,
+      sessionRhythmWindowId,
+      sessionRhythmDecisionId
+    } = await resolveXhsCloseoutValidationSourceRhythm({
+      store: runtimeStore,
+      profile,
+      sessionId: null,
+      runId: context.run_id
+    });
+
+    bridge = resolveRuntimeBridge();
+    const sessionId = await bridge.ensureSession({ profile });
+    assertXhsCloseoutValidationSourceOfficialBridge({
+      proof: bridge.currentTransportProof()
+    });
+    if (sessionId !== rhythmSessionId) {
+      throw new CliError(
+        "ERR_EXECUTION_FAILED",
+        "XHS closeout validation source rhythm evidence is not bound to the active session",
+        {
+          retryable: false,
+          details: {
+            ability_id: "runtime.xhs_closeout_validation_source",
+            stage: "execution",
+            reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_RHYTHM_SESSION_MISMATCH",
+            expected_session_id: rhythmSessionId,
+            actual_session_id: sessionId,
+            expected_run_id: context.run_id
+          }
+        }
+      );
+    }
+    const bootstrapResult = await bridge.runCommand({
+      runId: context.run_id,
+      profile,
+      cwd: context.cwd,
+      command: "runtime.bootstrap",
+      params: {
+        version: "v1",
+        run_id: context.run_id,
+        runtime_context_id: buildRuntimeBootstrapContextId(profile, context.run_id),
+        profile,
+        target_domain: targetDomain,
+        target_tab_id: targetTabId,
+        target_page: targetPage,
+        fingerprint_runtime: fingerprintContext as unknown as JsonObject,
+        fingerprint_patch_manifest: asObject(fingerprintContext.fingerprint_patch_manifest) ?? {},
+        main_world_secret: `xhs-closeout-validation-source-bootstrap-${randomUUID()}`
+      }
+    });
+    if (!bootstrapResult.ok) {
+      const bootstrapDetails = asObject(bootstrapResult.payload?.details);
+      throw new CliError(
+        "ERR_EXECUTION_FAILED",
+        "XHS closeout validation source runtime bootstrap failed",
+        {
+          retryable: false,
+          details: {
+            ability_id: "runtime.xhs_closeout_validation_source",
+            stage: "execution",
+            reason:
+              asString(bootstrapDetails?.reason) ??
+              bootstrapResult.error.code,
+            bootstrap_error_code: bootstrapResult.error.code,
+            bootstrap_error_message: bootstrapResult.error.message
+          }
+        }
+      );
+    }
+    const bootstrapPayload = asObject(bootstrapResult.payload);
+    const bootstrapAck = asObject(bootstrapPayload?.result);
+    const bootstrapStatus = asString(bootstrapAck?.status);
+    if (
+      bootstrapStatus !== "ready" ||
+      asString(bootstrapAck?.run_id) !== context.run_id ||
+      asString(bootstrapAck?.runtime_context_id) !==
+        buildRuntimeBootstrapContextId(profile, context.run_id) ||
+      asString(bootstrapAck?.profile) !== profile
+    ) {
+      throw new CliError(
+        "ERR_EXECUTION_FAILED",
+        "XHS closeout validation source runtime bootstrap ack invalid",
+        {
+          retryable: false,
+          details: {
+            ability_id: "runtime.xhs_closeout_validation_source",
+            stage: "execution",
+            reason:
+              bootstrapStatus === "stale"
+                ? "ERR_RUNTIME_BOOTSTRAP_ACK_STALE"
+                : "ERR_RUNTIME_READY_SIGNAL_CONFLICT",
+            bootstrap_ack_status: bootstrapStatus,
+            bootstrap_ack_run_id: asString(bootstrapAck?.run_id),
+            bootstrap_ack_profile: asString(bootstrapAck?.profile)
+          }
+        }
+      );
+    }
+    const probeResult = await bridge.runCommand({
+      runId: context.run_id,
+      profile,
+      cwd: context.cwd,
+      command: "runtime.main_world_probe",
+      params: {
+        target_domain: targetDomain,
+        target_tab_id: targetTabId,
+        target_page: targetPage,
+        action_ref: actionRef,
+        managed_tab_binding_gate: {
+          source: "cli_persisted_runtime_gate",
+          purpose: "xhs_closeout_validation_source",
+          profile_ref: profile,
+          run_id: context.run_id,
+          session_id: sessionId,
+          target_domain: targetDomain,
+          target_page: targetPage,
+          target_tab_id: targetTabId,
+          action_ref: actionRef,
+          checked_at: observedAt,
+          active_fetch_performed: false,
+          closeout_bundle_entered: false
+        },
+        main_world_secret: `xhs-closeout-validation-source-${randomUUID()}`,
+        fingerprint_runtime: fingerprintContext as unknown as JsonObject
+      }
+    });
+    if (!probeResult.ok) {
+      const probeDetails = asObject(probeResult.payload?.details);
+      throw new CliError(
+        "ERR_EXECUTION_FAILED",
+        "XHS closeout validation source main-world probe failed",
+        {
+          retryable: false,
+          details: {
+            ability_id: "runtime.xhs_closeout_validation_source",
+            stage: "execution",
+            reason:
+              asString(probeDetails?.reason) ??
+              "XHS_CLOSEOUT_VALIDATION_SOURCE_MAIN_WORLD_PROBE_FAILED",
+            probe_error_code: probeResult.error.code,
+            probe_error_message: probeResult.error.message
+          }
+        }
+      );
+    }
+
+    assertXhsCloseoutValidationSourceBrowserAttestation({
+      bootstrapPayload,
+      probePayload: probeResult.payload,
+      runId: context.run_id,
+      sessionId,
+      profile,
+      targetDomain,
+      targetPage,
+      targetTabId,
+      actionRef
+    });
+
+    const probeTargetTabId = asInteger(probeResult.payload.target_tab_id);
+    if (probeTargetTabId !== targetTabId) {
+      throw new CliError(
+        "ERR_EXECUTION_FAILED",
+        "XHS closeout validation source probe target tab mismatch",
+        {
+          retryable: false,
+          details: {
+            ability_id: "runtime.xhs_closeout_validation_source",
+            stage: "execution",
+            reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_TARGET_TAB_MISMATCH",
+            expected_target_tab_id: targetTabId,
+            probe_target_tab_id: probeTargetTabId
+          }
+        }
+      );
+    }
+
+    const probe = asObject(probeResult.payload.probe);
+    const pageUrl = asString(probe?.href);
+    assertXhsCloseoutValidationSourceUrl({ href: pageUrl, expectedDomain: targetDomain });
+    if (probe?.probe_response_received !== true) {
+      throw new CliError(
+        "ERR_EXECUTION_FAILED",
+        "XHS closeout validation source main-world probe did not return evidence",
+        {
+          retryable: false,
+          details: {
+            ability_id: "runtime.xhs_closeout_validation_source",
+            stage: "execution",
+            reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_MAIN_WORLD_EVIDENCE_MISSING",
+            probe_error: asString(probe?.error)
+          }
+        }
+      );
+    }
+    const probeResultEnvelope = asObject(probe?.probe_result);
+    const injection = unwrapMainWorldProbeResult(probe?.probe_result);
+    if (
+      !injection ||
+      injection.installed !== true ||
+      asString(injection.source) !== "main_world" ||
+      asStringArray(injection.missing_required_patches).length > 0
+    ) {
+      throw new CliError(
+        "ERR_EXECUTION_FAILED",
+        "XHS closeout validation source fingerprint evidence is not ready",
+        {
+          retryable: false,
+          details: {
+            ability_id: "runtime.xhs_closeout_validation_source",
+            stage: "execution",
+            reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_FINGERPRINT_NOT_READY",
+            probe_result_ok: asBoolean(probeResultEnvelope?.ok),
+            probe_source: asString(injection?.source),
+            missing_required_patches: asStringArray(injection?.missing_required_patches)
+          }
+        }
+      );
+    }
+
+    const decisionId = `gate_decision_${context.run_id}_xhs_closeout_validation_source`;
+    const approvalId = `gate_appr_${context.run_id}_xhs_closeout_validation_source`;
+    const signals = buildXhsCloseoutValidationSourceSignals({
+      fingerprintRuntime: fingerprintContext as unknown as Record<string, unknown>,
+      injection,
+      targetDomain,
+      targetTabId,
+      pageUrl,
+      sessionRhythmWindowId,
+      sessionRhythmDecisionId,
+      runId: context.run_id,
+      sessionId,
+      actionRef
+    });
+    const sourceAuditRef: { current?: GateAuditRecord } = {};
+    let sourceSampleRefs: string[] = [];
+    await runtimeStore.runInTransaction(async () => {
+      await runtimeStore.upsertGateApproval({
+        approvalId,
+        runId: context.run_id,
+        decisionId,
+        approved: true,
+        approver: "runtime.xhs_closeout_validation_source",
+        approvedAt: observedAt,
+        checks: {
+          target_domain_confirmed: true,
+          target_tab_confirmed: true,
+          target_page_confirmed: true,
+          risk_state_checked: true,
+          action_type_confirmed: true
+        }
+      });
+      sourceAuditRef.current = await runtimeStore.appendGateAuditRecord({
+        eventId: `gate_evt_${context.run_id}_xhs_closeout_validation_source`,
+        decisionId,
+        approvalId,
+        runId: context.run_id,
+        sessionId,
+        profile,
+        issueScope: "issue_209",
+        riskState: "allowed",
+        nextState: "allowed",
+        transitionTrigger: "gate_evaluation",
+        targetDomain,
+        targetTabId,
+        targetPage,
+        actionType: "read",
+        actionRef,
+        requestedExecutionMode,
+        effectiveExecutionMode: requestedExecutionMode,
+        gateDecision: "allowed",
+        gateReasons: [XHS_CLOSEOUT_VALIDATION_SOURCE_APPROVED_REASON],
+        approver: "runtime.xhs_closeout_validation_source",
+        approvedAt: observedAt,
+        recordedAt: observedAt
+      });
+      const samples = await persistXhsCloseoutValidationSourceEvidence({
+        store: runtimeStore,
+        profile,
+        effectiveExecutionMode: requestedExecutionMode,
+        targetDomain,
+        sourceRunId: context.run_id,
+        observedAt,
+        sourceAudit: sourceAuditRef.current,
+        actionRef,
+        signals,
+        artifactRefs: [`artifact/xhs-closeout-validation-source/${context.run_id}`],
+        useExistingTransaction: true
+      });
+      sourceSampleRefs = samples.map((sample) => sample.sample_ref);
+    });
+    const sourceAudit = sourceAuditRef.current;
+    if (!sourceAudit) {
+      throw new CliError(
+        "ERR_EXECUTION_FAILED",
+        "XHS closeout validation source audit was not persisted",
+        {
+          retryable: false,
+          details: {
+            ability_id: "runtime.xhs_closeout_validation_source",
+            stage: "execution",
+            reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_AUDIT_MISSING"
+          }
+        }
+      );
+    }
+
+    return {
+      validation_source_generation: {
+        source: "runtime.xhs_closeout_validation_source",
+        profile,
+        target_domain: targetDomain,
+        target_tab_id: targetTabId,
+        page_url: pageUrl,
+        target_page: targetPage,
+        requested_execution_mode: requestedExecutionMode,
+        run_id: context.run_id,
+        action_ref: actionRef,
+        source_audit_event_id: sourceAudit.event_id,
+        source_session_id: sessionId,
+        source_sample_refs: sourceSampleRefs,
+        active_fetch_performed: false,
+        closeout_bundle_entered: false
+      }
+    };
+  } catch (error) {
+    if (error instanceof RuntimeStoreError) {
+      if (error.code === "ERR_RUNTIME_STORE_INVALID_INPUT") {
+        throw new CliError(
+          "ERR_EXECUTION_FAILED",
+          "XHS closeout validation source evidence invalid",
+          {
+            retryable: false,
+            details: {
+              ability_id: "runtime.xhs_closeout_validation_source",
+              stage: "execution",
+              reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_PERSISTED_EVIDENCE_INVALID",
+              validation_error: error.message
+            }
+          }
+        );
+      }
+      throw new CliError("ERR_RUNTIME_UNAVAILABLE", `运行记录存储失败: ${error.code}`, {
+        retryable: error.code !== "ERR_RUNTIME_STORE_SCHEMA_MISMATCH",
+        cause: error
+      });
+    }
+    if (error instanceof NativeMessagingTransportError) {
+      throw new CliError("ERR_RUNTIME_UNAVAILABLE", `通信链路不可用: ${error.code}`, {
+        retryable: error.retryable,
+        cause: error
+      });
+    }
+    throw error;
+  } finally {
+    try {
+      store?.close();
+    } catch {
+      // Best-effort close after validation source generation.
+    }
+    await bridge?.close().catch(() => undefined);
+  }
 };
 
 const runtimeXhsCloseoutValidation = async (context: RuntimeContext) => {
@@ -1328,6 +2255,7 @@ const runtimeHelp = async () => ({
     "runtime.status",
     "runtime.tabs",
     "runtime.restore_xhs_target",
+    "runtime.xhs_closeout_validation_source",
     "runtime.xhs_closeout_validation",
     "runtime.stop",
     "runtime.audit",
@@ -1378,6 +2306,12 @@ export const runtimeCommands = (): CommandDefinition[] => [
     status: "implemented",
     requiresProfile: true,
     handler: runtimeRestoreXhsTarget
+  },
+  {
+    name: "runtime.xhs_closeout_validation_source",
+    status: "implemented",
+    requiresProfile: true,
+    handler: runtimeXhsCloseoutValidationSource
   },
   {
     name: "runtime.xhs_closeout_validation",
