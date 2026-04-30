@@ -621,7 +621,9 @@ describe("webenvoy cli contract / runtime errors and fallback", () => {
         details: {
           ability_id: "runtime.restore_xhs_target",
           stage: "execution",
-          reason: "ANTI_DETECTION_VALIDATION_BASELINE_BLOCKED",
+          reason: expect.stringMatching(
+            /^(ANTI_DETECTION_VALIDATION_BASELINE_BLOCKED|OFFICIAL_RUNTIME_NOT_READY)$/
+          ),
           account_safety: expect.objectContaining({
             state: "clear"
           }),

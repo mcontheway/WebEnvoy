@@ -692,6 +692,26 @@ export class SQLiteRuntimeStore {
     this.#db.close();
   }
 
+  async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
+    try {
+      this.#db.exec("BEGIN IMMEDIATE");
+    } catch (error) {
+      throw this.#toStoreDbError(error);
+    }
+    try {
+      const result = await callback();
+      this.#db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      try {
+        this.#db.exec("ROLLBACK");
+      } catch {
+        // Preserve the original failure; rollback errors are secondary.
+      }
+      throw this.#toStoreDbError(error);
+    }
+  }
+
   #toStoreDbError(error: unknown): RuntimeStoreError {
     if (error instanceof RuntimeStoreError) {
       return error;
@@ -986,54 +1006,61 @@ export class SQLiteRuntimeStore {
     };
   }
 
-  async getGateAuditTrail(runId: string): Promise<GetGateAuditTrailResult> {
+  async getGateAuditTrail(
+    runId: string,
+    options?: { limit?: number }
+  ): Promise<GetGateAuditTrailResult> {
     if (!runId.trim()) {
       throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "run_id is required");
     }
 
-    const auditRecords = this.#listGateAuditRecords({ runId });
-    const latestApprovedRecord =
-      auditRecords
-        .map((record) => {
-          if (!isAllowedLiveAuditRecord(record)) {
-            return null;
-          }
-          if (
-            typeof record.decision_id !== "string" ||
-            record.decision_id.length === 0 ||
-            typeof record.approval_id !== "string" ||
-            record.approval_id.length === 0
-          ) {
-            return null;
-          }
+    try {
+      const auditRecords = this.#listGateAuditRecords({ runId, limit: options?.limit });
+      const latestApprovedRecord =
+        auditRecords
+          .map((record) => {
+            if (!isAllowedLiveAuditRecord(record)) {
+              return null;
+            }
+            if (
+              typeof record.decision_id !== "string" ||
+              record.decision_id.length === 0 ||
+              typeof record.approval_id !== "string" ||
+              record.approval_id.length === 0
+            ) {
+              return null;
+            }
 
-          const approvalRecord = this.#getOptionalGateApprovalByDecisionId(record.decision_id);
-          if (!approvalRecord || approvalRecord.approval_id !== record.approval_id) {
-            return null;
-          }
+            const approvalRecord = this.#getOptionalGateApprovalByDecisionId(record.decision_id);
+            if (!approvalRecord || approvalRecord.approval_id !== record.approval_id) {
+              return null;
+            }
 
-          return {
-            auditRecord: record,
-            approvalRecord
-          };
-        })
-        .find((entry) => entry !== null) ?? null;
-    const latestApprovedDecisionId = latestApprovedRecord?.auditRecord.decision_id ?? null;
-    const latestDecisionId =
-      auditRecords.find(
-        (record): record is GateAuditRecord & { decision_id: string } =>
-          typeof record.decision_id === "string" && record.decision_id.length > 0
-      )?.decision_id ?? null;
-    const approvalDecisionId = latestApprovedDecisionId ?? latestDecisionId;
+            return {
+              auditRecord: record,
+              approvalRecord
+            };
+          })
+          .find((entry) => entry !== null) ?? null;
+      const latestApprovedDecisionId = latestApprovedRecord?.auditRecord.decision_id ?? null;
+      const latestDecisionId =
+        auditRecords.find(
+          (record): record is GateAuditRecord & { decision_id: string } =>
+            typeof record.decision_id === "string" && record.decision_id.length > 0
+        )?.decision_id ?? null;
+      const approvalDecisionId = latestApprovedDecisionId ?? latestDecisionId;
 
-    return {
-      approvalRecord:
-        latestApprovedRecord?.approvalRecord ??
-        (approvalDecisionId
-          ? this.#getOptionalGateApprovalByDecisionId(approvalDecisionId)
-          : this.#getOptionalGateApprovalByRunId(runId)),
-      auditRecords
-    };
+      return {
+        approvalRecord:
+          latestApprovedRecord?.approvalRecord ??
+          (approvalDecisionId
+            ? this.#getOptionalGateApprovalByDecisionId(approvalDecisionId)
+            : this.#getOptionalGateApprovalByRunId(runId)),
+        auditRecords
+      };
+    } catch (error) {
+      throw this.#toStoreDbError(error);
+    }
   }
 
   async listGateAuditRecords(input: ListGateAuditRecordsInput): Promise<GateAuditRecord[]> {
@@ -1042,6 +1069,59 @@ export class SQLiteRuntimeStore {
 
   async upsertApprovalRecord(input: UpsertGateApprovalInput): Promise<GateApprovalRecord> {
     return this.upsertGateApproval(input);
+  }
+
+  async getGateApprovalByDecisionId(decisionId: string): Promise<GateApprovalRecord | null> {
+    if (!decisionId.trim()) {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "decision_id is required");
+    }
+    try {
+      return this.#getOptionalGateApprovalByDecisionId(decisionId);
+    } catch (error) {
+      throw this.#toStoreDbError(error);
+    }
+  }
+
+  async getGateAuditRecordByIdentity(input: {
+    runId: string;
+    eventId: string;
+    decisionId: string;
+    sessionId: string;
+  }): Promise<GateAuditRecord | null> {
+    if (
+      !input.runId.trim() ||
+      !input.eventId.trim() ||
+      !input.decisionId.trim() ||
+      !input.sessionId.trim()
+    ) {
+      throw new RuntimeStoreError(
+        "ERR_RUNTIME_STORE_INVALID_INPUT",
+        "gate audit identity is required"
+      );
+    }
+    try {
+      const row = this.#db
+        .prepare(
+          `
+          SELECT event_id, run_id, session_id, profile, issue_scope, risk_state, next_state, transition_trigger, target_domain, target_tab_id, target_page,
+                 decision_id, approval_id,
+                 action_type, requested_execution_mode, effective_execution_mode, gate_decision,
+                 gate_reasons_json, approver, approved_at, recorded_at, created_at
+          FROM runtime_gate_audit_records
+          WHERE run_id = ?
+            AND event_id = ?
+            AND decision_id = ?
+            AND session_id = ?
+          LIMIT 1
+        `
+        )
+        .get(input.runId, input.eventId, input.decisionId, input.sessionId) as
+        | (Omit<GateAuditRecord, "gate_reasons"> & { gate_reasons_json: string })
+        | undefined;
+      return row ? mapGateAuditRecordRow(row) : null;
+    } catch (error) {
+      throw this.#toStoreDbError(error);
+    }
   }
 
   async appendAuditRecord(input: AppendGateAuditRecordInput): Promise<GateAuditRecord> {
@@ -1463,6 +1543,32 @@ export class SQLiteRuntimeStore {
         );
 
       return this.#getAntiDetectionStructuredSampleByRef(input.sampleRef);
+    } catch (error) {
+      throw this.#toStoreDbError(error);
+    }
+  }
+
+  async getAntiDetectionStructuredSample(
+    sampleRef: string
+  ): Promise<AntiDetectionStructuredSampleRecord | null> {
+    if (!sampleRef.trim()) {
+      throw new RuntimeStoreError("ERR_RUNTIME_STORE_INVALID_INPUT", "sample_ref is required");
+    }
+    try {
+      return this.#getOptionalAntiDetectionStructuredSampleByRef(sampleRef);
+    } catch (error) {
+      throw this.#toStoreDbError(error);
+    }
+  }
+
+  async getAntiDetectionValidationRequest(
+    requestRef: string
+  ): Promise<AntiDetectionValidationRequestRecord | null> {
+    if (typeof requestRef !== "string" || requestRef.trim().length === 0) {
+      throw invalidRuntimeStoreInput("missing required anti-detection request_ref");
+    }
+    try {
+      return this.#getOptionalAntiDetectionValidationRequestByRef(requestRef);
     } catch (error) {
       throw this.#toStoreDbError(error);
     }

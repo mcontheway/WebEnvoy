@@ -187,6 +187,216 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
     await seedReadyAntiDetectionValidationViews(input);
   };
 
+  const createXhsCloseoutValidationSignals = () => ({
+    layer1_consistency: {
+      browser_returned_evidence: {
+        source: "main_world",
+        target_domain: "www.xiaohongshu.com",
+        probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1"
+      },
+      fingerprint_runtime: {
+        fingerprint_profile_bundle_ref: "fingerprint-bundle/xhs-closeout",
+        fingerprint_patch_manifest: {
+          required_patches: ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"]
+        },
+        injection: {
+          installed: true,
+          required_patches: ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"],
+          missing_required_patches: [],
+          source: "main_world"
+        }
+      }
+    },
+    layer2_interaction: {
+      browser_returned_evidence: {
+        source: "main_world",
+        target_domain: "www.xiaohongshu.com",
+        probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1"
+      },
+      event_strategy_profile: {
+        action_kind: "scroll",
+        preferred_path: "real_input"
+      },
+      event_chain_policy: {
+        chain_name: "scroll_segment",
+        required_events: ["wheel", "scroll"]
+      },
+      rhythm_profile: {
+        profile_name: "default_layer2",
+        scroll_segment_min_px: 120,
+        scroll_segment_max_px: 480
+      },
+      strategy_selection: {
+        action_kind: "scroll",
+        selected_path: "real_input"
+      },
+      execution_trace: {
+        action_kind: "scroll",
+        selected_path: "real_input",
+        settled_wait_result: "settled"
+      }
+    },
+    layer3_session_rhythm: {
+      browser_returned_evidence: {
+        source: "execution_audit",
+        target_domain: "www.xiaohongshu.com",
+        probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1"
+      },
+      session_rhythm_window_id: "rhythm_win_xhs_closeout",
+      session_rhythm_decision_id: "rhythm_decision_xhs_closeout",
+      escalation: "recon_probe_to_live_admission"
+    }
+  });
+
+  const seedXhsCloseoutValidationSourceAudit = async (input: {
+    cwd: string;
+    profile: string;
+    runId: string;
+    requestedExecutionMode?: "live_read_high_risk" | "recon";
+    effectiveExecutionMode?: "live_read_high_risk" | "recon";
+    signals?: ReturnType<typeof createXhsCloseoutValidationSignals>;
+    artifactRefs?: string[];
+    approvalChecks?: Record<string, boolean>;
+  }): Promise<string[]> => {
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(input.cwd));
+    const requestedExecutionMode = input.requestedExecutionMode ?? "live_read_high_risk";
+    const effectiveExecutionMode = input.effectiveExecutionMode ?? requestedExecutionMode;
+    const decisionId = `gate_decision_${input.runId}`;
+    const approvalId = `gate_approval_${input.runId}`;
+    const sessionId = `session-${input.runId}`;
+    const signals = input.signals ?? createXhsCloseoutValidationSignals();
+    const sampleRefs: string[] = [];
+    try {
+      await store.upsertRun({
+        runId: input.runId,
+        sessionId,
+        profileName: input.profile,
+        command: "xhs.search",
+        status: "succeeded",
+        startedAt: "2026-04-30T01:20:00.000Z",
+        endedAt: "2026-04-30T01:20:05.000Z",
+        errorCode: null
+      });
+      for (const [targetFrRef, validationScope, signal] of [
+        ["FR-0012", "layer1_consistency", signals.layer1_consistency],
+        ["FR-0013", "layer2_interaction", signals.layer2_interaction],
+        ["FR-0014", "layer3_session_rhythm", signals.layer3_session_rhythm]
+      ] as const) {
+        const requestRef = `validation-request/source/${input.runId}/${targetFrRef}`;
+        const sampleRef = `validation-sample/source/${input.runId}/${targetFrRef}`;
+        sampleRefs.push(sampleRef);
+        await store.upsertAntiDetectionValidationRequest({
+          requestRef,
+          validationScope,
+          targetFrRef,
+          profileRef: `profile/${input.profile}`,
+          browserChannel: "Google Chrome stable",
+          executionSurface: "real_browser",
+          sampleGoal: `capture ${targetFrRef} source sample`,
+          requestedExecutionMode: effectiveExecutionMode,
+          probeBundleRef: "probe-bundle/xhs-closeout-min-v1",
+          requestState: "accepted",
+          requestedAt: "2026-04-30T01:20:05.000Z"
+        });
+        await store.upsertAntiDetectionValidationRequest({
+          requestRef,
+          validationScope,
+          targetFrRef,
+          profileRef: `profile/${input.profile}`,
+          browserChannel: "Google Chrome stable",
+          executionSurface: "real_browser",
+          sampleGoal: `capture ${targetFrRef} source sample`,
+          requestedExecutionMode: effectiveExecutionMode,
+          probeBundleRef: "probe-bundle/xhs-closeout-min-v1",
+          requestState: "completed",
+          requestedAt: "2026-04-30T01:20:05.000Z"
+        });
+        await store.insertAntiDetectionStructuredSample({
+          sampleRef,
+          requestRef,
+          targetFrRef,
+          validationScope,
+          profileRef: `profile/${input.profile}`,
+          browserChannel: "Google Chrome stable",
+          executionSurface: "real_browser",
+          effectiveExecutionMode,
+          probeBundleRef: "probe-bundle/xhs-closeout-min-v1",
+          runId: input.runId,
+          capturedAt: "2026-04-30T01:20:05.000Z",
+          structuredPayload: {
+            target_fr_ref: targetFrRef,
+            validation_scope: validationScope,
+            profile_ref: `profile/${input.profile}`,
+            probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1",
+            source_gate_audit: {
+              event_id: `gate_evt_${input.runId}`,
+              decision_id: decisionId,
+              session_id: sessionId,
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: requestedExecutionMode,
+              effective_execution_mode: effectiveExecutionMode,
+              approved_at: "2026-04-30T01:19:59.000Z",
+              recorded_at: "2026-04-30T01:20:05.000Z"
+            },
+            signal
+          },
+          artifactRefs: input.artifactRefs ?? [`artifact/xhs-closeout-validation/${input.runId}`]
+        });
+      }
+      if (requestedExecutionMode === "live_read_high_risk") {
+        const approvalChecks = input.approvalChecks ?? {
+          target_domain_confirmed: true,
+          target_tab_confirmed: true,
+          target_page_confirmed: true,
+          risk_state_checked: true,
+          action_type_confirmed: true
+        };
+        await store.upsertGateApproval({
+          approvalId,
+          runId: input.runId,
+          decisionId,
+          approved: true,
+          approver: "qa-reviewer",
+          approvedAt: "2026-04-30T01:19:59.000Z",
+          checks: approvalChecks
+        });
+      }
+      await store.appendGateAuditRecord({
+        eventId: `gate_evt_${input.runId}`,
+        decisionId,
+        approvalId: requestedExecutionMode === "live_read_high_risk" ? approvalId : null,
+        runId: input.runId,
+        sessionId,
+        profile: input.profile,
+        issueScope: "issue_209",
+        riskState: requestedExecutionMode === "live_read_high_risk" ? "allowed" : "paused",
+        nextState: requestedExecutionMode === "live_read_high_risk" ? "allowed" : "paused",
+        transitionTrigger: "gate_evaluation",
+        targetDomain: "www.xiaohongshu.com",
+        targetTabId: 32,
+        targetPage: "search_result_tab",
+        actionType: "read",
+        requestedExecutionMode,
+        effectiveExecutionMode,
+        gateDecision: requestedExecutionMode === "live_read_high_risk" ? "allowed" : "blocked",
+        gateReasons:
+          requestedExecutionMode === "live_read_high_risk"
+            ? ["LIVE_MODE_APPROVED"]
+            : ["DEFAULT_MODE_RECON"],
+        approver: requestedExecutionMode === "live_read_high_risk" ? "qa-reviewer" : null,
+        approvedAt:
+          requestedExecutionMode === "live_read_high_risk" ? "2026-04-30T01:19:59.000Z" : null,
+        recordedAt: "2026-04-30T01:20:05.000Z"
+      });
+      return sampleRefs;
+    } finally {
+      store.close();
+    }
+  };
+
   beforeEach(async () => {
     await seedXhsCloseoutReadyProfile({ cwd: repoRoot, profile: "xhs_account_001" });
     await seedXhsCloseoutReadyProfile({
@@ -1788,6 +1998,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
   });
 
   it("preserves explicit null execution_audit in CLI success summary when upstream summary sets it to null", async () => {
+    const cwd = await createRuntimeCwd();
     const hostDir = await mkdtemp(path.join(tmpdir(), "webenvoy-native-host-null-summary-"));
     const nativeHostPath = path.join(hostDir, "native-host-null-summary.mjs");
     await writeFile(
@@ -1897,7 +2108,7 @@ process.stdin.on("data", (chunk) => {
             }
           })
         ],
-        repoRoot,
+        cwd,
         {
           WEBENVOY_NATIVE_TRANSPORT: "native",
           WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostPath)
@@ -3413,6 +3624,1066 @@ process.stdin.on("data", (chunk) => {
           all_required_ready: false,
           missing_target_fr_refs: ["FR-0012", "FR-0013", "FR-0014"],
           blocking_target_fr_refs: ["FR-0012", "FR-0013", "FR-0014"]
+        }
+      }
+    });
+  });
+
+  itWithSqlite("generates XHS closeout validation baseline views through production CLI", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_cli_profile";
+    const runId = "run-xhs-closeout-validation-cli-001";
+    const sourceRunId = "run-xhs-closeout-validation-source-001";
+    const sourceSampleRefs = await seedXhsCloseoutValidationSourceAudit({
+      cwd,
+      profile,
+      runId: sourceRunId
+    });
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      runId,
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+        observed_at: "2026-04-30T01:30:00.000Z",
+      })
+    ], cwd);
+
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "success",
+      summary: {
+        validation_baseline_generation: {
+          source: "runtime.xhs_closeout_validation",
+          profile,
+          target_domain: "www.xiaohongshu.com",
+          requested_execution_mode: "live_read_high_risk",
+          run_id: runId,
+          source_run_id: sourceRunId,
+          source_audit_event_id: `gate_evt_${sourceRunId}`,
+          active_fetch_performed: false,
+          closeout_bundle_entered: false
+        },
+        anti_detection_validation_view: {
+          profile_ref: `profile/${profile}`,
+          effective_execution_mode: "live_read_high_risk",
+          all_required_ready: true,
+          missing_target_fr_refs: [],
+          blocking_target_fr_refs: []
+        }
+      }
+    });
+
+    const auditResult = runCli([
+      "runtime.audit",
+      "--run-id",
+      "run-xhs-closeout-validation-cli-audit-001",
+      "--params",
+      JSON.stringify({
+        profile,
+        requested_execution_mode: "live_read_high_risk",
+        limit: 1
+      })
+    ], cwd);
+    expect(auditResult.status).toBe(0);
+    const auditBody = parseSingleJsonLine(auditResult.stdout);
+    expect(auditBody).toMatchObject({
+      command: "runtime.audit",
+      status: "success",
+      summary: {
+        anti_detection_validation_view: {
+          profile_ref: `profile/${profile}`,
+          all_required_ready: true,
+          blocking_target_fr_refs: []
+        }
+      }
+    });
+
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    const db = new DatabaseSyncCtor(resolveRuntimeStorePath(cwd)) as unknown as {
+      prepare: (sql: string) => {
+        all: (...args: unknown[]) => unknown[];
+        get: (...args: unknown[]) => unknown;
+      };
+      close: () => void;
+    };
+    try {
+      const provenanceRows = db.prepare(
+        `SELECT
+          anti_detection_validation_record.target_fr_ref,
+          anti_detection_validation_record.request_ref,
+          anti_detection_validation_record.sample_ref,
+          anti_detection_validation_record.run_id,
+          anti_detection_validation_record.validated_at,
+          anti_detection_structured_sample.structured_payload,
+          anti_detection_baseline_snapshot.source_sample_refs,
+          anti_detection_baseline_snapshot.source_run_ids
+        FROM anti_detection_validation_record
+        JOIN anti_detection_structured_sample
+          ON anti_detection_structured_sample.sample_ref = anti_detection_validation_record.sample_ref
+        JOIN anti_detection_baseline_snapshot
+          ON anti_detection_baseline_snapshot.baseline_ref = anti_detection_validation_record.baseline_ref
+        WHERE anti_detection_validation_record.profile_ref = ?
+          AND anti_detection_validation_record.effective_execution_mode = ?
+          AND anti_detection_validation_record.probe_bundle_ref = ?
+        ORDER BY anti_detection_validation_record.target_fr_ref`
+      ).all(
+        `profile/${profile}`,
+        "live_read_high_risk",
+        "probe-bundle/xhs-closeout-min-v1"
+      ) as Array<Record<string, string>>;
+      expect(provenanceRows).toHaveLength(3);
+      for (const row of provenanceRows) {
+        expect(row.request_ref).toContain(`/${runId}/`);
+        expect(row.sample_ref).toContain(`/${runId}/`);
+        expect(row.run_id).toBe(runId);
+        expect(row.validated_at).not.toBe("2026-04-30T01:30:00.000Z");
+        const structuredPayload = JSON.parse(row.structured_payload) as Record<string, unknown>;
+        expect(sourceSampleRefs).toContain(structuredPayload.source_sample_ref);
+        expect(structuredPayload.source_run_id).toBe(sourceRunId);
+        expect(String(structuredPayload.source_request_ref)).toContain(`/source/${sourceRunId}/`);
+        expect(JSON.parse(row.source_sample_refs)).toEqual([structuredPayload.source_sample_ref]);
+        expect(JSON.parse(row.source_run_ids)).toEqual([sourceRunId]);
+      }
+
+      const generatedSampleCount = db.prepare(
+        "SELECT count(*) AS count FROM anti_detection_structured_sample WHERE run_id = ?"
+      ).get(runId) as { count: number };
+      expect(generatedSampleCount.count).toBe(3);
+    } finally {
+      db.close();
+    }
+
+    const repeatRunId = "run-xhs-closeout-validation-cli-002";
+    const repeatResult = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      repeatRunId,
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+        observed_at: "2026-04-30T01:31:00.000Z",
+      })
+    ], cwd);
+    expect(repeatResult.status).toBe(0);
+    const repeatBody = parseSingleJsonLine(repeatResult.stdout);
+    expect(repeatBody).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "success",
+      summary: {
+        validation_baseline_generation: {
+          run_id: repeatRunId,
+          source_run_id: sourceRunId
+        },
+        anti_detection_validation_view: {
+          all_required_ready: true
+        }
+      }
+    });
+  });
+
+  itWithSqlite("fails closed when XHS closeout validation evidence is not browser-returned", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_cli_reject_profile";
+    const sourceRunId = "run-xhs-closeout-validation-reject-source-001";
+    const signals = createXhsCloseoutValidationSignals();
+    signals.layer1_consistency.browser_returned_evidence.source = "local_fixture";
+    const sourceSampleRefs = await seedXhsCloseoutValidationSourceAudit({
+      cwd,
+      profile,
+      runId: sourceRunId,
+      signals
+    });
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      "run-xhs-closeout-validation-cli-reject-001",
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+      })
+    ], cwd);
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_PERSISTED_SOURCE_INVALID"
+        }
+      }
+    });
+  });
+
+  itWithSqlite("fails closed when the active XHS closeout baseline snapshot is missing", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_cli_stale_registry_profile";
+    const sourceRunId = "run-xhs-closeout-validation-stale-registry-source-001";
+    const sourceSampleRefs = await seedXhsCloseoutValidationSourceAudit({
+      cwd,
+      profile,
+      runId: sourceRunId
+    });
+
+    const seedResult = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      "run-xhs-closeout-validation-cli-stale-registry-seed-001",
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+      })
+    ], cwd);
+    expect(seedResult.status).toBe(0);
+
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    const db = new DatabaseSyncCtor(resolveRuntimeStorePath(cwd));
+    try {
+      db.prepare("PRAGMA foreign_keys = OFF").run();
+      db.prepare(
+        `UPDATE anti_detection_baseline_registry_entry
+        SET active_baseline_ref = ?
+        WHERE target_fr_ref = ?
+          AND validation_scope = ?
+          AND profile_ref = ?`
+      ).run(
+        "baseline/xhs-closeout-min-v1/missing-active-snapshot",
+        "FR-0012",
+        "layer1_consistency",
+        `profile/${profile}`
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      "run-xhs-closeout-validation-cli-stale-registry-001",
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+      })
+    ], cwd);
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_PERSISTED_SOURCE_INVALID"
+        }
+      }
+    });
+    expect(
+      String(((body.error as Record<string, unknown>).details as Record<string, unknown>).validation_error)
+    ).toContain("active baseline snapshot is missing");
+  });
+
+  itWithSqlite("rejects recon audit sources for XHS closeout validation generation", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_cli_recon_source_profile";
+    const sourceRunId = "run-xhs-closeout-validation-recon-source-001";
+    const sourceSampleRefs = await seedXhsCloseoutValidationSourceAudit({
+      cwd,
+      profile,
+      runId: sourceRunId,
+      requestedExecutionMode: "recon",
+      effectiveExecutionMode: "recon"
+    });
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      "run-xhs-closeout-validation-cli-recon-source-001",
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+      })
+    ], cwd);
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_AUDIT_INVALID",
+          source_requested_execution_mode: "recon",
+          source_effective_execution_mode: "recon"
+        }
+      }
+    });
+  });
+
+  itWithSqlite("accepts source samples when a later unrelated audit is blocked", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_cli_latest_blocked_profile";
+    const sourceRunId = "run-xhs-closeout-validation-latest-blocked-source-001";
+    const sourceSampleRefs = await seedXhsCloseoutValidationSourceAudit({
+      cwd,
+      profile,
+      runId: sourceRunId
+    });
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    try {
+      await store.appendGateAuditRecord({
+        eventId: `gate_evt_${sourceRunId}_blocked`,
+        decisionId: `gate_decision_${sourceRunId}_blocked`,
+        approvalId: null,
+        runId: sourceRunId,
+        sessionId: `session-${sourceRunId}`,
+        profile,
+        issueScope: "issue_209",
+        riskState: "paused",
+        nextState: "paused",
+        transitionTrigger: "gate_evaluation",
+        targetDomain: "www.xiaohongshu.com",
+        targetTabId: 32,
+        targetPage: "search_result_tab",
+        actionType: "read",
+        requestedExecutionMode: "live_read_high_risk",
+        effectiveExecutionMode: "live_read_high_risk",
+        gateDecision: "blocked",
+        gateReasons: ["TARGET_TAB_NOT_FOUND"],
+        approver: null,
+        approvedAt: null,
+        recordedAt: "2026-04-30T01:21:05.000Z"
+      });
+    } finally {
+      store.close();
+    }
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      "run-xhs-closeout-validation-cli-latest-blocked-001",
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+      })
+    ], cwd);
+
+    expect(result.status).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "success",
+      summary: {
+        validation_baseline_generation: {
+          source_run_id: sourceRunId,
+          source_audit_event_id: `gate_evt_${sourceRunId}`
+        }
+      }
+    });
+  });
+
+  itWithSqlite("rejects legacy source samples without embedded gate audit", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_cli_legacy_sample_profile";
+    const sourceRunId = "run-xhs-closeout-validation-legacy-sample-source-001";
+    const sourceSampleRefs = await seedXhsCloseoutValidationSourceAudit({
+      cwd,
+      profile,
+      runId: sourceRunId
+    });
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    const db = new DatabaseSyncCtor(resolveRuntimeStorePath(cwd)) as unknown as {
+      prepare: (sql: string) => {
+        all: (...args: unknown[]) => Array<{ sample_ref: string; structured_payload: string }>;
+        run: (...args: unknown[]) => unknown;
+      };
+      close: () => void;
+    };
+    try {
+      const rows = db.prepare(
+        "SELECT sample_ref, structured_payload FROM anti_detection_structured_sample WHERE sample_ref IN (?, ?, ?)"
+      ).all(...sourceSampleRefs);
+      for (const row of rows) {
+        const payload = JSON.parse(row.structured_payload) as Record<string, unknown>;
+        delete payload.source_gate_audit;
+        db.prepare(
+          "UPDATE anti_detection_structured_sample SET structured_payload = ? WHERE sample_ref = ?"
+        ).run(JSON.stringify(payload), row.sample_ref);
+      }
+    } finally {
+      db.close();
+    }
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      "run-xhs-closeout-validation-cli-legacy-sample-001",
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+      })
+    ], cwd);
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_AUDIT_INVALID",
+          source_samples_bound_to_gate_audit: false
+        }
+      }
+    });
+  });
+
+  itWithSqlite("rejects legacy source samples with only temporal audit correlation", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_cli_legacy_sample_temporal_profile";
+    const sourceRunId = "run-xhs-closeout-validation-legacy-sample-temporal-source-001";
+    const sourceSampleRefs = await seedXhsCloseoutValidationSourceAudit({
+      cwd,
+      profile,
+      runId: sourceRunId
+    });
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    const db = new DatabaseSyncCtor(resolveRuntimeStorePath(cwd)) as unknown as {
+      prepare: (sql: string) => {
+        all: (...args: unknown[]) => Array<{ sample_ref: string; structured_payload: string }>;
+        run: (...args: unknown[]) => unknown;
+      };
+      close: () => void;
+    };
+    try {
+      const rows = db.prepare(
+        "SELECT sample_ref, structured_payload FROM anti_detection_structured_sample WHERE sample_ref IN (?, ?, ?)"
+      ).all(...sourceSampleRefs);
+      for (const row of rows) {
+        const payload = JSON.parse(row.structured_payload) as Record<string, unknown>;
+        delete payload.source_gate_audit;
+        db.prepare(
+          "UPDATE anti_detection_structured_sample SET structured_payload = ? WHERE sample_ref = ?"
+        ).run(JSON.stringify(payload), row.sample_ref);
+      }
+    } finally {
+      db.close();
+    }
+
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    try {
+      await store.upsertGateApproval({
+        approvalId: `gate_approval_${sourceRunId}_later`,
+        runId: sourceRunId,
+        decisionId: `gate_decision_${sourceRunId}_later`,
+        approved: true,
+        approver: "qa-reviewer",
+        approvedAt: "2026-04-30T01:21:59.000Z",
+        checks: {
+          target_domain_confirmed: true,
+          target_tab_confirmed: true,
+          target_page_confirmed: true,
+          risk_state_checked: true,
+          action_type_confirmed: true
+        }
+      });
+      await store.appendGateAuditRecord({
+        eventId: `gate_evt_${sourceRunId}_later`,
+        decisionId: `gate_decision_${sourceRunId}_later`,
+        approvalId: `gate_approval_${sourceRunId}_later`,
+        runId: sourceRunId,
+        sessionId: `session-${sourceRunId}`,
+        profile,
+        issueScope: "issue_209",
+        riskState: "allowed",
+        nextState: "allowed",
+        transitionTrigger: "gate_evaluation",
+        targetDomain: "www.xiaohongshu.com",
+        targetTabId: 32,
+        targetPage: "search_result_tab",
+        actionType: "read",
+        requestedExecutionMode: "live_read_high_risk",
+        effectiveExecutionMode: "live_read_high_risk",
+        gateDecision: "allowed",
+        gateReasons: ["LIVE_MODE_APPROVED"],
+        approver: "qa-reviewer",
+        approvedAt: "2026-04-30T01:21:59.000Z",
+        recordedAt: "2026-04-30T01:22:05.000Z"
+      });
+    } finally {
+      store.close();
+    }
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      "run-xhs-closeout-validation-cli-legacy-sample-temporal-001",
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+      })
+    ], cwd);
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_AUDIT_INVALID",
+          source_samples_bound_to_gate_audit: false
+        }
+      }
+    });
+  });
+
+  itWithSqlite("rejects legacy source samples even when unrelated audits exist", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_cli_legacy_sample_unrelated_profile";
+    const sourceRunId = "run-xhs-closeout-validation-legacy-sample-unrelated-source-001";
+    const sourceSampleRefs = await seedXhsCloseoutValidationSourceAudit({
+      cwd,
+      profile,
+      runId: sourceRunId
+    });
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    const db = new DatabaseSyncCtor(resolveRuntimeStorePath(cwd)) as unknown as {
+      prepare: (sql: string) => {
+        all: (...args: unknown[]) => Array<{ sample_ref: string; structured_payload: string }>;
+        run: (...args: unknown[]) => unknown;
+      };
+      close: () => void;
+    };
+    try {
+      const rows = db.prepare(
+        "SELECT sample_ref, structured_payload FROM anti_detection_structured_sample WHERE sample_ref IN (?, ?, ?)"
+      ).all(...sourceSampleRefs);
+      for (const row of rows) {
+        const payload = JSON.parse(row.structured_payload) as Record<string, unknown>;
+        delete payload.source_gate_audit;
+        db.prepare(
+          "UPDATE anti_detection_structured_sample SET structured_payload = ? WHERE sample_ref = ?"
+        ).run(JSON.stringify(payload), row.sample_ref);
+      }
+    } finally {
+      db.close();
+    }
+
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    try {
+      await store.upsertGateApproval({
+        approvalId: `gate_approval_${sourceRunId}_unrelated`,
+        runId: sourceRunId,
+        decisionId: `gate_decision_${sourceRunId}_unrelated`,
+        approved: true,
+        approver: "qa-reviewer",
+        approvedAt: "2026-04-30T01:18:59.000Z",
+        checks: {
+          target_domain_confirmed: true,
+          target_tab_confirmed: true,
+          target_page_confirmed: true,
+          risk_state_checked: true,
+          action_type_confirmed: true
+        }
+      });
+      await store.appendGateAuditRecord({
+        eventId: `gate_evt_${sourceRunId}_unrelated`,
+        decisionId: `gate_decision_${sourceRunId}_unrelated`,
+        approvalId: `gate_approval_${sourceRunId}_unrelated`,
+        runId: sourceRunId,
+        sessionId: `session-${sourceRunId}`,
+        profile,
+        issueScope: "issue_209",
+        riskState: "allowed",
+        nextState: "allowed",
+        transitionTrigger: "gate_evaluation",
+        targetDomain: "www.xiaohongshu.com",
+        targetTabId: 32,
+        targetPage: "note_detail_tab",
+        actionType: "read",
+        requestedExecutionMode: "live_read_high_risk",
+        effectiveExecutionMode: "live_read_high_risk",
+        gateDecision: "allowed",
+        gateReasons: ["LIVE_MODE_APPROVED"],
+        approver: "qa-reviewer",
+        approvedAt: "2026-04-30T01:18:59.000Z",
+        recordedAt: "2026-04-30T01:19:00.000Z"
+      });
+    } finally {
+      store.close();
+    }
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      "run-xhs-closeout-validation-cli-legacy-sample-unrelated-001",
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+      })
+    ], cwd);
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_AUDIT_INVALID",
+          source_samples_bound_to_gate_audit: false
+        }
+      }
+    });
+  });
+
+  itWithSqlite("rejects legacy source samples when multiple approved audits predate capture", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_cli_legacy_sample_ambiguous_profile";
+    const sourceRunId = "run-xhs-closeout-validation-legacy-sample-ambiguous-source-001";
+    const sourceSampleRefs = await seedXhsCloseoutValidationSourceAudit({
+      cwd,
+      profile,
+      runId: sourceRunId
+    });
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    const db = new DatabaseSyncCtor(resolveRuntimeStorePath(cwd)) as unknown as {
+      prepare: (sql: string) => {
+        all: (...args: unknown[]) => Array<{ sample_ref: string; structured_payload: string }>;
+        run: (...args: unknown[]) => unknown;
+      };
+      close: () => void;
+    };
+    try {
+      const rows = db.prepare(
+        "SELECT sample_ref, structured_payload FROM anti_detection_structured_sample WHERE sample_ref IN (?, ?, ?)"
+      ).all(...sourceSampleRefs);
+      for (const row of rows) {
+        const payload = JSON.parse(row.structured_payload) as Record<string, unknown>;
+        delete payload.source_gate_audit;
+        db.prepare(
+          "UPDATE anti_detection_structured_sample SET structured_payload = ? WHERE sample_ref = ?"
+        ).run(JSON.stringify(payload), row.sample_ref);
+      }
+    } finally {
+      db.close();
+    }
+
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(cwd));
+    try {
+      await store.upsertGateApproval({
+        approvalId: `gate_approval_${sourceRunId}_earlier`,
+        runId: sourceRunId,
+        decisionId: `gate_decision_${sourceRunId}_earlier`,
+        approved: true,
+        approver: "qa-reviewer",
+        approvedAt: "2026-04-30T01:18:59.000Z",
+        checks: {
+          target_domain_confirmed: true,
+          target_tab_confirmed: true,
+          target_page_confirmed: true,
+          risk_state_checked: true,
+          action_type_confirmed: true
+        }
+      });
+      await store.appendGateAuditRecord({
+        eventId: `gate_evt_${sourceRunId}_earlier`,
+        decisionId: `gate_decision_${sourceRunId}_earlier`,
+        approvalId: `gate_approval_${sourceRunId}_earlier`,
+        runId: sourceRunId,
+        sessionId: `session-${sourceRunId}`,
+        profile,
+        issueScope: "issue_209",
+        riskState: "allowed",
+        nextState: "allowed",
+        transitionTrigger: "gate_evaluation",
+        targetDomain: "www.xiaohongshu.com",
+        targetTabId: 32,
+        targetPage: "search_result_tab",
+        actionType: "read",
+        requestedExecutionMode: "live_read_high_risk",
+        effectiveExecutionMode: "live_read_high_risk",
+        gateDecision: "allowed",
+        gateReasons: ["LIVE_MODE_APPROVED"],
+        approver: "qa-reviewer",
+        approvedAt: "2026-04-30T01:18:59.000Z",
+        recordedAt: "2026-04-30T01:19:00.000Z"
+      });
+    } finally {
+      store.close();
+    }
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      "run-xhs-closeout-validation-cli-legacy-sample-ambiguous-001",
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+      })
+    ], cwd);
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_AUDIT_INVALID",
+          source_samples_bound_to_gate_audit: false
+        }
+      }
+    });
+  });
+
+  itWithSqlite("reports invalid persisted source evidence as execution failure", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_cli_invalid_persisted_source_profile";
+    const sourceRunId = "run-xhs-closeout-validation-invalid-persisted-source-001";
+    const sourceSampleRefs = await seedXhsCloseoutValidationSourceAudit({
+      cwd,
+      profile,
+      runId: sourceRunId
+    });
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    const db = new DatabaseSyncCtor(resolveRuntimeStorePath(cwd)) as unknown as {
+      prepare: (sql: string) => {
+        all: (...args: unknown[]) => Array<{ sample_ref: string; structured_payload: string }>;
+        run: (...args: unknown[]) => unknown;
+      };
+      close: () => void;
+    };
+    try {
+      const rows = db.prepare(
+        "SELECT sample_ref, structured_payload FROM anti_detection_structured_sample WHERE sample_ref IN (?, ?, ?)"
+      ).all(...sourceSampleRefs);
+      for (const row of rows) {
+        const payload = JSON.parse(row.structured_payload) as {
+          source_gate_audit: Record<string, unknown>;
+        };
+        payload.source_gate_audit.event_id = "";
+        db.prepare(
+          "UPDATE anti_detection_structured_sample SET structured_payload = ? WHERE sample_ref = ?"
+        ).run(JSON.stringify(payload), row.sample_ref);
+      }
+    } finally {
+      db.close();
+    }
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      "run-xhs-closeout-validation-cli-invalid-persisted-source-001",
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+      })
+    ], cwd);
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          stage: "execution",
+          reason: "XHS_CLOSEOUT_VALIDATION_PERSISTED_SOURCE_INVALID"
+        }
+      }
+    });
+  });
+
+  itWithSqlite("requires complete live approval checks for source audits", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_cli_incomplete_approval_profile";
+    const sourceRunId = "run-xhs-closeout-validation-incomplete-approval-source-001";
+    const sourceSampleRefs = await seedXhsCloseoutValidationSourceAudit({
+      cwd,
+      profile,
+      runId: sourceRunId,
+      approvalChecks: {
+        target_domain_confirmed: true,
+        target_tab_confirmed: true,
+        target_page_confirmed: true,
+        risk_state_checked: false,
+        action_type_confirmed: true
+      }
+    });
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      "run-xhs-closeout-validation-cli-incomplete-approval-001",
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+      })
+    ], cwd);
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_AUDIT_INVALID",
+          source_gate_decision: "allowed",
+          approval_matched: false,
+          approval_checks_complete: false
+        }
+      }
+    });
+  });
+
+  itWithSqlite("rejects source samples not bound to the approved gate audit", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_cli_sample_gate_mismatch_profile";
+    const sourceRunId = "run-xhs-closeout-validation-sample-gate-mismatch-source-001";
+    const sourceSampleRefs = await seedXhsCloseoutValidationSourceAudit({
+      cwd,
+      profile,
+      runId: sourceRunId
+    });
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    const db = new DatabaseSyncCtor(resolveRuntimeStorePath(cwd)) as unknown as {
+      prepare: (sql: string) => {
+        get: (...args: unknown[]) => unknown;
+        run: (...args: unknown[]) => unknown;
+      };
+      close: () => void;
+    };
+    try {
+      const row = db.prepare(
+        "SELECT structured_payload FROM anti_detection_structured_sample WHERE sample_ref = ?"
+      ).get(sourceSampleRefs[0]) as { structured_payload: string };
+      const payload = JSON.parse(row.structured_payload) as {
+        source_gate_audit: Record<string, unknown>;
+      };
+      payload.source_gate_audit.decision_id = "gate_decision_unapproved_other";
+      db.prepare(
+        "UPDATE anti_detection_structured_sample SET structured_payload = ? WHERE sample_ref = ?"
+      ).run(JSON.stringify(payload), sourceSampleRefs[0]);
+    } finally {
+      db.close();
+    }
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      "run-xhs-closeout-validation-cli-sample-gate-mismatch-001",
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+      })
+    ], cwd);
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_AUDIT_INVALID",
+          approval_matched: false
+        }
+      }
+    });
+  });
+
+  itWithSqlite("rejects source samples whose validation request mode does not match", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_cli_sample_request_mode_profile";
+    const sourceRunId = "run-xhs-closeout-validation-sample-request-mode-source-001";
+    const sourceSampleRefs = await seedXhsCloseoutValidationSourceAudit({
+      cwd,
+      profile,
+      runId: sourceRunId
+    });
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    const db = new DatabaseSyncCtor(resolveRuntimeStorePath(cwd));
+    try {
+      db.prepare(
+        "UPDATE anti_detection_validation_request SET requested_execution_mode = ? WHERE request_ref = ?"
+      ).run("recon", `validation-request/source/${sourceRunId}/FR-0012`);
+    } finally {
+      db.close();
+    }
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      "run-xhs-closeout-validation-cli-sample-request-mode-001",
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+      })
+    ], cwd);
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_SAMPLE_INVALID",
+          sample_request_execution_mode: "recon"
+        }
+      }
+    });
+  });
+
+  it("rejects XHS closeout validation generation outside the live_read_high_risk scope", () => {
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      "xhs_validation_cli_wrong_mode",
+      "--run-id",
+      "run-xhs-closeout-validation-cli-wrong-mode-001",
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "recon",
+        signals: createXhsCloseoutValidationSignals()
+      })
+    ]);
+
+    expect(result.status).toBe(2);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_MODE_INVALID"
+        }
+      }
+    });
+  });
+
+  it("rejects inline XHS closeout validation signals", () => {
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      "xhs_validation_cli_inline_signals",
+      "--run-id",
+      "run-xhs-closeout-validation-cli-inline-signals-001",
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: "run-xhs-closeout-validation-source-inline",
+        signals: createXhsCloseoutValidationSignals()
+      })
+    ]);
+
+    expect(result.status).toBe(2);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "error",
+      error: {
+        code: "ERR_CLI_INVALID_ARGS",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_INLINE_SIGNALS_FORBIDDEN"
         }
       }
     });

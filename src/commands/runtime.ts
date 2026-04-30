@@ -29,11 +29,15 @@ import {
   SQLiteRuntimeStore,
   resolveRuntimeStorePath,
   type AntiDetectionExecutionMode,
+  type AntiDetectionStructuredSampleRecord,
+  type GateAuditRecord,
   type SessionRhythmStatusViewRecord
 } from "../runtime/store/sqlite-runtime-store.js";
 import {
+  persistXhsCloseoutValidationSourceSamples,
   readXhsCloseoutValidationGateView,
-  toXhsCloseoutValidationGateJson
+  toXhsCloseoutValidationGateJson,
+  type XhsCloseoutValidationSignalMap
 } from "../runtime/anti-detection-validation.js";
 
 const asBoolean = (value: unknown): boolean => value === true;
@@ -73,6 +77,10 @@ const asStringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 const hasOwn = (record: Record<string, unknown>, key: string): boolean =>
   Object.prototype.hasOwnProperty.call(record, key);
+const asStringArrayStrict = (value: unknown): string[] | null =>
+  Array.isArray(value) && value.every((item) => typeof item === "string" && item.trim().length > 0)
+    ? value.map((item) => item.trim())
+    : null;
 
 const resolveRuntimeBridge = (): NativeMessagingBridge => {
   if (process.env.WEBENVOY_NATIVE_TRANSPORT === "loopback") {
@@ -194,6 +202,456 @@ const buildAntiDetectionValidationViewForProfile = async (input: {
     effectiveExecutionMode: resolveAntiDetectionEffectiveExecutionMode(input.effectiveExecutionMode)
   });
   return toXhsCloseoutValidationGateJson(gate);
+};
+
+const parseXhsCloseoutValidationSignals = (
+  signals: unknown
+): XhsCloseoutValidationSignalMap | null => {
+  const payload = asObject(signals);
+  if (!payload) {
+    return null;
+  }
+  const layer1 = asObject(payload.layer1_consistency);
+  const layer2 = asObject(payload.layer2_interaction);
+  const layer3 = asObject(payload.layer3_session_rhythm);
+  if (!layer1 || !layer2 || !layer3) {
+    return null;
+  }
+  return {
+    layer1_consistency: layer1,
+    layer2_interaction: layer2,
+    layer3_session_rhythm: layer3
+  };
+};
+
+const parseSourceSampleRefs = (value: unknown): string[] | null => {
+  const refs = asStringArrayStrict(value);
+  if (!refs || refs.length !== 3 || new Set(refs).size !== refs.length) {
+    return null;
+  }
+  return refs;
+};
+
+const requiredXhsCloseoutSampleScopes = [
+  ["FR-0012", "layer1_consistency"],
+  ["FR-0013", "layer2_interaction"],
+  ["FR-0014", "layer3_session_rhythm"]
+] as const;
+
+const sampleSignal = (sample: AntiDetectionStructuredSampleRecord): Record<string, unknown> | null => {
+  const payload = asObject(sample.structured_payload);
+  return asObject(payload?.signal);
+};
+
+const sampleSourceGateAudit = (
+  sample: AntiDetectionStructuredSampleRecord
+): Record<string, unknown> | null => {
+  const payload = asObject(sample.structured_payload);
+  return asObject(payload?.source_gate_audit);
+};
+
+const isoTimeMs = (value: string | null | undefined): number | null => {
+  if (!value) {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const sampleMatchesSourceGateAudit = (
+  sample: AntiDetectionStructuredSampleRecord,
+  sourceAudit: GateAuditRecord
+): boolean => {
+  const sourceGateAudit = sampleSourceGateAudit(sample);
+  const capturedAt = isoTimeMs(sample.captured_at);
+  const approvedAt = isoTimeMs(sourceAudit.approved_at);
+  if (!sourceGateAudit) {
+    return false;
+  }
+  return (
+    sourceGateAudit.event_id === sourceAudit.event_id &&
+    sourceGateAudit.decision_id === sourceAudit.decision_id &&
+    sourceGateAudit.session_id === sourceAudit.session_id &&
+    sourceGateAudit.target_domain === sourceAudit.target_domain &&
+    sourceGateAudit.target_tab_id === sourceAudit.target_tab_id &&
+    sourceGateAudit.target_page === sourceAudit.target_page &&
+    sourceGateAudit.action_type === sourceAudit.action_type &&
+    sourceGateAudit.requested_execution_mode === sourceAudit.requested_execution_mode &&
+    sourceGateAudit.effective_execution_mode === sourceAudit.effective_execution_mode &&
+    capturedAt !== null &&
+    approvedAt !== null &&
+    capturedAt >= approvedAt
+  );
+};
+
+const sourceAuditMatchesXhsCloseoutScope = (input: {
+  sourceAudit: GateAuditRecord;
+  profile: string | null;
+  targetDomain: string;
+  requestedExecutionMode: "live_read_high_risk";
+}): boolean => {
+  return (
+    input.sourceAudit.profile === input.profile &&
+    input.sourceAudit.issue_scope === "issue_209" &&
+    input.sourceAudit.target_domain === input.targetDomain &&
+    input.sourceAudit.target_page === "search_result_tab" &&
+    input.sourceAudit.action_type === "read" &&
+    input.sourceAudit.requested_execution_mode === input.requestedExecutionMode &&
+    input.sourceAudit.effective_execution_mode === input.requestedExecutionMode &&
+    input.sourceAudit.gate_decision === "allowed" &&
+    input.sourceAudit.gate_reasons.includes("LIVE_MODE_APPROVED")
+  );
+};
+
+const readXhsCloseoutValidationSignalsFromSourceSamples = async (input: {
+  store: SQLiteRuntimeStore;
+  sourceRunId: string;
+  sourceAudit: GateAuditRecord;
+  profile: string | null;
+  requestedExecutionMode: "live_read_high_risk";
+  sourceSampleRefs: string[];
+}): Promise<{
+  signals: XhsCloseoutValidationSignalMap;
+  artifactRefs: string[];
+  sourceSamples: AntiDetectionStructuredSampleRecord[];
+}> => {
+  const samples = await Promise.all(
+    input.sourceSampleRefs.map((sampleRef) => input.store.getAntiDetectionStructuredSample(sampleRef))
+  );
+  const artifactRefs = new Set<string>();
+  const signals: Partial<XhsCloseoutValidationSignalMap> = {};
+  for (const [targetFrRef, validationScope] of requiredXhsCloseoutSampleScopes) {
+    const sample =
+      samples.find(
+        (candidate): candidate is AntiDetectionStructuredSampleRecord =>
+          candidate !== null &&
+          candidate.target_fr_ref === targetFrRef &&
+          candidate.validation_scope === validationScope
+      ) ?? null;
+    const sampleRequest = sample
+      ? await input.store.getAntiDetectionValidationRequest(sample.request_ref)
+      : null;
+    const signal = sample ? sampleSignal(sample) : null;
+    if (
+      !sample ||
+      !sampleRequest ||
+      !signal ||
+      sample.run_id !== input.sourceRunId ||
+      sample.profile_ref !== `profile/${input.profile ?? ""}` ||
+      sample.browser_channel !== "Google Chrome stable" ||
+      sample.execution_surface !== "real_browser" ||
+      sample.effective_execution_mode !== input.requestedExecutionMode ||
+      sample.probe_bundle_ref !== "probe-bundle/xhs-closeout-min-v1" ||
+      sampleRequest.requested_execution_mode !== input.requestedExecutionMode ||
+      sampleRequest.request_state !== "completed" ||
+      sampleRequest.target_fr_ref !== targetFrRef ||
+      sampleRequest.validation_scope !== validationScope ||
+      sampleRequest.profile_ref !== `profile/${input.profile ?? ""}` ||
+      sampleRequest.browser_channel !== "Google Chrome stable" ||
+      sampleRequest.execution_surface !== "real_browser" ||
+      sampleRequest.probe_bundle_ref !== "probe-bundle/xhs-closeout-min-v1" ||
+      !sampleMatchesSourceGateAudit(sample, input.sourceAudit)
+    ) {
+      throw new CliError(
+        "ERR_EXECUTION_FAILED",
+        "XHS closeout validation source samples are not eligible",
+        {
+          retryable: false,
+          details: {
+            ability_id: "runtime.xhs_closeout_validation",
+            stage: "execution",
+            reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_SAMPLE_INVALID",
+            source_run_id: input.sourceRunId,
+            target_fr_ref: targetFrRef,
+            validation_scope: validationScope,
+            sample_ref: sample?.sample_ref ?? null,
+            sample_run_id: sample?.run_id ?? null,
+            sample_profile_ref: sample?.profile_ref ?? null,
+            sample_effective_execution_mode: sample?.effective_execution_mode ?? null,
+            sample_request_ref: sampleRequest?.request_ref ?? null,
+            sample_request_execution_mode: sampleRequest?.requested_execution_mode ?? null,
+            sample_request_state: sampleRequest?.request_state ?? null,
+            sample_gate_audit_matched: sample
+              ? sampleMatchesSourceGateAudit(sample, input.sourceAudit)
+              : false
+          }
+        }
+      );
+    }
+    if (validationScope === "layer1_consistency") {
+      signals.layer1_consistency = signal;
+    } else if (validationScope === "layer2_interaction") {
+      signals.layer2_interaction = signal;
+    } else if (validationScope === "layer3_session_rhythm") {
+      signals.layer3_session_rhythm = signal;
+    }
+    for (const artifactRef of sample.artifact_refs) {
+      artifactRefs.add(artifactRef);
+    }
+  }
+  const parsedSignals = parseXhsCloseoutValidationSignals(signals);
+  if (!parsedSignals) {
+    throw new CliError(
+      "ERR_EXECUTION_FAILED",
+      "XHS closeout validation source samples did not cover all required scopes",
+      {
+        retryable: false,
+        details: {
+          ability_id: "runtime.xhs_closeout_validation",
+          stage: "execution",
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_SAMPLES_INCOMPLETE",
+          source_run_id: input.sourceRunId
+        }
+      }
+    );
+  }
+  return {
+    signals: parsedSignals,
+    artifactRefs: [...artifactRefs],
+    sourceSamples: samples.filter(
+      (sample): sample is AntiDetectionStructuredSampleRecord => sample !== null
+    )
+  };
+};
+
+const assertXhsCloseoutValidationSourceAudit = async (input: {
+  store: SQLiteRuntimeStore;
+  sourceRunId: string;
+  profile: string | null;
+  targetDomain: string;
+  requestedExecutionMode: "live_read_high_risk";
+  sourceSampleRefs: string[];
+}): Promise<GateAuditRecord> => {
+  const samples = await Promise.all(
+    input.sourceSampleRefs.map((sampleRef) => input.store.getAntiDetectionStructuredSample(sampleRef))
+  );
+  const sampleGateAudits = samples.map((sample) =>
+    sample ? sampleSourceGateAudit(sample) : null
+  );
+  const sampleGateAudit = sampleGateAudits[0] ?? null;
+  const allSamplesReferenceSameGateAudit =
+    !!sampleGateAudit &&
+    sampleGateAudits.every(
+      (gateAudit) =>
+        gateAudit &&
+        gateAudit.event_id === sampleGateAudit.event_id &&
+        gateAudit.decision_id === sampleGateAudit.decision_id &&
+        gateAudit.session_id === sampleGateAudit.session_id &&
+        gateAudit.target_tab_id === sampleGateAudit.target_tab_id
+    );
+  let sourceAudit: GateAuditRecord | null = null;
+  if (
+    allSamplesReferenceSameGateAudit &&
+    typeof sampleGateAudit.event_id === "string" &&
+    typeof sampleGateAudit.decision_id === "string" &&
+    typeof sampleGateAudit.session_id === "string"
+  ) {
+    sourceAudit = await input.store.getGateAuditRecordByIdentity({
+      runId: input.sourceRunId,
+      eventId: sampleGateAudit.event_id,
+      decisionId: sampleGateAudit.decision_id,
+      sessionId: sampleGateAudit.session_id
+    });
+  }
+  const approvalRecord =
+    typeof sourceAudit?.decision_id === "string" && sourceAudit.decision_id.length > 0
+      ? await input.store.getGateApprovalByDecisionId(sourceAudit.decision_id)
+      : null;
+  const approvalChecks = approvalRecord?.checks ?? {};
+  const approvalChecksComplete =
+    approvalRecord?.approved === true &&
+    typeof approvalRecord.approver === "string" &&
+    approvalRecord.approver.trim().length > 0 &&
+    typeof approvalRecord.approved_at === "string" &&
+    approvalRecord.approved_at.trim().length > 0 &&
+    [
+      "target_domain_confirmed",
+      "target_tab_confirmed",
+      "target_page_confirmed",
+      "risk_state_checked",
+      "action_type_confirmed"
+    ].every((key) => approvalChecks[key] === true);
+  const approvalMatches =
+    approvalChecksComplete &&
+    typeof sourceAudit?.approval_id === "string" &&
+    sourceAudit.approval_id.length > 0 &&
+    approvalRecord?.approval_id === sourceAudit.approval_id &&
+    approvalRecord.decision_id === sourceAudit.decision_id;
+  if (
+    sourceAudit &&
+    sourceAuditMatchesXhsCloseoutScope({
+      sourceAudit,
+      profile: input.profile,
+      targetDomain: input.targetDomain,
+      requestedExecutionMode: input.requestedExecutionMode
+    }) &&
+    approvalMatches
+  ) {
+    return sourceAudit;
+  }
+
+  throw new CliError(
+    "ERR_EXECUTION_FAILED",
+    "XHS closeout validation source audit is not eligible",
+    {
+      retryable: false,
+      details: {
+        ability_id: "runtime.xhs_closeout_validation",
+        stage: "execution",
+        reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_AUDIT_INVALID",
+        source_run_id: input.sourceRunId,
+        source_profile: sourceAudit?.profile ?? null,
+        expected_profile: input.profile,
+        source_target_domain: sourceAudit?.target_domain ?? null,
+        source_requested_execution_mode: sourceAudit?.requested_execution_mode ?? null,
+        source_effective_execution_mode: sourceAudit?.effective_execution_mode ?? null,
+        source_gate_decision: sourceAudit?.gate_decision ?? null,
+        approval_matched: approvalMatches,
+        approval_checks_complete: approvalChecksComplete,
+        source_samples_bound_to_gate_audit: allSamplesReferenceSameGateAudit
+      }
+    }
+  );
+};
+
+const runtimeXhsCloseoutValidation = async (context: RuntimeContext) => {
+  const targetDomain = asString(context.params.target_domain);
+  const requestedExecutionMode = asString(context.params.requested_execution_mode);
+  const sourceRunId = asString(context.params.source_run_id);
+  const sourceSampleRefs = parseSourceSampleRefs(context.params.source_sample_refs);
+  const observedAt = new Date().toISOString();
+
+  if (targetDomain !== "www.xiaohongshu.com") {
+    throw new CliError("ERR_CLI_INVALID_ARGS", "XHS closeout validation target_domain invalid", {
+      details: {
+        ability_id: "runtime.xhs_closeout_validation",
+        stage: "input_validation",
+        reason: "XHS_CLOSEOUT_VALIDATION_TARGET_DOMAIN_INVALID"
+      }
+    });
+  }
+  if (requestedExecutionMode !== "live_read_high_risk") {
+    throw new CliError(
+      "ERR_CLI_INVALID_ARGS",
+      "XHS closeout validation requires live_read_high_risk mode",
+      {
+        details: {
+          ability_id: "runtime.xhs_closeout_validation",
+          stage: "input_validation",
+          reason: "XHS_CLOSEOUT_VALIDATION_MODE_INVALID"
+        }
+      }
+    );
+  }
+  if (!sourceRunId) {
+    throw new CliError("ERR_CLI_INVALID_ARGS", "XHS closeout validation source_run_id required", {
+      details: {
+        ability_id: "runtime.xhs_closeout_validation",
+        stage: "input_validation",
+        reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_RUN_ID_REQUIRED"
+      }
+    });
+  }
+  if (hasOwn(context.params, "signals")) {
+    throw new CliError("ERR_CLI_INVALID_ARGS", "XHS closeout validation inline signals forbidden", {
+      details: {
+        ability_id: "runtime.xhs_closeout_validation",
+        stage: "input_validation",
+        reason: "XHS_CLOSEOUT_VALIDATION_INLINE_SIGNALS_FORBIDDEN"
+      }
+    });
+  }
+  if (hasOwn(context.params, "artifact_refs")) {
+    throw new CliError("ERR_CLI_INVALID_ARGS", "XHS closeout validation inline artifact_refs forbidden", {
+      details: {
+        ability_id: "runtime.xhs_closeout_validation",
+        stage: "input_validation",
+        reason: "XHS_CLOSEOUT_VALIDATION_INLINE_ARTIFACT_REFS_FORBIDDEN"
+      }
+    });
+  }
+  if (!sourceSampleRefs) {
+    throw new CliError("ERR_CLI_INVALID_ARGS", "XHS closeout validation source_sample_refs invalid", {
+      details: {
+        ability_id: "runtime.xhs_closeout_validation",
+        stage: "input_validation",
+        reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_SAMPLE_REFS_INVALID"
+      }
+    });
+  }
+
+  let store: SQLiteRuntimeStore | null = null;
+  try {
+    store = new SQLiteRuntimeStore(resolveRuntimeStorePath(context.cwd));
+    const sourceAudit = await assertXhsCloseoutValidationSourceAudit({
+      store,
+      sourceRunId,
+      profile: context.profile,
+      targetDomain,
+      requestedExecutionMode,
+      sourceSampleRefs
+    });
+    const sourcePayload = await readXhsCloseoutValidationSignalsFromSourceSamples({
+      store,
+      sourceRunId,
+      sourceAudit,
+      profile: context.profile,
+      requestedExecutionMode,
+      sourceSampleRefs
+    });
+    const gate = await persistXhsCloseoutValidationSourceSamples({
+      store,
+      profile: context.profile ?? "",
+      effectiveExecutionMode: requestedExecutionMode,
+      targetDomain,
+      validationRunId: context.run_id,
+      observedAt,
+      sourceRunId,
+      sourceSamples: sourcePayload.sourceSamples
+    });
+    return {
+      validation_baseline_generation: {
+        source: "runtime.xhs_closeout_validation",
+        profile: context.profile,
+        target_domain: targetDomain,
+        requested_execution_mode: requestedExecutionMode,
+        run_id: context.run_id,
+        source_run_id: sourceRunId,
+        source_audit_event_id: sourceAudit.event_id,
+        source_session_id: sourceAudit.session_id,
+        observed_at: observedAt,
+        artifact_refs: sourcePayload.artifactRefs,
+        active_fetch_performed: false,
+        closeout_bundle_entered: false
+      },
+      anti_detection_validation_view: toXhsCloseoutValidationGateJson(gate)
+    };
+  } catch (error) {
+    if (error instanceof RuntimeStoreError) {
+      if (error.code === "ERR_RUNTIME_STORE_INVALID_INPUT") {
+        throw new CliError("ERR_EXECUTION_FAILED", "XHS closeout validation source evidence invalid", {
+          retryable: false,
+          details: {
+            ability_id: "runtime.xhs_closeout_validation",
+            stage: "execution",
+            reason: "XHS_CLOSEOUT_VALIDATION_PERSISTED_SOURCE_INVALID",
+            validation_error: error.message
+          }
+        });
+      }
+      throw new CliError("ERR_RUNTIME_UNAVAILABLE", `运行记录存储失败: ${error.code}`, {
+        retryable: error.code !== "ERR_RUNTIME_STORE_SCHEMA_MISMATCH",
+        cause: error
+      });
+    }
+    throw error;
+  } finally {
+    try {
+      store?.close();
+    } catch {
+      // Best-effort close after validation baseline generation.
+    }
+  }
 };
 
 const resolveCurrentRiskState = (
@@ -821,6 +1279,7 @@ const runtimeHelp = async () => ({
     "runtime.status",
     "runtime.tabs",
     "runtime.restore_xhs_target",
+    "runtime.xhs_closeout_validation",
     "runtime.stop",
     "runtime.audit",
     "xhs.search",
@@ -870,6 +1329,12 @@ export const runtimeCommands = (): CommandDefinition[] => [
     status: "implemented",
     requiresProfile: true,
     handler: runtimeRestoreXhsTarget
+  },
+  {
+    name: "runtime.xhs_closeout_validation",
+    status: "implemented",
+    requiresProfile: true,
+    handler: runtimeXhsCloseoutValidation
   },
   {
     name: "runtime.stop",

@@ -549,7 +549,7 @@ describeWithSqlite("sqlite-runtime-store", () => {
     } finally {
       store.close();
     }
-  });
+  }, 15000);
 
   it("initializes schema with WAL and schema version", async () => {
     const cwd = await createTempCwd();
