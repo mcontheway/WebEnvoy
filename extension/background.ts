@@ -993,6 +993,29 @@ const isRestoreSafetyGateAllowed = (
   );
 };
 
+const isManagedTabBindingGateAllowed = (
+  value: Record<string, unknown> | null,
+  profile: string | null,
+  runId: string,
+  sessionId: string,
+  targetDomain: string | null,
+  targetPage: string | null,
+  targetTabId: number,
+  actionRef: string
+): boolean =>
+  profile !== null &&
+  value?.source === "cli_persisted_runtime_gate" &&
+  value.purpose === "xhs_closeout_validation_source" &&
+  value.profile_ref === profile &&
+  value.run_id === runId &&
+  value.session_id === sessionId &&
+  value.target_domain === targetDomain &&
+  value.target_page === targetPage &&
+  value.target_tab_id === targetTabId &&
+  value.action_ref === actionRef &&
+  value.active_fetch_performed === false &&
+  value.closeout_bundle_entered === false;
+
 const buildChromeUrlPatternForDomain = (value: string): string | null => {
   const normalized = value.trim().toLowerCase();
   if (normalized.length === 0) {
@@ -3685,6 +3708,17 @@ class ChromeBackgroundBridge {
     const tabId = await this.#resolveTargetTabId(request);
     const commandParams = asRecord(request.params.command_params) ?? {};
     const mainWorldSecret = asNonEmptyString(commandParams.main_world_secret);
+    const fingerprintRuntime = asRecord(commandParams.fingerprint_runtime);
+    const targetDomain = asNonEmptyString(commandParams.target_domain);
+    const targetPage = asNonEmptyString(commandParams.target_page);
+    const actionRef =
+      asNonEmptyString(commandParams.action_ref) ??
+      asNonEmptyString(commandParams.gate_invocation_id) ??
+      String(request.params.run_id ?? request.id);
+    const profile = typeof request.profile === "string" ? request.profile : null;
+    const runId = String(request.params.run_id ?? request.id);
+    const sessionId = String(request.params.session_id ?? this.#sessionId);
+    const managedTabBindingGate = asRecord(commandParams.managed_tab_binding_gate);
 
     if (!tabId || !mainWorldSecret) {
       this.#emit({
@@ -3699,6 +3733,71 @@ class ChromeBackgroundBridge {
         }
       });
       return;
+    }
+
+    if (managedTabBindingGate) {
+      const gateAllowed = isManagedTabBindingGateAllowed(
+        managedTabBindingGate,
+        profile,
+        runId,
+        sessionId,
+        targetDomain,
+        targetPage,
+        tabId,
+        actionRef
+      );
+      const bootstrap = profile ? this.#runtimeTrustState.getBootstrap(profile) : null;
+      const trusted = profile ? this.#runtimeTrustState.getTrusted(profile, sessionId) : null;
+      const bootstrapBindsTarget =
+        !!bootstrap &&
+        (bootstrap.status === "pending" || bootstrap.status === "ready") &&
+        bootstrap.sessionId === sessionId &&
+        bootstrap.runId === runId &&
+        bootstrap.sourceTabId === tabId &&
+        bootstrap.sourceDomain === targetDomain;
+      const trustedBindsTarget =
+        !!trusted &&
+        trusted.sessionId === sessionId &&
+        trusted.runId === runId &&
+        trusted.sourceTabId === tabId &&
+        trusted.sourceDomain === targetDomain;
+      if (!gateAllowed || (!bootstrapBindsTarget && !trustedBindsTarget)) {
+        this.#emit({
+          id: request.id,
+          status: "error",
+          summary: {
+            session_id: sessionId,
+            run_id: runId,
+            command: "runtime.main_world_probe",
+            profile,
+            tab_id: tabId,
+            relay_path: "host>background"
+          },
+          payload: {
+            details: {
+              stage: "execution",
+              reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_MANAGED_TAB_NOT_BOUND",
+              target_domain: targetDomain,
+              target_page: targetPage,
+              target_tab_id: tabId,
+              action_ref: actionRef,
+              bootstrap_source_tab_id: bootstrap?.sourceTabId ?? null,
+              bootstrap_source_domain: bootstrap?.sourceDomain ?? null,
+              bootstrap_run_id: bootstrap?.runId ?? null,
+              trusted_source_tab_id: trusted?.sourceTabId ?? null,
+              trusted_source_domain: trusted?.sourceDomain ?? null,
+              trusted_run_id: trusted?.runId ?? null,
+              active_fetch_performed: false,
+              closeout_bundle_entered: false
+            }
+          },
+          error: {
+            code: "ERR_TRANSPORT_FORWARD_FAILED",
+            message: "runtime.main_world_probe requires a current managed tab binding"
+          }
+        });
+        return;
+      }
     }
 
     if (!this.chromeApi.scripting?.executeScript) {
@@ -3726,7 +3825,8 @@ class ChromeBackgroundBridge {
         func: async (
           requestEventName: unknown,
           resultEventName: unknown,
-          namespaceEventName: unknown
+          namespaceEventName: unknown,
+          fingerprintRuntimePayload: unknown
         ) => {
           const MAIN_WORLD_EVENT_BOOTSTRAP = "__mw_bootstrap__";
           const requestEvent =
@@ -3802,13 +3902,19 @@ class ChromeBackgroundBridge {
                 detail: {
                   id: `probe-${Date.now()}`,
                   type: "fingerprint-install",
-                  payload: {}
+                  payload: {
+                    fingerprint_runtime:
+                      typeof fingerprintRuntimePayload === "object" &&
+                      fingerprintRuntimePayload !== null
+                        ? fingerprintRuntimePayload
+                        : null
+                  }
                 }
               })
             );
           });
         },
-        args: [requestEvent, resultEvent, namespaceEvent]
+        args: [requestEvent, resultEvent, namespaceEvent, fingerprintRuntime]
       });
       const payload =
         Array.isArray(results) && results.length > 0
@@ -3829,6 +3935,20 @@ class ChromeBackgroundBridge {
           target_tab_id: tabId,
           request_event: requestEvent,
           result_event: resultEvent,
+          browser_attestation: {
+            source: "chrome_scripting_main_world",
+            execution_surface: "real_browser",
+            extension_surface: "background_service_worker",
+            run_id: runId,
+            session_id: sessionId,
+            profile,
+            target_domain: targetDomain,
+            target_page: targetPage,
+            target_tab_id: tabId,
+            action_ref: actionRef,
+            request_event: requestEvent,
+            result_event: resultEvent
+          },
           ...(payload ? { probe: payload } : {})
         },
         error: null

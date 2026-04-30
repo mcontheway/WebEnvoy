@@ -5,14 +5,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildXhsCloseoutValidationScope,
+  persistXhsCloseoutValidationSourceEvidence,
   persistXhsCloseoutValidationSignals,
-  readXhsCloseoutValidationGateView
+  readXhsCloseoutValidationGateView,
+  type XhsCloseoutValidationSignalMap
 } from "../anti-detection-validation.js";
 import {
   resolveRuntimeStorePath,
   SQLiteRuntimeStore,
   type AntiDetectionExecutionMode,
-  type AntiDetectionValidationScope
+  type AntiDetectionValidationScope,
+  type GateAuditRecord
 } from "../store/sqlite-runtime-store.js";
 
 const createStore = async (): Promise<{ cwd: string; store: SQLiteRuntimeStore }> => {
@@ -82,6 +85,32 @@ const signals = {
     session_rhythm_decision_id: "rhythm_decision_xhs_closeout",
     escalation: "recon_probe_to_live_admission"
   }
+};
+
+const sourceAudit: GateAuditRecord = {
+  event_id: "gate_evt_source_validation",
+  decision_id: "gate_decision_source_validation",
+  approval_id: "gate_approval_source_validation",
+  run_id: "run-validation-source",
+  session_id: "nm-session-001",
+  profile: "xhs_validation_profile",
+  issue_scope: "issue_209",
+  risk_state: "allowed",
+  next_state: "allowed",
+  transition_trigger: "gate_evaluation",
+  target_domain: "www.xiaohongshu.com",
+  target_tab_id: 32,
+  target_page: "search_result_tab",
+  action_type: "read",
+  action_ref: "run-validation-source",
+  requested_execution_mode: "live_read_high_risk",
+  effective_execution_mode: "live_read_high_risk",
+  gate_decision: "allowed",
+  gate_reasons: ["XHS_CLOSEOUT_VALIDATION_SOURCE_APPROVED"],
+  approver: "runtime.xhs_closeout_validation_source",
+  approved_at: "2026-04-30T01:00:00.000Z",
+  recorded_at: "2026-04-30T01:00:01.000Z",
+  created_at: "2026-04-30T01:00:01.000Z"
 };
 
 const seedBrokenView = async (input: {
@@ -161,6 +190,112 @@ const seedBrokenView = async (input: {
 };
 
 describe("FR-0020 XHS closeout validation baseline", () => {
+  it("persists browser-returned XHS closeout validation source evidence with canonical source refs", async () => {
+    const { cwd, store } = await createStore();
+    try {
+      const sourceRunId = "run-validation-source";
+      const samples = await persistXhsCloseoutValidationSourceEvidence({
+        store,
+        profile: "xhs_validation_profile",
+        effectiveExecutionMode: "live_read_high_risk",
+        targetDomain: "www.xiaohongshu.com",
+        sourceRunId,
+        observedAt: "2026-04-30T01:00:02.000Z",
+        sourceAudit,
+        actionRef: "run-validation-source",
+        signals,
+        artifactRefs: [`artifact/xhs-closeout-validation-source/${sourceRunId}`]
+      });
+
+      expect(samples).toHaveLength(3);
+      expect(samples.map((sample) => sample.sample_ref)).toEqual([
+        `validation-sample/source/xhs-closeout-min-v1/xhs_validation_profile/live_read_high_risk/${sourceRunId}/FR-0012/layer1_consistency`,
+        `validation-sample/source/xhs-closeout-min-v1/xhs_validation_profile/live_read_high_risk/${sourceRunId}/FR-0013/layer2_interaction`,
+        `validation-sample/source/xhs-closeout-min-v1/xhs_validation_profile/live_read_high_risk/${sourceRunId}/FR-0014/layer3_session_rhythm`
+      ]);
+      for (const sample of samples) {
+        expect(sample.run_id).toBe(sourceRunId);
+        expect(sample.artifact_refs).toEqual([
+          `artifact/xhs-closeout-validation-source/${sourceRunId}`
+        ]);
+        const request = await store.getAntiDetectionValidationRequest(sample.request_ref);
+        expect(request).toMatchObject({
+          request_state: "completed",
+          requested_execution_mode: "live_read_high_risk",
+          profile_ref: "profile/xhs_validation_profile",
+          probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1"
+        });
+        expect(sample.request_ref).toContain(
+          `validation-request/source/xhs-closeout-min-v1/xhs_validation_profile/live_read_high_risk/${sourceRunId}/`
+        );
+        expect(sample.structured_payload).toMatchObject({
+          source_gate_audit: {
+            event_id: sourceAudit.event_id,
+            decision_id: sourceAudit.decision_id,
+            session_id: sourceAudit.session_id,
+            action_ref: "run-validation-source",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 32,
+            gate_reasons: ["XHS_CLOSEOUT_VALIDATION_SOURCE_APPROVED"]
+          }
+        });
+      }
+    } finally {
+      store.close();
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects XHS closeout validation source evidence outside the browser-returned source scope", async () => {
+    const { cwd, store } = await createStore();
+    try {
+      await expect(
+        persistXhsCloseoutValidationSourceEvidence({
+          store,
+          profile: "xhs_validation_profile",
+          effectiveExecutionMode: "live_read_high_risk",
+          targetDomain: "example.com" as "www.xiaohongshu.com",
+          sourceRunId: "run-validation-source-wrong-domain",
+          observedAt: "2026-04-30T01:01:00.000Z",
+          sourceAudit,
+        actionRef: "run-validation-source",
+        signals
+        })
+      ).rejects.toMatchObject({
+        code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+      });
+
+      await expect(
+        persistXhsCloseoutValidationSourceEvidence({
+          store,
+          profile: "xhs_validation_profile",
+          effectiveExecutionMode: "live_read_high_risk",
+          targetDomain: "www.xiaohongshu.com",
+          sourceRunId: "run-validation-source-local-signal",
+          observedAt: "2026-04-30T01:02:00.000Z",
+          sourceAudit,
+        actionRef: "run-validation-source",
+        signals: {
+            ...signals,
+            layer1_consistency: {
+              ...signals.layer1_consistency,
+              browser_returned_evidence: {
+                source: "local_fixture",
+                target_domain: "www.xiaohongshu.com",
+                probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1"
+              }
+            }
+          }
+        })
+      ).rejects.toMatchObject({
+        code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+      });
+    } finally {
+      store.close();
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("persists the three required XHS closeout validation views as ready", async () => {
     const { cwd, store } = await createStore();
     try {
@@ -233,6 +368,47 @@ describe("FR-0020 XHS closeout validation baseline", () => {
         readXhsCloseoutValidationGateView({
           store,
           profile: "xhs_validation_profile",
+          effectiveExecutionMode: "live_read_high_risk"
+        })
+      ).resolves.toMatchObject({
+        all_required_ready: false,
+        missing_target_fr_refs: ["FR-0012", "FR-0013", "FR-0014"],
+        blocking_target_fr_refs: ["FR-0012", "FR-0013", "FR-0014"]
+      });
+    } finally {
+      store.close();
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when XHS closeout validation source evidence is missing a required scope", async () => {
+    const { cwd, store } = await createStore();
+    try {
+      const incompleteSignals = {
+        ...signals,
+        layer2_interaction: undefined
+      } as unknown as XhsCloseoutValidationSignalMap;
+
+      await expect(
+        persistXhsCloseoutValidationSourceEvidence({
+          store,
+          profile: "xhs_validation_missing_scope_profile",
+          effectiveExecutionMode: "live_read_high_risk",
+          targetDomain: "www.xiaohongshu.com",
+          sourceRunId: "run-validation-source-missing-scope",
+          observedAt: "2026-04-30T01:03:00.000Z",
+          sourceAudit,
+        actionRef: "run-validation-source",
+        signals: incompleteSignals
+        })
+      ).rejects.toMatchObject({
+        code: "ERR_RUNTIME_STORE_INVALID_INPUT"
+      });
+
+      await expect(
+        readXhsCloseoutValidationGateView({
+          store,
+          profile: "xhs_validation_missing_scope_profile",
           effectiveExecutionMode: "live_read_high_risk"
         })
       ).resolves.toMatchObject({

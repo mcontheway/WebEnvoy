@@ -19,7 +19,7 @@ import {
   classifyTransportFailure,
   type TransportFailureCode
 } from "./session.js";
-import type { NativeBridgeTransport } from "./transport.js";
+import type { NativeBridgeTransport, NativeBridgeTransportProof } from "./transport.js";
 
 export class NativeMessagingTransportError extends Error {
   code: TransportFailureCode;
@@ -383,6 +383,10 @@ export class NativeMessagingBridge {
 
   currentSessionId(): string | null {
     return this.#session.snapshot().sessionId;
+  }
+
+  currentTransportProof(): NativeBridgeTransportProof {
+    return this.#transport.currentTransportProof?.() ?? { surface: "unknown" };
   }
 
   async ensureSession(input: BridgeSessionInput): Promise<string> {

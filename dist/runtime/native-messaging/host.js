@@ -88,6 +88,7 @@ export class NativeHostBridgeTransport {
     #hostSpec;
     #socketPath;
     #activeSocketPath = null;
+    #lastTransportProof = { surface: "unknown" };
     #child = null;
     #stdoutBuffer = Buffer.alloc(0);
     #pending = new Map();
@@ -142,11 +143,16 @@ export class NativeHostBridgeTransport {
         });
         return this.#closePromise;
     }
+    currentTransportProof() {
+        return {
+            ...this.#lastTransportProof
+        };
+    }
     async #send(phase, request) {
         ensureBridgeRequestEnvelope(request);
         const resolvedSocket = await this.#resolveSocketPath(request);
         if (resolvedSocket) {
-            return await this.#sendViaSocket(phase, request, resolvedSocket.path);
+            return await this.#sendViaSocket(phase, request, resolvedSocket.path, resolvedSocket.surface);
         }
         return await this.#sendViaSpawn(phase, request);
     }
@@ -163,7 +169,8 @@ export class NativeHostBridgeTransport {
             this.#activeSocketPath = this.#socketPath;
             return {
                 path: this.#socketPath,
-                required: true
+                required: true,
+                surface: "explicit_socket"
             };
         }
         const candidates = (requestedProfile !== null
@@ -176,9 +183,15 @@ export class NativeHostBridgeTransport {
             try {
                 await access(candidate);
                 this.#activeSocketPath = candidate;
+                const surface = requestedProfileSocketPath && candidate === requestedProfileSocketPath
+                    ? "profile_socket"
+                    : candidate === rootSocketPath
+                        ? "root_socket"
+                        : "root_socket";
                 return {
                     path: candidate,
-                    required: false
+                    required: false,
+                    surface
                 };
             }
             catch {
@@ -207,6 +220,10 @@ export class NativeHostBridgeTransport {
         }
     }
     #sendViaSpawn(phase, request) {
+        this.#lastTransportProof = {
+            surface: "spawned_host",
+            spawned_host_configured: !!this.#hostCommand
+        };
         if (!this.#hostCommand || !this.#hostSpec) {
             const code = phase === "open" ? "ERR_TRANSPORT_HANDSHAKE_FAILED" : "ERR_TRANSPORT_DISCONNECTED";
             return Promise.reject(withTransportCode(new Error("native host command is not configured or invalid"), code));
@@ -246,7 +263,12 @@ export class NativeHostBridgeTransport {
             }
         });
     }
-    async #sendViaSocket(phase, request, socketPath) {
+    async #sendViaSocket(phase, request, socketPath, surface) {
+        this.#lastTransportProof = {
+            surface,
+            socket_path: socketPath,
+            spawned_host_configured: !!this.#hostCommand
+        };
         try {
             await access(socketPath);
         }

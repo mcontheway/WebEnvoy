@@ -224,6 +224,9 @@ export class NativeMessagingBridge {
     currentSessionId() {
         return this.#session.snapshot().sessionId;
     }
+    currentTransportProof() {
+        return this.#transport.currentTransportProof?.() ?? { surface: "unknown" };
+    }
     async ensureSession(input) {
         const timeoutMs = readTimeoutMs(input.timeoutMs) ?? DEFAULT_TRANSPORT_TIMEOUT_MS;
         const budget = createTimeoutBudget(timeoutMs, this.#now);

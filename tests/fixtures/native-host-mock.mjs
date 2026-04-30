@@ -185,6 +185,39 @@ const onRequest = (request) => {
     }
 
     if (command === "runtime.bootstrap") {
+      if (mode === "xhs-closeout-validation-source-bootstrap-timeout") {
+        writeMessage({
+          id: request.id,
+          status: "error",
+          summary: {
+            session_id: String(request.params?.session_id ?? "nm-session-001"),
+            run_id: String(request.params?.run_id ?? request.id),
+            command,
+            relay_path: "host>background>content-script>background>host"
+          },
+          payload: {},
+          error: {
+            code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+            message: "runtime bootstrap 尚未获得执行面确认"
+          }
+        });
+        process.exit(0);
+        return;
+      }
+
+      if (mode.startsWith("xhs-closeout-validation-source")) {
+        writeMessage(
+          bootstrapAck(request, {
+            version: String(commandParams.version ?? "v1"),
+            run_id: String(commandParams.run_id ?? request.params?.run_id ?? request.id),
+            runtime_context_id: String(commandParams.runtime_context_id ?? "runtime-context-001"),
+            profile: request.profile ?? null,
+            status: "ready"
+          })
+        );
+        return;
+      }
+
       if (mode === "bootstrap-ack-timeout-error") {
         writeMessage({
           id: request.id,
@@ -252,6 +285,121 @@ const onRequest = (request) => {
               url: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5&type=51"
             }
           ]
+        },
+        error: null
+      });
+      process.exit(0);
+      return;
+    }
+
+    if (command === "runtime.main_world_probe") {
+      const validationSourceMode = mode.startsWith("xhs-closeout-validation-source");
+      const missingPatchMode = mode === "xhs-closeout-validation-source-fingerprint-not-ready";
+      const noResponseMode = mode === "xhs-closeout-validation-source-no-response";
+      const pageMismatchMode = mode === "xhs-closeout-validation-source-page-mismatch";
+      const tabMismatchMode = mode === "xhs-closeout-validation-source-tab-mismatch";
+      const sourceMismatchMode = mode === "xhs-closeout-validation-source-source-mismatch";
+      const unboundTabMode = mode === "xhs-closeout-validation-source-unbound-tab";
+      const requestedTabId = Number.isInteger(commandParams.target_tab_id)
+        ? commandParams.target_tab_id
+        : null;
+      const managedTabBindingGate =
+        commandParams.managed_tab_binding_gate &&
+        typeof commandParams.managed_tab_binding_gate === "object" &&
+        !Array.isArray(commandParams.managed_tab_binding_gate)
+          ? commandParams.managed_tab_binding_gate
+          : null;
+      const actionRef =
+        typeof commandParams.action_ref === "string"
+          ? commandParams.action_ref
+          : String(request.params?.run_id ?? request.id);
+      const gateBindsTarget =
+        managedTabBindingGate?.source === "cli_persisted_runtime_gate" &&
+        managedTabBindingGate.purpose === "xhs_closeout_validation_source" &&
+        managedTabBindingGate.profile_ref === request.profile &&
+        managedTabBindingGate.run_id === String(request.params?.run_id ?? request.id) &&
+        managedTabBindingGate.session_id === String(request.params?.session_id ?? "nm-session-001") &&
+        managedTabBindingGate.target_domain === commandParams.target_domain &&
+        managedTabBindingGate.target_page === commandParams.target_page &&
+        managedTabBindingGate.target_tab_id === requestedTabId &&
+        managedTabBindingGate.action_ref === actionRef &&
+        managedTabBindingGate.active_fetch_performed === false &&
+        managedTabBindingGate.closeout_bundle_entered === false;
+      if (validationSourceMode && (unboundTabMode || !gateBindsTarget)) {
+        writeMessage({
+          id: request.id,
+          status: "error",
+          summary: {
+            session_id: String(request.params?.session_id ?? "nm-session-001"),
+            run_id: String(request.params?.run_id ?? request.id),
+            command,
+            profile: request.profile ?? null,
+            tab_id: requestedTabId,
+            relay_path: "host>background"
+          },
+          payload: {
+            details: {
+              stage: "execution",
+              reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_MANAGED_TAB_NOT_BOUND",
+              target_domain: commandParams.target_domain ?? null,
+              target_page: commandParams.target_page ?? null,
+              target_tab_id: requestedTabId,
+              action_ref: actionRef,
+              active_fetch_performed: false,
+              closeout_bundle_entered: false
+            }
+          },
+          error: {
+            code: "ERR_TRANSPORT_FORWARD_FAILED",
+            message: "runtime.main_world_probe requires a current managed tab binding"
+          }
+        });
+        process.exit(0);
+        return;
+      }
+      writeMessage({
+        id: request.id,
+        status: "success",
+        summary: {
+          session_id: String(request.params?.session_id ?? "nm-session-001"),
+          run_id: String(request.params?.run_id ?? request.id),
+          command,
+          profile: request.profile ?? null,
+          tab_id: tabMismatchMode && requestedTabId !== null ? requestedTabId + 1 : requestedTabId,
+          relay_path: "host>background>main-world>background>host"
+        },
+        payload: {
+          target_tab_id: tabMismatchMode && requestedTabId !== null ? requestedTabId + 1 : requestedTabId,
+          probe: {
+            ready_state: "complete",
+            href: pageMismatchMode
+              ? "https://www.xiaohongshu.com/explore"
+              : "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5&type=51",
+            probe_response_received: !noResponseMode,
+            ...(noResponseMode
+              ? { error: "mock main world probe timeout" }
+              : {
+                  probe_result: {
+                    id: "mock-main-world-fingerprint-install",
+                    ok: true,
+                    result: {
+                      installed: true,
+                      applied_patches: missingPatchMode
+                        ? ["audio_context", "battery", "navigator_plugins"]
+                        : ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"],
+                      required_patches: [
+                        "audio_context",
+                        "battery",
+                        "navigator_plugins",
+                        "navigator_mime_types"
+                      ],
+                      missing_required_patches: missingPatchMode ? ["navigator_mime_types"] : [],
+                      source: sourceMismatchMode ? "isolated_world" : "main_world",
+                      runtime_source: "profile_meta"
+                    }
+                  }
+                })
+          }
         },
         error: null
       });

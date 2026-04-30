@@ -421,7 +421,12 @@ describe("main-world bridge contract", () => {
     expect(resultEvents).toHaveLength(2);
     expect(resultEvents[0]?.detail).toMatchObject({
       id: "install-request-001",
-      ok: true
+      ok: true,
+      result: {
+        source: "main_world",
+        runtime_source: "contract",
+        missing_required_patches: []
+      }
     });
     expect(resultEvents[1]?.detail).toMatchObject({
       id: "verify-request-001",

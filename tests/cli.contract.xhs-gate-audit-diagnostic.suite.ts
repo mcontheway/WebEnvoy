@@ -1,6 +1,292 @@
+import { createServer as createNetServer, type Server as NetServer, type Socket } from "node:net";
 import { beforeEach, describe, expect, it } from "vitest";
 import { repoRoot, binPath, mockBrowserPath, nativeHostMockPath, repoOwnedNativeHostEntryPath, browserStateFilename, tempDirs, resolveDatabaseSync, DatabaseSync, itWithSqlite, createRuntimeCwd, createNativeHostManifest, seedInstalledPersistentExtension, defaultRuntimeEnv, runCli, expectBundledNativeHostStarts, createNativeHostCommand, createShellWrappedNativeHostCommand, PROFILE_MODE_ROOT_PREFERRED, quoteLauncherExportValue, resolveCanonicalExpectedProfileDir, expectProfileRootOnlyLauncherContract, expectDualEnvRootPreferredLauncherContract, runGit, createGitWorktreePair, runCliAsync, parseSingleJsonLine, encodeNativeBridgeEnvelope, readSingleNativeBridgeEnvelope, asRecord, resolveCliGateEnvelope, resolveWriteInteractionTier, scopedXhsGateOptions, assertLockMissing, detectSystemChromePath, wait, runHeadlessDomProbe, realBrowserContractsEnabled, BROWSER_STATE_FILENAME, BROWSER_CONTROL_FILENAME, isPidAlive, scopedReadGateOptions, path, readFile, writeFile, mkdir, mkdtemp, realpath, rm, stat, chmod, symlink, spawn, spawnSync, createServer, createRequire, tmpdir, resolveRuntimeStorePath, type DatabaseSyncCtor } from "./cli.contract.shared.js";
 import { SQLiteRuntimeStore } from "../src/runtime/store/sqlite-runtime-store.js";
+import { resolveCurrentFingerprintEnvironment } from "../src/runtime/fingerprint-runtime.js";
+import { buildFingerprintProfileBundle } from "../shared/fingerprint-profile.js";
+
+type NativeBridgeSocketRequest = {
+  id: string;
+  method: "bridge.open" | "bridge.forward" | "__ping__";
+  profile?: string | null;
+  params?: Record<string, unknown>;
+};
+
+const writeNativeBridgeSocketMessage = (socket: Socket, message: Record<string, unknown>): void => {
+  socket.write(encodeNativeBridgeEnvelope(message));
+  socket.end();
+};
+
+const parseCommandParams = (request: NativeBridgeSocketRequest): Record<string, unknown> => {
+  const params = request.params ?? {};
+  return params.command_params &&
+    typeof params.command_params === "object" &&
+    !Array.isArray(params.command_params)
+    ? (params.command_params as Record<string, unknown>)
+    : {};
+};
+
+const startXhsCloseoutValidationSourceSocket = async (input: {
+  cwd: string;
+  profile: string;
+  mode?: string;
+}): Promise<{ close: () => Promise<void> }> => {
+  const mode = input.mode ?? "xhs-closeout-validation-source-success";
+  const socketPath = path.join(input.cwd, ".webenvoy", "profiles", "nm.sock");
+  await mkdir(path.dirname(socketPath), { recursive: true });
+  let openCompleted = false;
+
+  const server = createNetServer((socket) => {
+    let buffer = Buffer.alloc(0);
+    socket.on("data", (chunk: Buffer) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      if (buffer.length < 4) {
+        return;
+      }
+      const frameLength = buffer.readUInt32LE(0);
+      const frameEnd = 4 + frameLength;
+      if (buffer.length < frameEnd) {
+        return;
+      }
+      const request = JSON.parse(buffer.subarray(4, frameEnd).toString("utf8")) as NativeBridgeSocketRequest;
+      const params = request.params ?? {};
+      const command = String(params.command ?? "runtime.ping");
+      const commandParams = parseCommandParams(request);
+      const runId = String(params.run_id ?? request.id);
+      const sessionId = String(params.session_id ?? "nm-session-001");
+
+      if (request.method === "bridge.open") {
+        openCompleted = true;
+        writeNativeBridgeSocketMessage(socket, {
+          id: request.id,
+          status: "success",
+          summary: {
+            protocol: "webenvoy.native-bridge.v1",
+            state: "ready",
+            session_id: "nm-session-001"
+          },
+          error: null
+        });
+        return;
+      }
+
+      if (request.method === "__ping__") {
+        writeNativeBridgeSocketMessage(socket, {
+          id: request.id,
+          status: "success",
+          summary: {
+            session_id: "nm-session-001"
+          },
+          error: null
+        });
+        return;
+      }
+
+      if (request.method !== "bridge.forward" || !openCompleted) {
+        writeNativeBridgeSocketMessage(socket, {
+          id: request.id,
+          status: "error",
+          summary: {},
+          error: {
+            code: "ERR_TRANSPORT_NOT_READY",
+            message: "open is required"
+          }
+        });
+        return;
+      }
+
+      if (command === "runtime.bootstrap") {
+        if (mode === "xhs-closeout-validation-source-bootstrap-timeout") {
+          writeNativeBridgeSocketMessage(socket, {
+            id: request.id,
+            status: "error",
+            summary: {
+              session_id: sessionId,
+              run_id: runId,
+              command,
+              relay_path: "host>background>content-script>background>host"
+            },
+            payload: {},
+            error: {
+              code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED",
+              message: "runtime bootstrap 尚未获得执行面确认"
+            }
+          });
+          return;
+        }
+        writeNativeBridgeSocketMessage(socket, {
+          id: request.id,
+          status: "success",
+          summary: {
+            session_id: sessionId,
+            run_id: runId,
+            command,
+            relay_path: "host>background>content-script>background>host"
+          },
+          payload: {
+            result: {
+              version: String(commandParams.version ?? "v1"),
+              run_id: String(commandParams.run_id ?? runId),
+              runtime_context_id: String(commandParams.runtime_context_id ?? "runtime-context-001"),
+              profile: request.profile ?? null,
+              status: "ready"
+            }
+          },
+          error: null
+        });
+        return;
+      }
+
+      if (command === "runtime.main_world_probe") {
+        const missingPatchMode = mode === "xhs-closeout-validation-source-fingerprint-not-ready";
+        const noResponseMode = mode === "xhs-closeout-validation-source-no-response";
+        const pageMismatchMode = mode === "xhs-closeout-validation-source-page-mismatch";
+        const tabMismatchMode = mode === "xhs-closeout-validation-source-tab-mismatch";
+        const sourceMismatchMode = mode === "xhs-closeout-validation-source-source-mismatch";
+        const unboundTabMode = mode === "xhs-closeout-validation-source-unbound-tab";
+        const requestedTabId = Number.isInteger(commandParams.target_tab_id)
+          ? (commandParams.target_tab_id as number)
+          : null;
+        const managedTabBindingGate =
+          commandParams.managed_tab_binding_gate &&
+          typeof commandParams.managed_tab_binding_gate === "object" &&
+          !Array.isArray(commandParams.managed_tab_binding_gate)
+            ? (commandParams.managed_tab_binding_gate as Record<string, unknown>)
+            : null;
+        const actionRef =
+          typeof commandParams.action_ref === "string" ? commandParams.action_ref : runId;
+        const gateBindsTarget =
+          managedTabBindingGate?.source === "cli_persisted_runtime_gate" &&
+          managedTabBindingGate.purpose === "xhs_closeout_validation_source" &&
+          managedTabBindingGate.profile_ref === request.profile &&
+          managedTabBindingGate.run_id === runId &&
+          managedTabBindingGate.session_id === sessionId &&
+          managedTabBindingGate.target_domain === commandParams.target_domain &&
+          managedTabBindingGate.target_page === commandParams.target_page &&
+          managedTabBindingGate.target_tab_id === requestedTabId &&
+          managedTabBindingGate.action_ref === actionRef &&
+          managedTabBindingGate.active_fetch_performed === false &&
+          managedTabBindingGate.closeout_bundle_entered === false;
+        if (unboundTabMode || !gateBindsTarget) {
+          writeNativeBridgeSocketMessage(socket, {
+            id: request.id,
+            status: "error",
+            summary: {
+              session_id: sessionId,
+              run_id: runId,
+              command,
+              profile: request.profile ?? null,
+              tab_id: requestedTabId,
+              relay_path: "host>background"
+            },
+            payload: {
+              details: {
+                stage: "execution",
+                reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_MANAGED_TAB_NOT_BOUND",
+                target_domain: commandParams.target_domain ?? null,
+                target_page: commandParams.target_page ?? null,
+                target_tab_id: requestedTabId,
+                action_ref: actionRef,
+                active_fetch_performed: false,
+                closeout_bundle_entered: false
+              }
+            },
+            error: {
+              code: "ERR_TRANSPORT_FORWARD_FAILED",
+              message: "runtime.main_world_probe requires a current managed tab binding"
+            }
+          });
+          return;
+        }
+        writeNativeBridgeSocketMessage(socket, {
+          id: request.id,
+          status: "success",
+          summary: {
+            session_id: sessionId,
+            run_id: runId,
+            command,
+            profile: request.profile ?? null,
+            tab_id: tabMismatchMode && requestedTabId !== null ? requestedTabId + 1 : requestedTabId,
+            relay_path: "host>background>main-world>background>host"
+          },
+          payload: {
+            target_tab_id: tabMismatchMode && requestedTabId !== null ? requestedTabId + 1 : requestedTabId,
+            probe: {
+              ready_state: "complete",
+              href: pageMismatchMode
+                ? "https://www.xiaohongshu.com/explore"
+                : "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5&type=51",
+              probe_response_received: !noResponseMode,
+              ...(noResponseMode
+                ? { error: "mock main world probe timeout" }
+                : {
+                    probe_result: {
+                      id: "mock-main-world-fingerprint-install",
+                      ok: true,
+                      result: {
+                        installed: true,
+                        applied_patches: missingPatchMode
+                          ? ["audio_context", "battery", "navigator_plugins"]
+                          : ["audio_context", "battery", "navigator_plugins", "navigator_mime_types"],
+                        required_patches: [
+                          "audio_context",
+                          "battery",
+                          "navigator_plugins",
+                          "navigator_mime_types"
+                        ],
+                        missing_required_patches: missingPatchMode ? ["navigator_mime_types"] : [],
+                        source: sourceMismatchMode ? "isolated_world" : "main_world",
+                        runtime_source: "profile_meta"
+                      }
+                    }
+                  })
+            }
+          },
+          error: null
+        });
+        return;
+      }
+
+      writeNativeBridgeSocketMessage(socket, {
+        id: request.id,
+        status: "success",
+        summary: {
+          session_id: sessionId,
+          run_id: runId,
+          command,
+          relay_path: "host>background"
+        },
+        payload: {
+          message: "pong",
+          run_id: runId,
+          profile: request.profile ?? null,
+          cwd: String(params.cwd ?? "")
+        },
+        error: null
+      });
+    });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(socketPath, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  return {
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        (server as NetServer).close((error?: Error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      })
+  };
+};
 
 describe("webenvoy cli contract / xhs gate and audit", () => {
   const isolatedProfileSalt = `${process.pid}_${Date.now()}`;
@@ -126,6 +412,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
     cwd: string;
     profile: string;
     effectiveExecutionMode?: "live_read_high_risk" | "live_read_limited" | "live_write" | "recon";
+    seedBaseline?: boolean;
   }): Promise<void> => {
     const profileDir = path.join(input.cwd, ".webenvoy", "profiles", input.profile);
     const metaPath = path.join(profileDir, "__webenvoy_meta.json");
@@ -143,6 +430,19 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
           profileDir,
           profileState: existingMeta.profileState ?? "ready",
           proxyBinding: existingMeta.proxyBinding ?? null,
+          persistentExtensionBinding: existingMeta.persistentExtensionBinding ?? {
+            extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            nativeHostName: "com.webenvoy.host",
+            browserChannel: "chrome",
+            manifestPath: path.join(
+              input.cwd,
+              ".webenvoy",
+              "native-host-install",
+              "chrome",
+              "manifests",
+              "com.webenvoy.host.json"
+            )
+          },
           accountSafety: {
             state: "clear",
             platform: null,
@@ -171,6 +471,15 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
             audioNoiseSeed: `seed-${input.profile}-a`,
             canvasNoiseSeed: `seed-${input.profile}-c`
           },
+          fingerprintProfileBundle: buildFingerprintProfileBundle({
+            profileName: input.profile,
+            fingerprintSeeds: {
+              audioNoiseSeed: `seed-${input.profile}-a`,
+              canvasNoiseSeed: `seed-${input.profile}-c`
+            },
+            environment: resolveCurrentFingerprintEnvironment(),
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+          }),
           localStorageSnapshots: existingMeta.localStorageSnapshots ?? [],
           createdAt: existingMeta.createdAt ?? "2026-04-25T10:00:00.000Z",
           updatedAt: "2026-04-25T10:40:00.000Z",
@@ -184,7 +493,91 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       )}\n`,
       "utf8"
     );
-    await seedReadyAntiDetectionValidationViews(input);
+    if (input.seedBaseline !== false) {
+      await seedReadyAntiDetectionValidationViews(input);
+    }
+  };
+
+  const seedXhsCloseoutValidationSourceRhythmView = async (input: {
+    cwd: string;
+    profile: string;
+    sessionId?: string;
+    runId?: string;
+    decision?: "allowed" | "blocked";
+    riskState?: "allowed" | "paused" | "limited";
+    currentPhase?: "steady" | "cooldown" | "recovery_probe";
+  }): Promise<void> => {
+    const sessionId = input.sessionId ?? "nm-session-001";
+    const runId = input.runId ?? `run-${input.profile}-validation-source-rhythm`;
+    const decision = input.decision ?? "allowed";
+    const riskState = input.riskState ?? "allowed";
+    const currentPhase = input.currentPhase ?? "steady";
+    const windowId = `rhythm_win_${input.profile}_validation_source`;
+    const eventId = `rhythm_evt_${input.profile}_validation_source`;
+    const decisionId = `rhythm_decision_${input.profile}_validation_source`;
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(input.cwd));
+    try {
+      await store.recordSessionRhythmStatusView({
+        profile: input.profile,
+        platform: "xhs",
+        issueScope: "issue_209",
+        windowState: {
+          window_id: windowId,
+          profile: input.profile,
+          platform: "xhs",
+          issue_scope: "issue_209",
+          session_id: sessionId,
+          current_phase: currentPhase,
+          risk_state: riskState,
+          window_started_at: "2026-04-30T01:00:00.000Z",
+          window_deadline_at: "2026-04-30T01:30:00.000Z",
+          cooldown_until: null,
+          recovery_probe_due_at: null,
+          stability_window_until: "2026-04-30T01:30:00.000Z",
+          risk_signal_count: 0,
+          last_event_id: eventId,
+          source_run_id: runId,
+          updated_at: "2026-04-30T01:00:05.000Z"
+        },
+        event: {
+          event_id: eventId,
+          profile: input.profile,
+          platform: "xhs",
+          issue_scope: "issue_209",
+          session_id: sessionId,
+          window_id: windowId,
+          event_type: decision === "allowed" ? "recovery_probe_passed" : "cooldown_started",
+          phase_before: decision === "allowed" ? "recovery_probe" : "steady",
+          phase_after: currentPhase,
+          risk_state_before: decision === "allowed" ? "limited" : "allowed",
+          risk_state_after: riskState,
+          source_audit_event_id: `gate_evt_${runId}`,
+          reason: "XHS_RECOVERY_SINGLE_PROBE_PASSED",
+          recorded_at: "2026-04-30T01:00:05.000Z"
+        },
+        decision: {
+          decision_id: decisionId,
+          window_id: windowId,
+          run_id: runId,
+          session_id: sessionId,
+          profile: input.profile,
+          current_phase: currentPhase,
+          current_risk_state: riskState,
+          next_phase: currentPhase,
+          next_risk_state: riskState,
+          effective_execution_mode: "live_read_high_risk",
+          decision,
+          reason_codes:
+            decision === "allowed"
+              ? ["XHS_RECOVERY_SINGLE_PROBE_PASSED"]
+              : ["ACCOUNT_RISK_RECOVERY_REQUIRED"],
+          requires: decision === "allowed" ? [] : ["cooldown_until_elapsed"],
+          decided_at: "2026-04-30T01:00:05.000Z"
+        }
+      });
+    } finally {
+      store.close();
+    }
   };
 
   const createXhsCloseoutValidationSignals = () => ({
@@ -192,6 +585,8 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       browser_returned_evidence: {
         source: "main_world",
         target_domain: "www.xiaohongshu.com",
+        target_tab_id: 32,
+        page_url: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5&type=51",
         probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1"
       },
       fingerprint_runtime: {
@@ -211,6 +606,8 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       browser_returned_evidence: {
         source: "main_world",
         target_domain: "www.xiaohongshu.com",
+        target_tab_id: 32,
+        page_url: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5&type=51",
         probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1"
       },
       event_strategy_profile: {
@@ -224,7 +621,8 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       rhythm_profile: {
         profile_name: "default_layer2",
         scroll_segment_min_px: 120,
-        scroll_segment_max_px: 480
+        scroll_segment_max_px: 480,
+        source_run_id: "run-xhs-closeout-validation-source"
       },
       strategy_selection: {
         action_kind: "scroll",
@@ -233,20 +631,54 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       execution_trace: {
         action_kind: "scroll",
         selected_path: "real_input",
-        settled_wait_result: "settled"
+        settled_wait_result: "settled",
+        session_id: "session-run-xhs-closeout-validation-source",
+        target_tab_id: 32
       }
     },
     layer3_session_rhythm: {
       browser_returned_evidence: {
         source: "execution_audit",
         target_domain: "www.xiaohongshu.com",
+        target_tab_id: 32,
+        page_url: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5&type=51",
         probe_bundle_ref: "probe-bundle/xhs-closeout-min-v1"
       },
       session_rhythm_window_id: "rhythm_win_xhs_closeout",
       session_rhythm_decision_id: "rhythm_decision_xhs_closeout",
-      escalation: "recon_probe_to_live_admission"
+      escalation: "recon_probe_to_live_admission",
+      active_fetch_performed: false,
+      closeout_bundle_entered: false
     }
   });
+
+  const bindXhsCloseoutValidationSignalsToSource = (
+    signals: ReturnType<typeof createXhsCloseoutValidationSignals>,
+    input: { profile: string; runId: string; sessionId: string; targetTabId?: number }
+  ): ReturnType<typeof createXhsCloseoutValidationSignals> => {
+    const targetTabId = input.targetTabId ?? 32;
+    const pageUrl = "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5&type=51";
+    for (const layer of [
+      signals.layer1_consistency,
+      signals.layer2_interaction,
+      signals.layer3_session_rhythm
+    ]) {
+      layer.browser_returned_evidence.target_tab_id = targetTabId;
+      layer.browser_returned_evidence.page_url = pageUrl;
+    }
+    signals.layer2_interaction.rhythm_profile.source_run_id = input.runId;
+    signals.layer2_interaction.strategy_selection.action_kind = "validation_source_probe";
+    signals.layer2_interaction.strategy_selection.selected_path = "managed_official_chrome_main_world";
+    signals.layer2_interaction.execution_trace.action_kind = "validation_source_probe";
+    signals.layer2_interaction.execution_trace.action_ref = input.runId;
+    signals.layer2_interaction.execution_trace.session_id = input.sessionId;
+    signals.layer2_interaction.execution_trace.target_tab_id = targetTabId;
+    signals.layer3_session_rhythm.session_rhythm_window_id =
+      `rhythm_win_${input.profile}_validation_source`;
+    signals.layer3_session_rhythm.session_rhythm_decision_id =
+      `rhythm_decision_${input.profile}_validation_source`;
+    return signals;
+  };
 
   const seedXhsCloseoutValidationSourceAudit = async (input: {
     cwd: string;
@@ -258,13 +690,22 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
     artifactRefs?: string[];
     approvalChecks?: Record<string, boolean>;
   }): Promise<string[]> => {
-    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(input.cwd));
     const requestedExecutionMode = input.requestedExecutionMode ?? "live_read_high_risk";
     const effectiveExecutionMode = input.effectiveExecutionMode ?? requestedExecutionMode;
     const decisionId = `gate_decision_${input.runId}`;
     const approvalId = `gate_approval_${input.runId}`;
     const sessionId = `session-${input.runId}`;
-    const signals = input.signals ?? createXhsCloseoutValidationSignals();
+    await seedXhsCloseoutValidationSourceRhythmView({
+      cwd: input.cwd,
+      profile: input.profile,
+      sessionId,
+      runId: input.runId
+    });
+    const store = new SQLiteRuntimeStore(resolveRuntimeStorePath(input.cwd));
+    const signals = bindXhsCloseoutValidationSignalsToSource(
+      input.signals ?? createXhsCloseoutValidationSignals(),
+      { profile: input.profile, runId: input.runId, sessionId }
+    );
     const sampleRefs: string[] = [];
     try {
       await store.upsertRun({
@@ -332,6 +773,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
               event_id: `gate_evt_${input.runId}`,
               decision_id: decisionId,
               session_id: sessionId,
+              action_ref: input.runId,
               target_domain: "www.xiaohongshu.com",
               target_tab_id: 32,
               target_page: "search_result_tab",
@@ -379,6 +821,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
         targetTabId: 32,
         targetPage: "search_result_tab",
         actionType: "read",
+        actionRef: input.runId,
         requestedExecutionMode,
         effectiveExecutionMode,
         gateDecision: requestedExecutionMode === "live_read_high_risk" ? "allowed" : "blocked",
@@ -649,7 +1092,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
     ], repoRoot, {
       WEBENVOY_ALLOW_FIXTURE_SUCCESS: "1"
     });
-    expect(result.status).toBe(0);
+    expect(result.status, result.stdout).toBe(0);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
       command: "xhs.search",
@@ -726,7 +1169,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       WEBENVOY_NATIVE_TRANSPORT: "loopback"
     });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stdout).toBe(0);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
       command: "xhs.search",
@@ -781,7 +1224,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
       WEBENVOY_BROWSER_MOCK_VERSION: ""
     });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stdout).toBe(0);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
       command: "xhs.search",
@@ -3656,7 +4099,7 @@ process.stdin.on("data", (chunk) => {
       })
     ], cwd);
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stdout).toBe(0);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
       command: "runtime.xhs_closeout_validation",
@@ -3791,6 +4234,335 @@ process.stdin.on("data", (chunk) => {
         },
         anti_detection_validation_view: {
           all_required_ready: true
+        }
+      }
+    });
+  });
+
+  itWithSqlite("fails closed when XHS closeout validation source socket lacks browser attestation", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_source_cli_profile";
+    const sourceRunId = "run-xhs-closeout-validation-source-cli-001";
+    await seedXhsCloseoutReadyProfile({ cwd, profile, seedBaseline: false });
+    await seedXhsCloseoutValidationSourceRhythmView({ cwd, profile, runId: sourceRunId });
+
+    const socketBridge = await startXhsCloseoutValidationSourceSocket({ cwd, profile });
+    let sourceResult: Awaited<ReturnType<typeof runCliAsync>>;
+    try {
+      sourceResult = await runCliAsync([
+        "runtime.xhs_closeout_validation_source",
+        "--profile",
+        profile,
+        "--run-id",
+        sourceRunId,
+        "--params",
+        JSON.stringify({
+          target_domain: "www.xiaohongshu.com",
+          requested_execution_mode: "live_read_high_risk",
+          target_tab_id: 32,
+          target_page: "search_result_tab"
+        })
+      ], cwd);
+    } finally {
+      await socketBridge.close();
+    }
+
+    expect(sourceResult.status, sourceResult.stdout).toBe(6);
+    const sourceBody = parseSingleJsonLine(sourceResult.stdout);
+    expect(sourceBody).toMatchObject({
+      command: "runtime.xhs_closeout_validation_source",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_BROWSER_ATTESTATION_MISSING",
+          bootstrap_attested: null,
+          attestation_source: null
+        }
+      }
+    });
+  });
+
+  itWithSqlite("fails closed when XHS closeout validation source socket evidence is not attested or bound", async () => {
+    const cwd = await createRuntimeCwd();
+
+    for (const [mode, reason] of [
+      [
+        "xhs-closeout-validation-source-tab-mismatch",
+        "XHS_CLOSEOUT_VALIDATION_SOURCE_BROWSER_ATTESTATION_MISSING"
+      ],
+      [
+        "xhs-closeout-validation-source-page-mismatch",
+        "XHS_CLOSEOUT_VALIDATION_SOURCE_BROWSER_ATTESTATION_MISSING"
+      ],
+      [
+        "xhs-closeout-validation-source-no-response",
+        "XHS_CLOSEOUT_VALIDATION_SOURCE_BROWSER_ATTESTATION_MISSING"
+      ],
+      [
+        "xhs-closeout-validation-source-source-mismatch",
+        "XHS_CLOSEOUT_VALIDATION_SOURCE_BROWSER_ATTESTATION_MISSING"
+      ],
+      [
+        "xhs-closeout-validation-source-fingerprint-not-ready",
+        "XHS_CLOSEOUT_VALIDATION_SOURCE_BROWSER_ATTESTATION_MISSING"
+      ],
+      [
+        "xhs-closeout-validation-source-unbound-tab",
+        "XHS_CLOSEOUT_VALIDATION_SOURCE_MANAGED_TAB_NOT_BOUND"
+      ],
+      [
+        "xhs-closeout-validation-source-bootstrap-timeout",
+        "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+      ]
+    ] as const) {
+      const runId = `run-${mode}`;
+      const profile = `xhs_validation_source_cli_fail_profile_${mode.replace(/[^A-Za-z0-9]+/gu, "_")}`;
+      await seedXhsCloseoutReadyProfile({ cwd, profile, seedBaseline: false });
+      await seedXhsCloseoutValidationSourceRhythmView({ cwd, profile, runId });
+      const socketBridge = await startXhsCloseoutValidationSourceSocket({ cwd, profile, mode });
+      let result: Awaited<ReturnType<typeof runCliAsync>>;
+      try {
+        result = await runCliAsync([
+          "runtime.xhs_closeout_validation_source",
+          "--profile",
+          profile,
+          "--run-id",
+          runId,
+          "--params",
+          JSON.stringify({
+            target_domain: "www.xiaohongshu.com",
+            requested_execution_mode: "live_read_high_risk",
+            target_tab_id: 32,
+            target_page: "search_result_tab"
+          })
+        ], cwd);
+      } finally {
+        await socketBridge.close();
+      }
+      expect(result.status).toBe(6);
+      const body = parseSingleJsonLine(result.stdout);
+      expect(body).toMatchObject({
+        command: "runtime.xhs_closeout_validation_source",
+        status: "error",
+        error: {
+          code: "ERR_EXECUTION_FAILED",
+          details: {
+            reason
+          }
+        }
+      });
+    }
+  });
+
+  itWithSqlite("fails closed before persisting XHS validation source samples from spawned stub bridges", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_source_cli_stub_bridge_profile";
+    const sourceRunId = "run-xhs-closeout-validation-source-stub-bridge-001";
+    await seedXhsCloseoutReadyProfile({ cwd, profile, seedBaseline: false });
+    await seedXhsCloseoutValidationSourceRhythmView({ cwd, profile, runId: sourceRunId });
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation_source",
+      "--profile",
+      profile,
+      "--run-id",
+      sourceRunId,
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        target_tab_id: 32,
+        target_page: "search_result_tab"
+      })
+    ], cwd, {
+      WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+      WEBENVOY_NATIVE_HOST_MODE: "xhs-closeout-validation-source-success"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation_source",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_STUB_BRIDGE_BLOCKED",
+          bridge_transport_surface: "spawned_host",
+          bridge_spawned_host_configured: true
+        }
+      }
+    });
+  });
+
+  itWithSqlite("fails closed when XHS closeout validation source rhythm is blocked for the current run", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_source_cli_blocked_rhythm_profile";
+    const sourceRunId = "run-xhs-closeout-validation-source-blocked-rhythm-001";
+    await seedXhsCloseoutReadyProfile({ cwd, profile, seedBaseline: false });
+    await seedXhsCloseoutValidationSourceRhythmView({
+      cwd,
+      profile,
+      runId: sourceRunId,
+      decision: "blocked",
+      riskState: "paused",
+      currentPhase: "cooldown"
+    });
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation_source",
+      "--profile",
+      profile,
+      "--run-id",
+      sourceRunId,
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        target_tab_id: 32,
+        target_page: "search_result_tab"
+      })
+    ], cwd, {
+      WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(path.join(cwd, "must-not-run-native-host.mjs")),
+      WEBENVOY_NATIVE_HOST_MODE: "xhs-closeout-validation-source-success"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation_source",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_RHYTHM_BLOCKED",
+          expected_run_id: sourceRunId,
+          rhythm_decision_run_id: sourceRunId,
+          rhythm_decision: "blocked",
+          rhythm_current_risk_state: "paused"
+        }
+      }
+    });
+  });
+
+  itWithSqlite("fails closed when XHS closeout validation source rhythm evidence is absent", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_source_cli_missing_rhythm_profile";
+    const sourceRunId = "run-xhs-closeout-validation-source-missing-rhythm-001";
+    await seedXhsCloseoutReadyProfile({ cwd, profile, seedBaseline: false });
+    const metaPath = path.join(cwd, ".webenvoy", "profiles", profile, "__webenvoy_meta.json");
+    const meta = JSON.parse(await readFile(metaPath, "utf8")) as Record<string, unknown>;
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          ...meta,
+          xhsCloseoutRhythm: {
+            state: "not_required",
+            cooldownUntil: null,
+            operatorConfirmedAt: null,
+            singleProbeRequired: false,
+            singleProbePassedAt: null,
+            probeRunId: null,
+            fullBundleBlocked: false,
+            reasonCodes: []
+          }
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation_source",
+      "--profile",
+      profile,
+      "--run-id",
+      sourceRunId,
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        target_tab_id: 32,
+        target_page: "search_result_tab"
+      })
+    ], cwd, {
+      WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(path.join(cwd, "must-not-run-native-host.mjs")),
+      WEBENVOY_NATIVE_HOST_MODE: "xhs-closeout-validation-source-success"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation_source",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_RHYTHM_EVIDENCE_MISSING",
+          expected_run_id: sourceRunId,
+          expected_session_id: null
+        }
+      }
+    });
+  });
+
+  itWithSqlite("fails closed before native bridge when XHS closeout validation source runtime is not official Chrome", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_source_cli_non_official_runtime_profile";
+    const sourceRunId = "run-xhs-closeout-validation-source-non-official-runtime-001";
+    await seedXhsCloseoutReadyProfile({ cwd, profile, seedBaseline: false });
+    await seedXhsCloseoutValidationSourceRhythmView({ cwd, profile, runId: sourceRunId });
+    const metaPath = path.join(cwd, ".webenvoy", "profiles", profile, "__webenvoy_meta.json");
+    const meta = JSON.parse(await readFile(metaPath, "utf8")) as Record<string, unknown>;
+    await writeFile(
+      metaPath,
+      `${JSON.stringify(
+        {
+          ...meta,
+          persistentExtensionBinding: {
+            extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            nativeHostName: "com.webenvoy.host",
+            browserChannel: "chromium",
+            manifestPath: path.join(cwd, "chromium-native-host.json")
+          }
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation_source",
+      "--profile",
+      profile,
+      "--run-id",
+      sourceRunId,
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        target_tab_id: 32,
+        target_page: "search_result_tab"
+      })
+    ], cwd, {
+      WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(path.join(cwd, "must-not-run-native-host.mjs")),
+      WEBENVOY_NATIVE_HOST_MODE: "xhs-closeout-validation-source-success"
+    });
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation_source",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_RUNTIME_SURFACE_BLOCKED",
+          browser_channel: "chromium"
         }
       }
     });
@@ -4012,7 +4784,7 @@ process.stdin.on("data", (chunk) => {
       })
     ], cwd);
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stdout).toBe(0);
     const body = parseSingleJsonLine(result.stdout);
     expect(body).toMatchObject({
       command: "runtime.xhs_closeout_validation",
@@ -4576,6 +5348,205 @@ process.stdin.on("data", (chunk) => {
         details: {
           reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_AUDIT_INVALID",
           approval_matched: false
+        }
+      }
+    });
+  });
+
+  itWithSqlite("rejects source samples whose browser evidence binding does not match the approved audit", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_cli_sample_browser_binding_mismatch_profile";
+    const sourceRunId = "run-xhs-closeout-validation-sample-browser-binding-source-001";
+    const sourceSampleRefs = await seedXhsCloseoutValidationSourceAudit({
+      cwd,
+      profile,
+      runId: sourceRunId
+    });
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    const db = new DatabaseSyncCtor(resolveRuntimeStorePath(cwd)) as unknown as {
+      prepare: (sql: string) => {
+        get: (...args: unknown[]) => unknown;
+        run: (...args: unknown[]) => unknown;
+      };
+      close: () => void;
+    };
+    try {
+      const row = db.prepare(
+        "SELECT structured_payload FROM anti_detection_structured_sample WHERE sample_ref = ?"
+      ).get(sourceSampleRefs[0]) as { structured_payload: string };
+      const payload = JSON.parse(row.structured_payload) as {
+        signal: {
+          browser_returned_evidence: Record<string, unknown>;
+        };
+      };
+      payload.signal.browser_returned_evidence.target_tab_id = 999;
+      db.prepare(
+        "UPDATE anti_detection_structured_sample SET structured_payload = ? WHERE sample_ref = ?"
+      ).run(JSON.stringify(payload), sourceSampleRefs[0]);
+    } finally {
+      db.close();
+    }
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      "run-xhs-closeout-validation-cli-sample-browser-binding-mismatch-001",
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+      })
+    ], cwd);
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_SAMPLE_INVALID",
+          sample_source_binding_matched: false
+        }
+      }
+    });
+  });
+
+  itWithSqlite("rejects source samples whose action_ref does not match the approved source evidence", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_cli_sample_action_binding_mismatch_profile";
+    const sourceRunId = "run-xhs-closeout-validation-sample-action-binding-source-001";
+    const sourceSampleRefs = await seedXhsCloseoutValidationSourceAudit({
+      cwd,
+      profile,
+      runId: sourceRunId
+    });
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    const db = new DatabaseSyncCtor(resolveRuntimeStorePath(cwd)) as unknown as {
+      prepare: (sql: string) => {
+        get: (...args: unknown[]) => unknown;
+        run: (...args: unknown[]) => unknown;
+      };
+      close: () => void;
+    };
+    try {
+      for (const sampleRef of sourceSampleRefs) {
+        const row = db.prepare(
+          "SELECT structured_payload FROM anti_detection_structured_sample WHERE sample_ref = ?"
+        ).get(sampleRef) as { structured_payload: string };
+        const payload = JSON.parse(row.structured_payload) as {
+          source_gate_audit: Record<string, unknown>;
+          signal: {
+            execution_trace?: Record<string, unknown>;
+          };
+        };
+        payload.source_gate_audit.action_ref = "other-action-ref";
+        if (payload.signal.execution_trace) {
+          payload.signal.execution_trace.action_ref = "other-action-ref";
+        }
+        db.prepare(
+          "UPDATE anti_detection_structured_sample SET structured_payload = ? WHERE sample_ref = ?"
+        ).run(JSON.stringify(payload), sampleRef);
+      }
+    } finally {
+      db.close();
+    }
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      "run-xhs-closeout-validation-cli-sample-action-binding-mismatch-001",
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+      })
+    ], cwd);
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_SAMPLE_INVALID",
+          sample_gate_audit_matched: false
+        }
+      }
+    });
+  });
+
+  itWithSqlite("rejects layer3 source samples whose session rhythm evidence is not bound", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_cli_sample_layer3_binding_mismatch_profile";
+    const sourceRunId = "run-xhs-closeout-validation-sample-layer3-binding-source-001";
+    const sourceSampleRefs = await seedXhsCloseoutValidationSourceAudit({
+      cwd,
+      profile,
+      runId: sourceRunId
+    });
+    const layer3SampleRef = sourceSampleRefs[2];
+    const DatabaseSyncCtor = DatabaseSync as DatabaseSyncCtor;
+    const db = new DatabaseSyncCtor(resolveRuntimeStorePath(cwd)) as unknown as {
+      prepare: (sql: string) => {
+        get: (...args: unknown[]) => unknown;
+        run: (...args: unknown[]) => unknown;
+      };
+      close: () => void;
+    };
+    try {
+      const row = db.prepare(
+        "SELECT structured_payload FROM anti_detection_structured_sample WHERE sample_ref = ?"
+      ).get(layer3SampleRef) as { structured_payload: string };
+      const payload = JSON.parse(row.structured_payload) as {
+        signal: Record<string, unknown>;
+      };
+      payload.signal.session_rhythm_decision_id = "rhythm_decision_unrelated";
+      db.prepare(
+        "UPDATE anti_detection_structured_sample SET structured_payload = ? WHERE sample_ref = ?"
+      ).run(JSON.stringify(payload), layer3SampleRef);
+    } finally {
+      db.close();
+    }
+
+    const result = runCli([
+      "runtime.xhs_closeout_validation",
+      "--profile",
+      profile,
+      "--run-id",
+      "run-xhs-closeout-validation-cli-sample-layer3-binding-mismatch-001",
+      "--params",
+      JSON.stringify({
+        target_domain: "www.xiaohongshu.com",
+        requested_execution_mode: "live_read_high_risk",
+        source_run_id: sourceRunId,
+        source_sample_refs: sourceSampleRefs,
+      })
+    ], cwd);
+
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      command: "runtime.xhs_closeout_validation",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_SAMPLE_INVALID",
+          target_fr_ref: "FR-0014",
+          validation_scope: "layer3_session_rhythm",
+          sample_source_binding_matched: false
         }
       }
     });
