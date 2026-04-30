@@ -63,6 +63,20 @@ export const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
   const debuggerAttach = vi.fn(async () => {});
   const debuggerSendCommand = vi.fn(async () => ({}));
   const debuggerDetach = vi.fn(async () => {});
+  const updatedTabs = new Map<number, { id: number; url?: string; active?: boolean; status?: string }>();
+  const tabsQuery = vi.fn(async () => [{ id: 11 }]);
+  const tabsGet = vi.fn(async (tabId: number) => {
+    const updatedTab = updatedTabs.get(tabId);
+    if (updatedTab) {
+      return updatedTab;
+    }
+    const tabs = await tabsQuery({});
+    const tab = tabs.find((entry: { id?: number }) => entry.id === tabId);
+    if (!tab) {
+      throw new Error("tab not found");
+    }
+    return tab;
+  });
   const chromeApi = {
     runtime: {
       lastError: undefined as { message?: string } | undefined,
@@ -94,7 +108,23 @@ export const createChromeApi = (ports: ReturnType<typeof createMockPort>[]) => {
       }
     },
     tabs: {
-      query: vi.fn(async () => [{ id: 11 }]),
+      query: tabsQuery,
+      get: tabsGet,
+      create: vi.fn(async (properties: { url: string; active?: boolean }) => ({
+        id: 99,
+        url: properties.url,
+        active: properties.active === true
+      })),
+      update: vi.fn(async (tabId: number, properties: { url?: string; active?: boolean }) => {
+        const updatedTab = {
+          id: tabId,
+          url: properties.url,
+          active: properties.active === true,
+          status: "complete"
+        };
+        updatedTabs.set(tabId, updatedTab);
+        return updatedTab;
+      }),
       sendMessage: vi.fn(async () => {})
     },
     scripting: {
