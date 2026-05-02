@@ -893,7 +893,8 @@ const isLiveAdmissionAllowedXhsCloseoutValidationSourceRhythm = (input: {
   requires: string[];
 }): boolean =>
   input.decision === "allowed" &&
-  input.effectiveExecutionMode === "live_read_high_risk" &&
+  (input.effectiveExecutionMode === "live_read_high_risk" ||
+    input.effectiveExecutionMode === "recon") &&
   isXhsCloseoutValidationSourceRecoverableRiskState(input.currentRiskState) &&
   isXhsCloseoutValidationSourceRecoverableRiskState(input.nextRiskState) &&
   isXhsCloseoutValidationSourceRecoverableRiskState(input.windowRiskState) &&

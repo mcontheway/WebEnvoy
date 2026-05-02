@@ -513,6 +513,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
     decision?: "allowed" | "blocked" | "deferred";
     riskState?: "allowed" | "paused" | "limited";
     currentPhase?: "steady" | "cooldown" | "recovery_probe";
+    effectiveExecutionMode?: "live_read_high_risk" | "recon";
     reasonCodes?: string[];
     requires?: string[];
   }): Promise<void> => {
@@ -574,7 +575,7 @@ describe("webenvoy cli contract / xhs gate and audit", () => {
           current_risk_state: riskState,
           next_phase: currentPhase,
           next_risk_state: riskState,
-          effective_execution_mode: "live_read_high_risk",
+          effective_execution_mode: input.effectiveExecutionMode ?? "live_read_high_risk",
           decision,
           reason_codes:
             input.reasonCodes ??
@@ -4453,11 +4454,16 @@ process.stdin.on("data", (chunk) => {
       decision: "allowed",
       riskState: "limited",
       currentPhase: "steady",
+      effectiveExecutionMode: "recon",
       reasonCodes: ["XHS_CLOSEOUT_LIVE_ADMISSION_ALLOWED"],
       requires: []
     });
 
-    const socketBridge = await startXhsCloseoutValidationSourceSocket({ cwd, profile });
+    const socketBridge = await startXhsCloseoutValidationSourceSocket({
+      cwd,
+      profile,
+      mode: "xhs-closeout-validation-source-require-allowed-admission"
+    });
     let sourceResult: Awaited<ReturnType<typeof runCliAsync>>;
     try {
       sourceResult = await runCliAsync([

@@ -654,7 +654,8 @@ const XHS_CLOSEOUT_VALIDATION_SOURCE_BASELINE_REQUIRES = new Set([
 ]);
 const isXhsCloseoutValidationSourceRecoverableRiskState = (state) => state === "limited" || state === "allowed";
 const isLiveAdmissionAllowedXhsCloseoutValidationSourceRhythm = (input) => input.decision === "allowed" &&
-    input.effectiveExecutionMode === "live_read_high_risk" &&
+    (input.effectiveExecutionMode === "live_read_high_risk" ||
+        input.effectiveExecutionMode === "recon") &&
     isXhsCloseoutValidationSourceRecoverableRiskState(input.currentRiskState) &&
     isXhsCloseoutValidationSourceRecoverableRiskState(input.nextRiskState) &&
     isXhsCloseoutValidationSourceRecoverableRiskState(input.windowRiskState) &&
