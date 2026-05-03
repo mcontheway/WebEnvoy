@@ -1050,8 +1050,8 @@ const assertEligibleXhsCloseoutValidationSourceRhythm = (input: {
     sessionRhythmWindowId,
     sessionRhythmDecisionId,
     rhythmAdmissionClass: allowedRhythm || liveAdmissionAllowedRhythm ? "allowed" : "baseline_required_recovery",
-    rhythmAuditRiskState: currentRiskState ?? "limited",
-    rhythmAuditNextState: nextRiskState ?? currentRiskState ?? "limited"
+    rhythmAuditRiskState: allowedRhythm || liveAdmissionAllowedRhythm ? "allowed" : (currentRiskState ?? "limited"),
+    rhythmAuditNextState: allowedRhythm || liveAdmissionAllowedRhythm ? "allowed" : (nextRiskState ?? currentRiskState ?? "limited")
   };
 };
 
