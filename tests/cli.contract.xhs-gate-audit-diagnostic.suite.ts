@@ -54,6 +54,7 @@ const startXhsCloseoutValidationSourceSocket = async (input: {
       const commandParams = parseCommandParams(request);
       const runId = String(params.run_id ?? request.id);
       const sessionId = String(params.session_id ?? "nm-session-001");
+      const attestedSuccessMode = mode === "xhs-closeout-validation-source-attested-success";
 
       if (request.method === "bridge.open") {
         openCompleted = true;
@@ -130,7 +131,8 @@ const startXhsCloseoutValidationSourceSocket = async (input: {
               runtime_context_id: String(commandParams.runtime_context_id ?? "runtime-context-001"),
               profile: request.profile ?? null,
               status: "ready"
-            }
+            },
+            ...(attestedSuccessMode ? { runtime_bootstrap_attested: true } : {})
           },
           error: null
         });
@@ -157,6 +159,8 @@ const startXhsCloseoutValidationSourceSocket = async (input: {
             : null;
         const actionRef =
           typeof commandParams.action_ref === "string" ? commandParams.action_ref : runId;
+        const requestEvent = `evt_${runId}_main_world_probe_request`;
+        const resultEvent = `evt_${runId}_main_world_probe_result`;
         const gateBindsTarget =
           managedTabBindingGate?.source === "cli_persisted_runtime_gate" &&
           managedTabBindingGate.purpose === "xhs_closeout_validation_source" &&
@@ -218,6 +222,26 @@ const startXhsCloseoutValidationSourceSocket = async (input: {
           },
           payload: {
             target_tab_id: tabMismatchMode && requestedTabId !== null ? requestedTabId + 1 : requestedTabId,
+            request_event: requestEvent,
+            result_event: resultEvent,
+            ...(attestedSuccessMode
+              ? {
+                  browser_attestation: {
+                    source: "chrome_scripting_main_world",
+                    execution_surface: "real_browser",
+                    extension_surface: "background_service_worker",
+                    run_id: runId,
+                    session_id: sessionId,
+                    profile: request.profile ?? null,
+                    target_domain: commandParams.target_domain,
+                    target_page: commandParams.target_page,
+                    target_tab_id: requestedTabId,
+                    action_ref: actionRef,
+                    request_event: requestEvent,
+                    result_event: resultEvent
+                  }
+                }
+              : {}),
             probe: {
               ready_state: "complete",
               href: pageMismatchMode
@@ -4494,6 +4518,105 @@ process.stdin.on("data", (chunk) => {
         details: {
           reason: "XHS_CLOSEOUT_VALIDATION_SOURCE_BROWSER_ATTESTATION_MISSING"
         }
+      }
+    });
+  });
+
+  itWithSqlite("records XHS closeout validation source live admission as allowed for follow-up closeout gates", async () => {
+    const cwd = await createRuntimeCwd();
+    const profile = "xhs_validation_source_cli_live_admission_allowed_profile";
+    const sourceRunId = "run-xhs-closeout-validation-source-live-admission-allowed-001";
+    await seedXhsCloseoutReadyProfile({ cwd, profile, seedBaseline: false });
+    await seedXhsCloseoutValidationSourceRhythmView({
+      cwd,
+      profile,
+      runId: sourceRunId,
+      decision: "allowed",
+      riskState: "limited",
+      currentPhase: "steady",
+      effectiveExecutionMode: "recon",
+      reasonCodes: ["XHS_CLOSEOUT_LIVE_ADMISSION_ALLOWED"],
+      requires: []
+    });
+
+    const socketBridge = await startXhsCloseoutValidationSourceSocket({
+      cwd,
+      profile,
+      mode: "xhs-closeout-validation-source-attested-success"
+    });
+    let sourceResult: Awaited<ReturnType<typeof runCliAsync>>;
+    try {
+      sourceResult = await runCliAsync([
+        "runtime.xhs_closeout_validation_source",
+        "--profile",
+        profile,
+        "--run-id",
+        sourceRunId,
+        "--params",
+        JSON.stringify({
+          target_domain: "www.xiaohongshu.com",
+          requested_execution_mode: "live_read_high_risk",
+          target_tab_id: 32,
+          target_page: "search_result_tab"
+        })
+      ], cwd);
+    } finally {
+      await socketBridge.close();
+    }
+
+    expect(sourceResult.status, sourceResult.stdout).toBe(0);
+    const sourceBody = parseSingleJsonLine(sourceResult.stdout);
+    expect(sourceBody).toMatchObject({
+      command: "runtime.xhs_closeout_validation_source",
+      status: "success",
+      summary: {
+        validation_source_generation: {
+          source: "runtime.xhs_closeout_validation_source",
+          active_fetch_performed: false,
+          closeout_bundle_entered: false
+        }
+      }
+    });
+
+    const auditResult = runCli([
+      "runtime.audit",
+      "--run-id",
+      "run-xhs-closeout-validation-source-live-admission-audit-001",
+      "--params",
+      JSON.stringify({
+        profile,
+        requested_execution_mode: "live_read_high_risk",
+        limit: 1
+      })
+    ], cwd);
+    expect(auditResult.status, auditResult.stdout).toBe(0);
+    const auditBody = parseSingleJsonLine(auditResult.stdout);
+    expect(auditBody).toMatchObject({
+      command: "runtime.audit",
+      status: "success",
+      summary: {
+        audit_records: [
+          expect.objectContaining({
+            run_id: sourceRunId,
+            risk_state: "allowed",
+            next_state: "allowed",
+            gate_reasons: ["XHS_CLOSEOUT_VALIDATION_SOURCE_APPROVED"]
+          })
+        ],
+        risk_state_output: expect.objectContaining({
+          current_state: "allowed",
+          issue_action_matrix: expect.arrayContaining([
+            expect.objectContaining({
+              issue_scope: "issue_209",
+              state: "allowed",
+              conditional_actions: expect.arrayContaining([
+                expect.objectContaining({
+                  action: "live_read_high_risk"
+                })
+              ])
+            })
+          ])
+        })
       }
     });
   });
