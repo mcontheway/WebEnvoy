@@ -7,7 +7,8 @@ import { join } from "node:path";
 import {
   buildOfficialChromeRuntimeStatusParams,
   ensureOfficialChromeRuntimeReady,
-  normalizeGateOptionsForContract
+  normalizeGateOptionsForContract,
+  resolveForwardTimeoutMsForContract
 } from "../xhs.js";
 import { executeCommand } from "../../core/router.js";
 import { createCommandRegistry } from "../index.js";
@@ -1071,6 +1072,20 @@ describe("ensureOfficialChromeRuntimeReady", () => {
 });
 
 describe("normalizeGateOptionsForContract", () => {
+  describe("resolveForwardTimeoutMsForContract", () => {
+    it("keeps a valid top-level timeout_ms for native bridge forwarding", () => {
+      expect(resolveForwardTimeoutMsForContract({ timeout_ms: 120_000 })).toBe(120_000);
+    });
+
+    it("rejects invalid timeout_ms values instead of forwarding ambiguous budgets", () => {
+      expect(resolveForwardTimeoutMsForContract({ timeout_ms: 0 })).toBeNull();
+      expect(resolveForwardTimeoutMsForContract({ timeout_ms: -1 })).toBeNull();
+      expect(resolveForwardTimeoutMsForContract({ timeout_ms: 1.5 })).toBeNull();
+      expect(resolveForwardTimeoutMsForContract({ timeout_ms: "120000" })).toBeNull();
+      expect(resolveForwardTimeoutMsForContract({})).toBeNull();
+    });
+  });
+
   it("keeps target_tab_id mandatory for issue_208 editor_input", () => {
     try {
       normalizeGateOptionsForContract(

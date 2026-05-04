@@ -2,5 +2,6 @@ export { buildOfficialChromeRuntimeStatusParams } from "../runtime/official-chro
 export {
   ensureOfficialChromeRuntimeReady,
   normalizeGateOptionsForContract,
+  resolveForwardTimeoutMsForContract,
   xhsCommands
 } from "./xhs-runtime.js";

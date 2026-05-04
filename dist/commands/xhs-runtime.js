@@ -22,6 +22,8 @@ const asObject = (value) => typeof value === "object" && value !== null && !Arra
     ? value
     : null;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const asPositiveInteger = (value) => typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+export const resolveForwardTimeoutMsForContract = (params) => asPositiveInteger(params.timeout_ms);
 const toSessionRhythmIdPart = (value) => value.replace(/[^A-Za-z0-9._-]+/gu, "_");
 const buildSessionRhythmCompatibilityRefsForRuntime = async (input) => {
     if (!input.profile) {
@@ -928,6 +930,7 @@ const xhsReadCommand = async (context, inputConfig) => {
             profileMeta,
             gate
         });
+        const forwardTimeoutMs = resolveForwardTimeoutMsForContract(context.params);
         const runtimeGateOptions = {
             ...injectActiveApiFetchFallbackRuntimeAttestation({
                 options: preparedGateOptions,
@@ -947,6 +950,7 @@ const xhsReadCommand = async (context, inputConfig) => {
             ...(typeof context.profile === "string" ? { __runtime_profile_ref: context.profile } : {})
         };
         const commandParams = appendFingerprintContext({
+            ...(forwardTimeoutMs ? { timeout_ms: forwardTimeoutMs } : {}),
             ...(preparedIssue209LiveRead.commandRequestId
                 ? { request_id: preparedIssue209LiveRead.commandRequestId }
                 : {}),

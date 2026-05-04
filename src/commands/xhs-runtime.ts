@@ -64,6 +64,12 @@ const asObject = (value: unknown): JsonObject | null =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const asPositiveInteger = (value: unknown): number | null =>
+  typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+
+export const resolveForwardTimeoutMsForContract = (params: JsonObject): number | null =>
+  asPositiveInteger(params.timeout_ms);
+
 const toSessionRhythmIdPart = (value: string): string =>
   value.replace(/[^A-Za-z0-9._-]+/gu, "_");
 
@@ -1226,6 +1232,7 @@ const xhsReadCommand = async (
       profileMeta,
       gate
     });
+    const forwardTimeoutMs = resolveForwardTimeoutMsForContract(context.params);
     const runtimeGateOptions = {
       ...injectActiveApiFetchFallbackRuntimeAttestation({
         options: preparedGateOptions,
@@ -1246,6 +1253,7 @@ const xhsReadCommand = async (
     };
     const commandParams = appendFingerprintContext(
       {
+        ...(forwardTimeoutMs ? { timeout_ms: forwardTimeoutMs } : {}),
         ...(preparedIssue209LiveRead.commandRequestId
           ? { request_id: preparedIssue209LiveRead.commandRequestId }
           : {}),
