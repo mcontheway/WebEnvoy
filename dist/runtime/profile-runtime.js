@@ -226,6 +226,11 @@ const ensureXhsRuntimeStartVisible = (input) => {
         }
     });
 };
+const buildForwardTimeoutParams = (params) => ({
+    ...(typeof params.timeout_ms === "number" && Number.isInteger(params.timeout_ms) && params.timeout_ms > 0
+        ? { timeout_ms: params.timeout_ms }
+        : {})
+});
 const buildRuntimeTargetParams = (params) => ({
     ...(typeof params.target_domain === "string" && params.target_domain.length > 0
         ? { target_domain: params.target_domain }
@@ -265,6 +270,9 @@ const buildRuntimeBootstrapEnvelope = (input) => ({
     run_id: input.runId,
     runtime_context_id: input.runtimeContextId,
     profile: input.profile,
+    ...(typeof input.timeout_ms === "number" && Number.isInteger(input.timeout_ms) && input.timeout_ms > 0
+        ? { timeout_ms: input.timeout_ms }
+        : {}),
     fingerprint_runtime: input.fingerprintRuntime,
     fingerprint_patch_manifest: input.fingerprintRuntime.fingerprint_patch_manifest
         ? input.fingerprintRuntime.fingerprint_patch_manifest
@@ -1723,7 +1731,8 @@ export class ProfileRuntimeService {
             runId: input.runtimeInput.runId,
             runtimeContextId: buildRuntimeBootstrapContextId(input.profile, input.runtimeInput.runId),
             fingerprintRuntime: input.fingerprintRuntime,
-            mainWorldSecret: randomUUID()
+            mainWorldSecret: randomUUID(),
+            ...buildForwardTimeoutParams(input.runtimeInput.params)
         });
         try {
             const result = await bridge.runCommand({
@@ -1860,6 +1869,7 @@ export class ProfileRuntimeService {
                 params: {
                     run_id: input.runtimeInput.runId,
                     runtime_context_id: runtimeContextId,
+                    ...buildForwardTimeoutParams(input.runtimeInput.params),
                     ...(input.includeTargetBinding === false
                         ? {}
                         : buildRuntimeTargetParams(input.runtimeInput.params))

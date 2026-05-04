@@ -1233,11 +1233,14 @@ describe("profile-runtime identity preflight", () => {
       profile: "identity_bound_transport_missing_profile"
     });
     const readinessContextIds: string[] = [];
+    const readinessTimeouts: unknown[] = [];
+    const bootstrapTimeouts: unknown[] = [];
     const service = createTestService({
       browserLauncher: createMockBrowserLauncher(),
       bridgeFactory: () => ({
         runCommand: async ({ command, params, profile, runId }) => {
           if (command === "runtime.bootstrap") {
+            bootstrapTimeouts.push((params as { timeout_ms?: unknown }).timeout_ms);
             return {
               ok: true as const,
               payload: {
@@ -1254,6 +1257,7 @@ describe("profile-runtime identity preflight", () => {
           }
           if (command === "runtime.readiness") {
             readinessContextIds.push(String((params as { runtime_context_id?: unknown }).runtime_context_id));
+            readinessTimeouts.push((params as { timeout_ms?: unknown }).timeout_ms);
             return {
               ok: true as const,
               payload: {
@@ -1272,6 +1276,7 @@ describe("profile-runtime identity preflight", () => {
       profile: "identity_bound_transport_missing_profile",
       runId: "run-runtime-readiness-transport-missing-001",
       params: {
+        timeout_ms: 120_000,
         persistent_extension_identity: {
           extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           manifest_path: manifestPath
@@ -1284,6 +1289,7 @@ describe("profile-runtime identity preflight", () => {
       profile: "identity_bound_transport_missing_profile",
       runId: "run-runtime-readiness-transport-missing-001",
       params: {
+        timeout_ms: 120_000,
         persistent_extension_identity: {
           extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           manifest_path: manifestPath
@@ -1305,6 +1311,8 @@ describe("profile-runtime identity preflight", () => {
         "run-runtime-readiness-transport-missing-001"
       )
     ]);
+    expect(bootstrapTimeouts).toEqual([120_000]);
+    expect(readinessTimeouts).toEqual([120_000]);
   });
 
   it("marks runtime.status as blocked when runtime.readiness reports stale bootstrap", async () => {

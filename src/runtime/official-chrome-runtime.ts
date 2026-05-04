@@ -38,6 +38,14 @@ const asObject = (value: unknown): JsonObject | null =>
     ? (value as JsonObject)
     : null;
 
+const asPositiveInteger = (value: unknown): number | null =>
+  typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+
+const buildForwardTimeoutParams = (params: JsonObject): JsonObject => {
+  const timeoutMs = asPositiveInteger(params.timeout_ms);
+  return timeoutMs ? { timeout_ms: timeoutMs } : {};
+};
+
 const readRuntimeTakeoverEvidence = (status: JsonObject): RuntimeTakeoverEvidence => {
   const evidence = asObject(status.runtimeTakeoverEvidence);
   return evidence ?? {};
@@ -97,6 +105,7 @@ const buildRuntimeBootstrapEnvelope = (input: {
   targetDomain?: string | null;
   targetPage?: string | null;
   targetResourceId?: string | null;
+  timeoutMs?: number | null;
 }): JsonObject & {
   version: "v1";
   run_id: string;
@@ -119,6 +128,9 @@ const buildRuntimeBootstrapEnvelope = (input: {
     : {}),
   ...(typeof input.targetResourceId === "string" && input.targetResourceId.length > 0
     ? { target_resource_id: input.targetResourceId }
+    : {}),
+  ...(typeof input.timeoutMs === "number" && Number.isInteger(input.timeoutMs) && input.timeoutMs > 0
+    ? { timeout_ms: input.timeoutMs }
     : {}),
   fingerprint_runtime: input.fingerprintRuntime,
   fingerprint_patch_manifest: asObject(input.fingerprintRuntime.fingerprint_patch_manifest) ?? {},
@@ -171,6 +183,7 @@ const readOfficialChromeRuntimeReadinessViaBridge = async (input: {
         input.context.profile ?? "",
         input.context.run_id
       ),
+      ...buildForwardTimeoutParams(input.context.params ?? {}),
       ...buildOfficialChromeTargetParams(input.target)
     }
   });
@@ -310,6 +323,7 @@ export const buildOfficialChromeRuntimeStatusParams = (
 ): JsonObject => {
   return {
     requested_execution_mode: requestedExecutionMode,
+    ...buildForwardTimeoutParams(_context.params ?? {}),
     ...buildOfficialChromeTargetParams(target)
   };
 };
@@ -435,7 +449,8 @@ export const prepareOfficialChromeRuntime = async (input: {
       targetTabId: input.bootstrapTargetTabId,
       targetDomain: input.bootstrapTargetDomain ?? null,
       targetPage: input.bootstrapTargetPage ?? null,
-      targetResourceId: input.bootstrapTargetResourceId ?? null
+      targetResourceId: input.bootstrapTargetResourceId ?? null,
+      timeoutMs: asPositiveInteger(input.context.params?.timeout_ms)
     });
     const bootstrapResult = await input.bridge.runCommand({
       runId: input.context.run_id,
