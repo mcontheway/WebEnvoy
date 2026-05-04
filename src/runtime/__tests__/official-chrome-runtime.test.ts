@@ -29,6 +29,7 @@ describe("prepareOfficialChromeRuntime", () => {
           run_id: "run-runtime-ready-identity-001",
           command: "xhs.search",
           params: {
+            timeout_ms: 120_000,
             persistentExtensionIdentity: {
               extensionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               manifestPath: "/tmp/native-host-manifest.json"
@@ -38,7 +39,8 @@ describe("prepareOfficialChromeRuntime", () => {
         "live_read_high_risk"
       )
     ).toEqual({
-      requested_execution_mode: "live_read_high_risk"
+      requested_execution_mode: "live_read_high_risk",
+      timeout_ms: 120_000
     });
   });
 
@@ -122,7 +124,9 @@ describe("prepareOfficialChromeRuntime", () => {
           profile: "official_ready_profile",
           run_id: "run-runtime-ready-001",
           command: "xhs.search",
-          params: {}
+          params: {
+            timeout_ms: 120_000
+          }
         } as never,
         consumerId: "xhs.search",
         requestedExecutionMode: "live_read_high_risk",
@@ -145,7 +149,8 @@ describe("prepareOfficialChromeRuntime", () => {
         command: "runtime.bootstrap",
         params: expect.objectContaining({
           run_id: "run-runtime-ready-001",
-          profile: "official_ready_profile"
+          profile: "official_ready_profile",
+          timeout_ms: 120_000
         })
       })
     );
@@ -365,7 +370,9 @@ describe("prepareOfficialChromeRuntime", () => {
           profile: "official_target_readiness_profile",
           run_id: "run-runtime-target-readiness-001",
           command: "xhs.search",
-          params: {}
+          params: {
+            timeout_ms: 120_000
+          }
         } as never,
         consumerId: "xhs.search",
         requestedExecutionMode: "live_read_high_risk",
@@ -391,7 +398,8 @@ describe("prepareOfficialChromeRuntime", () => {
         params: expect.objectContaining({
           target_domain: "www.xiaohongshu.com",
           target_tab_id: 52,
-          target_page: "search_result_tab"
+          target_page: "search_result_tab",
+          timeout_ms: 120_000
         })
       })
     );

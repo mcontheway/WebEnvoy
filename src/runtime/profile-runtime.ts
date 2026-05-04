@@ -456,6 +456,12 @@ const ensureXhsRuntimeStartVisible = (input: RuntimeActionInput): void => {
   });
 };
 
+const buildForwardTimeoutParams = (params: JsonObject): JsonObject => ({
+  ...(typeof params.timeout_ms === "number" && Number.isInteger(params.timeout_ms) && params.timeout_ms > 0
+    ? { timeout_ms: params.timeout_ms }
+    : {})
+});
+
 const buildRuntimeTargetParams = (params: JsonObject): JsonObject => ({
   ...(typeof params.target_domain === "string" && params.target_domain.length > 0
     ? { target_domain: params.target_domain }
@@ -505,6 +511,7 @@ type RuntimeBootstrapEnvelope = {
   run_id: string;
   runtime_context_id: string;
   profile: string;
+  timeout_ms?: number;
   fingerprint_runtime: ReturnType<typeof buildFingerprintContextForMeta>;
   fingerprint_patch_manifest: Record<string, unknown>;
   main_world_secret: string;
@@ -526,11 +533,15 @@ const buildRuntimeBootstrapEnvelope = (input: {
   runtimeContextId: string;
   fingerprintRuntime: ReturnType<typeof buildFingerprintContextForMeta>;
   mainWorldSecret: string;
+  timeout_ms?: number;
 }): RuntimeBootstrapEnvelope => ({
   version: "v1",
   run_id: input.runId,
   runtime_context_id: input.runtimeContextId,
   profile: input.profile,
+  ...(typeof input.timeout_ms === "number" && Number.isInteger(input.timeout_ms) && input.timeout_ms > 0
+    ? { timeout_ms: input.timeout_ms }
+    : {}),
   fingerprint_runtime: input.fingerprintRuntime,
   fingerprint_patch_manifest: input.fingerprintRuntime.fingerprint_patch_manifest
     ? (input.fingerprintRuntime.fingerprint_patch_manifest as unknown as Record<string, unknown>)
@@ -2251,7 +2262,8 @@ export class ProfileRuntimeService {
       runId: input.runtimeInput.runId,
       runtimeContextId: buildRuntimeBootstrapContextId(input.profile, input.runtimeInput.runId),
       fingerprintRuntime: input.fingerprintRuntime,
-      mainWorldSecret: randomUUID()
+      mainWorldSecret: randomUUID(),
+      ...buildForwardTimeoutParams(input.runtimeInput.params)
     });
 
     try {
@@ -2426,6 +2438,7 @@ export class ProfileRuntimeService {
           params: {
             run_id: input.runtimeInput.runId,
             runtime_context_id: runtimeContextId,
+            ...buildForwardTimeoutParams(input.runtimeInput.params),
             ...(input.includeTargetBinding === false
               ? {}
               : buildRuntimeTargetParams(input.runtimeInput.params))
