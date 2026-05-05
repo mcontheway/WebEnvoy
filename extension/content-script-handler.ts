@@ -688,6 +688,11 @@ const createBrowserEnvironment = (): XhsSearchEnvironment => ({
   readCapturedRequestContext: async (input) => await readCapturedRequestContextViaMainWorld(input),
   configureCapturedRequestContextProvenance: async (input) =>
     await configureCapturedRequestContextProvenanceViaMainWorld(input),
+  sleep: async (ms) => {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, ms);
+    });
+  },
   callSignature: async (
     uri: Parameters<XhsSearchEnvironment["callSignature"]>[0],
     payload: Parameters<XhsSearchEnvironment["callSignature"]>[1]
@@ -1124,7 +1129,9 @@ export class ContentScriptHandler {
         abilityLayer: String(ability.layer ?? "L3"),
         abilityAction: String(ability.action ?? "read"),
         options: {
-          ...(typeof options.timeout_ms === "number" ? { timeout_ms: options.timeout_ms } : {}),
+          ...(typeof options.timeout_ms === "number"
+            ? { timeout_ms: options.timeout_ms }
+            : { timeout_ms: message.timeoutMs }),
           ...(typeof options.simulate_result === "string"
             ? { simulate_result: options.simulate_result }
             : {}),

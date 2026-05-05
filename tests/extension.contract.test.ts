@@ -1641,8 +1641,7 @@ describe("extension build contract", () => {
       };
     });
 
-    await expect(
-      executeXhsSearch(
+    const result = await executeXhsSearch(
         {
           abilityId: "xhs.note.search.v1",
           abilityLayer: "L3",
@@ -1715,8 +1714,9 @@ describe("extension build contract", () => {
           callSignature,
           fetchJson
         }
-      )
-    ).resolves.toMatchObject({
+      );
+
+    expect(result).toMatchObject({
       ok: true,
       payload: {
         summary: {
@@ -1962,8 +1962,7 @@ describe("extension build contract", () => {
       }
     }));
 
-    await expect(
-      executeXhsSearch(
+    const result = await executeXhsSearch(
         {
           abilityId: "xhs.note.search.v1",
           abilityLayer: "L3",
@@ -2020,8 +2019,9 @@ describe("extension build contract", () => {
           },
           fetchJson
         }
-      )
-    ).resolves.toMatchObject({
+      );
+
+    expect(result).toMatchObject({
       ok: true,
       payload: {
         summary: {
@@ -2056,8 +2056,7 @@ describe("extension build contract", () => {
       }
     }));
 
-    await expect(
-      executeXhsSearch(
+    const result = await executeXhsSearch(
         {
           abilityId: "xhs.note.search.v1",
           abilityLayer: "L3",
@@ -2115,7 +2114,7 @@ describe("extension build contract", () => {
             expect(lookup.min_observed_at).toBe(1_710_000_000_000);
             actionOrder.push("capture_poll");
             lookupCount += 1;
-            return lookupCount === 1
+            return lookupCount < 12
               ? null
               : createCapturedSearchContextArtifact({
                   href,
@@ -2126,8 +2125,9 @@ describe("extension build contract", () => {
           callSignature: async () => ({ "X-s": "fresh-signature", "X-t": "1710000000" }),
           fetchJson
         }
-      )
-    ).resolves.toMatchObject({
+      );
+
+    expect(result).toMatchObject({
       ok: true,
       payload: {
         summary: {
@@ -2139,7 +2139,7 @@ describe("extension build contract", () => {
     });
 
     expect(actionOrder.slice(0, 2)).toEqual(["humanized_action", "capture_poll"]);
-    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(sleep).toHaveBeenCalledTimes(11);
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
@@ -2164,8 +2164,7 @@ describe("extension build contract", () => {
       }
     }));
 
-    await expect(
-      executeXhsSearch(
+    const result = await executeXhsSearch(
         {
           abilityId: "xhs.note.search.v1",
           abilityLayer: "L3",
@@ -2245,8 +2244,9 @@ describe("extension build contract", () => {
           callSignature: async () => ({ "X-s": "fresh-signature", "X-t": "1710000000" }),
           fetchJson
         }
-      )
-    ).resolves.toMatchObject({
+      );
+
+    expect(result).toMatchObject({
       ok: true,
       payload: {
         summary: {
@@ -2282,8 +2282,7 @@ describe("extension build contract", () => {
       }
     }));
 
-    await expect(
-      executeXhsSearch(
+    const result = await executeXhsSearch(
         {
           abilityId: "xhs.note.search.v1",
           abilityLayer: "L3",
@@ -2360,8 +2359,9 @@ describe("extension build contract", () => {
           callSignature: async () => ({ "X-s": "fresh-signature", "X-t": "1710000000" }),
           fetchJson
         }
-      )
-    ).resolves.toMatchObject({
+      );
+
+    expect(result).toMatchObject({
       ok: true,
       payload: {
         summary: {
@@ -2396,8 +2396,7 @@ describe("extension build contract", () => {
     }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
 
-    await expect(
-      executeXhsSearch(
+    const result = await executeXhsSearch(
         {
           abilityId: "xhs.note.search.v1",
           abilityLayer: "L3",
@@ -2459,8 +2458,9 @@ describe("extension build contract", () => {
           callSignature,
           fetchJson
         }
-      )
-    ).resolves.toMatchObject({
+      );
+
+    expect(result).toMatchObject({
       ok: false,
       payload: {
         details: {
@@ -2470,7 +2470,7 @@ describe("extension build contract", () => {
       }
     });
 
-    expect(sleep).toHaveBeenCalledTimes(9);
+    expect(sleep).toHaveBeenCalledTimes(60);
     expect(callSignature).not.toHaveBeenCalled();
     expect(fetchJson).not.toHaveBeenCalled();
   });
@@ -2495,8 +2495,7 @@ describe("extension build contract", () => {
     }));
     const callSignature = vi.fn(async () => ({ "X-s": "sig", "X-t": "1710000000" }));
 
-    await expect(
-      executeXhsSearch(
+    const result = await executeXhsSearch(
         {
           abilityId: "xhs.note.search.v1",
           abilityLayer: "L3",
@@ -2561,8 +2560,9 @@ describe("extension build contract", () => {
           callSignature,
           fetchJson
         }
-      )
-    ).resolves.toMatchObject({
+      );
+
+    expect(result).toMatchObject({
       ok: true,
       payload: {
         summary: {
@@ -2601,9 +2601,203 @@ describe("extension build contract", () => {
         }
       }
     });
+    expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([]);
 
-    expect(sleep).toHaveBeenCalledTimes(9);
+    expect(sleep).toHaveBeenCalledTimes(60);
     expect(callSignature).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("keeps request-context waiting inside the command timeout budget", async () => {
+    const admissionContext = buildLiveReadAdmissionContext({
+      runId: "run-source-search-live-context-timeout-budget-001",
+      sessionId: "nm-session-source-search-live-context-timeout-budget-001",
+      gateInvocationId: "issue209-gate-run-source-search-live-context-timeout-budget-001",
+      targetTabId: 11,
+      targetPage: "search_result_tab"
+    });
+    const sleep = vi.fn(async () => {});
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          items: []
+        }
+      }
+    }));
+
+    await expect(
+      executeXhsSearch(
+        {
+          abilityId: "xhs.note.search.v1",
+          abilityLayer: "L3",
+          abilityAction: "read",
+          params: {
+            query: "露营装备"
+          },
+          options: {
+            timeout_ms: 1_000,
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 11,
+            target_page: "search_result_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 11,
+            actual_target_page: "search_result_tab",
+            action_type: "read",
+            risk_state: "allowed",
+            requested_execution_mode: "live_read_high_risk",
+            upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+              requestRef: "upstream_source_search_live_context_timeout_budget_001",
+              actionName: "xhs.read_search_results",
+              targetPage: "search_result_tab",
+              targetTabId: 11,
+              profileRef: "profile-a",
+              approvalRefs: [
+                String(admissionContext.approval_admission_evidence.approval_admission_ref)
+              ],
+              auditRefs: [String(admissionContext.audit_admission_evidence.audit_admission_ref)]
+            }),
+            admission_context: admissionContext
+          },
+          executionContext: {
+            runId: "run-source-search-live-context-timeout-budget-001",
+            sessionId: "nm-session-source-search-live-context-timeout-budget-001",
+            profile: "profile-a",
+            gateInvocationId: "issue209-gate-run-source-search-live-context-timeout-budget-001"
+          }
+        },
+        {
+          now: () => 1_710_000_000_000,
+          randomId: () => "source-req-context-timeout-budget-001",
+          getLocationHref: () =>
+            "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5%E8%A3%85%E5%A4%87",
+          getDocumentTitle: () => "Search Result",
+          getReadyState: () => "complete",
+          getCookie: () => "a1=session-cookie",
+          sleep,
+          readCapturedRequestContext: async () => null,
+          callSignature: async () => {
+            throw new Error("signature should not be used when request context is missing");
+          },
+          fetchJson
+        }
+      )
+    ).resolves.toMatchObject({
+      ok: false,
+      payload: {
+        details: {
+          reason: "REQUEST_CONTEXT_MISSING",
+          request_context_reason: "template_missing"
+        }
+      }
+    });
+
+    expect(sleep).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("subtracts elapsed passive action time from the request-context wait budget", async () => {
+    const admissionContext = buildLiveReadAdmissionContext({
+      runId: "run-source-search-live-context-elapsed-budget-001",
+      sessionId: "nm-session-source-search-live-context-elapsed-budget-001",
+      gateInvocationId: "issue619-gate-run-source-search-live-context-elapsed-budget-001",
+      targetTabId: 11,
+      targetPage: "search_result_tab"
+    });
+    let nowMs = 1_710_000_000_000;
+    let lookupCount = 0;
+    const sleep = vi.fn(async () => {});
+    const fetchJson = vi.fn(async () => ({
+      status: 200,
+      body: {
+        code: 0,
+        data: {
+          items: []
+        }
+      }
+    }));
+
+    await expect(
+      executeXhsSearch(
+        {
+          abilityId: "xhs.note.search.v1",
+          abilityLayer: "L3",
+          abilityAction: "read",
+          params: {
+            query: "露营装备"
+          },
+          options: {
+            timeout_ms: 1_600,
+            issue_scope: "issue_209",
+            target_domain: "www.xiaohongshu.com",
+            target_tab_id: 11,
+            target_page: "search_result_tab",
+            actual_target_domain: "www.xiaohongshu.com",
+            actual_target_tab_id: 11,
+            actual_target_page: "search_result_tab",
+            action_type: "read",
+            risk_state: "allowed",
+            requested_execution_mode: "live_read_high_risk",
+            upstream_authorization_request: buildCanonicalReadAuthorizationRequest({
+              requestRef: "upstream_source_search_live_context_elapsed_budget_001",
+              actionName: "xhs.read_search_results",
+              targetPage: "search_result_tab",
+              targetTabId: 11,
+              profileRef: "profile-a",
+              approvalRefs: [
+                String(admissionContext.approval_admission_evidence.approval_admission_ref)
+              ],
+              auditRefs: [String(admissionContext.audit_admission_evidence.audit_admission_ref)]
+            }),
+            admission_context: admissionContext
+          },
+          executionContext: {
+            runId: "run-source-search-live-context-elapsed-budget-001",
+            sessionId: "nm-session-source-search-live-context-elapsed-budget-001",
+            profile: "profile-a",
+            gateInvocationId: "issue619-gate-run-source-search-live-context-elapsed-budget-001"
+          }
+        },
+        {
+          now: () => nowMs,
+          randomId: () => "source-req-context-elapsed-budget-001",
+          getLocationHref: () =>
+            "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5%E8%A3%85%E5%A4%87",
+          getDocumentTitle: () => "Search Result",
+          getReadyState: () => "complete",
+          getCookie: () => "a1=session-cookie",
+          sleep,
+          performSearchPassiveAction: async () => {
+            nowMs += 600;
+            return {
+              evidence_class: "humanized_action",
+              action_kind: "scroll"
+            };
+          },
+          readCapturedRequestContext: async () => {
+            lookupCount += 1;
+            return null;
+          },
+          callSignature: async () => {
+            throw new Error("signature should not be used when request context is missing");
+          },
+          fetchJson
+        }
+      )
+    ).resolves.toMatchObject({
+      ok: false,
+      payload: {
+        details: {
+          reason: "REQUEST_CONTEXT_MISSING",
+          request_context_reason: "template_missing"
+        }
+      }
+    });
+
+    expect(lookupCount).toBe(1);
+    expect(sleep).not.toHaveBeenCalled();
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
@@ -2697,7 +2891,7 @@ describe("extension build contract", () => {
       }
     });
 
-    expect(sleep).toHaveBeenCalledTimes(9);
+    expect(sleep).toHaveBeenCalledTimes(60);
     expect(callSignature).not.toHaveBeenCalled();
     expect(fetchJson).not.toHaveBeenCalled();
   });
@@ -2759,6 +2953,7 @@ describe("extension build contract", () => {
           getDocumentTitle: () => "Search Result",
           getReadyState: () => "complete",
           getCookie: () => "a1=session-cookie",
+          sleep: async () => {},
           readCapturedRequestContext: async () => {
             const lookup = createCapturedSearchContextArtifact({
               href: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
@@ -2874,6 +3069,7 @@ describe("extension build contract", () => {
           getDocumentTitle: () => "Search Result",
           getReadyState: () => "complete",
           getCookie: () => "a1=session-cookie",
+          sleep: async () => {},
           readCapturedRequestContext: async () => {
             const lookup = createCapturedSearchContextArtifact({
               href: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
@@ -2988,6 +3184,7 @@ describe("extension build contract", () => {
           getDocumentTitle: () => "Search Result",
           getReadyState: () => "complete",
           getCookie: () => "a1=session-cookie",
+          sleep: async () => {},
           readCapturedRequestContext: async () =>
             createCapturedSearchContextArtifact({
               href: "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5",
@@ -3082,6 +3279,7 @@ describe("extension build contract", () => {
           getDocumentTitle: () => "Search Result",
           getReadyState: () => "complete",
           getCookie: () => "a1=session-cookie",
+          sleep: async () => {},
           readCapturedRequestContext: async () => {
             throw new Error("main-world lookup transport failed");
           },

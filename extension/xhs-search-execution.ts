@@ -47,8 +47,9 @@ const asInteger = (value: unknown): number | null => {
 };
 
 const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60 * 1000;
-const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 10;
-const REQUEST_CONTEXT_WAIT_RETRY_MS = 150;
+const REQUEST_CONTEXT_WAIT_MAX_MS = 15_000;
+const REQUEST_CONTEXT_WAIT_RETRY_MS = 250;
+const REQUEST_CONTEXT_FORWARD_DEADLINE_SAFETY_MS = 1_000;
 
 type RequestContextFailureReason =
   | "template_missing"
@@ -680,11 +681,31 @@ const waitForRequestContextRetry = async (
   });
 };
 
+const resolveRequestContextWaitMaxAttempts = (
+  options: XhsSearchOptions,
+  elapsedBeforeWaitMs = 0
+): number => {
+  const timeoutMs =
+    typeof options.timeout_ms === "number" &&
+    Number.isFinite(options.timeout_ms) &&
+    options.timeout_ms > 0
+      ? Math.floor(options.timeout_ms)
+      : null;
+  const elapsedMs = Math.max(0, Math.floor(elapsedBeforeWaitMs));
+  const waitBudgetMs =
+    timeoutMs === null
+      ? REQUEST_CONTEXT_WAIT_MAX_MS
+      : Math.max(0, timeoutMs - REQUEST_CONTEXT_FORWARD_DEADLINE_SAFETY_MS - elapsedMs);
+  const maxWaitMs = Math.min(REQUEST_CONTEXT_WAIT_MAX_MS, waitBudgetMs);
+  return Math.max(1, Math.floor(maxWaitMs / REQUEST_CONTEXT_WAIT_RETRY_MS) + 1);
+};
+
 const resolveRequestContextState = async (
   requestInput: {
     params: XhsSearchParams;
     options: XhsSearchOptions;
     minObservedAt?: number | null;
+    elapsedBeforeWaitMs?: number;
     expectedProvenance?: RequestContextExpectedProvenance | null;
   },
   env: XhsSearchEnvironment
@@ -903,19 +924,23 @@ const resolveRequestContextState = async (
     };
   };
 
+  const maxAttempts = resolveRequestContextWaitMaxAttempts(
+    requestInput.options,
+    requestInput.elapsedBeforeWaitMs
+  );
   let lastState = await lookupOnce({
-    deferTransientMisses: REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS > 1
+    deferTransientMisses: maxAttempts > 1
   });
   for (
     let attempt = 1;
-    attempt < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS &&
+    attempt < maxAttempts &&
     lastState.status === "miss" &&
     lastState.failureReason === "template_missing";
     attempt += 1
   ) {
     await waitForRequestContextRetry(env, REQUEST_CONTEXT_WAIT_RETRY_MS);
     lastState = await lookupOnce({
-      deferTransientMisses: attempt + 1 < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS
+      deferTransientMisses: attempt + 1 < maxAttempts
     });
   }
   return lastState;
@@ -925,6 +950,7 @@ export const executeXhsSearch = async (
   input: ExecuteXhsSearchInput,
   env: XhsSearchEnvironment
 ): Promise<SearchExecutionResult> => {
+  const executionStartedAt = env.now();
   const gate = resolveGate(input.options, input.executionContext, env.getLocationHref());
   const auditRecord = createAuditRecord(input.executionContext, gate, env);
   const layer2Interaction = buildXhsSearchLayer2InteractionEvidence({
@@ -1370,6 +1396,7 @@ export const executeXhsSearch = async (
       params: input.params,
       options: input.options,
       minObservedAt: passiveActionEvidence ? passiveActionStartedAt : null,
+      elapsedBeforeWaitMs: env.now() - executionStartedAt,
       expectedProvenance: buildExpectedRequestContextProvenance()
     },
     env
@@ -1504,8 +1531,10 @@ export const executeXhsSearch = async (
             },
             request_context: {
               status: "missing",
+              reason: requestContextState.failureReason,
               page_context_namespace: requestContextState.pageContextNamespace,
-              shape_key: requestContextState.shapeKey
+              shape_key: requestContextState.shapeKey,
+              available_shape_keys: requestContextState.availableShapeKeys
             }
           },
           observability: createObservability({
@@ -1513,7 +1542,8 @@ export const executeXhsSearch = async (
             title: env.getDocumentTitle(),
             readyState: env.getReadyState(),
             requestId: `req-${env.randomId()}`,
-            outcome: "completed"
+            outcome: "completed",
+            includeKeyRequest: false
           })
         }
       };

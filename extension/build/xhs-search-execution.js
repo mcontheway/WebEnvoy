@@ -16,8 +16,9 @@ const asInteger = (value) => {
     return null;
 };
 const REQUEST_CONTEXT_FRESHNESS_WINDOW_MS = 5 * 60 * 1000;
-const REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS = 10;
-const REQUEST_CONTEXT_WAIT_RETRY_MS = 150;
+const REQUEST_CONTEXT_WAIT_MAX_MS = 15_000;
+const REQUEST_CONTEXT_WAIT_RETRY_MS = 250;
+const REQUEST_CONTEXT_FORWARD_DEADLINE_SAFETY_MS = 1_000;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const toIsoString = (value) => new Date(value).toISOString();
 const normalizeSearchQueryText = (value) => {
@@ -461,6 +462,19 @@ const waitForRequestContextRetry = async (env, ms) => {
         setTimeout(resolve, ms);
     });
 };
+const resolveRequestContextWaitMaxAttempts = (options, elapsedBeforeWaitMs = 0) => {
+    const timeoutMs = typeof options.timeout_ms === "number" &&
+        Number.isFinite(options.timeout_ms) &&
+        options.timeout_ms > 0
+        ? Math.floor(options.timeout_ms)
+        : null;
+    const elapsedMs = Math.max(0, Math.floor(elapsedBeforeWaitMs));
+    const waitBudgetMs = timeoutMs === null
+        ? REQUEST_CONTEXT_WAIT_MAX_MS
+        : Math.max(0, timeoutMs - REQUEST_CONTEXT_FORWARD_DEADLINE_SAFETY_MS - elapsedMs);
+    const maxWaitMs = Math.min(REQUEST_CONTEXT_WAIT_MAX_MS, waitBudgetMs);
+    return Math.max(1, Math.floor(maxWaitMs / REQUEST_CONTEXT_WAIT_RETRY_MS) + 1);
+};
 const resolveRequestContextState = async (requestInput, env) => {
     const shape = createSearchRequestShape({
         keyword: requestInput.params.query,
@@ -657,20 +671,22 @@ const resolveRequestContextState = async (requestInput, env) => {
             availableShapeKeys
         };
     };
+    const maxAttempts = resolveRequestContextWaitMaxAttempts(requestInput.options, requestInput.elapsedBeforeWaitMs);
     let lastState = await lookupOnce({
-        deferTransientMisses: REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS > 1
+        deferTransientMisses: maxAttempts > 1
     });
-    for (let attempt = 1; attempt < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS &&
+    for (let attempt = 1; attempt < maxAttempts &&
         lastState.status === "miss" &&
         lastState.failureReason === "template_missing"; attempt += 1) {
         await waitForRequestContextRetry(env, REQUEST_CONTEXT_WAIT_RETRY_MS);
         lastState = await lookupOnce({
-            deferTransientMisses: attempt + 1 < REQUEST_CONTEXT_WAIT_MAX_ATTEMPTS
+            deferTransientMisses: attempt + 1 < maxAttempts
         });
     }
     return lastState;
 };
 export const executeXhsSearch = async (input, env) => {
+    const executionStartedAt = env.now();
     const gate = resolveGate(input.options, input.executionContext, env.getLocationHref());
     const auditRecord = createAuditRecord(input.executionContext, gate, env);
     const layer2Interaction = buildXhsSearchLayer2InteractionEvidence({
@@ -1026,6 +1042,7 @@ export const executeXhsSearch = async (input, env) => {
         params: input.params,
         options: input.options,
         minObservedAt: passiveActionEvidence ? passiveActionStartedAt : null,
+        elapsedBeforeWaitMs: env.now() - executionStartedAt,
         expectedProvenance: buildExpectedRequestContextProvenance()
     }, env);
     if (requestContextState.status !== "hit") {
@@ -1145,8 +1162,10 @@ export const executeXhsSearch = async (input, env) => {
                         },
                         request_context: {
                             status: "missing",
+                            reason: requestContextState.failureReason,
                             page_context_namespace: requestContextState.pageContextNamespace,
-                            shape_key: requestContextState.shapeKey
+                            shape_key: requestContextState.shapeKey,
+                            available_shape_keys: requestContextState.availableShapeKeys
                         }
                     },
                     observability: createObservability({
@@ -1154,7 +1173,8 @@ export const executeXhsSearch = async (input, env) => {
                         title: env.getDocumentTitle(),
                         readyState: env.getReadyState(),
                         requestId: `req-${env.randomId()}`,
-                        outcome: "completed"
+                        outcome: "completed",
+                        includeKeyRequest: false
                     })
                 }
             };
