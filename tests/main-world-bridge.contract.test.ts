@@ -532,6 +532,191 @@ describe("main-world bridge contract", () => {
     });
   });
 
+  it("binds same-query search_result captures after SPA visit drift to configured provenance", async () => {
+    const pageUrl = "https://www.xiaohongshu.com/search_result/?keyword=contract&type=51";
+    const nextPageUrl =
+      "https://www.xiaohongshu.com/search_result/?keyword=contract&type=51&source=web_search_result_notes";
+    const env = createMockMainWorldEnvironment(pageUrl);
+    const searchNamespace = createPageContextNamespace(pageUrl);
+    env.setFetchHandler(async () => {
+      return new Response(JSON.stringify({ code: 0, data: { items: [{ id: "note-001" }] } }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    });
+
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    const configured = await configureCapturedContextProvenance({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: searchNamespace,
+      profileRef: "xhs_001",
+      sessionId: "nm-session-001",
+      targetTabId: 1230427051,
+      runId: "run-search-same-query-visit-drift-001",
+      actionRef: "xhs.search",
+      pageUrl
+    });
+    expect(configured).toMatchObject({
+      ok: true,
+      result: {
+        configured: true,
+        page_context_namespace: searchNamespace
+      }
+    });
+
+    env.mockWindow.history?.pushState({}, "", nextPageUrl);
+    await (env.mockWindow.fetch as typeof fetch)(`https://www.xiaohongshu.com${SEARCH_ENDPOINT}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ keyword: "contract" })
+    });
+
+    const currentNamespace =
+      asRecord(
+        env.dispatched.filter((entry) => entry.type === channel.namespaceEvent).at(-1)?.detail
+      )?.page_context_namespace ?? createVisitedPageContextNamespace(nextPageUrl, 1);
+    const captured = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: createPageContextNamespace(nextPageUrl),
+      shapeKey: createShapeKey({ keyword: "contract" }),
+      profileRef: "xhs_001",
+      sessionId: "nm-session-001",
+      targetTabId: 1230427051,
+      runId: "run-search-same-query-visit-drift-001",
+      actionRef: "xhs.search",
+      pageUrl
+    });
+
+    expect(captured).toMatchObject({
+      ok: true,
+      result: {
+        page_context_namespace: String(currentNamespace),
+        admitted_template: {
+          route_evidence_class: "passive_api_capture",
+          source_kind: "page_request",
+          page_context_namespace: String(currentNamespace),
+          profile_ref: "xhs_001",
+          session_id: "nm-session-001",
+          target_tab_id: 1230427051,
+          run_id: "run-search-same-query-visit-drift-001",
+          action_ref: "xhs.search",
+          page_url: pageUrl
+        }
+      }
+    });
+  });
+
+  it("prefers the newest compatible search_result provenance after repeated SPA revisits", async () => {
+    const pageUrl = "https://www.xiaohongshu.com/search_result/?keyword=contract&type=51";
+    const env = createMockMainWorldEnvironment(pageUrl);
+    const searchNamespace = createPageContextNamespace(pageUrl);
+    env.setFetchHandler(async () => {
+      return new Response(JSON.stringify({ code: 0, data: { items: [{ id: "note-001" }] } }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    });
+
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    await configureCapturedContextProvenance({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: searchNamespace,
+      profileRef: "xhs_001",
+      sessionId: "nm-session-old",
+      targetTabId: 1230427051,
+      runId: "run-search-revisit-old-001",
+      actionRef: "xhs.search.old",
+      pageUrl
+    });
+
+    let latestProvenancePageUrl = pageUrl;
+    for (let visit = 1; visit <= 10; visit += 1) {
+      latestProvenancePageUrl = `${pageUrl}&source=revisit-${visit}`;
+      env.mockWindow.history?.pushState({}, "", latestProvenancePageUrl);
+    }
+    const latestProvenanceNamespace =
+      asRecord(
+        env.dispatched.filter((entry) => entry.type === channel.namespaceEvent).at(-1)?.detail
+      )?.page_context_namespace ?? createVisitedPageContextNamespace(latestProvenancePageUrl, 10);
+    await configureCapturedContextProvenance({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: String(latestProvenanceNamespace),
+      profileRef: "xhs_001",
+      sessionId: "nm-session-new",
+      targetTabId: 1230427051,
+      runId: "run-search-revisit-new-001",
+      actionRef: "xhs.search.new",
+      pageUrl: latestProvenancePageUrl
+    });
+
+    const capturePageUrl = `${pageUrl}&source=revisit-11`;
+    env.mockWindow.history?.pushState({}, "", capturePageUrl);
+    await (env.mockWindow.fetch as typeof fetch)(`https://www.xiaohongshu.com${SEARCH_ENDPOINT}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ keyword: "contract" })
+    });
+
+    const captured = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: createPageContextNamespace(capturePageUrl),
+      shapeKey: createShapeKey({ keyword: "contract" }),
+      profileRef: "xhs_001",
+      sessionId: "nm-session-new",
+      targetTabId: 1230427051,
+      runId: "run-search-revisit-new-001",
+      actionRef: "xhs.search.new",
+      pageUrl: latestProvenancePageUrl
+    });
+
+    expect(captured).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          route_evidence_class: "passive_api_capture",
+          source_kind: "page_request",
+          session_id: "nm-session-new",
+          run_id: "run-search-revisit-new-001",
+          action_ref: "xhs.search.new",
+          page_url: latestProvenancePageUrl
+        }
+      }
+    });
+  });
+
   it("stores configured provenance on later passive-captured page requests", async () => {
     const env = createMockMainWorldEnvironment();
     const pageContextNamespace = createPageContextNamespace(SEARCH_PAGE_HREF);
@@ -768,6 +953,103 @@ describe("main-world bridge contract", () => {
     });
   });
 
+  it("binds fresh search_result templates when referrer spelling drifts but keyword continuity holds", async () => {
+    const referrerUrl = "https://www.xiaohongshu.com/search_result?keyword=contract";
+    const provenancePageUrl = "https://www.xiaohongshu.com/search_result/?keyword=contract&type=51";
+    const env = createMockMainWorldEnvironment(referrerUrl);
+    const pageContextNamespace = createPageContextNamespace(referrerUrl);
+    env.setFetchHandler(async () => {
+      return new Response(JSON.stringify({ code: 0, data: { items: [{ id: "note-001" }] } }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    });
+
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    await (env.mockWindow.fetch as typeof fetch)(`https://www.xiaohongshu.com${SEARCH_ENDPOINT}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ keyword: "contract" })
+    });
+    await flushMicrotasks();
+    const capturedBeforeProvenance = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace,
+      shapeKey: createShapeKey({ keyword: "contract" })
+    });
+    expect(capturedBeforeProvenance).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          route_evidence_class: "passive_api_capture",
+          source_kind: "page_request"
+        }
+      }
+    });
+
+    const configured = await configureCapturedContextProvenance({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace,
+      profileRef: "xhs_001",
+      sessionId: "nm-session-001",
+      targetTabId: 1230427051,
+      runId: "run-search-referrer-spelling-drift-001",
+      actionRef: "xhs.search",
+      pageUrl: provenancePageUrl
+    });
+    expect(configured).toMatchObject({
+      ok: true,
+      result: {
+        configured: true,
+        bound_fresh_existing_templates: 1
+      }
+    });
+
+    const captured = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace,
+      shapeKey: createShapeKey({ keyword: "contract" }),
+      profileRef: "xhs_001",
+      sessionId: "nm-session-001",
+      targetTabId: 1230427051,
+      runId: "run-search-referrer-spelling-drift-001",
+      actionRef: "xhs.search",
+      pageUrl: provenancePageUrl
+    });
+
+    expect(captured).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          route_evidence_class: "passive_api_capture",
+          source_kind: "page_request",
+          profile_ref: "xhs_001",
+          run_id: "run-search-referrer-spelling-drift-001",
+          action_ref: "xhs.search",
+          page_url: provenancePageUrl
+        }
+      }
+    });
+  });
+
   it("does not rebind stale passive templates when provenance is configured later", async () => {
     const pageUrl = "https://www.xiaohongshu.com/search_result?keyword=stale-no-rebind";
     const env = createMockMainWorldEnvironment(pageUrl);
@@ -837,6 +1119,93 @@ describe("main-world bridge contract", () => {
     expect(admittedTemplate).not.toHaveProperty("run_id");
     expect(admittedTemplate).not.toHaveProperty("action_ref");
     expect(admittedTemplate).not.toHaveProperty("page_url");
+  });
+
+  it("uses numeric visit recency when resolving compatible search_result lookup namespaces", async () => {
+    const pageUrl = "https://www.xiaohongshu.com/search_result/?keyword=contract&type=51";
+    const env = createMockMainWorldEnvironment(pageUrl);
+    env.setFetchHandler(async () => {
+      return new Response(JSON.stringify({ code: 0, data: { items: [{ id: "note-001" }] } }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    });
+
+    installMockDomGlobals({
+      mockWindow: env.mockWindow as Window & Record<string, unknown>,
+      mockDocument: env.mockDocument
+    });
+
+    const channel = await bootstrapMainWorldBridge(env.added);
+    let visitNineNamespace = "";
+    let visitTenNamespace = "";
+    for (let visit = 1; visit <= 10; visit += 1) {
+      const visitPageUrl = `${pageUrl}&source=numeric-${visit}`;
+      env.mockWindow.history?.pushState({}, "", visitPageUrl);
+      const currentNamespace = String(
+        asRecord(
+          env.dispatched.filter((entry) => entry.type === channel.namespaceEvent).at(-1)?.detail
+        )?.page_context_namespace ?? createVisitedPageContextNamespace(visitPageUrl, visit)
+      );
+      if (visit === 9 || visit === 10) {
+        await configureCapturedContextProvenance({
+          dispatched: env.dispatched,
+          requestEvent: channel.requestEvent,
+          resultEvent: channel.resultEvent,
+          requestListener: channel.requestListener,
+          pageContextNamespace: currentNamespace,
+          profileRef: "xhs_001",
+          sessionId: "nm-session-001",
+          targetTabId: 1230427051,
+          runId: "run-search-numeric-visit-001",
+          actionRef: "xhs.search",
+          pageUrl
+        });
+        await (env.mockWindow.fetch as typeof fetch)(`https://www.xiaohongshu.com${SEARCH_ENDPOINT}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({ keyword: "contract" })
+        });
+        if (visit === 9) {
+          visitNineNamespace = currentNamespace;
+        } else {
+          visitTenNamespace = currentNamespace;
+        }
+      }
+    }
+
+    const lookupPageUrl = `${pageUrl}&source=numeric-11`;
+    env.mockWindow.history?.pushState({}, "", lookupPageUrl);
+    const lookup = await readCapturedContext({
+      dispatched: env.dispatched,
+      requestEvent: channel.requestEvent,
+      resultEvent: channel.resultEvent,
+      requestListener: channel.requestListener,
+      pageContextNamespace: createPageContextNamespace(lookupPageUrl),
+      shapeKey: createShapeKey({ keyword: "contract" }),
+      profileRef: "xhs_001",
+      sessionId: "nm-session-001",
+      targetTabId: 1230427051,
+      runId: "run-search-numeric-visit-001",
+      actionRef: "xhs.search"
+    });
+
+    expect(visitNineNamespace).toContain("|visit=9");
+    expect(visitTenNamespace).toContain("|visit=10");
+    expect(lookup).toMatchObject({
+      ok: true,
+      result: {
+        admitted_template: {
+          route_evidence_class: "passive_api_capture",
+          source_kind: "page_request",
+          captured_page_context_namespace: visitTenNamespace
+        }
+      }
+    });
   });
 
   it("captures XHR search request-context as a real page request", async () => {

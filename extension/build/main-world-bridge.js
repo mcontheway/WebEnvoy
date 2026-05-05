@@ -264,6 +264,18 @@ const parsePageContextNamespaceUrl = (namespace) => {
         return null;
     }
 };
+const resolveVisitedNamespaceSequence = (namespace) => {
+    const match = namespace.match(/\|visit=(\d+)$/);
+    if (!match) {
+        return 0;
+    }
+    const parsed = Number(match[1]);
+    return Number.isFinite(parsed) ? parsed : 0;
+};
+const comparePageContextNamespaceRecency = (left, right) => {
+    const visitDelta = resolveVisitedNamespaceSequence(right) - resolveVisitedNamespaceSequence(left);
+    return visitDelta !== 0 ? visitDelta : right.localeCompare(left);
+};
 const resolveNamespaceDocumentIdentity = (url) => url.hash.startsWith("#doc=") ? url.hash : null;
 const isBareExploreNamespaceUrl = (url) => url.origin === "https://www.xiaohongshu.com" && url.pathname === "/explore";
 const isSearchResultNamespaceUrl = (url) => url.origin === "https://www.xiaohongshu.com" && url.pathname.startsWith("/search_result");
@@ -294,6 +306,47 @@ const isCompatibleExploreToSearchNamespace = (exploreNamespace, searchNamespace)
     return (isBareExploreNamespaceUrl(exploreUrl) &&
         isSearchResultNamespaceUrl(searchUrl) &&
         areSameDocumentNamespaces(exploreUrl, searchUrl));
+};
+const isCompatibleSearchResultNamespace = (leftNamespace, rightNamespace) => {
+    const leftUrl = parsePageContextNamespaceUrl(leftNamespace);
+    const rightUrl = parsePageContextNamespaceUrl(rightNamespace);
+    if (!leftUrl || !rightUrl) {
+        return false;
+    }
+    const leftKeyword = toTrimmedString(leftUrl.searchParams.get("keyword"));
+    const rightKeyword = toTrimmedString(rightUrl.searchParams.get("keyword"));
+    return (isSearchResultNamespaceUrl(leftUrl) &&
+        isSearchResultNamespaceUrl(rightUrl) &&
+        leftKeyword !== null &&
+        leftKeyword === rightKeyword &&
+        areSameDocumentNamespaces(leftUrl, rightUrl));
+};
+const isCompatibleSearchResultPageUrl = (leftPageUrl, rightPageUrl, requestBody) => {
+    if (!leftPageUrl || !rightPageUrl) {
+        return false;
+    }
+    let leftUrl;
+    let rightUrl;
+    try {
+        leftUrl = new URL(leftPageUrl, "https://www.xiaohongshu.com/");
+        rightUrl = new URL(rightPageUrl, "https://www.xiaohongshu.com/");
+    }
+    catch {
+        return false;
+    }
+    const leftKeyword = toTrimmedString(leftUrl.searchParams.get("keyword"));
+    const rightKeyword = toTrimmedString(rightUrl.searchParams.get("keyword"));
+    if (!isSearchResultNamespaceUrl(leftUrl) ||
+        !isSearchResultNamespaceUrl(rightUrl) ||
+        leftKeyword === null ||
+        leftKeyword !== rightKeyword) {
+        return false;
+    }
+    const requestKeyword = requestBody === undefined ? null : resolveSearchKeywordFromPayload(requestBody);
+    if (!requestKeyword) {
+        return true;
+    }
+    return leftKeyword === requestKeyword && rightKeyword === requestKeyword;
 };
 const createCapturedContextRouteScope = (command, method, pathname) => ({
     command,
@@ -892,15 +945,20 @@ const resolveCompatibleSearchResultProvenance = (namespace, body) => {
     if (!requestKeyword) {
         return null;
     }
+    const candidates = [];
     for (const [candidateNamespace, provenance] of mainWorldBridgeSharedState
         .capturedRequestContextProvenanceByNamespace) {
         const pageKeyword = resolveSearchKeywordFromPageUrl(provenance.page_url);
         if (pageKeyword === requestKeyword &&
-            isCompatibleExploreToSearchNamespace(namespace, candidateNamespace)) {
-            return provenance;
+            (isCompatibleExploreToSearchNamespace(namespace, candidateNamespace) ||
+                isCompatibleSearchResultNamespace(namespace, candidateNamespace))) {
+            candidates.push({
+                namespace: candidateNamespace,
+                provenance
+            });
         }
     }
-    return null;
+    return (candidates.sort((left, right) => comparePageContextNamespaceRecency(left.namespace, right.namespace))[0]?.provenance ?? null);
 };
 const resolveCapturedRequestContextProvenanceForCandidate = (input) => resolveCapturedRequestContextProvenance(input.namespace) ??
     (input.path === SEARCH_ENDPOINT
@@ -940,7 +998,8 @@ const bindFreshUnprovenancedPassiveTemplates = (namespace, provenance, configure
                 (provenance.page_url !== null &&
                     template.referrer !== null &&
                     template.referrer !== undefined &&
-                    template.referrer !== provenance.page_url)) {
+                    template.referrer !== provenance.page_url &&
+                    !isCompatibleSearchResultPageUrl(template.referrer, provenance.page_url, template.request.body))) {
                 continue;
             }
             bucket.admittedTemplate = bindCapturedRequestContextProvenance(template, provenance);
@@ -1583,8 +1642,10 @@ const handleCapturedRequestContextReadRequest = async (request) => {
         }
         return [...mainWorldBridgeSharedState.capturedRequestContextBucketsByNamespace.keys()]
             .filter((candidateNamespace) => candidateNamespace !== namespace &&
-            isCompatibleExploreToSearchNamespace(candidateNamespace, namespace))
-            .sort((left, right) => right.localeCompare(left));
+            (isCompatibleExploreToSearchNamespace(candidateNamespace, namespace) ||
+                (hasRequestedProvenance &&
+                    isCompatibleSearchResultNamespace(candidateNamespace, namespace))))
+            .sort(comparePageContextNamespaceRecency);
     };
     const result = method && path && namespace && shapeKey && routeScopeKey
         ? (() => {
