@@ -25,6 +25,7 @@ import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import {
   readXhsCloseoutValidationGateView,
+  resolveXhsCloseoutReadinessBaselineExecutionMode,
   toXhsCloseoutValidationGateJson,
   type XhsCloseoutValidationGateView
 } from "../runtime/anti-detection-validation.js";
@@ -1128,7 +1129,9 @@ const xhsReadCommand = async (
           antiDetectionValidationGate = await readXhsCloseoutValidationGateView({
             store,
             profile: context.profile,
-            effectiveExecutionMode: gate.requestedExecutionMode
+            effectiveExecutionMode: resolveXhsCloseoutReadinessBaselineExecutionMode(
+              gate.requestedExecutionMode
+            )
           });
         } catch (error) {
           if (error instanceof RuntimeStoreError) {

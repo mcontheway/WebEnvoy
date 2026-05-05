@@ -4089,6 +4089,36 @@ process.stdin.on("data", (chunk) => {
       ])
     );
 
+    const limitedQueryResult = runCli([
+      "runtime.audit",
+      "--run-id",
+      "run-audit-validation-status-view-limited-001",
+      "--params",
+      JSON.stringify({
+        profile,
+        requested_execution_mode: "live_read_limited",
+        limit: 1
+      })
+    ], cwd);
+    expect(limitedQueryResult.status).toBe(0);
+    const limitedBody = parseSingleJsonLine(limitedQueryResult.stdout);
+    expect(limitedBody).toMatchObject({
+      status: "success",
+      summary: {
+        query: {
+          profile,
+          requested_execution_mode: "live_read_limited",
+          limit: 1
+        },
+        anti_detection_validation_view: {
+          profile_ref: `profile/${profile}`,
+          effective_execution_mode: "live_read_high_risk",
+          all_required_ready: true,
+          blocking_target_fr_refs: []
+        }
+      }
+    });
+
     const reconQueryResult = runCli([
       "runtime.audit",
       "--run-id",
