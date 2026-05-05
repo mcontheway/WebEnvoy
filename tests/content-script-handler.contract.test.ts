@@ -314,6 +314,23 @@ const withMockMainWorld = async (
         ) {
           return;
         }
+        const capturedRequestContextReadHandler = (mockWindow as Window &
+          Record<string, unknown>).__mainWorldCapturedRequestContextReadHandler__;
+        if (typeof capturedRequestContextReadHandler === "function") {
+          const result = (
+            capturedRequestContextReadHandler as (
+              payload: Record<string, unknown> | null
+            ) => Record<string, unknown> | null
+          )(requestPayload);
+          if (result) {
+            emitResult({
+              id: requestId,
+              ok: true,
+              result
+            });
+            return;
+          }
+        }
         const shapeKey =
           typeof requestPayload?.shape_key === "string" ? requestPayload.shape_key : "";
         let parsedShape: Record<string, unknown> | null = null;
@@ -416,6 +433,15 @@ const withMockMainWorld = async (
             action_ref: requestPayload?.action_ref,
             page_url: requestPayload?.page_url
           }
+        });
+        return;
+      }
+
+      if (requestType === "page-state-read") {
+        emitResult({
+          id: requestId,
+          ok: true,
+          result: null
         });
         return;
       }
@@ -1518,6 +1544,9 @@ describe("content-script handler contract", () => {
         });
 
         await waitForResult(results);
+        for (let attempt = 0; attempt < 200 && results.length === 0; attempt += 1) {
+          await new Promise((resolve) => previousSetTimeout(resolve, 0));
+        }
 
         expect(results[0]?.ok).toBe(true);
         expect(mainWorldFetch).not.toHaveBeenCalled();
@@ -1732,7 +1761,7 @@ describe("content-script handler contract", () => {
   });
 
   it("perturbs same-query xhs.search input state before restoring the original query for passive submit", async () => {
-    const href = "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5&type=51";
+    const href = "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2&type=51";
     const runId = "run-xhs-search-same-query-passive-action-001";
     const issue209Linkage = createIssue209InvocationLinkage(runId, "same-query-passive-action");
     const previousEvent = (globalThis as { Event?: unknown }).Event;
@@ -1748,11 +1777,18 @@ describe("content-script handler contract", () => {
       readonly type: string;
       readonly bubbles: boolean;
       readonly cancelable: boolean;
+      defaultPrevented = false;
 
       constructor(type: string, init?: { bubbles?: boolean; cancelable?: boolean }) {
         this.type = type;
         this.bubbles = init?.bubbles === true;
         this.cancelable = init?.cancelable === true;
+      }
+
+      preventDefault() {
+        if (this.cancelable) {
+          this.defaultPrevented = true;
+        }
       }
     }
     class MockInputEventImpl extends MockEventImpl {
@@ -1777,7 +1813,12 @@ describe("content-script handler contract", () => {
       }
     }
     class MockHTMLInputElementImpl {
-      #value = "露营";
+      #value: string;
+      #keydownListeners: Array<(event: MockEvent) => void> = [];
+
+      constructor(value = "露") {
+        this.#value = value;
+      }
 
       get value() {
         return this.#value;
@@ -1794,8 +1835,32 @@ describe("content-script handler contract", () => {
       }
 
       dispatchEvent(event: MockEvent) {
+        if (event.type === "keydown") {
+          for (const listener of this.#keydownListeners) {
+            listener(event);
+          }
+          if ((event as MockEventImpl).defaultPrevented) {
+            eventSequence.push("keydown:defaultPrevented");
+          }
+        }
         eventSequence.push(event.type);
         return true;
+      }
+
+      addEventListener(type: string, listener: (event: MockEvent) => void) {
+        if (type === "keydown") {
+          this.#keydownListeners.push(listener);
+        }
+      }
+
+      removeEventListener(type: string, listener: (event: MockEvent) => void) {
+        if (type !== "keydown") {
+          return;
+        }
+        const index = this.#keydownListeners.indexOf(listener);
+        if (index >= 0) {
+          this.#keydownListeners.splice(index, 1);
+        }
       }
 
       closest(selector: string) {
@@ -1803,17 +1868,53 @@ describe("content-script handler contract", () => {
       }
     }
 
+    const searchButton = {
+      click: () => {
+        buttonClickCount += 1;
+        eventSequence.push("buttonClick");
+      }
+    };
+    const submitListeners: Array<(event: MockEventImpl) => void> = [];
     const searchForm = {
-      querySelector: () => null,
+      getAttribute: (name: string) => (name === "action" ? "/search_result" : null),
+      querySelector: () => searchButton,
       requestSubmit: () => {
+        submitCount += 1;
+        const submitEvent = new MockEventImpl("submit", { bubbles: true, cancelable: true });
+        for (const listener of submitListeners) {
+          listener(submitEvent);
+        }
+        if (submitEvent.defaultPrevented) {
+          preventedSubmitCount += 1;
+        }
         eventSequence.push("requestSubmit");
+        if (submitCount === 1) {
+          activeSearchInput = null;
+        }
       },
       dispatchEvent: (event: MockEvent) => {
         eventSequence.push(event.type);
         return true;
+      },
+      addEventListener: (type: string, listener: (event: MockEventImpl) => void) => {
+        if (type === "submit") {
+          submitListeners.push(listener);
+        }
+      },
+      removeEventListener: (type: string, listener: (event: MockEventImpl) => void) => {
+        if (type !== "submit") {
+          return;
+        }
+        const index = submitListeners.indexOf(listener);
+        if (index >= 0) {
+          submitListeners.splice(index, 1);
+        }
       }
     };
-    const searchInput = new MockHTMLInputElementImpl();
+    let buttonClickCount = 0;
+    let preventedSubmitCount = 0;
+    let submitCount = 0;
+    let activeSearchInput: MockHTMLInputElementImpl | null = new MockHTMLInputElementImpl();
 
     (globalThis as { Event?: unknown }).Event = MockEventImpl;
     (globalThis as { InputEvent?: unknown }).InputEvent = MockInputEventImpl;
@@ -1822,6 +1923,10 @@ describe("content-script handler contract", () => {
     globalThis.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
       settleTimeouts.push(typeof timeout === "number" ? timeout : 0);
       queueMicrotask(() => {
+        const passiveWaitCount = settleTimeouts.filter((settleTimeout) => settleTimeout === 180).length;
+        if (submitCount === 1 && activeSearchInput === null && passiveWaitCount >= 4) {
+          activeSearchInput = new MockHTMLInputElementImpl("露x");
+        }
         if (typeof handler === "function") {
           handler(...args);
         }
@@ -1832,12 +1937,140 @@ describe("content-script handler contract", () => {
     try {
       await withMockMainWorld(async ({ mockWindow }) => {
         mockWindow.location.href = href;
+        let capturedLookupCount = 0;
+        (mockWindow as Window & Record<string, unknown>).__mainWorldCapturedRequestContextReadHandler__ =
+          (requestPayload: Record<string, unknown> | null) => {
+            capturedLookupCount += 1;
+            const shapeKey =
+              typeof requestPayload?.shape_key === "string" ? requestPayload.shape_key : "";
+            const namespace =
+              typeof requestPayload?.page_context_namespace === "string"
+                ? requestPayload.page_context_namespace
+                : href;
+            const shape = JSON.parse(shapeKey) as Record<string, unknown>;
+            const siblingShapeKey = JSON.stringify({
+              ...shape,
+              keyword: "露x"
+            });
+            if (shape.keyword === "露x" && submitCount >= 1) {
+              return {
+                page_context_namespace: namespace,
+                shape_key: shapeKey,
+                admitted_template: {
+                  route_evidence_class: "passive_api_capture",
+                  source_kind: "page_request",
+                  transport: "fetch",
+                  method: "POST",
+                  path: "/api/sns/web/v1/search/notes",
+                  url: "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
+                  status: 200,
+                  captured_at: Date.now(),
+                  observed_at: Date.now(),
+                  page_context_namespace: namespace,
+                  shape_key: shapeKey,
+                  shape,
+                  template_ready: true,
+                  request_status: {
+                    completion: "completed",
+                    http_status: 200
+                  },
+                  request: {
+                    headers: {
+                      "content-type": "application/json"
+                    },
+                    body: {
+                      keyword: "露x",
+                      page: 1,
+                      page_size: 20,
+                      search_id: "captured-search-id-preflight",
+                      sort: "general",
+                      note_type: 0
+                    }
+                  },
+                  response: {
+                    headers: {
+                      "content-type": "application/json"
+                    },
+                    body: {
+                      code: 0,
+                      data: {
+                        items: []
+                      }
+                    }
+                  }
+                },
+                rejected_observation: null,
+                incompatible_observation: null,
+                available_shape_keys: [shapeKey]
+              };
+            }
+            if (submitCount < 2) {
+              return {
+                page_context_namespace: namespace,
+                shape_key: shapeKey,
+                admitted_template: null,
+                rejected_observation: null,
+                incompatible_observation: null,
+                available_shape_keys: [siblingShapeKey]
+              };
+            }
+            return {
+              page_context_namespace: namespace,
+              shape_key: shapeKey,
+              admitted_template: {
+                route_evidence_class: "passive_api_capture",
+                source_kind: "page_request",
+                transport: "fetch",
+                method: "POST",
+                path: "/api/sns/web/v1/search/notes",
+                url: "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
+                status: 200,
+                captured_at: Date.now(),
+                observed_at: Date.now(),
+                page_context_namespace: namespace,
+                shape_key: shapeKey,
+                shape,
+                template_ready: true,
+                request_status: {
+                  completion: "completed",
+                  http_status: 200
+                },
+                request: {
+                  headers: {
+                    "content-type": "application/json"
+                  },
+                  body: {
+                    keyword: "露",
+                    page: 1,
+                    page_size: 20,
+                    search_id: "captured-search-id",
+                    sort: "general",
+                    note_type: 0
+                  }
+                },
+                response: {
+                  headers: {
+                    "content-type": "application/json"
+                  },
+                  body: {
+                    code: 0,
+                    data: {
+                      items: []
+                    }
+                  }
+                }
+              },
+              rejected_observation: null,
+              incompatible_observation: null,
+              available_shape_keys: [shapeKey, siblingShapeKey]
+            };
+          };
         (globalThis as { document: Document }).document = {
           title: "露营 - 小红书搜索",
           readyState: "complete",
           cookie: "a1=session-token",
           querySelector: (selector: string) =>
-            selector.startsWith('input[type="search"]') ? searchInput : null,
+            selector.startsWith('input[type="search"]') ? activeSearchInput : null,
           documentElement: {
             appendChild: (node: unknown) => node
           },
@@ -1874,7 +2107,7 @@ describe("content-script handler contract", () => {
               action: "read"
             },
             input: {
-              query: "露营"
+              query: "露"
             },
             options: {
               issue_scope: "issue_209",
@@ -1911,18 +2144,34 @@ describe("content-script handler contract", () => {
         });
 
         await waitForResult(results);
+        for (let attempt = 0; attempt < 200 && results.length === 0; attempt += 1) {
+          await new Promise((resolve) => previousSetTimeout(resolve, 0));
+        }
 
         expect(results[0]?.ok).toBe(true);
         expect(valueSequence.length).toBeGreaterThanOrEqual(2);
-        const perturbValue = valueSequence.find((value) => value !== "露营");
+        const perturbValue = valueSequence.find((value) => value !== "露");
         expect(perturbValue).toBeTruthy();
+        expect(perturbValue).toBe("露x");
         const perturbValueIndex = eventSequence.indexOf(`value:${perturbValue}`);
-        const restoredValueIndex = eventSequence.lastIndexOf("value:露营");
-        const submitIndex = eventSequence.indexOf("requestSubmit");
-        expect(settleTimeouts.filter((timeout) => timeout === 180)).toHaveLength(2);
+        const restoredValueIndex = eventSequence.lastIndexOf("value:露");
+        const preflightSubmitIndex = eventSequence.indexOf("requestSubmit");
+        const finalSubmitIndex = eventSequence.lastIndexOf("requestSubmit");
+        const firstKeydownIndex = eventSequence.indexOf("keydown");
+        const guardedKeydownIndex = eventSequence.indexOf("keydown:defaultPrevented");
+        expect(settleTimeouts.filter((timeout) => timeout === 180)).toHaveLength(5);
+        expect(submitCount).toBe(2);
+        expect(preventedSubmitCount).toBe(1);
+        expect(buttonClickCount).toBe(0);
+        expect(capturedLookupCount).toBeGreaterThan(0);
         expect(perturbValueIndex).toBeGreaterThan(-1);
+        expect(preflightSubmitIndex).toBeGreaterThan(perturbValueIndex);
+        expect(preflightSubmitIndex).toBeLessThan(restoredValueIndex);
         expect(restoredValueIndex).toBeGreaterThan(perturbValueIndex);
-        expect(submitIndex).toBeGreaterThan(restoredValueIndex);
+        expect(finalSubmitIndex).toBeGreaterThan(restoredValueIndex);
+        expect(firstKeydownIndex).toBeLessThan(preflightSubmitIndex);
+        expect(guardedKeydownIndex).toBeLessThan(preflightSubmitIndex);
+        expect(eventSequence.lastIndexOf("keydown")).toBeGreaterThan(restoredValueIndex);
         const payload = results[0]?.payload as Record<string, unknown>;
         const summary = payload?.summary as Record<string, unknown>;
         expect(summary?.route_evidence).toMatchObject({
@@ -1930,9 +2179,980 @@ describe("content-script handler contract", () => {
           humanized_action: {
             same_query_input_matched: true,
             same_query_perturbed: true,
+            same_query_preflight_submitted: true,
+            same_query_preflight_submit_triggered: "form_request_submit",
+            same_query_preflight_mode: "guarded_submit",
+            same_query_preflight_state_change_observed: true,
+            same_query_preflight_state_change_source: "passive_request_context",
+            same_query_search_input_refreshed: true,
+            same_query_search_input_refresh_attempts: 3,
+            same_query_search_input_refresh_source: "selector",
             pre_submit_value_changed: true,
-            input_settle_waits: 2
+            input_settle_waits: 5,
+            submit_triggered: "form_request_submit"
           }
+        });
+      });
+    } finally {
+      (globalThis as { Event?: unknown }).Event = previousEvent;
+      (globalThis as { InputEvent?: unknown }).InputEvent = previousInputEvent;
+      (globalThis as { KeyboardEvent?: unknown }).KeyboardEvent = previousKeyboardEvent;
+      (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement = previousHTMLInputElement;
+      globalThis.setTimeout = previousSetTimeout;
+    }
+  });
+
+  it("keeps the final original-query submit when same-query preflight state is unobserved", async () => {
+    const href = "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2&type=51";
+    const runId = "run-xhs-search-same-query-unobserved-preflight-001";
+    const issue209Linkage = createIssue209InvocationLinkage(runId, "same-query-unobserved-preflight");
+    const previousEvent = (globalThis as { Event?: unknown }).Event;
+    const previousInputEvent = (globalThis as { InputEvent?: unknown }).InputEvent;
+    const previousKeyboardEvent = (globalThis as { KeyboardEvent?: unknown }).KeyboardEvent;
+    const previousHTMLInputElement = (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement;
+    const previousSetTimeout = globalThis.setTimeout;
+    const eventSequence: string[] = [];
+
+    class MockEventImpl implements MockEvent {
+      readonly type: string;
+      readonly bubbles: boolean;
+      readonly cancelable: boolean;
+      defaultPrevented = false;
+
+      constructor(type: string, init?: { bubbles?: boolean; cancelable?: boolean }) {
+        this.type = type;
+        this.bubbles = init?.bubbles === true;
+        this.cancelable = init?.cancelable === true;
+      }
+
+      preventDefault() {
+        if (this.cancelable) {
+          this.defaultPrevented = true;
+        }
+      }
+    }
+    class MockInputEventImpl extends MockEventImpl {
+      readonly data: string | null;
+
+      constructor(type: string, init?: { bubbles?: boolean; data?: string }) {
+        super(type, init);
+        this.data = init?.data ?? null;
+      }
+    }
+    class MockKeyboardEventImpl extends MockEventImpl {
+      readonly key: string;
+      readonly code: string;
+
+      constructor(
+        type: string,
+        init?: { bubbles?: boolean; cancelable?: boolean; key?: string; code?: string }
+      ) {
+        super(type, init);
+        this.key = init?.key ?? "";
+        this.code = init?.code ?? "";
+      }
+    }
+    class MockHTMLInputElementImpl {
+      #value = "露";
+      isConnected = true;
+      #keydownListeners: Array<(event: MockEvent) => void> = [];
+
+      get value() {
+        return this.#value;
+      }
+
+      set value(value: string) {
+        this.#value = value;
+        eventSequence.push(`value:${value}`);
+      }
+
+      focus() {
+        eventSequence.push("focus");
+      }
+
+      dispatchEvent(event: MockEvent) {
+        if (event.type === "keydown") {
+          for (const listener of this.#keydownListeners) {
+            listener(event);
+          }
+          if ((event as MockEventImpl).defaultPrevented) {
+            eventSequence.push("keydown:defaultPrevented");
+          }
+        }
+        eventSequence.push(event.type);
+        return true;
+      }
+
+      addEventListener(type: string, listener: (event: MockEvent) => void) {
+        if (type === "keydown") {
+          this.#keydownListeners.push(listener);
+        }
+      }
+
+      removeEventListener(type: string, listener: (event: MockEvent) => void) {
+        if (type !== "keydown") {
+          return;
+        }
+        const index = this.#keydownListeners.indexOf(listener);
+        if (index >= 0) {
+          this.#keydownListeners.splice(index, 1);
+        }
+      }
+
+      closest(selector: string) {
+        return selector === "form" ? searchForm : null;
+      }
+    }
+
+    const submitListeners: Array<(event: MockEventImpl) => void> = [];
+    const searchForm = {
+      getAttribute: (name: string) => (name === "action" ? "/search_result" : null),
+      querySelector: () => null,
+      requestSubmit: () => {
+        submitCount += 1;
+        const submitEvent = new MockEventImpl("submit", { bubbles: true, cancelable: true });
+        for (const listener of submitListeners) {
+          listener(submitEvent);
+        }
+        eventSequence.push("requestSubmit");
+      },
+      dispatchEvent: (event: MockEvent) => {
+        eventSequence.push(event.type);
+        return true;
+      },
+      addEventListener: (type: string, listener: (event: MockEventImpl) => void) => {
+        if (type === "submit") {
+          submitListeners.push(listener);
+        }
+      },
+      removeEventListener: (type: string, listener: (event: MockEventImpl) => void) => {
+        if (type !== "submit") {
+          return;
+        }
+        const index = submitListeners.indexOf(listener);
+        if (index >= 0) {
+          submitListeners.splice(index, 1);
+        }
+      }
+    };
+    let submitCount = 0;
+    const activeSearchInput = new MockHTMLInputElementImpl();
+
+    (globalThis as { Event?: unknown }).Event = MockEventImpl;
+    (globalThis as { InputEvent?: unknown }).InputEvent = MockInputEventImpl;
+    (globalThis as { KeyboardEvent?: unknown }).KeyboardEvent = MockKeyboardEventImpl;
+    (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement = MockHTMLInputElementImpl;
+    globalThis.setTimeout = ((handler: TimerHandler, _timeout?: number, ...args: unknown[]) => {
+      queueMicrotask(() => {
+        if (typeof handler === "function") {
+          handler(...args);
+        }
+      });
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+
+    try {
+      await withMockMainWorld(async ({ mockWindow }) => {
+        mockWindow.location.href = href;
+        (mockWindow as Window & Record<string, unknown>).__mainWorldCapturedRequestContextReadHandler__ =
+          (requestPayload: Record<string, unknown> | null) => {
+            const shapeKey =
+              typeof requestPayload?.shape_key === "string" ? requestPayload.shape_key : "";
+            const namespace =
+              typeof requestPayload?.page_context_namespace === "string"
+                ? requestPayload.page_context_namespace
+                : href;
+            const shape = JSON.parse(shapeKey) as Record<string, unknown>;
+            return {
+              page_context_namespace: namespace,
+              shape_key: shapeKey,
+              admitted_template:
+                shape.keyword === "露" && submitCount >= 2
+                  ? {
+                      route_evidence_class: "passive_api_capture",
+                      source_kind: "page_request",
+                      transport: "fetch",
+                      method: "POST",
+                      path: "/api/sns/web/v1/search/notes",
+                      url: "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
+                      status: 200,
+                      captured_at: Date.now(),
+                      observed_at: Date.now(),
+                      page_context_namespace: namespace,
+                      shape_key: shapeKey,
+                      shape,
+                      template_ready: true,
+                      request_status: {
+                        completion: "completed",
+                        http_status: 200
+                      },
+                      request: {
+                        headers: {
+                          "content-type": "application/json"
+                        },
+                        body: {
+                          keyword: "露",
+                          page: 1,
+                          page_size: 20,
+                          search_id: "captured-search-id-final",
+                          sort: "general",
+                          note_type: 0
+                        }
+                      },
+                      response: {
+                        headers: {
+                          "content-type": "application/json"
+                        },
+                        body: {
+                          code: 0,
+                          data: {
+                            items: []
+                          }
+                        }
+                      }
+                    }
+                  : null,
+              rejected_observation: null,
+              incompatible_observation: null,
+              available_shape_keys: []
+            };
+          };
+        (globalThis as { document: Document }).document = {
+          title: "露营 - 小红书搜索",
+          readyState: "complete",
+          cookie: "a1=session-token",
+          querySelector: (selector: string) =>
+            selector.startsWith('input[type="search"]') ? activeSearchInput : null,
+          documentElement: {
+            appendChild: (node: unknown) => node
+          },
+          createElement: () => ({
+            textContent: "",
+            remove: () => {}
+          })
+        } as unknown as Document;
+        const handler = new ContentScriptHandler();
+        const results: Array<Record<string, unknown>> = [];
+        handler.onResult((message) => {
+          results.push(message as unknown as Record<string, unknown>);
+        });
+
+        handler.onBackgroundMessage({
+          kind: "forward",
+          id: runId,
+          runId,
+          tabId: 1,
+          profile: "profile-a",
+          cwd: "/workspace/WebEnvoy",
+          timeoutMs: 3_000,
+          command: "xhs.search",
+          params: {
+            session_id: "nm-session-001"
+          },
+          commandParams: {
+            request_id: "issue630-same-query-unobserved-preflight-001",
+            gate_invocation_id: issue209Linkage.gateInvocationId,
+            requested_execution_mode: "live_read_limited",
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              query: "露"
+            },
+            options: {
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 1,
+              target_page: "search_result_tab",
+              action_type: "read",
+              risk_state: "limited",
+              limited_read_rollout_ready_true: true,
+              approval_record: createApprovedReadApprovalRecord(),
+              audit_record: createApprovedReadAuditRecord({
+                runId,
+                requestId: runId,
+                commandRequestId: "issue630-same-query-unobserved-preflight-001",
+                gateInvocationId: issue209Linkage.gateInvocationId
+              }),
+              admission_context: createApprovedReadAdmissionContext({
+                runId,
+                requestId: runId,
+                commandRequestId: "issue630-same-query-unobserved-preflight-001",
+                gateInvocationId: issue209Linkage.gateInvocationId
+              })
+            }
+          },
+          fingerprintContext: {
+            ...createFingerprintContext(),
+            injection: {
+              installed: true,
+              required_patches: [],
+              missing_required_patches: [],
+              source: "main_world"
+            }
+          }
+        });
+
+        await waitForResult(results);
+        for (let attempt = 0; attempt < 200 && results.length === 0; attempt += 1) {
+          await new Promise((resolve) => previousSetTimeout(resolve, 0));
+        }
+
+        expect(results[0]?.ok).toBe(true);
+        expect(submitCount).toBe(2);
+        expect(eventSequence.filter((event) => event === "requestSubmit")).toHaveLength(2);
+        const restoredValueIndex = eventSequence.lastIndexOf("value:露");
+        const finalSubmitIndex = eventSequence.lastIndexOf("requestSubmit");
+        expect(finalSubmitIndex).toBeGreaterThan(restoredValueIndex);
+        const payload = results[0]?.payload as Record<string, unknown>;
+        const summary = payload?.summary as Record<string, unknown>;
+        expect(summary?.request_context).toMatchObject({ status: "exact_hit" });
+        expect(summary?.route_evidence).toMatchObject({
+          evidence_class: "passive_api_capture",
+          humanized_action: {
+            same_query_preflight_state_change_observed: false,
+            same_query_preflight_state_change_source: "missing",
+            submit_triggered: "form_request_submit"
+          }
+        });
+      });
+    } finally {
+      (globalThis as { Event?: unknown }).Event = previousEvent;
+      (globalThis as { InputEvent?: unknown }).InputEvent = previousInputEvent;
+      (globalThis as { KeyboardEvent?: unknown }).KeyboardEvent = previousKeyboardEvent;
+      (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement = previousHTMLInputElement;
+      globalThis.setTimeout = previousSetTimeout;
+    }
+  });
+
+  it("uses a two-phase button search when same-query xhs.search has no form", async () => {
+    const href = "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2&type=51";
+    const runId = "run-xhs-search-same-query-button-action-001";
+    const issue209Linkage = createIssue209InvocationLinkage(runId, "same-query-button-action");
+    const previousEvent = (globalThis as { Event?: unknown }).Event;
+    const previousInputEvent = (globalThis as { InputEvent?: unknown }).InputEvent;
+    const previousKeyboardEvent = (globalThis as { KeyboardEvent?: unknown }).KeyboardEvent;
+    const previousHTMLInputElement = (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement;
+    const previousSetTimeout = globalThis.setTimeout;
+    const valueSequence: string[] = [];
+    const eventSequence: string[] = [];
+    const settleTimeouts: number[] = [];
+
+    class MockEventImpl implements MockEvent {
+      readonly type: string;
+      readonly bubbles: boolean;
+      readonly cancelable: boolean;
+
+      constructor(type: string, init?: { bubbles?: boolean; cancelable?: boolean }) {
+        this.type = type;
+        this.bubbles = init?.bubbles === true;
+        this.cancelable = init?.cancelable === true;
+      }
+
+      preventDefault() {
+        if (this.cancelable) {
+          this.defaultPrevented = true;
+        }
+      }
+    }
+    class MockInputEventImpl extends MockEventImpl {
+      readonly data: string | null;
+
+      constructor(type: string, init?: { bubbles?: boolean; data?: string }) {
+        super(type, init);
+        this.data = init?.data ?? null;
+      }
+    }
+    class MockKeyboardEventImpl extends MockEventImpl {
+      readonly key: string;
+      readonly code: string;
+
+      constructor(
+        type: string,
+        init?: { bubbles?: boolean; cancelable?: boolean; key?: string; code?: string }
+      ) {
+        super(type, init);
+        this.key = init?.key ?? "";
+        this.code = init?.code ?? "";
+      }
+    }
+    class MockHTMLInputElementImpl {
+      #value: string;
+      #keydownListeners: Array<(event: MockEvent) => void> = [];
+
+      constructor(value = "露") {
+        this.#value = value;
+      }
+
+      get value() {
+        return this.#value;
+      }
+
+      set value(value: string) {
+        this.#value = value;
+        valueSequence.push(value);
+        eventSequence.push(`value:${value}`);
+      }
+
+      focus() {
+        eventSequence.push("focus");
+      }
+
+      dispatchEvent(event: MockEvent) {
+        if (event.type === "keydown") {
+          for (const listener of this.#keydownListeners) {
+            listener(event);
+          }
+          if ((event as MockEventImpl).defaultPrevented) {
+            eventSequence.push("keydown:defaultPrevented");
+          }
+        }
+        eventSequence.push(event.type);
+        return true;
+      }
+
+      addEventListener(type: string, listener: (event: MockEvent) => void) {
+        if (type === "keydown") {
+          this.#keydownListeners.push(listener);
+        }
+      }
+
+      removeEventListener(type: string, listener: (event: MockEvent) => void) {
+        if (type !== "keydown") {
+          return;
+        }
+        const index = this.#keydownListeners.indexOf(listener);
+        if (index >= 0) {
+          this.#keydownListeners.splice(index, 1);
+        }
+      }
+
+      closest() {
+        return null;
+      }
+    }
+
+    const searchButton = {
+      click: () => {
+        buttonClickCount += 1;
+        eventSequence.push("buttonClick");
+        if (buttonClickCount === 1) {
+          activeSearchInput = null;
+        }
+      }
+    };
+    let buttonClickCount = 0;
+    let activeSearchInput: MockHTMLInputElementImpl | null = new MockHTMLInputElementImpl();
+    const hiddenSearchInput = new MockHTMLInputElementImpl("hidden") as MockHTMLInputElementImpl & {
+      hidden: boolean;
+    };
+    hiddenSearchInput.hidden = true;
+
+    (globalThis as { Event?: unknown }).Event = MockEventImpl;
+    (globalThis as { InputEvent?: unknown }).InputEvent = MockInputEventImpl;
+    (globalThis as { KeyboardEvent?: unknown }).KeyboardEvent = MockKeyboardEventImpl;
+    (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement = MockHTMLInputElementImpl;
+    globalThis.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+      settleTimeouts.push(typeof timeout === "number" ? timeout : 0);
+      queueMicrotask(() => {
+        const passiveWaitCount = settleTimeouts.filter((settleTimeout) => settleTimeout === 180).length;
+        if (buttonClickCount === 1 && activeSearchInput === null && passiveWaitCount >= 4) {
+          activeSearchInput = new MockHTMLInputElementImpl("露x");
+        }
+        if (typeof handler === "function") {
+          handler(...args);
+        }
+      });
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+
+    try {
+      await withMockMainWorld(async ({ mockWindow }) => {
+        mockWindow.location.href = href;
+        (mockWindow as Window & Record<string, unknown>).__mainWorldCapturedRequestContextReadHandler__ =
+          (requestPayload: Record<string, unknown> | null) => {
+            const shapeKey =
+              typeof requestPayload?.shape_key === "string" ? requestPayload.shape_key : "";
+            const namespace =
+              typeof requestPayload?.page_context_namespace === "string"
+                ? requestPayload.page_context_namespace
+                : href;
+            const shape = JSON.parse(shapeKey) as Record<string, unknown>;
+            return {
+              page_context_namespace: namespace,
+              shape_key: shapeKey,
+              admitted_template:
+                buttonClickCount >= 2
+                  ? {
+                      source_kind: "page_request",
+                      transport: "fetch",
+                      method: "POST",
+                      path: "/api/sns/web/v1/search/notes",
+                      url: "https://www.xiaohongshu.com/api/sns/web/v1/search/notes",
+                      status: 200,
+                      captured_at: Date.now(),
+                      observed_at: Date.now(),
+                      page_context_namespace: namespace,
+                      shape_key: shapeKey,
+                      shape,
+                      template_ready: true,
+                      request_status: {
+                        completion: "completed",
+                        http_status: 200
+                      },
+                      request: {
+                        headers: {
+                          "content-type": "application/json"
+                        },
+                        body: {
+                          keyword: "露",
+                          page: 1,
+                          page_size: 20,
+                          search_id: "captured-search-id",
+                          sort: "general",
+                          note_type: 0
+                        }
+                      },
+                      response: {
+                        headers: {
+                          "content-type": "application/json"
+                        },
+                        body: {
+                          code: 0,
+                          data: {
+                            items: []
+                          }
+                        }
+                      }
+                    }
+                  : null,
+              rejected_observation: null,
+              incompatible_observation: null,
+              available_shape_keys: [shapeKey]
+            };
+          };
+        (globalThis as { document: Document }).document = {
+          title: "露营 - 小红书搜索",
+          readyState: "complete",
+          cookie: "a1=session-token",
+          querySelectorAll: (selector: string) => {
+            if (selector.startsWith('input[type="search"]')) {
+              return [hiddenSearchInput, activeSearchInput].filter(Boolean);
+            }
+            if (selector.startsWith('button[type="submit"]')) {
+              return [searchButton];
+            }
+            return [];
+          },
+          querySelector: (selector: string) => {
+            if (selector.startsWith('input[type="search"]')) {
+              return activeSearchInput;
+            }
+            if (selector.startsWith('button[type="submit"]')) {
+              return searchButton;
+            }
+            return null;
+          },
+          documentElement: {
+            appendChild: (node: unknown) => node
+          },
+          createElement: () => ({
+            textContent: "",
+            remove: () => {}
+          })
+        } as unknown as Document;
+        const handler = new ContentScriptHandler();
+        const results: Array<Record<string, unknown>> = [];
+        handler.onResult((message) => {
+          results.push(message as unknown as Record<string, unknown>);
+        });
+
+        handler.onBackgroundMessage({
+          kind: "forward",
+          id: runId,
+          runId,
+          tabId: 1,
+          profile: "profile-a",
+          cwd: "/workspace/WebEnvoy",
+          timeoutMs: 1_000,
+          command: "xhs.search",
+          params: {
+            session_id: "nm-session-001"
+          },
+          commandParams: {
+            request_id: "issue630-same-query-button-action-001",
+            gate_invocation_id: issue209Linkage.gateInvocationId,
+            requested_execution_mode: "live_read_limited",
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              query: "露"
+            },
+            options: {
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 1,
+              target_page: "search_result_tab",
+              action_type: "read",
+              risk_state: "limited",
+              limited_read_rollout_ready_true: true,
+              approval_record: createApprovedReadApprovalRecord(),
+              audit_record: createApprovedReadAuditRecord({
+                runId,
+                requestId: runId,
+                commandRequestId: "issue630-same-query-button-action-001",
+                gateInvocationId: issue209Linkage.gateInvocationId
+              }),
+              admission_context: createApprovedReadAdmissionContext({
+                runId,
+                requestId: runId,
+                commandRequestId: "issue630-same-query-button-action-001",
+                gateInvocationId: issue209Linkage.gateInvocationId
+              })
+            }
+          },
+          fingerprintContext: {
+            ...createFingerprintContext(),
+            injection: {
+              installed: true,
+              required_patches: [],
+              missing_required_patches: [],
+              source: "main_world"
+            }
+          }
+        });
+
+        await waitForResult(results);
+
+        expect(results[0]?.ok).toBe(true);
+        expect(valueSequence).not.toContain("hiddenx");
+        expect(buttonClickCount).toBe(2);
+        const restoredValueIndex = eventSequence.lastIndexOf("value:露");
+        const firstButtonClickIndex = eventSequence.indexOf("buttonClick");
+        const firstKeydownIndex = eventSequence.indexOf("keydown");
+        const guardedKeydownIndex = eventSequence.indexOf("keydown:defaultPrevented");
+        expect(firstButtonClickIndex).toBeGreaterThan(-1);
+        expect(firstKeydownIndex).toBeLessThan(firstButtonClickIndex);
+        expect(guardedKeydownIndex).toBeLessThan(firstButtonClickIndex);
+        expect(firstButtonClickIndex).toBeLessThan(restoredValueIndex);
+        expect(eventSequence.lastIndexOf("keydown")).toBeGreaterThan(restoredValueIndex);
+        const payload = results[0]?.payload as Record<string, unknown>;
+        const summary = payload?.summary as Record<string, unknown>;
+        expect(summary?.request_context).toMatchObject({ status: "exact_hit" });
+        expect(summary?.route_evidence).toMatchObject({
+          evidence_class: "passive_api_capture",
+          humanized_action: {
+            same_query_input_matched: true,
+            same_query_perturbed: true,
+            same_query_preflight_submitted: true,
+            same_query_preflight_submit_triggered: "button_click",
+            same_query_preflight_mode: "button_click",
+            same_query_preflight_state_change_observed: true,
+            same_query_preflight_state_change_source: "passive_request_context",
+            same_query_search_input_refreshed: true,
+            same_query_search_input_refresh_source: "selector",
+            submit_triggered: "button_click"
+          }
+        });
+      });
+    } finally {
+      (globalThis as { Event?: unknown }).Event = previousEvent;
+      (globalThis as { InputEvent?: unknown }).InputEvent = previousInputEvent;
+      (globalThis as { KeyboardEvent?: unknown }).KeyboardEvent = previousKeyboardEvent;
+      (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement = previousHTMLInputElement;
+      globalThis.setTimeout = previousSetTimeout;
+    }
+  });
+
+  it("preserves DOM fallback when same-query search controls do not remount for final submit", async () => {
+    const href = "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2&type=51";
+    const runId = "run-xhs-search-same-query-location-fallback-001";
+    const issue209Linkage = createIssue209InvocationLinkage(runId, "same-query-location-fallback");
+    const previousEvent = (globalThis as { Event?: unknown }).Event;
+    const previousInputEvent = (globalThis as { InputEvent?: unknown }).InputEvent;
+    const previousKeyboardEvent = (globalThis as { KeyboardEvent?: unknown }).KeyboardEvent;
+    const previousHTMLInputElement = (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement;
+    const previousSetTimeout = globalThis.setTimeout;
+
+    class MockEventImpl implements MockEvent {
+      readonly type: string;
+      readonly bubbles: boolean;
+      readonly cancelable: boolean;
+      defaultPrevented = false;
+
+      constructor(type: string, init?: { bubbles?: boolean; cancelable?: boolean }) {
+        this.type = type;
+        this.bubbles = init?.bubbles === true;
+        this.cancelable = init?.cancelable === true;
+      }
+
+      preventDefault() {
+        if (this.cancelable) {
+          this.defaultPrevented = true;
+        }
+      }
+    }
+    class MockInputEventImpl extends MockEventImpl {
+      readonly data: string | null;
+
+      constructor(type: string, init?: { bubbles?: boolean; data?: string }) {
+        super(type, init);
+        this.data = init?.data ?? null;
+      }
+    }
+    class MockKeyboardEventImpl extends MockEventImpl {
+      readonly key: string;
+      readonly code: string;
+
+      constructor(
+        type: string,
+        init?: { bubbles?: boolean; cancelable?: boolean; key?: string; code?: string }
+      ) {
+        super(type, init);
+        this.key = init?.key ?? "";
+        this.code = init?.code ?? "";
+      }
+    }
+    class MockHTMLInputElementImpl {
+      #value = "露";
+      isConnected = false;
+
+      get value() {
+        return this.#value;
+      }
+
+      set value(value: string) {
+        this.#value = value;
+      }
+
+      focus() {}
+
+      dispatchEvent() {
+        return true;
+      }
+
+      closest(selector: string) {
+        return selector === "form" ? searchForm : null;
+      }
+    }
+
+    const submitListeners: Array<(event: MockEventImpl) => void> = [];
+    const titleElement = {
+      textContent: "露营装备"
+    };
+    const userAnchor = {
+      getAttribute: (name: string) =>
+        name === "href" ? "/user/profile/user-001?xsec_token=user-token&xsec_source=search" : null
+    };
+    const cardRoot = {
+      querySelector: (selector: string) => {
+        if (selector.includes("/user/profile/")) {
+          return userAnchor;
+        }
+        if (selector.includes("title") || selector.includes("desc")) {
+          return titleElement;
+        }
+        return null;
+      }
+    };
+    const noteAnchor = {
+      textContent: "露营装备",
+      getAttribute: (name: string) =>
+        name === "href" ? "/explore/note-001?xsec_token=note-token&xsec_source=search" : null,
+      closest: () => cardRoot,
+      querySelector: () => null,
+      parentElement: cardRoot
+    };
+    const searchForm = {
+      getAttribute: (name: string) => (name === "action" ? "/search_result" : null),
+      querySelector: () => null,
+      requestSubmit: () => {
+        submitCount += 1;
+        const submitEvent = new MockEventImpl("submit", { bubbles: true, cancelable: true });
+        for (const listener of submitListeners) {
+          listener(submitEvent);
+        }
+        activeSearchInput = null;
+      },
+      dispatchEvent: () => true,
+      addEventListener: (type: string, listener: (event: MockEventImpl) => void) => {
+        if (type === "submit") {
+          submitListeners.push(listener);
+        }
+      },
+      removeEventListener: (type: string, listener: (event: MockEventImpl) => void) => {
+        if (type !== "submit") {
+          return;
+        }
+        const index = submitListeners.indexOf(listener);
+        if (index >= 0) {
+          submitListeners.splice(index, 1);
+        }
+      }
+    };
+    let submitCount = 0;
+    let activeSearchInput: MockHTMLInputElementImpl | null = new MockHTMLInputElementImpl();
+
+    (globalThis as { Event?: unknown }).Event = MockEventImpl;
+    (globalThis as { InputEvent?: unknown }).InputEvent = MockInputEventImpl;
+    (globalThis as { KeyboardEvent?: unknown }).KeyboardEvent = MockKeyboardEventImpl;
+    (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement = MockHTMLInputElementImpl;
+    globalThis.setTimeout = ((handler: TimerHandler, _timeout?: number, ...args: unknown[]) => {
+      queueMicrotask(() => {
+        if (typeof handler === "function") {
+          handler(...args);
+        }
+      });
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+
+    try {
+      await withMockMainWorld(async ({ mockWindow }) => {
+        mockWindow.location.href = href;
+        (mockWindow as Window & Record<string, unknown>).__mainWorldCapturedRequestContextReadHandler__ =
+          (requestPayload: Record<string, unknown> | null) => {
+            const shapeKey =
+              typeof requestPayload?.shape_key === "string" ? requestPayload.shape_key : "";
+            const namespace =
+              typeof requestPayload?.page_context_namespace === "string"
+                ? requestPayload.page_context_namespace
+                : mockWindow.location.href;
+            const shape = JSON.parse(shapeKey) as Record<string, unknown>;
+            const siblingShapeKey = JSON.stringify({
+              ...shape,
+              keyword: "露x"
+            });
+            return {
+              page_context_namespace: namespace,
+              shape_key: shapeKey,
+              admitted_template: null,
+              rejected_observation: null,
+              incompatible_observation: null,
+              available_shape_keys: [siblingShapeKey]
+            };
+          };
+        (globalThis as { document: Document }).document = {
+          title: "露营 - 小红书搜索",
+          readyState: "complete",
+          cookie: "a1=session-token",
+          querySelectorAll: (selector: string) => {
+            if (selector.startsWith('input[type="search"]')) {
+              return activeSearchInput ? [activeSearchInput] : [];
+            }
+            if (selector.includes('/explore/') || selector.includes('/discovery/item/')) {
+              return [noteAnchor];
+            }
+            return [];
+          },
+          querySelector: (selector: string) =>
+            selector.startsWith('input[type="search"]') ? activeSearchInput : null,
+          documentElement: {
+            appendChild: (node: unknown) => node
+          },
+          createElement: () => ({
+            textContent: "",
+            remove: () => {}
+          })
+        } as unknown as Document;
+        const handler = new ContentScriptHandler();
+        const results: Array<Record<string, unknown>> = [];
+        handler.onResult((message) => {
+          results.push(message as unknown as Record<string, unknown>);
+        });
+
+        handler.onBackgroundMessage({
+          kind: "forward",
+          id: runId,
+          runId,
+          tabId: 1,
+          profile: "profile-a",
+          cwd: "/workspace/WebEnvoy",
+          timeoutMs: 3_000,
+          command: "xhs.search",
+          params: {
+            session_id: "nm-session-001"
+          },
+          commandParams: {
+            request_id: "issue630-same-query-location-fallback-001",
+            gate_invocation_id: issue209Linkage.gateInvocationId,
+            requested_execution_mode: "live_read_limited",
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              query: "露"
+            },
+            options: {
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 1,
+              target_page: "search_result_tab",
+              action_type: "read",
+              risk_state: "limited",
+              limited_read_rollout_ready_true: true,
+              approval_record: createApprovedReadApprovalRecord(),
+              audit_record: createApprovedReadAuditRecord({
+                runId,
+                requestId: runId,
+                commandRequestId: "issue630-same-query-location-fallback-001",
+                gateInvocationId: issue209Linkage.gateInvocationId
+              }),
+              admission_context: createApprovedReadAdmissionContext({
+                runId,
+                requestId: runId,
+                commandRequestId: "issue630-same-query-location-fallback-001",
+                gateInvocationId: issue209Linkage.gateInvocationId
+              })
+            }
+          },
+          fingerprintContext: {
+            ...createFingerprintContext(),
+            injection: {
+              installed: true,
+              required_patches: [],
+              missing_required_patches: [],
+              source: "main_world"
+            }
+          }
+        });
+
+        await waitForResult(results);
+        for (let attempt = 0; attempt < 200 && results.length === 0; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+
+        expect(results[0]?.ok).toBe(true);
+        expect(submitCount).toBe(1);
+        const payload = results[0]?.payload as Record<string, unknown>;
+        const summary = payload?.summary as Record<string, unknown>;
+        expect(summary?.request_context).toMatchObject({
+          status: "missing",
+          reason: "shape_mismatch"
+        });
+        expect(summary?.route_evidence).toMatchObject({
+          evidence_class: "dom_state_extraction",
+          humanized_action: {
+            same_query_input_matched: true,
+            same_query_perturbed: true,
+            same_query_preflight_submitted: true,
+            same_query_preflight_state_change_observed: true,
+            same_query_preflight_state_change_source: "search_input_detached",
+            same_query_search_input_refreshed: false,
+            same_query_search_input_refresh_source: "missing",
+            dom_fallback_allowed: true,
+            submit_triggered: null,
+            final_submit_skipped: true,
+            final_submit_blocked: true,
+            final_submit_blocker: "search_input_refresh_missing"
+          },
+          item_kind: "search_card"
         });
       });
     } finally {

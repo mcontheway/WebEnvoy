@@ -10183,66 +10183,325 @@ const isCurrentSearchPageForQuery = (href, query) => {
     }
 };
 const createSameQuerySearchPerturbation = (query, currentValue) => {
-    const candidates = [`${query} `, query.slice(0, Math.max(0, query.length - 1)), `${query}x`];
-    return candidates.find((candidate) => candidate !== currentValue && candidate !== query) ?? `${query}x`;
+    const normalizedQuery = normalizeSearchQueryText(query);
+    const candidates = [query.slice(0, Math.max(0, query.length - 1)), `${query}x`, `${query} `];
+    return (candidates.find((candidate) => candidate !== currentValue &&
+        candidate !== query &&
+        normalizeSearchQueryText(candidate) !== null &&
+        normalizeSearchQueryText(candidate) !== normalizedQuery) ?? `${query}x`);
 };
 const waitForXhsSearchPassiveActionTurn = async () => {
     await new Promise((resolve) => {
         setTimeout(resolve, 180);
     });
 };
+const XHS_SEARCH_INPUT_SELECTOR = 'input[type="search"], input[class*="search"], input[placeholder*="搜索"], input[placeholder*="search" i]';
+const XHS_SEARCH_BUTTON_SELECTOR = 'button[type="submit"], button[class*="search"], [role="button"][class*="search"]';
+const isElementUsableForXhsSearch = (element) => {
+    if (!element) {
+        return false;
+    }
+    const record = element;
+    if (record.hidden === true || record.disabled === true) {
+        return false;
+    }
+    if (typeof record.getAttribute === "function") {
+        const ariaHidden = record.getAttribute("aria-hidden");
+        if (ariaHidden === "true") {
+            return false;
+        }
+    }
+    if (typeof record.type === "string" && record.type.toLowerCase() === "hidden") {
+        return false;
+    }
+    if (typeof record.getClientRects === "function") {
+        const rects = record.getClientRects();
+        if (rects.length === 0) {
+            return false;
+        }
+    }
+    return true;
+};
+const queryFirstUsableXhsElement = (selector) => {
+    const queryAll = typeof document.querySelectorAll === "function"
+        ? Array.from(document.querySelectorAll(selector))
+        : [];
+    const candidates = queryAll.length > 0
+        ? queryAll
+        : typeof document.querySelector === "function"
+            ? [document.querySelector(selector)]
+            : [];
+    return candidates.find((candidate) => isElementUsableForXhsSearch(candidate)) ?? null;
+};
 const performXhsSearchPassiveAction = async (input) => {
     const queryMatched = isCurrentSearchPageForQuery(window.location.href, input.query);
-    const searchInput = document.querySelector('input[type="search"], input[class*="search"], input[placeholder*="搜索"], input[placeholder*="search" i]');
-    if (searchInput) {
-        const searchForm = searchInput.closest("form");
-        const searchButton = (searchForm?.querySelector('button[type="submit"], button[class*="search"], [role="button"][class*="search"]') ?? document.querySelector('button[type="submit"], button[class*="search"], [role="button"][class*="search"]'));
+    const resolveSearchControls = () => {
+        const resolvedSearchInput = queryFirstUsableXhsElement(XHS_SEARCH_INPUT_SELECTOR);
+        const resolvedSearchForm = resolvedSearchInput?.closest("form");
+        const formSearchButton = resolvedSearchForm?.querySelector(XHS_SEARCH_BUTTON_SELECTOR) ?? null;
+        const resolvedSearchButton = (isElementUsableForXhsSearch(formSearchButton)
+            ? formSearchButton
+            : queryFirstUsableXhsElement(XHS_SEARCH_BUTTON_SELECTOR));
+        return {
+            searchInput: resolvedSearchInput,
+            searchForm: resolvedSearchForm,
+            searchButton: resolvedSearchButton
+        };
+    };
+    const initialSearchControls = resolveSearchControls();
+    if (initialSearchControls.searchInput) {
+        let searchInput = initialSearchControls.searchInput;
+        let searchForm = initialSearchControls.searchForm;
+        let searchButton = initialSearchControls.searchButton;
         const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-        const setSearchInputValue = (value) => {
+        const setSearchInputValue = (target, value) => {
             if (valueSetter) {
-                valueSetter.call(searchInput, value);
+                valueSetter.call(target, value);
             }
             else {
-                searchInput.value = value;
+                target.value = value;
             }
         };
-        const dispatchTextChange = (value) => {
-            searchInput.dispatchEvent(new InputEvent("input", { bubbles: true, data: value }));
-            searchInput.dispatchEvent(new Event("change", { bubbles: true }));
+        const dispatchTextChange = (target, value) => {
+            target.dispatchEvent(new InputEvent("input", { bubbles: true, data: value }));
+            target.dispatchEvent(new Event("change", { bubbles: true }));
+        };
+        const triggerSubmit = (target, form, button, options) => {
+            const preventNativeNavigation = (event) => {
+                event.preventDefault();
+            };
+            const preventKeyboardDefault = (event) => {
+                if (event.key === "Enter" || event.code === "Enter") {
+                    event.preventDefault();
+                }
+            };
+            if (form && options?.preventNativeNavigation === true) {
+                form.addEventListener("submit", preventNativeNavigation, { capture: true, once: true });
+            }
+            if (options?.preventKeyboardDefault === true &&
+                typeof target.addEventListener === "function") {
+                target.addEventListener("keydown", preventKeyboardDefault, { capture: true, once: true });
+            }
+            if (options?.dispatchKeyboardEvents !== false) {
+                target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }));
+                target.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }));
+            }
+            try {
+                if (form && typeof form.requestSubmit === "function") {
+                    form.requestSubmit();
+                    return "form_request_submit";
+                }
+                if (button && typeof button.click === "function") {
+                    button.click();
+                    return "button_click";
+                }
+                if (form) {
+                    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+                    return "submit_event";
+                }
+                return "enter_key";
+            }
+            finally {
+                if (options?.preventKeyboardDefault === true &&
+                    typeof target.removeEventListener === "function") {
+                    target.removeEventListener("keydown", preventKeyboardDefault, { capture: true });
+                }
+                if (form && options?.preventNativeNavigation === true) {
+                    form.removeEventListener("submit", preventNativeNavigation, { capture: true });
+                }
+            }
+        };
+        const refreshSearchControls = () => {
+            const refreshed = resolveSearchControls();
+            searchInput = refreshed.searchInput;
+            searchForm = refreshed.searchForm;
+            searchButton = refreshed.searchButton;
+            return Boolean(searchInput);
         };
         const currentInputValue = searchInput.value;
         const sameQueryInputMatched = queryMatched &&
             normalizeSearchQueryText(currentInputValue) === normalizeSearchQueryText(input.query);
         let sameQueryPerturbed = false;
+        let sameQueryPreflightSubmitted = false;
+        let sameQueryPreflightSubmitTriggered = null;
+        let sameQueryPreflightMode = null;
+        let sameQueryPreflightStateChangeObserved = null;
+        let sameQueryPreflightStateChangeSource = null;
+        let sameQueryPreflightStateChangeAttempts = 0;
+        let sameQuerySearchInputRefreshed = null;
+        let sameQuerySearchInputRefreshAttempts = 0;
+        let sameQuerySearchInputRefreshSource = null;
         let preSubmitValueChanged = false;
         let inputSettleWaits = 0;
+        const restoreConnectedSearchControls = (fallbackInput) => {
+            if (fallbackInput.isConnected !== true || !isElementUsableForXhsSearch(fallbackInput)) {
+                return false;
+            }
+            const fallbackForm = fallbackInput.closest("form");
+            searchInput = fallbackInput;
+            searchForm = fallbackForm;
+            const fallbackFormButton = fallbackForm?.querySelector(XHS_SEARCH_BUTTON_SELECTOR) ?? null;
+            searchButton = (isElementUsableForXhsSearch(fallbackFormButton)
+                ? fallbackFormButton
+                : queryFirstUsableXhsElement(XHS_SEARCH_BUTTON_SELECTOR));
+            return true;
+        };
+        const waitForSearchControlsAfterPreflight = async (fallbackInput) => {
+            const maxRefreshAttempts = 16;
+            for (let attempt = 0; attempt <= maxRefreshAttempts; attempt += 1) {
+                sameQuerySearchInputRefreshAttempts = attempt + 1;
+                if (refreshSearchControls()) {
+                    sameQuerySearchInputRefreshSource = "selector";
+                    return true;
+                }
+                if (restoreConnectedSearchControls(fallbackInput)) {
+                    sameQuerySearchInputRefreshSource = "connected_fallback";
+                    return true;
+                }
+                if (attempt < maxRefreshAttempts) {
+                    await waitForXhsSearchPassiveActionTurn();
+                    inputSettleWaits += 1;
+                }
+            }
+            sameQuerySearchInputRefreshSource = "missing";
+            return false;
+        };
+        const waitForPreflightStateChange = async (initialInput, perturbedValue, submittedAt) => {
+            const initialHref = window.location.href;
+            const preflightShape = createSearchRequestShape({ keyword: perturbedValue });
+            const preflightShapeKey = preflightShape
+                ? serializeSearchRequestShape(preflightShape)
+                : null;
+            const maxStateAttempts = 8;
+            for (let attempt = 0; attempt <= maxStateAttempts; attempt += 1) {
+                sameQueryPreflightStateChangeAttempts = attempt + 1;
+                if (window.location.href !== initialHref ||
+                    isCurrentSearchPageForQuery(window.location.href, perturbedValue)) {
+                    sameQueryPreflightStateChangeSource = "url";
+                    return true;
+                }
+                const refreshed = resolveSearchControls();
+                if (refreshed.searchInput && refreshed.searchInput !== initialInput) {
+                    sameQueryPreflightStateChangeSource = "search_controls_replaced";
+                    return true;
+                }
+                if (initialInput.isConnected === false) {
+                    sameQueryPreflightStateChangeSource = "search_input_detached";
+                    return true;
+                }
+                if (preflightShapeKey) {
+                    const pageContextNamespace = createPageContextNamespace(window.location.href);
+                    const lookup = await readCapturedRequestContextViaMainWorld({
+                        method: "POST",
+                        path: SEARCH_ENDPOINT,
+                        page_context_namespace: pageContextNamespace,
+                        shape_key: preflightShapeKey,
+                        min_observed_at: submittedAt
+                    }).catch(() => null);
+                    if (lookup?.admitted_template ||
+                        lookup?.rejected_observation ||
+                        lookup?.incompatible_observation ||
+                        lookup?.available_shape_keys.includes(preflightShapeKey)) {
+                        sameQueryPreflightStateChangeSource = "passive_request_context";
+                        return true;
+                    }
+                }
+                if (attempt < maxStateAttempts) {
+                    await waitForXhsSearchPassiveActionTurn();
+                    inputSettleWaits += 1;
+                }
+            }
+            sameQueryPreflightStateChangeSource = "missing";
+            return false;
+        };
         searchInput.focus();
         if (sameQueryInputMatched) {
+            const preflightSearchInput = searchInput;
             const perturbedValue = createSameQuerySearchPerturbation(input.query, currentInputValue);
-            setSearchInputValue(perturbedValue);
-            dispatchTextChange(perturbedValue);
+            setSearchInputValue(searchInput, perturbedValue);
+            dispatchTextChange(searchInput, perturbedValue);
             sameQueryPerturbed = true;
             preSubmitValueChanged = searchInput.value !== currentInputValue;
             await waitForXhsSearchPassiveActionTurn();
             inputSettleWaits += 1;
+            let preflightSubmittedAt = null;
+            if (searchForm) {
+                sameQueryPreflightMode = "guarded_submit";
+                preflightSubmittedAt = Date.now();
+                sameQueryPreflightSubmitTriggered = triggerSubmit(searchInput, searchForm, searchButton, {
+                    preventNativeNavigation: true,
+                    preventKeyboardDefault: true
+                });
+                sameQueryPreflightSubmitted = true;
+                await waitForXhsSearchPassiveActionTurn();
+                inputSettleWaits += 1;
+            }
+            else if (searchButton) {
+                sameQueryPreflightMode = "button_click";
+                preflightSubmittedAt = Date.now();
+                sameQueryPreflightSubmitTriggered = triggerSubmit(searchInput, null, searchButton, {
+                    preventKeyboardDefault: true
+                });
+                sameQueryPreflightSubmitted = true;
+                await waitForXhsSearchPassiveActionTurn();
+                inputSettleWaits += 1;
+            }
+            else {
+                sameQueryPreflightMode = "state_only_no_submit_surface";
+            }
+            sameQueryPreflightStateChangeObserved =
+                preflightSubmittedAt === null
+                    ? false
+                    : await waitForPreflightStateChange(preflightSearchInput, perturbedValue, preflightSubmittedAt);
+            sameQuerySearchInputRefreshed = await waitForSearchControlsAfterPreflight(preflightSearchInput);
+            if (!searchInput) {
+                const pageUrlAfterPreflight = window.location.href;
+                const domFallbackAllowed = true;
+                return {
+                    evidence_class: "humanized_action",
+                    action_kind: "keyboard_input",
+                    action_ref: input.actionRef,
+                    run_id: input.runId,
+                    page_url: input.pageUrl,
+                    query: input.query,
+                    query_matched: queryMatched,
+                    search_input_found: false,
+                    initial_search_input_found: true,
+                    same_query_input_matched: sameQueryInputMatched,
+                    same_query_perturbed: sameQueryPerturbed,
+                    same_query_preflight_submitted: sameQueryPreflightSubmitted,
+                    same_query_preflight_submit_triggered: sameQueryPreflightSubmitTriggered,
+                    same_query_preflight_mode: sameQueryPreflightMode,
+                    same_query_preflight_state_change_observed: sameQueryPreflightStateChangeObserved,
+                    same_query_preflight_state_change_source: sameQueryPreflightStateChangeSource,
+                    same_query_preflight_state_change_attempts: sameQueryPreflightStateChangeAttempts,
+                    same_query_search_input_refreshed: sameQuerySearchInputRefreshed,
+                    same_query_search_input_refresh_attempts: sameQuerySearchInputRefreshAttempts,
+                    same_query_search_input_refresh_source: sameQuerySearchInputRefreshSource,
+                    page_url_after_preflight: pageUrlAfterPreflight,
+                    dom_fallback_allowed: domFallbackAllowed,
+                    original_query_restored: false,
+                    pre_submit_value_changed: preSubmitValueChanged,
+                    input_settle_waits: inputSettleWaits,
+                    search_form_found: false,
+                    search_button_found: false,
+                    submit_triggered: null,
+                    final_submit_skipped: true,
+                    final_submit_blocked: true,
+                    final_submit_blocker: "search_input_refresh_missing",
+                    skipped_reason: "search_input_refresh_missing",
+                    trigger_surface: "xhs.search_result"
+                };
+            }
+            searchInput.focus();
         }
-        setSearchInputValue(input.query);
-        dispatchTextChange(input.query);
+        setSearchInputValue(searchInput, input.query);
+        dispatchTextChange(searchInput, input.query);
         if (sameQueryInputMatched) {
             await waitForXhsSearchPassiveActionTurn();
             inputSettleWaits += 1;
         }
-        searchInput.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }));
-        searchInput.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }));
-        if (searchForm && typeof searchForm.requestSubmit === "function") {
-            searchForm.requestSubmit();
-        }
-        else if (searchButton && typeof searchButton.click === "function") {
-            searchButton.click();
-        }
-        else if (searchForm) {
-            searchForm.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-        }
+        const submitTriggered = triggerSubmit(searchInput, searchForm, searchButton);
         return {
             evidence_class: "humanized_action",
             action_kind: "keyboard_input",
@@ -10254,17 +10513,20 @@ const performXhsSearchPassiveAction = async (input) => {
             search_input_found: true,
             same_query_input_matched: sameQueryInputMatched,
             same_query_perturbed: sameQueryPerturbed,
+            same_query_preflight_submitted: sameQueryPreflightSubmitted,
+            same_query_preflight_submit_triggered: sameQueryPreflightSubmitTriggered,
+            same_query_preflight_mode: sameQueryPreflightMode,
+            same_query_preflight_state_change_observed: sameQueryPreflightStateChangeObserved,
+            same_query_preflight_state_change_source: sameQueryPreflightStateChangeSource,
+            same_query_preflight_state_change_attempts: sameQueryPreflightStateChangeAttempts,
+            same_query_search_input_refreshed: sameQuerySearchInputRefreshed,
+            same_query_search_input_refresh_attempts: sameQuerySearchInputRefreshAttempts,
+            same_query_search_input_refresh_source: sameQuerySearchInputRefreshSource,
             pre_submit_value_changed: preSubmitValueChanged,
             input_settle_waits: inputSettleWaits,
             search_form_found: Boolean(searchForm),
             search_button_found: Boolean(searchButton),
-            submit_triggered: searchForm && typeof searchForm.requestSubmit === "function"
-                ? "form_request_submit"
-                : searchButton
-                    ? "button_click"
-                    : searchForm
-                        ? "submit_event"
-                        : "enter_key",
+            submit_triggered: submitTriggered,
             trigger_surface: "xhs.search_result"
         };
     }
