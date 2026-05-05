@@ -5750,7 +5750,11 @@ const resolveRequestContextState = async (requestInput, env) => {
             failureReason: "template_missing",
             pageContextNamespace: fallbackNamespace,
             shapeKey: shape ? serializeSearchRequestShape(shape) : "",
-            availableShapeKeys: []
+            availableShapeKeys: [],
+            diagnostics: {
+                lookup_unavailable: !readCapturedRequestContext,
+                shape_available: Boolean(shape)
+            }
         };
     }
     const shapeKey = serializeSearchRequestShape(shape);
@@ -5787,11 +5791,15 @@ const resolveRequestContextState = async (requestInput, env) => {
                 failureReason: "template_missing",
                 pageContextNamespace,
                 shapeKey,
-                availableShapeKeys: []
+                availableShapeKeys: [],
+                diagnostics: {
+                    lookup_transport_failed: true
+                }
             };
         }
         pageContextNamespace = lookup?.page_context_namespace ?? pageContextNamespace;
         const availableShapeKeys = lookup?.available_shape_keys ?? [];
+        const diagnostics = asRecord(lookup?.diagnostics) ?? undefined;
         const siblingShapeKeys = availableShapeKeys.filter((candidate) => candidate !== shapeKey);
         const admittedTemplate = isTrustedCapturedTemplate(lookup?.admitted_template ?? null, {
             pageContextNamespace,
@@ -5819,7 +5827,8 @@ const resolveRequestContextState = async (requestInput, env) => {
                     failureReason: "template_missing",
                     pageContextNamespace,
                     shapeKey,
-                    availableShapeKeys
+                    availableShapeKeys,
+                    diagnostics
                 };
             }
             const admittedResponseRecord = asRecord(admittedTemplate.response.body);
@@ -5838,7 +5847,8 @@ const resolveRequestContextState = async (requestInput, env) => {
                     pageContextNamespace,
                     shapeKey,
                     availableShapeKeys,
-                    observedAt: admittedTemplate.observed_at ?? admittedTemplate.captured_at
+                    observedAt: admittedTemplate.observed_at ?? admittedTemplate.captured_at,
+                    diagnostics
                 };
             }
             const observedAt = admittedTemplate.observed_at ?? admittedTemplate.captured_at;
@@ -5849,7 +5859,8 @@ const resolveRequestContextState = async (requestInput, env) => {
                     pageContextNamespace,
                     shapeKey,
                     availableShapeKeys,
-                    observedAt
+                    observedAt,
+                    diagnostics
                 };
             }
             return {
@@ -5885,7 +5896,8 @@ const resolveRequestContextState = async (requestInput, env) => {
                     pageContextNamespace,
                     shapeKey,
                     availableShapeKeys,
-                    observedAt: rejectedObservation.observed_at ?? rejectedObservation.captured_at
+                    observedAt: rejectedObservation.observed_at ?? rejectedObservation.captured_at,
+                    diagnostics
                 };
             }
             const rejectedDetail = resolveRejectedSourceDetail(rejectedObservation);
@@ -5899,7 +5911,8 @@ const resolveRequestContextState = async (requestInput, env) => {
                 pageContextNamespace,
                 shapeKey,
                 availableShapeKeys,
-                observedAt: rejectedObservation.observed_at ?? rejectedObservation.captured_at
+                observedAt: rejectedObservation.observed_at ?? rejectedObservation.captured_at,
+                diagnostics
             };
         }
         if (incompatibleObservation || siblingShapeKeys.length > 0) {
@@ -5910,7 +5923,8 @@ const resolveRequestContextState = async (requestInput, env) => {
                     pageContextNamespace,
                     shapeKey,
                     availableShapeKeys: siblingShapeKeys,
-                    observedAt: incompatibleObservation?.observed_at ?? incompatibleObservation?.captured_at ?? undefined
+                    observedAt: incompatibleObservation?.observed_at ?? incompatibleObservation?.captured_at ?? undefined,
+                    diagnostics
                 };
             }
             return {
@@ -5919,7 +5933,8 @@ const resolveRequestContextState = async (requestInput, env) => {
                 pageContextNamespace,
                 shapeKey,
                 availableShapeKeys: siblingShapeKeys,
-                observedAt: incompatibleObservation?.observed_at ?? incompatibleObservation?.captured_at ?? undefined
+                observedAt: incompatibleObservation?.observed_at ?? incompatibleObservation?.captured_at ?? undefined,
+                diagnostics
             };
         }
         return {
@@ -5927,7 +5942,8 @@ const resolveRequestContextState = async (requestInput, env) => {
             failureReason: "template_missing",
             pageContextNamespace,
             shapeKey,
-            availableShapeKeys
+            availableShapeKeys,
+            diagnostics
         };
     };
     const maxAttempts = resolveRequestContextWaitMaxAttempts(requestInput.options, requestInput.elapsedBeforeWaitMs);
@@ -6331,6 +6347,9 @@ const executeXhsSearch = async (input, env) => {
                 page_context_namespace: requestContextState.pageContextNamespace,
                 shape_key: requestContextState.shapeKey,
                 available_shape_keys: requestContextState.availableShapeKeys,
+                ...(requestContextState.diagnostics
+                    ? { request_context_diagnostics: requestContextState.diagnostics }
+                    : {}),
                 ...(requestContextState.statusCode !== undefined
                     ? { status_code: requestContextState.statusCode }
                     : {}),
@@ -6424,7 +6443,10 @@ const executeXhsSearch = async (input, env) => {
                             reason: requestContextState.failureReason,
                             page_context_namespace: requestContextState.pageContextNamespace,
                             shape_key: requestContextState.shapeKey,
-                            available_shape_keys: requestContextState.availableShapeKeys
+                            available_shape_keys: requestContextState.availableShapeKeys,
+                            ...(requestContextState.diagnostics
+                                ? { diagnostics: requestContextState.diagnostics }
+                                : {})
                         }
                     },
                     observability: createObservability({
@@ -6446,6 +6468,9 @@ const executeXhsSearch = async (input, env) => {
             page_context_namespace: requestContextState.pageContextNamespace,
             shape_key: requestContextState.shapeKey,
             available_shape_keys: requestContextState.availableShapeKeys,
+            ...(requestContextState.diagnostics
+                ? { request_context_diagnostics: requestContextState.diagnostics }
+                : {}),
             ...(requestContextState.detailReason
                 ? { rejected_source_reason: requestContextState.detailReason }
                 : {}),
@@ -9419,7 +9444,8 @@ const asCapturedRequestContextLookupResult = (value) => {
         admitted_template: asRecord(record.admitted_template),
         rejected_observation: asRecord(record.rejected_observation),
         incompatible_observation: asRecord(record.incompatible_observation),
-        available_shape_keys: record.available_shape_keys.filter((item) => typeof item === "string")
+        available_shape_keys: record.available_shape_keys.filter((item) => typeof item === "string"),
+        ...(asRecord(record.diagnostics) ? { diagnostics: asRecord(record.diagnostics) ?? {} } : {})
     };
 };
 const readCapturedRequestContextViaMainWorld = async (input) => {
@@ -10196,7 +10222,7 @@ const waitForXhsSearchPassiveActionTurn = async () => {
     });
 };
 const XHS_SEARCH_INPUT_SELECTOR = 'input[type="search"], input[class*="search"], input[placeholder*="搜索"], input[placeholder*="search" i]';
-const XHS_SEARCH_BUTTON_SELECTOR = 'button[type="submit"], button[class*="search"], [role="button"][class*="search"]';
+const XHS_SEARCH_BUTTON_SELECTOR = 'button[type="submit"], button[class*="search" i], [role="button"][class*="search" i], [aria-label*="搜索"], [aria-label*="search" i], [title*="搜索"], [title*="search" i], [class*="search-icon" i], [class*="searchIcon" i], [class*="search-btn" i]';
 const isElementUsableForXhsSearch = (element) => {
     if (!element) {
         return false;
@@ -10233,15 +10259,69 @@ const queryFirstUsableXhsElement = (selector) => {
             : [];
     return candidates.find((candidate) => isElementUsableForXhsSearch(candidate)) ?? null;
 };
+const readXhsElementSearchText = (element) => {
+    const htmlElement = element;
+    return [
+        htmlElement.id,
+        typeof htmlElement.className === "string" ? htmlElement.className : "",
+        htmlElement.getAttribute?.("aria-label"),
+        htmlElement.getAttribute?.("title"),
+        htmlElement.getAttribute?.("data-testid"),
+        htmlElement.textContent
+    ]
+        .filter((value) => typeof value === "string" && value.trim().length > 0)
+        .join(" ")
+        .toLowerCase();
+};
+const looksLikeXhsSearchSubmitControl = (element) => {
+    const tagName = typeof element.tagName === "string" ? element.tagName.toLowerCase() : "";
+    if (tagName === "input" || tagName === "textarea") {
+        return false;
+    }
+    const elementText = readXhsElementSearchText(element);
+    return (tagName === "button" ||
+        (tagName.length === 0 && typeof element.click === "function") ||
+        element.getAttribute?.("role") === "button" ||
+        elementText.includes("search") ||
+        elementText.includes("搜索"));
+};
+const resolveClickableXhsSearchControl = (element) => {
+    if (!element) {
+        return null;
+    }
+    const candidates = [
+        element,
+        element.closest?.("button"),
+        element.closest?.('[role="button"]'),
+        element.closest?.('[class*="search" i]'),
+        element.closest?.("[aria-label]"),
+        element.closest?.("[title]")
+    ];
+    for (const candidate of candidates) {
+        const clickableCandidate = candidate;
+        if (clickableCandidate &&
+            isElementUsableForXhsSearch(clickableCandidate) &&
+            looksLikeXhsSearchSubmitControl(clickableCandidate) &&
+            typeof clickableCandidate.click === "function") {
+            return clickableCandidate;
+        }
+    }
+    return null;
+};
 const performXhsSearchPassiveAction = async (input) => {
     const queryMatched = isCurrentSearchPageForQuery(window.location.href, input.query);
     const resolveSearchControls = () => {
         const resolvedSearchInput = queryFirstUsableXhsElement(XHS_SEARCH_INPUT_SELECTOR);
         const resolvedSearchForm = resolvedSearchInput?.closest("form");
+        const scopedSearchRoot = resolvedSearchInput?.closest('[class*="search" i], [role="search"], header, nav') ??
+            resolvedSearchForm ??
+            resolvedSearchInput?.parentElement ??
+            null;
         const formSearchButton = resolvedSearchForm?.querySelector(XHS_SEARCH_BUTTON_SELECTOR) ?? null;
-        const resolvedSearchButton = (isElementUsableForXhsSearch(formSearchButton)
-            ? formSearchButton
-            : queryFirstUsableXhsElement(XHS_SEARCH_BUTTON_SELECTOR));
+        const scopedSearchButton = scopedSearchRoot?.querySelector(XHS_SEARCH_BUTTON_SELECTOR) ?? null;
+        const resolvedSearchButton = resolveClickableXhsSearchControl(formSearchButton) ??
+            resolveClickableXhsSearchControl(scopedSearchButton) ??
+            resolveClickableXhsSearchControl(queryFirstUsableXhsElement(XHS_SEARCH_BUTTON_SELECTOR));
         return {
             searchInput: resolvedSearchInput,
             searchForm: resolvedSearchForm,
@@ -10270,13 +10350,35 @@ const performXhsSearchPassiveAction = async (input) => {
             const preventNativeNavigation = (event) => {
                 event.preventDefault();
             };
+            const isNativeSubmitControlBoundToForm = (candidate, targetForm) => {
+                const tagName = typeof candidate.tagName === "string" ? candidate.tagName.toLowerCase() : "";
+                if (tagName !== "button" && tagName !== "input") {
+                    return false;
+                }
+                const type = candidate.getAttribute?.("type")?.trim().toLowerCase();
+                if (type && type !== "submit") {
+                    return false;
+                }
+                const candidateForm = candidate.form ??
+                    candidate.closest?.("form") ??
+                    null;
+                return candidateForm === targetForm;
+            };
             const preventKeyboardDefault = (event) => {
                 if (event.key === "Enter" || event.code === "Enter") {
                     event.preventDefault();
                 }
             };
-            if (form && options?.preventNativeNavigation === true) {
-                form.addEventListener("submit", preventNativeNavigation, { capture: true, once: true });
+            let submitObserved = false;
+            const observeSubmit = (event) => {
+                submitObserved = true;
+                if (options?.preventNativeNavigation === true) {
+                    preventNativeNavigation(event);
+                }
+            };
+            if (form &&
+                (options?.preventNativeNavigation === true || options?.preferButtonClick === true)) {
+                form.addEventListener("submit", observeSubmit, { capture: true, once: true });
             }
             if (options?.preventKeyboardDefault === true &&
                 typeof target.addEventListener === "function") {
@@ -10287,6 +10389,17 @@ const performXhsSearchPassiveAction = async (input) => {
                 target.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }));
             }
             try {
+                if (options?.preferButtonClick === true && button && typeof button.click === "function") {
+                    button.click();
+                    if (form &&
+                        !submitObserved &&
+                        !isNativeSubmitControlBoundToForm(button, form) &&
+                        typeof form.requestSubmit === "function") {
+                        form.requestSubmit();
+                        return "button_click_form_request_submit_fallback";
+                    }
+                    return "button_click";
+                }
                 if (form && typeof form.requestSubmit === "function") {
                     form.requestSubmit();
                     return "form_request_submit";
@@ -10306,8 +10419,9 @@ const performXhsSearchPassiveAction = async (input) => {
                     typeof target.removeEventListener === "function") {
                     target.removeEventListener("keydown", preventKeyboardDefault, { capture: true });
                 }
-                if (form && options?.preventNativeNavigation === true) {
-                    form.removeEventListener("submit", preventNativeNavigation, { capture: true });
+                if (form &&
+                    (options?.preventNativeNavigation === true || options?.preferButtonClick === true)) {
+                    form.removeEventListener("submit", observeSubmit, { capture: true });
                 }
             }
         };
@@ -10430,7 +10544,8 @@ const performXhsSearchPassiveAction = async (input) => {
                 preflightSubmittedAt = Date.now();
                 sameQueryPreflightSubmitTriggered = triggerSubmit(searchInput, searchForm, searchButton, {
                     preventNativeNavigation: true,
-                    preventKeyboardDefault: true
+                    preventKeyboardDefault: true,
+                    preferButtonClick: Boolean(searchButton)
                 });
                 sameQueryPreflightSubmitted = true;
                 await waitForXhsSearchPassiveActionTurn();
@@ -10501,7 +10616,9 @@ const performXhsSearchPassiveAction = async (input) => {
             await waitForXhsSearchPassiveActionTurn();
             inputSettleWaits += 1;
         }
-        const submitTriggered = triggerSubmit(searchInput, searchForm, searchButton);
+        const submitTriggered = triggerSubmit(searchInput, searchForm, searchButton, {
+            preferButtonClick: Boolean(searchButton)
+        });
         return {
             evidence_class: "humanized_action",
             action_kind: "keyboard_input",

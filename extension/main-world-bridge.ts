@@ -1950,6 +1950,69 @@ const handleCapturedRequestContextReadRequest = async (request: MainWorldRequest
     }
     return (artifact.observed_at ?? artifact.captured_at) >= minObservedAt;
   };
+  const createArtifactDiagnostics = (
+    artifact: CapturedRequestContextArtifact | null | undefined
+  ): RecordValue | null => {
+    if (!artifact) {
+      return null;
+    }
+    return {
+      method_path_match: artifact.method === method && artifact.path === path,
+      fresh_for_lookup: isFreshForLookup(artifact),
+      provenance_match: matchesRequestedProvenance(artifact),
+      observed_at: artifact.observed_at ?? artifact.captured_at,
+      source_kind: artifact.source_kind,
+      route_evidence_class: artifact.route_evidence_class ?? null,
+      template_ready: artifact.template_ready ?? null,
+      rejection_reason: artifact.rejection_reason ?? null,
+      profile_ref_present: Object.prototype.hasOwnProperty.call(artifact, "profile_ref"),
+      run_id_present: Object.prototype.hasOwnProperty.call(artifact, "run_id"),
+      action_ref_present: Object.prototype.hasOwnProperty.call(artifact, "action_ref"),
+      page_url_present: Object.prototype.hasOwnProperty.call(artifact, "page_url")
+    };
+  };
+  const createRouteBucketDiagnostics = (
+    routeBucket: Map<string, CapturedContextBucket> | null | undefined
+  ): RecordValue => {
+    if (!routeBucket) {
+      return {
+        shape_count: 0,
+        shape_keys_before_filters: [],
+        artifact_count: 0,
+        fresh_artifact_count: 0,
+        provenance_match_count: 0,
+        fresh_and_provenance_match_count: 0,
+        filtered_by_min_observed_at_count: 0,
+        filtered_by_provenance_count: 0
+      };
+    }
+    const shapeKeysBeforeFilters = [...routeBucket.keys()];
+    const artifacts = [...routeBucket.values()].flatMap((bucket) =>
+      [bucket.admittedTemplate, bucket.rejectedObservation].filter(
+        (artifact): artifact is CapturedRequestContextArtifact => artifact !== null
+      )
+    );
+    const freshArtifacts = artifacts.filter((artifact) => isFreshForLookup(artifact));
+    const provenanceMatchedArtifacts = artifacts.filter((artifact) =>
+      matchesRequestedProvenance(artifact)
+    );
+    const freshAndProvenanceMatchedArtifacts = artifacts.filter(
+      (artifact) => isFreshForLookup(artifact) && matchesRequestedProvenance(artifact)
+    );
+    return {
+      shape_count: shapeKeysBeforeFilters.length,
+      shape_keys_before_filters: shapeKeysBeforeFilters,
+      artifact_count: artifacts.length,
+      fresh_artifact_count: freshArtifacts.length,
+      provenance_match_count: provenanceMatchedArtifacts.length,
+      fresh_and_provenance_match_count: freshAndProvenanceMatchedArtifacts.length,
+      filtered_by_min_observed_at_count:
+        minObservedAt === null ? 0 : artifacts.length - freshArtifacts.length,
+      filtered_by_provenance_count: hasRequestedProvenance
+        ? artifacts.length - provenanceMatchedArtifacts.length
+        : 0
+    };
+  };
   const resolveAvailableShapeKeys = (
     routeBucket: Map<string, CapturedContextBucket> | null | undefined
   ): string[] => {
@@ -1979,6 +2042,10 @@ const handleCapturedRequestContextReadRequest = async (request: MainWorldRequest
       mainWorldBridgeSharedState.capturedRequestContextBucketsByNamespace.get(lookupNamespace);
     const routeBucket = namespaceBuckets?.get(routeScopeKey ?? "") ?? null;
     const exactBucket = routeBucket?.get(shapeKey ?? "") ?? null;
+    const availableShapeKeys = resolveAvailableShapeKeys(routeBucket);
+    const incompatible =
+      getRouteBucketIncompatibleObservation(lookupNamespace, routeScopeKey ?? "") ??
+      (routeBucket && shapeKey ? resolveIncompatibleObservation(routeBucket, shapeKey) : null);
     const normalizeArtifactNamespace = (
       artifact: CapturedRequestContextArtifact | null
     ): CapturedRequestContextArtifact | null =>
@@ -1989,6 +2056,26 @@ const handleCapturedRequestContextReadRequest = async (request: MainWorldRequest
             page_context_namespace: resultNamespace
           }
         : artifact;
+    const diagnostics: RecordValue = {
+      lookup_namespace: lookupNamespace,
+      result_namespace: resultNamespace,
+      route_scope_key: routeScopeKey,
+      namespace_bucket_present: Boolean(namespaceBuckets),
+      route_bucket_present: Boolean(routeBucket),
+      exact_bucket_present: Boolean(exactBucket),
+      min_observed_at: minObservedAt,
+      has_requested_provenance: hasRequestedProvenance,
+      requested_provenance_fields: Object.fromEntries(
+        Object.entries(requestedProvenance).map(([key, value]) => [key, value !== null])
+      ),
+      route_bucket: createRouteBucketDiagnostics(routeBucket),
+      available_shape_keys_after_filters: availableShapeKeys,
+      exact_bucket: {
+        admitted_template: createArtifactDiagnostics(exactBucket?.admittedTemplate),
+        rejected_observation: createArtifactDiagnostics(exactBucket?.rejectedObservation)
+      },
+      incompatible_observation: createArtifactDiagnostics(incompatible)
+    };
     return {
       page_context_namespace: resultNamespace,
       shape_key: shapeKey ?? "",
@@ -2009,15 +2096,11 @@ const handleCapturedRequestContextReadRequest = async (request: MainWorldRequest
           ? normalizeArtifactNamespace(exactBucket.rejectedObservation)
           : null,
       incompatible_observation:
-        (() => {
-          const incompatible =
-            getRouteBucketIncompatibleObservation(lookupNamespace, routeScopeKey ?? "") ??
-            (routeBucket && shapeKey ? resolveIncompatibleObservation(routeBucket, shapeKey) : null);
-          return isFreshForLookup(incompatible) && matchesRequestedProvenance(incompatible)
-            ? normalizeArtifactNamespace(incompatible)
-            : null;
-        })(),
-      available_shape_keys: resolveAvailableShapeKeys(routeBucket)
+        isFreshForLookup(incompatible) && matchesRequestedProvenance(incompatible)
+          ? normalizeArtifactNamespace(incompatible)
+          : null,
+      available_shape_keys: availableShapeKeys,
+      diagnostics
     };
   };
   const hasLookupEvidence = (lookup: CapturedRequestContextLookupResult): boolean =>
@@ -2052,12 +2135,26 @@ const handleCapturedRequestContextReadRequest = async (request: MainWorldRequest
           if (hasLookupEvidence(primary)) {
             return primary;
           }
-          for (const compatibleNamespace of resolveCompatibleLookupNamespaces()) {
+          const compatibleNamespaces = resolveCompatibleLookupNamespaces();
+          const compatibleMisses: RecordValue[] = [];
+          for (const compatibleNamespace of compatibleNamespaces) {
             const compatible = createLookupResultForNamespace(compatibleNamespace, namespace);
             if (hasLookupEvidence(compatible)) {
+              compatible.diagnostics = {
+                ...(asRecord(compatible.diagnostics) ?? {}),
+                selected_lookup_namespace: compatibleNamespace,
+                compatible_namespace_candidates: compatibleNamespaces,
+                compatible_misses: compatibleMisses
+              };
               return compatible;
             }
+            compatibleMisses.push(asRecord(compatible.diagnostics) ?? {});
           }
+          primary.diagnostics = {
+            ...(asRecord(primary.diagnostics) ?? {}),
+            compatible_namespace_candidates: compatibleNamespaces,
+            compatible_misses: compatibleMisses
+          };
           return primary;
         })()
       : null;

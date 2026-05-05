@@ -199,6 +199,7 @@ export interface CapturedRequestContextLookupResult {
   rejected_observation: CapturedRequestContextArtifact | null;
   incompatible_observation: CapturedRequestContextArtifact | null;
   available_shape_keys: string[];
+  diagnostics?: JsonRecord;
 }
 
 export interface XhsSearchEnvironment {

@@ -96,18 +96,19 @@ type RequestContextState =
       pageContextNamespace: string;
       shapeKey: string;
     }
-  | {
-      status: "miss";
-      failureReason: RequestContextFailureReason;
-      detailReason?: RejectedSourceDetailReason;
-      detailMessage?: string;
-      statusCode?: number;
-      platformCode?: number;
-      pageContextNamespace: string;
-      shapeKey: string;
-      availableShapeKeys: string[];
-      observedAt?: number;
-    };
+    | {
+        status: "miss";
+        failureReason: RequestContextFailureReason;
+        detailReason?: RejectedSourceDetailReason;
+        detailMessage?: string;
+        statusCode?: number;
+        platformCode?: number;
+        pageContextNamespace: string;
+        shapeKey: string;
+        availableShapeKeys: string[];
+        observedAt?: number;
+        diagnostics?: JsonRecord;
+      };
 
 type ExecuteXhsSearchInput = {
   abilityId: string;
@@ -725,7 +726,11 @@ const resolveRequestContextState = async (
       failureReason: "template_missing",
       pageContextNamespace: fallbackNamespace,
       shapeKey: shape ? serializeSearchRequestShape(shape) : "",
-      availableShapeKeys: []
+      availableShapeKeys: [],
+      diagnostics: {
+        lookup_unavailable: !readCapturedRequestContext,
+        shape_available: Boolean(shape)
+      }
     };
   }
 
@@ -765,12 +770,16 @@ const resolveRequestContextState = async (
         failureReason: "template_missing",
         pageContextNamespace,
         shapeKey,
-        availableShapeKeys: []
+        availableShapeKeys: [],
+        diagnostics: {
+          lookup_transport_failed: true
+        }
       };
     }
 
     pageContextNamespace = lookup?.page_context_namespace ?? pageContextNamespace;
     const availableShapeKeys = lookup?.available_shape_keys ?? [];
+    const diagnostics = asRecord(lookup?.diagnostics) ?? undefined;
     const siblingShapeKeys = availableShapeKeys.filter((candidate) => candidate !== shapeKey);
     const admittedTemplate = isTrustedCapturedTemplate(lookup?.admitted_template ?? null, {
       pageContextNamespace,
@@ -802,7 +811,8 @@ const resolveRequestContextState = async (
           failureReason: "template_missing",
           pageContextNamespace,
           shapeKey,
-          availableShapeKeys
+          availableShapeKeys,
+          diagnostics
         };
       }
       const admittedResponseRecord = asRecord(admittedTemplate.response.body);
@@ -823,7 +833,8 @@ const resolveRequestContextState = async (
           pageContextNamespace,
           shapeKey,
           availableShapeKeys,
-          observedAt: admittedTemplate.observed_at ?? admittedTemplate.captured_at
+          observedAt: admittedTemplate.observed_at ?? admittedTemplate.captured_at,
+          diagnostics
         };
       }
       const observedAt = admittedTemplate.observed_at ?? admittedTemplate.captured_at;
@@ -834,7 +845,8 @@ const resolveRequestContextState = async (
           pageContextNamespace,
           shapeKey,
           availableShapeKeys,
-          observedAt
+          observedAt,
+          diagnostics
         };
       }
       return {
@@ -874,7 +886,8 @@ const resolveRequestContextState = async (
           pageContextNamespace,
           shapeKey,
           availableShapeKeys,
-          observedAt: rejectedObservation.observed_at ?? rejectedObservation.captured_at
+          observedAt: rejectedObservation.observed_at ?? rejectedObservation.captured_at,
+          diagnostics
         };
       }
       const rejectedDetail = resolveRejectedSourceDetail(rejectedObservation);
@@ -888,7 +901,8 @@ const resolveRequestContextState = async (
         pageContextNamespace,
         shapeKey,
         availableShapeKeys,
-        observedAt: rejectedObservation.observed_at ?? rejectedObservation.captured_at
+        observedAt: rejectedObservation.observed_at ?? rejectedObservation.captured_at,
+        diagnostics
       };
     }
 
@@ -901,7 +915,8 @@ const resolveRequestContextState = async (
           shapeKey,
           availableShapeKeys: siblingShapeKeys,
           observedAt:
-            incompatibleObservation?.observed_at ?? incompatibleObservation?.captured_at ?? undefined
+            incompatibleObservation?.observed_at ?? incompatibleObservation?.captured_at ?? undefined,
+          diagnostics
         };
       }
       return {
@@ -911,7 +926,8 @@ const resolveRequestContextState = async (
         shapeKey,
         availableShapeKeys: siblingShapeKeys,
         observedAt:
-          incompatibleObservation?.observed_at ?? incompatibleObservation?.captured_at ?? undefined
+          incompatibleObservation?.observed_at ?? incompatibleObservation?.captured_at ?? undefined,
+        diagnostics
       };
     }
 
@@ -920,7 +936,8 @@ const resolveRequestContextState = async (
       failureReason: "template_missing",
       pageContextNamespace,
       shapeKey,
-      availableShapeKeys
+      availableShapeKeys,
+      diagnostics
     };
   };
 
@@ -1434,6 +1451,9 @@ export const executeXhsSearch = async (
             page_context_namespace: requestContextState.pageContextNamespace,
             shape_key: requestContextState.shapeKey,
             available_shape_keys: requestContextState.availableShapeKeys,
+            ...(requestContextState.diagnostics
+              ? { request_context_diagnostics: requestContextState.diagnostics }
+              : {}),
             ...(requestContextState.statusCode !== undefined
               ? { status_code: requestContextState.statusCode }
               : {}),
@@ -1534,7 +1554,10 @@ export const executeXhsSearch = async (
               reason: requestContextState.failureReason,
               page_context_namespace: requestContextState.pageContextNamespace,
               shape_key: requestContextState.shapeKey,
-              available_shape_keys: requestContextState.availableShapeKeys
+              available_shape_keys: requestContextState.availableShapeKeys,
+              ...(requestContextState.diagnostics
+                ? { diagnostics: requestContextState.diagnostics }
+                : {})
             }
           },
           observability: createObservability({
@@ -1560,6 +1583,9 @@ export const executeXhsSearch = async (
           page_context_namespace: requestContextState.pageContextNamespace,
           shape_key: requestContextState.shapeKey,
           available_shape_keys: requestContextState.availableShapeKeys,
+          ...(requestContextState.diagnostics
+            ? { request_context_diagnostics: requestContextState.diagnostics }
+            : {}),
           ...(requestContextState.detailReason
             ? { rejected_source_reason: requestContextState.detailReason }
             : {}),

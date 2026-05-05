@@ -264,6 +264,7 @@ const readCapturedContext = async (input: {
   runId?: string;
   actionRef?: string;
   pageUrl?: string;
+  minObservedAt?: number;
 }) => {
   await flushMicrotasks();
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -283,7 +284,8 @@ const readCapturedContext = async (input: {
         ...(typeof input.targetTabId === "number" ? { target_tab_id: input.targetTabId } : {}),
         ...(typeof input.runId === "string" ? { run_id: input.runId } : {}),
         ...(typeof input.actionRef === "string" ? { action_ref: input.actionRef } : {}),
-        ...(typeof input.pageUrl === "string" ? { page_url: input.pageUrl } : {})
+        ...(typeof input.pageUrl === "string" ? { page_url: input.pageUrl } : {}),
+        ...(typeof input.minObservedAt === "number" ? { min_observed_at: input.minObservedAt } : {})
       }
     }
   } as unknown as Event);
@@ -831,15 +833,127 @@ describe("main-world bridge contract", () => {
       pageUrl: SEARCH_PAGE_HREF
     });
 
-    expect(capturedWithoutProvenance).toMatchObject({
-      ok: true,
-      result: {
-        admitted_template: null,
-        rejected_observation: null,
-        incompatible_observation: null
-      }
+      expect(capturedWithoutProvenance).toMatchObject({
+        ok: true,
+        result: {
+          admitted_template: null,
+          rejected_observation: null,
+          incompatible_observation: null,
+          diagnostics: {
+            namespace_bucket_present: true,
+            route_bucket_present: true,
+            route_bucket: {
+              shape_count: 1,
+              artifact_count: 1,
+              filtered_by_provenance_count: 1
+            },
+            exact_bucket: {
+              admitted_template: {
+                provenance_match: false,
+                fresh_for_lookup: true
+              }
+            }
+          }
+        }
+      });
     });
-  });
+
+    it("reports request-context miss diagnostics for absent route buckets", async () => {
+      const emptyEnv = createMockMainWorldEnvironment();
+      installMockDomGlobals({
+        mockWindow: emptyEnv.mockWindow as Window & Record<string, unknown>,
+        mockDocument: emptyEnv.mockDocument
+      });
+      const emptyChannel = await bootstrapMainWorldBridge(emptyEnv.added);
+
+      const emptyCaptured = await readCapturedContext({
+        dispatched: emptyEnv.dispatched,
+        requestEvent: emptyChannel.requestEvent,
+        resultEvent: emptyChannel.resultEvent,
+        requestListener: emptyChannel.requestListener,
+        pageContextNamespace: createPageContextNamespace(SEARCH_PAGE_HREF),
+        shapeKey: createShapeKey({ keyword: "contract" })
+      });
+
+      expect(emptyCaptured).toMatchObject({
+        ok: true,
+        result: {
+          admitted_template: null,
+          available_shape_keys: [],
+          diagnostics: {
+            namespace_bucket_present: false,
+            route_bucket_present: false,
+            exact_bucket_present: false,
+            route_bucket: {
+              shape_count: 0,
+              artifact_count: 0
+            }
+          }
+        }
+      });
+    });
+
+    it("reports request-context miss diagnostics for freshness filters", async () => {
+      const filteredEnv = createMockMainWorldEnvironment();
+      const pageContextNamespace = createPageContextNamespace(SEARCH_PAGE_HREF);
+      filteredEnv.setFetchHandler(async () => {
+        return new Response(JSON.stringify({ code: 0, data: { items: [{ id: "note-001" }] } }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        });
+      });
+      installMockDomGlobals({
+        mockWindow: filteredEnv.mockWindow as Window & Record<string, unknown>,
+        mockDocument: filteredEnv.mockDocument
+      });
+      const filteredChannel = await bootstrapMainWorldBridge(filteredEnv.added);
+      await (filteredEnv.mockWindow.fetch as typeof fetch)(
+        `https://www.xiaohongshu.com${SEARCH_ENDPOINT}`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({ keyword: "contract" })
+        }
+      );
+      await flushMicrotasks();
+      const capturedAfterFreshWindow = await readCapturedContext({
+        dispatched: filteredEnv.dispatched,
+        requestEvent: filteredChannel.requestEvent,
+        resultEvent: filteredChannel.resultEvent,
+        requestListener: filteredChannel.requestListener,
+        pageContextNamespace,
+        shapeKey: createShapeKey({ keyword: "contract" }),
+        minObservedAt: Date.now() + 1
+      });
+
+      expect(capturedAfterFreshWindow).toMatchObject({
+        ok: true,
+        result: {
+          admitted_template: null,
+          available_shape_keys: [],
+          diagnostics: {
+            namespace_bucket_present: true,
+            route_bucket_present: true,
+            exact_bucket_present: true,
+            route_bucket: {
+              shape_count: 1,
+              artifact_count: 1,
+              filtered_by_min_observed_at_count: 1
+            },
+            exact_bucket: {
+              admitted_template: {
+                fresh_for_lookup: false,
+                provenance_match: true
+              }
+            }
+          }
+        }
+      });
+    });
 
   it("binds fresh current-namespace passive templates captured just before provenance is configured", async () => {
     const pageUrl = "https://www.xiaohongshu.com/search_result?keyword=fresh-bind";

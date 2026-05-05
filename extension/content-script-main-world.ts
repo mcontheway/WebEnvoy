@@ -400,7 +400,8 @@ const asCapturedRequestContextLookupResult = (
     incompatible_observation: asRecord(record.incompatible_observation) as CapturedRequestContextLookupResult["incompatible_observation"],
     available_shape_keys: record.available_shape_keys.filter(
       (item): item is string => typeof item === "string"
-    )
+    ),
+    ...(asRecord(record.diagnostics) ? { diagnostics: asRecord(record.diagnostics) ?? {} } : {})
   };
 };
 
@@ -416,20 +417,20 @@ export const readCapturedRequestContextViaMainWorld = async (
   );
   const result = await mainWorldCall<unknown>({
     type: "captured-request-context-read",
-      payload: {
-        method: input.method,
-        path: input.path,
-        ...(pageContextNamespace ? { page_context_namespace: pageContextNamespace } : {}),
-        shape_key: input.shape_key,
-        ...(typeof input.profile_ref === "string" ? { profile_ref: input.profile_ref } : {}),
-        ...(typeof input.session_id === "string" ? { session_id: input.session_id } : {}),
-        ...(typeof input.target_tab_id === "number" ? { target_tab_id: input.target_tab_id } : {}),
-        ...(typeof input.run_id === "string" ? { run_id: input.run_id } : {}),
-        ...(typeof input.action_ref === "string" ? { action_ref: input.action_ref } : {}),
-        ...(typeof input.page_url === "string" ? { page_url: input.page_url } : {}),
-        ...(typeof input.min_observed_at === "number" && Number.isFinite(input.min_observed_at)
-          ? { min_observed_at: input.min_observed_at }
-          : {})
+    payload: {
+      method: input.method,
+      path: input.path,
+      ...(pageContextNamespace ? { page_context_namespace: pageContextNamespace } : {}),
+      shape_key: input.shape_key,
+      ...(typeof input.profile_ref === "string" ? { profile_ref: input.profile_ref } : {}),
+      ...(typeof input.session_id === "string" ? { session_id: input.session_id } : {}),
+      ...(typeof input.target_tab_id === "number" ? { target_tab_id: input.target_tab_id } : {}),
+      ...(typeof input.run_id === "string" ? { run_id: input.run_id } : {}),
+      ...(typeof input.action_ref === "string" ? { action_ref: input.action_ref } : {}),
+      ...(typeof input.page_url === "string" ? { page_url: input.page_url } : {}),
+      ...(typeof input.min_observed_at === "number" && Number.isFinite(input.min_observed_at)
+        ? { min_observed_at: input.min_observed_at }
+        : {})
     }
   });
   const normalized = asCapturedRequestContextLookupResult(result);

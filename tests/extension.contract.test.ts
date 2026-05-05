@@ -2443,7 +2443,19 @@ describe("extension build contract", () => {
           getReadyState: () => "complete",
           getCookie: () => "a1=session-cookie",
           sleep,
-          readCapturedRequestContext: async () => null,
+            readCapturedRequestContext: async (lookup) => ({
+              page_context_namespace: lookup.page_context_namespace,
+              shape_key: lookup.shape_key,
+              admitted_template: null,
+              rejected_observation: null,
+              incompatible_observation: null,
+              available_shape_keys: [],
+              diagnostics: {
+                namespace_bucket_present: false,
+                route_bucket_present: false,
+                exact_bucket_present: false
+              }
+            }),
           readPageStateRoot: async () => ({
             feed: {
               items: [
@@ -2543,7 +2555,19 @@ describe("extension build contract", () => {
           getReadyState: () => "complete",
           getCookie: () => "a1=session-cookie",
           sleep,
-          readCapturedRequestContext: async () => null,
+            readCapturedRequestContext: async (lookup) => ({
+              page_context_namespace: lookup.page_context_namespace,
+              shape_key: lookup.shape_key,
+              admitted_template: null,
+              rejected_observation: null,
+              incompatible_observation: null,
+              available_shape_keys: [],
+              diagnostics: {
+                namespace_bucket_present: false,
+                route_bucket_present: false,
+                exact_bucket_present: false
+              }
+            }),
           readPageStateRoot: async () => ({
             feed: {
               items: [
@@ -2595,11 +2619,16 @@ describe("extension build contract", () => {
               }
             ]
           },
-          request_context: {
-            status: "missing"
+            request_context: {
+              status: "missing",
+              diagnostics: {
+                namespace_bucket_present: false,
+                route_bucket_present: false,
+                exact_bucket_present: false
+              }
+            }
           }
         }
-      }
     });
     expect((result.payload.observability as Record<string, unknown>).key_requests).toEqual([]);
 

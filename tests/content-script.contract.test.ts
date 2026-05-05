@@ -210,6 +210,7 @@ const createRuntime = () => {
 
 const createCapturedRequestContextProbeWindow = (input?: {
   admittedTemplate?: Record<string, unknown> | null;
+  diagnostics?: Record<string, unknown> | null;
 }): {
   window: {
     addEventListener: (type: string, listener: EventListener) => void;
@@ -282,7 +283,8 @@ const createCapturedRequestContextProbeWindow = (input?: {
                 admitted_template: input?.admittedTemplate ?? null,
                 rejected_observation: null,
                 incompatible_observation: null,
-                available_shape_keys: []
+                available_shape_keys: [],
+                ...(input?.diagnostics ? { diagnostics: input.diagnostics } : {})
               }
             });
             return true;
@@ -951,6 +953,42 @@ describe("content-script bootstrap contract", () => {
     });
     expect(result).toMatchObject({
       page_context_namespace: createVisitedPageContextNamespace(window.location.href, 1)
+    });
+  });
+
+  it("preserves request-context miss diagnostics returned by main-world reads", async () => {
+    const { window } = createCapturedRequestContextProbeWindow({
+      diagnostics: {
+        namespace_bucket_present: true,
+        route_bucket_present: true,
+        exact_bucket_present: false,
+        route_bucket: {
+          shape_count: 1,
+          filtered_by_provenance_count: 1
+        }
+      }
+    });
+    (globalThis as { window?: unknown }).window = window;
+
+    expect(contentScriptHandlerModule.installMainWorldEventChannelSecret("namespace-secret-002b")).toBe(
+      true
+    );
+
+    const result = await contentScriptHandlerModule.readCapturedRequestContextViaMainWorld({
+      method: "POST",
+      path: "/api/sns/web/v1/search/notes",
+      page_context_namespace: createPageContextNamespace(window.location.href),
+      shape_key: createShapeKey("contract")
+    });
+
+    expect(result?.diagnostics).toMatchObject({
+      namespace_bucket_present: true,
+      route_bucket_present: true,
+      exact_bucket_present: false,
+      route_bucket: {
+        shape_count: 1,
+        filtered_by_provenance_count: 1
+      }
     });
   });
 

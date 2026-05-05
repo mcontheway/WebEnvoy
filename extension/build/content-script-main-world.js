@@ -267,7 +267,8 @@ const asCapturedRequestContextLookupResult = (value) => {
         admitted_template: asRecord(record.admitted_template),
         rejected_observation: asRecord(record.rejected_observation),
         incompatible_observation: asRecord(record.incompatible_observation),
-        available_shape_keys: record.available_shape_keys.filter((item) => typeof item === "string")
+        available_shape_keys: record.available_shape_keys.filter((item) => typeof item === "string"),
+        ...(asRecord(record.diagnostics) ? { diagnostics: asRecord(record.diagnostics) ?? {} } : {})
     };
 };
 export const readCapturedRequestContextViaMainWorld = async (input) => {

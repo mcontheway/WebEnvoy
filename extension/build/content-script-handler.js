@@ -403,7 +403,7 @@ const waitForXhsSearchPassiveActionTurn = async () => {
     });
 };
 const XHS_SEARCH_INPUT_SELECTOR = 'input[type="search"], input[class*="search"], input[placeholder*="搜索"], input[placeholder*="search" i]';
-const XHS_SEARCH_BUTTON_SELECTOR = 'button[type="submit"], button[class*="search"], [role="button"][class*="search"]';
+const XHS_SEARCH_BUTTON_SELECTOR = 'button[type="submit"], button[class*="search" i], [role="button"][class*="search" i], [aria-label*="搜索"], [aria-label*="search" i], [title*="搜索"], [title*="search" i], [class*="search-icon" i], [class*="searchIcon" i], [class*="search-btn" i]';
 const isElementUsableForXhsSearch = (element) => {
     if (!element) {
         return false;
@@ -440,15 +440,69 @@ const queryFirstUsableXhsElement = (selector) => {
             : [];
     return candidates.find((candidate) => isElementUsableForXhsSearch(candidate)) ?? null;
 };
+const readXhsElementSearchText = (element) => {
+    const htmlElement = element;
+    return [
+        htmlElement.id,
+        typeof htmlElement.className === "string" ? htmlElement.className : "",
+        htmlElement.getAttribute?.("aria-label"),
+        htmlElement.getAttribute?.("title"),
+        htmlElement.getAttribute?.("data-testid"),
+        htmlElement.textContent
+    ]
+        .filter((value) => typeof value === "string" && value.trim().length > 0)
+        .join(" ")
+        .toLowerCase();
+};
+const looksLikeXhsSearchSubmitControl = (element) => {
+    const tagName = typeof element.tagName === "string" ? element.tagName.toLowerCase() : "";
+    if (tagName === "input" || tagName === "textarea") {
+        return false;
+    }
+    const elementText = readXhsElementSearchText(element);
+    return (tagName === "button" ||
+        (tagName.length === 0 && typeof element.click === "function") ||
+        element.getAttribute?.("role") === "button" ||
+        elementText.includes("search") ||
+        elementText.includes("搜索"));
+};
+const resolveClickableXhsSearchControl = (element) => {
+    if (!element) {
+        return null;
+    }
+    const candidates = [
+        element,
+        element.closest?.("button"),
+        element.closest?.('[role="button"]'),
+        element.closest?.('[class*="search" i]'),
+        element.closest?.("[aria-label]"),
+        element.closest?.("[title]")
+    ];
+    for (const candidate of candidates) {
+        const clickableCandidate = candidate;
+        if (clickableCandidate &&
+            isElementUsableForXhsSearch(clickableCandidate) &&
+            looksLikeXhsSearchSubmitControl(clickableCandidate) &&
+            typeof clickableCandidate.click === "function") {
+            return clickableCandidate;
+        }
+    }
+    return null;
+};
 const performXhsSearchPassiveAction = async (input) => {
     const queryMatched = isCurrentSearchPageForQuery(window.location.href, input.query);
     const resolveSearchControls = () => {
         const resolvedSearchInput = queryFirstUsableXhsElement(XHS_SEARCH_INPUT_SELECTOR);
         const resolvedSearchForm = resolvedSearchInput?.closest("form");
+        const scopedSearchRoot = resolvedSearchInput?.closest('[class*="search" i], [role="search"], header, nav') ??
+            resolvedSearchForm ??
+            resolvedSearchInput?.parentElement ??
+            null;
         const formSearchButton = resolvedSearchForm?.querySelector(XHS_SEARCH_BUTTON_SELECTOR) ?? null;
-        const resolvedSearchButton = (isElementUsableForXhsSearch(formSearchButton)
-            ? formSearchButton
-            : queryFirstUsableXhsElement(XHS_SEARCH_BUTTON_SELECTOR));
+        const scopedSearchButton = scopedSearchRoot?.querySelector(XHS_SEARCH_BUTTON_SELECTOR) ?? null;
+        const resolvedSearchButton = resolveClickableXhsSearchControl(formSearchButton) ??
+            resolveClickableXhsSearchControl(scopedSearchButton) ??
+            resolveClickableXhsSearchControl(queryFirstUsableXhsElement(XHS_SEARCH_BUTTON_SELECTOR));
         return {
             searchInput: resolvedSearchInput,
             searchForm: resolvedSearchForm,
@@ -477,13 +531,35 @@ const performXhsSearchPassiveAction = async (input) => {
             const preventNativeNavigation = (event) => {
                 event.preventDefault();
             };
+            const isNativeSubmitControlBoundToForm = (candidate, targetForm) => {
+                const tagName = typeof candidate.tagName === "string" ? candidate.tagName.toLowerCase() : "";
+                if (tagName !== "button" && tagName !== "input") {
+                    return false;
+                }
+                const type = candidate.getAttribute?.("type")?.trim().toLowerCase();
+                if (type && type !== "submit") {
+                    return false;
+                }
+                const candidateForm = candidate.form ??
+                    candidate.closest?.("form") ??
+                    null;
+                return candidateForm === targetForm;
+            };
             const preventKeyboardDefault = (event) => {
                 if (event.key === "Enter" || event.code === "Enter") {
                     event.preventDefault();
                 }
             };
-            if (form && options?.preventNativeNavigation === true) {
-                form.addEventListener("submit", preventNativeNavigation, { capture: true, once: true });
+            let submitObserved = false;
+            const observeSubmit = (event) => {
+                submitObserved = true;
+                if (options?.preventNativeNavigation === true) {
+                    preventNativeNavigation(event);
+                }
+            };
+            if (form &&
+                (options?.preventNativeNavigation === true || options?.preferButtonClick === true)) {
+                form.addEventListener("submit", observeSubmit, { capture: true, once: true });
             }
             if (options?.preventKeyboardDefault === true &&
                 typeof target.addEventListener === "function") {
@@ -494,6 +570,17 @@ const performXhsSearchPassiveAction = async (input) => {
                 target.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }));
             }
             try {
+                if (options?.preferButtonClick === true && button && typeof button.click === "function") {
+                    button.click();
+                    if (form &&
+                        !submitObserved &&
+                        !isNativeSubmitControlBoundToForm(button, form) &&
+                        typeof form.requestSubmit === "function") {
+                        form.requestSubmit();
+                        return "button_click_form_request_submit_fallback";
+                    }
+                    return "button_click";
+                }
                 if (form && typeof form.requestSubmit === "function") {
                     form.requestSubmit();
                     return "form_request_submit";
@@ -513,8 +600,9 @@ const performXhsSearchPassiveAction = async (input) => {
                     typeof target.removeEventListener === "function") {
                     target.removeEventListener("keydown", preventKeyboardDefault, { capture: true });
                 }
-                if (form && options?.preventNativeNavigation === true) {
-                    form.removeEventListener("submit", preventNativeNavigation, { capture: true });
+                if (form &&
+                    (options?.preventNativeNavigation === true || options?.preferButtonClick === true)) {
+                    form.removeEventListener("submit", observeSubmit, { capture: true });
                 }
             }
         };
@@ -637,7 +725,8 @@ const performXhsSearchPassiveAction = async (input) => {
                 preflightSubmittedAt = Date.now();
                 sameQueryPreflightSubmitTriggered = triggerSubmit(searchInput, searchForm, searchButton, {
                     preventNativeNavigation: true,
-                    preventKeyboardDefault: true
+                    preventKeyboardDefault: true,
+                    preferButtonClick: Boolean(searchButton)
                 });
                 sameQueryPreflightSubmitted = true;
                 await waitForXhsSearchPassiveActionTurn();
@@ -708,7 +797,9 @@ const performXhsSearchPassiveAction = async (input) => {
             await waitForXhsSearchPassiveActionTurn();
             inputSettleWaits += 1;
         }
-        const submitTriggered = triggerSubmit(searchInput, searchForm, searchButton);
+        const submitTriggered = triggerSubmit(searchInput, searchForm, searchButton, {
+            preferButtonClick: Boolean(searchButton)
+        });
         return {
             evidence_class: "humanized_action",
             action_kind: "keyboard_input",

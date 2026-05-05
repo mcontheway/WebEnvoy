@@ -1869,6 +1869,11 @@ describe("content-script handler contract", () => {
     }
 
     const searchButton = {
+      className: "search-icon",
+      closest: () => null,
+      form: null,
+      getAttribute: (name: string) => (name === "type" ? "submit" : null),
+      tagName: "button",
       click: () => {
         buttonClickCount += 1;
         eventSequence.push("buttonClick");
@@ -2155,14 +2160,14 @@ describe("content-script handler contract", () => {
         expect(perturbValue).toBe("露x");
         const perturbValueIndex = eventSequence.indexOf(`value:${perturbValue}`);
         const restoredValueIndex = eventSequence.lastIndexOf("value:露");
-        const preflightSubmitIndex = eventSequence.indexOf("requestSubmit");
-        const finalSubmitIndex = eventSequence.lastIndexOf("requestSubmit");
+        const preflightSubmitIndex = eventSequence.indexOf("buttonClick");
+        const finalSubmitIndex = eventSequence.lastIndexOf("buttonClick");
         const firstKeydownIndex = eventSequence.indexOf("keydown");
         const guardedKeydownIndex = eventSequence.indexOf("keydown:defaultPrevented");
         expect(settleTimeouts.filter((timeout) => timeout === 180)).toHaveLength(5);
         expect(submitCount).toBe(2);
         expect(preventedSubmitCount).toBe(1);
-        expect(buttonClickCount).toBe(0);
+        expect(buttonClickCount).toBe(2);
         expect(capturedLookupCount).toBeGreaterThan(0);
         expect(perturbValueIndex).toBeGreaterThan(-1);
         expect(preflightSubmitIndex).toBeGreaterThan(perturbValueIndex);
@@ -2180,7 +2185,7 @@ describe("content-script handler contract", () => {
             same_query_input_matched: true,
             same_query_perturbed: true,
             same_query_preflight_submitted: true,
-            same_query_preflight_submit_triggered: "form_request_submit",
+            same_query_preflight_submit_triggered: "button_click_form_request_submit_fallback",
             same_query_preflight_mode: "guarded_submit",
             same_query_preflight_state_change_observed: true,
             same_query_preflight_state_change_source: "passive_request_context",
@@ -2189,7 +2194,7 @@ describe("content-script handler contract", () => {
             same_query_search_input_refresh_source: "selector",
             pre_submit_value_changed: true,
             input_settle_waits: 5,
-            submit_triggered: "form_request_submit"
+            submit_triggered: "button_click_form_request_submit_fallback"
           }
         });
       });
