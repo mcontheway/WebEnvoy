@@ -12,7 +12,7 @@ import { toSessionRhythmStatusView } from "../runtime/xhs-closeout-rhythm.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import { buildUnifiedRiskStateOutput, resolveRiskState } from "../runtime/risk-state.js";
 import { RuntimeStoreError, SQLiteRuntimeStore, resolveRuntimeStorePath } from "../runtime/store/sqlite-runtime-store.js";
-import { persistXhsCloseoutValidationSourceEvidence, persistXhsCloseoutValidationSourceSamples, readXhsCloseoutValidationGateView, toXhsCloseoutValidationGateJson } from "../runtime/anti-detection-validation.js";
+import { persistXhsCloseoutValidationSourceEvidence, persistXhsCloseoutValidationSourceSamples, readXhsCloseoutValidationGateView, resolveXhsCloseoutReadinessBaselineExecutionMode, toXhsCloseoutValidationGateJson } from "../runtime/anti-detection-validation.js";
 const asBoolean = (value) => value === true;
 const asString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
@@ -128,7 +128,7 @@ const buildSessionRhythmStatusViewForProfile = async (cwd, profile, input) => {
 const resolveAntiDetectionEffectiveExecutionMode = (value) => {
     const mode = asString(value) ?? "live_read_high_risk";
     if (isAntiDetectionExecutionMode(mode)) {
-        return mode;
+        return resolveXhsCloseoutReadinessBaselineExecutionMode(mode);
     }
     return "live_read_high_risk";
 };

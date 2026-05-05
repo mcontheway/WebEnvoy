@@ -2882,6 +2882,92 @@ describe("normalizeGateOptionsForContract", () => {
     }
   });
 
+  it("allows XHS live_read_limited reads with the closeout readiness baseline", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-limited-validation-ready-"));
+    const runId = "run-validation-ready-limited-search-001";
+    const requestId = "issue209-validation-ready-limited-search-001";
+    const gateInvocationId = "issue209-gate-validation-ready-limited-search-001";
+    const decisionId = `gate_decision_${gateInvocationId}`;
+    const approvalId = `gate_appr_${decisionId}`;
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+    const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    process.env.WEBENVOY_NATIVE_TRANSPORT = "loopback";
+    process.env.WEBENVOY_BROWSER_PATH = join(process.cwd(), "tests", "fixtures", "mock-browser.sh");
+    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Chromium 146.0.0.0";
+    try {
+      await seedXhsCloseoutReady({ cwd, profile: "xhs_validation_ready_limited_profile" });
+
+      const result = await executeCommand(
+        {
+          cwd,
+          command: "xhs.search",
+          profile: "xhs_validation_ready_limited_profile",
+          run_id: runId,
+          params: {
+            request_id: requestId,
+            gate_invocation_id: gateInvocationId,
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              query: "露营"
+            },
+            options: {
+              simulate_result: "success",
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 32,
+              target_page: "search_result_tab",
+              action_type: "read",
+              requested_execution_mode: "live_read_limited",
+              risk_state: "limited",
+              limited_read_rollout_ready_true: true,
+              approval_record: createIssue209FormalApprovalRecord(decisionId, approvalId),
+              audit_record: {
+                ...createIssue209FormalAuditRecord(requestId, decisionId, approvalId),
+                requested_execution_mode: "live_read_limited",
+                risk_state: "limited"
+              }
+            }
+          }
+        } as RuntimeContext,
+        createCommandRegistry()
+      );
+
+      expect(result.summary).toMatchObject({
+        gate_outcome: {
+          effective_execution_mode: "live_read_limited",
+          gate_decision: "allowed",
+          gate_reasons: ["LIVE_MODE_APPROVED"]
+        },
+        request_admission_result: {
+          request_ref: requestId,
+          admission_decision: "allowed"
+        }
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+      if (previousTransport === undefined) {
+        delete process.env.WEBENVOY_NATIVE_TRANSPORT;
+      } else {
+        process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
+      }
+      if (previousBrowserPath === undefined) {
+        delete process.env.WEBENVOY_BROWSER_PATH;
+      } else {
+        process.env.WEBENVOY_BROWSER_PATH = previousBrowserPath;
+      }
+      if (previousBrowserMockVersion === undefined) {
+        delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+      } else {
+        process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
+      }
+    }
+  });
+
   it("preserves persisted cooldown before XHS closeout live execution", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-persisted-cooldown-"));
     const profile = "xhs_persisted_cooldown_profile";

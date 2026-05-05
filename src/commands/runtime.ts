@@ -38,6 +38,7 @@ import {
   persistXhsCloseoutValidationSourceEvidence,
   persistXhsCloseoutValidationSourceSamples,
   readXhsCloseoutValidationGateView,
+  resolveXhsCloseoutReadinessBaselineExecutionMode,
   toXhsCloseoutValidationGateJson,
   type XhsCloseoutValidationSignalMap
 } from "../runtime/anti-detection-validation.js";
@@ -186,7 +187,7 @@ const buildSessionRhythmStatusViewForProfile = async (
 const resolveAntiDetectionEffectiveExecutionMode = (value: unknown) => {
   const mode = asString(value) ?? "live_read_high_risk";
   if (isAntiDetectionExecutionMode(mode)) {
-    return mode;
+    return resolveXhsCloseoutReadinessBaselineExecutionMode(mode);
   }
   return "live_read_high_risk";
 };

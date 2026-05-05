@@ -17,6 +17,7 @@ export const XHS_CLOSEOUT_REQUIRED_VALIDATION_SCOPES = [
         validationScope: "layer3_session_rhythm"
     }
 ];
+export const resolveXhsCloseoutReadinessBaselineExecutionMode = (mode) => mode === "live_read_limited" ? "live_read_high_risk" : mode;
 const toViewJson = (view) => view ? { ...view } : null;
 export const toXhsCloseoutValidationGateJson = (gate) => ({
     profile_ref: gate.profile_ref,

@@ -52,6 +52,11 @@ export interface XhsCloseoutValidationGateView {
   blocking_target_fr_refs: string[];
 }
 
+export const resolveXhsCloseoutReadinessBaselineExecutionMode = (
+  mode: AntiDetectionExecutionMode
+): AntiDetectionExecutionMode =>
+  mode === "live_read_limited" ? "live_read_high_risk" : mode;
+
 const toViewJson = (view: AntiDetectionValidationViewRecord | null): JsonObject | null =>
   view ? ({ ...view } as unknown as JsonObject) : null;
 

@@ -12,7 +12,7 @@ import { isAccountSafetyReason, toAccountSafetyStatus } from "../runtime/account
 import { toSessionRhythmStatusView, toXhsCloseoutRhythmStatus } from "../runtime/xhs-closeout-rhythm.js";
 import { ProfileRuntimeService } from "../runtime/profile-runtime.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
-import { readXhsCloseoutValidationGateView, toXhsCloseoutValidationGateJson } from "../runtime/anti-detection-validation.js";
+import { readXhsCloseoutValidationGateView, resolveXhsCloseoutReadinessBaselineExecutionMode, toXhsCloseoutValidationGateJson } from "../runtime/anti-detection-validation.js";
 import { RuntimeStoreError, SQLiteRuntimeStore, resolveRuntimeStorePath } from "../runtime/store/sqlite-runtime-store.js";
 import { prepareOfficialChromeRuntime } from "../runtime/official-chrome-runtime.js";
 import { buildCapabilityResult, ISSUE209_INTERNAL_ADMISSION_DRAFT_KEY, normalizeGateOptionsForContract, parseAbilityEnvelopeForContract, parseDetailInputForContract, parseSearchInputForContract, parseUserHomeInputForContract, prepareIssue209LiveReadEnvelopeForContract } from "./xhs-input.js";
@@ -837,7 +837,7 @@ const xhsReadCommand = async (context, inputConfig) => {
                     antiDetectionValidationGate = await readXhsCloseoutValidationGateView({
                         store,
                         profile: context.profile,
-                        effectiveExecutionMode: gate.requestedExecutionMode
+                        effectiveExecutionMode: resolveXhsCloseoutReadinessBaselineExecutionMode(gate.requestedExecutionMode)
                     });
                 }
                 catch (error) {
