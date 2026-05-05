@@ -388,6 +388,10 @@ const isCurrentSearchPageForQuery = (href, query) => {
         return false;
     }
 };
+const createSameQuerySearchPerturbation = (query, currentValue) => {
+    const candidates = [`${query} `, query.slice(0, Math.max(0, query.length - 1)), `${query}x`];
+    return candidates.find((candidate) => candidate !== currentValue && candidate !== query) ?? `${query}x`;
+};
 const performXhsSearchPassiveAction = async (input) => {
     const queryMatched = isCurrentSearchPageForQuery(window.location.href, input.query);
     const searchInput = document.querySelector('input[type="search"], input[class*="search"], input[placeholder*="搜索"], input[placeholder*="search" i]');
@@ -395,10 +399,33 @@ const performXhsSearchPassiveAction = async (input) => {
         const searchForm = searchInput.closest("form");
         const searchButton = (searchForm?.querySelector('button[type="submit"], button[class*="search"], [role="button"][class*="search"]') ?? document.querySelector('button[type="submit"], button[class*="search"], [role="button"][class*="search"]'));
         const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        const setSearchInputValue = (value) => {
+            if (valueSetter) {
+                valueSetter.call(searchInput, value);
+            }
+            else {
+                searchInput.value = value;
+            }
+        };
+        const dispatchTextChange = (value) => {
+            searchInput.dispatchEvent(new InputEvent("input", { bubbles: true, data: value }));
+            searchInput.dispatchEvent(new Event("change", { bubbles: true }));
+        };
+        const currentInputValue = searchInput.value;
+        const sameQueryInputMatched = queryMatched &&
+            normalizeSearchQueryText(currentInputValue) === normalizeSearchQueryText(input.query);
+        let sameQueryPerturbed = false;
+        let preSubmitValueChanged = false;
         searchInput.focus();
-        valueSetter?.call(searchInput, input.query);
-        searchInput.dispatchEvent(new InputEvent("input", { bubbles: true, data: input.query }));
-        searchInput.dispatchEvent(new Event("change", { bubbles: true }));
+        if (sameQueryInputMatched) {
+            const perturbedValue = createSameQuerySearchPerturbation(input.query, currentInputValue);
+            setSearchInputValue(perturbedValue);
+            dispatchTextChange(perturbedValue);
+            sameQueryPerturbed = true;
+            preSubmitValueChanged = searchInput.value !== currentInputValue;
+        }
+        setSearchInputValue(input.query);
+        dispatchTextChange(input.query);
         searchInput.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }));
         searchInput.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }));
         if (searchForm && typeof searchForm.requestSubmit === "function") {
@@ -419,6 +446,9 @@ const performXhsSearchPassiveAction = async (input) => {
             query: input.query,
             query_matched: queryMatched,
             search_input_found: true,
+            same_query_input_matched: sameQueryInputMatched,
+            same_query_perturbed: sameQueryPerturbed,
+            pre_submit_value_changed: preSubmitValueChanged,
             search_form_found: Boolean(searchForm),
             search_button_found: Boolean(searchButton),
             submit_triggered: searchForm && typeof searchForm.requestSubmit === "function"

@@ -566,6 +566,11 @@ const isCurrentSearchPageForQuery = (href: string, query: string): boolean => {
   }
 };
 
+const createSameQuerySearchPerturbation = (query: string, currentValue: string): string => {
+  const candidates = [`${query} `, query.slice(0, Math.max(0, query.length - 1)), `${query}x`];
+  return candidates.find((candidate) => candidate !== currentValue && candidate !== query) ?? `${query}x`;
+};
+
 const performXhsSearchPassiveAction = async (input: {
   query: string;
   pageUrl: string;
@@ -587,10 +592,33 @@ const performXhsSearchPassiveAction = async (input: {
       HTMLInputElement.prototype,
       "value"
     )?.set;
+    const setSearchInputValue = (value: string) => {
+      if (valueSetter) {
+        valueSetter.call(searchInput, value);
+      } else {
+        searchInput.value = value;
+      }
+    };
+    const dispatchTextChange = (value: string) => {
+      searchInput.dispatchEvent(new InputEvent("input", { bubbles: true, data: value }));
+      searchInput.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    const currentInputValue = searchInput.value;
+    const sameQueryInputMatched =
+      queryMatched &&
+      normalizeSearchQueryText(currentInputValue) === normalizeSearchQueryText(input.query);
+    let sameQueryPerturbed = false;
+    let preSubmitValueChanged = false;
     searchInput.focus();
-    valueSetter?.call(searchInput, input.query);
-    searchInput.dispatchEvent(new InputEvent("input", { bubbles: true, data: input.query }));
-    searchInput.dispatchEvent(new Event("change", { bubbles: true }));
+    if (sameQueryInputMatched) {
+      const perturbedValue = createSameQuerySearchPerturbation(input.query, currentInputValue);
+      setSearchInputValue(perturbedValue);
+      dispatchTextChange(perturbedValue);
+      sameQueryPerturbed = true;
+      preSubmitValueChanged = searchInput.value !== currentInputValue;
+    }
+    setSearchInputValue(input.query);
+    dispatchTextChange(input.query);
     searchInput.dispatchEvent(
       new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" })
     );
@@ -613,6 +641,9 @@ const performXhsSearchPassiveAction = async (input: {
       query: input.query,
       query_matched: queryMatched,
       search_input_found: true,
+      same_query_input_matched: sameQueryInputMatched,
+      same_query_perturbed: sameQueryPerturbed,
+      pre_submit_value_changed: preSubmitValueChanged,
       search_form_found: Boolean(searchForm),
       search_button_found: Boolean(searchButton),
       submit_triggered:

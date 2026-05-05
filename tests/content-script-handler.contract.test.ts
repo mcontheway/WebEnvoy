@@ -1731,6 +1731,205 @@ describe("content-script handler contract", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
+  it("perturbs same-query xhs.search input state before restoring the original query for passive submit", async () => {
+    const href = "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5&type=51";
+    const runId = "run-xhs-search-same-query-passive-action-001";
+    const issue209Linkage = createIssue209InvocationLinkage(runId, "same-query-passive-action");
+    const previousEvent = (globalThis as { Event?: unknown }).Event;
+    const previousInputEvent = (globalThis as { InputEvent?: unknown }).InputEvent;
+    const previousKeyboardEvent = (globalThis as { KeyboardEvent?: unknown }).KeyboardEvent;
+    const previousHTMLInputElement = (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement;
+    const valueSequence: string[] = [];
+    const eventSequence: string[] = [];
+
+    class MockEventImpl implements MockEvent {
+      readonly type: string;
+      readonly bubbles: boolean;
+      readonly cancelable: boolean;
+
+      constructor(type: string, init?: { bubbles?: boolean; cancelable?: boolean }) {
+        this.type = type;
+        this.bubbles = init?.bubbles === true;
+        this.cancelable = init?.cancelable === true;
+      }
+    }
+    class MockInputEventImpl extends MockEventImpl {
+      readonly data: string | null;
+
+      constructor(type: string, init?: { bubbles?: boolean; data?: string }) {
+        super(type, init);
+        this.data = init?.data ?? null;
+      }
+    }
+    class MockKeyboardEventImpl extends MockEventImpl {
+      readonly key: string;
+      readonly code: string;
+
+      constructor(
+        type: string,
+        init?: { bubbles?: boolean; cancelable?: boolean; key?: string; code?: string }
+      ) {
+        super(type, init);
+        this.key = init?.key ?? "";
+        this.code = init?.code ?? "";
+      }
+    }
+    class MockHTMLInputElementImpl {
+      #value = "露营";
+
+      get value() {
+        return this.#value;
+      }
+
+      set value(value: string) {
+        this.#value = value;
+        valueSequence.push(value);
+        eventSequence.push(`value:${value}`);
+      }
+
+      focus() {
+        eventSequence.push("focus");
+      }
+
+      dispatchEvent(event: MockEvent) {
+        eventSequence.push(event.type);
+        return true;
+      }
+
+      closest(selector: string) {
+        return selector === "form" ? searchForm : null;
+      }
+    }
+
+    const searchForm = {
+      querySelector: () => null,
+      requestSubmit: () => {
+        eventSequence.push("requestSubmit");
+      },
+      dispatchEvent: (event: MockEvent) => {
+        eventSequence.push(event.type);
+        return true;
+      }
+    };
+    const searchInput = new MockHTMLInputElementImpl();
+
+    (globalThis as { Event?: unknown }).Event = MockEventImpl;
+    (globalThis as { InputEvent?: unknown }).InputEvent = MockInputEventImpl;
+    (globalThis as { KeyboardEvent?: unknown }).KeyboardEvent = MockKeyboardEventImpl;
+    (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement = MockHTMLInputElementImpl;
+
+    try {
+      await withMockMainWorld(async ({ mockWindow }) => {
+        mockWindow.location.href = href;
+        (globalThis as { document: Document }).document = {
+          title: "露营 - 小红书搜索",
+          readyState: "complete",
+          cookie: "a1=session-token",
+          querySelector: (selector: string) =>
+            selector.startsWith('input[type="search"]') ? searchInput : null,
+          documentElement: {
+            appendChild: (node: unknown) => node
+          },
+          createElement: () => ({
+            textContent: "",
+            remove: () => {}
+          })
+        } as unknown as Document;
+        const handler = new ContentScriptHandler();
+        const results: Array<Record<string, unknown>> = [];
+        handler.onResult((message) => {
+          results.push(message as unknown as Record<string, unknown>);
+        });
+
+        handler.onBackgroundMessage({
+          kind: "forward",
+          id: runId,
+          runId,
+          tabId: 1,
+          profile: "profile-a",
+          cwd: "/workspace/WebEnvoy",
+          timeoutMs: 1_000,
+          command: "xhs.search",
+          params: {
+            session_id: "nm-session-001"
+          },
+          commandParams: {
+            request_id: "issue621-same-query-passive-action-001",
+            gate_invocation_id: issue209Linkage.gateInvocationId,
+            requested_execution_mode: "live_read_limited",
+            ability: {
+              id: "xhs.note.search.v1",
+              layer: "L3",
+              action: "read"
+            },
+            input: {
+              query: "露营"
+            },
+            options: {
+              issue_scope: "issue_209",
+              target_domain: "www.xiaohongshu.com",
+              target_tab_id: 1,
+              target_page: "search_result_tab",
+              action_type: "read",
+              risk_state: "limited",
+              limited_read_rollout_ready_true: true,
+              approval_record: createApprovedReadApprovalRecord(),
+              audit_record: createApprovedReadAuditRecord({
+                runId,
+                requestId: runId,
+                commandRequestId: "issue621-same-query-passive-action-001",
+                gateInvocationId: issue209Linkage.gateInvocationId
+              }),
+              admission_context: createApprovedReadAdmissionContext({
+                runId,
+                requestId: runId,
+                commandRequestId: "issue621-same-query-passive-action-001",
+                gateInvocationId: issue209Linkage.gateInvocationId
+              })
+            }
+          },
+          fingerprintContext: {
+            ...createFingerprintContext(),
+            injection: {
+              installed: true,
+              required_patches: [],
+              missing_required_patches: [],
+              source: "main_world"
+            }
+          }
+        });
+
+        await waitForResult(results);
+
+        expect(results[0]?.ok).toBe(true);
+        expect(valueSequence.length).toBeGreaterThanOrEqual(2);
+        const perturbValue = valueSequence.find((value) => value !== "露营");
+        expect(perturbValue).toBeTruthy();
+        const perturbValueIndex = eventSequence.indexOf(`value:${perturbValue}`);
+        const restoredValueIndex = eventSequence.lastIndexOf("value:露营");
+        const submitIndex = eventSequence.indexOf("requestSubmit");
+        expect(perturbValueIndex).toBeGreaterThan(-1);
+        expect(restoredValueIndex).toBeGreaterThan(perturbValueIndex);
+        expect(submitIndex).toBeGreaterThan(restoredValueIndex);
+        const payload = results[0]?.payload as Record<string, unknown>;
+        const summary = payload?.summary as Record<string, unknown>;
+        expect(summary?.route_evidence).toMatchObject({
+          evidence_class: "passive_api_capture",
+          humanized_action: {
+            same_query_input_matched: true,
+            same_query_perturbed: true,
+            pre_submit_value_changed: true
+          }
+        });
+      });
+    } finally {
+      (globalThis as { Event?: unknown }).Event = previousEvent;
+      (globalThis as { InputEvent?: unknown }).InputEvent = previousInputEvent;
+      (globalThis as { KeyboardEvent?: unknown }).KeyboardEvent = previousKeyboardEvent;
+      (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement = previousHTMLInputElement;
+    }
+  });
+
   it("fails closed for xhs.search when passive request-context provenance is not confirmed", async () => {
     const href = "https://www.xiaohongshu.com/search_result?keyword=%E9%9C%B2%E8%90%A5&type=51";
     const runId = "run-xhs-search-passive-provenance-blocked-001";
