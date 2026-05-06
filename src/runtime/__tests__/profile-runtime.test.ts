@@ -2705,6 +2705,7 @@ describe("profile-runtime identity preflight", () => {
       runtimeTakeoverEvidence: expect.objectContaining({
         mode: "stale_bootstrap_rebind",
         staleBootstrapRecoverable: true,
+        transportBootstrapViable: true,
         freshness: "fresh",
 	        ownerConflictFree: true,
 	        observedRuntimeSessionId: "nm-session-stale-bootstrap-001",

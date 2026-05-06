@@ -2314,13 +2314,14 @@ export class ProfileRuntimeService {
       Number.isInteger(input.pinnedControllerPid) &&
       Number.isInteger(input.browserPid) &&
       input.stateRunId === input.observedRunId;
-    const transportBootstrapViable =
-      input.readiness.transportState !== "not_connected" &&
-      input.readiness.bootstrapState !== "stale";
     const readyAttach = !input.lockHeld && input.attachableReadyRuntime;
     const recoverableRebind = !input.lockHeld && !readyAttach && input.orphanRecoverable;
     const staleBootstrapRebind =
       !input.lockHeld && !readyAttach && !recoverableRebind && input.staleBootstrapRecoverable;
+    const transportBootstrapViable = staleBootstrapRebind
+      ? input.readiness.transportState === "ready" && input.readiness.bootstrapState === "stale"
+      : input.readiness.transportState !== "not_connected" &&
+        input.readiness.bootstrapState !== "stale";
     const staleObservedRuntimeInstanceId = asNonEmptyString(
       readinessDetails.observed_runtime_instance_id
     );
@@ -2343,9 +2344,7 @@ export class ProfileRuntimeService {
       orphanRecoverable: recoverableRebind,
       staleBootstrapRecoverable: staleBootstrapRebind,
       freshness:
-        controllerBrowserContinuity &&
-        (transportBootstrapViable || staleBootstrapRebind) &&
-        input.healthyLock
+        controllerBrowserContinuity && transportBootstrapViable && input.healthyLock
           ? "fresh"
           : "stale",
       identityBound: input.readiness.identityBindingState === "bound",

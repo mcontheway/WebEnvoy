@@ -15,6 +15,7 @@ const buildRuntimeTakeoverEvidence = (input: {
   identityBound?: boolean;
   ownerConflictFree?: boolean;
   controllerBrowserContinuity?: boolean;
+  transportBootstrapViable?: boolean;
   observedRunId?: string;
   observedRuntimeSessionId?: string | null;
   observedRuntimeInstanceId?: string | null;
@@ -35,6 +36,7 @@ const buildRuntimeTakeoverEvidence = (input: {
   identityBound: input.identityBound ?? true,
   ownerConflictFree: input.ownerConflictFree ?? true,
   controllerBrowserContinuity: input.controllerBrowserContinuity ?? true,
+  transportBootstrapViable: input.transportBootstrapViable ?? true,
   observedRunId: input.observedRunId ?? "observed-runtime-001",
   observedRuntimeSessionId: input.observedRuntimeSessionId ?? null,
   observedRuntimeInstanceId: input.observedRuntimeInstanceId ?? null,
@@ -731,6 +733,81 @@ describe("prepareOfficialChromeRuntime", () => {
         observedRunId: "run-runtime-stale-bootstrap-owner-001",
         observedRuntimeSessionId: "nm-session-stale-bootstrap-001",
         observedRuntimeInstanceId: "nm-session-other:run-runtime-stale-bootstrap-owner-001:wrong-context",
+        runtimeContextId: buildRuntimeBootstrapContextId(
+          "official_stale_bootstrap_blocked_profile",
+          "run-runtime-stale-bootstrap-owner-001"
+        ),
+        requestRunId: "run-runtime-stale-bootstrap-next-001",
+        requestRuntimeContextId: buildRuntimeBootstrapContextId(
+          "official_stale_bootstrap_blocked_profile",
+          "run-runtime-stale-bootstrap-next-001"
+        ),
+        managedTargetTabId: 52,
+        managedTargetDomain: "www.xiaohongshu.com",
+        managedTargetPage: "search_result_tab",
+        targetTabContinuity: "runtime_trust_state",
+        takeoverEvidenceObservedAt: "2999-01-01T00:00:00.000Z"
+      })
+    }));
+    const attachRuntime = vi.fn();
+    const bridge = {
+      runCommand: vi.fn()
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_stale_bootstrap_blocked_profile",
+          run_id: "run-runtime-stale-bootstrap-next-001",
+          command: "xhs.search",
+          params: {}
+        } as never,
+        consumerId: "xhs.search",
+        requestedExecutionMode: "live_read_limited",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        bootstrapTargetTabId: 52,
+        bootstrapTargetDomain: "www.xiaohongshu.com",
+        bootstrapTargetPage: "search_result_tab",
+        attachRuntime,
+        readStatus
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_BOOTSTRAP_ACK_STALE"
+    });
+
+    expect(attachRuntime).not.toHaveBeenCalled();
+    expect(bridge.runCommand).not.toHaveBeenCalled();
+  });
+
+  it("keeps stale bootstrap blocked when transport bootstrap viability is missing", async () => {
+    const readStatus = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "blocked",
+      identityBindingState: "bound",
+      bootstrapState: "stale",
+      transportState: "ready",
+      lockHeld: false,
+      executionSurface: "real_browser",
+      headless: false,
+      profile: "official_stale_bootstrap_blocked_profile",
+      runId: "run-runtime-stale-bootstrap-next-001",
+      runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+        mode: "stale_bootstrap_rebind",
+        staleBootstrapRecoverable: true,
+        transportBootstrapViable: false,
+        observedRunId: "run-runtime-stale-bootstrap-owner-001",
+        observedRuntimeSessionId: "nm-session-stale-bootstrap-001",
+        observedRuntimeInstanceId: `nm-session-stale-bootstrap-001:run-runtime-stale-bootstrap-owner-001:${buildRuntimeBootstrapContextId(
+          "official_stale_bootstrap_blocked_profile",
+          "run-runtime-stale-bootstrap-owner-001"
+        )}`,
         runtimeContextId: buildRuntimeBootstrapContextId(
           "official_stale_bootstrap_blocked_profile",
           "run-runtime-stale-bootstrap-owner-001"

@@ -19,6 +19,7 @@ import { buildRuntimeBootstrapContextId } from "../runtime/runtime-bootstrap.js"
 import { buildFingerprintContextForMeta, appendFingerprintContext } from "../runtime/fingerprint-runtime.js";
 import { ProfileStore } from "../runtime/profile-store.js";
 import { toSessionRhythmStatusView } from "../runtime/xhs-closeout-rhythm.js";
+import { buildCloseoutRuntimeReadinessPreflight } from "../runtime/closeout-runtime-readiness.js";
 import { resolveRuntimeProfileRoot } from "../runtime/worktree-root.js";
 import {
   buildUnifiedRiskStateOutput,
@@ -2242,6 +2243,22 @@ const runtimeStatus = async (context: RuntimeContext) =>
     params: context.params
   });
 
+const runtimeCloseoutPreflight = async (context: RuntimeContext) => {
+  const status = await profileRuntime.status({
+    cwd: context.cwd,
+    profile: context.profile ?? "",
+    runId: context.run_id,
+    params: context.params
+  });
+  return {
+    closeout_runtime_readiness_preflight: buildCloseoutRuntimeReadinessPreflight({
+      status,
+      params: context.params
+    }),
+    runtime_status: status
+  };
+};
+
 const runtimeStop = async (context: RuntimeContext) =>
   profileRuntime.stop({
     cwd: context.cwd,
@@ -2422,6 +2439,7 @@ const runtimeHelp = async () => ({
     "runtime.start",
     "runtime.login",
     "runtime.status",
+    "runtime.closeout_preflight",
     "runtime.tabs",
     "runtime.restore_xhs_target",
     "runtime.xhs_closeout_validation_source",
@@ -2463,6 +2481,12 @@ export const runtimeCommands = (): CommandDefinition[] => [
     status: "implemented",
     requiresProfile: true,
     handler: runtimeStatus
+  },
+  {
+    name: "runtime.closeout_preflight",
+    status: "implemented",
+    requiresProfile: true,
+    handler: runtimeCloseoutPreflight
   },
   {
     name: "runtime.tabs",

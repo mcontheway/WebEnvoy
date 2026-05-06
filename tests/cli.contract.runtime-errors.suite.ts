@@ -721,6 +721,61 @@ describe("webenvoy cli contract / runtime errors and fallback", () => {
     });
   });
 
+  it("reports closeout runtime readiness as recoverable for an attachable official Chrome runtime", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const profile = "xhs_closeout_preflight_attachable";
+    const persistentExtensionIdentity = await startOfficialReadyRuntime(
+      runtimeCwd,
+      profile,
+      "run-contract-closeout-preflight-owner-001"
+    );
+
+    const result = runCli(
+      [
+        "runtime.closeout_preflight",
+        "--profile",
+        profile,
+        "--run-id",
+        "run-contract-closeout-preflight-next-001",
+        "--params",
+        JSON.stringify({
+          requested_execution_mode: "live_read_high_risk",
+          persistent_extension_identity: persistentExtensionIdentity
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
+        WEBENVOY_NATIVE_TRANSPORT: "native",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "runtime-readiness-ready"
+      }
+    );
+
+    expect(result.status, result.stdout).toBe(0);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: "run-contract-closeout-preflight-next-001",
+      command: "runtime.closeout_preflight",
+      status: "success",
+      summary: {
+        closeout_runtime_readiness_preflight: {
+          decision: "RECOVERABLE",
+          runtime_state: "recoverable",
+          recovery_mode: "ready_attach",
+          blocker: null,
+          runtime_status: {
+            identity_binding_state: "bound",
+            transport_state: "ready",
+            bootstrap_state: "ready",
+            execution_surface: "real_browser",
+            headless: false
+          }
+        }
+      }
+    });
+  });
+
   it("allows XHS target restoration during the recovery single-probe window before validation baseline is ready", async () => {
     const runtimeCwd = await createRuntimeCwd();
     const profile = "xhs_restore_single_probe_required";

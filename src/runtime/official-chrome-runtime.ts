@@ -28,6 +28,7 @@ type RuntimeTakeoverEvidence = {
   identityBound?: boolean;
   ownerConflictFree?: boolean;
   controllerBrowserContinuity?: boolean;
+  transportBootstrapViable?: boolean;
   managedTargetTabId?: number | null;
   managedTargetDomain?: string | null;
   managedTargetPage?: string | null;
@@ -129,6 +130,7 @@ const hasStaleBootstrapRebindEvidence = (input: {
   input.evidence.identityBound === true &&
   input.evidence.ownerConflictFree === true &&
   input.evidence.controllerBrowserContinuity === true &&
+  input.evidence.transportBootstrapViable === true &&
   asNonEmptyString(input.evidence.requestRunId) === asNonEmptyString(input.status.runId) &&
   asNonEmptyString(input.evidence.requestRuntimeContextId) ===
     buildRuntimeBootstrapContextId(

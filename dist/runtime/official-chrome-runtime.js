@@ -57,6 +57,7 @@ const hasStaleBootstrapRebindEvidence = (input) => input.evidence.mode === "stal
     input.evidence.identityBound === true &&
     input.evidence.ownerConflictFree === true &&
     input.evidence.controllerBrowserContinuity === true &&
+    input.evidence.transportBootstrapViable === true &&
     asNonEmptyString(input.evidence.requestRunId) === asNonEmptyString(input.status.runId) &&
     asNonEmptyString(input.evidence.requestRuntimeContextId) ===
         buildRuntimeBootstrapContextId(asNonEmptyString(input.status.profile) ?? "", asNonEmptyString(input.status.runId) ?? "") &&
