@@ -927,7 +927,7 @@ describe("main-world bridge contract", () => {
         requestListener: filteredChannel.requestListener,
         pageContextNamespace,
         shapeKey: createShapeKey({ keyword: "contract" }),
-        minObservedAt: Date.now() + 1
+        minObservedAt: Number.MAX_SAFE_INTEGER
       });
 
       expect(capturedAfterFreshWindow).toMatchObject({

@@ -550,6 +550,41 @@ const performXhsSearchPassiveAction = async (input) => {
                     event.preventDefault();
                 }
             };
+            const createEnterKeyboardEvent = (type) => {
+                const event = new KeyboardEvent(type, {
+                    bubbles: true,
+                    cancelable: true,
+                    composed: true,
+                    key: "Enter",
+                    code: "Enter",
+                    location: 0,
+                    repeat: false,
+                    isComposing: false
+                });
+                const legacyFields = {
+                    keyCode: 13,
+                    which: 13,
+                    charCode: type === "keypress" ? 13 : 0
+                };
+                for (const [field, value] of Object.entries(legacyFields)) {
+                    try {
+                        Object.defineProperty(event, field, {
+                            configurable: true,
+                            enumerable: true,
+                            get: () => value
+                        });
+                    }
+                    catch {
+                        // Some browser implementations expose non-configurable legacy fields.
+                    }
+                }
+                return event;
+            };
+            const dispatchEnterFallback = () => {
+                target.dispatchEvent(createEnterKeyboardEvent("keydown"));
+                target.dispatchEvent(createEnterKeyboardEvent("keypress"));
+                target.dispatchEvent(createEnterKeyboardEvent("keyup"));
+            };
             let submitObserved = false;
             const observeSubmit = (event) => {
                 submitObserved = true;
@@ -564,10 +599,10 @@ const performXhsSearchPassiveAction = async (input) => {
             if (options?.preventKeyboardDefault === true &&
                 typeof target.addEventListener === "function") {
                 target.addEventListener("keydown", preventKeyboardDefault, { capture: true, once: true });
+                target.addEventListener("keypress", preventKeyboardDefault, { capture: true, once: true });
             }
             if (options?.dispatchKeyboardEvents !== false) {
-                target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }));
-                target.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }));
+                dispatchEnterFallback();
             }
             try {
                 if (options?.preferButtonClick === true && button && typeof button.click === "function") {
@@ -599,6 +634,7 @@ const performXhsSearchPassiveAction = async (input) => {
                 if (options?.preventKeyboardDefault === true &&
                     typeof target.removeEventListener === "function") {
                     target.removeEventListener("keydown", preventKeyboardDefault, { capture: true });
+                    target.removeEventListener("keypress", preventKeyboardDefault, { capture: true });
                 }
                 if (form &&
                     (options?.preventNativeNavigation === true || options?.preferButtonClick === true)) {
