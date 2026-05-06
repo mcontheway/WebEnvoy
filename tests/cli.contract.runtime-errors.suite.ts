@@ -680,6 +680,7 @@ describe("webenvoy cli contract / runtime errors and fallback", () => {
           target_domain: "www.xiaohongshu.com",
           target_page: "search_result_tab",
           target_tab_id: 44,
+          requested_at: "2026-04-25T10:40:00.000Z",
           query: "露营",
           persistent_extension_identity: persistentExtensionIdentity
         })
@@ -787,6 +788,7 @@ describe("webenvoy cli contract / runtime errors and fallback", () => {
           target_domain: "www.xiaohongshu.com",
           target_page: "search_result_tab",
           target_tab_id: 44,
+          requested_at: "2026-04-25T10:45:00.000Z",
           query: "露营",
           persistent_extension_identity: persistentExtensionIdentity
         })
@@ -854,6 +856,7 @@ describe("webenvoy cli contract / runtime errors and fallback", () => {
           target_domain: "www.xiaohongshu.com",
           target_page: "search_result_tab",
           target_tab_id: 44,
+          requested_at: "2026-04-25T10:50:00.000Z",
           query: "露营",
           persistent_extension_identity: persistentExtensionIdentity
         })
@@ -904,6 +907,7 @@ describe("webenvoy cli contract / runtime errors and fallback", () => {
           target_domain: "www.xiaohongshu.com",
           target_page: "search_result_tab",
           target_tab_id: 44,
+          requested_at: "2026-04-25T10:45:00.000Z",
           query: "露营",
           persistent_extension_identity: persistentExtensionIdentity
         })
@@ -923,6 +927,53 @@ describe("webenvoy cli contract / runtime errors and fallback", () => {
       run_id: runId,
       command: "runtime.restore_xhs_target",
       status: "success"
+    });
+  }, 10_000);
+
+  it("blocks stale-bootstrap XHS target restoration when requested_at is missing", async () => {
+    const runtimeCwd = await createRuntimeCwd();
+    const profile = "xhs_restore_stale_bootstrap_missing_requested_at";
+    const runId = "run-contract-restore-stale-bootstrap-missing-requested-at-001";
+    const persistentExtensionIdentity = await startOfficialReadyRuntime(runtimeCwd, profile, runId);
+    await seedReadyXhsCloseoutValidationViews(runtimeCwd, profile);
+
+    const result = runCli(
+      [
+        "runtime.restore_xhs_target",
+        "--profile",
+        profile,
+        "--run-id",
+        runId,
+        "--params",
+        JSON.stringify({
+          target_domain: "www.xiaohongshu.com",
+          target_page: "search_result_tab",
+          target_tab_id: 44,
+          query: "露营",
+          persistent_extension_identity: persistentExtensionIdentity
+        })
+      ],
+      runtimeCwd,
+      {
+        WEBENVOY_BROWSER_MOCK_VERSION: "Google Chrome 146.0.7680.154",
+        WEBENVOY_NATIVE_TRANSPORT: "native",
+        WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
+        WEBENVOY_NATIVE_HOST_MODE: "runtime-readiness-stale-for-run",
+        WEBENVOY_NATIVE_HOST_STALE_RUN_ID: runId
+      }
+    );
+    expect(result.status).toBe(6);
+    const body = parseSingleJsonLine(result.stdout);
+    expect(body).toMatchObject({
+      run_id: runId,
+      command: "runtime.restore_xhs_target",
+      status: "error",
+      error: {
+        code: "ERR_EXECUTION_FAILED",
+        details: {
+          reason: "OFFICIAL_RUNTIME_NOT_READY"
+        }
+      }
     });
   }, 10_000);
 
@@ -1006,7 +1057,8 @@ describe("webenvoy cli contract / runtime errors and fallback", () => {
         WEBENVOY_NATIVE_TRANSPORT: "native",
         WEBENVOY_NATIVE_HOST_CMD: createNativeHostCommand(nativeHostMockPath),
         WEBENVOY_NATIVE_HOST_MODE: "runtime-readiness-stale-for-run",
-        WEBENVOY_NATIVE_HOST_STALE_RUN_ID: restoreRunId
+        WEBENVOY_NATIVE_HOST_STALE_RUN_ID: restoreRunId,
+        WEBENVOY_NATIVE_HOST_REQUIRE_REQUESTED_AT: "1"
       }
     );
     expect(result.status).toBe(0);

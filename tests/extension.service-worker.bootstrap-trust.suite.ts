@@ -703,6 +703,502 @@ describe("extension service worker / bootstrap and trust", () => {
     });
   });
 
+  it("keeps target-bound readiness compatible with legacy ready bootstrap state missing sourcePage", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-legacy-page-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-legacy-page-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-legacy-page-001",
+          runtime_context_id: "ctx-bootstrap-legacy-page-001",
+          profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-legacy-page-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-legacy-page-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+      })
+    });
+
+    await primeTrustedFingerprintContext({
+      runtimeMessageListeners,
+      runId: "run-bootstrap-legacy-page-001",
+      runtimeContextId: "ctx-bootstrap-legacy-page-001",
+      profile: "profile-a",
+      fingerprintContext,
+      tabId: 32,
+      tabUrl: ""
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-legacy-page-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-legacy-page-001",
+        command: "runtime.readiness",
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-legacy-page-001",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-readiness-legacy-page-001",
+      status: "success",
+      payload: expect.objectContaining({
+        bootstrap_state: "ready",
+        managed_target_tab_id: 32,
+        managed_target_domain: "www.xiaohongshu.com",
+        managed_target_page: "search_result_tab",
+        target_tab_continuity: "runtime_trust_state"
+      })
+    });
+  });
+
+  it("accepts legacy trusted bootstrap records missing sourcePage on the next target-bound bootstrap", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-legacy-trusted-page-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-legacy-trusted-page-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-legacy-trusted-page-001",
+          runtime_context_id: "ctx-bootstrap-legacy-trusted-page-001",
+          profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-legacy-trusted-page-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-legacy-trusted-page-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED"
+      })
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-ping-legacy-trusted-page-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-legacy-trusted-page-001",
+        command: "runtime.ping",
+        command_params: {
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          fingerprint_context: fingerprintContext
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await waitForBridgeTurn();
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-ping-legacy-trusted-page-001",
+        ok: true,
+        payload: {
+          fingerprint_runtime: {
+            ...fingerprintContext,
+            injection: {
+              installed: true,
+              required_patches: ["audio_context"],
+              missing_required_patches: [],
+              source: "main_world"
+            }
+          },
+          target_tab_id: 32,
+          summary: {
+            capability_result: {
+              outcome: "success"
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32
+        }
+      }
+    );
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-ping-legacy-trusted-page-001",
+      status: "success"
+    });
+
+    firstPort.postMessage.mockClear();
+    chromeApi.tabs.sendMessage.mockClear();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-legacy-trusted-page-002",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-legacy-trusted-page-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-legacy-trusted-page-001",
+          runtime_context_id: "ctx-bootstrap-legacy-trusted-page-001",
+          profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-legacy-trusted-page-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-legacy-trusted-page-002",
+      status: "success",
+      payload: expect.objectContaining({
+        runtime_bootstrap_attested: true,
+        result: expect.objectContaining({
+          status: "ready"
+        })
+      })
+    });
+    expect(chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("fails runtime.bootstrap ready ack when the sender page no longer matches target_page", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-page-conflict-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-page-conflict-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-page-conflict-001",
+          runtime_context_id: "ctx-bootstrap-page-conflict-001",
+          profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-page-conflict-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-bootstrap-page-conflict-001",
+        ok: true,
+        payload: {
+          method: "runtime.bootstrap.ack",
+          result: {
+            version: "v1",
+            run_id: "run-bootstrap-page-conflict-001",
+            runtime_context_id: "ctx-bootstrap-page-conflict-001",
+            profile: "profile-a",
+            status: "ready"
+          },
+          fingerprint_runtime: {
+            ...fingerprintContext,
+            injection: {
+              installed: true,
+              required_patches: ["audio_context"],
+              missing_required_patches: [],
+              source: "main_world"
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://www.xiaohongshu.com/explore/abc123"
+        }
+      }
+    );
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-page-conflict-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_READY_SIGNAL_CONFLICT"
+      })
+    });
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-readiness-page-conflict-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-page-conflict-001",
+        command: "runtime.readiness",
+        command_params: {
+          runtime_context_id: "ctx-bootstrap-page-conflict-001",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 50
+    });
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-readiness-page-conflict-001",
+      status: "success",
+      payload: expect.objectContaining({
+        bootstrap_state: "failed"
+      })
+    });
+  });
+
+  it("fails stale runtime.bootstrap ack when the sender page no longer matches target_page", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-stale-page-conflict-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-stale-page-conflict-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-stale-page-conflict-001",
+          runtime_context_id: "ctx-bootstrap-stale-page-conflict-001",
+          profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-stale-page-conflict-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-bootstrap-stale-page-conflict-001",
+        ok: true,
+        payload: {
+          method: "runtime.bootstrap.ack",
+          result: {
+            version: "v1",
+            run_id: "run-bootstrap-stale-page-conflict-001",
+            runtime_context_id: "ctx-bootstrap-stale-page-conflict-001",
+            profile: "profile-a",
+            status: "stale"
+          },
+          fingerprint_runtime: {
+            ...fingerprintContext,
+            injection: {
+              installed: true,
+              required_patches: ["audio_context"],
+              missing_required_patches: [],
+              source: "main_world"
+            }
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://www.xiaohongshu.com/explore/abc123"
+        }
+      }
+    );
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-stale-page-conflict-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_READY_SIGNAL_CONFLICT"
+      })
+    });
+  });
+
+  it("fails stale runtime.bootstrap ack without execution-surface attestation", async () => {
+    const firstPort = createMockPort();
+    const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);
+    const fingerprintContext = createFingerprintRuntimeContext();
+    chromeApi.tabs.query.mockImplementation(async () => [
+      { id: 32, url: "https://www.xiaohongshu.com/search_result?keyword=露营", active: true }
+    ]);
+
+    startChromeBackgroundBridge(chromeApi);
+    respondHandshake(firstPort);
+    await Promise.resolve();
+
+    firstPort.onMessageListeners[0]?.({
+      id: "run-bootstrap-stale-no-attestation-001",
+      method: "bridge.forward",
+      profile: "profile-a",
+      params: {
+        session_id: "nm-session-001",
+        run_id: "run-bootstrap-stale-no-attestation-001",
+        command: "runtime.bootstrap",
+        command_params: {
+          version: "v1",
+          run_id: "run-bootstrap-stale-no-attestation-001",
+          runtime_context_id: "ctx-bootstrap-stale-no-attestation-001",
+          profile: "profile-a",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 32,
+          target_page: "search_result_tab",
+          fingerprint_runtime: fingerprintContext,
+          fingerprint_patch_manifest: {
+            required_patches: ["audio_context"]
+          },
+          main_world_secret: "secret-bootstrap-stale-no-attestation-001"
+        },
+        cwd: "/workspace/WebEnvoy"
+      },
+      timeout_ms: 100
+    });
+    await waitForBridgeTurn();
+
+    runtimeMessageListeners[0]?.(
+      {
+        kind: "result",
+        id: "run-bootstrap-stale-no-attestation-001",
+        ok: true,
+        payload: {
+          method: "runtime.bootstrap.ack",
+          result: {
+            version: "v1",
+            run_id: "run-bootstrap-stale-no-attestation-001",
+            runtime_context_id: "ctx-bootstrap-stale-no-attestation-001",
+            profile: "profile-a",
+            status: "stale"
+          }
+        }
+      },
+      {
+        tab: {
+          id: 32,
+          url: "https://www.xiaohongshu.com/search_result?keyword=露营"
+        }
+      }
+    );
+    await Promise.resolve();
+
+    await waitForPostedMessage(firstPort.postMessage, {
+      id: "run-bootstrap-stale-no-attestation-001",
+      status: "error",
+      error: expect.objectContaining({
+        code: "ERR_RUNTIME_READY_SIGNAL_CONFLICT"
+      })
+    });
+  });
+
   it("allows runtime.readiness promotion without xhs-specific target binding", async () => {
     const firstPort = createMockPort();
     const { chromeApi, runtimeMessageListeners } = createChromeApi([firstPort]);

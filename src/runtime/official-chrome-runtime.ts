@@ -15,11 +15,25 @@ type RuntimeStatusReader = () => Promise<JsonObject>;
 type RuntimeAttachReader = () => Promise<JsonObject>;
 
 type RuntimeTakeoverEvidence = {
-  mode?: "ready_attach" | "recoverable_rebind" | null;
+  mode?: "ready_attach" | "recoverable_rebind" | "stale_bootstrap_rebind" | null;
   attachableReadyRuntime?: boolean;
   orphanRecoverable?: boolean;
+  staleBootstrapRecoverable?: boolean;
   observedRunId?: string;
+  observedRuntimeInstanceId?: string | null;
   runtimeContextId?: string | null;
+  requestRunId?: string | null;
+  requestRuntimeContextId?: string | null;
+  freshness?: string;
+  identityBound?: boolean;
+  ownerConflictFree?: boolean;
+  controllerBrowserContinuity?: boolean;
+  managedTargetTabId?: number | null;
+  managedTargetDomain?: string | null;
+  managedTargetPage?: string | null;
+  targetTabContinuity?: string | null;
+  observedRuntimeSessionId?: string | null;
+  takeoverEvidenceObservedAt?: string | null;
 };
 
 type OfficialChromeBootstrapTarget = {
@@ -27,6 +41,7 @@ type OfficialChromeBootstrapTarget = {
   targetDomain?: string | null;
   targetPage?: string | null;
   targetResourceId?: string | null;
+  requestedAt?: string | null;
 };
 
 const OFFICIAL_CHROME_BOOTSTRAP_READINESS_MAX_ATTEMPTS = 5;
@@ -50,6 +65,93 @@ const readRuntimeTakeoverEvidence = (status: JsonObject): RuntimeTakeoverEvidenc
   const evidence = asObject(status.runtimeTakeoverEvidence);
   return evidence ?? {};
 };
+
+const asNonEmptyString = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+
+const asInteger = (value: unknown): number | null =>
+  typeof value === "number" && Number.isInteger(value) ? value : null;
+
+const isIsoTimestampAtOrAfter = (value: unknown, floor: unknown): boolean => {
+  if (typeof value !== "string" || typeof floor !== "string") {
+    return false;
+  }
+  const valueMs = Date.parse(value);
+  const floorMs = Date.parse(floor);
+  return Number.isFinite(valueMs) && Number.isFinite(floorMs) && valueMs >= floorMs;
+};
+
+const buildObservedRuntimeInstanceId = (input: {
+  sessionId: string;
+  runId: string;
+  runtimeContextId: string;
+}): string => `${input.sessionId}:${input.runId}:${input.runtimeContextId}`;
+
+const hasObservedRuntimeContinuity = (input: {
+  status: JsonObject;
+  evidence: RuntimeTakeoverEvidence;
+}): boolean => {
+  const profile = asNonEmptyString(input.status.profile);
+  const observedRunId = asNonEmptyString(input.evidence.observedRunId);
+  const observedRuntimeSessionId = asNonEmptyString(input.evidence.observedRuntimeSessionId);
+  const observedRuntimeContextId = asNonEmptyString(input.evidence.runtimeContextId);
+  const observedRuntimeInstanceId = asNonEmptyString(input.evidence.observedRuntimeInstanceId);
+  if (
+    profile === null ||
+    observedRunId === null ||
+    observedRuntimeSessionId === null ||
+    observedRuntimeContextId === null ||
+    observedRuntimeInstanceId === null
+  ) {
+    return false;
+  }
+  if (observedRuntimeContextId !== buildRuntimeBootstrapContextId(profile, observedRunId)) {
+    return false;
+  }
+  return (
+    observedRuntimeInstanceId ===
+    buildObservedRuntimeInstanceId({
+      sessionId: observedRuntimeSessionId,
+      runId: observedRunId,
+      runtimeContextId: observedRuntimeContextId
+    })
+  );
+};
+
+const hasStaleBootstrapRebindEvidence = (input: {
+  status: JsonObject;
+  evidence: RuntimeTakeoverEvidence;
+  target: OfficialChromeBootstrapTarget;
+}): boolean =>
+  input.evidence.mode === "stale_bootstrap_rebind" &&
+  input.evidence.staleBootstrapRecoverable === true &&
+  input.evidence.freshness === "fresh" &&
+  input.evidence.identityBound === true &&
+  input.evidence.ownerConflictFree === true &&
+  input.evidence.controllerBrowserContinuity === true &&
+  asNonEmptyString(input.evidence.requestRunId) === asNonEmptyString(input.status.runId) &&
+  asNonEmptyString(input.evidence.requestRuntimeContextId) ===
+    buildRuntimeBootstrapContextId(
+      asNonEmptyString(input.status.profile) ?? "",
+      asNonEmptyString(input.status.runId) ?? ""
+    ) &&
+  hasObservedRuntimeContinuity({
+    status: input.status,
+    evidence: input.evidence
+  }) &&
+  asInteger(input.evidence.managedTargetTabId) === input.target.targetTabId &&
+  asNonEmptyString(input.evidence.managedTargetDomain) === input.target.targetDomain &&
+  asNonEmptyString(input.evidence.managedTargetPage) === input.target.targetPage &&
+  input.evidence.targetTabContinuity === "runtime_trust_state" &&
+  isIsoTimestampAtOrAfter(input.evidence.takeoverEvidenceObservedAt, input.target.requestedAt) &&
+  input.status.executionSurface === "real_browser" &&
+  input.status.headless === false &&
+  typeof input.target.targetTabId === "number" &&
+  Number.isInteger(input.target.targetTabId) &&
+  typeof input.target.targetDomain === "string" &&
+  input.target.targetDomain.length > 0 &&
+  typeof input.target.targetPage === "string" &&
+  input.target.targetPage.length > 0;
 
 const isTransportFailureCode = (code: unknown): code is string =>
   code === "ERR_TRANSPORT_HANDSHAKE_FAILED" ||
@@ -101,6 +203,7 @@ const buildRuntimeBootstrapEnvelope = (input: {
   profile: string;
   runId: string;
   fingerprintRuntime: ReturnType<typeof buildFingerprintContextForMeta>;
+  requestedAt?: string | null;
   targetTabId?: number | null;
   targetDomain?: string | null;
   targetPage?: string | null;
@@ -117,6 +220,9 @@ const buildRuntimeBootstrapEnvelope = (input: {
   run_id: input.runId,
   runtime_context_id: buildRuntimeBootstrapContextId(input.profile, input.runId),
   profile: input.profile,
+  ...(typeof input.requestedAt === "string" && input.requestedAt.length > 0
+    ? { requested_at: input.requestedAt }
+    : {}),
   ...(typeof input.targetTabId === "number" && Number.isInteger(input.targetTabId)
     ? { target_tab_id: input.targetTabId }
     : {}),
@@ -145,6 +251,9 @@ const sleep = async (ms: number): Promise<void> =>
 const buildOfficialChromeTargetParams = (
   input: OfficialChromeBootstrapTarget = {}
 ): JsonObject => ({
+  ...(typeof input.requestedAt === "string" && input.requestedAt.length > 0
+    ? { requested_at: input.requestedAt }
+    : {}),
   ...(typeof input.targetTabId === "number" && Number.isInteger(input.targetTabId)
     ? { target_tab_id: input.targetTabId }
     : {}),
@@ -341,6 +450,7 @@ export const prepareOfficialChromeRuntime = async (input: {
   readStatus?: RuntimeStatusReader;
   attachRuntime?: RuntimeAttachReader;
 }): Promise<JsonObject> => {
+  const runtimeBootstrapRequestedAt = new Date().toISOString();
   const readStatus =
     input.readStatus ??
     (async () =>
@@ -352,6 +462,7 @@ export const prepareOfficialChromeRuntime = async (input: {
             input.context,
             input.requestedExecutionMode,
             {
+              requestedAt: runtimeBootstrapRequestedAt,
               targetTabId: input.bootstrapTargetTabId,
               targetDomain: input.bootstrapTargetDomain,
               targetPage: input.bootstrapTargetPage,
@@ -370,6 +481,7 @@ export const prepareOfficialChromeRuntime = async (input: {
             input.context,
             input.requestedExecutionMode,
             {
+              requestedAt: runtimeBootstrapRequestedAt,
               targetTabId: input.bootstrapTargetTabId,
               targetDomain: input.bootstrapTargetDomain,
               targetPage: input.bootstrapTargetPage,
@@ -399,6 +511,13 @@ export const prepareOfficialChromeRuntime = async (input: {
   const runtimeTakeoverEvidence = readRuntimeTakeoverEvidence(status);
   const preLockOrphanRecoverable = runtimeTakeoverEvidence.orphanRecoverable === true;
   const preLockAttachableReadyRuntime = runtimeTakeoverEvidence.attachableReadyRuntime === true;
+  const bootstrapTarget = {
+    requestedAt: runtimeBootstrapRequestedAt,
+    targetTabId: input.bootstrapTargetTabId,
+    targetDomain: input.bootstrapTargetDomain,
+    targetPage: input.bootstrapTargetPage,
+    targetResourceId: input.bootstrapTargetResourceId
+  };
 
   const syncRuntimeStatus = (nextStatus: JsonObject): void => {
     status = nextStatus;
@@ -431,11 +550,17 @@ export const prepareOfficialChromeRuntime = async (input: {
   const shouldAttemptAttach =
     !lockHeld &&
     identityBindingState === "bound" &&
-    bootstrapState !== "stale" &&
-    (preLockAttachableReadyRuntime ||
-      (runtimeReadiness === "recoverable" &&
-        preLockOrphanRecoverable &&
-        (profileState === "disconnected" || profileState === "ready")));
+    ((bootstrapState !== "stale" &&
+      (preLockAttachableReadyRuntime ||
+        (runtimeReadiness === "recoverable" &&
+          preLockOrphanRecoverable &&
+          (profileState === "disconnected" || profileState === "ready")))) ||
+      (bootstrapState === "stale" &&
+        hasStaleBootstrapRebindEvidence({
+          status,
+          evidence: runtimeTakeoverEvidence,
+          target: bootstrapTarget
+        })));
 
   if (shouldAttemptAttach) {
     syncRuntimeStatus(await attachRuntime());
@@ -446,6 +571,7 @@ export const prepareOfficialChromeRuntime = async (input: {
       profile: input.context.profile ?? "",
       runId: input.context.run_id,
       fingerprintRuntime: input.fingerprintContext,
+      requestedAt: runtimeBootstrapRequestedAt,
       targetTabId: input.bootstrapTargetTabId,
       targetDomain: input.bootstrapTargetDomain ?? null,
       targetPage: input.bootstrapTargetPage ?? null,
@@ -583,6 +709,7 @@ export const prepareOfficialChromeRuntime = async (input: {
       consumerId: input.consumerId,
       identityBindingState,
       target: {
+        requestedAt: runtimeBootstrapRequestedAt,
         targetTabId: input.bootstrapTargetTabId,
         targetDomain: input.bootstrapTargetDomain,
         targetPage: input.bootstrapTargetPage,
@@ -624,6 +751,7 @@ export const prepareOfficialChromeRuntime = async (input: {
         consumerId: input.consumerId,
         identityBindingState,
         target: {
+          requestedAt: runtimeBootstrapRequestedAt,
           targetTabId: input.bootstrapTargetTabId,
           targetDomain: input.bootstrapTargetDomain,
           targetPage: input.bootstrapTargetPage,
@@ -642,6 +770,7 @@ export const prepareOfficialChromeRuntime = async (input: {
           consumerId: input.consumerId,
           identityBindingState,
           target: {
+            requestedAt: runtimeBootstrapRequestedAt,
             targetTabId: input.bootstrapTargetTabId,
             targetDomain: input.bootstrapTargetDomain,
             targetPage: input.bootstrapTargetPage,

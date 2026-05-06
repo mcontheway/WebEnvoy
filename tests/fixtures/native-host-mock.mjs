@@ -125,13 +125,16 @@ const onRequest = (request) => {
       !Array.isArray(request.params.command_params)
         ? request.params.command_params
         : {};
+    const commandRunId = String(commandParams.run_id ?? request.params?.run_id ?? request.id);
+    const commandRuntimeContextId = String(commandParams.runtime_context_id ?? "");
+    const commandSessionId = String(request.params?.session_id ?? "nm-session-001");
 
     if (command === "runtime.readiness" && mode === "runtime-readiness-ready") {
       writeMessage({
         id: request.id,
         status: "success",
         summary: {
-          session_id: String(request.params?.session_id ?? "nm-session-001"),
+          session_id: commandSessionId,
           run_id: String(request.params?.run_id ?? request.id),
           command,
           relay_path: "host>background"
@@ -139,11 +142,22 @@ const onRequest = (request) => {
         payload: {
           transport_state: "ready",
           bootstrap_state: "ready",
+          runtime_context_id: commandRuntimeContextId || null,
           managed_target_tab_id: Number.isInteger(commandParams.target_tab_id)
             ? commandParams.target_tab_id
             : null,
           managed_target_domain:
             typeof commandParams.target_domain === "string" ? commandParams.target_domain : null,
+          managed_target_page:
+            typeof commandParams.target_page === "string" ? commandParams.target_page : null,
+          observed_runtime_session_id: Number.isInteger(commandParams.target_tab_id)
+            ? commandSessionId
+            : null,
+          observed_runtime_instance_id:
+            Number.isInteger(commandParams.target_tab_id)
+              ? `${commandSessionId}:${commandRunId}:${commandRuntimeContextId}`
+              : null,
+          takeover_evidence_observed_at: new Date().toISOString(),
           target_tab_continuity: Number.isInteger(commandParams.target_tab_id)
             ? "runtime_trust_state"
             : null
@@ -156,12 +170,14 @@ const onRequest = (request) => {
 
     if (command === "runtime.readiness" && mode === "runtime-readiness-stale-for-run") {
       const staleRunId = process.env.WEBENVOY_NATIVE_HOST_STALE_RUN_ID ?? "";
-      const commandRunId = String(commandParams.run_id ?? request.params?.run_id ?? request.id);
+      const requireRequestedAt = process.env.WEBENVOY_NATIVE_HOST_REQUIRE_REQUESTED_AT === "1";
+      const requestedAtPresent =
+        typeof commandParams.requested_at === "string" && commandParams.requested_at.length > 0;
       writeMessage({
         id: request.id,
         status: "success",
         summary: {
-          session_id: String(request.params?.session_id ?? "nm-session-001"),
+          session_id: commandSessionId,
           run_id: String(request.params?.run_id ?? request.id),
           command,
           relay_path: "host>background"
@@ -169,11 +185,23 @@ const onRequest = (request) => {
         payload: {
           transport_state: "ready",
           bootstrap_state: commandRunId === staleRunId ? "stale" : "ready",
+          runtime_context_id: commandRuntimeContextId || null,
           managed_target_tab_id: Number.isInteger(commandParams.target_tab_id)
             ? commandParams.target_tab_id
             : null,
           managed_target_domain:
             typeof commandParams.target_domain === "string" ? commandParams.target_domain : null,
+          managed_target_page:
+            typeof commandParams.target_page === "string" ? commandParams.target_page : null,
+          observed_runtime_session_id: Number.isInteger(commandParams.target_tab_id)
+            ? commandSessionId
+            : null,
+          observed_runtime_instance_id:
+            Number.isInteger(commandParams.target_tab_id)
+              ? `${commandSessionId}:${commandRunId}:${commandRuntimeContextId}`
+              : null,
+          takeover_evidence_observed_at:
+            requireRequestedAt && !requestedAtPresent ? null : new Date().toISOString(),
           target_tab_continuity: Number.isInteger(commandParams.target_tab_id)
             ? "runtime_trust_state"
             : null

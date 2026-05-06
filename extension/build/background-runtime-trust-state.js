@@ -51,6 +51,7 @@ export class BackgroundRuntimeTrustState {
         const serializedFingerprintRuntime = this.options.serializeFingerprintRuntimeContext(normalized);
         const sourceTabId = source?.sourceTabId ?? null;
         const sourceDomain = source?.sourceDomain ?? null;
+        const sourcePage = source?.sourcePage ?? null;
         const runId = source?.runId ?? null;
         const runtimeContextId = source?.runtimeContextId ?? null;
         const existing = this.#trustedFingerprintContexts.get(key);
@@ -60,7 +61,8 @@ export class BackgroundRuntimeTrustState {
                 existing.runtimeContextId !== runtimeContextId ||
                 existing.serializedFingerprintRuntime !== serializedFingerprintRuntime ||
                 existing.sourceTabId !== sourceTabId ||
-                existing.sourceDomain !== sourceDomain);
+                existing.sourceDomain !== sourceDomain ||
+                existing.sourcePage !== sourcePage);
         if (shouldRotate) {
             this.#trustedFingerprintContexts.delete(key);
         }
@@ -71,7 +73,8 @@ export class BackgroundRuntimeTrustState {
             fingerprintRuntime: normalized,
             serializedFingerprintRuntime,
             sourceTabId,
-            sourceDomain
+            sourceDomain,
+            sourcePage
         });
         const maxTrustedFingerprintContexts = this.options.maxTrustedFingerprintContexts ?? defaultMaxTrustedFingerprintContexts;
         if (this.#trustedFingerprintContexts.size <= maxTrustedFingerprintContexts) {

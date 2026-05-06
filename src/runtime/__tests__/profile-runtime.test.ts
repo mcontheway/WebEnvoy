@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -138,6 +138,67 @@ const createTargetAwareTakeoverBridge = () => ({
         payload: {
           bootstrap_state: hasExplicitRuntimeTargetBinding(params) ? "pending" : "ready",
           transport_state: "ready"
+        },
+        relay_path: "host>background"
+      };
+    }
+    throw new Error(`unexpected bridge command: ${command}`);
+  }
+});
+
+const createStaleTargetTakeoverBridge = (input: {
+  targetTabId: number;
+  targetDomain: string;
+  targetPage: string;
+}) => ({
+  runCommand: async ({
+    command,
+    params,
+    profile,
+    runId
+  }: {
+    command: string;
+    params: Record<string, unknown>;
+    profile: string | null;
+    runId: string;
+  }) => {
+    if (command === "runtime.bootstrap") {
+      return {
+        ok: true as const,
+        payload: {
+          result: {
+            version: "v1",
+            run_id: runId,
+            runtime_context_id: String(params.runtime_context_id),
+            profile,
+            status: "ready"
+          }
+        },
+        relay_path: "host>background"
+      };
+    }
+    if (command === "runtime.readiness") {
+      const targetMatches =
+        params.target_tab_id === input.targetTabId &&
+        params.target_domain === input.targetDomain &&
+        params.target_page === input.targetPage;
+      return {
+        ok: true as const,
+        payload: {
+          bootstrap_state: runId.length > 0 ? "stale" : "pending",
+          transport_state: "ready",
+          runtime_context_id: String(params.runtime_context_id),
+          ...(targetMatches
+            ? {
+                managed_target_tab_id: input.targetTabId,
+                managed_target_domain: input.targetDomain,
+                managed_target_page: input.targetPage,
+                observed_runtime_session_id: "nm-session-stale-bootstrap-001",
+                observed_runtime_instance_id: `nm-session-stale-bootstrap-001:${runId}:${String(params.runtime_context_id)}`,
+                takeover_evidence_observed_at: "2999-01-01T00:00:00.000Z",
+                target_tab_continuity: "runtime_trust_state"
+              }
+            : {})
         },
         relay_path: "host>background"
       };
@@ -2557,6 +2618,246 @@ describe("profile-runtime identity preflight", () => {
     const browserStateRaw = await readFile(join(profileDir, BROWSER_STATE_FILENAME), "utf8");
     const browserState = JSON.parse(browserStateRaw) as { runId?: unknown };
     expect(browserState.runId).toBe("run-runtime-attach-next-001");
+  });
+
+  it("allows a fresh run_id to attach a stale-bootstrap runtime when the managed target continuity is proven", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-attach-stale-bootstrap-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "attach_stale_bootstrap_profile"
+    });
+    const ownerService = createTestService();
+
+    await ownerService.start({
+      cwd: baseDir,
+      profile: "attach_stale_bootstrap_profile",
+      runId: "run-runtime-attach-stale-bootstrap-owner-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    const profileDir = join(baseDir, ".webenvoy", "profiles", "attach_stale_bootstrap_profile");
+    await writeFile(
+      join(profileDir, BROWSER_STATE_FILENAME),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          launchToken: "attach-stale-bootstrap-token-001",
+          profileDir,
+          runId: "run-runtime-attach-stale-bootstrap-owner-001",
+          browserPath: "/mock/chrome",
+          controllerPid: 999998,
+          browserPid: 999999,
+          launchedAt: new Date().toISOString(),
+          headless: false,
+          executionSurface: "real_browser"
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+	    const staleService = createTestService({
+	      bridgeFactory: () =>
+	        createStaleTargetTakeoverBridge({
+	          targetTabId: 88,
+	          targetDomain: "www.xiaohongshu.com",
+	          targetPage: "search_result_tab"
+	        })
+	    });
+	    const params = {
+      persistent_extension_identity: {
+        extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        manifest_path: manifestPath
+      },
+	      requested_execution_mode: "live_read_limited",
+	      requested_at: "2026-05-06T14:00:00.000Z",
+	      target_domain: "www.xiaohongshu.com",
+	      target_tab_id: 88,
+      target_page: "search_result_tab"
+    };
+
+    await expect(
+      staleService.status({
+        cwd: baseDir,
+        profile: "attach_stale_bootstrap_profile",
+        runId: "run-runtime-attach-stale-bootstrap-next-001",
+        params
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: false,
+      runtimeReadiness: "blocked",
+      transportState: "ready",
+      bootstrapState: "stale",
+      headless: false,
+      executionSurface: "real_browser",
+      runtimeTakeoverEvidence: expect.objectContaining({
+        mode: "stale_bootstrap_rebind",
+        staleBootstrapRecoverable: true,
+        freshness: "fresh",
+	        ownerConflictFree: true,
+	        observedRuntimeSessionId: "nm-session-stale-bootstrap-001",
+	        observedRuntimeInstanceId: `nm-session-stale-bootstrap-001:run-runtime-attach-stale-bootstrap-owner-001:${buildRuntimeBootstrapContextId(
+	          "attach_stale_bootstrap_profile",
+	          "run-runtime-attach-stale-bootstrap-owner-001"
+	        )}`,
+	        requestRunId: "run-runtime-attach-stale-bootstrap-next-001",
+	        requestRuntimeContextId: buildRuntimeBootstrapContextId(
+	          "attach_stale_bootstrap_profile",
+	          "run-runtime-attach-stale-bootstrap-next-001"
+	        ),
+	        managedTargetTabId: 88,
+	        managedTargetDomain: "www.xiaohongshu.com",
+	        managedTargetPage: "search_result_tab",
+	        targetTabContinuity: "runtime_trust_state",
+	        takeoverEvidenceObservedAt: "2999-01-01T00:00:00.000Z"
+	      })
+    });
+
+    await expect(
+      staleService.attach({
+        cwd: baseDir,
+        profile: "attach_stale_bootstrap_profile",
+        runId: "run-runtime-attach-stale-bootstrap-next-001",
+        params
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: true,
+      runtimeReadiness: "blocked",
+      transportState: "ready",
+      bootstrapState: "stale"
+    });
+
+    const lockRaw = await readFile(join(profileDir, "__webenvoy_lock.json"), "utf8");
+    const lock = JSON.parse(lockRaw) as ProfileLock;
+    expect(lock.ownerRunId).toBe("run-runtime-attach-stale-bootstrap-next-001");
+
+    const browserStateRaw = await readFile(join(profileDir, BROWSER_STATE_FILENAME), "utf8");
+    const browserState = JSON.parse(browserStateRaw) as { runId?: unknown };
+    expect(browserState.runId).toBe("run-runtime-attach-stale-bootstrap-next-001");
+  });
+
+  it("allows stale-bootstrap runtime attach when the profile lock is missing but browser continuity is proven", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "webenvoy-profile-runtime-attach-stale-bootstrap-lockless-"));
+    tempDirs.push(baseDir);
+    process.env.WEBENVOY_BROWSER_PATH = await createMockBrowserExecutable("Google Chrome 146.0.7680.154");
+    const manifestPath = await createNativeHostManifest({
+      allowedOrigins: ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+    });
+    await seedInstalledPersistentExtension({
+      baseDir,
+      profile: "attach_stale_bootstrap_lockless_profile"
+    });
+    const ownerService = createTestService();
+
+    await ownerService.start({
+      cwd: baseDir,
+      profile: "attach_stale_bootstrap_lockless_profile",
+      runId: "run-runtime-attach-stale-bootstrap-lockless-owner-001",
+      params: {
+        persistent_extension_identity: {
+          extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          manifest_path: manifestPath
+        }
+      }
+    });
+
+    const profileDir = join(baseDir, ".webenvoy", "profiles", "attach_stale_bootstrap_lockless_profile");
+    await writeFile(
+      join(profileDir, BROWSER_STATE_FILENAME),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          launchToken: "attach-stale-bootstrap-lockless-token-001",
+          profileDir,
+          runId: "run-runtime-attach-stale-bootstrap-lockless-owner-001",
+          browserPath: "/mock/chrome",
+          controllerPid: 999998,
+          browserPid: 999999,
+          launchedAt: new Date().toISOString(),
+          headless: false,
+          executionSurface: "real_browser"
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await unlink(join(profileDir, "__webenvoy_lock.json"));
+
+    const staleService = createTestService({
+      bridgeFactory: () =>
+        createStaleTargetTakeoverBridge({
+          targetTabId: 88,
+          targetDomain: "www.xiaohongshu.com",
+          targetPage: "search_result_tab"
+        })
+    });
+    const params = {
+      persistent_extension_identity: {
+        extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        manifest_path: manifestPath
+      },
+      requested_execution_mode: "live_read_limited",
+      requested_at: "2026-05-06T14:00:00.000Z",
+      target_domain: "www.xiaohongshu.com",
+      target_tab_id: 88,
+      target_page: "search_result_tab"
+    };
+
+    await expect(
+      staleService.status({
+        cwd: baseDir,
+        profile: "attach_stale_bootstrap_lockless_profile",
+        runId: "run-runtime-attach-stale-bootstrap-lockless-next-001",
+        params
+      })
+    ).resolves.toMatchObject({
+      lockHeld: false,
+      runtimeTakeoverEvidence: expect.objectContaining({
+        mode: "stale_bootstrap_rebind",
+        staleBootstrapRecoverable: true,
+        observedRunId: "run-runtime-attach-stale-bootstrap-lockless-owner-001",
+        observedRuntimeInstanceId: `nm-session-stale-bootstrap-001:run-runtime-attach-stale-bootstrap-lockless-owner-001:${buildRuntimeBootstrapContextId(
+          "attach_stale_bootstrap_lockless_profile",
+          "run-runtime-attach-stale-bootstrap-lockless-owner-001"
+        )}`
+      })
+    });
+
+    await expect(
+      staleService.attach({
+        cwd: baseDir,
+        profile: "attach_stale_bootstrap_lockless_profile",
+        runId: "run-runtime-attach-stale-bootstrap-lockless-next-001",
+        params
+      })
+    ).resolves.toMatchObject({
+      profileState: "ready",
+      lockHeld: true,
+      bootstrapState: "stale"
+    });
+
+    const lockRaw = await readFile(join(profileDir, "__webenvoy_lock.json"), "utf8");
+    const lock = JSON.parse(lockRaw) as ProfileLock;
+    expect(lock.ownerRunId).toBe("run-runtime-attach-stale-bootstrap-lockless-next-001");
+    expect(lock.controllerPid).toBe(999998);
+
+    const browserStateRaw = await readFile(join(profileDir, BROWSER_STATE_FILENAME), "utf8");
+    const browserState = JSON.parse(browserStateRaw) as { runId?: unknown };
+    expect(browserState.runId).toBe("run-runtime-attach-stale-bootstrap-lockless-next-001");
   });
 
   it("does not auto-provision profile native host manifest when attach fails before ownership is rebound", async () => {

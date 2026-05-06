@@ -1906,14 +1906,21 @@ const retryableRestoreRuntimeFailureReasons = new Set([
 
 const shouldAttachRuntimeForXhsRestore = (status: Record<string, unknown>): boolean => {
   const takeover = asObject(status.runtimeTakeoverEvidence);
+  const staleBootstrapRebind =
+    takeover?.staleBootstrapRecoverable === true &&
+    status.transportState === "ready" &&
+    status.bootstrapState === "stale" &&
+    status.executionSurface === "real_browser" &&
+    status.headless === false;
   return (
     status.lockHeld !== true &&
     takeover?.identityBound === true &&
     takeover.ownerConflictFree === true &&
     takeover.controllerBrowserContinuity === true &&
-    takeover.transportBootstrapViable === true &&
+    (takeover.transportBootstrapViable === true || staleBootstrapRebind) &&
     (takeover?.attachableReadyRuntime === true ||
-      (status.runtimeReadiness === "recoverable" && takeover?.orphanRecoverable === true))
+      (status.runtimeReadiness === "recoverable" && takeover?.orphanRecoverable === true) ||
+      staleBootstrapRebind)
   );
 };
 
@@ -1950,6 +1957,7 @@ const assertRuntimeRestoreXhsTargetSafetyGate = async (
     return null;
   }
 
+  const restoreRequestedAt = asString(context.params.requested_at);
   let status = await profileRuntime.status({
     cwd: context.cwd,
     profile: context.profile,
@@ -2033,6 +2041,18 @@ const assertRuntimeRestoreXhsTargetSafetyGate = async (
   const runtimeTargetTabContinuity = asString(
     runtimeTakeover?.targetTabContinuity ?? runtimeTakeover?.target_tab_continuity
   );
+  const managedRuntimeTargetPage = asString(
+    runtimeTakeover?.managedTargetPage ?? runtimeTakeover?.managed_target_page
+  );
+  const runtimeTakeoverMode = asString(runtimeTakeover?.mode);
+  const staleBootstrapRecoveryContinuity =
+    runtimeTakeoverMode === "stale_bootstrap_rebind" &&
+    runtimeTakeover?.staleBootstrapRecoverable === true &&
+    runtimeTakeover?.requestRunId === context.run_id &&
+    runtimeTakeover?.requestRuntimeContextId === runtimeContextId &&
+    runtimeTakeover.controllerBrowserContinuity === true &&
+    runtimeTakeover.ownerConflictFree === true &&
+    runtimeTakeover.identityBound === true;
   const currentRuntimeContinuity =
     runtimeTakeover?.observedRunId === context.run_id &&
     runtimeTakeover.controllerBrowserContinuity === true &&
@@ -2042,10 +2062,12 @@ const assertRuntimeRestoreXhsTargetSafetyGate = async (
   const staleBootstrapTargetContinuity =
     managedRuntimeTargetTabId === context.params.target_tab_id &&
     managedRuntimeTargetDomain === context.params.target_domain &&
+    managedRuntimeTargetPage === context.params.target_page &&
     runtimeTargetTabContinuity === "runtime_trust_state";
   const staleBootstrapSameRuntimeReady =
+    restoreRequestedAt !== null &&
     status.lockHeld === true &&
-    currentRuntimeContinuity &&
+    (currentRuntimeContinuity || staleBootstrapRecoveryContinuity) &&
     staleBootstrapTargetContinuity &&
     status.identityBindingState === "bound" &&
     status.transportState === "ready" &&

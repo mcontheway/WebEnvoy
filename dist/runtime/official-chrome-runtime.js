@@ -17,6 +17,66 @@ const readRuntimeTakeoverEvidence = (status) => {
     const evidence = asObject(status.runtimeTakeoverEvidence);
     return evidence ?? {};
 };
+const asNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const asInteger = (value) => typeof value === "number" && Number.isInteger(value) ? value : null;
+const isIsoTimestampAtOrAfter = (value, floor) => {
+    if (typeof value !== "string" || typeof floor !== "string") {
+        return false;
+    }
+    const valueMs = Date.parse(value);
+    const floorMs = Date.parse(floor);
+    return Number.isFinite(valueMs) && Number.isFinite(floorMs) && valueMs >= floorMs;
+};
+const buildObservedRuntimeInstanceId = (input) => `${input.sessionId}:${input.runId}:${input.runtimeContextId}`;
+const hasObservedRuntimeContinuity = (input) => {
+    const profile = asNonEmptyString(input.status.profile);
+    const observedRunId = asNonEmptyString(input.evidence.observedRunId);
+    const observedRuntimeSessionId = asNonEmptyString(input.evidence.observedRuntimeSessionId);
+    const observedRuntimeContextId = asNonEmptyString(input.evidence.runtimeContextId);
+    const observedRuntimeInstanceId = asNonEmptyString(input.evidence.observedRuntimeInstanceId);
+    if (profile === null ||
+        observedRunId === null ||
+        observedRuntimeSessionId === null ||
+        observedRuntimeContextId === null ||
+        observedRuntimeInstanceId === null) {
+        return false;
+    }
+    if (observedRuntimeContextId !== buildRuntimeBootstrapContextId(profile, observedRunId)) {
+        return false;
+    }
+    return (observedRuntimeInstanceId ===
+        buildObservedRuntimeInstanceId({
+            sessionId: observedRuntimeSessionId,
+            runId: observedRunId,
+            runtimeContextId: observedRuntimeContextId
+        }));
+};
+const hasStaleBootstrapRebindEvidence = (input) => input.evidence.mode === "stale_bootstrap_rebind" &&
+    input.evidence.staleBootstrapRecoverable === true &&
+    input.evidence.freshness === "fresh" &&
+    input.evidence.identityBound === true &&
+    input.evidence.ownerConflictFree === true &&
+    input.evidence.controllerBrowserContinuity === true &&
+    asNonEmptyString(input.evidence.requestRunId) === asNonEmptyString(input.status.runId) &&
+    asNonEmptyString(input.evidence.requestRuntimeContextId) ===
+        buildRuntimeBootstrapContextId(asNonEmptyString(input.status.profile) ?? "", asNonEmptyString(input.status.runId) ?? "") &&
+    hasObservedRuntimeContinuity({
+        status: input.status,
+        evidence: input.evidence
+    }) &&
+    asInteger(input.evidence.managedTargetTabId) === input.target.targetTabId &&
+    asNonEmptyString(input.evidence.managedTargetDomain) === input.target.targetDomain &&
+    asNonEmptyString(input.evidence.managedTargetPage) === input.target.targetPage &&
+    input.evidence.targetTabContinuity === "runtime_trust_state" &&
+    isIsoTimestampAtOrAfter(input.evidence.takeoverEvidenceObservedAt, input.target.requestedAt) &&
+    input.status.executionSurface === "real_browser" &&
+    input.status.headless === false &&
+    typeof input.target.targetTabId === "number" &&
+    Number.isInteger(input.target.targetTabId) &&
+    typeof input.target.targetDomain === "string" &&
+    input.target.targetDomain.length > 0 &&
+    typeof input.target.targetPage === "string" &&
+    input.target.targetPage.length > 0;
 const isTransportFailureCode = (code) => code === "ERR_TRANSPORT_HANDSHAKE_FAILED" ||
     code === "ERR_TRANSPORT_TIMEOUT" ||
     code === "ERR_TRANSPORT_DISCONNECTED" ||
@@ -56,6 +116,9 @@ const buildRuntimeBootstrapEnvelope = (input) => ({
     run_id: input.runId,
     runtime_context_id: buildRuntimeBootstrapContextId(input.profile, input.runId),
     profile: input.profile,
+    ...(typeof input.requestedAt === "string" && input.requestedAt.length > 0
+        ? { requested_at: input.requestedAt }
+        : {}),
     ...(typeof input.targetTabId === "number" && Number.isInteger(input.targetTabId)
         ? { target_tab_id: input.targetTabId }
         : {}),
@@ -79,6 +142,9 @@ const sleep = async (ms) => await new Promise((resolve) => {
     setTimeout(resolve, ms);
 });
 const buildOfficialChromeTargetParams = (input = {}) => ({
+    ...(typeof input.requestedAt === "string" && input.requestedAt.length > 0
+        ? { requested_at: input.requestedAt }
+        : {}),
     ...(typeof input.targetTabId === "number" && Number.isInteger(input.targetTabId)
         ? { target_tab_id: input.targetTabId }
         : {}),
@@ -202,12 +268,14 @@ export const buildOfficialChromeRuntimeStatusParams = (_context, requestedExecut
     };
 };
 export const prepareOfficialChromeRuntime = async (input) => {
+    const runtimeBootstrapRequestedAt = new Date().toISOString();
     const readStatus = input.readStatus ??
         (async () => await profileRuntime.status({
             cwd: input.context.cwd,
             profile: input.context.profile ?? "",
             runId: input.context.run_id,
             params: buildOfficialChromeRuntimeStatusParams(input.context, input.requestedExecutionMode, {
+                requestedAt: runtimeBootstrapRequestedAt,
                 targetTabId: input.bootstrapTargetTabId,
                 targetDomain: input.bootstrapTargetDomain,
                 targetPage: input.bootstrapTargetPage,
@@ -220,6 +288,7 @@ export const prepareOfficialChromeRuntime = async (input) => {
             profile: input.context.profile ?? "",
             runId: input.context.run_id,
             params: buildOfficialChromeRuntimeStatusParams(input.context, input.requestedExecutionMode, {
+                requestedAt: runtimeBootstrapRequestedAt,
                 targetTabId: input.bootstrapTargetTabId,
                 targetDomain: input.bootstrapTargetDomain,
                 targetPage: input.bootstrapTargetPage,
@@ -241,6 +310,13 @@ export const prepareOfficialChromeRuntime = async (input) => {
     const runtimeTakeoverEvidence = readRuntimeTakeoverEvidence(status);
     const preLockOrphanRecoverable = runtimeTakeoverEvidence.orphanRecoverable === true;
     const preLockAttachableReadyRuntime = runtimeTakeoverEvidence.attachableReadyRuntime === true;
+    const bootstrapTarget = {
+        requestedAt: runtimeBootstrapRequestedAt,
+        targetTabId: input.bootstrapTargetTabId,
+        targetDomain: input.bootstrapTargetDomain,
+        targetPage: input.bootstrapTargetPage,
+        targetResourceId: input.bootstrapTargetResourceId
+    };
     const syncRuntimeStatus = (nextStatus) => {
         status = nextStatus;
         profileState =
@@ -269,11 +345,17 @@ export const prepareOfficialChromeRuntime = async (input) => {
     });
     const shouldAttemptAttach = !lockHeld &&
         identityBindingState === "bound" &&
-        bootstrapState !== "stale" &&
-        (preLockAttachableReadyRuntime ||
-            (runtimeReadiness === "recoverable" &&
-                preLockOrphanRecoverable &&
-                (profileState === "disconnected" || profileState === "ready")));
+        ((bootstrapState !== "stale" &&
+            (preLockAttachableReadyRuntime ||
+                (runtimeReadiness === "recoverable" &&
+                    preLockOrphanRecoverable &&
+                    (profileState === "disconnected" || profileState === "ready")))) ||
+            (bootstrapState === "stale" &&
+                hasStaleBootstrapRebindEvidence({
+                    status,
+                    evidence: runtimeTakeoverEvidence,
+                    target: bootstrapTarget
+                })));
     if (shouldAttemptAttach) {
         syncRuntimeStatus(await attachRuntime());
     }
@@ -282,6 +364,7 @@ export const prepareOfficialChromeRuntime = async (input) => {
             profile: input.context.profile ?? "",
             runId: input.context.run_id,
             fingerprintRuntime: input.fingerprintContext,
+            requestedAt: runtimeBootstrapRequestedAt,
             targetTabId: input.bootstrapTargetTabId,
             targetDomain: input.bootstrapTargetDomain ?? null,
             targetPage: input.bootstrapTargetPage ?? null,
@@ -403,6 +486,7 @@ export const prepareOfficialChromeRuntime = async (input) => {
             consumerId: input.consumerId,
             identityBindingState,
             target: {
+                requestedAt: runtimeBootstrapRequestedAt,
                 targetTabId: input.bootstrapTargetTabId,
                 targetDomain: input.bootstrapTargetDomain,
                 targetPage: input.bootstrapTargetPage,
@@ -440,6 +524,7 @@ export const prepareOfficialChromeRuntime = async (input) => {
                 consumerId: input.consumerId,
                 identityBindingState,
                 target: {
+                    requestedAt: runtimeBootstrapRequestedAt,
                     targetTabId: input.bootstrapTargetTabId,
                     targetDomain: input.bootstrapTargetDomain,
                     targetPage: input.bootstrapTargetPage,
@@ -458,6 +543,7 @@ export const prepareOfficialChromeRuntime = async (input) => {
                     consumerId: input.consumerId,
                     identityBindingState,
                     target: {
+                        requestedAt: runtimeBootstrapRequestedAt,
                         targetTabId: input.bootstrapTargetTabId,
                         targetDomain: input.bootstrapTargetDomain,
                         targetPage: input.bootstrapTargetPage,

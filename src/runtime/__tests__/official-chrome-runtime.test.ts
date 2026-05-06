@@ -4,19 +4,48 @@ import {
   buildOfficialChromeRuntimeStatusParams,
   prepareOfficialChromeRuntime
 } from "../official-chrome-runtime.js";
+import { buildRuntimeBootstrapContextId } from "../runtime-bootstrap.js";
 
 const buildRuntimeTakeoverEvidence = (input: {
-  mode?: "ready_attach" | "recoverable_rebind" | null;
+  mode?: "ready_attach" | "recoverable_rebind" | "stale_bootstrap_rebind" | null;
   attachableReadyRuntime?: boolean;
   orphanRecoverable?: boolean;
+  staleBootstrapRecoverable?: boolean;
+  freshness?: string;
+  identityBound?: boolean;
+  ownerConflictFree?: boolean;
+  controllerBrowserContinuity?: boolean;
   observedRunId?: string;
+  observedRuntimeSessionId?: string | null;
+  observedRuntimeInstanceId?: string | null;
   runtimeContextId?: string | null;
+  requestRunId?: string | null;
+  requestRuntimeContextId?: string | null;
+  managedTargetTabId?: number | null;
+  managedTargetDomain?: string | null;
+  managedTargetPage?: string | null;
+  targetTabContinuity?: string | null;
+  takeoverEvidenceObservedAt?: string | null;
 } = {}) => ({
   mode: input.mode ?? null,
   attachableReadyRuntime: input.attachableReadyRuntime ?? false,
   orphanRecoverable: input.orphanRecoverable ?? false,
+  staleBootstrapRecoverable: input.staleBootstrapRecoverable ?? false,
+  freshness: input.freshness ?? "fresh",
+  identityBound: input.identityBound ?? true,
+  ownerConflictFree: input.ownerConflictFree ?? true,
+  controllerBrowserContinuity: input.controllerBrowserContinuity ?? true,
   observedRunId: input.observedRunId ?? "observed-runtime-001",
-  runtimeContextId: input.runtimeContextId ?? null
+  observedRuntimeSessionId: input.observedRuntimeSessionId ?? null,
+  observedRuntimeInstanceId: input.observedRuntimeInstanceId ?? null,
+  runtimeContextId: input.runtimeContextId ?? null,
+  requestRunId: input.requestRunId ?? null,
+  requestRuntimeContextId: input.requestRuntimeContextId ?? null,
+  managedTargetTabId: input.managedTargetTabId ?? null,
+  managedTargetDomain: input.managedTargetDomain ?? null,
+  managedTargetPage: input.managedTargetPage ?? null,
+  targetTabContinuity: input.targetTabContinuity ?? null,
+  takeoverEvidenceObservedAt: input.takeoverEvidenceObservedAt ?? null
 });
 
 describe("prepareOfficialChromeRuntime", () => {
@@ -399,6 +428,7 @@ describe("prepareOfficialChromeRuntime", () => {
           target_domain: "www.xiaohongshu.com",
           target_tab_id: 52,
           target_page: "search_result_tab",
+          requested_at: expect.any(String),
           timeout_ms: 120_000
         })
       })
@@ -499,6 +529,256 @@ describe("prepareOfficialChromeRuntime", () => {
         })
       })
     );
+  });
+
+  it("attaches and re-bootstraps a stale same-target managed runtime when recovery evidence is fresh", async () => {
+    const readStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "blocked",
+        identityBindingState: "bound",
+        bootstrapState: "stale",
+        transportState: "ready",
+        lockHeld: false,
+        executionSurface: "real_browser",
+        headless: false,
+        profile: "official_stale_bootstrap_attach_profile",
+        runId: "run-runtime-stale-bootstrap-next-001",
+        runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+          mode: "stale_bootstrap_rebind",
+          staleBootstrapRecoverable: true,
+          observedRunId: "run-runtime-stale-bootstrap-owner-001",
+          observedRuntimeSessionId: "nm-session-stale-bootstrap-001",
+          observedRuntimeInstanceId: `nm-session-stale-bootstrap-001:run-runtime-stale-bootstrap-owner-001:${buildRuntimeBootstrapContextId(
+            "official_stale_bootstrap_attach_profile",
+            "run-runtime-stale-bootstrap-owner-001"
+          )}`,
+          runtimeContextId: buildRuntimeBootstrapContextId(
+            "official_stale_bootstrap_attach_profile",
+            "run-runtime-stale-bootstrap-owner-001"
+          ),
+          requestRunId: "run-runtime-stale-bootstrap-next-001",
+          requestRuntimeContextId: buildRuntimeBootstrapContextId(
+            "official_stale_bootstrap_attach_profile",
+            "run-runtime-stale-bootstrap-next-001"
+          ),
+          managedTargetTabId: 52,
+          managedTargetDomain: "www.xiaohongshu.com",
+          managedTargetPage: "search_result_tab",
+          targetTabContinuity: "runtime_trust_state",
+          takeoverEvidenceObservedAt: "2999-01-01T00:00:00.000Z"
+        })
+      })
+      .mockResolvedValueOnce({
+        identityPreflight: {
+          mode: "official_chrome_persistent_extension"
+        },
+        profileState: "ready",
+        runtimeReadiness: "ready",
+        identityBindingState: "bound",
+        bootstrapState: "ready",
+        transportState: "ready",
+        lockHeld: true,
+        executionSurface: "real_browser",
+        headless: false
+      });
+    const attachRuntime = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "blocked",
+      identityBindingState: "bound",
+      bootstrapState: "stale",
+      transportState: "ready",
+      lockHeld: true,
+      executionSurface: "real_browser",
+      headless: false
+    }));
+    const bridge = {
+      runCommand: vi.fn(async (request: { params: { runtime_context_id: string } }) => ({
+        ok: true,
+        payload: {
+          result: {
+            version: "v1",
+            run_id: "run-runtime-stale-bootstrap-next-001",
+            runtime_context_id: request.params.runtime_context_id,
+            profile: "official_stale_bootstrap_attach_profile",
+            status: "ready"
+          }
+        },
+        error: null
+      }))
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_stale_bootstrap_attach_profile",
+          run_id: "run-runtime-stale-bootstrap-next-001",
+          command: "xhs.search",
+          params: {
+            timeout_ms: 120_000
+          }
+        } as never,
+        consumerId: "xhs.search",
+        requestedExecutionMode: "live_read_limited",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        bootstrapTargetTabId: 52,
+        bootstrapTargetDomain: "www.xiaohongshu.com",
+        bootstrapTargetPage: "search_result_tab",
+        attachRuntime,
+        readStatus
+      })
+    ).resolves.toMatchObject({
+      runtimeReadiness: "ready",
+      bootstrapState: "ready",
+      lockHeld: true
+    });
+
+    expect(attachRuntime).toHaveBeenCalledTimes(1);
+    expect(bridge.runCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "runtime.bootstrap",
+        params: expect.objectContaining({
+          run_id: "run-runtime-stale-bootstrap-next-001",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 52,
+          target_page: "search_result_tab"
+        })
+      })
+    );
+  });
+
+  it("keeps stale bootstrap blocked when same-target recovery evidence is missing", async () => {
+    const readStatus = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "blocked",
+      identityBindingState: "bound",
+      bootstrapState: "stale",
+      transportState: "ready",
+      lockHeld: false,
+      executionSurface: "real_browser",
+      headless: false,
+      runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+        mode: null,
+        staleBootstrapRecoverable: false
+      })
+    }));
+    const attachRuntime = vi.fn();
+    const bridge = {
+      runCommand: vi.fn()
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_stale_bootstrap_blocked_profile",
+          run_id: "run-runtime-stale-bootstrap-blocked-001",
+          command: "xhs.search",
+          params: {}
+        } as never,
+        consumerId: "xhs.search",
+        requestedExecutionMode: "live_read_limited",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        bootstrapTargetTabId: 52,
+        bootstrapTargetDomain: "www.xiaohongshu.com",
+        bootstrapTargetPage: "search_result_tab",
+        attachRuntime,
+        readStatus
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_BOOTSTRAP_ACK_STALE"
+    });
+
+    expect(attachRuntime).not.toHaveBeenCalled();
+    expect(bridge.runCommand).not.toHaveBeenCalled();
+  });
+
+  it("keeps stale bootstrap blocked when observed runtime instance continuity mismatches", async () => {
+    const readStatus = vi.fn(async () => ({
+      identityPreflight: {
+        mode: "official_chrome_persistent_extension"
+      },
+      profileState: "ready",
+      runtimeReadiness: "blocked",
+      identityBindingState: "bound",
+      bootstrapState: "stale",
+      transportState: "ready",
+      lockHeld: false,
+      executionSurface: "real_browser",
+      headless: false,
+      profile: "official_stale_bootstrap_blocked_profile",
+      runId: "run-runtime-stale-bootstrap-next-001",
+      runtimeTakeoverEvidence: buildRuntimeTakeoverEvidence({
+        mode: "stale_bootstrap_rebind",
+        staleBootstrapRecoverable: true,
+        observedRunId: "run-runtime-stale-bootstrap-owner-001",
+        observedRuntimeSessionId: "nm-session-stale-bootstrap-001",
+        observedRuntimeInstanceId: "nm-session-other:run-runtime-stale-bootstrap-owner-001:wrong-context",
+        runtimeContextId: buildRuntimeBootstrapContextId(
+          "official_stale_bootstrap_blocked_profile",
+          "run-runtime-stale-bootstrap-owner-001"
+        ),
+        requestRunId: "run-runtime-stale-bootstrap-next-001",
+        requestRuntimeContextId: buildRuntimeBootstrapContextId(
+          "official_stale_bootstrap_blocked_profile",
+          "run-runtime-stale-bootstrap-next-001"
+        ),
+        managedTargetTabId: 52,
+        managedTargetDomain: "www.xiaohongshu.com",
+        managedTargetPage: "search_result_tab",
+        targetTabContinuity: "runtime_trust_state",
+        takeoverEvidenceObservedAt: "2999-01-01T00:00:00.000Z"
+      })
+    }));
+    const attachRuntime = vi.fn();
+    const bridge = {
+      runCommand: vi.fn()
+    };
+
+    await expect(
+      prepareOfficialChromeRuntime({
+        context: {
+          cwd: "/tmp/webenvoy",
+          profile: "official_stale_bootstrap_blocked_profile",
+          run_id: "run-runtime-stale-bootstrap-next-001",
+          command: "xhs.search",
+          params: {}
+        } as never,
+        consumerId: "xhs.search",
+        requestedExecutionMode: "live_read_limited",
+        bridge: bridge as never,
+        fingerprintContext: {
+          fingerprint_profile_bundle: null
+        } as never,
+        bootstrapTargetTabId: 52,
+        bootstrapTargetDomain: "www.xiaohongshu.com",
+        bootstrapTargetPage: "search_result_tab",
+        attachRuntime,
+        readStatus
+      })
+    ).rejects.toMatchObject({
+      code: "ERR_RUNTIME_BOOTSTRAP_ACK_STALE"
+    });
+
+    expect(attachRuntime).not.toHaveBeenCalled();
+    expect(bridge.runCommand).not.toHaveBeenCalled();
   });
 
   it("attempts attach from pre-lock orphan recovery facts even after attach rebinding", async () => {

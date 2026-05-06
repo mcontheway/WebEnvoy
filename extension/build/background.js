@@ -515,6 +515,7 @@ const xhsRestoreSearchUrlsMatch = (observedUrl, targetUrl) => {
     const target = normalizeXhsRestoreSearchUrl(targetUrl);
     return observed !== null && target !== null && observed === target;
 };
+const buildObservedRuntimeInstanceId = (input) => `${input.sessionId}:${input.runId}:${input.runtimeContextId}`;
 const isRestoreTargetTabNotFoundError = (error) => {
     const message = error instanceof Error ? error.message : String(error);
     return /(?:no tab with id|tab not found)/i.test(message);
@@ -1832,6 +1833,7 @@ class ChromeBackgroundBridge {
         this.#upsertTrustedFingerprintContext(profile, sessionId, fingerprintRuntime, {
             sourceTabId: sourceBinding.tabId,
             sourceDomain: sourceBinding.domain,
+            sourcePage: sourceBinding.page,
             runId: bootstrap?.runId ?? null,
             runtimeContextId: bootstrap?.runtimeContextId ?? null
         });
@@ -1849,7 +1851,8 @@ class ChromeBackgroundBridge {
             }
             return {
                 tabId,
-                domain: parsedSenderUrl.hostname
+                domain: parsedSenderUrl.hostname,
+                page: classifyXhsPage(senderUrl, parsedSenderUrl.hostname)
             };
         }
         const allowlistTabs = await this.chromeApi.tabs.query({
@@ -1863,7 +1866,8 @@ class ChromeBackgroundBridge {
         }
         return {
             tabId,
-            domain: parsedTabUrl.hostname
+            domain: parsedTabUrl.hostname,
+            page: classifyXhsPage(senderTabUrl, parsedTabUrl.hostname)
         };
     }
     #resolveRequestTargetBinding(request) {
@@ -1874,24 +1878,41 @@ class ChromeBackgroundBridge {
             : options?.[key];
         const targetTabId = asInteger(readTarget("target_tab_id"));
         const targetDomain = asNonEmptyString(readTarget("target_domain"));
+        const targetPage = asNonEmptyString(readTarget("target_page"));
         if (targetTabId === null || !targetDomain || !XHS_DOMAIN_ALLOWLIST.has(targetDomain)) {
             return null;
         }
         return {
             tabId: targetTabId,
-            domain: targetDomain
+            domain: targetDomain,
+            page: targetPage
         };
     }
-    #doesStrictTargetBindingMatch(requestTargetBinding, storedTarget) {
-        if (storedTarget.sourceTabId === null && storedTarget.sourceDomain === null) {
+    #doesStrictTargetBindingMatch(requestTargetBinding, storedTarget, options = {}) {
+        const storedSourcePage = asNonEmptyString(storedTarget.sourcePage);
+        if (storedTarget.sourceTabId === null &&
+            storedTarget.sourceDomain === null &&
+            storedSourcePage === null) {
             return requestTargetBinding === null;
         }
         if (storedTarget.sourceTabId === null || storedTarget.sourceDomain === null) {
             return false;
         }
-        return (requestTargetBinding !== null &&
-            requestTargetBinding.tabId === storedTarget.sourceTabId &&
-            requestTargetBinding.domain === storedTarget.sourceDomain);
+        if (requestTargetBinding === null ||
+            requestTargetBinding.tabId !== storedTarget.sourceTabId ||
+            requestTargetBinding.domain !== storedTarget.sourceDomain) {
+            return false;
+        }
+        if (options.requirePage === true) {
+            if (requestTargetBinding.page === null) {
+                return false;
+            }
+            if (storedSourcePage === null) {
+                return options.allowMissingStoredPage === true;
+            }
+            return requestTargetBinding.page === storedSourcePage;
+        }
+        return true;
     }
     async #rememberStartupTrustedFingerprintContext(payload, sender) {
         const startupTrust = asRecord(payload.startup_fingerprint_trust);
@@ -1930,6 +1951,7 @@ class ChromeBackgroundBridge {
         this.#upsertTrustedFingerprintContext(profile, explicitSessionId, fingerprintRuntime, {
             sourceTabId: senderBinding.tabId,
             sourceDomain: senderBinding.domain,
+            sourcePage: senderBinding.page,
             runId: asNonEmptyString(startupTrust.run_id ?? null),
             runtimeContextId: asNonEmptyString(startupTrust.runtime_context_id ?? null)
         });
@@ -1976,6 +1998,7 @@ class ChromeBackgroundBridge {
         if (sourceBinding) {
             bootstrap.sourceTabId = sourceBinding.tabId;
             bootstrap.sourceDomain = sourceBinding.domain;
+            bootstrap.sourcePage = sourceBinding.page;
         }
         bootstrap.status = "ready";
         bootstrap.updatedAt = new Date().toISOString();
@@ -2193,6 +2216,7 @@ class ChromeBackgroundBridge {
                 serializedFingerprintRuntime: serializeFingerprintRuntimeContext(fingerprintRuntime),
                 sourceTabId: requestTargetBinding?.tabId ?? null,
                 sourceDomain: requestTargetBinding?.domain ?? null,
+                sourcePage: requestTargetBinding?.page ?? null,
                 updatedAt: new Date().toISOString()
             });
             this.#emit({
@@ -2227,7 +2251,10 @@ class ChromeBackgroundBridge {
             currentBootstrapState.version === version &&
             currentBootstrapState.runId === runId &&
             currentBootstrapState.runtimeContextId === runtimeContextId &&
-            this.#doesStrictTargetBindingMatch(requestTargetBinding, currentBootstrapState) &&
+            this.#doesStrictTargetBindingMatch(requestTargetBinding, currentBootstrapState, {
+                requirePage: requestTargetBinding?.page != null,
+                allowMissingStoredPage: true
+            }) &&
             currentBootstrapState.serializedFingerprintRuntime === serializedFingerprintRuntime;
         const trusted = this.#runtimeTrustState.getTrusted(profile, requestSessionId);
         const trustedHasInstalledInjection = hasInstalledFingerprintInjection(trusted?.fingerprintRuntime ?? null);
@@ -2235,7 +2262,10 @@ class ChromeBackgroundBridge {
             trusted.sessionId === requestSessionId &&
             trusted.runId === runId &&
             trusted.runtimeContextId === runtimeContextId &&
-            this.#doesStrictTargetBindingMatch(requestTargetBinding, trusted) &&
+            this.#doesStrictTargetBindingMatch(requestTargetBinding, trusted, {
+                requirePage: requestTargetBinding?.page != null,
+                allowMissingStoredPage: true
+            }) &&
             trustedHasInstalledInjection;
         const bootstrapReadyFromTrusted = trustedMatchesBootstrap &&
             trusted.serializedFingerprintRuntime === serializedFingerprintRuntime;
@@ -2262,6 +2292,10 @@ class ChromeBackgroundBridge {
                 sourceDomain: trusted?.sourceDomain ??
                     requestTargetBinding?.domain ??
                     currentBootstrapState?.sourceDomain ??
+                    null,
+                sourcePage: trusted?.sourcePage ??
+                    requestTargetBinding?.page ??
+                    currentBootstrapState?.sourcePage ??
                     null,
                 updatedAt: new Date().toISOString()
             });
@@ -2306,6 +2340,7 @@ class ChromeBackgroundBridge {
             serializedFingerprintRuntime,
             sourceTabId: requestTargetBinding?.tabId ?? null,
             sourceDomain: requestTargetBinding?.domain ?? null,
+            sourcePage: requestTargetBinding?.page ?? null,
             updatedAt: new Date().toISOString()
         });
         // Keep the request pending until the execution surface returns an explicit bootstrap ack
@@ -2521,7 +2556,8 @@ class ChromeBackgroundBridge {
             restoreSafetyGate.target_tab_id === sourceTab.id &&
             restoreSafetyGate.managed_target_tab_id === sourceTab.id &&
             restoreSafetyGate.target_tab_continuity === "stale_bootstrap_current_managed_tab" &&
-            restoreSafetyGate.target_domain === targetDomain;
+            restoreSafetyGate.target_domain === targetDomain &&
+            restoreSafetyGate.target_page === targetPage;
         const bootstrapBindsTarget = !!bootstrap &&
             (bootstrap.status === "pending" || bootstrap.status === "ready") &&
             bootstrap.sessionId === sessionId &&
@@ -2536,7 +2572,8 @@ class ChromeBackgroundBridge {
             staleRestoreLease.runId === runId &&
             staleRestoreLease.runtimeContextId === restoreSafetyGate?.runtime_context_id &&
             staleRestoreLease.targetTabId === sourceTab.id &&
-            staleRestoreLease.targetDomain === targetDomain;
+            staleRestoreLease.targetDomain === targetDomain &&
+            staleRestoreLease.targetPage === targetPage;
         const staleBootstrapRecoveryBindsTarget = staleBootstrapRecovery &&
             staleRestoreLeaseBindsTarget &&
             restoreSafetyGate?.managed_target_tab_id === sourceTab.id;
@@ -2985,7 +3022,8 @@ class ChromeBackgroundBridge {
                     resolved_request_target_binding: sourceBinding
                         ? {
                             tab_id: sourceBinding.tabId,
-                            domain: sourceBinding.domain
+                            domain: sourceBinding.domain,
+                            page: sourceBinding.page
                         }
                         : null,
                     bootstrap_state: bootstrap
@@ -3014,7 +3052,11 @@ class ChromeBackgroundBridge {
             (!requestRuntimeContextId || bootstrap.runtimeContextId === requestRuntimeContextId);
         const { binding: requestTargetBinding, requested: targetBindingRequested } = await this.#resolveRuntimeReadinessTargetBinding(request);
         const targetBindingMatches = !targetBindingRequested ||
-            (!!bootstrap && this.#doesStrictTargetBindingMatch(requestTargetBinding, bootstrap));
+            (!!bootstrap &&
+                this.#doesStrictTargetBindingMatch(requestTargetBinding, bootstrap, {
+                    requirePage: true,
+                    allowMissingStoredPage: true
+                }));
         const bootstrapState = bootstrap === null
             ? "not_started"
             : sessionMatches && runMatches && runtimeContextMatches
@@ -3030,12 +3072,29 @@ class ChromeBackgroundBridge {
         const managedTargetDomain = targetBindingRequested && targetBindingMatches && typeof bootstrap?.sourceDomain === "string"
             ? bootstrap.sourceDomain
             : null;
-        const targetTabContinuity = managedTargetTabId !== null && managedTargetDomain !== null ? "runtime_trust_state" : null;
+        const managedTargetPage = targetBindingRequested && targetBindingMatches && requestTargetBinding?.page
+            ? requestTargetBinding.page
+            : null;
+        const targetTabContinuity = managedTargetTabId !== null && managedTargetDomain !== null && managedTargetPage !== null
+            ? "runtime_trust_state"
+            : null;
+        const observedRuntimeSessionId = targetTabContinuity === "runtime_trust_state" && bootstrap ? this.#sessionId : null;
+        const observedRuntimeInstanceId = targetTabContinuity === "runtime_trust_state" && bootstrap
+            ? buildObservedRuntimeInstanceId({
+                sessionId: this.#sessionId,
+                runId: bootstrap.runId,
+                runtimeContextId: bootstrap.runtimeContextId
+            })
+            : null;
+        const takeoverEvidenceObservedAt = targetTabContinuity === "runtime_trust_state" ? new Date().toISOString() : null;
         if (profile &&
             requestRunId &&
             requestRuntimeContextId &&
             managedTargetTabId !== null &&
             managedTargetDomain !== null &&
+            managedTargetPage !== null &&
+            observedRuntimeSessionId !== null &&
+            observedRuntimeInstanceId !== null &&
             targetTabContinuity === "runtime_trust_state") {
             this.#upsertStaleRestoreBindingLease(profile, {
                 sessionId: this.#sessionId,
@@ -3043,6 +3102,9 @@ class ChromeBackgroundBridge {
                 runtimeContextId: requestRuntimeContextId,
                 targetTabId: managedTargetTabId,
                 targetDomain: managedTargetDomain,
+                targetPage: managedTargetPage,
+                observedRuntimeSessionId,
+                observedRuntimeInstanceId,
                 issuedAtMs: Date.now()
             });
         }
@@ -3067,7 +3129,11 @@ class ChromeBackgroundBridge {
                 version: bootstrap?.version ?? null,
                 managed_target_tab_id: managedTargetTabId,
                 managed_target_domain: managedTargetDomain,
+                managed_target_page: managedTargetPage,
                 target_tab_continuity: targetTabContinuity,
+                observed_runtime_session_id: observedRuntimeSessionId,
+                observed_runtime_instance_id: observedRuntimeInstanceId,
+                takeover_evidence_observed_at: takeoverEvidenceObservedAt,
                 transport_state: "ready"
             },
             error: null
@@ -3106,7 +3172,8 @@ class ChromeBackgroundBridge {
         return {
             binding: {
                 tabId: targetTabId,
-                domain: targetDomain
+                domain: targetDomain,
+                page: preferredPage
             },
             requested: true
         };
@@ -3165,7 +3232,65 @@ class ChromeBackgroundBridge {
             ackRunId === bootstrap.runId &&
             ackRuntimeContextId === bootstrap.runtimeContextId &&
             ackProfile === bootstrap.profile;
-        if (ackStatus === "stale" && isContextMatch) {
+        const ackExecutionAttested = hasSuccessfulExecutionAttestation(input.payload);
+        const requestTargetBinding = this.#resolveRequestTargetBinding(input.request);
+        const senderBinding = await this.#resolveStartupTrustSenderBinding(input.sender);
+        if (requestTargetBinding &&
+            !this.#doesStrictTargetBindingMatch(requestTargetBinding, {
+                sourceTabId: senderBinding?.tabId ?? null,
+                sourceDomain: senderBinding?.domain ?? null,
+                sourcePage: senderBinding?.page ?? null
+            }, {
+                requirePage: requestTargetBinding.page !== null
+            })) {
+            bootstrap.status = "failed";
+            bootstrap.updatedAt = new Date().toISOString();
+            this.#runtimeTrustState.setBootstrap(profile, bootstrap);
+            if (input.suppressHostResponse) {
+                return;
+            }
+            this.#emit({
+                id: input.request.id,
+                status: "error",
+                summary: {
+                    relay_path: "host>background>content-script>background>host"
+                },
+                payload: input.payload,
+                error: {
+                    code: "ERR_RUNTIME_READY_SIGNAL_CONFLICT",
+                    message: "runtime bootstrap ack target_page 与当前执行 tab 不一致"
+                }
+            });
+            return;
+        }
+        if (!isContextMatch || !ackExecutionAttested || (ackStatus !== "ready" && ackStatus !== "stale")) {
+            bootstrap.status = "failed";
+            bootstrap.updatedAt = new Date().toISOString();
+            this.#runtimeTrustState.setBootstrap(profile, bootstrap);
+            if (input.suppressHostResponse) {
+                return;
+            }
+            this.#emit({
+                id: input.request.id,
+                status: "error",
+                summary: {
+                    relay_path: "host>background>content-script>background>host"
+                },
+                payload: input.payload,
+                error: {
+                    code: "ERR_RUNTIME_READY_SIGNAL_CONFLICT",
+                    message: "runtime bootstrap ack 与当前运行上下文不一致"
+                }
+            });
+            return;
+        }
+        const sourceBinding = senderBinding ?? requestTargetBinding;
+        if (ackStatus === "stale") {
+            if (sourceBinding) {
+                bootstrap.sourceTabId = sourceBinding.tabId;
+                bootstrap.sourceDomain = sourceBinding.domain;
+                bootstrap.sourcePage = sourceBinding.page;
+            }
             bootstrap.status = "stale";
             bootstrap.updatedAt = new Date().toISOString();
             this.#runtimeTrustState.setBootstrap(profile, bootstrap);
@@ -3189,32 +3314,10 @@ class ChromeBackgroundBridge {
             });
             return;
         }
-        if (ackStatus !== "ready" || !isContextMatch || !hasSuccessfulExecutionAttestation(input.payload)) {
-            bootstrap.status = "failed";
-            bootstrap.updatedAt = new Date().toISOString();
-            this.#runtimeTrustState.setBootstrap(profile, bootstrap);
-            if (input.suppressHostResponse) {
-                return;
-            }
-            this.#emit({
-                id: input.request.id,
-                status: "error",
-                summary: {
-                    relay_path: "host>background>content-script>background>host"
-                },
-                payload: input.payload,
-                error: {
-                    code: "ERR_RUNTIME_READY_SIGNAL_CONFLICT",
-                    message: "runtime bootstrap ack 与当前运行上下文不一致"
-                }
-            });
-            return;
-        }
-        const sourceBinding = this.#resolveRequestTargetBinding(input.request) ??
-            (await this.#resolveStartupTrustSenderBinding(input.sender));
         if (sourceBinding) {
             bootstrap.sourceTabId = sourceBinding.tabId;
             bootstrap.sourceDomain = sourceBinding.domain;
+            bootstrap.sourcePage = sourceBinding.page;
         }
         bootstrap.status = "ready";
         bootstrap.updatedAt = new Date().toISOString();
@@ -3226,6 +3329,7 @@ class ChromeBackgroundBridge {
             this.#upsertTrustedFingerprintContext(profile, bootstrap.sessionId, attestedFingerprintRuntime, {
                 sourceTabId: sourceBinding.tabId,
                 sourceDomain: sourceBinding.domain,
+                sourcePage: sourceBinding.page,
                 runId: bootstrap.runId,
                 runtimeContextId: bootstrap.runtimeContextId
             });
