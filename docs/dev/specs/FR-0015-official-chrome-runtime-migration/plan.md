@@ -33,7 +33,7 @@
   - `TODO.md`
   - implementation-prep 中的代码路径、切片顺序、验证矩阵与回滚边界
 - 目标：
-  - 给后续实现 PR 明确第一刀切片与 stop-ship 边界。
+  - 给后续实现 PR 明确第一步切片与 stop-ship 边界。
   - 避免实现阶段把安装器、candidate 分发、验证体系混进 runtime migration。
 
 ## 实现约束
@@ -70,15 +70,23 @@
     - identity/context conflict 与真实 owner 冲突继续视为阻断态
     - 其 `orphanRecoverable=true` 仅在 `runtimeReadiness=recoverable`、`identityBindingState=bound`、旧 owner 已失去有效独占控制、没有其他 controller 已重新取得有效独占控制且 browser/controller 连续性仍成立时成立
     - identity 缺失/冲突、旧 owner 仍持有有效独占控制、已有其他 controller 抢先取得有效独占控制、`transportState=not_connected` 或 `bootstrapState=stale` 时，`RuntimeTakeoverEvidence.orphanRecoverable` 必须继续为 `false`
+    - 其 `staleBootstrapRecoverable=true` 仅在 `bootstrapState=stale`、`transportState=ready`、`runtime.bootstrap.ack.result.stale_provenance` 使用冻结字段并指向非当前 `(run_id, runtime_context_id)` 的旧 ready marker 或 observed runtime identity、`stale_provenance.observed_runtime_instance_id` 为非空字符串且原样 carry-through 到 `RuntimeTakeoverEvidence.observedRuntimeInstanceId`、同一 managed target tab/domain/page 已由 `managedTargetTabId` / `managedTargetDomain` / `managedTargetPage` 证明、official Chrome `real_browser`、`headless=false`、owner conflict free、controller/browser continuity 与消费方既有 safety/validation gates 均成立时成立
+    - stale-bootstrap recovery proof fields 必须全部来自 `runtime-readiness-status` contract 冻结的 source machine fields，并一次性冻结到 `RuntimeTakeoverEvidence`
+    - target proof 必须来自当前 `runtime.bootstrap.params.target_domain` / `target_tab_id` / `target_page` 与 readiness target attestation 的匹配结果；freshness proof 必须来自 `runtime.status.takeoverEvidenceObservedAt` 与当前 `runtime.bootstrap.params.requested_at`
+    - `staleBootstrapRecoverable=true` 只允许 replacement run 先 attach/rebind 再重新 bootstrap，不得把旧 run 的 stale ack 当作 ready evidence
     - `orphanRecoverable` 只适用于尚未有 controller 重新取得有效独占控制的 pre-lock handoff 视图；replacement controller 或其他 controller 一旦重新持有有效独占锁，新的 pre-lock evidence 中该字段必须回落为 `false`
-    - 至少区分 `ready_attach` 与 `recoverable_rebind`
-    - 至少包含 freshness、identity bound、owner conflict free、controller/browser continuity、transport/bootstrap viability
-    - 必须绑定到具体 observed runtime instance（例如 `observedRunId`、`runtimeContextId` 或等价 attach-target identity）
+    - 至少区分 `ready_attach`、`recoverable_rebind` 与 `stale_bootstrap_rebind`
+    - 至少包含 freshness、identity bound、owner conflict free、controller/browser continuity、transport/bootstrap viability、`observedRunId`、`runtimeContextId`
+    - `requestRunId`、`requestRuntimeContextId` 与 `observedRuntimeInstanceId` 只属于 `mode=stale_bootstrap_rebind` 的 non-null proof fields；`ready_attach` 与 `recoverable_rebind` 下必须为 `null` 或缺省，除非后续 formal contract 单独冻结来源
+    - 只有在对应 mode 已冻结 observed runtime instance 来源时，才必须绑定到具体 observed runtime instance；`mode=stale_bootstrap_rebind` 必须非空绑定该字段
   - `postLockTakeoverGate`
     - 当前调用方先持有 FR-0003 profile 独占锁
     - ready-runtime attach 只能消费锁切换前冻结的 `RuntimeTakeoverEvidence(mode=ready_attach)` 通过 `postLockTakeoverGate`
     - recoverable rebind 只能消费锁切换前冻结的 `RuntimeTakeoverEvidence(mode=recoverable_rebind)` 通过 `postLockTakeoverGate`
-    - 必须校验 evidence 仍绑定到同一个 observed runtime instance
+    - stale bootstrap rebind 只能消费锁切换前冻结的 `RuntimeTakeoverEvidence(mode=stale_bootstrap_rebind)` 通过 `postLockTakeoverGate`，随后必须重新下发 replacement/current requested run 的 `runtime.bootstrap`
+    - stale bootstrap rebind 的 `postLockTakeoverGate` 必须复验 `requestRunId` 与 `requestRuntimeContextId` 等于当前 replacement run 的 `(run_id, runtime_context_id)`
+    - stale bootstrap rebind 的 `postLockTakeoverGate` 必须复验冻结的 `managedTargetTabId`、`managedTargetDomain`、`managedTargetPage` 与当前 post-lock observed target 完全一致，且 `targetTabContinuity=runtime_trust_state`
+    - 必须校验 evidence 仍绑定到同一个已冻结来源的 observed runtime instance；对 `mode=stale_bootstrap_rebind`，该校验必须使用非空 `observedRuntimeInstanceId`
     - 它不是 `runtime.status` 顶层字段，且不得把 `RuntimeTakeoverEvidence.attachableReadyRuntime` / `orphanRecoverable` 直接当作最终 gate
     - relock 后不得要求新的 pre-lock evidence 继续保留 `orphanRecoverable=true`
   - 控制进程死 / 浏览器活
@@ -153,12 +161,12 @@
   - 必须先明确 identity preflight 失败面的 stop-ship 规则，才能做写路径或更大范围的 live 验证。
 - 明确拆开：
   - FR-0015 的后续实现 PR 与 `FR-0020` 的验证 PR 必须分开推进。
-  - candidate 安装/分发路径若要产品化，必须另开后续事项，不挂在本 FR 的第一刀实现中。
+  - candidate 安装/分发路径若要产品化，必须另开后续事项，不挂在本 FR 的第一步实现中。
 
 ## 进入实现前条件
 
 1. FR-0015 的 spec review 通过，且 reviewer 明确认可其足以支撑 `#281` implementation-prep。
 2. `contracts/runtime-bootstrap.md`、`contracts/runtime-readiness-status.md`、`data-model.md` 与 `risks.md` 被 reviewer 认可，能解释 bootstrap / identity / readiness 的共享边界。
-3. 后续实现 PR 明确只围绕 runtime migration 第一刀切片，并显式 `Refs` FR-0015 当前 canonical issue；如需追溯历史实现链路，可补充 `Refs #281` 或 `Refs #361`，但不得再用它们充当当前结构父级，也不得混入 `FR-0020`、安装器产品化或 candidate 分发产品化。
+3. 后续实现 PR 明确只围绕 runtime migration 第一步切片，并显式 `Refs` FR-0015 当前 canonical issue；如需追溯历史实现链路，可补充 `Refs #281` 或 `Refs #361`，但不得再用它们充当当前结构父级，也不得混入 `FR-0020`、安装器产品化或 candidate 分发产品化。
 4. 后续实现 PR 预先声明 stop-ship 条件、回滚入口与最小验证矩阵。
 5. 在这些条件满足前，禁止把 `#281` 视为已闭环，也禁止使用 `Fixes #281`。

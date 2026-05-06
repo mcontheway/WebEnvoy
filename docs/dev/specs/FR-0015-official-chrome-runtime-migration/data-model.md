@@ -103,15 +103,22 @@ RuntimeBootstrapEnvelope 对应当前 run/session 的临时输入。
 - `runId`
 - `runtimeContextId`
 - `profile`
+- `requestedAt | null`
 - `fingerprintRuntime`
 - `fingerprintPatchManifest`
 - `mainWorldSecret`
+- `targetDomain | null`
+- `targetTabId | null`
+- `targetPage | null`
 
 约束：
 
 - 仅属于单次 run/session
 - 不得作为 profile 永久元数据保存
 - 不得通过 staged extension 文件承载
+- `requestedAt` 对普通 bootstrap 可为 `null` 或缺省；进入 `stale_bootstrap_rebind` 时必须对应 `runtime.bootstrap.params.requested_at`，且为当前 request 生成的 ISO-8601 timestamp
+- `targetDomain`、`targetTabId`、`targetPage` 对普通 bootstrap 可为 `null` 或缺省；进入 `stale_bootstrap_rebind` 时必须分别对应 `runtime.bootstrap.params.target_domain`、`target_tab_id`、`target_page`，且必须为非空 machine fields
+- 上述 stale request extension fields 只作为受限 stale recovery 的 proof input，不进入 profile 持久元数据
 
 生命周期：
 
@@ -161,18 +168,34 @@ RuntimeTakeoverEvidence 表示锁切换前冻结下来的 transient handoff evid
 - `controllerBrowserContinuity`
 - `transportBootstrapViable`
 - `observedRunId`
+- `observedRuntimeInstanceId | null`
 - `runtimeContextId | null`
+- `requestRunId | null`
+- `requestRuntimeContextId | null`
+- `managedTargetTabId | null`
+- `managedTargetDomain | null`
+- `managedTargetPage | null`
+- `targetTabContinuity | null`
 
 约束：
 
 - `mode` 至少允许：
   - `ready_attach`
   - `recoverable_rebind`
+  - `stale_bootstrap_rebind`
 - 该对象只允许由 pre-lock handoff facts 冻结生成，不得反向要求 relock 后的 `runtime.status` 继续维持原布尔值
 - 该对象是 transient / non-persistent / non-profile-metadata
-- 该对象必须绑定到具体 observed runtime instance，而不是只表达抽象“可接管”结论
+- 该对象只有在对应 mode 已冻结 observed runtime instance 来源时，才必须绑定到具体 observed runtime instance；未定义来源的 mode 不得伪造该字段
+- 对 `mode=stale_bootstrap_rebind`，该对象的 required fields 只能来自 `contracts/runtime-readiness-status.md` 中的 stale-bootstrap recovery proof mapping；不得从日志、issue comment、旧 artifact 或未冻结字段名补齐
+- 对 `mode=ready_attach` 与 `mode=recoverable_rebind`，`requestRunId` 与 `requestRuntimeContextId` 必须为 `null` 或缺省；不得把 stale-mode-only request identity gate 外推到其他 takeover mode
+- 对 `mode=ready_attach` 与 `mode=recoverable_rebind`，`observedRuntimeInstanceId` 可以为 `null` 或缺省，除非对应 mode 在后续 formal contract 中单独冻结来源；本 PR 不为这两种 mode 发明 observed runtime instance source
+- 对 `mode=stale_bootstrap_rebind`，target proof 只能来自当前 `runtime.bootstrap.params.target_domain` / `target_tab_id` / `target_page` 与 readiness target attestation 的匹配结果
+- 对 `mode=stale_bootstrap_rebind`，freshness proof 只能来自 `runtime.status.takeoverEvidenceObservedAt` 与当前 `runtime.bootstrap.params.requested_at` 的比较结果
+- 对 `mode=stale_bootstrap_rebind`，`requestRunId` 与 `requestRuntimeContextId` 必须等于当前 replacement run 的 `(run_id, runtime_context_id)`；`postLockTakeoverGate` 必须复验二者，防止 stale evidence 跨 run 重放
+- 对 `mode=stale_bootstrap_rebind`，`observedRuntimeInstanceId` 必须等于 `runtime.bootstrap.ack.result.stale_provenance.observed_runtime_instance_id`；该 provenance 字段为 `null` 时不得形成 `staleBootstrapRecoverable=true`
 - attach/rebind 动作面只能在当前调用方已重新持有 FR-0003 profile 独占锁之后消费它
 - `postLockTakeoverGate` 必须继续校验 evidence 仍对应同一个 observed runtime instance
+- 对 `mode=stale_bootstrap_rebind`，`postLockTakeoverGate` 必须同时复验 `managedTargetTabId`、`managedTargetDomain`、`managedTargetPage` 和 `targetTabContinuity=runtime_trust_state` 仍匹配当前 post-lock observed target；不得只凭 runtime instance identity 放行
 - `attachableReadyRuntime=true` 只表示“对一个新的 `run_id` 来说，当前 ready runtime 已形成可冻结的 pre-lock handoff fact”
 - `attachableReadyRuntime` 不得替代 `runtimeReadiness` 作为业务命令最终门禁
 - `attachableReadyRuntime` 必须要求 status 聚合器已独立验证现存 runtime 处于 ready；`pending`、`not_started`、`ERR_RUNTIME_BOOTSTRAP_NOT_DELIVERED`、`ERR_RUNTIME_BOOTSTRAP_ACK_TIMEOUT` 与 attested failed 都不能被提升为 attachable
@@ -188,6 +211,14 @@ RuntimeTakeoverEvidence 表示锁切换前冻结下来的 transient handoff evid
 - `orphanRecoverable` 必须把 browser/controller 所有权连续性与 transport/bootstrap 可恢复性同时纳入判定，不能只靠单一进程存活信号抬高
 - `orphanRecoverable` 同样不得迫使调用方重解释 top-level `lockHeld` / `runtimeReadiness` / `bootstrapState` 的语义归属
 - `orphanRecoverable` 只适用于尚未有 controller 重新取得有效独占控制的 pre-lock handoff 视图；一旦 replacement controller 或其他 controller 重新持有有效独占锁，新的 pre-lock evidence 中该字段必须回落为 `false`
+- `staleBootstrapRecoverable=true` 只表示旧 run 的 stale bootstrap 可由同一 managed target/runtime 的 replacement run 重新 bootstrap
+- `staleBootstrapRecoverable` 必须要求完整 target binding 与 readiness target attestation 匹配：`managedTargetTabId`、`managedTargetDomain`、`managedTargetPage`、`targetTabContinuity=runtime_trust_state`
+- `staleBootstrapRecoverable` 必须要求 `runtime.bootstrap.ack.result.stale_provenance` 使用冻结字段：`kind`、`observed_run_id`、`observed_runtime_context_id`、`observed_runtime_instance_id`
+- `staleBootstrapRecoverable` 必须要求 `stale_provenance.kind` 为 `ready_marker | observed_runtime`，`observed_run_id` 与 `observed_runtime_context_id` 均为非空字符串且分别不等于当前 `(run_id, runtime_context_id)`，`observed_runtime_instance_id` 为非空字符串；ack 的 request identity 匹配当前请求本身不足以证明 stale 可恢复
+- `staleBootstrapRecoverable` 必须把当前 bootstrap request 的 `run_id` 与 `runtime_context_id` 原样 carry-through 到 `RuntimeTakeoverEvidence.requestRunId` 与 `requestRuntimeContextId`
+- `staleBootstrapRecoverable` 必须把 `stale_provenance.observed_runtime_instance_id` 原样 carry-through 到 `RuntimeTakeoverEvidence.observedRuntimeInstanceId`
+- `staleBootstrapRecoverable` 必须要求 official Chrome `real_browser`、`headless=false` 以及消费方既有 account safety、rhythm、anti-detection validation / admission gates 均已通过
+- `staleBootstrapRecoverable` 不得把旧 run 的 stale ack 直接提升为当前 run 的 ready evidence；业务命令仍需等待 replacement run 完成新的 `runtime.bootstrap`
 - `orphanRecoverable` 同样只表达 pre-lock handoff 事实本身；不得单独授权 attach/rebind
 
 生命周期：

@@ -17,7 +17,7 @@
 
 ## 进入实现前条件
 
-- 第一刀切片必须限定在 FR-0015 已冻结的 implementation-prep 约束内：仅包含 identity preflight、`runtime_bootstrap_envelope` contract、`runtime.status` read model，以及 bootstrap 失败后的 stop/retry/recover 边界；不得外扩到安装器产品化、candidate 分发或 `FR-0020` 验证体系。
+- 第一步切片必须限定在 FR-0015 已冻结的 implementation-prep 约束内：仅包含 identity preflight、`runtime_bootstrap_envelope` contract、`runtime.status` read model，以及 bootstrap 失败后的 stop/retry/recover 边界；不得外扩到安装器产品化、candidate 分发或 `FR-0020` 验证体系。
 - 如后续实现继续改 `runtime.status` 或 `runtime_bootstrap_envelope`，先核对 `contracts/` 中已冻结的状态语义与错误分类，避免通过 `TODO.md` 临时改口径。
 - 如后续实现继续改 pre-lock handoff facts、`RuntimeTakeoverEvidence` 或 `postLockTakeoverGate`，先满足 formal 验证矩阵：
   - `runtime.status` 顶层只允许返回单实例状态视图；`attachableReadyRuntime` / `orphanRecoverable` 不得再作为顶层字段直接暴露
@@ -27,19 +27,27 @@
   - 若另一条 controller 仍有效持有该 profile 的独占控制，`RuntimeTakeoverEvidence.attachableReadyRuntime` 必须继续为 `false`
   - `RuntimeTakeoverEvidence.orphanRecoverable=true` 只能建立在 `runtimeReadiness=recoverable`、`identityBindingState=bound`、旧 owner 已失去有效独占控制、没有其他 controller 已重新取得有效独占控制且 browser/controller 连续性仍成立的前提下
   - identity 缺失/冲突、旧 owner 仍持有有效独占控制、已有其他 controller 抢先取得有效独占控制、`transportState=not_connected` 或 `bootstrapState=stale` 时，`RuntimeTakeoverEvidence.orphanRecoverable` 必须继续为 `false`
+  - `RuntimeTakeoverEvidence.staleBootstrapRecoverable=true` 只能建立在 `bootstrapState=stale`、`transportState=ready`、`runtime.bootstrap.ack.result.stale_provenance` 使用冻结字段并指向非当前 `(run_id, runtime_context_id)` 的旧 ready marker 或 observed runtime identity、`stale_provenance.observed_runtime_instance_id` 为非空字符串且原样 carry-through 到 `RuntimeTakeoverEvidence.observedRuntimeInstanceId`、同一 managed target tab/domain/page 已由 `managedTargetTabId` / `managedTargetDomain` / `managedTargetPage` 证明、official Chrome `real_browser`、`headless=false`、owner conflict free、controller/browser continuity 与消费方既有 safety/validation gates 均成立的前提下
+  - stale-bootstrap recovery proof fields 必须全部来自 `runtime-readiness-status` contract 冻结的 source machine fields；不得由日志、issue comment、旧 artifact 或未冻结字段补齐
+  - target proof 必须来自当前 `runtime.bootstrap.params.target_domain` / `target_tab_id` / `target_page` 与 readiness target attestation 的匹配结果；freshness proof 必须来自 `runtime.status.takeoverEvidenceObservedAt` 与当前 `runtime.bootstrap.params.requested_at`
+  - `RuntimeTakeoverEvidence.staleBootstrapRecoverable=true` 只能授权 replacement run 先 attach/rebind 再重新 bootstrap，不得把旧 run 的 stale ack 当作 ready evidence
   - `RuntimeTakeoverEvidence.orphanRecoverable` 只适用于尚未有 controller 重新取得有效独占控制的 pre-lock handoff 视图；replacement controller 或其他 controller 一旦重新持有有效独占锁，新的 pre-lock evidence 中该字段必须回落为 `false`
   - `RuntimeTakeoverEvidence` 必须作为锁切换前冻结的 transient evidence 存在，不得写入 profile 持久元数据
-  - `RuntimeTakeoverEvidence` 必须绑定到具体 observed runtime instance（例如 `observedRunId`、`runtimeContextId` 或等价 attach-target identity）
+  - `RuntimeTakeoverEvidence(mode=stale_bootstrap_rebind)` 必须通过 `requestRunId` 与 `requestRuntimeContextId` 绑定当前 replacement run 的 `(run_id, runtime_context_id)`
+  - `requestRunId`、`requestRuntimeContextId` 与 `observedRuntimeInstanceId` 只属于 `mode=stale_bootstrap_rebind` 的 non-null proof fields；`ready_attach` 与 `recoverable_rebind` 下必须为 `null` 或缺省，除非后续 formal contract 单独冻结来源
+  - `RuntimeTakeoverEvidence` 只有在对应 mode 已冻结 observed runtime instance 来源时，才必须通过 `observedRuntimeInstanceId` 绑定到具体 observed runtime instance；`mode=stale_bootstrap_rebind` 必须非空绑定该字段
   - 真正执行 attach/rebind 时，当前调用方必须先持有 FR-0003 profile 独占锁，并通过 `postLockTakeoverGate` 消费锁切换前已成立的 `RuntimeTakeoverEvidence`
-  - `postLockTakeoverGate` 必须校验 evidence 仍对应同一个 observed runtime instance，不能把旧 evidence 套到新的 attach 目标
+  - 对 `mode=stale_bootstrap_rebind`，`postLockTakeoverGate` 必须复验 `requestRunId` 与 `requestRuntimeContextId` 等于当前 replacement run 的 `(run_id, runtime_context_id)`
+  - `postLockTakeoverGate` 必须校验 evidence 仍对应同一个已冻结来源的 observed runtime instance；对 `mode=stale_bootstrap_rebind`，不能把旧 evidence 套到新的 attach 目标
+  - 对 `mode=stale_bootstrap_rebind`，`postLockTakeoverGate` 必须复验冻结的 `managedTargetTabId`、`managedTargetDomain`、`managedTargetPage` 与当前 post-lock observed target 完全一致，且 `targetTabContinuity=runtime_trust_state`
   - relock 后不得继续要求新的 pre-lock evidence 维持 `orphanRecoverable=true` 作为 attach/rebind 前提
 - 如进入实现阶段需要推进恢复链路、健康矩阵或 stop-ship 规则，先确认对应验证入口、失败回退与证据产物已在 formal 文档中冻结，而不是通过 `TODO.md` 临时补约束。
-- 开始第一刀前，先明确 stop-ship 触发条件：identity mismatch、stale bootstrap ack、多信号冲突、陈旧 ready marker、bootstrap 非幂等恢复失败；触发后必须阻断 `runtime.start` 成功路径并产出可复核状态。
-- 开始第一刀前，先冻结验证入口：`tests/cli.contract.test.ts` 并发/恢复契约、runtime status contract 回读、bootstrap ack/失败注入、断连恢复与幂等 stop/start 证据。
+- 开始第一步前，先明确 stop-ship 触发条件：identity mismatch、stale bootstrap ack、多信号冲突、陈旧 ready marker、bootstrap 非幂等恢复失败；触发后必须阻断 `runtime.start` 成功路径并产出可复核状态。
+- 开始第一步前，先冻结验证入口：`tests/cli.contract.test.ts` 并发/恢复契约、runtime status contract 回读、bootstrap ack/失败注入、断连恢复与幂等 stop/start 证据。
 
 ## 实现停点
 
 - implementation-prep 阶段的 formal 输入、健康矩阵、恢复路径与 stop-ship 规则，恢复入口分别以 `spec.md`、`plan.md`、`implementation-prep.md`、`contracts/`、`risks.md` 为准。
 - candidate 安装/分发路径、最终安装器、CWS 合规与 `FR-0020` 验证体系仍属于后续事项，不在 FR-0015 当前收口范围内完成。
 - identity mismatch、stale bootstrap ack、多信号冲突、陈旧 ready marker 与幂等恢复边界的 formal 定义继续以 `risks.md` 为准；本文件只保留 formal 恢复入口，不维护 backlog 或完成态账本。
-- 进入实现后若第一刀任一 stop-ship 条件被触发且无法在当前 PR 消解，停在 formal 停点，不以补文案替代恢复/验证证据，不推进 closing 语义。
+- 进入实现后若第一步任一 stop-ship 条件被触发且无法在当前 PR 消解，停在 formal 停点，不以补文案替代恢复/验证证据，不推进 closing 语义。
