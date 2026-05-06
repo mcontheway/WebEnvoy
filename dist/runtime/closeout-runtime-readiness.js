@@ -28,7 +28,12 @@ const buildTargetBinding = (params, takeoverEvidence) => {
             managedTargetDomain === requestedTargetDomain &&
             managedTargetPage === requestedTargetPage &&
             targetTabContinuity !== null;
-        state = exactMatch ? "verified" : hasManagedTarget ? "mismatch" : "missing";
+        state =
+            exactMatch && targetTabContinuity === "runtime_trust_state"
+                ? "verified"
+                : hasManagedTarget
+                    ? "mismatch"
+                    : "missing";
     }
     return {
         requested,
@@ -55,6 +60,16 @@ export const buildCloseoutRuntimeReadinessPreflight = (input) => {
     const executionSurface = asString(status.executionSurface);
     const headless = asBooleanOrNull(status.headless);
     const freshness = asString(takeoverEvidence?.freshness);
+    const staleBootstrapContinuityReady = takeoverEvidence?.identityBound === true &&
+        takeoverEvidence?.ownerConflictFree === true &&
+        takeoverEvidence?.controllerBrowserContinuity === true &&
+        takeoverEvidence?.transportBootstrapViable === true &&
+        asString(takeoverEvidence?.observedRunId) !== null &&
+        asString(takeoverEvidence?.observedRuntimeSessionId) !== null &&
+        asString(takeoverEvidence?.observedRuntimeInstanceId) !== null &&
+        asString(takeoverEvidence?.requestRunId) !== null &&
+        asString(takeoverEvidence?.requestRuntimeContextId) !== null &&
+        asString(takeoverEvidence?.takeoverEvidenceObservedAt) !== null;
     const base = {
         target_binding: targetBinding,
         runtime_status: {
@@ -142,6 +157,9 @@ export const buildCloseoutRuntimeReadinessPreflight = (input) => {
         if (!lockHeld &&
             takeoverEvidence?.staleBootstrapRecoverable === true &&
             freshness === "fresh" &&
+            staleBootstrapContinuityReady &&
+            executionSurface === "real_browser" &&
+            headless === false &&
             targetBinding.requested &&
             targetBinding.state === "verified") {
             return {

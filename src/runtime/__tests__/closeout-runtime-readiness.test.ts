@@ -84,14 +84,22 @@ describe("closeout runtime readiness preflight", () => {
           runtimeTakeoverEvidence: {
             identityBound: true,
             ownerConflictFree: true,
+            controllerBrowserContinuity: true,
+            transportBootstrapViable: true,
             attachableReadyRuntime: false,
             orphanRecoverable: false,
             staleBootstrapRecoverable: true,
             freshness: "fresh",
+            observedRunId: "run-owner",
+            observedRuntimeSessionId: "nm-session-001",
+            observedRuntimeInstanceId: "nm-session-001:run-owner:runtime-context-owner",
+            requestRunId: "run-request",
+            requestRuntimeContextId: "runtime-context-request",
             managedTargetTabId: 88,
             managedTargetDomain: "www.xiaohongshu.com",
             managedTargetPage: "search_result_tab",
-            targetTabContinuity: "runtime_trust_state"
+            targetTabContinuity: "runtime_trust_state",
+            takeoverEvidenceObservedAt: "2026-05-06T14:00:01.000Z"
           }
         }
       })
@@ -104,6 +112,95 @@ describe("closeout runtime readiness preflight", () => {
         state: "verified"
       },
       blocker: null
+    });
+  });
+
+  it("blocks stale bootstrap rebind when continuity token is not trusted", () => {
+    expect(
+      buildCloseoutRuntimeReadinessPreflight({
+        params: {
+          requested_at: "2026-05-06T14:00:00.000Z",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 88,
+          target_page: "search_result_tab"
+        },
+        status: {
+          ...readyStatus(),
+          lockHeld: false,
+          bootstrapState: "stale",
+          runtimeReadiness: "blocked",
+          runtimeTakeoverEvidence: {
+            identityBound: true,
+            ownerConflictFree: true,
+            controllerBrowserContinuity: true,
+            transportBootstrapViable: true,
+            staleBootstrapRecoverable: true,
+            freshness: "fresh",
+            observedRunId: "run-owner",
+            observedRuntimeSessionId: "nm-session-001",
+            observedRuntimeInstanceId: "nm-session-001:run-owner:runtime-context-owner",
+            requestRunId: "run-request",
+            requestRuntimeContextId: "runtime-context-request",
+            managedTargetTabId: 88,
+            managedTargetDomain: "www.xiaohongshu.com",
+            managedTargetPage: "search_result_tab",
+            targetTabContinuity: "non_trusted_value",
+            takeoverEvidenceObservedAt: "2026-05-06T14:00:01.000Z"
+          }
+        }
+      })
+    ).toMatchObject({
+      decision: "NO_GO",
+      blocker: {
+        blocker_code: "target_mismatch"
+      },
+      target_binding: {
+        state: "mismatch",
+        target_tab_continuity: "non_trusted_value"
+      }
+    });
+  });
+
+  it("blocks stale bootstrap rebind when runtime continuity fields are incomplete", () => {
+    expect(
+      buildCloseoutRuntimeReadinessPreflight({
+        params: {
+          requested_at: "2026-05-06T14:00:00.000Z",
+          target_domain: "www.xiaohongshu.com",
+          target_tab_id: 88,
+          target_page: "search_result_tab"
+        },
+        status: {
+          ...readyStatus(),
+          lockHeld: false,
+          bootstrapState: "stale",
+          runtimeReadiness: "blocked",
+          runtimeTakeoverEvidence: {
+            identityBound: true,
+            ownerConflictFree: true,
+            controllerBrowserContinuity: true,
+            transportBootstrapViable: true,
+            staleBootstrapRecoverable: true,
+            freshness: "fresh",
+            observedRunId: "run-owner",
+            requestRunId: "run-request",
+            requestRuntimeContextId: "runtime-context-request",
+            managedTargetTabId: 88,
+            managedTargetDomain: "www.xiaohongshu.com",
+            managedTargetPage: "search_result_tab",
+            targetTabContinuity: "runtime_trust_state",
+            takeoverEvidenceObservedAt: "2026-05-06T14:00:01.000Z"
+          }
+        }
+      })
+    ).toMatchObject({
+      decision: "NO_GO",
+      blocker: {
+        blocker_code: "bootstrap_stale_unrecoverable"
+      },
+      target_binding: {
+        state: "verified"
+      }
     });
   });
 
