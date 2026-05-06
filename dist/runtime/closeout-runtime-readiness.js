@@ -118,6 +118,7 @@ export const buildCloseoutRuntimeReadinessPreflight = (input) => {
     const executionSurface = asString(status.executionSurface);
     const headless = asBooleanOrNull(status.headless);
     const requestedAt = asString(params.requested_at);
+    const officialRealBrowserSurface = executionSurface === "real_browser" && headless === false;
     const base = {
         target_binding: targetBinding,
         runtime_status: {
@@ -164,8 +165,7 @@ export const buildCloseoutRuntimeReadinessPreflight = (input) => {
         transportState === "ready" &&
         bootstrapState === "ready" &&
         runtimeReadiness === "ready" &&
-        executionSurface === "real_browser" &&
-        headless === false) {
+        officialRealBrowserSurface) {
         return {
             decision: "GO",
             runtime_state: "ready",
@@ -183,7 +183,7 @@ export const buildCloseoutRuntimeReadinessPreflight = (input) => {
             ...base
         };
     }
-    if (!lockHeld && takeoverEvidence?.attachableReadyRuntime === true) {
+    if (!lockHeld && takeoverEvidence?.attachableReadyRuntime === true && officialRealBrowserSurface) {
         return {
             decision: "RECOVERABLE",
             runtime_state: "recoverable",
@@ -192,7 +192,7 @@ export const buildCloseoutRuntimeReadinessPreflight = (input) => {
             ...base
         };
     }
-    if (!lockHeld && takeoverEvidence?.orphanRecoverable === true) {
+    if (!lockHeld && takeoverEvidence?.orphanRecoverable === true && officialRealBrowserSurface) {
         return {
             decision: "RECOVERABLE",
             runtime_state: "recoverable",

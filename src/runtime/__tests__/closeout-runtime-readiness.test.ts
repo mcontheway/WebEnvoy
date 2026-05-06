@@ -80,6 +80,38 @@ describe("closeout runtime readiness preflight", () => {
     });
   });
 
+  it("blocks attachable runtime recovery on non-real-browser execution surface", () => {
+    expect(
+      buildCloseoutRuntimeReadinessPreflight({
+        status: {
+          ...readyStatus(),
+          lockHeld: false,
+          runtimeReadiness: "blocked",
+          executionSurface: "headless_browser",
+          headless: true,
+          runtimeTakeoverEvidence: {
+            identityBound: true,
+            ownerConflictFree: true,
+            attachableReadyRuntime: true,
+            orphanRecoverable: false,
+            staleBootstrapRecoverable: false
+          }
+        }
+      })
+    ).toMatchObject({
+      decision: "NO_GO",
+      runtime_state: "blocked",
+      recovery_mode: "none",
+      blocker: {
+        blocker_code: "runtime_not_ready"
+      },
+      runtime_status: {
+        execution_surface: "headless_browser",
+        headless: true
+      }
+    });
+  });
+
   it("returns RECOVERABLE for fresh stale-bootstrap rebind evidence bound to the requested target", () => {
     expect(
       buildCloseoutRuntimeReadinessPreflight({
