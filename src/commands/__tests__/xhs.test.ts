@@ -1438,6 +1438,13 @@ describe("normalizeGateOptionsForContract", () => {
         code: "ERR_EXECUTION_FAILED",
         details: {
           reason: "ACCOUNT_RISK_BLOCKED",
+          closeout_hard_stop_risk: expect.objectContaining({
+            state: "hard_stop",
+            risk_class: "account_abnormal",
+            reason: "ACCOUNT_ABNORMAL",
+            source: "account_safety",
+            should_block_route_action: true
+          }),
           account_safety: expect.objectContaining({
             state: "account_risk_blocked",
             reason: "ACCOUNT_ABNORMAL",
@@ -1611,6 +1618,13 @@ describe("normalizeGateOptionsForContract", () => {
         code: "ERR_EXECUTION_FAILED",
         details: {
           reason: "ACCOUNT_ABNORMAL",
+          closeout_hard_stop_risk: expect.objectContaining({
+            state: "hard_stop",
+            risk_class: "account_abnormal",
+            reason: "ACCOUNT_ABNORMAL",
+            source: "account_safety",
+            should_block_route_action: true
+          }),
           account_safety: expect.objectContaining({
             state: "account_risk_blocked",
             reason: "ACCOUNT_ABNORMAL",
@@ -1641,6 +1655,336 @@ describe("normalizeGateOptionsForContract", () => {
         singleProbeRequired: true,
         fullBundleBlocked: true,
         reasonCodes: expect.arrayContaining(["ACCOUNT_ABNORMAL"])
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+      if (previousTransport === undefined) {
+        delete process.env.WEBENVOY_NATIVE_TRANSPORT;
+      } else {
+        process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
+      }
+      if (previousBrowserPath === undefined) {
+        delete process.env.WEBENVOY_BROWSER_PATH;
+      } else {
+        process.env.WEBENVOY_BROWSER_PATH = previousBrowserPath;
+      }
+      if (previousBrowserMockVersion === undefined) {
+        delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+      } else {
+        process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
+      }
+    }
+  });
+
+  it("persists account_safety blocked from classifier-only hard-stop evidence", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-classifier-account-safety-"));
+    const runId = "run-classifier-account-risk-001";
+    const requestId = "issue209-classifier-account-risk-001";
+    const gateInvocationId = "issue209-gate-classifier-account-risk-001";
+    const decisionId = `gate_decision_${gateInvocationId}`;
+    const approvalId = `gate_appr_${decisionId}`;
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+    const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    process.env.WEBENVOY_NATIVE_TRANSPORT = "loopback";
+    process.env.WEBENVOY_BROWSER_PATH = join(process.cwd(), "tests", "fixtures", "mock-browser.sh");
+    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Chromium 146.0.0.0";
+    try {
+      await seedXhsCloseoutReady({ cwd, profile: "xhs_classifier_account_signal_profile" });
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.search",
+            profile: "xhs_classifier_account_signal_profile",
+            run_id: runId,
+            params: {
+              request_id: requestId,
+              gate_invocation_id: gateInvocationId,
+              ability: {
+                id: "xhs.note.search.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                query: "露营"
+              },
+              options: {
+                simulate_result: "classifier_only_account_abnormal",
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "search_result_tab",
+                action_type: "read",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed",
+                approval_record: createIssue209FormalApprovalRecord(decisionId, approvalId),
+                audit_record: createIssue209FormalAuditRecord(requestId, decisionId, approvalId)
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        diagnosis: {
+          failure_site: expect.objectContaining({
+            summary: "ACCOUNT_ABNORMAL"
+          }),
+          evidence: expect.arrayContaining(["ACCOUNT_ABNORMAL", "account_abnormal"])
+        },
+        observability: {
+          failure_site: expect.objectContaining({
+            summary: "ACCOUNT_ABNORMAL"
+          })
+        },
+        details: {
+          closeout_hard_stop_risk: expect.objectContaining({
+            state: "hard_stop",
+            risk_class: "account_abnormal",
+            reason: "ACCOUNT_ABNORMAL",
+            should_block_route_action: true
+          }),
+          account_safety: expect.objectContaining({
+            state: "account_risk_blocked",
+            reason: "ACCOUNT_ABNORMAL",
+            source_run_id: runId,
+            source_command: "xhs.search",
+            target_tab_id: 32,
+            live_commands_blocked: true
+          })
+        }
+      });
+
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.readMeta("xhs_classifier_account_signal_profile");
+      expect(meta?.accountSafety).toMatchObject({
+        state: "account_risk_blocked",
+        reason: "ACCOUNT_ABNORMAL",
+        sourceRunId: runId,
+        sourceCommand: "xhs.search",
+        targetTabId: 32
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+      if (previousTransport === undefined) {
+        delete process.env.WEBENVOY_NATIVE_TRANSPORT;
+      } else {
+        process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
+      }
+      if (previousBrowserPath === undefined) {
+        delete process.env.WEBENVOY_BROWSER_PATH;
+      } else {
+        process.env.WEBENVOY_BROWSER_PATH = previousBrowserPath;
+      }
+      if (previousBrowserMockVersion === undefined) {
+        delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+      } else {
+        process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
+      }
+    }
+  });
+
+  it("prefers classifier hard-stop evidence over generic diagnosis tokens when persisting account_safety", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-classifier-diagnosis-priority-"));
+    const runId = "run-classifier-diagnosis-priority-001";
+    const requestId = "issue209-classifier-diagnosis-priority-001";
+    const gateInvocationId = "issue209-gate-classifier-diagnosis-priority-001";
+    const decisionId = `gate_decision_${gateInvocationId}`;
+    const approvalId = `gate_appr_${decisionId}`;
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+    const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    process.env.WEBENVOY_NATIVE_TRANSPORT = "loopback";
+    process.env.WEBENVOY_BROWSER_PATH = join(process.cwd(), "tests", "fixtures", "mock-browser.sh");
+    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Chromium 146.0.0.0";
+    try {
+      await seedXhsCloseoutReady({ cwd, profile: "xhs_classifier_diagnosis_priority_profile" });
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.search",
+            profile: "xhs_classifier_diagnosis_priority_profile",
+            run_id: runId,
+            params: {
+              request_id: requestId,
+              gate_invocation_id: gateInvocationId,
+              ability: {
+                id: "xhs.note.search.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                query: "露营"
+              },
+              options: {
+                simulate_result: "classifier_account_abnormal_with_generic_diagnosis",
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "search_result_tab",
+                action_type: "read",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed",
+                approval_record: createIssue209FormalApprovalRecord(decisionId, approvalId),
+                audit_record: createIssue209FormalAuditRecord(requestId, decisionId, approvalId)
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        diagnosis: {
+          failure_site: expect.objectContaining({
+            summary: "ACCOUNT_ABNORMAL"
+          }),
+          evidence: expect.arrayContaining(["ACCOUNT_ABNORMAL", "account_abnormal"])
+        },
+        observability: {
+          failure_site: expect.objectContaining({
+            summary: "ACCOUNT_ABNORMAL"
+          })
+        },
+        details: {
+          closeout_hard_stop_risk: expect.objectContaining({
+            state: "hard_stop",
+            risk_class: "account_abnormal",
+            reason: "ACCOUNT_ABNORMAL",
+            should_block_route_action: true
+          }),
+          account_safety: expect.objectContaining({
+            state: "account_risk_blocked",
+            reason: "ACCOUNT_ABNORMAL",
+            source_run_id: runId,
+            source_command: "xhs.search",
+            target_tab_id: 32,
+            live_commands_blocked: true
+          })
+        }
+      });
+
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.readMeta("xhs_classifier_diagnosis_priority_profile");
+      expect(meta?.accountSafety).toMatchObject({
+        state: "account_risk_blocked",
+        reason: "ACCOUNT_ABNORMAL",
+        sourceRunId: runId,
+        sourceCommand: "xhs.search",
+        targetTabId: 32
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+      if (previousTransport === undefined) {
+        delete process.env.WEBENVOY_NATIVE_TRANSPORT;
+      } else {
+        process.env.WEBENVOY_NATIVE_TRANSPORT = previousTransport;
+      }
+      if (previousBrowserPath === undefined) {
+        delete process.env.WEBENVOY_BROWSER_PATH;
+      } else {
+        process.env.WEBENVOY_BROWSER_PATH = previousBrowserPath;
+      }
+      if (previousBrowserMockVersion === undefined) {
+        delete process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+      } else {
+        process.env.WEBENVOY_BROWSER_MOCK_VERSION = previousBrowserMockVersion;
+      }
+    }
+  });
+
+  it("prefers current captcha hard-stop evidence over stale account_safety when persisting account_safety", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "webenvoy-xhs-stale-account-current-captcha-"));
+    const runId = "run-stale-account-current-captcha-001";
+    const requestId = "issue209-stale-account-current-captcha-001";
+    const gateInvocationId = "issue209-gate-stale-account-current-captcha-001";
+    const decisionId = `gate_decision_${gateInvocationId}`;
+    const approvalId = `gate_appr_${decisionId}`;
+    const previousTransport = process.env.WEBENVOY_NATIVE_TRANSPORT;
+    const previousBrowserPath = process.env.WEBENVOY_BROWSER_PATH;
+    const previousBrowserMockVersion = process.env.WEBENVOY_BROWSER_MOCK_VERSION;
+    process.env.WEBENVOY_NATIVE_TRANSPORT = "loopback";
+    process.env.WEBENVOY_BROWSER_PATH = join(process.cwd(), "tests", "fixtures", "mock-browser.sh");
+    process.env.WEBENVOY_BROWSER_MOCK_VERSION = "Chromium 146.0.0.0";
+    try {
+      await seedXhsCloseoutReady({ cwd, profile: "xhs_stale_account_current_captcha_profile" });
+      await expect(
+        executeCommand(
+          {
+            cwd,
+            command: "xhs.search",
+            profile: "xhs_stale_account_current_captcha_profile",
+            run_id: runId,
+            params: {
+              request_id: requestId,
+              gate_invocation_id: gateInvocationId,
+              ability: {
+                id: "xhs.note.search.v1",
+                layer: "L3",
+                action: "read"
+              },
+              input: {
+                query: "露营"
+              },
+              options: {
+                simulate_result: "stale_account_safety_with_current_captcha",
+                issue_scope: "issue_209",
+                target_domain: "www.xiaohongshu.com",
+                target_tab_id: 32,
+                target_page: "search_result_tab",
+                action_type: "read",
+                requested_execution_mode: "live_read_high_risk",
+                risk_state: "allowed",
+                approval_record: createIssue209FormalApprovalRecord(decisionId, approvalId),
+                audit_record: createIssue209FormalAuditRecord(requestId, decisionId, approvalId)
+              }
+            }
+          } as RuntimeContext,
+          createCommandRegistry()
+        )
+      ).rejects.toMatchObject({
+        code: "ERR_EXECUTION_FAILED",
+        diagnosis: {
+          failure_site: expect.objectContaining({
+            summary: "CAPTCHA_REQUIRED"
+          }),
+          evidence: expect.arrayContaining(["CAPTCHA_REQUIRED", "captcha_required"])
+        },
+        observability: {
+          failure_site: expect.objectContaining({
+            summary: "CAPTCHA_REQUIRED"
+          })
+        },
+        details: {
+          closeout_hard_stop_risk: expect.objectContaining({
+            state: "hard_stop",
+            risk_class: "captcha_required",
+            reason: "CAPTCHA_REQUIRED",
+            source: "account_safety",
+            should_block_route_action: true
+          }),
+          account_safety: expect.objectContaining({
+            state: "account_risk_blocked",
+            reason: "CAPTCHA_REQUIRED",
+            source_run_id: runId,
+            source_command: "xhs.search",
+            target_tab_id: 32,
+            status_code: 429,
+            live_commands_blocked: true
+          })
+        }
+      });
+
+      const profileStore = new ProfileStore(join(cwd, ".webenvoy", "profiles"));
+      const meta = await profileStore.readMeta("xhs_stale_account_current_captcha_profile");
+      expect(meta?.accountSafety).toMatchObject({
+        state: "account_risk_blocked",
+        reason: "CAPTCHA_REQUIRED",
+        sourceRunId: runId,
+        sourceCommand: "xhs.search",
+        targetTabId: 32,
+        statusCode: 429
       });
     } finally {
       await rm(cwd, { recursive: true, force: true });

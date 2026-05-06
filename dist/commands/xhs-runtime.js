@@ -7,6 +7,7 @@ import { buildLoopbackAuditRecord } from "../runtime/native-messaging/loopback-g
 import { buildLoopbackGate } from "../runtime/native-messaging/loopback-gate.js";
 import { buildLoopbackGatePayload } from "../runtime/native-messaging/loopback-gate-payload.js";
 import { appendFingerprintContext, buildFingerprintContextForMeta } from "../runtime/fingerprint-runtime.js";
+import { classifyCloseoutHardStopRisk } from "../runtime/closeout-hard-stop-risk.js";
 import { ProfileStore } from "../runtime/profile-store.js";
 import { isAccountSafetyReason, toAccountSafetyStatus } from "../runtime/account-safety.js";
 import { toSessionRhythmStatusView, toXhsCloseoutRhythmStatus } from "../runtime/xhs-closeout-rhythm.js";
@@ -312,6 +313,7 @@ const ACCOUNT_SAFETY_REASON_ALIASES = {
     ACCOUNT_ABNORMAL: "ACCOUNT_ABNORMAL",
     XHS_ACCOUNT_RISK_PAGE: "XHS_ACCOUNT_RISK_PAGE",
     CAPTCHA_REQUIRED: "CAPTCHA_REQUIRED",
+    SECURITY_REDIRECT: "XHS_ACCOUNT_RISK_PAGE",
     BROWSER_ENV_ABNORMAL: "BROWSER_ENV_ABNORMAL"
 };
 const normalizeAccountSafetyReason = (value) => {
@@ -322,6 +324,13 @@ const normalizeAccountSafetyReason = (value) => {
     const normalized = raw.trim().toUpperCase();
     const mapped = ACCOUNT_SAFETY_REASON_ALIASES[normalized];
     return mapped && isAccountSafetyReason(mapped) ? mapped : null;
+};
+const closeoutRiskReasonToAccountSafetyReason = (reason) => {
+    if (reason === null) {
+        return null;
+    }
+    const mapped = ACCOUNT_SAFETY_REASON_ALIASES[reason] ?? reason;
+    return isAccountSafetyReason(mapped) ? mapped : null;
 };
 const pickCanonicalSummaryField = (payload, key) => {
     const summary = asObject(payload.summary);
@@ -427,8 +436,169 @@ const pickGateErrorDetails = (payload, details) => {
     }
     return picked;
 };
+const pickCloseoutHardStopResponseBody = (payload, details) => asObject(details?.response_body) ??
+    asObject(details?.response) ??
+    asObject(payload.response_body) ??
+    asObject(payload.response);
+const pickCloseoutHardStopPageSurface = (input) => {
+    const pageState = asObject(input.observability?.page_state);
+    const pageSurface = asObject(input.details?.page_surface) ??
+        asObject(input.payload.page_surface) ??
+        asObject(input.observability?.page_surface);
+    const overlay = asObject(pageSurface?.overlay) ??
+        asObject(input.details?.account_safety_overlay) ??
+        asObject(input.payload.account_safety_overlay) ??
+        asObject(input.observability?.account_safety_overlay);
+    return {
+        url: input.details?.page_url ??
+            pageSurface?.url ??
+            pageSurface?.href ??
+            pageState?.url,
+        title: pageSurface?.title ?? pageState?.title,
+        bodyText: pageSurface?.body_text ?? pageSurface?.bodyText,
+        overlay: overlay
+            ? {
+                selector: overlay.selector,
+                text: overlay.text
+            }
+            : null
+    };
+};
+const pickCloseoutHardStopFailureSignals = (payload, details, observability, diagnosis) => {
+    const signals = [];
+    const pushStructuredSignals = (record) => {
+        if (!record) {
+            return;
+        }
+        if (Array.isArray(record.failure_signals)) {
+            signals.push(...record.failure_signals);
+        }
+    };
+    pushStructuredSignals(asObject(payload));
+    pushStructuredSignals(details);
+    if (Array.isArray(observability?.key_requests)) {
+        for (const item of observability.key_requests) {
+            const request = asObject(item);
+            if (!request) {
+                continue;
+            }
+            const normalizedReason = normalizeAccountSafetyReason(request.failure_reason);
+            signals.push(normalizedReason ?? request.failure_reason);
+        }
+    }
+    const failureSite = asObject(observability?.failure_site);
+    if (failureSite) {
+        const normalizedSummary = normalizeAccountSafetyReason(failureSite.summary);
+        signals.push(normalizedSummary ?? failureSite.summary);
+    }
+    const diagnosisFailureSite = asObject(diagnosis?.failure_site);
+    if (diagnosisFailureSite) {
+        const normalizedSummary = normalizeAccountSafetyReason(diagnosisFailureSite.summary);
+        signals.push(normalizedSummary ?? diagnosisFailureSite.summary);
+    }
+    if (Array.isArray(diagnosis?.evidence)) {
+        for (const item of diagnosis.evidence) {
+            const normalizedEvidence = normalizeAccountSafetyReason(item);
+            signals.push(normalizedEvidence ?? item);
+        }
+    }
+    return signals.filter((item) => asString(item) !== null);
+};
+const pickCloseoutHardStopApiResponses = (observability) => {
+    if (!Array.isArray(observability?.key_requests)) {
+        return [];
+    }
+    return observability.key_requests.flatMap((item) => {
+        const request = asObject(item);
+        if (!request) {
+            return [];
+        }
+        return [
+            {
+                statusCode: request.status_code,
+                platformCode: request.platform_code,
+                responseBody: request.response_body ?? request.response ?? request.body,
+                fallbackMessage: request.failure_reason
+            }
+        ];
+    });
+};
+const classifyCloseoutHardStopRiskForPayload = (payload) => {
+    const details = asObject(payload.details);
+    const observability = asObject(payload.observability);
+    const diagnosis = asObject(payload.diagnosis);
+    const accountSafety = asObject(details?.account_safety) ?? asObject(payload.account_safety);
+    const currentRunId = asString(asObject(payload.gate_input)?.run_id) ??
+        asString(asObject(details?.gate_input)?.run_id) ??
+        asString(asObject(payload.audit_record)?.run_id);
+    const accountSafetySourceRunId = asString(accountSafety?.source_run_id) ?? asString(accountSafety?.sourceRunId);
+    return classifyCloseoutHardStopRisk({
+        reason: details?.reason,
+        statusCode: details?.status_code,
+        platformCode: details?.platform_code,
+        responseBody: pickCloseoutHardStopResponseBody(payload, details),
+        apiResponses: pickCloseoutHardStopApiResponses(observability),
+        accountSafety,
+        accountSafetyFresh: accountSafetySourceRunId !== null &&
+            currentRunId !== null &&
+            accountSafetySourceRunId === currentRunId,
+        observabilitySignals: pickCloseoutHardStopFailureSignals(payload, details, observability, diagnosis),
+        pageSurface: pickCloseoutHardStopPageSurface({
+            payload,
+            details,
+            observability
+        })
+    });
+};
+const buildCloseoutHardStopFailureSite = (closeoutHardStopRisk, existing) => ({
+    ...(existing ?? {}),
+    stage: asString(existing?.stage) ?? "execution",
+    component: asString(existing?.component) ??
+        (closeoutHardStopRisk.source === "api_response"
+            ? "network"
+            : closeoutHardStopRisk.source === "page_surface"
+                ? "page"
+                : "runtime"),
+    target: asString(existing?.target) ??
+        closeoutHardStopRisk.evidence.page_url ??
+        closeoutHardStopRisk.evidence.message ??
+        "xhs.closeout_hard_stop_risk",
+    summary: closeoutHardStopRisk.reason ?? "XHS_HARD_STOP_RISK"
+});
+const augmentCloseoutHardStopObservability = (value, closeoutHardStopRisk) => {
+    const observability = asObject(value);
+    if (!closeoutHardStopRisk.hard_stop) {
+        return asObservabilityInput(value);
+    }
+    return {
+        ...(observability ?? {}),
+        failure_site: buildCloseoutHardStopFailureSite(closeoutHardStopRisk, asObject(observability?.failure_site))
+    };
+};
+const augmentCloseoutHardStopDiagnosis = (value, closeoutHardStopRisk) => {
+    const diagnosis = asObject(value);
+    if (!closeoutHardStopRisk.hard_stop) {
+        return asDiagnosisInput(value);
+    }
+    const evidence = Array.isArray(diagnosis?.evidence)
+        ? diagnosis.evidence.filter((item) => typeof item === "string")
+        : [];
+    return {
+        ...(diagnosis ?? {}),
+        category: "request_failed",
+        stage: asString(diagnosis?.stage) ?? "execution",
+        component: asString(diagnosis?.component) ?? "runtime",
+        failure_site: buildCloseoutHardStopFailureSite(closeoutHardStopRisk, asObject(diagnosis?.failure_site)),
+        evidence: [
+            closeoutHardStopRisk.reason ?? "XHS_HARD_STOP_RISK",
+            closeoutHardStopRisk.risk_class ?? "hard_stop",
+            ...evidence
+        ].filter((item, index, list) => list.indexOf(item) === index)
+    };
+};
 const toCliExecutionError = (ability, payload, fallbackMessage) => {
     const details = asObject(payload.details);
+    const closeoutHardStopRisk = classifyCloseoutHardStopRiskForPayload(payload);
     const reason = typeof details?.reason === "string" && details.reason.trim().length > 0
         ? details.reason.trim()
         : "TARGET_API_RESPONSE_INVALID";
@@ -443,11 +613,14 @@ const toCliExecutionError = (ability, payload, fallbackMessage) => {
                 ? details.stage
                 : "execution",
             reason,
+            ...(closeoutHardStopRisk.hard_stop
+                ? { closeout_hard_stop_risk: closeoutHardStopRisk }
+                : {}),
             ...(consumerGateResult ?? {}),
             ...pickGateErrorDetails(payload, details)
         },
-        observability: asObservabilityInput(payload.observability),
-        diagnosis: asDiagnosisInput(payload.diagnosis)
+        observability: augmentCloseoutHardStopObservability(payload.observability, closeoutHardStopRisk),
+        diagnosis: augmentCloseoutHardStopDiagnosis(payload.diagnosis, closeoutHardStopRisk)
     });
 };
 const toTransportCliError = (error, ability) => new CliError("ERR_RUNTIME_UNAVAILABLE", `通信链路不可用: ${error.code}`, {
@@ -482,7 +655,9 @@ const resolveAccountSafetySignal = (payload, fallback) => {
     const auditRecord = asObject(payload.audit_record);
     const diagnosis = asObject(payload.diagnosis);
     const diagnosisEvidence = Array.isArray(diagnosis?.evidence) ? diagnosis?.evidence : [];
+    const closeoutHardStopRisk = classifyCloseoutHardStopRiskForPayload(payload);
     const reason = normalizeAccountSafetyReason(details?.reason) ??
+        closeoutRiskReasonToAccountSafetyReason(closeoutHardStopRisk.reason) ??
         normalizeAccountSafetyReason(keyRequest?.failure_reason) ??
         normalizeAccountSafetyReason(diagnosisEvidence.find((item) => normalizeAccountSafetyReason(item))) ??
         (() => {
@@ -490,6 +665,9 @@ const resolveAccountSafetySignal = (payload, fallback) => {
             const platformCode = asInteger(details?.platform_code);
             if (statusCode === 401) {
                 return "SESSION_EXPIRED";
+            }
+            if (statusCode === 429) {
+                return "CAPTCHA_REQUIRED";
             }
             if (statusCode === 461 || platformCode === 300011) {
                 return "ACCOUNT_ABNORMAL";
@@ -517,10 +695,13 @@ const resolveAccountSafetySignal = (payload, fallback) => {
             fallback.targetDomain,
         targetTabId,
         pageUrl: asString(details?.page_url) ??
+            closeoutHardStopRisk.evidence.page_url ??
             asString(pageState?.url) ??
             fallback.targetPage,
-        statusCode: asInteger(details?.status_code) ?? asInteger(keyRequest?.status_code),
-        platformCode: asInteger(details?.platform_code)
+        statusCode: asInteger(details?.status_code) ??
+            closeoutHardStopRisk.evidence.status_code ??
+            asInteger(keyRequest?.status_code),
+        platformCode: asInteger(details?.platform_code) ?? closeoutHardStopRisk.evidence.platform_code
     };
 };
 const mergeAccountSafetyIntoFailurePayload = (payload, accountSafety, xhsCloseoutRhythm, runtimeStop) => {
@@ -657,22 +838,32 @@ const assertXhsLivePreflightAllowsCommand = (input) => {
         input.antiDetectionValidationView?.all_required_ready === true) {
         return;
     }
+    const blockReason = input.accountSafety.state === "account_risk_blocked"
+        ? "ACCOUNT_RISK_BLOCKED"
+        : recoveryProbe && input.requestedExecutionMode !== "recon"
+            ? "XHS_RECOVERY_PROBE_MODE_INVALID"
+            : !recoveryProbe && isLiveXhsExecutionMode(input.requestedExecutionMode) && rhythmState === "single_probe_passed"
+                ? "ANTI_DETECTION_VALIDATION_BASELINE_BLOCKED"
+                : fullBundleBlocked || singleProbeRequired
+                    ? "XHS_CLOSEOUT_RHYTHM_BLOCKED"
+                    : "XHS_CLOSEOUT_RHYTHM_UNAVAILABLE";
+    const preflightHardStopRisk = classifyCloseoutHardStopRisk({
+        statusCode: input.accountSafety.status_code ?? input.accountSafety.statusCode,
+        platformCode: input.accountSafety.platform_code ?? input.accountSafety.platformCode,
+        accountSafety: input.accountSafety,
+        accountSafetyFresh: true
+    });
     throw new CliError("ERR_EXECUTION_FAILED", "XHS account-safety gate blocked current live command", {
         retryable: false,
         details: {
             ability_id: input.ability.id,
             stage: "execution",
-            reason: input.accountSafety.state === "account_risk_blocked"
-                ? "ACCOUNT_RISK_BLOCKED"
-                : recoveryProbe && input.requestedExecutionMode !== "recon"
-                    ? "XHS_RECOVERY_PROBE_MODE_INVALID"
-                    : !recoveryProbe && isLiveXhsExecutionMode(input.requestedExecutionMode) && rhythmState === "single_probe_passed"
-                        ? "ANTI_DETECTION_VALIDATION_BASELINE_BLOCKED"
-                        : fullBundleBlocked || singleProbeRequired
-                            ? "XHS_CLOSEOUT_RHYTHM_BLOCKED"
-                            : "XHS_CLOSEOUT_RHYTHM_UNAVAILABLE",
+            reason: blockReason,
             account_safety: input.accountSafety,
             xhs_closeout_rhythm: input.xhsCloseoutRhythm,
+            ...(preflightHardStopRisk.hard_stop
+                ? { closeout_hard_stop_risk: preflightHardStopRisk }
+                : {}),
             ...(input.antiDetectionValidationView
                 ? {
                     anti_detection_validation_view: toXhsCloseoutValidationGateJson(input.antiDetectionValidationView)

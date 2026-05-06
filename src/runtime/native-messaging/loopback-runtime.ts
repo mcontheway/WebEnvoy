@@ -642,6 +642,12 @@ class InMemoryContentScriptRuntime {
                 ? "浏览器环境异常，平台拒绝当前请求"
                 : simulated === "captcha_required"
                   ? "平台要求额外人机验证，无法继续执行"
+                  : simulated === "classifier_only_account_abnormal"
+                    ? `${command} 接口返回了未识别的失败响应`
+                  : simulated === "classifier_account_abnormal_with_generic_diagnosis"
+                    ? `${command} 接口返回了未识别的失败响应`
+                  : simulated === "stale_account_safety_with_current_captcha"
+                    ? `${command} 接口返回了当前人机验证阻断`
                   : simulated === "generic_api_warning"
                     ? `${command} 接口返回了未识别的失败响应`
                     : simulated === "signature_entry_missing"
@@ -660,12 +666,27 @@ class InMemoryContentScriptRuntime {
                 : simulated === "browser_env_abnormal"
                   ? "BROWSER_ENV_ABNORMAL"
                   : simulated === "captcha_required"
-                    ? "CAPTCHA_REQUIRED"
-                    : simulated === "generic_api_warning"
-                      ? "TARGET_API_RESPONSE_INVALID"
+                  ? "CAPTCHA_REQUIRED"
+                  : simulated === "classifier_only_account_abnormal"
+                    ? "TARGET_API_RESPONSE_INVALID"
+                  : simulated === "classifier_account_abnormal_with_generic_diagnosis"
+                    ? "TARGET_API_RESPONSE_INVALID"
+                  : simulated === "stale_account_safety_with_current_captcha"
+                    ? "TARGET_API_RESPONSE_INVALID"
+                  : simulated === "generic_api_warning"
+                    ? "TARGET_API_RESPONSE_INVALID"
                     : simulated === "signature_entry_missing"
                       ? "SIGNATURE_ENTRY_MISSING"
-                      : "GATEWAY_INVOKER_FAILED"
+                      : "GATEWAY_INVOKER_FAILED",
+          ...(simulated === "stale_account_safety_with_current_captcha"
+            ? {
+                account_safety: {
+                  state: "account_risk_blocked",
+                  reason: "SESSION_EXPIRED",
+                  source_run_id: "run-stale-account-safety-source-001"
+                }
+              }
+            : {})
         },
         ...gateBundle.payload,
         observability: {
@@ -682,7 +703,28 @@ class InMemoryContentScriptRuntime {
           key_requests:
             simulated === "signature_entry_missing"
               ? []
-              : [
+              : simulated === "stale_account_safety_with_current_captcha"
+                ? [
+                    {
+                      request_id: "req-loopback-generic-001",
+                      stage: "request",
+                      method: "POST",
+                      url: spec.requestUrl,
+                      outcome: "failed",
+                      status_code: 500,
+                      failure_reason: "request_context_missing"
+                    },
+                    {
+                      request_id: "req-loopback-captcha-002",
+                      stage: "request",
+                      method: "POST",
+                      url: spec.requestUrl,
+                      outcome: "failed",
+                      status_code: 429,
+                      failure_reason: "request_context_missing"
+                    }
+                  ]
+                : [
                   {
                     request_id: "req-loopback-001",
                     stage: "request",
@@ -696,12 +738,20 @@ class InMemoryContentScriptRuntime {
                           ? 200
                           : simulated === "captcha_required"
                             ? 429
+                            : simulated === "classifier_only_account_abnormal"
+                              ? 400
+                            : simulated === "classifier_account_abnormal_with_generic_diagnosis"
+                              ? 400
                             : simulated === "generic_api_warning"
                               ? 400
                             : simulated === "gateway_invoker_failed"
                               ? 500
                               : undefined,
-                    failure_reason: simulated
+                    failure_reason:
+                      simulated === "classifier_only_account_abnormal"
+                      || simulated === "classifier_account_abnormal_with_generic_diagnosis"
+                        ? "request_context_missing"
+                        : simulated
                   }
                 ],
           failure_site: {
@@ -711,7 +761,11 @@ class InMemoryContentScriptRuntime {
               simulated === "signature_entry_missing"
                 ? "window._webmsxyw"
                 : spec.requestUrl,
-            summary: simulated
+            summary:
+              simulated === "classifier_only_account_abnormal"
+              || simulated === "classifier_account_abnormal_with_generic_diagnosis"
+                ? "Account abnormal. Switch account and retry."
+                : simulated
           }
         },
         diagnosis: {
@@ -725,9 +779,19 @@ class InMemoryContentScriptRuntime {
               simulated === "signature_entry_missing"
                 ? "window._webmsxyw"
                 : spec.requestUrl,
-            summary: simulated
+            summary:
+              simulated === "classifier_only_account_abnormal"
+              || simulated === "classifier_account_abnormal_with_generic_diagnosis"
+                ? "Account abnormal. Switch account and retry."
+                : simulated
           },
-          evidence: [simulated]
+          evidence: [
+            simulated === "classifier_only_account_abnormal"
+              ? "unclassified upstream failure"
+              : simulated === "classifier_account_abnormal_with_generic_diagnosis"
+                ? "SESSION_EXPIRED"
+              : simulated
+          ]
         }
       }
     };

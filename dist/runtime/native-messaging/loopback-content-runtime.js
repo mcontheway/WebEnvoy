@@ -442,11 +442,17 @@ export class InMemoryContentScriptRuntime {
                                 ? "浏览器环境异常，平台拒绝当前请求"
                                 : simulated === "captcha_required"
                                     ? "平台要求额外人机验证，无法继续执行"
-                                    : simulated === "generic_api_warning"
+                                    : simulated === "classifier_only_account_abnormal"
                                         ? `${commandName} 接口返回了未识别的失败响应`
-                                        : simulated === "signature_entry_missing"
-                                            ? "页面签名入口不可用"
-                                            : `网关调用失败，当前上下文不足以完成 ${commandName} 请求`
+                                        : simulated === "classifier_account_abnormal_with_generic_diagnosis"
+                                            ? `${commandName} 接口返回了未识别的失败响应`
+                                            : simulated === "stale_account_safety_with_current_captcha"
+                                                ? `${commandName} 接口返回了当前人机验证阻断`
+                                                : simulated === "generic_api_warning"
+                                                    ? `${commandName} 接口返回了未识别的失败响应`
+                                                    : simulated === "signature_entry_missing"
+                                                        ? "页面签名入口不可用"
+                                                        : `网关调用失败，当前上下文不足以完成 ${commandName} 请求`
                 },
                 payload: {
                     details: {
@@ -460,11 +466,26 @@ export class InMemoryContentScriptRuntime {
                                     ? "BROWSER_ENV_ABNORMAL"
                                     : simulated === "captcha_required"
                                         ? "CAPTCHA_REQUIRED"
-                                        : simulated === "generic_api_warning"
+                                        : simulated === "classifier_only_account_abnormal"
                                             ? "TARGET_API_RESPONSE_INVALID"
-                                            : simulated === "signature_entry_missing"
-                                                ? "SIGNATURE_ENTRY_MISSING"
-                                                : "GATEWAY_INVOKER_FAILED"
+                                            : simulated === "classifier_account_abnormal_with_generic_diagnosis"
+                                                ? "TARGET_API_RESPONSE_INVALID"
+                                                : simulated === "stale_account_safety_with_current_captcha"
+                                                    ? "TARGET_API_RESPONSE_INVALID"
+                                                    : simulated === "generic_api_warning"
+                                                        ? "TARGET_API_RESPONSE_INVALID"
+                                                        : simulated === "signature_entry_missing"
+                                                            ? "SIGNATURE_ENTRY_MISSING"
+                                                            : "GATEWAY_INVOKER_FAILED",
+                        ...(simulated === "stale_account_safety_with_current_captcha"
+                            ? {
+                                account_safety: {
+                                    state: "account_risk_blocked",
+                                    reason: "SESSION_EXPIRED",
+                                    source_run_id: "run-stale-account-safety-source-001"
+                                }
+                            }
+                            : {})
                     },
                     ...gateBundle,
                     observability: {
@@ -477,34 +498,65 @@ export class InMemoryContentScriptRuntime {
                         },
                         key_requests: simulated === "signature_entry_missing"
                             ? []
-                            : [
-                                {
-                                    request_id: "req-loopback-001",
-                                    stage: "request",
-                                    method: commandSpec.request_method,
-                                    url: commandSpec.request_url,
-                                    outcome: "failed",
-                                    status_code: simulated === "account_abnormal"
-                                        ? 461
-                                        : simulated === "browser_env_abnormal"
-                                            ? 200
-                                            : simulated === "captcha_required"
-                                                ? 429
-                                                : simulated === "generic_api_warning"
-                                                    ? 400
-                                                    : simulated === "gateway_invoker_failed"
-                                                        ? 500
-                                                        : undefined,
-                                    failure_reason: simulated
-                                }
-                            ],
+                            : simulated === "stale_account_safety_with_current_captcha"
+                                ? [
+                                    {
+                                        request_id: "req-loopback-generic-001",
+                                        stage: "request",
+                                        method: commandSpec.request_method,
+                                        url: commandSpec.request_url,
+                                        outcome: "failed",
+                                        status_code: 500,
+                                        failure_reason: "request_context_missing"
+                                    },
+                                    {
+                                        request_id: "req-loopback-captcha-002",
+                                        stage: "request",
+                                        method: commandSpec.request_method,
+                                        url: commandSpec.request_url,
+                                        outcome: "failed",
+                                        status_code: 429,
+                                        failure_reason: "request_context_missing"
+                                    }
+                                ]
+                                : [
+                                    {
+                                        request_id: "req-loopback-001",
+                                        stage: "request",
+                                        method: commandSpec.request_method,
+                                        url: commandSpec.request_url,
+                                        outcome: "failed",
+                                        status_code: simulated === "account_abnormal"
+                                            ? 461
+                                            : simulated === "browser_env_abnormal"
+                                                ? 200
+                                                : simulated === "captcha_required"
+                                                    ? 429
+                                                    : simulated === "classifier_only_account_abnormal"
+                                                        ? 400
+                                                        : simulated === "classifier_account_abnormal_with_generic_diagnosis"
+                                                            ? 400
+                                                            : simulated === "generic_api_warning"
+                                                                ? 400
+                                                                : simulated === "gateway_invoker_failed"
+                                                                    ? 500
+                                                                    : undefined,
+                                        failure_reason: simulated === "classifier_only_account_abnormal" ||
+                                            simulated === "classifier_account_abnormal_with_generic_diagnosis"
+                                            ? "request_context_missing"
+                                            : simulated
+                                    }
+                                ],
                         failure_site: {
                             stage: simulated === "signature_entry_missing" ? "action" : "request",
                             component: simulated === "signature_entry_missing" ? "page" : "network",
                             target: simulated === "signature_entry_missing"
                                 ? "window._webmsxyw"
                                 : commandSpec.request_url,
-                            summary: simulated
+                            summary: simulated === "classifier_only_account_abnormal" ||
+                                simulated === "classifier_account_abnormal_with_generic_diagnosis"
+                                ? "Account abnormal. Switch account and retry."
+                                : simulated
                         }
                     },
                     diagnosis: {
@@ -517,9 +569,18 @@ export class InMemoryContentScriptRuntime {
                             target: simulated === "signature_entry_missing"
                                 ? "window._webmsxyw"
                                 : commandSpec.request_url,
-                            summary: simulated
+                            summary: simulated === "classifier_only_account_abnormal" ||
+                                simulated === "classifier_account_abnormal_with_generic_diagnosis"
+                                ? "Account abnormal. Switch account and retry."
+                                : simulated
                         },
-                        evidence: [simulated]
+                        evidence: [
+                            simulated === "classifier_only_account_abnormal"
+                                ? "unclassified upstream failure"
+                                : simulated === "classifier_account_abnormal_with_generic_diagnosis"
+                                    ? "SESSION_EXPIRED"
+                                    : simulated
+                        ]
                     }
                 }
             };
