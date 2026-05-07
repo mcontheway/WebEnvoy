@@ -94,6 +94,13 @@ describe("closeout evidence evaluator", () => {
       blocker_code: "active_fetch_not_admitted"
     },
     {
+      name: "unsupported evidence class",
+      mutate: (input: EvaluateCloseoutEvidenceInput) => {
+        input.evidence.evidence_class = "unexpected_adapter_class";
+      },
+      blocker_code: "unsupported_evidence_class"
+    },
+    {
       name: "missing latest head",
       mutate: (input: EvaluateCloseoutEvidenceInput) => {
         input.expected.latest_head_sha = null;

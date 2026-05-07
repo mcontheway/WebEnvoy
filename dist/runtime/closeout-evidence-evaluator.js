@@ -16,6 +16,10 @@ const blocker = (blocker_code, blocker_layer, message) => ({
     blocker_layer,
     message
 });
+const isAdmittedEvidenceClass = (evidenceClass) => evidenceClass === "passive_api_capture";
+const isRecognizedEvidenceClass = (evidenceClass) => evidenceClass === "passive_api_capture" ||
+    evidenceClass === "dom_state_extraction" ||
+    evidenceClass === "active_api_fetch_fallback";
 export const evaluateCloseoutEvidence = (input) => {
     const expectedLatestHeadSha = normalizeString(input.expected.latest_head_sha);
     const observedHeadSha = normalizeString(input.evidence.head_sha);
@@ -56,6 +60,9 @@ export const evaluateCloseoutEvidence = (input) => {
     }
     if (evidenceClass === "active_api_fetch_fallback") {
         blockers.push(blocker("active_fetch_not_admitted", "route", "active API fetch fallback is not admitted as primary closeout evidence"));
+    }
+    else if (evidenceClass !== null && !isRecognizedEvidenceClass(evidenceClass)) {
+        blockers.push(blocker("unsupported_evidence_class", "route", "closeout evidence must use an admitted evidence_class"));
     }
     if (!input.evidence.reproduced_multi_round) {
         blockers.push(blocker("missing_multi_round_evidence", "route", "closeout evidence must be reproduced across multiple rounds"));

@@ -6,6 +6,7 @@ export type CloseoutEvidenceBlockerCode =
   | "evidence_not_success"
   | "dom_state_not_full_closeout"
   | "active_fetch_not_admitted"
+  | "unsupported_evidence_class"
   | "missing_latest_head"
   | "stale_head"
   | "stale_run"
@@ -118,6 +119,14 @@ const blocker = (
   message
 });
 
+const isAdmittedEvidenceClass = (evidenceClass: string | null): boolean =>
+  evidenceClass === "passive_api_capture";
+
+const isRecognizedEvidenceClass = (evidenceClass: string | null): boolean =>
+  evidenceClass === "passive_api_capture" ||
+  evidenceClass === "dom_state_extraction" ||
+  evidenceClass === "active_api_fetch_fallback";
+
 export const evaluateCloseoutEvidence = (
   input: EvaluateCloseoutEvidenceInput
 ): CloseoutEvidenceEvaluation => {
@@ -190,6 +199,14 @@ export const evaluateCloseoutEvidence = (
         "active_fetch_not_admitted",
         "route",
         "active API fetch fallback is not admitted as primary closeout evidence"
+      )
+    );
+  } else if (evidenceClass !== null && !isRecognizedEvidenceClass(evidenceClass)) {
+    blockers.push(
+      blocker(
+        "unsupported_evidence_class",
+        "route",
+        "closeout evidence must use an admitted evidence_class"
       )
     );
   }
